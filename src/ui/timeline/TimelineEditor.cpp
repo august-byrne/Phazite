@@ -604,7 +604,7 @@ void TimelineRuler::movePlayhead (const juce::MouseEvent& e)
 // The playhead, in the focus colour so that it is easy to find: a marker at the foot of the ruler pointing down at where
 // playback is, and a line from its point down over the time line (nothing above the marker). Clicks go through it to the
 // ruler, which a drag along moves it. It sits on whole pixels, a pixel wider than its marker, and draws itself the part of a
-// pixel further right that the playhead is (setOffset()), so that it glides rather than steps (docs/performance-audit.md,
+// pixel further right that the playhead is (setOffset()), so that it glides rather than steps (docs/archive/performance-audit.md,
 // section 16).
 struct TimelineEditor::Playhead : public juce::Component
 {
@@ -1439,7 +1439,7 @@ void TimelineEditor::timerCallback()
         return;
 
     // While playing where it shows, the playhead moves at each frame of the display (showFrame()); this notices moves made
-    // elsewhere a few times a second. An editor that doesn't show draws nothing (docs/performance-audit.md, U5 and section 8).
+    // elsewhere a few times a second. An editor that doesn't show draws nothing (docs/archive/performance-audit.md, U5 and section 8).
     if (! isShowing())
         return;
 
@@ -1497,7 +1497,7 @@ void TimelineEditor::followPlayhead()
         {
             // The view by whole steps (getViewStep(), a pixel at 100 %), which what it draws lines up with, and the rest as a
             // shift of what draws the song (setSubPixel()), so that the song glides under the playhead: by whole pixels alone, it
-            // stood still one frame in four at the owner's zoom (docs/performance-audit.md, section 16). The view starts at the
+            // stood still one frame in four at the owner's zoom (docs/archive/performance-audit.md, section 16). The view starts at the
             // last step the song has passed with the playhead in the middle, and the shift, less than a step, is always left,
             // which the time line's parts are a step wider than their windows for (addTimelinePart()). The playhead stays on one
             // column, the middle's, a whole pixel: a middle half a pixel in (a time line an odd number of pixels wide) put the
@@ -1568,7 +1568,7 @@ void TimelineEditor::showFrame (double seconds)
     }
 
     // The beat heard at the frame's own time, not at the moment the message thread gets to it, which changes with what else
-    // it does (docs/performance-audit.md, section 16).
+    // it does (docs/archive/performance-audit.md, section 16).
     const auto taken = juce::Time::getMillisecondCounterHiRes();
     const auto milliseconds = seconds * 1000.0;
     const auto startBefore = view.start;

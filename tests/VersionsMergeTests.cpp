@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Merging two lines of a song by IDs (docs/versions.md: Merging by IDs, step V4): each side a song of its own made from the
+// Merging two lines of a song by IDs (docs/design/versions.md: Merging by IDs, step V4): each side a song of its own made from the
 // same base, changed through the model, and the other side's lines taken into this side's.
 #include "EnginePlayback.h"
 #include "SongIDs.h"

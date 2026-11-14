@@ -557,7 +557,7 @@ std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext& context, Tra
         return spots;
 
     // Where each audio clip plays, worked out once: it reads the clip's file and the song's tempo, which every pair of clips
-    // asked again made a mouse move over a track of a dozen clips take a frame's time (docs/performance-audit.md, section 16).
+    // asked again made a mouse move over a track of a dozen clips take a frame's time (docs/archive/performance-audit.md, section 16).
     struct Placed
     {
         ClipID id;

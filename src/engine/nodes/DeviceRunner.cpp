@@ -150,7 +150,7 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
 {
     // Each parameter's value now, an automated one's where the song is. A continuous one that moved since the last block
     // glides there over this one, in stretches of smoothingStep, rather than jumping, so values set by hand and modulation
-    // don't step (docs/performance-audit.md, A7); while the song plays, automation moves its parameters a stretch at a time.
+    // don't step (docs/archive/performance-audit.md, A7); while the song plays, automation moves its parameters a stretch at a time.
     Begun begun;
     auto* plan = in.modulation;
     auto gliding = false;
@@ -186,6 +186,12 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
     lastMoved = begun.inStretches || ! in.automation.empty();
     lastSettled = begun.settled;
     begun.targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
+
+    // Its first block since it was prepared or started from silence: its mix starts at its value, as its other parameters
+    // do, rather than ramp there from the mix the device is made with (a render's first block, with all its effects).
+    if (! hasPreviousValues)
+        appliedMix = begun.targetMix;
+
     begun.isMixMoved = mixIndex >= 0
                        && ((plan != nullptr && plan->isModulated[(size_t) mixIndex])
                            || (begun.automationMoves

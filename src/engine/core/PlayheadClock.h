@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Where the playhead was as each of the audio device's last blocks started, and when, so that the window can read it at its
-// frames' own times (Engine::getPlayheadBeatAt(); docs/performance-audit.md, section 16). The times are smoothed by a
+// frames' own times (Engine::getPlayheadBeatAt(); docs/archive/performance-audit.md, section 16). The times are smoothed by a
 // delay-locked loop over the times the blocks come at (F. Adriaensen, "Using a DLL to filter time", 2005, as JACK and
 // PipeWire smooth their clocks): a block that comes a little early or late, or several that come together, as some devices
 // and Bluetooth outputs hand them, keep the times of a steady stream. Real-time safe: no allocation, no lock.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Going back to a version (docs/versions.md: Going back, step V2): Bring Back This Version, Put Back and Take from This
+// Going back to a version (docs/design/versions.md: Going back, step V2): Bring Back This Version, Put Back and Take from This
 // Version, each one undo step that what plays follows, with the fewest edits, and what isn't counted left as it is.
 #include "GoldenFiles.h"
 #include "RenderHarness.h"

@@ -5,19 +5,52 @@
          gridSnap="0"
          gridStep="1/4 beat"
          gridTriplets="0"
+         lastInput="1"
          loop="1"
-         loopEnd="12"
+         loopEnd="2"
          loopFollowsSong="0"
-         loopStart="4"
-         nextID="37"
-         outline="golden">
+         loopStart="0"
+         metronome="1"
+         nextID="115"
+         notes="Mix notes:&#10;turn the pad down"
+         outline="golden"
+         patternsKeepTheirSpeed="1"
+         punch="1">
   <AUTOMATION>
     <CURVE device="14"
            parameter="volume">
       <POINT beat="0"
+             curve="0.5"
              value="0.7408182"/>
       <POINT beat="8"
              value="0.5488116"/>
+    </CURVE>
+    <CURVE device="2"
+           parameter="master volume">
+      <POINT beat="0"
+             value="0.75"/>
+    </CURVE>
+    <CURVE device="2"
+           parameter="master pan">
+      <POINT beat="0"
+             value="0"/>
+      <POINT beat="16"
+             value="0.25"/>
+    </CURVE>
+    <CURVE device="110"
+           parameter="vca">
+      <POINT beat="0"
+             value="0.5"/>
+    </CURVE>
+    <CURVE device="35"
+           parameter="send level">
+      <POINT beat="4"
+             value="0.5"/>
+    </CURVE>
+    <CURVE device="63"
+           parameter="crossover">
+      <POINT beat="8"
+             value="4000"/>
     </CURVE>
   </AUTOMATION>
   <CHORDLANE>
@@ -57,10 +90,20 @@
   </CHORDLANE>
   <LASTKEY keyRoot="2"
            keyScale="minor"/>
-  <MASTER fader="2"
-          id="1">
+  <MASTER automationMode="touch"
+          collapsed="1"
+          fader="2"
+          id="1"
+          pan="0.125"
+          volume="-6">
     <DEVICE id="36"
             type="phaziteReverb"/>
+    <LANES>
+      <LANE device="2"
+            parameter="master volume"/>
+      <LANE device="2"
+            parameter="master pan"/>
+    </LANES>
   </MASTER>
   <PIANOROLL gridAdaptive="0"
              gridOffset="0"
@@ -93,7 +136,10 @@
   </SECTIONS>
   <TEMPOMAP>
     <TEMPO beat="0"
-           bpm="120"/>
+           bpm="120"
+           curve="0.25"/>
+    <TEMPO beat="16"
+           bpm="140"/>
     <TIMESIGNATURE beat="0"
                    denominator="4"
                    numerator="4"/>
@@ -134,7 +180,22 @@
               start="3"
               velocity="110"/>
       </CLIP>
+      <DEVICE id="90"
+              type="phaziteDrums">
+        <SOUNDS pad36Sound="808 Kick"
+                pad38SoundFile="Audio/Snare.wav"
+                pad38SoundFile2="Audio/Snare Top.wav"/>
+      </DEVICE>
     </TRACK>
+    <TRACK colour="ff56b4e9"
+           fader="92"
+           id="91"
+           keyRoot="2"
+           keyScale="minor"
+           kind="track"
+           name="Snare"
+           pad="38"
+           padDevice="90"/>
     <TRACK bus="1"
            collapsed="1"
            colour="ff56b4e9"
@@ -142,14 +203,16 @@
            id="27"
            kind="folder"
            name="Group">
-      <TRACK colour="ff56b4e9"
+      <TRACK automationMode="touch"
+             colour="ff56b4e9"
              fader="14"
              height="96"
              id="13"
              keyRoot="2"
              keyScale="minor"
              kind="track"
-             name="Keys">
+             name="Keys"
+             solo="1">
         <CLIP id="17"
               kind="midi"
               length="8"
@@ -188,18 +251,172 @@
                 type="phaziteSynth"/>
         <DEVICE id="16"
                 type="phaziteReverb"/>
+        <LANES>
+          <LANE device="14"
+                height="96"
+                parameter="volume"/>
+          <LANE collapsed="1"
+                device="14"
+                parameter="pan"/>
+        </LANES>
+        <MACRO id="95"
+               name="Swell"
+               value="0.25">
+          <MODULATES amount="-0.5"
+                     device="14"
+                     parameter="volume"/>
+        </MACRO>
+        <MODULATOR id="93"
+                   type="lfo">
+          <MODULATES amount="0.375"
+                     device="15"
+                     parameter="cutoff"/>
+          <VALUES bipolar="Bipolar"
+                  rate="2"/>
+        </MODULATOR>
+        <MODULATOR id="94"
+                   off="1"
+                   steps="1 -0.8667 -0.5 -0.6 -0.4667 -0.3333 -0.2 -0.0667 0.0667 0.2 0.3333 0.4667 0.6 0.7333 0.8667 1"
+                   type="steps">
+          <MODULATES amount="0.25"
+                     device="14"
+                     parameter="pan"/>
+        </MODULATOR>
         <SEND id="35"
               level="-6"
               preFader="1"
               to="32"/>
       </TRACK>
-      <TRACK colour="ff009e73"
+      <TRACK automationMode="latch"
+             colour="ff009e73"
              fader="23"
              id="22"
              keyRoot="2"
              keyScale="minor"
              kind="track"
-             name="Pad"/>
+             name="Pad">
+        <CLIP id="96"
+              kind="midi"
+              length="3"
+              mute="1"
+              offset="1"
+              start="1">
+          <NOTE id="97"
+                length="1"
+                pitch="48"
+                start="1"
+                velocity="100"/>
+          <NOTE id="98"
+                length="0.5"
+                pitch="55"
+                slide="1"
+                start="1.5"
+                velocity="100"/>
+          <NOTE id="99"
+                length="1"
+                pitch="60"
+                portamento="1"
+                start="3"
+                velocity="100"/>
+        </CLIP>
+        <CLIP id="100"
+              kind="midi"
+              length="4"
+              name="Pedal"
+              start="8">
+          <CONTROL beat="0"
+                   kind="controller"
+                   number="64"
+                   value="127"/>
+          <CONTROL beat="0.5"
+                   kind="pitchWheel"
+                   value="9000"/>
+          <CONTROL beat="1"
+                   kind="channelPressure"
+                   value="80"/>
+          <CONTROL beat="1.5"
+                   kind="aftertouch"
+                   number="64"
+                   value="70"/>
+          <CONTROL beat="1.75"
+                   kind="programChange"
+                   value="5"/>
+          <NOTE id="101"
+                length="2"
+                pitch="64"
+                start="0"
+                velocity="96"/>
+        </CLIP>
+        <CONTAINER id="37"
+                   instrument="1"
+                   name="Layers">
+          <CHAIN highKey="59"
+                 highVelocity="100"
+                 id="38"
+                 lowKey="24"
+                 lowVelocity="20"
+                 name="Low"
+                 solo="1">
+            <DEVICE id="47"
+                    type="phaziteWavetable">
+              <SOUNDS osc1Wavetable="Pulse Width"
+                      osc2WavetableFile="Audio/Wave.wav"/>
+            </DEVICE>
+          </CHAIN>
+          <CHAIN id="48"
+                 lowKey="60"
+                 mute="1"
+                 name="Chain 2"
+                 pan="0.25"
+                 volume="-6">
+            <DEVICE id="49"
+                    type="phaziteSampler">
+              <SOUNDS sampleFile="Audio/Hit.wav"
+                      sampleSlices="0.3"
+                      sampleSlicesRemoved="0.25"/>
+              <VALUES mode="Slice"
+                      root="64"
+                      sliceBy="Equal"/>
+            </DEVICE>
+            <DEVICE id="50"
+                    type="phaziteDelay"/>
+          </CHAIN>
+          <CHAIN id="51"
+                 name="Chain 3">
+            <DEVICE id="52"
+                    type="phaziteSampler">
+              <SOUNDS sample="Wide Saw"/>
+              <VALUES loopOn="1"
+                      loopStart="0"
+                      root="57"/>
+            </DEVICE>
+          </CHAIN>
+          <MACRO id="39"
+                 name="Brightness"
+                 value="0.5">
+            <MODULATES amount="0.5"
+                       device="47"
+                       parameter="cutoff"/>
+            <MODULATES amount="-0.25"
+                       device="48"
+                       parameter="volume"/>
+          </MACRO>
+          <MACRO id="40"
+                 name="Macro 2"/>
+          <MACRO id="41"
+                 name="Macro 3"/>
+          <MACRO id="42"
+                 name="Macro 4"/>
+          <MACRO id="43"
+                 name="Macro 5"/>
+          <MACRO id="44"
+                 name="Macro 6"/>
+          <MACRO id="45"
+                 name="Macro 7"/>
+          <MACRO id="46"
+                 name="Macro 8"/>
+        </CONTAINER>
+      </TRACK>
     </TRACK>
     <TRACK bus="1"
            colour="fff0e442"
@@ -208,7 +425,8 @@
            kind="folder"
            name="Bus"
            volume="-3">
-      <TRACK colour="fff0e442"
+      <TRACK automationMode="write"
+             colour="fff0e442"
              fader="25"
              id="24"
              keyRoot="2"
@@ -227,6 +445,123 @@
               kind="audio"
               name="Tone"
               start="4"/>
+        <CLIP fadeIn="0.1"
+              fadeInBend="1"
+              fadeInShape="sCurve"
+              fadeOut="0.2"
+              fadeOutBend="1"
+              fadeOutShape="sCurve"
+              file="Audio/Clicks 100 BPM.wav"
+              fileEnd="2.4"
+              fileStart="0"
+              gain="3"
+              id="102"
+              kind="audio"
+              name="Clicks 100 BPM"
+              pitch="-2.5"
+              reversed="1"
+              start="16"
+              tempo="100">
+          <WARP playsAt="0.6"
+                time="0.6"/>
+          <WARP playsAt="1.5"
+                time="1.2"/>
+        </CLIP>
+        <CONTAINER id="53"
+                   mix="0.5"
+                   name="Bands"
+                   split="bands">
+          <CHAIN id="54"
+                 name="Chain 1"/>
+          <CHAIN crossover="2000"
+                 id="63"
+                 name="Chain 2">
+            <DEVICE id="64"
+                    type="phaziteSaturator"/>
+          </CHAIN>
+          <MACRO id="55"
+                 name="Macro 1"/>
+          <MACRO id="56"
+                 name="Macro 2"/>
+          <MACRO id="57"
+                 name="Macro 3"/>
+          <MACRO id="58"
+                 name="Macro 4"/>
+          <MACRO id="59"
+                 name="Macro 5"/>
+          <MACRO id="60"
+                 name="Macro 6"/>
+          <MACRO id="61"
+                 name="Macro 7"/>
+          <MACRO id="62"
+                 name="Macro 8"/>
+        </CONTAINER>
+        <CONTAINER id="65"
+                   name="Container"
+                   split="midSide">
+          <CHAIN id="66"
+                 name="Chain 1"/>
+          <CHAIN id="75"
+                 name="Chain 2"/>
+          <MACRO id="67"
+                 name="Macro 1"/>
+          <MACRO id="68"
+                 name="Macro 2"/>
+          <MACRO id="69"
+                 name="Macro 3"/>
+          <MACRO id="70"
+                 name="Macro 4"/>
+          <MACRO id="71"
+                 name="Macro 5"/>
+          <MACRO id="72"
+                 name="Macro 6"/>
+          <MACRO id="73"
+                 name="Macro 7"/>
+          <MACRO id="74"
+                 name="Macro 8"/>
+        </CONTAINER>
+        <CONTAINER id="76"
+                   name="Container 2"
+                   off="1"
+                   split="leftRight">
+          <CHAIN id="77"
+                 name="Chain 1"/>
+          <CHAIN id="86"
+                 name="Chain 2"/>
+          <MACRO id="78"
+                 name="Macro 1"/>
+          <MACRO id="79"
+                 name="Macro 2"/>
+          <MACRO id="80"
+                 name="Macro 3"/>
+          <MACRO id="81"
+                 name="Macro 4"/>
+          <MACRO id="82"
+                 name="Macro 5"/>
+          <MACRO id="83"
+                 name="Macro 6"/>
+          <MACRO id="84"
+                 name="Macro 7"/>
+          <MACRO id="85"
+                 name="Macro 8"/>
+        </CONTAINER>
+        <DEVICE id="87"
+                sidechain="3"
+                type="phaziteCompressor">
+          <VALUES attack="1"
+                  depth="14"
+                  hold="120"
+                  mode="Duck"
+                  release="80"
+                  threshold="-14"/>
+        </DEVICE>
+        <DEVICE id="88"
+                off="1"
+                type="phaziteFilter"/>
+        <DEVICE id="89"
+                type="phaziteEq"
+                windowX="120"
+                windowY="80"/>
         <SEND id="34"
               level="-6"
               to="32"/>
@@ -243,6 +578,75 @@
               type="phaziteReverb">
         <VALUES mix="1"/>
       </DEVICE>
+      <DEVICE format="Test"
+              id="111"
+              identifier="PhaziteTestEffect"
+              manufacturer="Phazite Tests"
+              mix="0.5"
+              name="Test Effect"
+              program="0"
+              state="AAAAPwAAgD4="
+              type="plugin"
+              uid="8280037"
+              version="1">
+        <VALUE parameter="0"
+               value="0.25"/>
+      </DEVICE>
+    </TRACK>
+    <TRACK colour="ff3366cc"
+           id="108"
+           kind="folder"
+           name="Takes"
+           vca="110">
+      <TRACK colour="ff3366cc"
+             fader="104"
+             frozen="1"
+             id="103"
+             input="1"
+             keyRoot="2"
+             keyScale="minor"
+             kind="track"
+             monitoring="never"
+             name="Voice">
+        <CLIP file="Audio/Voice Take 1.wav"
+              fileEnd="1.015458"
+              fileStart="0.01545833"
+              id="107"
+              kind="audio"
+              name="Voice"
+              start="0"
+              take="1"
+              takeLength="1"
+              takes="3"
+              tempo="120"/>
+      </TRACK>
+      <TRACK colour="ffe69f00"
+             fader="106"
+             id="105"
+             input="2"
+             keyRoot="2"
+             keyScale="minor"
+             kind="track"
+             monitoring="always"
+             name="Guitar"/>
+    </TRACK>
+    <TRACK colour="ff56b4e9"
+           fader="113"
+           id="112"
+           keyRoot="2"
+           keyScale="minor"
+           kind="track"
+           name="Bells">
+      <DEVICE format="Test"
+              id="114"
+              identifier="PhaziteTestSynth"
+              instrument="1"
+              manufacturer="Phazite Tests"
+              name="Test Synth"
+              state="AACAPg=="
+              type="plugin"
+              uid="8279889"
+              version="1"/>
     </TRACK>
   </TRACKS>
 </PHAZITE>

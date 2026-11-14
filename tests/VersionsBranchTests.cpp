@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Branches and merges of a project's versions (docs/versions.md: Branches, Merging; step V4): through the model, as the
+// Branches and merges of a project's versions (docs/design/versions.md: Branches, Merging; step V4): through the model, as the
 // Versions view and its commands make them, each switch making the song the other branch's in place.
 #include "EnginePlayback.h"
 #include "SongIDs.h"

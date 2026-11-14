@@ -196,7 +196,7 @@ public:
 
     // Scrolling continuously, how far the song has moved past the view's whole step (getViewStep(), a pixel at 100 %), from 0
     // up to the step, by which the editor's parts that draw the time line (addTimelinePart()) are moved left inside their
-    // windows, so that the song glides under the playhead rather than stepping a pixel at a time (docs/performance-audit.md,
+    // windows, so that the song glides under the playhead rather than stepping a pixel at a time (docs/archive/performance-audit.md,
     // section 16, option 15); 0 otherwise (for tests).
     float getSubPixel() const noexcept { return subPixel; }
 

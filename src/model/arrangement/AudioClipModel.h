@@ -109,7 +109,7 @@ void setClipFollowsTempo (ProjectContext&, ClipID, bool);
 void setClipTempo (ProjectContext&, ClipID, double bpm);
 
 //==============================================================================
-// Warping (docs/design.md, section 7; docs/recording-audit.md), as Ableton Live's: warp markers (PlaylistValues.h:
+// Warping (docs/design.md, section 7; docs/archive/recording-audit.md), as Ableton Live's: warp markers (PlaylistValues.h:
 // WarpMarker) pin times of a clip's audio to beats of the song, the audio between two of them stretched to fit, and a clip
 // with any follows the song's tempo; stopping following it takes them away. They are a clip's alias group's, which plays
 // the same audio. Each change is an undo step of its own, named as its comment says, or joins an open gesture's (a drag's).

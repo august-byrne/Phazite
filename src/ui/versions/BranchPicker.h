@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Source control's quick inputs (docs/versions.md: Branches), as VS Code's branch quick picks, in a call-out like the command
+// Source control's quick inputs (docs/design/versions.md: Branches), as VS Code's branch quick picks, in a call-out like the command
 // palette's; Esc or a click elsewhere closes one:
 // - Checkout to...: first Create new branch, named as typed (else "idea-2" and on), then the project's branches, the one the
 //   song is on ticked, each with what it holds (its last commit and when it was made; for the one the song is on, its

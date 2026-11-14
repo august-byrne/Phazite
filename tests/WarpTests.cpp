@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Warping audio clips (src/model/arrangement/AudioClipModel.h, internal/AudioClips.h; docs/recording-audit.md), as Ableton
+// Warping audio clips (src/model/arrangement/AudioClipModel.h, internal/AudioClips.h; docs/archive/recording-audit.md), as Ableton
 // Live's: warp markers pin a time of a clip's file to a beat, the audio between them stretched to fit; the hits in a file,
 // found in the background; and Quantize Audio, which moves the hits a clip plays to the grid through markers.
 #include "TestClips.h"

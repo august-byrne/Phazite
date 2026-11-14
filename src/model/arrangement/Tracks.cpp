@@ -441,7 +441,7 @@ void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackMute] != muted)
     {
         // Off is no property at all, as it is at first: unmuted again, the track is as it was, which a version's changes then
-        // don't count (docs/versions.md).
+        // don't count (docs/design/versions.md).
         if (muted)
             state.setProperty (schema::trackMute, true, undo);
         else

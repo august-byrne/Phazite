@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the DSP audit (docs/dsp-audit.md) fixed, measured: the band-limited synth waves (src/devices/dsp/Oscillators.h), the
+// What the DSP audit (docs/archive/dsp-audit.md) fixed, measured: the band-limited synth waves (src/devices/dsp/Oscillators.h), the
 // saturator and the drives played by their antiderivatives at twice the rate (src/devices/dsp/Saturation.h), the EQ's
 // matched bands (src/devices/dsp/Filters.h), the delay line's Lagrange interpolation (src/devices/dsp/DelayLine.h) and the
 // drum sampler's windowed sinc (src/devices/dsp/SincReader.h). Aliases are measured as the reference measurements of the
@@ -134,7 +134,7 @@ double getLevel (const float* sound, int numSamples, double frequency, double sa
 TEST_CASE ("The synth's saw, pulse and triangle keep their aliases out of hearing, up to A7")
 {
     // PolyBLEP's saw had its loudest alias 37 dB under the note at A5 and 25 dB at A7, and the triangle's was 34 dB under at
-    // A7 (docs/dsp-audit.md, 5.3). Read from band-limited tables, every harmonic that plays aliases above 20 kHz.
+    // A7 (docs/archive/dsp-audit.md, 5.3). Read from band-limited tables, every harmonic that plays aliases above 20 kHz.
     constexpr double rate = 48000.0;
 
     for (const auto note : { 220.0, 880.0, 1760.0, 3520.0 })

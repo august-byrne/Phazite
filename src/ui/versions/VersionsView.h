@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The project's source control, in the left panel (docs/versions.md: The Versions view), laid out as VS Code's Source
+// The project's source control, in the left panel (docs/design/versions.md: The Versions view), laid out as VS Code's Source
 // Control view and named in git's words:
 // - at the top, its menu of what else it does, and the branch the song is on, whose button opens the branch picker
 //   (version.pickBranch);

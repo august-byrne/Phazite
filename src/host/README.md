@@ -1,0 +1,22 @@
+# src/host
+
+The helper program that hosts plug-ins for Phazite: `PhaziteHost`, next to the app, which starts it. The code is in the
+`phazite_host` static library, which `PhaziteHost` and the tests' helper (`phazite_test_host`, with the tests' stand-ins
+in `tests/host/`) link; it links `phazite_core` for JUCE and the sandbox. It includes `src/sandbox/` and
+`src/devices/`, and nothing includes it ([docs/architecture.md](../../docs/architecture.md)).
+
+## core/
+
+| File | What it holds |
+|---|---|
+| `Host.h` | The pipe to Phazite and its requests, handled on the helper's message thread. |
+| `Instance.h` | A plug-in it hosts, and the thread that plays its blocks, in pieces between its parameters' changes, each with the song's place, time signature and bar on its playhead; and what the plug-in changes itself, told to Phazite from the message thread. |
+| `Editor.h` | The plug-in's editor, in a window of the helper's inside Phazite's where Phazite places it, catching the keys Phazite takes over it. |
+| `Platform.cpp` | What the helper asks of the operating system. |
+
+## app/
+
+| File | What it holds |
+|---|---|
+| `HostMain.cpp` | The helper's `main`: started by Phazite with the name of a pipe to connect to, it shows no window of its own and runs until Phazite asks it to quit or goes. |
+| `Formats.cpp` | The plug-in formats it hosts, those JUCE is built with (`juce::addDefaultFormatsToManager()`): VST3. Audio Units on macOS: Planned. |

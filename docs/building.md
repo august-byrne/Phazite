@@ -98,7 +98,7 @@ Configuring finds the compiler and prepares a build folder, `build\<preset>`; bu
 |---|---|
 | `windows-profile` | Playing and everyday testing: as fast as Release, with the debug symbols that make a crash dump readable. |
 | `windows-release` | The optimized app alone, without debug symbols. |
-| `windows-debug` | Stepping through code in a debugger. It plays audio 3 to 20 times slower ([performance audit](performance-audit.md)), so don't judge Phazite's sound or speed by it. |
+| `windows-debug` | Stepping through code in a debugger. It plays audio 3 to 20 times slower ([performance audit](archive/performance-audit.md)), so don't judge Phazite's sound or speed by it. |
 
 Configure has worked when its last line is `-- Build files have been written to: ...`, and the build when its last line is a `Linking CXX executable` line (or `ninja: no work to do.`). Otherwise the first line with `CMake Error` or `error` names the cause: see [Troubleshooting](#troubleshooting). There's no Developer PowerShell or vcvars to run first: [cmake/toolchains/windows-msvc.cmake](../cmake/toolchains/windows-msvc.cmake) finds MSVC by itself.
 

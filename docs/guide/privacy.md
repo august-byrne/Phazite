@@ -2,7 +2,7 @@
 title: Privacy
 description: What Phazite and its website send, and when.
 sidebar:
-  order: 4
+  order: 16
 ---
 
 ## Phazite

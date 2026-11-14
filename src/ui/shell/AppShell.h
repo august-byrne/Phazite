@@ -228,7 +228,7 @@ private:
     TimelineEditor* getTimelineEditorInUse();
 
     // The audio output in the status bar, and "No audio output" in its hint bar while none plays, which a click on it takes
-    // to the audio settings (docs/performance-audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth
+    // to the audio settings (docs/archive/performance-audit.md, R3): the device failed to open, or went (unplugged, or Bluetooth
     // that disconnected).
     void updateAudioAlert();
     void changeListenerCallback (juce::ChangeBroadcaster*) override { updateAudioAlert(); } // the audio devices changed

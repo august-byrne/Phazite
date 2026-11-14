@@ -27,7 +27,7 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
 
     // One Phazite at a time: a second start brings the first forward instead (two would autosave the same project, and the
-    // first to close would delete its autosave: docs/performance-audit.md, R6). Plug-ins are hosted and scanned in its
+    // first to close would delete its autosave: docs/archive/performance-audit.md, R6). Plug-ins are hosted and scanned in its
     // helper program, PhaziteHost, never in another copy of this one.
     bool moreThanOneInstanceAllowed() override { return false; }
 
@@ -55,7 +55,7 @@ public:
 #endif
 
         // A log of what happened, for a report of what went wrong (%APPDATA%\Phazite\Phazite.log), kept short: JUCE trims
-        // the start of an old one (docs/performance-audit.md, R7).
+        // the start of an old one (docs/archive/performance-audit.md, R7).
         logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
         juce::Logger::setCurrentLogger (logger.get());
 

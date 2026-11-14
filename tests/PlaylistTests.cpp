@@ -1058,7 +1058,7 @@ TEST_CASE ("A folder's row shows its tracks' clips in their colors, collapsed to
 
 TEST_CASE ("Only the clips in view have components, which come and go as the playlist scrolls and zooms")
 {
-    // A song much bigger than the playlist (docs/performance-audit.md, section 8): its clips once all had components, each
+    // A song much bigger than the playlist (docs/archive/performance-audit.md, section 8): its clips once all had components, each
     // moved at every step of a scroll, and all built again at each change of a clip.
     PlaylistScreen screen;
     screen.tracks = phazite::ensureTracks (screen.getSong(), 40);
@@ -1355,7 +1355,7 @@ TEST_CASE ("Scrolling continuously, the playhead stays on one column while the s
 
 TEST_CASE ("The playhead's line is drawn where the playhead is, between pixels, so that it glides rather than steps")
 {
-    // docs/performance-audit.md, section 16 (G2): drawn on whole pixels, at 0.8 of a pixel a frame (the default zoom at 120 BPM
+    // docs/archive/performance-audit.md, section 16 (G2): drawn on whole pixels, at 0.8 of a pixel a frame (the default zoom at 120 BPM
     // on a 60 Hz display) it stood still one frame in five.
     PlaylistScreen screen;
     phazite::test::dispatchPendingMessages();
@@ -1401,7 +1401,7 @@ TEST_CASE ("The playhead's line is drawn where the playhead is, between pixels, 
 
 TEST_CASE ("At each frame while the song plays, the playhead shows the beat heard then, and the frames go into the log once it stops")
 {
-    // docs/performance-audit.md, section 16 (G3, G6 and option 5): the playhead was read whenever the message thread got to a
+    // docs/archive/performance-audit.md, section 16 (G3, G6 and option 5): the playhead was read whenever the message thread got to a
     // frame, from the first frame after a fifth of a second; the frames' log tells how the display's frames went.
     PlaylistScreen screen;
     screen.addClip (0, 0.0, 64.0);
@@ -1450,7 +1450,7 @@ TEST_CASE ("At each frame while the song plays, the playhead shows the beat hear
 
 TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts of a pixel, and a click finds what shows there")
 {
-    // docs/performance-audit.md, section 16 (option 15): by whole pixels alone, the song stood still one frame in four at the
+    // docs/archive/performance-audit.md, section 16 (option 15): by whole pixels alone, the song stood still one frame in four at the
     // owner's zoom.
     PlaylistScreen screen;
     const auto clip = screen.addClip (0, 0.0, 256.0);
@@ -1570,7 +1570,7 @@ TEST_CASE ("A view that moves by whole pixels moves the grid's lines and the cli
 TEST_CASE ("A clip is kept as a picture, which scrolling only moves; one that draws the part of it in view is painted afresh while "
            "the view's edge cuts it")
 {
-    // docs/performance-audit.md, section 16 (option 16): every clip in view was painted again at each frame the song scrolled.
+    // docs/archive/performance-audit.md, section 16 (option 16): every clip in view was painted again at each frame the song scrolled.
     PlaylistScreen screen;
     const auto whole = screen.addClip (0, 4.0, 4.0);  // named after its track: no tag
     const auto tagged = screen.addClip (1, 4.0, 4.0); // its name in a tag, which stays in view
@@ -1617,7 +1617,7 @@ TEST_CASE ("A clip is kept as a picture, which scrolling only moves; one that dr
 
 TEST_CASE ("A clip with a tag stays a picture while the view's top edge cuts it, and draws again with its tag in view as the rows scroll")
 {
-    // docs/performance-audit.md, section 16 (option 16): only the view's left and right edges, which scroll at every frame of a
+    // docs/archive/performance-audit.md, section 16 (option 16): only the view's left and right edges, which scroll at every frame of a
     // song playing, stop a clip with a tag being kept; scrolled up or down, it draws its picture again, its tag where it shows.
     PlaylistScreen screen;
     screen.tracks = phazite::ensureTracks (screen.getSong(), 30); // more than fit: the rows scroll
@@ -1664,7 +1664,7 @@ TEST_CASE ("A clip with a tag stays a picture while the view's top edge cuts it,
 
 TEST_CASE ("A clip too long to keep as a picture draws its notes where they are as the view moves along it, muted too")
 {
-    // docs/performance-audit.md, section 16: such a clip is painted again at each frame the song scrolls, and draws only the
+    // docs/archive/performance-audit.md, section 16: such a clip is painted again at each frame the song scrolls, and draws only the
     // notes where it is being painted. Muted, it paints in a layer of its own, faint.
     for (const auto muted : { false, true })
     {
@@ -1705,7 +1705,7 @@ TEST_CASE ("A clip too long to keep as a picture draws its notes where they are 
 
 TEST_CASE ("The Smart Tool finds where two audio clips meet as the mouse moves, and follows the clips and the zoom")
 {
-    // docs/performance-audit.md, section 16: each move of the mouse asked the model where the track's audio clips meet, which
+    // docs/archive/performance-audit.md, section 16: each move of the mouse asked the model where the track's audio clips meet, which
     // took a frame's time over a track of a dozen, and the song stuttered as the mouse moved. The playlist keeps them now.
     PlaylistScreen screen;
     phazite::test::TemporaryFolder temp;

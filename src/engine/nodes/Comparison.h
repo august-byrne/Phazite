@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A version's bounce heard against the song (the model's versions, docs/versions.md: Hearing a version), as Phazite's engine
+// A version's bounce heard against the song (the model's versions, docs/design/versions.md: Hearing a version), as Phazite's engine
 // plays it after the master: what goes out is the song or the bounce, which both play while the comparison lasts, each
 // measured as it is (EBU R128, LoudnessMeter.h), and at each switch the louder of the two is turned down to the other's
 // loudness so far, so that neither wins by being louder (until both have a loudness, as soon as they do). The bounce plays

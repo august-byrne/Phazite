@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The open song's versions (docs/versions.md), as the model holds them while its project is open: what its Versions folder
+// The open song's versions (docs/design/versions.md), as the model holds them while its project is open: what its Versions folder
 // holds (VersionStore.h), read as the project opens; the version its branch is at, and the changes since then, worked out
 // as they are asked for, from what changed since they were last; and versions saved, written on a thread of its own. A
 // project context makes one for each song it opens (model/project/internal/ProjectContext.h): the versions of the project
@@ -135,7 +135,7 @@ public:
     juce::StringArray findVersionsAudioPaths() const;
 
     //==============================================================================
-    // Bounces (docs/versions.md: Bounces and hearing them): a version's file, whether it has one or not, and whether it has
+    // Bounces (docs/design/versions.md: Bounces and hearing them): a version's file, whether it has one or not, and whether it has
     // one; how many bytes they take, of the history's size; the bounces folder read again, after one was made or deleted (it
     // is read as the versions are); and whether Save Version bounces the version it saves, as the Versions view's box says.
     juce::File getBounceFile (const juce::String& versionID) const;
@@ -162,7 +162,7 @@ public:
     juce::String hearWhenBounced, compareProblem;
 
     //==============================================================================
-    // Branches (docs/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
+    // Branches (docs/design/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
     // "idea-2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
     // can't be made. And a branch named anew, as git names one (model/versions/VersionsModel.h: toBranchName()), never as
     // another is.
@@ -181,7 +181,7 @@ public:
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
 
-    // Checkout (Detached), as VS Code's graph names git switch --detach (docs/versions.md: Checking out a commit): the song
+    // Checkout (Detached), as VS Code's graph names git switch --detach (docs/design/versions.md: Checking out a commit): the song
     // made a commit's in place, as a switch makes it a branch's, the song as it was kept on the branch it leaves, to come back
     // to. The song is on no branch then, but this computer's record of the checkout (BranchRecord::detachedFrom), the current
     // one, so that the project opens again where it was left; other computers leave it out. Nothing is committed or merged
@@ -219,7 +219,7 @@ public:
     bool editMessage (const juce::String& versionID, const juce::String& name, const juce::String& note);
 
     //==============================================================================
-    // Local History (docs/versions.md: Local History): the song as it was at times while it differed from its last commit,
+    // Local History (docs/design/versions.md: Local History): the song as it was at times while it differed from its last commit,
     // kept without commits in this computer's history in the store (VersionStore.h: Snapshot), newest first. Taken as the
     // project opens with changes since its last commit, every snapshotMinutes while the song changes, and, with a reason,
     // before what makes the song another (Restore from This Commit, Discard All Changes, a merge taken, a snapshot
@@ -413,7 +413,7 @@ std::vector<BranchRecord> joinBranchRecords (const std::vector<BranchRecord>& re
 // What a version is called: the name it was given, or the summary of its changes.
 juce::String getDisplayName (const VersionRecord&);
 
-// A local history thinned as it grows, as of a time (docs/versions.md: Local History): every snapshot of the last two hours,
+// A local history thinned as it grows, as of a time (docs/design/versions.md: Local History): every snapshot of the last two hours,
 // then the newest of each hour for a day, then the newest of each day for 30 days, and none older; oldest first, as given.
 std::vector<Snapshot> thinSnapshots (const std::vector<Snapshot>& oldestFirst, juce::int64 now);
 } // namespace phazite

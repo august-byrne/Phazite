@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Whether the last Phazite closed properly (docs/performance-audit.md, R2): a file in the settings folder that is there for
+// Whether the last Phazite closed properly (docs/archive/performance-audit.md, R2): a file in the settings folder that is there for
 // as long as Phazite runs, so one that is there as Phazite starts was left by one that didn't close (a crash, perhaps in
 // a plug-in of the project that was open).
 #pragma once

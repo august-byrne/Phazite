@@ -137,7 +137,7 @@ TEST_CASE ("The audio clip editor shows the selected audio clip, in the song's b
 TEST_CASE ("In the audio clip editor, a double-click along the top pins the audio with a warp marker, which drags, each change one "
            "undo step")
 {
-    // As Ableton Live's warp markers (docs/recording-audit.md): the vocal from beat 4 to 12, half of it at beat 8.
+    // As Ableton Live's warp markers (docs/archive/recording-audit.md): the vocal from beat 4 to 12, half of it at beat 8.
     EditorScreen screen;
     screen.editor.showClip (screen.vocal);
     phazite::test::dispatchPendingMessages();

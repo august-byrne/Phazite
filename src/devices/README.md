@@ -1,0 +1,49 @@
+# src/devices
+
+The DSP of Phazite's own instruments and effects, engine-neutral and compiled into `phazite_core`. It uses JUCE's
+`juce_core`, `juce_audio_basics` and `juce_dsp` only, and Rubber Band, and nothing of the other layers, so that a device
+could run on another engine; Phazite's engine plays each through `engine::DeviceRunner` (`src/engine/nodes/`). Every
+other layer may include it ([docs/architecture.md](../../docs/architecture.md)).
+
+One folder per area, with `core/` below the others. Each device's parameters, described in its header, are what the
+model saves and automation and modulation move.
+
+## core/
+
+| File | What it holds |
+|---|---|
+| `DeviceInfo.h` | How a device and its parameters are described. |
+| `Processor.h` | What a device does with a block: what plays it prepares it, then hands it each block's audio, notes and parameter values. |
+| `AudioThreads.h` | How Phazite's own threads that play audio (the engine's workers, the helpers' threads that play plug-ins) get the audio device's priority, never raising the whole process's. |
+| `DeviceScope.h` | What goes into a device and what comes out of it, for its editor's displays, at no cost until an editor listens. |
+| `SampleTap.h` | What a device just played, for a display on the message thread (an EQ's analyzer); lock-free, one writer and one reader. |
+| `Spectrum.h` | The spectrum of what a device plays, for an analyzer. |
+| `LiveValue.h`, `MeterValue.h`, `FallingValue.h` | Values a device sets on the audio thread for its editor to show: the latest (`LiveValue`), the most since the editor last looked (`MeterValue`), or a peak that falls back at a steady rate, for several displays at once (`FallingValue`). |
+
+## The devices
+
+| Folder | What it holds |
+|---|---|
+| `synth/` | `Synth.h`: the subtractive synth. |
+| `wavetable/` | `WavetableSynth.h`: the wavetable synth ("Wavetable"); `Wavetable.h`: a wavetable, its frames band-limited at every pitch; `FactoryWavetables.h`: the tables that come with it, made from formulas the first time each is needed. |
+| `fm/` | `FmSynth.h`: the FM synth ("FM"), four operators. |
+| `drums/` | `DrumSampler.h`: the drum sampler, a pad on every note, each with its envelope, sweep, filter and layers, its parameters found by their IDs at once. `FactoryDrums.h`: its factory sounds, the default kit and each of Phazite's kits' own, synthesized when first needed, from `DrumSynthesis.h` (with the 80s' gated reverb, a room that isn't gated, `addRoom()`, struck sounds by their modes, `makeStruck()`, and the Simmons SDS-V's voice, which `tools/soundkit/` shares) and `DrumMachines.h` (the classic drum machines' voices as their circuits make them: the 808's, the 909's and a CR-78's). |
+| `sampler/` | `Sampler.h`: the sampler, one sound played across the keys. `SampleAnalysis.h`: what it finds in a sound as it loads (its pitch, where its hits begin, its zero crossings). `FactorySamples.h`: its factory sounds, an 808 bass, a saw ensemble made from its spectrum (Wide Saw), and the drum sampler's. |
+| `vocoder/` | `Vocoder.h`: the vocoder. |
+| `eq/` | `Equalizer.h`: the EQ, eight bands matched to their analog shapes. |
+| `filter/` | `FilterEffect.h`: the Filter device, with a drive. |
+| `dynamics/` | `Compressor.h`: the compressor, in its Compress and Duck modes. `Limiter.h`: the limiter, which looks ahead and listens for true peaks. `Multiband.h`: the multiband, in the layout of FL Studio's Maximus. `DynamicsCurve.h`: a dynamics curve, through up to eight points, which the compressor and the multiband share. `TruePeak.h`: true peaks as ITU-R BS.1770 finds them, for the limiter and the loudness meter. |
+| `saturation/` | `Saturator.h`: the saturator. `Exciter.h`: the exciter, which adds the harmonics of the highs above a frequency to the sound, in phase with it. |
+| `delay/` | `Delay.h`: the delay. |
+| `reverb/` | `Reverb.h`: the reverb, a room's eight-line feedback delay network or Jon Dattorro's plate (JAES 1997), as its Mode says, the plate's decay from a table measured on it. |
+| `motion/` | `Chorus.h`, `Flanger.h`, `Phaser.h`: the effects that sweep; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
+| `stereo/` | `StereoExpander.h`: the stereo expander. |
+| `vinyl/` | `Vinyl.h`: what a record and its player do to a sound: its wow and flutter through one moving delay line, the groove's distortion of the loud highs, its lows in mono, its narrower sides and its band. `SurfaceNoise.h`: its surface noise, hiss and crackle, each click drawn from where the song is. |
+
+## What the devices share
+
+| Folder | What it holds |
+|---|---|
+| `modulation/` | `Modulation.h`: modulation as devices take it, an LFO's waves and how modulation moves a parameter. `Modulators.h`: the six modulators (LFO, envelope follower, step sequencer, random source, breakpoint envelope, note follower), each worked out on the song's control points. |
+| `stretch/` | `Stretch.h`: how audio clips are stretched, pitched and reversed: Rubber Band Library's R3 engine, offline, over a whole file, along a time map for a clip under the song's tempo changes, in real-time mode with its stretch set at each hop to land on the map. `RubberBandLibrary.cpp`: Rubber Band's single-file build, with its warnings off. |
+| `dsp/` | The building blocks: `Oscillators.h` (band-limited oscillators, read from band-limited tables as the wavetable synth's, and a low-frequency one), `Filters.h` (the state-variable filter, and the EQ's matched bands), `MultimodeFilter.h` (the filter types every Phazite filter offers), `CombFilter.h`, `Crossover.h` (Linkwitz-Riley crossovers), `DelayLine.h`, `Envelopes.h` (the ADSR and the level follower), `Saturation.h` and `Oversampling.h` (curves played by their antiderivatives at twice the rate, so that drive doesn't alias), `SincReader.h` (a sound read between its samples by a windowed sinc whose cutoff follows its pitch), `SpectralLoop.h` (a sound made from its spectrum, each harmonic a band so many cents wide, as one seamless loop, by Paul Nasca's PADsynth algorithm), `SyncedLfo.h` (the sweeping effects' LFO, in time with the song), `NoteValues.h` (note values and their lengths), `Random.h` (random numbers that come out the same from the same seed) and `Math.h`. |

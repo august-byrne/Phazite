@@ -2247,7 +2247,7 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 
 void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, TrackRenderHost& renders)
 {
-    // In git's words (docs/versions.md: Words), as VS Code's Source Control names them.
+    // In git's words (docs/design/versions.md: Words), as VS Code's Source Control names them.
     const auto add = [&registry] (Command command)
     {
         command.category = "Source Control";

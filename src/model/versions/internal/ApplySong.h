@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song made like another, a version's, or a part of it, with the fewest edits (docs/versions.md: Making the song a
+// The song made like another, a version's, or a part of it, with the fewest edits (docs/design/versions.md: Making the song a
 // version): each property that differs set, each element the song hasn't added where the other has it, each the other
 // hasn't taken away, and the children put in its order, all through the song's undo history, in the caller's step. What
 // isn't counted (model/base/internal/Schema.h: view state, how the song plays) stays as it is. What plays follows, as it

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What differs between two songs (docs/versions.md: Differences): by track, the master and the song itself, in Phazite's
+// What differs between two songs (docs/design/versions.md: Differences): by track, the master and the song itself, in Phazite's
 // own words, leaving out what is no change (model/base/internal/Schema.h: isUncountedProperty(), isUncountedElement()).
 // Elements are matched by their keys (schema::getElementKey()): items by their IDs, wherever they moved. Plain functions of
 // trees, for any thread.

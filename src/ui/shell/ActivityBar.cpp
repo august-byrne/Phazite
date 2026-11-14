@@ -310,7 +310,7 @@ juce::PopupMenu ActivityBar::makeSettingsMenu()
 
 void ActivityBar::showAccountMenu()
 {
-    // Accounts are to come (docs/versions.md: Later, the cloud on top): what there is to say of them now.
+    // Accounts are to come (docs/design/versions.md: Later, the cloud on top): what there is to say of them now.
     juce::PopupMenu menu;
     menu.addSectionHeader ("Account");
     menu.addItem ("Accounts aren't built yet", false, false, nullptr);

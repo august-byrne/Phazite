@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Benchmarks (docs/performance-audit.md): what each device costs and how soon it sounds, how soon a live note sounds
+// Benchmarks (docs/archive/performance-audit.md): what each device costs and how soon it sounds, how soon a live note sounds
 // through Phazite's engine, what a project costs stopped and playing, how long saving, opening and the UI's work take, and what
 // scrolling and zooming a big song cost.
 // ctest and CI skip them; run them from an optimised build (windows-profile or windows-release) with
 //   phazite_tests.exe --test-suite=benchmark --no-skip
-// and record the numbers in docs/performance-audit.md. Times depend on the machine: compare runs on the same one.
+// and record the numbers in docs/archive/performance-audit.md. Times depend on the machine: compare runs on the same one.
 #include "AppScreen.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
@@ -732,7 +732,7 @@ TEST_CASE ("Benchmark: rendering audio clips stretched and pitched" * doctest::t
 
 TEST_CASE ("Benchmark: audio clips of files at another rate than the engine's" * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    // What a clip costs as it plays (docs/dsp-audit.md, 3.1): 64 clips of a stereo file, in memory, on an engine at 48 kHz,
+    // What a clip costs as it plays (docs/archive/dsp-audit.md, 3.1): 64 clips of a stereo file, in memory, on an engine at 48 kHz,
     // played for 10 s in blocks of 512: a file at the engine's rate, which plays as it is, and files at 44.1 and 96 kHz.
     namespace engine = phazite::engine;
 
@@ -1153,7 +1153,7 @@ TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame pai
 {
     // Each frame painted as the window paints it on Windows: what it asked to repaint, into one native image (Direct2D's, its
     // device held as the window holds it), in the app's look and feel, with its audio clips' waveforms, at the owner's
-    // screen size (docs/performance-audit.md, section 16, options 15 and 16).
+    // screen size (docs/archive/performance-audit.md, section 16, options 15 and 16).
     juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
     {
         juce::Graphics g (frameImage);
@@ -1337,7 +1337,7 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
     // The owner, 2026-11-07: "when i move my mouse around on top of the playlist though, i can get visual stuttering". Frames
     // at 60 Hz in real time, so that timers run as in the app, with the mouse moving over the track headers and the lanes
     // between them as Windows reports it (four moves a frame) for two seconds, then resting for one, as a hand does; first
-    // without the window's tooltips, then with them, on frosted glass as the main window has them (docs/performance-audit.md,
+    // without the window's tooltips, then with them, on frosted glass as the main window has them (docs/archive/performance-audit.md,
     // section 16).
     juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
     {

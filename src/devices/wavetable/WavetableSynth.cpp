@@ -1027,7 +1027,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
                 const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
 
-                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/performance-audit.md, A4):
+                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/archive/performance-audit.md, A4):
                 // its place in the detune, and the step of the stack it takes in its turn.
                 std::array<double, maxUnison> unisonRatios {};
                 const auto stackLength = settings.stack.size();
@@ -1155,7 +1155,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             const auto stereo = unison > 1 && right != nullptr;
 
             // Without FM, which reads the other oscillator sample by sample, each oscillator's unison voices play the stretch
-            // first (renderStep()), and are mixed after: the same sums, in the same order (docs/performance-audit.md, A6).
+            // first (renderStep()), and are mixed after: the same sums, in the same order (docs/archive/performance-audit.md, A6).
             const auto blockwise = ! ((osc1Run.on && osc1Run.warp == Warp::fm) || (osc2Run.on && osc2Run.warp == Warp::fm));
             std::array<float, controlStep> stepLefts {}, stepRights {};
 

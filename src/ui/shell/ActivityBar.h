@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The column of icons along the window's left edge, as VS Code's activity bar (docs/versions.md: The activity bar): one for
+// The column of icons along the window's left edge, as VS Code's activity bar (docs/design/versions.md: The activity bar): one for
 // each of the left panel's views, the browser, the project (what the song holds: ui/project/ProjectView.h) and the versions,
 // and at its foot, as VS Code's Accounts and Manage, the account (none yet: its menu says so) and the settings, whose menu
 // holds the settings' commands, and whose badge says an update waits. It is always there: while the left panel is hidden, while another panel fills the window and

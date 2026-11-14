@@ -142,7 +142,7 @@ struct ParameterHandle::Impl
     mutable std::optional<FoundParameter> cache; // as find() found it last
 
     // Its parameter while the song has it, or nullptr: found again only once its element has left the song or names another
-    // (controls read it at each of the display ticker's ticks: docs/performance-audit.md, U5).
+    // (controls read it at each of the display ticker's ticks: docs/archive/performance-audit.md, U5).
     const FoundParameter* find() const
     {
         auto* in = song.get();

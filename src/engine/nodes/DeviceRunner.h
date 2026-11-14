@@ -3,12 +3,12 @@
 // engine-neutral DSP (src/devices/, or the plug-in's channel: model/plugins/internal/SandboxedProcessor.h) with what
 // every device gets around it. It glides each continuous parameter from one block's value to the next and moves the
 // modulated and automated ones itself, in stretches of a block, each starting on the song's control points, one every
-// 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10), so that a song sounds the same
+// 32 samples from its start (docs/archive/performance-audit.md, A7; docs/design.md, section 10), so that a song sounds the same
 // at any block size (a device that takes its blocks whole, a plug-in in its helper, gets a block in one call, with its
 // moved parameters' values on those points as changes at their samples, and an instrument of them may be handed it
 // early, to play beside the others: start()); it applies an effect's mix, with what came in delayed as much as the
 // effect delays its sound and turned as the effect turns its phase (devices::ProcessContext::dry); it plays a mono
-// channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
+// channel in stereo; and it sleeps on silence (docs/archive/performance-audit.md, A1).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"

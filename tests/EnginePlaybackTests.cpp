@@ -111,7 +111,7 @@ TEST_CASE ("Phazite's engine loops the range the song loops, and stops at the so
 TEST_CASE ("The playhead heard is where the engine was as long before as its sound takes to reach the speakers")
 {
     // The window showed where the engine played, ahead of what was heard by the delay compensation and the audio output's
-    // latency (docs/performance-audit.md, section 16, option 7). An effect 64 samples late delays the song's sound by as much.
+    // latency (docs/archive/performance-audit.md, section 16, option 7). An effect 64 samples late delays the song's sound by as much.
     TestSong song;
     song.setTempo (120.0);
     song.addMidiClip (song.firstTrack, 0.0, 16.0);

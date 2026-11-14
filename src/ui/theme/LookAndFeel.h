@@ -10,7 +10,7 @@ namespace phazite::ui
 // Phazite's look: the design tokens applied to JUCE's components, and the Inter typeface; JUCE's controls drawn as VS Code's
 // Modern UI draws its own (docs/vscode-look.md). While it lives (the app's, for the whole session), it keeps every one of
 // JUCE's standard mouse pointers: JUCE keeps a pointer only while something holds it, so a view that switches between two (a
-// clip's halves, select and move) would make one again at each switch, the hand's from an image (docs/performance-audit.md,
+// clip's halves, select and move) would make one again at each switch, the hand's from an image (docs/archive/performance-audit.md,
 // section 8). JUCE workaround W15 (docs/juce-workarounds.md).
 class LookAndFeel : public juce::LookAndFeel_V4
 {

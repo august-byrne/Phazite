@@ -183,7 +183,7 @@ namespace
                 return add (pending.devices);
 
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
+            // makes one at each move (docs/archive/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
             // chain's crossover, a send's level and a macro's value neither. Nor is where a device's window was, which no
             // view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES) || tree.hasType (schema::VALUE)

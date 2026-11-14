@@ -322,7 +322,7 @@ void Playlist::layOutClips()
 
         component.setBounds (bounds - layer.getPosition());
 
-        // Kept as a picture, which scrolling then only moves rather than painting it again (docs/performance-audit.md,
+        // Kept as a picture, which scrolling then only moves rather than painting it again (docs/archive/performance-audit.md,
         // section 16, option 16). A clip that draws the part of itself in view (an audio clip's waveform, a tag with its name
         // or marks, which stay in view) isn't kept while the view's left or right edge crosses it, at any part of a pixel, as
         // scrolling sideways then changes what it draws at every frame; kept, it draws its picture again when what shows of it

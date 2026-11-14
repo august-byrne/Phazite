@@ -415,7 +415,7 @@ void ClipComponent::paintNotes (juce::Graphics& g, juce::Rectangle<int> area, ju
     const auto end = (float) getShape().getRight(); // short of the line after it
 
     // Only those where it is being painted: a clip too long to keep as a picture is painted again at each frame the song
-    // scrolls, and most of it is out of view (docs/performance-audit.md, section 16).
+    // scrolls, and most of it is out of view (docs/archive/performance-audit.md, section 16).
     const auto painted = g.getClipBounds().toFloat();
     g.setColour (ink);
 

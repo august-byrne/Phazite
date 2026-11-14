@@ -1799,7 +1799,7 @@ TEST_CASE ("A file at another rate keeps its top octave at its level, and nothin
     };
 
     // 44.1 kHz, the most common rate of samples, in a 48 kHz project: whole to 20 kHz (JUCE's Lagrange interpolation lost
-    // 1.2 dB at 15 kHz and 4.4 dB at 20 kHz, and its false tones were 17.5 dB and 4.7 dB under them; docs/dsp-audit.md).
+    // 1.2 dB at 15 kHz and 4.4 dB at 20 kHz, and its false tones were 17.5 dB and 4.7 dB under them; docs/archive/dsp-audit.md).
     for (const auto hertz : { 1000.0, 10000.0, 15000.0, 20000.0 })
     {
         CAPTURE (hertz);

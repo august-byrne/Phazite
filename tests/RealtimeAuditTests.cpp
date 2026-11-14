@@ -1646,7 +1646,7 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: a version's bounce heard in place of the song, both measured as they play")
     {
-        // As Hear It plays it (docs/versions.md: Hearing a version): the bounce read from its file after the master, at the
+        // As Hear It plays it (docs/design/versions.md: Hearing a version): the bounce read from its file after the master, at the
         // song's beat, the song played and measured beside it, the louder turned down.
         TestSong song;
         addTone (song, song.firstTrack);

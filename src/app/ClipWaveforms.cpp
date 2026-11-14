@@ -142,7 +142,7 @@ namespace
         // Draws the file over the part of an area that it has audio for, given the song beat at each x: over all of the area,
         // not only the part being painted, as a mask kept while what it shows stays the same, filled with the colour set. A
         // strip that repaints, such as under the playhead, draws of the mask and reads nothing again, while an area as wide
-        // as the part being painted would read the levels at each paint (docs/performance-audit.md, section 8). JUCE draws a
+        // as the part being painted would read the levels at each paint (docs/archive/performance-audit.md, section 8). JUCE draws a
         // waveform as a list of rectangles a pixel wide, which its Direct2D renderer draws sharp or soft by how the rounding
         // of their edges falls, where a part of a pixel moves them: as the playlist glides the song under the playhead, a clip
         // it paints afresh at each frame (one that the view's edge cuts) blinked fainter about one frame in four (the owner,

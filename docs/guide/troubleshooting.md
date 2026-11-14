@@ -2,7 +2,7 @@
 title: Troubleshooting
 description: What to do when there's no sound, notes come out late, a plug-in is missing or crashed, or Phazite closed unexpectedly.
 sidebar:
-  order: 2
+  order: 14
 ---
 
 ## No sound

@@ -77,7 +77,7 @@ public:
         askWhichCopy;
 
     // After Phazite didn't close properly (a crash, perhaps in a plug-in of the project that was open), asks how to open that
-    // project (docs/performance-audit.md, R2): as usual, with its plug-ins off, or not, starting a new one. Unset, a dialog
+    // project (docs/archive/performance-audit.md, R2): as usual, with its plug-ins off, or not, starting a new one. Unset, a dialog
     // asks; tests answer themselves.
     enum class AfterCrash
     {

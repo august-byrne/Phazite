@@ -37,7 +37,7 @@ struct ModulatorEditor::Scope : public juce::Component
         setInterceptsMouseClicks (false, false);
     }
 
-    // Repainted when what it shows moved: a modulator at rest moves nothing (docs/performance-audit.md, section 8).
+    // Repainted when what it shows moved: a modulator at rest moves nothing (docs/archive/performance-audit.md, section 8).
     void refresh()
     {
         auto now = getModulatorOutput (context, modulator, scopeSeconds);

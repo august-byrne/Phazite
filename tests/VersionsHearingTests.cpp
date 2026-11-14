@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A version's bounce, and hearing it in place of the song (docs/versions.md: Bounces and hearing them; step V3): a bounce
+// A version's bounce, and hearing it in place of the song (docs/design/versions.md: Bounces and hearing them; step V3): a bounce
 // made as Export Song renders the song, deleted with the room it took, and heard through Phazite's engine as the app plays
 // the song, a block at a time: at once, on the same beat, and as loud as the song.
 #include "EnginePlayback.h"

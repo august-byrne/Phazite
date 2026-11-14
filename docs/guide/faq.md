@@ -2,7 +2,7 @@
 title: Questions
 description: What people ask about Phazite, from its license to the plug-ins it plays.
 sidebar:
-  order: 3
+  order: 15
 ---
 
 ## Is Phazite free?

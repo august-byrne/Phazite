@@ -1,3 +1,5 @@
+> **Archived on 2026-11-13.** Frozen history, kept whole and not updated: what it says may no longer be so, and its links may no longer lead anywhere. What is current starts at [docs/README.md](../README.md).
+
 # Format audit
 
 *2026-11-09, the owner's request: "is source control able to handle changes in external plugins? i also want you to do an

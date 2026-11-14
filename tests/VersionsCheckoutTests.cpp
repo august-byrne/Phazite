@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Checking out a commit on its own, and A/B (docs/versions.md: Checking out a commit; Hearing a version; the owner, 2026-11-12:
+// Checking out a commit on its own, and A/B (docs/design/versions.md: Checking out a commit; Hearing a version; the owner, 2026-11-12:
 // "i want quick ways to be able to compare the sound between commits and also between uncommitted work"): the song made a
 // commit's on no branch and back to its branch as it was left, a branch made there keeping what changed, the checkout kept as
 // the project opens again; and A/B hearing the last commit's bounce in place of the song, bounced first when it has none.

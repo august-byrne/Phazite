@@ -2,7 +2,7 @@
 // The playlist and the piano roll frame by frame while they follow the playhead, painted as the screen shows them, by each
 // of JUCE's renderers that Phazite's windows paint with (Direct2D on Windows, the software renderer on Linux): nothing
 // beside the time line changes, what the time line shows moves exactly as far as the song played, and what stays in view
-// stays put on the screen's pixels. Each of these broke as the owner watched the song play (docs/performance-audit.md,
+// stays put on the screen's pixels. Each of these broke as the owner watched the song play (docs/archive/performance-audit.md,
 // section 16).
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
@@ -34,7 +34,7 @@ phazite::BeatPosition beats (double b)
 }
 
 // Parts of a pixel the song is past a whole one at a frame, either side of a half: not multiples of 1/64, which round
-// exactly where the renderer's own rounding doesn't (docs/performance-audit.md, section 16, "The rain that blinked").
+// exactly where the renderer's own rounding doesn't (docs/archive/performance-audit.md, section 16, "The rain that blinked").
 constexpr std::array<double, 6> parts { 0.137, 0.462, 0.731, 0.918, 0.283, 0.594 };
 
 // Each test runs once for each renderer, each frame painted by it: the platform's own (Direct2D on Windows) and JUCE's

@@ -1163,6 +1163,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlsTests.cpp
         tests/DawProjectTests.cpp
         tests/DesignTokenTests.cpp
+        tests/DeviceConformanceTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
         tests/DeviceStatesTests.cpp
@@ -1172,6 +1173,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp
         tests/DrumSynthesisTests.cpp
+        tests/DspProbe.cpp
+        tests/DspProbe.h
         tests/DspTests.cpp
         tests/EnginePlayback.h
         tests/EnginePlaybackTests.cpp
@@ -1191,6 +1194,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
         tests/GoldenFormatTests.cpp
+        tests/GoldenLiveTests.cpp
         tests/GoldenMetronomeTests.cpp
         tests/GoldenMixerTests.cpp
         tests/GoldenModulationTests.cpp
@@ -1227,6 +1231,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/PanelsTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
+        tests/PlaybackConditionTests.cpp
+        tests/PlaybackConditions.h
         tests/PlaybackTests.cpp
         tests/PlayheadClockTests.cpp
         tests/PlaylistModelTests.cpp
@@ -1303,6 +1309,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/TruePeakTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
+        tests/UndoCheck.cpp
+        tests/UndoCheck.h
         tests/UndoTests.cpp
         tests/UpdatesTests.cpp
         tests/ValueTextTests.cpp

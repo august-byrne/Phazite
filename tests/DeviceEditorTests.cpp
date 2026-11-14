@@ -116,7 +116,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
 TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows a value as it changes")
 {
     // Their pictures once repainted at each tick of the displays' ticker, 30 times a second, with nothing playing and nothing
-    // turned (docs/performance-audit.md, section 8).
+    // turned (docs/archive/performance-audit.md, section 8).
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
     const auto tick = [&ticker] (int times)
     {

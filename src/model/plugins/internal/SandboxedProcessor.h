@@ -49,7 +49,7 @@ public:
     bool takesWholeBlocks() const noexcept override { return true; }
 
     // An instrument is handed its block as the engine's block starts, so that the plug-in instruments of every track play
-    // side by side in their helpers (docs/performance-audit.md, section 10).
+    // side by side in their helpers (docs/archive/performance-audit.md, section 10).
     bool startsEarly() const noexcept override { return info.kind == devices::DeviceKind::instrument; }
     void start (const devices::ProcessContext&) override;
 

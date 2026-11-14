@@ -1,760 +1,237 @@
 # Phazite roadmap
 
-*Status: the plan in use since October 2026; the [status table](#status) at the end says where each phase is.* This is the plan for getting from a smoke-test app to v1 of the [design](design.md).
-- **Order:** each step builds on the ones before it and ends with something that can be built, tested and tried.
-- **Sizes:** relative effort, S < M < L < XL, for ordering only. They are not dates.
-- **On GitHub:** each open step is an issue in its phase's milestone, and the [project board](https://github.com/users/august-byrne/projects/1) shows which month each is planned for.
+Where Phazite is, and what comes next, in order. What is finished is listed in the [changelog](changelog.md), one line
+a step; what no person has tried yet is in the [hand checks](hand-checks.md); the bugs found and not fixed are in
+[known-bugs.md](known-bugs.md), and what is wanted but not planned in the [backlog](backlog.md). The plan this page
+replaced, with the full text of every finished step, is kept in the
+[archive](archive/roadmap-2026-11-13.md).
 
-## How each step is done
+- **Order:** the stages come one after another. Inside a stage the steps are in no fixed order.
+- **Sizes:** S under a day, M one to three days, L about a week, XL several weeks. They order the work; they are not
+  dates.
+- **Numbers:** a step that had a number before keeps it (4.3, 4.4, 4.5, 4.10, A4), because its GitHub issue's title
+  starts with that number, in its phase's milestone and on the
+  [project board](https://github.com/users/august-byrne/projects/1). The steps that are new in this plan are numbered
+  `S<stage>.<n>` and have no GitHub issue yet. S4.3 is stage 4's third step; 4.3 is code signing.
 
-1. **Plan:** confirm the step's scope. If a decision changes, update [design.md](design.md).
-2. **Build:** follow `CLAUDE.md`: architecture rules, real-time rules, formatting, SPDX headers, licences. Move the code the step touches toward the [architecture track](#architecture-track)'s structure.
-3. **Test:**
-   - unit tests for model logic and DSP tests for devices;
-   - the architecture check passes (`sh tools/check-architecture.sh`), and the golden tests pass, or their files change on purpose and the commit says why;
-   - a `windows-debug` build with zero warnings, plus `windows-release` for performance work;
-   - CI green on Windows and Linux.
-4. **Try:** a short manual check that says what to click and listen for.
-5. **Review and commit:**
-   - read the whole diff (no secrets, no personal data) and pass the git hooks;
-   - one commit per step, or per logical part of a step.
+## How a step is done
+
+1. **Plan:** confirm the step's scope. If a decision changes, update the [design](design.md).
+2. **Build:** follow `CLAUDE.md`: the architecture rules, the real-time rules, formatting, SPDX headers, licences.
+3. **Test:** unit tests for the model, DSP tests for devices, and a test that fails before a fix and passes after it;
+   `sh tools/check-architecture.sh` passes; the golden tests pass, or their files change on purpose and the commit says
+   why; `windows-debug` builds without warnings (`windows-profile` too for performance work); CI is green on Windows
+   and Linux.
+4. **Try:** a row in the [hand checks](hand-checks.md) that says what to click and what to listen or look for. A step
+   is built when its tests pass, and checked when a person has done that row.
+5. **Review and commit:** read the whole diff (no secrets, no personal data), pass the git hooks, one commit for each
+   step or logical part of one, with `Closes #<n>` where the step has an issue. Add its line to the
+   [changelog](changelog.md) and update the table below.
 
 ## Where we are
 
-Done before this plan (progress since then is under [Status](#status)):
-- **Tooling:** CMake presets, the MSVC toolchain wrapper and the Windows setup script.
-- **Dependencies:** JUCE (9.0.5), Rubber Band Library and doctest as pinned submodules, and WindowsToolchain at build time on Windows.
-- **Smoke-test app:** play/stop, audio settings, out-of-process plug-in scanning, ASIO® on Windows.
-- **Checks:** git hooks for commit identity, secrets and formatting; clang-format; CI on Windows and Linux with warnings as errors.
+Phazite is pre-alpha. Its first plan (phases 0 to 4, the architecture track and source control) is built except for the
+steps named here. A whole-project audit then found about 300 problems; its 16 worst are fixed, and the eight stages
+below are the plan for the rest.
 
-## Decisions and when they're needed
-
-| Open question ([design section 25](design.md#25-open-questions)) | Needed before |
+| Phase or track | State |
 |---|---|
-| 1. Algorithmic AI engines in v1 | **Decided:** yes, trained models later |
-| 2. First outline styles | **Decided:** pop, rock, electronic, hip-hop/trap |
-| 3. UI font and its licence | **Decided:** Inter, bundled, SIL OFL 1.1 |
-| 4. Engine fixes | **Decided:** simple workarounds first; replacing a part of the engine with Phazite's own is a separate decision for each part (A5), and the whole engine became Phazite's own (A6, done 2026-11-04) |
-| 5. MP3 export | **Decided:** none; WAV and FLAC |
-| 6. Airwindows effects | **Decided:** plug-ins that aren't Phazite's own are never built in; optional downloads (step 2.10) |
-| 7. Sandboxing before or after v1 | **Decided:** before v1, on by default, unless it costs a lot of performance (step 3.3) |
-| 8. Ableton Live keymap in v1 | **Decided:** yes (step 3.7) |
-| 9. Single-key tools and the computer keyboard | **Decided:** Ableton's way, Shift and a letter for the shortcut while the keyboard plays notes |
-| 10. The computer keyboard at startup | **Decided:** off until turned on |
-| 11 to 19 (the mixer, plug-in windows, newer projects, loops, duplicated ranges) | **Decided** by Claude, for the owner to review (2026-10-16): folders are buses (done), a strip's Out menu and a send knob for every return (step 2.9), empty new tracks and no reverb return (as now), keys to plug-ins per plug-in (step 2.12, done), newer projects not opened and duplicates replacing (as now), the loop's and metronome's switches not unsaved changes (done) |
+| Phase 0. Foundations | Built: the code's layers, projects with autosave and backups, commands, keymaps and undo, the window, audio and MIDI settings. Crash recovery, Narrator and a MIDI keyboard are not checked by a person. |
+| Phase 1. Make a beat | Built: the playlist, sections and outlines, the piano roll, the mixer, the browser, the first devices, MIDI recording and Capture, export, the first launch. Its usability test with a newcomer and an FL Studio user has not been held. |
+| Phase 2. Finish a track | Built, and every step checked by hand by the owner: automation, modulators and macros, containers and presets, the audio clip editor, the chord lane, freeze and stems, more devices, the wavetable synth, time-stretching. |
+| Phase 3. Polish | Built: every plug-in in a helper process, audio recording, the performance and accessibility passes, three keymaps, help and lessons. Recording through an audio interface and a session with a screen reader are not checked. Chord suggestions, the sound generator and the usability rounds moved after 1.0. |
+| Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
+| Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
+| Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
+| The plan below | Stage 1 in progress (the audit's 16 priorities are fixed). Stage 2 in progress. Stages 3 to 8 not started. |
 
-## Architecture track
+## The plan from here
 
-*Added 2026-10-14* ([design section 24](design.md#24-code-structure)). This track moves the code toward the structure in the design without a rewrite. Its phases are called A0 to A6 (A0 to A5 are phases 0 to 5 of the architecture review; A6 was added on 2026-10-30), so they aren't confused with the phases below.
-- **Small steps:** after each one the app builds, behaves the same and passes its tests, golden tests included, and each is its own commit.
-- **Alongside the features:** only A0 and A1 pause feature work. Later phases move each area of the code when a step touches it.
+Eight stages. A **beta** follows stage 5: it makes no promise that its projects open in later versions. **1.0** follows
+stage 8: from it on, a project opens in every later version.
 
-| Phase | Goal | When |
+### Stage 1. Safe: the bugs that lose work or sound
+
+The numbered bugs in [known-bugs.md](known-bugs.md) belong here too. Every step is done when each bug it names has a
+test that failed before its fix, unless its row says more.
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S1.1 | M | Playback: the click and the count-in compensated for latency; a clip moved under the playhead; a full transport queue; flush-to-zero on the worker threads; a device with one output channel plays both sides; plans freed after a timeout; notes and the transport ignored during a render | Each has its test |
+| S1.2 | S | Fades at Stop, at the loop's end and at a jump | A sine stopped, looped or jumped in mid-cycle renders without a step in its samples |
+| S1.3 | M | Plug-ins: a floor under the block deadline; plug-ins told that a render is offline; mono plug-ins; the program set before the state; a late or crashed effect faded to silence; sizes left by a crashed helper clamped | Each has its test with the tests' stand-in plug-ins |
+| S1.4 | L | Plug-ins open, close and save off the message thread, with progress | A project with a slow stand-in plug-in opens and saves while the window still answers |
+| S1.5 | S | Plug-in editors sized right at any Interface Size | An editor's window fits its plug-in at 75 % and at 200 % |
+| S1.6 | S | No helper process or shared memory left behind after a crash | A test ends Phazite's side by force and finds neither afterwards |
+| S1.7 | S | A damaged autosave no longer blocks the project file; a save that fails never traps the user | A project with an unreadable autosave opens from its file; with a save that fails, the user can still save elsewhere or close |
+| S1.8 | S | Selected automation points held by ID; a setting for the undo history's depth | A selection survives a point added before it; the setting is in `Settings` |
+| S1.9 | M | The first save copies the project's folders off the message thread | A first save of a project with a large Audio folder shows progress |
+| S1.10 | S | A clip render that fails stops and says so; a note dragged past its clip's end and back | The clip shows the failure in place of waiting; the note is where it began |
+| S1.11 | M | The audit's small bugs in the arrangement, the timeline and the shell | Each is fixed with a test, or moved to known-bugs.md with its reason |
+| S1.12 | M | References (sidechains, modulation, pad tracks, automation) follow the change that moves their target | A device moved or grouped keeps what points at it |
+| S1.13 | M | Escape abandons any drag; no command runs in the middle of one | Each timeline tool's drag, ended by Escape, leaves no undo step |
+| S1.14 | M | The wheel reads how far it turned; pinch zoom | A precision touchpad scrolls and zooms by its own distance |
+| S1.15 | S | The window remembers its place and size | Phazite reopens where it was closed, on a screen that still exists |
+| S1.16 | M | A project double-clicked while a dialog is open; the library's indexer and folder loops; presets without the user's name in a path; Clean Up counts backups; DAWproject import keeps one copy of each file and reports what it left out | Each has its test, the import with files written by other DAWs |
+| S1.17 | S | The folder beside the app rebuilt, not added to; line endings; CI builds `windows-profile`; time limits on CI's jobs; the version from the tag | CI builds all three Windows presets, and a stale file beside the app is gone after a build |
+
+### Stage 2. Caught: the tests that would have found those bugs, and the docs
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S2.1 | S | UBSan and a JUCE assertion each fail their test; the helper's sanitizer reports are kept | A test that asserts, or trips UBSan, fails in CI |
+| S2.2 | M | Engine and device tests at 44.1 kHz, 441-sample blocks and 140 BPM | The suites pass at that rate, block size and tempo as well as their own |
+| S2.3 | M | A golden for live playback; fingerprints that see pitch and spectrum | A song played block by block matches its committed fingerprint, and a wrong pitch fails it |
+| S2.4 | M | Undo and Redo exact after every command; the command script runs every command; the golden project holds everything | Undo after each command gives back the song as it was, to the property |
+| S2.5 | M | The allocation guard on a song being edited, from the first block, on Linux too | The real-time audit's guarded scenarios run in CI on both systems |
+| S2.6 | M | Versions tests with folders, moved clips, restarts and random edits | A seeded run of edits, commits, restores and merges never loses an item or reuses an ID |
+| S2.7 | M | All nine timeline tools driven by the mouse; a song change between press and release | Each tool has a test through `TestWindow` |
+| S2.8 | M | The shipped programs started in CI; the main window built in a test; every device editor painted | CI starts `Phazite` and `PhaziteHost` and ends them cleanly |
+| S2.9 | L | Fuzzing the readers of project files, packs, presets, DAWprojects and audio files | A fuzz run of fixed length finds no crash or hang |
+| S2.10 | M | A gate on speed; a long nightly run under ASan and TSan | A benchmark that slows past its limit fails ([performance.md](performance.md)) |
+| S2.11 | M | Tests in the light theme and at other sizes and scales; the design-token rule counted | `check-architecture.sh` counts colour and size literals in `src/ui/` |
+| S2.12 | M | A device conformance suite; a real VST®3 built in the repository and loaded by the tests | Every device passes one shared list of checks |
+| S2.13 | M | Precompiled headers for JUCE; a Clang build with static analysis; ASan on Windows | CI runs them |
+| S2.14 | L | The docs consolidated: this page, the changelog, the hand checks, the design as pages by area, the open questions, the backlog, `architecture.md`, `performance.md`, a page of source control as built | Each page says what is, and none repeats another |
+
+### Stage 3. Checked: a person tries what only tests have tried
+
+The steps are the tables of the [hand checks](hand-checks.md). Each is done when its rows have a name and a date, and
+what they found is fixed or in known-bugs.md.
+
+| Step | Size | What |
 |---|---|---|
-| A0. Safety net and limits | Make restructuring safe, and stop new breaks of the rules | Before step 1.6 (done 2026-10-14) |
-| A1. Untangle the model | One job per folder, and no UI code in the model | Before step 1.6 (done 2026-10-15) |
-| A2. One path for every edit | The UI decides nothing about the project | Alongside steps 1.6 to 1.9 |
-| A3. Phazite's types at the UI boundary | The UI knows nothing of the engine's types: it reaches the model by IDs and plain values | One view at a time; the playlist and the mixer before step 2.1 (done 2026-10-16) |
-| A4. A UI a designer can work on | A designer changes how Phazite looks without editing C++ | When the designer joins; any time after A1 |
-| A5. Engine parts replaced one at a time | Replace a part of the engine with Phazite's own where Phazite gains something | Only after a dated decision for each part ([design section 23](design.md#23-phazites-engine)) |
-| A6. Phazite's own engine | Phazite owns its song model, its playback engine, its plug-in hosting, its audio and MIDI devices and its renders, and builds on JUCE alone | Planned 2026-10-30, in phases T0 to T6 (A6, below), each after the owner's go-ahead; done 2026-11-04 |
-
-**A0. Safety net and limits (M)**
-- **Golden tests**, which bring forward the render comparisons under [Cross-cutting work](#cross-cutting-work):
-  - representative projects saved, reopened and saved again, and compared with committed files, leaving out what changes on every save;
-  - a project saved by today's version, kept to check that older projects still open as the same song;
-  - a short offline render compared with a committed level fingerprint, within a tolerance;
-  - the model's commands, their order, and a script running each of them, with the undo step it makes and every command's state, compared with committed files.
-- **The architecture check:** `tools/check-architecture.sh` in CI's Checks job, as pre-commit check 7 and in pre-push, counting what breaks the rules against limits that can only go down. A raise needs a reason in its commit message, which CI and pre-push check. It also checks that every quoted include and every source path in `CMakeLists.txt` names a file exactly, as Linux needs. The counts at the start:
-  - model includes of `ui/` or `app/`: 0;
-  - JUCE window includes in the model: 3 (0 after A1);
-  - the engine's headers included in `ui/`: 7, and the engine's types named there: about 545;
-  - undo steps started in `ui/`: 46;
-  - model files on include loops: 10 (0 after A1).
-- **Docs:** the structure and decisions in [design.md](design.md#24-code-structure), the rules in `CLAUDE.md`, and this track. CLAUDE.md's advice to link controls straight to the engine's parameters becomes a stopgap until A3, and step 2.1 draws a lane editor of Phazite's own rather than the engine's.
-- *Done when:* CI fails as soon as a count goes over its limit or a limit rises without a reason, and the golden tests pass on Windows and Linux.
-- *Status:* done (2026-10-14): the architecture check runs in CI's Checks job (with dash and mawk), as pre-commit check 7 and in pre-push; the golden tests of projects, the 0.1.0 format, a render and the model's commands pass on Windows, and in CI on Linux too since 2026-10-15. The 0.1.0 project went on 2026-10-18, when the owner decided that pre-alpha keeps no backward compatibility (design.md, section 18).
-
-**A1. Untangle the model, without changing behavior (L)**
-- **Folders by area:** `model/<area>/` with `base/` and `commands/` at the bottom, `services/`, `ui/<area>/` with `theme/`, `components/` and `input/`, and `app/`, which becomes a library the tests link.
-- **Headers:** the model gets the engine from one small header, its prelude, instead of through the command registry's, and has no include loops. At the start of A1, Project and Playback, Sections and Outlines, and the commands and Playback included each other; since 2026-10-14 no model file is on an include loop.
-- **Project data:**
-  - one schema file with every property Phazite saves, a schema version and migrations;
-  - the grid's fixed size and a key's scale, saved as the engine's enum numbers, become Phazite's own values, and older projects are converted when they open;
-  - projects from a newer Phazite are handled as [design question 17](design.md#25-open-questions) proposes until it is decided;
-  - view state stops counting as an unsaved change.
-- **Commands:** the registry splits. The model keeps the commands, running one inside a named undo step, enabled and ticked state, and search; key handling, the bridge to JUCE's menus and keymap storage move to `ui/input/`. One undo convention, `phazite::UndoStep`, and one way to find the open project, `ProjectContext`.
-- **Input and view code leaves the model:** the computer keyboard and how the main window's keys reach it, the Smart Tool and its hit zones, the time line's zoom and the grid's spacing in pixels (where grid lines fall is beat arithmetic on the tempo map, and stays in the model), track heights in pixels, the drum rows' display order, drag-and-drop payloads, the texts for decibels and pan, and the playlist's mouse options in the keymap. The hook that shows devices' windows moves to the app.
-- **Commands become tables:** the logic in command registration becomes named model functions with tests.
-- **Services and the app:** a typed settings service with one list of keys (today 14 keys are read and written in 5 files, in 3 ways); the sound pack, the library and the previewer belong to the app, not to the main window's content.
-- *Done when:*
-  - the architecture check's counts of JUCE window includes and window classes in the model, the engine's includes in the model outside its prelude, model undo steps outside the undo code, model files on include loops and files outside an area folder are all 0;
-  - every command's logic can be called and tested without the registry;
-  - the app behaves as before, except for the two changes decided on 2026-10-14 (view state no longer marks the project as changed; older projects' grid sizes and key scales are converted), question 17's handling of projects from a newer Phazite, and the fixes the golden tests found (Phase 1, after step 1.5); the golden files change only for that conversion and those fixes.
-- *Status:* done (2026-10-15), pending a check by hand that the app behaves as before. Each step was a commit of its own that built and passed the tests, golden tests included:
-  - folders by area; `app/` is the `phazite_app` library the tests link, and tests reach the window's content without a screen;
-  - the model gets the engine from its prelude only, and no model file is on an include loop;
-  - `src/model/base/internal/Schema.h` names everything a project saves, with the format version (1) and the migrations that convert older projects when they open (`src/model/base/Migrations.h`): the grid's fixed size and keys' scales are saved as Phazite's own names, and a project from a newer Phazite isn't opened;
-  - the command registry keeps the commands, their undo steps, state and search; keys, keymaps (with the playlist's mouse options) and JUCE's menus are in `src/ui/input/`, with the main window's keys in `WindowKeys`; `phazite::UndoStep` is the one undo convention, and `ProjectContext` the one way to the open project;
-  - `src/services/` holds the settings, with one list of keys, and recent projects; the app owns the sound pack, the library and the previewer;
-  - the computer keyboard, the Smart Tool, the time line's zoom, the grid's spacing in pixels, track heights in pixels, the drum rows' order, drag-and-drop payloads and the texts for values are UI code, and the hook that shows devices' windows is the app's;
-  - the commands are tables of named model functions, each with tests;
-  - view state no longer counts as an unsaved change.
-- *Done when, checked 2026-10-15:*
-  - `sh tools/check-architecture.sh` counts 0 for model-window-includes, model-window-references, the engine's includes outside the model's prelude, model-undo-steps, model-include-loops and flat-files, and 0 for unresolved-includes and cmake-sources too;
-  - every command the model registers calls a named model function that tests call without the registry. The views' own commands mostly open or show something; the few that still edit in the UI, such as Quantize and the piano roll's Apply, move into the model with A2's direct edits;
-  - the golden files changed only for three of the fixes the golden tests found and for the conversion to format version 1, besides a new file that lists the commands the app registers.
-- *Since 2026-10-18:* the format versions and migrations are gone, and question 17 waits: pre-alpha keeps no backward compatibility until the owner says so (design.md, section 18).
-
-**A2. One path for every edit (L, alongside steps 1.6 to 1.9)**
-- Model functions open their own named undo steps.
-- A drag is a gesture session that begins, updates, then commits or rolls back as one step.
-- The UI's direct edits (about 20) and the editing rules in UI files (where dropped files go, what Draw places, that sections never overlap, and others) move into model functions with tests.
-- The big files split: the playlist into layout, clip tools, drop target, commands and view; the piano roll into session, note layout, note tools and commands; the channel strip into one file per class. The browser gets a model, and the playlist and the piano roll share one set of gesture code.
-- *Done when:* the UI starts no undo steps and makes no direct edits, and no source file is much over 1,000 lines.
-- *Status:* done (2026-10-15), alongside step 1.6, pending a check by hand that editing works as before. Each step was a commit of its own that built and passed the tests, golden tests included:
-  - model functions open their own named undo steps (`phazite::UndoStep`), and a drag holds a `phazite::Gesture` (`src/model/commands/internal/Undo.h`) from its first change until the mouse goes up; knobs, faders and the mix knob change parameters through one. A gesture can also roll its changes back, which no tool offers yet (Escape during a drag could);
-  - the sections strip, the track header, the device menus, the mixer strip, the piano roll (the key menu, velocities, transforms and the note tools) and the playlist (dropped files, double-clicks, adding, coloring and moving tracks, and the clip tools) edit through model functions, and the rules they held moved with them: where dropped files go (`importFiles()`), what Draw and Paint place (`placeClip()`) and what Slip does (`slipClip()`); the mute and solo buttons use the track switches the commands use;
-  - the playlist is split into a file per part (`PlaylistParts.h`: the view, the rows, the tools, drops, and the track headers with the commands), the piano roll likewise (the view, the rows, the commands, the note grid and its tools), and the mixer strip into one file per class;
-  - the browser has a model (`src/services/BrowserModel.*`): its places, what each holds, search results and its rows' texts, without window code;
-  - the playlist's and the piano roll's tools share one gesture (`src/ui/timeline/TimelineGesture.*`).
-- *Done when, checked 2026-10-15:*
-  - `sh tools/check-architecture.sh` counts 0 UI undo steps (46 when A2 began), and the engine's types named in the UI went from 538 to 518;
-  - a search of `src/ui/` finds no call that changes the project except through a model function (or `ui::ParameterAttachment`, until A3);
-  - no source file is over 1,000 lines: the largest, `src/ui/timeline/TimelineEditor.cpp`, has 977.
-
-**A3. Phazite's types at the UI boundary (XL, one view at a time)**
-- IDs for tracks, clips and devices; stable note IDs saved in the project; selections held as IDs.
-- A view model per view (playlist, piano roll, mixer, transport), with plain values and grouped change signals.
-- Meters and the playhead read through small polled sources, ending each mixer strip's own polling.
-- Parameter handles for knobs and faders, replacing `ui::ParameterAttachment`, and a waveform source for clips.
-- One view at a time; then `ui/` loses the engine's include path, and the model's headers that name the engine's types move into `model/<area>/internal/`.
-- Tests build songs with shared helpers.
-- *Done when:* `src/ui/` names none of the engine's types and can't include its headers, and the model's public headers are free of its types.
-- *Status:* done (2026-10-16), a commit per view: Phazite's own beats and IDs (`src/model/base/Beats.h`, `IDs.h`); views that follow the project context, with the selection by IDs (`SongSelection`) and what changed in the song in groups (`SongChanges`, `src/model/project/ProjectContext.h`); and the mixer: a model of it by IDs (`src/model/mixer/MixerModel.h`, with tests), through which the strips, the inspector, the device menus and the top bar's master controls work by IDs and plain values, the meters reading polled level sources and the strips refreshing when the song changes instead of polling it; parameter handles made in the model only (`internal/` headers), and the devices' windows moved into the app (`src/app/PluginWindow.h`); the transport and the tempo as the top bar shows them (`src/model/transport/TransportModel.h`, a tempo drag one undo step through a handle), and the engine as the UI reaches it (`src/model/engine/EngineContext.h`: the audio devices, the CPU and the MIDI inputs) for the top bar and the settings; and the time line that the playlist and the piano roll share, its ruler, grid, zoom, playhead and loop in Phazite's beats (`src/model/arrangement/TimelineModel.h`), its tools' drags each one undo step through `SongGesture`, while the two editors turn their clips' and notes' beats into the engine's times at its edges until their own steps; and the playlist by IDs (`src/model/arrangement/PlaylistModel.h`, with tests): its rows, the clips and what it draws of them, its tools' edits and what is dropped on it, with the time range selected across tracks by beats and IDs (`SongRange.h`) and the audio clips' waveforms drawn by the app (`src/app/ClipWaveforms.h`), the playlist refreshing its rows and clips when the song changes; its sections strip by IDs, with a test that drives it with the mouse; and notes' IDs, saved in the project: each note has one that no other note of its clip has, which it keeps through edits, undo and redo, and a copy of a clip keeps them; and notes as plain values, in Phazite's beats with its own scales and chords (`src/model/notes/NoteValues.h`), the transforms keeping the IDs of the notes they replace; and the piano roll by note IDs (`src/model/notes/NotesModel.h`, with tests): the clips it shows and their notes, ghost notes, its tools' edits (a drag's notes set in one call per mouse move), keys, drum rows and auditioning, with the notes selected by their references in the song's selection, and a test that drives its tools with the mouse; and the browser: its previewer and library made without the engine's types in their headers (the previewer made by the app, `src/model/engine/internal/Preview.h`; the library through the engine context); and last, the headers the UI includes made free of the engine's types (the project context, the command registry, song outlines, export and new projects, their engine sides in `internal/` headers, and the track colours that menus show), the model's 30 other headers that named the engine's types moved into their areas' `internal/` folders, and `phazite_ui` compiled without the engine's include path, the architecture check counting any `internal/` header the UI includes. The engine's types named in `src/ui/`: 518 when A3 began, none at its end.
-
-**A4. A UI a designer can work on (L, any time after A1)**
-- `resources/design/tokens.json`, in the DTCG format, becomes the one source of the tokens, and a small build step generates `DesignTokens.h`.
-- New tokens for transparency, sizes, corner radii and fonts.
-- A gallery app shows every control and view in all three themes, with sample data.
-- Debug builds get the Melatonin Inspector (MIT).
-- User-facing text moves into a strings table, with one helper for key names.
-- A one-page guide for the designer.
-- *Done when:* any color, size or font can be changed in `tokens.json` and seen in the gallery without editing C++.
-
-**A5. Engine parts replaced one at a time (only after a dated decision)**
-- Step 1.6's devices start it: engine-neutral DSP in `src/devices/`, which any engine can play (Phazite's own plays each through `engine::DeviceRunner` and `DeviceNode`, `src/engine/nodes/`).
-- For a bigger part: an interface in front of it, the replacement behind it, a switch-over, then the old code deleted.
-- The first bigger part: time-stretching (step 2.18, the owner's go-ahead of 2026-10-28 to depart from the engine's own ways for subsystems where the best solution comes down to that).
-- The engine's project store stays until something replaces it (A6's T1 did: the song model); the one schema file makes a converter manageable.
-- *Done when,* for each part: the golden tests pass on the new code, and the old code is gone.
-
-**A5 parts decided 2026-10-30** (the owner's go-ahead, after a map of each model area to the engine's types it uses, which sorted them into parts cheap to own, parts to own while the engine still plays them, and the engine's core). In this order, each its own commit or commits, each kept to the layers and rules above:
-1. **Presets in Phazite's own format** (M): a preset file names a device by Phazite's type and parameter IDs (`src/devices/`), a plug-in by its identity and the state it gives itself, and containers, modulators and macros by Phazite's names, translated to and from the engine only at the model's edge, as projects save Phazite's own values (design sections 9 and 24). Presets are the user's own files and outlive any project, and they held the engine's internal elements until then. The factory presets that come with Phazite are written in the same format. *Done 2026-10-30:* JSON in `schema::preset` (`Schema.h`), every preset loaded by making devices, containers, modulators and macros through Phazite's own functions (`src/model/presets/Presets.cpp`), nothing of the engine's in the files; a preset loads into a device of its kind too, from a Presets button on each device's card in the Devices view; tests in `tests/PresetTests.cpp`. *Not* a format version: the same map proposed a version number for project files, which pre-alpha leaves out until the owner says compatibility starts (the owner's decision of 2026-10-18, design section 18); presets carry none either.
-2. **The selection held by Phazite** (M): what is selected (tracks, clips, sections, devices, notes, automation points) kept by Phazite as IDs, as the UI already reads it (`SongSelection`), and the model's commands given Phazite's selection rather than the engine's, which goes. *Done 2026-10-30:* `phazite::Selection` (`src/model/base/internal/Selection.h`) holds tracks, clips, sections and devices by their IDs in the order selected, the piano roll's notes by their references, and one parameter's automation points by index, one kind at a time; the project context owns it, and the model's commands take it.
-3. **Waveforms and sections** (S, M): clips' waveforms drawn from Phazite's own cache of their files' levels (JUCE's `AudioThumbnail`) rather than the engine's (done 2026-10-30: `src/app/ClipWaveforms.h`, one cache while waveforms show, a file's levels read once however many clips play it; `tests/ClipWaveformTests.cpp`); and sections kept as Phazite's own state in the project's PHAZITE branch, as the chord lane's are (step 2.7), rather than as clips on an arranger track of the engine's. Neither plays sound. *Sections done 2026-10-30:* `schema::SECTIONS` in the PHAZITE element, each section with an ID from the song's count of IDs (`Song::makeID()`, since T1), as clips have theirs (so that none is used twice, even after an undo), moved, stretched and copied by Phazite's own time edits (`src/model/arrangement/internal/Sections.h`), selected by ID in Phazite's selection.
-4. **Modulation of Phazite's own devices** (L): Phazite's modulators computed by engine-neutral DSP (`src/devices/`), which Phazite's devices read themselves within each block rather than once a block, and which is shaped for modulation per note (as CLAP's polyphonic modulation is), so that Phazite's instruments can later move a parameter for each voice. Plug-ins' parameters, and the mixer's, were still moved once a block until Phazite's engine played them (A6's T2 and T3). *Done 2026-10-30, for the whole device:* a device moves each of its modulated parameters itself in every stretch of 32 samples (the stretch its parameters already glide in, which per-sample parameters in every device's DSP would refine), from the value automation leaves: an LFO by Phazite's own copy of its wave from where the song's LFO is as the block starts, so modulation sounds the same at any buffer size and an LFO moving a plug-in and a device stays in step; other modulators and macros glide from block to block as before. What modulates each device is read from the song on the message thread and handed to the audio thread whole, without locks or freeing there (`src/devices/modulation/Modulation.h` and the real-time audit's modulation scenario; since T2 Phazite's engine plays the modulators themselves on the song's control points, `src/devices/modulation/Modulators.h`, `src/engine/modulation/ModulatorNode.h`). Per note, next: the same addition for each voice (design section 10).
-5. **Plug-in sandboxing** (XL, step 3.3): plug-ins run by Phazite's own host in helper processes, as step 3.3 describes, measured against hosting in Phazite's process. *Done as A6's T3 (2026-11-02):* the round trip measured, as step 3.3's *How* asks: about 28 microseconds a block at 128 samples, nothing measurable with tracks played side by side ([performance-audit.md](performance-audit.md), section 10); so sandboxing is on and the only way Phazite hosts plug-ins, one helper for each plug-in, its program `PhaziteHost` (`src/host/`) and what Phazite shares with it `src/sandbox/`.
-- Then nothing more without another dated decision: the rest (clips and their playback, the mixer's graph, automation, the transport and recording, the project store, and undo) is the engine's core, and replacing it means writing an engine, which decision 1 of 2026-10-14 calls a hedge, not a goal. *2026-10-30:* the owner asked for the whole path to an engine of Phazite's own, which A6 lays out, each of its phases still starting on the owner's go-ahead.
-
-**A6. Phazite's own engine (XL; planned 2026-10-30, done 2026-11-04)**
-- Phazite owns everything it keeps and plays: its song model, its playback engine, its plug-in hosting, its audio and MIDI devices and its renders, and it builds on JUCE alone ([design section 23](design.md#23-phazites-engine)). Each phase started on the owner's go-ahead, dated in the [decision log](design.md#26-decision-log), with the golden tests as the safety net:
-  - **T0. Safety nets** (done 2026-10-30): golden renders of everything that plays, rendered through the engine and checked before they are compared (`tests/RenderHarness.h`), and a test song made through the model by IDs, beats and plain values, as the UI makes one (`tests/TestSong.h`), so that what the tests build keeps working as the model's insides change.
-  - **T1. The song model** (done 2026-10-30, steps 1 to 11): the tempo map, the tracks, the clips, the devices' chains with Phazite's own devices' settings, the plug-ins and the containers, the channels' volume, pan, sends and faders, the sidechains, the frozen tracks, the modulators and macros, the automation and the transport's state are the song's own (`src/model/base/Song.h`, every name in `Schema.h`); the song numbers its items itself, the project file is the song alone, and undo is the song's own history.
-  - **T2. The playback engine and recording** (done 2026-11-02 on the owner's go-ahead of that day, steps 0 to 10, each a GitHub issue in the A6 milestone; recording moved into it from T4): `src/engine/`, engine-neutral, plays what the model compiles from the song (`src/model/playback/`), its strips on several cores, the same to the bit, and records the inputs and the notes played to the sample; it plays and records every project.
-  - **T3. Plug-ins hosted in helper processes** (done 2026-11-02 on the owner's go-ahead of that day, steps 0 to 9; A5's part 5 and step 3.3): one helper for each plug-in, `PhaziteHost` (`src/host/`, with what Phazite shares with it in `src/sandbox/`), the only way Phazite hosts plug-ins, and the plug-in scan in a helper too.
-  - **T4. The audio and MIDI devices, and the devices** (started 2026-11-02 on the owner's go-ahead of that day, done 2026-11-04): the audio device and MIDI inputs of Phazite's own, opened by it and kept in its settings (`src/model/engine/internal/AudioIO.h`; step 1, 2026-11-02, pending the check by hand with an ASIO interface and a MIDI keyboard plugged in), and Phazite's devices played by its engine alone.
-  - **T5. Renders and previews** (started 2026-11-02, done 2026-11-03, steps 1 to 3): the browser's previews on an engine of their own beside the song's (step 1, first, which T4's devices needed), then export and stems, freeze and bounce, rendered offline by Phazite's engine (`src/model/playback/internal/OfflineRender.h`).
-  - **T6. The build on JUCE alone** (2026-11-03 to 2026-11-04): the last parts by the song's IDs (the grid and the song's bars and scales; the tracks, clips, audio clips and notes; the mixer; parameters, automation and the modulators' parameters by their references, `src/model/devices/ParameterRef.h`), audio and MIDI files read by Phazite's own code, its settings in a file of its own, each project owning its song, and each song's plug-in instances its playback session's (`src/model/plugins/internal/PluginInstances.h`); then the build on JUCE alone (`external/JUCE`, 8.0.13), with doctest as a submodule of its own (`external/doctest`, 2.4.11).
-- *Done when:* every project plays, records, exports and freezes through Phazite's own engine, every plug-in runs in a helper, the build needs only JUCE and Rubber Band Library (and doctest for the tests), and the golden tests pass.
-- *Status:* done (2026-11-04), pending the checks by hand of T3 and of T4's audio and MIDI devices (with an ASIO interface and a MIDI keyboard).
-
-## Phase 0: Foundations
-
-**0.1 Code structure and tests (S)**
-- Split `src/` into:
-  - `app/`: startup and the main window;
-  - `model/`: Phazite's project model (commands, sections, chords, outlines);
-  - `ui/`: components and look-and-feel.
-- A static library target, `phazite_core`, holds everything testable without a window. The app links it.
-- A test runner using doctest (MIT, a pinned submodule since 2026-11-04), run by CTest locally and in CI. On Linux it runs headless.
-- *Done when:* CI runs the tests on Windows and Linux.
-- *Status:* done for `app/`, `model/` and `ui/`. Since 2026-10-14 the [architecture track](#architecture-track) organizes them by area, adds `services/`, and makes `app/` a library the tests link. Built-in DSP goes in `devices/` from step 1.6; the chord engine and the sound generator (steps 2.7, 3.1 and 3.2) follow the same rules: no engine or window code in their logic.
-
-**0.2 Engine setup (S)**
-- No personal data in saved projects (no user name), with the app's version and its settings folder.
-- The recording folder, raised device limits, plug-in scanning settings.
-- What the app shows for the engine: the open project, plug-in windows, progress for long tasks.
-- Projects open on the message thread, never on a background thread.
-- *Done when:*
-  - a test saves a project and finds no operating-system user name in it;
-  - freeze and render run without assertions.
-
-**0.3 Real-time audit (M, decision gate)** *Can run alongside 0.4–0.7.*
-- **The test:** a headless test loads a project with sends, automation, modulators and a plug-in, and plays it. CI runs it under the `linux-asan` and `linux-tsan` presets.
-- **Optional:** Clang's RealtimeSanitizer (Clang 20 or newer), which reports allocations and locks inside functions marked as non-blocking.
-- **The output:** a list of real-time violations on Phazite's code paths, each with an action ([realtime-audit.md](realtime-audit.md)). Per decision 4: a simple workaround where one exists, otherwise a part of the engine of Phazite's own.
-- *Done when:* the list exists and each violation has its action.
-
-**0.4 Projects, saving and autosave (M)**
-- The project folder layout ([design section 18](design.md#18-projects-saving-and-export)).
-- Save and load, with Phazite's own data inside the project file.
-- Autosave, crash recovery, backups and recent projects.
-- *Done when:*
-  - after the app is killed mid-session, restarting it offers the autosaved state;
-  - tests cover save/load round trips.
-- *Status:* done (`src/model/project/internal/Project.h` with tests, and the app's `src/app/ProjectSession.h`): new, open, open recent and save; an autosave every 2 minutes; the restore question at startup. Still to try by hand: end Phazite in Task Manager mid-session, then start it again. Since 2026-10-14 a project counts as changed only when it differs from how it was opened or last saved.
-
-**0.5 Commands, keymaps and undo (M)**
-- A command registry with names, descriptions, search synonyms and categories.
-- One named undo step per command.
-- Keymap files (Phazite default and FL Studio), and key rebinding.
-- The command palette (Ctrl+K), and macros made of chained commands.
-- *Done when:* every action in the app so far is a command, can be found in the palette, and shows by name in the undo history.
-- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/commands/CommandRegistry.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, including Quit, Open Recent and Save As, and **Keyboard Shortcuts** (Options > Keyboard Shortcuts then; the gear's menu since 2026-11-05) changes keys (kept per keymap). Undo and Redo show the step they apply to by name ("Undo Change Volume") in the Edit menu and the palette; an undo history panel can come later.
-
-**0.6 UI shell and design system (L)**
-- **The main window:** docking panels that resize, collapse and detach to another monitor. Layouts: Beat, Mix and Full.
-- **Design language** ([design.md](design.md#design-language)):
-  - bundle the Inter font as separate files with its licence, use tabular digits for numbers, and fall back to the system font;
-  - design tokens for color (dark, light and high-contrast themes), type sizes, spacing and control heights;
-  - pick an icon set under the MIT or ISC licence;
-  - HiDPI scaling.
-- **Base controls:** knob, slider, button, meter and menu, with keyboard focus and accessibility handlers.
-- **Help:** the hint bar and hover help.
-- *Done when:*
-  - the empty shell runs with all its panels, and layouts switch;
-  - text renders in Inter on Windows and Linux, with tabular digits in readouts;
-  - Windows Narrator reads the base controls;
-  - CPU is near zero when idle.
-- *Status:* the shell is in (`src/ui/`): the window with its menus, panels that resize and collapse, the Beat, Mix and Full layouts, the design tokens with three themes (`src/ui/theme/DesignTokens.h`, contrast checked by tests), Inter with tabular digits, the hint bar, hover help and the command palette. The base controls are in too (`src/ui/components/Controls.h`): knob, fader and level meter, buttons with a visible keyboard focus, and links to the engine's parameters with named undo steps (parameter handles since A3). They show in the top bar (master level and volume) and in the inspector, which shows the synth track's channel (volume, pan, mute, solo, level). The interface size goes from 75 % to 200 % (View menu, Ctrl+= and Ctrl+-). The browser, inspector and editor can each move to a window of their own, on a second monitor if there is one. The icons are Lucide's (`resources/icons/lucide/`, ISC). Still to try by hand: Windows Narrator reading the controls, and idle CPU.
-
-**0.7 Audio, MIDI and the computer keyboard (S)**
-- A settings page: audio device (including ASIO), buffer size and MIDI inputs.
-- Computer-keyboard MIDI input.
-- *Done when:* a MIDI keyboard and the computer keyboard both play the starter synth.
-- *Status:* done: **Settings** (in the Options menu then; the gear's menu at the activity bar's foot since 2026-11-05) with Audio (device type including ASIO, device, sample rate and buffer size), MIDI (each MIDI input with an on/off switch, and the computer keyboard) and Shortcuts tabs; the computer keyboard (`src/ui/input/ComputerKeyboard.h`) and live MIDI routing (`src/model/engine/internal/LiveInput.h`), with tests. Still to try by hand: a MIDI keyboard and the computer keyboard playing the starter synth.
-
-## Phase 1: Make a beat (milestone 1)
-
-**1.1 Playlist (XL)**
-- **Timeline:** a ruler, smooth zoom and scroll, an adaptive grid and snap.
-- **Tracks:**
-  - create, delete, reorder, rename, color and resize;
-  - folders that collapse and become buses;
-  - pinning and focus mode.
-- **Clips:**
-  - audio clips with waveforms, and MIDI clips with note previews;
-  - the Smart Tool, single-key tools and selection;
-  - split, duplicate, alias and make unique, delete and ripple delete, nudge, fades and crossfades.
-- **Placing content:** drag and drop from the browser, with automatic naming and coloring.
-- *Done when:* a beat can be laid out from one-shots and MIDI clips with just the keyboard and the Smart Tool.
-- *Status:* done, in four parts, pending a check by hand of the "done when" above.
-  - **Part 1, done:** the timeline (`src/ui/timeline/TimelineView.h`: positions in beats and zoom; `src/model/arrangement/internal/Grid.h`: a grid that adapts to the zoom or has a fixed size, with snap and triplets) and the tracks (`src/model/arrangement/internal/Tracks.h`: add, delete, duplicate, move, select, mute, solo, colors from the color-blind-safe palette, heights). The playlist (`src/ui/playlist/Playlist.h`) has the ruler, the playhead, scrolling, zoom and track headers that rename, recolor, resize and move tracks; live MIDI and the inspector follow the selected track.
-  - **Part 2, done:** clips (`src/ui/playlist/ClipComponent.h`): audio clips with waveforms and fades, MIDI clips with their notes, and aliases marked with a `*`. The Smart Tool (`src/ui/timeline/SmartTool.h`, `src/model/arrangement/internal/Clips.h`): trim at the edges, fades at the top corners, a time range from the upper half or empty space, and moving, copying (Ctrl) or aliasing (Ctrl+Shift) from the lower half, across tracks, snapped unless Alt is held, each drag one named undo step. Delete, duplicate and select all work on clips (`src/model/arrangement/internal/Selection.h`), and double-clicking a track with an instrument adds a MIDI clip.
-  - **Part 3, done:** the single-key tools (Draw, Paint, Slice, Slip, Mute, Delete, Select and Zoom, on FL Studio's letters, with toolbar buttons), and editing commands (`src/model/arrangement/internal/Selection.h`): split, duplicate as alias, make unique, mute, nudge, quantize clip starts, delete and close the gap, insert and remove time, crossfades from the Smart Tool and fade shapes. A time range is a selection of its own (`phazite::RangeSelection`) that Delete, Duplicate, Split and the time commands act on.
-  - **Part 4, done:** folders that group tracks (grouped, ungrouped, collapsed; plain until they hold an effect, then buses), pinned tracks in a band that doesn't scroll, focus mode, and audio and MIDI files dropped from Explorer (`src/model/arrangement/internal/Import.h`): copied into the project's `Audio` folder, on new tracks named after them and colored by their names.
-
-**1.2 Sections and song outlines (M)**
-- The sections strip. Move, duplicate (also as aliases), delete and resize a section across all tracks.
-- Outline data files for pop, rock, electronic and hip-hop/trap.
-- Apply an outline when creating a project, or later.
-- The energy curve and the section tips.
-- *Done when:*
-  - applying the electronic outline creates its seven sections at the project tempo;
-  - moving the Drop moves everything in it (unit-tested).
-- *Status:* done, pending a check by hand. Sections are named parts of the song with a role, a tip and an energy level (`src/model/arrangement/internal/Sections.h`; Phazite's own state in the project since 2026-10-30, A5). Moving, copying (also as aliases), deleting and resizing a section edit every track (`src/model/arrangement/internal/Arrangement.h`): clips are split at its edges, automation goes along, and Insert and Remove Time stretch sections instead of splitting them. The outlines are data files (`resources/outlines/*.outline.json`, read by `src/model/arrangement/Outlines.h`), offered by **File > New Project**, **Add > Song Outline** and the time bar's right-click menu. The sections show in the playlist's time bar (`src/ui/playlist/SectionsStrip.h`), over the bar numbers with the energy curve faintly behind, and as ghosts behind the tracks; the hint bar shows each section's tip. Both "done when" checks are unit tests (`tests/SectionTests.cpp`). Before this step, the playlist's time line, grid and tools moved into `src/ui/timeline/TimelineEditor.h`, for the piano roll to share.
-
-**1.3 Piano roll (XL)**
-- **Editing:**
-  - FL Studio's mouse model, the tools, grid and snap;
-  - multi-clip editing and note audition.
-- **Lanes and visual aids:**
-  - the velocity lane;
-  - ghost notes, scale shading and chord stamps.
-- **Drum mode.**
-- **Transforms with preview:** quantize, legato, chop and transpose. More come in phase 2.
-- *Done when:* a bass line and chords are quick to write, and drum mode works with the drum sampler.
-- *Status:* done, pending a check by hand. The piano roll (`src/ui/pianoroll/PianoRoll.h`) shares the playlist's time line, grid and tools (`src/ui/timeline/TimelineEditor.h`) and shows the notes of the MIDI clips selected in the playlist, several at once, each in its clip's color; double-clicking a clip opens it. FL Studio's mouse model: a click adds a note with the last length and velocity (a drag that follows moves it), right-click deletes, Shift+right-click opens the menu, the edges resize, Ctrl+drag selects in a rectangle and Shift+drag copies. Paint, Slice, Mute, Delete, Select and Zoom work on notes, and notes play on their track's instrument as they are placed. The velocity lane, ghost notes from other tracks (double-right-click one to edit its clip), shading outside the song's key with optional snapping, chord stamps, and drum mode (a sampler's pads, or the General MIDI drums, in an order the track keeps, with rows that can be hidden). Quantize (strength, swing, ends), legato, chop and transpose (in semitones or steps of the key) show their result before it is applied. The note edits are commands (`src/model/notes/internal/Notes.h`, with tests in `tests/NoteTests.cpp`); with notes selected, the note keys come before the playlist's (`Command::keyPriority`). Drum mode with the drum sampler waits for step 1.6, which brings the sampler; until then it works with any instrument.
-
-**1.4 Mixer (L)**
-- Channel strips: fader, pan, mute, solo, meters, and device slots with key controls.
-- Sends and returns (pre/post), folder buses, and a master with a loudness meter.
-- *Done when:* a mix with a reverb return and a bus works and matches the playlist's tracks.
-- *Status:* done, pending a check by hand. The mixer (`src/ui/mixer/MixerView.h`) has a strip for every track, in the playlist's order and colors (`src/ui/mixer/ChannelStrip.h`): the track's name and output, its devices (an on/off switch and two key controls each; click to open its window, right-click to turn it off, move or remove it), its sends with a level and a Pre/Post switch, pan, mute, solo, fader and meter. A folder becomes a bus with its first device and turns plain again without one; return tracks take an aux bus (`src/model/mixer/internal/Mixer.h`, with tests in `tests/MixerTests.cpp`). The master's strip has its devices, fader and meter, and the loudness meter, real-time safe, by EBU R128, at the end of the master's devices (since T2 Phazite's engine measures what the master puts out, `src/engine/nodes/LoudnessMeter.h`). Devices open in windows of their own (`src/app/PluginWindow.h`), with a knob for each parameter of a built-in device. A guarded real-time audit scenario plays the "done when" mix: a bus, a send to a reverb return and the loudness meter.
-
-**First feedback round on steps 1.1 to 1.4 (2026-10-13)**, after the owner tried them ([design decision log](design.md#26-decision-log)):
-- **Fixes:** dismissing the track color menu crashed the app (two other menus had the same mistake); a held key repeated its command, so holding a tool's key ended a drag after a copy or two and holding Space started and stopped playing; every mouse-wheel step was handled twice in the playlist and the piano roll.
-- **Playlist:** track colors run through their rows; dragging past an edge scrolls; "+ Track" moved over the track headers, with a row after the last track that adds one; the sections became a band in the time bar and ghosts behind the tracks; four more outlines.
-- **Piano roll:** bar 1 is the clip's start; a selected track shows its clip nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen; no Drums button.
-- **Mixer:** strips keep their parts apart at any height, and the mixer scrolls when it is shorter than they need.
-- **Keys and menus:** tool keys spring back after a hold; the digits 1 to 9 pick tools and M turns the computer keyboard on and off; the menu bar is File, Edit, Add, View, Options and Help (Options went on 2026-11-05: its settings are in the gear's menu).
-- **Tests that drive the UI:** the components are in a library of their own (`phazite_ui`), and `tests/UiTestHelpers.h` puts them in a window that isn't on any screen, so tests send them mouse and key events through JUCE as the app does (`tests/PlaylistTests.cpp`, `tests/PianoRollTests.cpp`, `tests/MixerViewTests.cpp`).
-
-**Second feedback round (2026-10-13):**
-- **The loop:** playback loops the whole song and grows with it, as FL Studio's song mode does (`src/model/transport/internal/Playback.h`); a new project looped a fixed 4 bars, so clips placed later never played. Loop Selection and Loop Section loop a part on purpose, and Loop the Song goes back. A Loop button in the top bar (L), and the loop drawn in the rulers.
-- **Track headers:** a handle moves the track, so clicks elsewhere on the header don't; an arrow collapses a track to a thin row (and a folder's tracks out of sight), as do U and dragging the bottom edge past the smallest height; stronger track colors, with names in black or white, whichever reads better; dragging along the headers selects the tracks it passes, and Alt+click on an arrow collapses every track.
-- **FL Studio's keymap:** a click on empty space places the last clip used, as FL's Draw tool does; a time range selected with Ctrl+drag loops while it is selected; Shift+right-click opens the menu.
-- **Mixer, redesigned after research into the mixers people praise** ([design](design.md#8-the-mixer)): a strip reads top to bottom as the sound goes; the instrument has a slot of its own above the effects, with menus that list only instruments or only effects (`src/ui/devices/DeviceMenus.h`); a track whose notes have no instrument asks for one in the mixer, the inspector and the piano roll. "+ Send" makes a return with an effect in one step; returns are solo-safe and sit next to the master; folders have a Bus switch; selecting a channel outlines what it feeds and what feeds it.
-- **Mute and solo:** one control for the playlist and the mixer (`ui::MuteSoloButtons`); a solo never changes the mute switches, right-click M solos a track alone, and a track silenced by solos shows its M half lit.
-- **The loop, refined after research:** Ctrl+L loops the selection, or the song with none; playback that doesn't loop stops at the song's end.
-
-**1.5 Browser (L)**
-- Folders, the plug-in list, search, tags and favorites.
-- Preview, with loops in time and key.
-- Drag-and-drop rules and the plug-in picker (F8).
-- *Done when:* finding and placing a kick takes seconds, and loops preview in time.
-- *Status:* done, pending a check by hand. The browser (`src/ui/browser/Browser.h`) is a tree of places, as FL Studio's: Favorites, Recent, Sounds by Type, Phazite Sounds, Instruments, Effects, the user's folders and **Add Folder...**; search finds sounds and devices by their names and tags as you type (`src/services/Library.h`, which indexes the sounds on a background thread). Clicking a sound or moving to it with the arrow keys previews it (`src/model/engine/Preview.h`): loops in time with the project, stretched by SoundTouch, and on its bars while it plays. Dragging puts sounds and devices onto the playlist (a track, or below the tracks for a new one) and devices onto mixer channels; Enter puts the selected item on the selected track at the play start. The plug-in picker (F8, `src/ui/browser/PluginPicker.h`) adds a device by name. Tests: `tests/LibraryTests.cpp` and `tests/BrowserTests.cpp` (finding and placing a kick, and the loop previewing in time, are both there). Phazite Sounds: 85 CC0 sounds for a new user to start with (9.3 MB): drums, 808s, loops, effects and foley from CC0 libraries and Phazite's own synthesis. They are an optional download from their own repository, [phazite-sounds](https://github.com/august-byrne/phazite-sounds), whose CI checks that each is listed as CC0 with its source; `tools/soundkit/` renders and zips them. Phazite offers them once, in a welcome window (`src/ui/shell/Welcome.h`), and in the browser until they are installed; `src/services/SoundPack.h` downloads the pinned release, checks its SHA-256 and unpacks it into `Documents/Phazite/Packs` (tests: `tests/SoundPackTests.cpp`, `tests/WelcomeTests.cpp`). Still to come in later steps: drops onto device slots and drum pads (step 1.6), loops in key once songs have a key, previews through the track's devices, tempo detection for loops whose names don't give one, and collections.
-- **Fixes from the third round of feedback (2026-10-13):** Space stops back at the play start (the last click in a ruler, or the song's start in a project just opened), and Shift+Space (Ctrl+Space in FL Studio's keymap) pauses; play, stop and the computer keyboard work while a plug-in window has the focus (`src/ui/input/PluginKeys.h`); each effect has a Mix knob; the inspector's channel strip fills its height.
-
-**Architecture phases A0 and A1 (2026-10-14 to 2026-10-15, done)**, before step 1.6: golden tests, the architecture check, and untangling the model, with no new features ([architecture track](#architecture-track)).
-- **Fixes the golden tests found (2026-10-14),** where they showed wrong behavior; the golden files change only where a fix says so:
-  - Go to End goes to the end of the song, the end of the bar its last clip ends in, not to the end of its sections.
-  - A note edit makes its clip longer only into the empty space after it, never over the next clip on its track.
-  - Opening a project with MIDI clips no longer counts as an unsaved change: Phazite compares the project with how it was opened or last saved, since a notification can change nothing (JUCE notifies a value written again as another type).
-  - A new project's starting content (the starter song, an outline's sections) is part of its first save: no `*` right after it is made, and Undo doesn't remove it.
-  - Duplicate (Ctrl+D, Ctrl+B in FL Studio's keymap) works on a selected time range: what lies in it goes again right after it, and the range moves to the copy (Undo moves it back).
-
-**1.6 First built-in devices (XL)**
-- The first devices:
-  - drum sampler: pads, choke groups, tuning and envelope;
-  - subtractive synth;
-  - parametric EQ with an analyzer;
-  - compressor with sidechain;
-  - reverb;
-  - limiter.
-- Each is real-time safe and has an editor and DSP tests.
-- Each device's DSP goes in `src/devices/`, engine-neutral, so that any engine can play it ([architecture track](#architecture-track), A5); Phazite's own plays it through `engine::DeviceRunner`. Devices render the same twice in a row offline (seeded randomness), so the golden render tests can cover them.
-- The starter project plays on these devices.
-- *Done when:* a beat can be made and mixed with built-ins only, and every device passes the real-time checks from step 0.3.
-- *Status:* done, pending a check by hand (2026-10-15). In: the devices' layer (`src/devices/`, a fifth layer in the architecture check, with DSP building blocks and their tests), what plays any of them around its DSP, with each effect's latency-aligned mix (since T2 Phazite's engine's `engine::DeviceRunner`, `src/engine/nodes/DeviceRunner.h`), handles through which editors reach devices by IDs, the EQ with its own editor and analyzer, and the compressor with its editor and a sidechain that listens to another track (`src/model/mixer/internal/Sidechain.h`), the true-peak limiter with its meters, the reverb with a graph of its fades, the synth with a panel of its controls, and the drum sampler with its pads, a synthesized default kit and sound files dropped on pads (which the piano roll's drum rows name), all offered in the device menus. The starter project plays on them only: a beat on the drum sampler and the arpeggio on the synth, with a golden render of it (`tests/golden/renders/starter.json`); MIDI files preview on the synth too.
-
-**1.7 Transport, MIDI recording and Capture (M)**
-- Play, stop and loop; metronome and count-in.
-- Editing tempo, key and time signature.
-- MIDI recording (overdub or replace), and Capture.
-- *Done when:* playing an idea and then pressing Capture turns it into a clip.
-- *Status:* done (2026-10-15), pending a check by hand. In: the metronome (a click, louder on bars' first beats; since T2 synthesized by Phazite's engine, `src/engine/transport/Click.h`) and a one-bar count-in; the tempo and time signature in the top bar, the tempo a field to drag, scroll or type (a key is a track's, set in the piano roll since step 1.3); MIDI recording onto the track live MIDI plays, with overdub or replace and input quantize, each take one undo step, the song's own loop set aside while it records; and Capture (Ctrl+Shift+C), which sets the tempo from the notes in a song without clips. Tests play notes in real time through a test audio device (`tests/TestAudioDevice.h`) and check the takes and captured clips, and the real-time audit guards the metronome and a recording.
-
-**1.8 Export (S)**
-- Render to WAV and FLAC with loudness normalization.
-- *Done when:* an exported file plays correctly and meets the chosen loudness target.
-- *Status:* done (2026-10-15), pending a check by hand. In: File > Export Song (Ctrl+Shift+R; Ctrl+R in FL Studio's keymap) and its window (`src/ui/shell/ExportPanel.h`), which keeps its choices: WAV or FLAC, 44.1 to 96 kHz, 16-bit dithered, 24-bit or 32-bit float, and Normalize to a loudness under a true-peak ceiling. The model (`src/model/project/Export.h`) renders the song to its end with its tails (since T5 offline on Phazite's engine, `src/model/playback/internal/OfflineRender.h`), in the background with progress and Cancel, into a file that replaces the chosen one only once it is complete, then measures it again for the report, which says when the ceiling kept it under its target. Tests export WAV and FLAC files and check that they play the song, meet -14 and -23 LUFS within 0.07 LU, keep under the ceiling, and leave an older file alone when cancelled. No MP3 ([question 5](design.md#25-open-questions), decided 2026-10-16).
-
-**1.9 First launch and starter project (M)**
-- The first-run flow: "Coming from…?" and audio setup.
-- The starter project and the hint-bar guidance.
-- The new-project dialog with outlines.
-- *Done when:* a newcomer gets sound in under a minute without help.
-- *Status:* done (2026-10-15), pending the check by hand that its "done when" needs: a newcomer trying it. In: the welcome window's three pages, opened at every first launch ("Coming from another music app?", which picks FL Studio's keymap or Phazite's; the audio output with a test sound; and Phazite Sounds); the starter project with its Synth track selected, so the computer keyboard plays at once; the guide in the hint bar (`src/ui/shell/Guide.h`: play, play notes, add a sound, record, export, each gone once done, and Help > Getting Started Tips); and the new-project window (`src/ui/shell/NewProjectPanel.h`, with `src/model/project/NewProject.h`): name, tempo, time signature, key, song outline, and a Drums and a Synth track to start with.
-
-**Milestone 1 check:** a usability test with one newcomer and one FL Studio user.
-- **Task:** each makes an 8-bar beat from an outline, with drums, bass and chords, mixes it with built-ins and exports it.
-- **Outcome:** their hesitations and errors decide the fixes, and settle the keymap and the details of the Smart Tool.
-
-## Phase 2: Finish a track (milestone 2)
-
-**2.1 Automation lanes (L)**
-- The lane editor, drawn by Phazite over the model's automation data: it reads points as plain values and changes them through model functions and commands, one named undo step per gesture, never a component that edits the engine's objects directly, in its own style. It comes after architecture phase A3 for the playlist and the mixer.
-- Right-click → Automate, the write modes and shapes, keyboard editing, and the last-touched hotkey.
-- *Done when:* any built-in or plug-in parameter can be automated in two clicks, and the four write modes behave as described.
-- *Status:* done (2026-10-16), checked by hand by the owner (2026-10-29): automation in the model, by IDs and plain values (`src/model/automation/AutomationModel.h`, with tests): the parameters each track's devices offer, the lanes a track shows (view state, saved in the project; since 2026-10-17 one for every automated parameter, collapsing rather than hiding), points in beats and their edits as named undo steps, shapes, each track's write mode (touch, latch and write, which record a pass as one undo step; since T2 written by Phazite's engine, `src/model/playback/internal/AutomationWriter.h`), the selected points with Delete, Duplicate and the arrow keys, Automate Last Touched (Ctrl+Shift+A) and Show Automation (A); automation keeps its beats when the tempo changes, and the values automation plays aren't unsaved changes. In the playlist (`src/ui/playlist/PlaylistAutomation.cpp`, with tests that drive it with the mouse): lanes under their tracks, the master's under a Master row, each with a header (a chevron that collapses it, the parameter, the track's write mode) and its curve, which the tools edit (add, move, bend, draw steps or a free line, paint shapes, select, delete); Automate on every knob's and fader's right-click and on a device slot's menu (design.md, section 10).
-
-**2.2 Automation that goes with the music (M)** (automation clips until 2026-10-17)
-- Lanes are the one way to automate (the owner's decision, design.md section 10): automation moves and copies with the clips above it and with time ranges selected across tracks, as in Ableton Live, Bitwig and Studio One. Automation clips, built on 2026-10-16, are gone.
-- *Done when:* moving, copying or duplicating clips or a selected time range does the same to the automation of their tracks' parameters under them, in the same undo step, and a project saved with automation clips plays the same with lanes.
-- *Status:* done (2026-10-17), checked by hand by the owner (2026-10-29): automation clips removed; a project saved with them opened with each clip's curve as its parameter's own automation until 2026-10-18, when that conversion went with the others (design.md, section 18). Automation goes with its clips (`moveAutomation()` and `deleteAutomation()` in `src/model/automation/internal/Automation.h`, tests in `tests/AutomationFollowsClipsTests.cpp` and `tests/PlaylistTests.cpp`): clips dragged, copied with Ctrl, nudged or duplicated along their tracks, clips deleted with Close Gap, and time ranges deleted or duplicated on tracks take their tracks' automation along, in the same undo step; clips dragged to another track leave it. Steady playback of dense lane automation allocates nothing on the audio thread (a guarded real-time audit scenario).
-
-**2.3 Modulators and macros (L)**
-- Add a modulator and assign it by dragging. Rings on controls show the modulation.
-- Editors for the six modulator types, and macros.
-- *Done when:* an LFO dragged onto a filter cutoff moves it, with the amount shown on the knob.
-- *Status:* done (2026-10-16), checked by hand by the owner (2026-10-29): modulation in the model (`src/model/modulation/ModulationModel.h`, with tests): each track's modulators of the six kinds and its macros, added and removed as named undo steps; what they modulate, by an amount, set, changed and taken away as named steps; a drag of the amount as one step; the range a modulated parameter moves over, for the ring; modulators' parameters with clear names, and a step sequencer's steps. A test plays an LFO on the synth's cutoff in real time and sees it move; another reopens a saved project with its modulators; a guarded real-time audit scenario plays every kind. In the window: the ring around a modulated knob, dragged to change the amount; Modulate on every knob's right-click; a Modulators section in each channel strip, whose grips drag onto knobs and whose names open the modulators' editors (output, knobs, steps), with tests that drive them with the mouse (design.md, section 10).
-
-**2.4 Containers and presets (L)**
-- Group devices into containers with macros.
-- Device, track and container presets; drag a track into the browser to save it.
-- *Done when:* a container saved as a preset loads into another project with its macros working.
-- *Status:* done (2026-10-16), checked by hand by the owner (2026-10-29): containers in the model (`src/model/mixer/ContainerModel.h`, with tests in `tests/ContainerTests.cpp`): effects of a channel grouped into a container in the first one's place and ungrouped again, each one named undo step, each container playing its devices one after the other, as one device; their eight macros, which modulate their devices, and their devices, which the mixer's functions, automation and the track's modulators reach as any device; a duplicated track's containers are copies of their own; devices are selected on their own in the song's selection, which Group into Container (Ctrl+G) and Ungroup Container (Ctrl+Shift+G) act on. Presets (`src/model/presets/PresetModel.h`, with tests in `tests/PresetTests.cpp`, the "done when" among them): a device's, a container's or a track's in a file of its own, without what ties it to its project, loaded into any project with new IDs as one undo step, a drum sampler's sounds copied in. In the window: Ctrl-click selects devices in the mixer, their menus group, ungroup and save presets; a container's slot shows its mix and macros, and its window (`src/ui/mixer/ContainerEditor.h`) its macros, to turn, rename and drag onto its devices' knobs, and its devices in a row; the browser has a Presets place, saves the selected device's or track's preset (Save Device Preset..., Save Track Preset...) and a track dragged into it by its handle, and presets go into the song as devices do, by a drop or Enter (tests in `tests/ContainerUiTests.cpp`). A guarded real-time audit scenario plays a container with a macro and an LFO at work (design.md, section 9).
-
-**2.5 The window: the whole song in the centre, the selection below (L)** (the owner's decision, 2026-10-17, [design section 4](design.md#4-the-window))
-- The centre shows the playlist or the mixer, chosen by tabs at its top (F5 and F9 too); the editor dock shows the piano roll and a new Devices view (F6); the Audio placeholder tab goes.
-- The Devices view: the selected track's modulators and macros, then its instrument and effects, in a row and in line. Phazite's own devices show their editors and containers their macros and devices, and their windows go; plug-ins show their key knobs and a button for their windows. A click on a device's name in the mixer shows it there.
-- The inspector shows the properties of what is selected (a track, clips, a section, or the song), not a copy of a mixer channel.
-- *Status:* done (2026-10-17), checked by hand by the owner (2026-10-29). The centre's Playlist and Mixer tabs (`src/ui/shell/Panels.h`; F5 and F9). The Devices view (`src/ui/mixer/DevicesView.h`, F6; tests in `tests/DevicesViewTests.cpp`): the track's modulators and macros, moved there from the mixer's strips, then panels with Phazite's devices' editors (the EQ's graph shrinks to fit), a container's macros with its devices inside it, and a plug-in's key knobs with a button for its window; the model gives a device's channel and handle by ID (`MixerModel.h`), and Phazite's own devices and containers have no windows of their own any more. The inspector as the properties of the selection (`src/ui/mixer/Inspector.h`; tests in `tests/InspectorTests.cpp`): a track's name, color, volume, pan, mute and solo, output, instrument, devices, automation mode, lanes and sends; clips' kind, place, length, mute, alias and fade shapes (fades' lengths are dragged on the clip); a section's name, color, place, length, energy and tip; and the song's tempo, time signature, length, tracks and sections.
-- *Done when:* someone who hasn't used Phazite finds the mixer and the playlist from the tabs without a key, edits an EQ in the Devices view under the mixer, drags an LFO from its first column onto a cutoff, and changes a clip's fade shape and a track's send in the inspector.
-
-**2.6 Audio clip editor (L)**
-- The editor dock's editor for audio clips, in the piano roll's tab, which names what it shows: the selected audio clip's waveform, with its gain, fades, pitch, reverse and stretching to the song's tempo. Double-clicking an audio clip opens it, as a MIDI clip's double-click opens the piano roll.
-- *Done when:* a vocal clip can be trimmed, faded, turned up, pitched and stretched to the tempo in the editor, each change one undo step.
-- *Status:* done (2026-10-17), checked by hand by the owner (2026-10-29) ([design section 7](design.md#the-audio-clip-editor)). An audio clip by ID in the model (`src/model/arrangement/AudioClipModel.h`, with tests in `tests/AudioClipModelTests.cpp`): its file, where all of it plays in the song, and how the clip plays it; its gain, pitch, reverse, following the song's tempo and the tempo its audio was played at, each change one named undo step, a change of speed keeping the clip's start and the audio in it; what the selection asks the editor dock's first tab to show; and Reverse and Follow Tempo as commands for the selected clips, on the playlist's clip menu. An audio clip's end now stops where its audio does when its start was trimmed. The editor (`src/ui/audioclip/AudioClipEditor.h`, with tests in `tests/AudioClipEditorTests.cpp` that drive it with the mouse, the "done when" among them): the song's bars, all of the file with what the clip's edges trim off shaded, edges and fade handles to drag (a double-click takes a fade away), a drag on the audio moving it inside the clip, and Gain, Pitch, Fine, Reverse, Follow tempo and Tempo down its left; it takes the dock's first tab, named "Audio clip", while an audio clip or a track that holds audio is selected, and double-clicking an audio clip opens it. A real-time audit scenario plays a clip turned up, pitched and reversed from its rendered copy. **Normalize (2026-11-07, as the owner asked):** a button at the right of Gain, and the command for the selected clips (Clip > Normalize, in their menu), sets a clip's gain so that the loudest peak of the part it plays plays at -1 dB, one undo step that writes no file (`normalizeClip()`, `normalizeClips()`).
-
-**2.7 Chord lane and progression outlines (L)**
-- Phazite's chord format and the chord lane.
-- The progression library (about 40): audition and apply, and follow key changes.
-- Chord highlighting in the piano roll. (The chords are no longer written to the engine: design section 14 says why.)
-- Generated chord, bass and arpeggio parts. (Taken out on 2026-11-07, the owner's decision: design section 14 says why.)
-- *Done when:*
-  - picking a progression for a section plays it in the project key;
-  - a bass part generated from it follows the chord lane (until 2026-11-07).
-- *Status:* done (2026-10-18), checked by hand by the owner (2026-10-29) ([design section 14](design.md#14-chords)). Chords as plain values (`src/model/chords/ChordValues.h`, tests in `tests/ChordValueTests.cpp`): Roman numerals with accidentals, kinds and inversions, read, written and named in any key, the keys progressions play in, and the notes of twelve part styles, voiced to move little. Forty progressions in `resources/progressions/progressions.json` (`Progressions.h`), by mood and genre. The chord lane in the model (`ChordModel.h`, tests in `tests/ChordModelTests.cpp`): chords and key changes in the project, progressions laid over a range, chords added, changed, resized and deleted, each one named undo step; chords that go with the song's time; parts on new tracks with Phazite's synth that follow the chords until their notes are edited. In the window (tests in `tests/ChordLaneTests.cpp`): the lane under the playlist's bar numbers with its menus and a dragged right edge, its header with the song's key, the Chord Progressions window (play and put on the lane), Add menu items and commands for the parts, the inspector's Follows the chords, and the piano roll's tint of chord notes. On 2026-11-07 the owner took the parts out, and the lane became a guide shown while the song has chords, 18 pixels tall, its key in the inspector, with Add Chord Here in the time bar's menu and Delete All Chords; four of the twelve styles stay, for the progressions' preview and the example songs.
-**2.8 Sound generator v1** — moved to phase 3, into [step 3.2](#phase-3-v1-polish-milestone-3) (the owner's decision, 2026-10-18). The steps after it keep their numbers.
-
-**2.9 Mixer depth (M)**
-- The sidechain source picker, the routing view (removed on 2026-11-01, the owner's decision on [design question 21](design.md#25-open-questions): routing is set on the strips), and a per-track CPU meter.
-- A strip's Out line as a menu: Master, the folder buses (choosing one moves the track into that folder) and a new bus from the selected tracks ([question 12](design.md#25-open-questions)).
-- A send knob for every return on every strip, off until first touched ([question 13](design.md#25-open-questions)).
-- *Done when:* a kick-to-bass sidechain is set up from the picker and shows as a cable in the routing view (since 2026-11-01: in the mixer's outline of the selected channel), and a track is sent to a reverb return with one drag.
-- *Status:* done (2026-10-18), checked by hand by the owner (2026-10-29) ([design section 8](design.md#8-the-mixer)). In the model (`src/model/mixer/MixerModel.h`, tests in `tests/RoutingTests.cpp`): the returns each track can send to, with a send-level handle that makes the send at its first change, in that change's undo step (`ParameterHandle` can now hold a device the first change makes); where each channel's sound goes, the master or a bus, set as one step that moves the track into or out of the bus's folder; any device's sidechain by its ID, plug-ins included; each channel's CPU load from the engine's measurement of each device (0 since T2, until Phazite's engine times its devices); and the routing's wires (outputs, sends, sidechains). In the window: a send knob for every return on every strip and in the inspector, "+ Send" for new returns, the Out button's menu, a CPU bar along each strip, a Sidechain submenu in every device's menu, and the routing view behind the mixer's Routing button, whose cables were dragged from Out jacks (removed on 2026-11-01); tests drive a strip's knob with the mouse, the "done when" among them.
-
-**2.10 More devices (XL)**
-- Multiband dynamics and a maximizer in the style of Maximus and OTT (since 2026-11-01 one Multiband in Maximus's image, as the owner asked).
-- A tempo-synced delay, a saturator, a filter and a utility.
-- A better synth.
-- Phazite's own devices only: plug-ins that aren't, such as Airwindows' effects and Surge XT, may be offered as optional downloads next to Phazite Sounds, never built in ([question 6](design.md#25-open-questions)).
-- *Done when:* each device passes its DSP and real-time tests and holds up in A/B listening against reference tools.
-- *Status:* done (2026-10-18), A/B listened to and checked by hand by the owner (2026-10-29) ([design section 9](design.md#9-devices-containers-and-presets)). Six new devices in `src/devices/` (filter, multiband dynamics in OTT's style, a maximizer in Maximus's, saturator, tempo-synced delay and utility, with Linkwitz-Riley crossovers in `dsp/Crossover.h`) and unison for the synth, each registered as Phazite's own and offered in the device menus, with a panel of its controls (`DevicePanel` now shows switches for what is on or off). DSP tests in `tests/EffectDeviceTests.cpp` (the delay's timing and ping-pong, the saturator's curves and level, the filter's response, the utility's controls, the multiband's flat split and both-way squeeze, the maximizer's ceiling, the synth's unison); two guarded real-time audit scenarios (the six in a row with the filter swept, and the synth with seven unison voices).
-
-**2.11 Freeze, bounce in place and stems (M)**
-- *Done when:* a heavy plug-in track can be frozen and unfrozen, and exporting stems produces one file per track or bus.
-- *Status:* done (2026-10-18), checked by hand by the owner (2026-10-29) ([design section 18](design.md#18-projects-saving-and-export)). **Freeze Track** renders a track up to its fader (or a sidechained device, or a send before the fader) in the background with a progress window, plays the file from the project's new `Cache` folder, shows a snowflake, frosted clips and greyed devices, opens frozen next time, and unfreezes when what it froze changes (`src/model/mixer/FreezeModel.h`, `internal/Freeze.h`); not an undo step. **Bounce in Place** renders a track before its fader onto a new audio track under it and mutes and collapses the original, as one undo step. **Stems** are a choice in the Export window: a file for each channel that reaches the master, lined up and not normalized, into "*project* Stems" (`src/model/project/Export.h`). Tests in `tests/FreezeTests.cpp` and `tests/ExportTests.cpp`.
-
-**2.12 Plug-in windows and plug-in presets (M)**
-- A "Send All Keys to the Plug-in" switch in each plug-in window's menu, off at first and remembered for that plug-in ([question 16](design.md#25-open-questions)).
-- *Done when:* plug-in windows remember their positions, plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields.
-- *Status:* done (2026-10-18), checked by hand by the owner (2026-10-29) ([design section 9](design.md#9-devices-containers-and-presets)). A plug-in's window opens where it was last, and its place is saved with the project as view state, neither an undo step nor an unsaved change (`rememberWindowPosition()` in `src/model/mixer/internal/Mixer.h`); one left on a screen that is gone comes back on the nearest. Its menu bar's **Plug-in** menu (`src/app/PluginWindow.h`) has **Save Preset...**, **Load Preset** (the presets saved for it, loaded into it with their mix as one undo step: `loadPresetInto()` in `src/model/presets/PresetModel.h`) and **Send All Keys to the Plug-in**, kept for the plug-in in the settings (`phazitePluginsGettingAllKeys`), which gives every key typed into its window to the plug-in (`src/ui/input/PluginKeys.h`). Tests in `tests/PluginWindowTests.cpp`, `tests/PluginKeysTests.cpp`, `tests/PresetTests.cpp` and `tests/ProjectTests.cpp`.
-
-**2.13 Wavetable synth (L)** (the owner's request, 2026-10-18)
-- A wavetable synth in the style of Serum, after research into the wavetable synths people use ([design section 9](design.md#9-devices-containers-and-presets)).
-- *Done when:* a Serum-style patch can be built from its own tables and from a Serum wavetable file, an envelope sweeps each note's table, it doesn't alias, and it passes the real-time audit.
-- *Status:* done (2026-10-18), checked by hand and A/B listened to by the owner (2026-10-29). **Wavetable** (`src/devices/wavetable/`): two wavetable oscillators with warps (sync, bend, pulse width, mirror, FM and ring modulation from the other), a sub and noise, unison up to eight voices across the stereo field and the table, a filter, three envelopes, two LFOs and eight modulation slots for each note; frames band-limited every half octave; 13 factory tables made from formulas; the user's tables from sounds, Serum's 'clm ' chunk read, copied into the project (`src/model/devices/internal/Wavetables.h`); an editor that draws each table with the frame it plays (`src/ui/devices/WavetableEditor.h`). Tests in `tests/WavetableTests.cpp`, `tests/WavetableModelTests.cpp`, `tests/WavetableEditorTests.cpp`, a real-time audit scenario and a golden render.
-
-**2.14 Comb filters (S)** (the owner's request, 2026-10-18)
-- A comb filter wherever a filter type is chosen, as the synths and filters people use have one ([design section 9](design.md#9-devices-containers-and-presets)); and an audit of the other filter types they share ([design question 20](design.md#25-open-questions)).
-- *Done when:* the synth, the wavetable synth and the Filter device offer a comb whose peaks fall on the cutoff's multiples, which sweeps without clicks, stays stable at full resonance and passes the real-time audit.
-- *Status:* done (2026-10-18), checked by hand and A/B listened to by the owner (2026-10-29). **Comb +** and **Comb -** after the other types of all three (`src/devices/dsp/CombFilter.h`), with the cutoff as their pitch and the resonance as their ring; the Filter device reports its ring as its tail. Building it showed that the Filter device's Type took the place of its plug-in's own type when changed, so a project lost the Filter when it next opened: its value is kept apart now. Tests in `tests/DspTests.cpp`, `tests/EffectDeviceTests.cpp`, `tests/SynthTests.cpp`, `tests/WavetableTests.cpp` and `tests/DevicePluginTests.cpp`, and a real-time audit scenario.
-
-**2.15 More filter types (M)** (the owner's choice from the audit of step 2.14, 2026-10-18)
-- Every filter type in one shared piece of code, and the types the audit recommended in all three filters ([design section 9](design.md#9-devices-containers-and-presets), [question 20](design.md#25-open-questions)).
-- *Done when:* the synth has a notch and a 24 dB slope; the synth, the wavetable synth and the Filter device offer a vowel the cutoff moves through, a phaser and a sample and hold; projects from before sound as they did; and they pass the real-time audit.
-- *Status:* done (2026-10-18), checked by hand and A/B listened to by the owner (2026-10-29). `src/devices/dsp/MultimodeFilter.h` holds every type, with each device's own resonance curve; the synth's **Notch** and **Filter Slope** (12 or 24 dB), and **Vowel** (a tenor's formants from Csound's table, the cutoff as the second formant, from U to I), **Phaser** (six all-pass stages, three notches, feedback) and **Sample & Hold** (twice the cutoff's rate, resonance ringing at the cutoff) after the other types of all three. Tests in `tests/DspTests.cpp`, `tests/EffectDeviceTests.cpp`, `tests/SynthTests.cpp` and `tests/WavetableTests.cpp`, and two real-time audit scenarios. Since 2026-10-18 all three offer the types as one list (`dsp::filterModeNames`), each with a Slope.
-
-**2.16 Performance (M)** (the owner's request, 2026-10-21: "a lag between when I press a note on the keyboard, and when I hear the sound", and a thorough audit of Phazite's performance)
-- The audit and its plan are in [performance-audit.md](performance-audit.md): measuring (A), correctness first (B), latency you can see and choose (C), idle and audio CPU (D), the UI thread (E) and robustness (F), with the owner's three decisions ([design section 20](design.md#20-performance)).
-- *Done when:* each part's "Done when" in the audit holds, and its tables are measured again.
-- *Status:* done, checked by hand by the owner (2026-10-29). A and B done (2026-10-21): the benchmark suite (`--test-suite=benchmark`, `tests/Benchmarks.cpp`) and the `windows-profile` preset; untitled recordings that survive a crash, key taps that always play, look-ahead devices that drop their latency when off, the wavetable synth's modulation and the glides on time, and voice stealing that fades. Tests in `tests/AppTests.cpp`, `tests/ProjectTests.cpp`, `tests/LiveInputTests.cpp`, `tests/SynthTests.cpp` and `tests/WavetableTests.cpp`. C done (2026-10-21), checked by hand by the owner (2026-10-29): the Audio settings show every device setting and, under them, how long a note takes to sound, from the buffer, the output's latency and the song's delay compensation (`getDelayCompensation()` in `src/model/mixer/MixerModel.h`), and warn of a Bluetooth output, as the welcome window does (`src/model/engine/AudioDevices.h`); a first run picks Windows' Low Latency Mode at 128 to 256 samples where offered; and a **Low Latency** switch in the top bar (`transport.lowLatency`) bypasses Phazite's look-ahead devices, turns delay compensation off and shrinks the buffer, leaving renders alone. Tests in `tests/AudioDevicesTests.cpp`, `tests/AudioSettingsTests.cpp`, `tests/LiveInputTests.cpp`, `tests/MixerModelTests.cpp` and `tests/WelcomeTests.cpp`. It found known bug 3, live notes lost after the UI thread was busy (first taken for two limiters; fixed 2026-10-28). D, E and F done (2026-10-21), measured in [performance-audit.md](performance-audit.md), section 7: devices sleep on silence (a stopped 20-track song from 17 % of a core to 2 %), the synths' worst cases 29 % and 42 % cheaper, parameters glide; a knob's change from 5.5 ms of view updates to 0.02 ms, the unsaved-changes check from 12.7 to 0.8 ms, autosave on a background thread (5 ms on the UI thread); after a crash Phazite asks how to open the last project, with its plug-ins off if wanted; "No audio output" in the hint bar; "Opening..." as it starts; a time limit for each plug-in scanned; one Phazite at a time; a log file. Tests in `tests/DevicePluginTests.cpp`, `tests/MixerTests.cpp`, `tests/ProjectContextTests.cpp`, `tests/ProjectTests.cpp`, `tests/AppTests.cpp` and `tests/AppShellTests.cpp`. An outside review, checked and acted on 2026-10-27 ([performance-audit.md](performance-audit.md), section 8): the playlist makes components only for the clips in view (a scroll step in a 2,400-clip song from 43 ms to 0.2 ms of the UI thread, a clip's move from 385 ms to 1.5 ms); meters and device pictures repaint only when what they draw moves, from one timer; components that fill themselves are opaque; the playhead moves with the display's frames; waveforms and the piano roll's notes are kept between paints; and the standard mouse pointers stay made. Link-time optimisation and AVX2, measured, don't speed the devices up, and stay off. Tests in `tests/PlaylistTests.cpp`, `tests/ControlsTests.cpp` and `tests/DeviceEditorTests.cpp`, and a benchmark of scrolling and zooming a big song.
-
-**2.17 Devices and the window (L)** (the owner's requests, 2026-10-21, after the audit: a picture with its own character for every built-in device, live where it shows what a knob does; the synths' controls stacked, with pages where they don't fit; panels that hide or fill the window, a title bar with the menus, Undo, Redo and the command search, as VS Code has, and a status bar; sidechains that work and show what they do; a Stereo Expander in place of the Utility, and a Phaser, a Flanger and a Vocoder; the instrument apart from the effects, a device row that doesn't run off sideways, and built-in devices in windows of their own; modulators that switch off; no sound after a pause)
-- Parts, each committed on its own: modulators on and off; the stop and pause fix; a picture for every device, with a shared frame for their editors; the synths' layouts; Instrument and Effects tabs, folded device cards and device windows; the four new devices; sidechains; the title bar, the panels and the status bar.
-- *Done when:* every built-in device shows what it does as it plays, in a layout that fits a 1280 x 800 window's dock without scrolling sideways; a maximized window shows four effects folded in the Effects tab, and a synth in the Instrument tab without scrolling sideways; an EQ pops out as "EQ - Bass" and comes back folded; "kick ducks bass" takes two clicks and shows its ducking; each panel hides and fills the window from the title bar; an LFO switched off leaves the cutoff alone, still assigned, as one undo step.
-- *Status:* done (2026-10-29), checked by hand by the owner. Done 2026-10-21: the stop and pause fix (notes that only just began are cut, as playback stops); modulators on and off (`setModulatorOn()` in `src/model/modulation/ModulationModel.h`; tests in `tests/ModulationModelTests.cpp`, `tests/ModulationUiTests.cpp`, `tests/DevicesViewTests.cpp` and `tests/PresetTests.cpp`); a picture for every device on a shared frame, every effect's mix in its header, and the synths in columns that fold into tabs (about 780 and 950 pixels wide at the default dock's height, from over 3,000 and 6,000; [design section 9](design.md#9-devices-containers-and-presets); tests in `tests/DynamicsEditorTests.cpp`, `tests/EffectEditorTests.cpp`, `tests/SynthEditorTests.cpp` and each editor's tests); the Stereo Expander in place of the Utility (`src/devices/stereo/StereoExpander.h`, `tests/StereoExpanderTests.cpp`); the Phaser and the Flanger, with LFOs in time with the song (`src/devices/motion/`, `tests/MotionEffectTests.cpp`, their editors' tests in `tests/EffectEditorTests.cpp`); the Vocoder, on the voice's track with a buzz, noise, the voice or a track through the sidechain as its carrier (`src/devices/vocoder/`, `tests/VocoderTests.cpp`); and sidechains, chosen in one place, each device's header, with Duck Under in the track's menu, the compressor set up to duck, its key's high cut and Listen (`src/ui/devices/SidechainMenus.h`; tests in `tests/SidechainTests.cpp`, `tests/RoutingTests.cpp`, `tests/DevicesViewTests.cpp`, `tests/CompressorTests.cpp` and `tests/CompressorEditorTests.cpp`). Also done (2026-10-21): the instrument apart from the effects, the editor dock's Instrument and Effects tabs, and effects as cards folded but one (`src/ui/mixer/DevicesView.h`, `src/ui/shell/Panels.h`; tests in `tests/DevicesViewTests.cpp` and `tests/AppShellTests.cpp`). Also: built-in devices in windows of their own (`src/app/PluginWindow.h`, `src/ui/devices/DeviceWindowContent.h`); panels that hide, fill the window one at a time and keep their sizes (`src/ui/shell/PanelLayout.h`; tests in `tests/PanelLayoutTests.cpp` and `tests/AppShellTests.cpp`); and the window's own title bar on Windows, with the menus, Undo and Redo beside the command search, the panels' switches and the window's buttons, and the status bar, with the save state, the hints, the audio output and the CPU (`src/ui/shell/TitleBar.h`, `StatusBar.h`; tests in `tests/TitleBarTests.cpp` and `tests/StatusBarTests.cpp`). And on 2026-10-29: the compressor's history draws the track its sidechain listens to in that track's colour, named (`src/ui/devices/LevelHistoryView.h`); the mixer slot of each of Phazite's devices that turns the sound down (the compressor, the limiter, the maximizer and the multiband) shows how far along its right edge, from a reading any number of displays share (`src/devices/core/FallingValue.h`); a folded effect card shows its editor's picture alone, live, over its key knobs, and a click on it opens the card (`ShowsPictureOnly` in `src/ui/devices/DeviceEditors.h`); and the status bar shows what is selected, where MIDI goes and the delay compensation (`src/ui/shell/StatusBar.h`). Tests in `tests/CompressorEditorTests.cpp`, `tests/DevicesViewTests.cpp` and `tests/StatusBarTests.cpp`.
-
-**2.18 Phazite's own time-stretching (L)** (the owner's report, 2026-10-28: "sometimes when sounds are playing, they will stutter ... it's obvious on transients like snare"; and the go-ahead to depart from the engine's own ways for subsystems such as time-stretching where the best solution comes down to that)
-- *Why:* clips were stretched with SoundTouch, which plays 12 to 50% of drum hits twice when it slows a loop down and plays stretched clips early (known bug 1). Rubber Band was offered only with its R2 engine, which is clean on drums but muddier than SoundTouch on a held chord. Rubber Band's R3 engine did well on both ([design section 23](design.md#23-phazites-engine)).
-- The first bigger engine part replaced ([architecture phase A5](#architecture-track)): an interface, the replacement behind it, the switch-over, then the old code deleted.
-  - Rubber Band Library 4.0 (GPL-2.0-or-later) as a pinned submodule, built into `phazite_core` from its single-file build, with its licence among the notices.
-  - An engine-neutral stretcher in `src/devices/`: R3, offline, over a clip's whole audio, its beats pinned to the song's with key frames, and with the clip's pitch.
-  - The switch-over: a clip that follows the tempo, or is pitched or reversed, plays a file that Phazite renders into the project's `Cache` folder, as a plain clip of that file. Phazite's own state on the clip (`Schema.h`) keeps the original file, its tempo, pitch and reverse. A tempo change, or a change to the clip, lays the clip out again from its beats in the same undo step and renders it again in the background. The clip is silent until its render is ready, as now; long clips render in pieces, so that they start sooner.
-  - The browser's previews: measure R3 rendering ahead against a stretcher that runs as they play, and use the better one.
-  - Then the old code goes: Phazite's playback keeps nothing of the old stretching (its automatic tempo, its background renders, SoundTouch).
-- *Done when:* a drum loop stretched from 120 BPM to anywhere from 90 to 140 plays every hit once, each within 1 ms of its beat, in the app and in export; a held chord stretched keeps -15 dB or less of its energy between its notes (SoundTouch: -6 to -10 dB); a 4-bar loop's render is ready within a second; known bug 1 is gone; the golden tests pass, their stretched clips regenerated with the reason; and nothing of the old stretching is used.
-- Also (the owner's request, 2026-10-28): what a tempo change stretches shows under the tempo field as it changes, with switches for samples and patterns ([design section 4](design.md#4-the-window)).
-- *Status:* done (2026-10-28), checked by hand and by listening by the owner (2026-10-29). Rubber Band 4.0 is a pinned submodule (`external/rubberband`); `src/devices/stretch/Stretch.h` renders a file with R3, offline, its pitch and backwards too; a clip that follows the tempo, is pitched or reversed keeps what it is made from in Phazite's properties (`Schema.h`) and plays a render in the Cache folder as a plain clip (`model/arrangement/internal/AudioClips.h`), which the project's `ClipRenders` makes in the background (`internal/ClipRenders.h`), and exports and freezes make first; the tempo command lays following clips out again for the new tempo in its undo step. Measured: no hit played twice; hits within 2.5 ms of their beats, half within 1 ms (the test allows that, as R3 moves an attack by up to about 2 ms, against SoundTouch's 8 to 28 ms early); a held chord -16 to -29 dB between its notes; R3 renders stereo about 9 times faster than it plays (`windows-profile`, the benchmark "rendering audio clips stretched and pitched": a 4-bar loop at 120 BPM in 0.9 s, a minute in 6.7 s). Tempo changes show what they stretch: the commands Samples Follow Tempo (every sample's Follow tempo at once) and Patterns Follow Tempo (the song's: off, a tempo change keeps its patterns' notes at their times), and a panel under the tempo field while it changes (`src/ui/shell/TempoStretchPanel.h`). Tests in `tests/StretchTests.cpp`, `tests/TempoTests.cpp`, `tests/TopBarTests.cpp`, `tests/AudioClipModelTests.cpp`, `tests/AudioClipEditorTests.cpp` and `tests/BrowserTests.cpp`. The browser's previews too (the same day): a previewed loop is rendered by R3 into memory as it starts, at the output's rate, and plays as soon as a quarter of a second is ready, the render keeping ahead: about 55 ms after it is chosen, all of it in a second, for four bars at 120 BPM previewed at 100 (`windows-profile`, the benchmark "a loop previewed in time, until it can start"; `src/model/engine/internal/PreviewLoop.h`; a test in `tests/TempoTests.cpp` finds each hit once and on its beat, twice round the loop, and the real-time audit's preview scenario is now guarded); R3 offline needs no study pass, which only counts frames, so renders read their file once; and no other stretcher is compiled in (SoundTouch went). On 2026-10-29, as the owner asked, a tempo change shows that clips are being stretched: "Stretching 2 clips" with a bar of how far that has come in the status bar, and each clip waiting for its render faint, with its own bar along its bottom edge (`getClipRenderProgress()` and `getClipsBeingRendered()` in `src/model/arrangement/AudioClipModel.h`; tests in `tests/TempoTests.cpp`, `tests/StatusBarTests.cpp` and `tests/PlaylistTests.cpp`). Long clips still render whole rather than in pieces (the owner: "keeps it simple, and the users shouldn't be changing tempo constantly"). The 1 ms target, measured again on 2026-10-29 from 80 to 160 BPM (the owner: fine for now, with a note): R3 puts the hits 0 to 1.5 ms from their beats, by an amount that depends on the tempo, give or take up to 1 ms more, and none of its settings does better: its short window put them 2 to 5 ms late and left -5 to -9 dB between a held chord's notes, and key frames moved nothing. Rubber Band's R2 engine, with the study pass it needs, puts every hit within 0.5 ms of one shift that depends only on the stretch (about 19 ms × (ratio − 1), which could be taken off), but leaves -5 to -8 dB between a chord's notes (R3: -16 to -32), so it would suit drum loops only: a choice for later, as Ableton's Beats mode is ([design section 7](design.md#the-audio-clip-editor)).
-
-**Milestone 2 check:** produce a complete track, from first idea to master, with automation and modulation, using Phazite and your own plug-ins.
-
-## Phase 3: v1 polish (milestone 3)
-
-On 2026-11-04 the owner moved the steps that weren't done, 3.1 (chord suggestions), 3.2 (the sound generator) and 3.8 (usability rounds), to [after v1](#after-v1), keeping their numbers out of use.
-
-**3.3 Stability (XL)**
-- A scan timeout.
-- A plug-in that crashed while loading is disabled on the next start.
-- Polished crash recovery.
-- **Plug-in sandboxing, on by default** ([question 7](design.md#25-open-questions), moved before v1 on 2026-10-16): plug-ins run in helper processes, and one that crashes leaves its slot saying so, with Reload, while Phazite plays on. First measure what it costs (CPU, latency per block, memory) against hosting in Phazite's own process; if the cost is large, it is a choice per plug-in instead, and the owner decides.
-  - *How* (an outside review, 2026-10-27, [performance-audit.md](performance-audit.md), section 8): each sandboxed plug-in is a round trip to its helper at every block, so to hold 128 samples: audio in shared memory, one wake-up each way per block, the helpers' audio threads registered with Windows' "Pro Audio" scheduling (MMCSS), and the engine's worker threads waiting on several helpers at once rather than one after another. Measure the round trip before choosing one process per plug-in or one per group.
-- *Done when:* a deliberately hanging or crashing test plug-in can't stall the scan, crash Phazite or lose the project.
-- *Status:* done (2026-11-02) as T3 ([architecture phase A6](#architecture-track), steps 0 to 9), pending the check by hand. Every plug-in runs in a helper process of Phazite's, `PhaziteHost`, one for each plug-in file, its audio in shared memory with one wake-up each way per block and its audio thread in Windows' "Pro Audio" scheduling; a block costs about 28 microseconds more at 128 samples ([performance-audit.md](performance-audit.md), section 10), so it is on, with no choice. Its window shows inside Phazite's, where play, stop and the computer keyboard work; a plug-in that crashes or hangs (a helper that doesn't answer in 10 seconds, or keeps a block 5 seconds) leaves its slot saying so, with Reload, while Phazite plays on; one that crashes as it loads stays off, at the next start too, until it is reloaded; the scan runs in a helper too, each file with a time limit, a hanging or crashing plug-in left out. Tests in `tests/SandboxedPluginTests.cpp`, with the stand-ins of `tests/host/TestPlugins.h`, which hang and crash on purpose.
-
-**3.4 Audio recording (L)**
-- Record-arm, monitoring, punch-in and basic takes.
-- *Done when:* recording a vocal or guitar over a loop, with count-in and punch-in, works with an ASIO interface.
-- *Status:* done (2026-10-29), pending the check by hand with an ASIO interface. An arm button beside each audio track's M and S, in its header and its mixer strip, whose right-click chooses the input ("In 1", "In 1+2"), when the input is heard (while armed, always or never) and Arm Only This Track; the command Arm Track; Record records the armed tracks' inputs with what is played on MIDI, in one undo step; Punch In (Record's menu) keeps only what is played in the looped range, cross-fading 10 ms at its edges; each time round a looped range is a take of one clip, "Take 2/3", chosen from its menu or with Previous Take and Next Take; the audio settings' Recording correction ([design section 17](design.md#17-recording-and-capture)). Phazite records itself, with no lock or allocation on the audio thread (the [real-time audit](realtime-audit.md)'s guarded recording scenario records a tone onto a track that hears it; since T2 through Phazite's engine, `internal/Take.h`): `src/model/transport/RecordingModel.h`, `internal/AudioRecorder.h`, `src/ui/components/ArmButton.h`. Tests in `tests/AudioRecordingTests.cpp`, through a test device with its output brought back into its input, as a cable would (`tests/EnginePlayback.h`): the metronome's clicks land one block (the cable's delay) after their beats to the sample, and on them with the correction; takes round a loop; punching in over a clip; and in `tests/PlaylistTests.cpp`, the arm button.
-
-**3.5 Performance pass (L)**
-- Profile against the targets in [design section 20](design.md#20-performance): idle CPU, large projects, startup time.
-- *Done when:* the targets are met, or the gaps are written down with a plan.
-- *Status:* done (2026-11-04): each target measured, the gaps written down with a plan ([performance-audit.md](performance-audit.md), section 13).
-  - **UI:** met: the 100-track playlist scrolls and zooms in under 4 ms of a frame, and nothing repaints at rest.
-  - **Startup:** met for everything Phazite does: the window and a project in under 0.05 s, the 64-bar House Groove in 0.14 s.
-  - **Memory:** met: long audio plays from disk.
-  - **Audio:** met with room to spare on this PC.
-  - **The gaps:**
-    - the audio benchmark at 128 samples and on a mid-range laptop;
-    - about 1 % of a core at rest, from the views' timers, to be folded into the display ticker;
-    - the whole start, timed by hand.
-  - **The benchmark added:** "Benchmark: starting up, and the window at rest", in `tests/Benchmarks.cpp`. Before it, a clip moved in a big song took 25 ms of the UI thread, and now takes 3.3 ms (section 12).
-
-**3.6 Accessibility pass (M)**
-- Keyboard navigation everywhere, screen-reader names, contrast and scaling.
-- *Done when:* core tasks can be done with Narrator and the keyboard alone, and the themes pass WCAG 2.2 contrast.
-- *Status:* done (2026-11-04), pending the check with Narrator by hand ([design section 21](design.md#21-accessibility)).
-  - **Screen-reader names:** every control in the window, and every component that takes the keyboard, has a name and a role for screen readers. That includes the scrolling areas, each named for what it scrolls, and a test walks the whole window with each view showing. The browser's tree takes the keys itself, without a second Tab stop for its scrolling.
-  - **Keyboard:** F5, F6, Shift+F6, F7 and F9 give the view they show the keyboard focus, and Narrator its name. The mixer and the Devices view take the focus themselves, so the arrow keys still run commands until Tab reaches a control (a test in `tests/AppShellTests.cpp`).
-  - **Already there:** the three themes' contrast, tested against WCAG 2.2 (`tests/DesignTokenTests.cpp`); the interface's size, which View > Interface Size sets; and the keys, which reach every command through the menus, the command palette (Ctrl+K) and the keymaps.
-
-**3.7 Keymaps and help (M)**
-- The FL Studio keymap completed, and an Ableton Live keymap ([question 8](design.md#25-open-questions), decided 2026-10-16).
-- Hover-help texts and short in-app lessons.
-- *Done when:* every command has help text, and the keymap presets cover all the core actions.
-- *Status:* done (2026-10-29), pending a check by hand. Cut, Copy and Paste, which the keymaps needed (`src/model/arrangement/internal/Clipboard.h`, tests in `tests/ClipboardTests.cpp`); FL Studio's keymap completed from its manual and an Ableton Live keymap from Live 12's, which the welcome window offers (`resources/keymaps/`; tests in `tests/ShortcutTests.cpp`, that every keymap covers the core actions, and `tests/WelcomeTests.cpp`); every command's help text and every visible control's hover help, device parameters' from their descriptions (tests in `tests/AppShellTests.cpp`); and five lessons in the hint bar from Help > Lessons (`src/ui/shell/Lessons.h`, tests in `tests/LessonsTests.cpp`). [Design section 12](design.md#12-commands-keys-and-help) has the details.
-
-**Feedback round (2026-10-30)**, the owner's list after trying the app ([design decision log](design.md#26-decision-log)):
-- **Mixer:** each device's slot is one line, its switch and its name, with no knobs (the Devices view controls devices), and the fader is as tall in every strip, however many devices are above it (`src/ui/mixer/DeviceSlots.h`, `StripParts.h`).
-- **Devices view:** a folded effect card, a plug-in's too, shows only what every effect has, one under another in a narrow card (its chevron, switch and window button, its name, its sidechain, its mix), with no picture or key knobs; so Phazite's devices have no key controls any more (`src/ui/mixer/DevicesView.cpp`).
-- **Moving effects:** a drag on an effect's name moves it along the cards, or up and down a strip's slots, as one undo step.
-- **Audio clip editor:** the clip's whole audio file, which never scrolls or zooms; a drag on the clip's part moves it along the audio (`src/ui/audioclip/AudioClipEditor.h`).
-- **Fix:** a modulator's editor stayed open, with nothing to close it, after its modulator was removed or its adding undone.
-- **Routing explained:** a send gives a return a copy of the track, which still goes to its Out; a bus runs several tracks' whole sound through one effect. The mixer's tooltips say so.
-- Tests in `tests/DevicesViewTests.cpp`, `tests/MixerViewTests.cpp`, `tests/ContainerUiTests.cpp` and `tests/AudioClipEditorTests.cpp`.
-
-**Feedback round (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
-- **Mute and solo:** one small switch for each track in place of its M and S buttons, in its playlist header, its mixer strip (by its name, so the strip lost a row) and the inspector: a click mutes, a right-click solos alone, Ctrl+right-click solos along with others (`src/ui/components/TrackSwitch.h`, tests in `tests/ControlsTests.cpp`).
-- **Dragging a modulator:** its grip in the modulation colour, lit under the pointer; a chip with its name follows the pointer, its slot is outlined, and every knob it can modulate lights from the start of the drag, in every window (`Knob::showModulatorTargets()`, tests in `tests/DevicesViewTests.cpp`).
-- **The mixer's row:** "+ Return" is a slim column after the returns, the Routing switch went into the centre's tab bar while the mixer showed, and a selected channel outlines what its sidechains link it to (tests in `tests/MixerViewTests.cpp`). The routing audit: [design question 21](design.md#25-open-questions), which the owner decided the same day: the routing view and its switch went.
-- **Empty new projects and example songs:** a new project starts with no tracks, the first start too; Help > Example Songs and the welcome window's new last page, Where to start, open First Beat (the starter's song), House Groove and Lo-fi Beat as new untitled projects, made in code through the model with Phazite's devices, presets and synthesized samples (`src/model/project/ExampleSongs.h`, tests in `tests/ExampleSongTests.cpp`, `tests/AppTests.cpp`, `tests/WelcomeTests.cpp`); the guide suggests putting something into the song first. Audio clips' paths are kept relative to the project's folder, as devices' files are, also while a new project's content is made.
-- **Lessons in a card:** a lesson shows in a card over the bottom right corner of the centre, with its name, a dot for each step, the step in large text, Back, Next or Skip and a button that stops it, and a ring around the control the step is about that pulses as the step starts; the hint bar no longer shows lessons, and the guide waits while one runs. The five lessons start from an empty project; Help > Lessons marks those finished (`src/ui/shell/LessonCard.h`, tests in `tests/LessonsTests.cpp`).
-- **Pictures as controls:** the synths' envelopes drag by their points (a double-click puts one back), the synth's LFO picture sets its depth with a drag and its rate with the wheel (the wavetable's, its rate or note value), the compressor's curve drags its threshold, ratio and makeup and the wheel bends its knee or changes its ratio, the stereo expander's fan follows the pointer, and the breakpoint envelope modulator's picture drags its points, bends its lines with a handle or the wheel and straightens one with a double-click (tests in `tests/GraphEditingTests.cpp`). The synths' envelopes have no curves to bend: adding them would change their sound and presets.
-- **Movable views:** the playlist, the mixer, the clip editor and the devices (Instrument and Effects together) move between the upper and the lower panel by dragging their tabs, or from a tab's menu; the settings keep where each is, View > Reset View Places puts them back, an area left without views hides, and F5, F6, F7 and F9 show a view wherever it is (`src/ui/shell/Panels.h`, tests in `tests/PanelsTests.cpp`).
-
-**Feedback round, second list (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
-- **No routing view:** the owner decided [design question 21](design.md#25-open-questions): routing is set on the strips, and the routing view and its switch went.
-- **No switch on an instrument:** an instrument has no on/off switch in the Devices view, the mixer's slot or its menu, and the model keeps it on; the track's switch mutes it and Freeze frees its CPU (tests in `tests/DevicesViewTests.cpp`).
-- **Envelope curves:** each stage of the synth's and the wavetable synth's envelopes has a curve, from fast at first through straight to slow at first, which starts as the analog shape the stages had (so no sound, golden render or preset sound changed; the presets list the new curves); the envelope pictures draw each stage along its curve, and a hollow handle in each stage's middle bends it; a knob for each curve sits under the picture. The wheel bends no line in any picture (no editor researched does it) and scrolls the view instead, in the breakpoint envelope too (tests in `tests/DspTests.cpp` and `tests/GraphEditingTests.cpp`).
-- **Rows that hold no clips:** a folder's row shows its tracks' clips in thin lanes in their colours (collapsed too), starts at 40 pixels and has a folder icon; a return has a row only while it has automation lanes, thin, after the tracks, with the Return key's arrow; the playlist's add row no longer offers return tracks (`getFolderSummary()` in `src/model/arrangement/PlaylistModel.h`, tests in `tests/PlaylistModelTests.cpp`, `tests/PlaylistTests.cpp` and `tests/AutomationModelTests.cpp`).
-- **Compressor characters:** Clean (as it was), VCA (it hears the average level), FET (feedback, fast), Opto (feedback, soft, a release in two stages that slows after holding) and Tube (its ratio growing with the level), and a Drive that saturates in the character's colour without aliasing much; its editor is plainer: the characters as buttons, one curve with a gain-reduction meter, knobs, and a Sidechain part; the presets show each character. The saturator stays a device of its own (tests in `tests/CompressorTests.cpp`, `tests/CompressorEditorTests.cpp` and `tests/GraphEditingTests.cpp`).
-- **One Multiband, in Maximus's image:** three bands and a master, each with a drawn curve (up to eight points, tensions, single and double curves, holds and stairs), pre and post gains, saturation with a ceiling, stereo separation, attack with its curve box, two releases (speeding up and slowing down), sustain and peak or RMS; LMH Delay, LMH Mix, crossovers of 12 or 24 dB and a low cut; the bands on, compression off, muted or off, and soloed; the mid band driving the master; Monitor and Bands; Maximus's drags and menus. It replaces the OTT-style multiband and the maximizer, with presets of its own, and the example songs use it (`src/devices/dynamics/Multiband.h`, `src/ui/devices/MultibandEditor.h`, tests in `tests/MultibandTests.cpp` and `tests/MultibandEditorTests.cpp`).
-
-**Feedback round, third list (2026-11-01)**, the owner's list ([design decision log](design.md#26-decision-log)):
-- **Graphs draw their lines:** the curve helper began a path at every point, so that no device graph drawn with it (the EQ's, the filter's, the phaser's, the flanger's, the saturator's, the synth's filter and the Multiband's curve) drew its line, and the area under one was a wedge from its last point (tests in `tests/DeviceEditorTests.cpp` and `tests/MultibandEditorTests.cpp`).
-- **The curve lit by the sound:** the Multiband's curve shades the area under it and lights it up to the level its compressor hears, as Maximus does, in place of a dot on the curve.
-- **The compressor draws its curve:** the Multiband's curve, the same component (`src/ui/devices/DynamicsCurve.h`, `src/devices/dynamics/DynamicsCurve.h`) with Maximus's drags and menu, replaces the threshold, ratio and knee, so that it compresses or expands either way by its shape, at first 4:1 over -18 dB; a meter beside it shows how far it turns down or up. Its characters all hear what comes in, so that each settles on the curve; FET and Tube colour the sound as far as they turn it down. Its presets and the ducking a sidechain sets up are curves (tests in `tests/CompressorTests.cpp`, `tests/CompressorEditorTests.cpp`, `tests/GraphEditingTests.cpp` and `tests/SidechainTests.cpp`).
-
-## Phase 4: v1 release
-
-On 2026-11-07 the owner added two instruments for right now, 4.6 (the sampler) and 4.7 (the FM synth), the next most used after Phazite's three ([design section 9](design.md#9-devices-containers-and-presets)); they are numbered after 4.5 so that the open steps keep their numbers, and come before 4.3 to 4.5.
-
-**4.1 Installer (M)**
-- A Windows installer and uninstaller, with file associations.
-- An optional, opt-in update check.
-- *Status:* done (2026-11-07), pending a check by hand ([design section 22](design.md#22-privacy-licences-and-trademarks)).
-  - **The installer:** Inno Setup 6.6 or newer compiles `packaging/windows/Phazite.iss` through CMake's `installer` target (`cmake --build --preset windows-release --target installer`; the setup script installs Inno Setup, and CI's Windows image has it) into `build/<preset>/installer/Phazite-<version>-Setup.exe`, with its SHA-256 beside it (`.sha256`, as `sha256sum -c` reads it) and the update file a release carries (`phazite-update.json`, `cmake/WriteUpdateFile.cmake`). It installs for the user who runs it, with no administrator rights (`%LOCALAPPDATA%\Programs\Phazite`), or for every user with `/ALLUSERS`; its first page shows Phazite's notice and every third-party notice; Start menu shortcut, and a desktop one if ticked. It waits for Phazite to close, or asks, before it replaces its files: Phazite holds a named mutex while it runs (`src/app/Main.cpp`).
-  - **File associations:** a project (`.phazite`) opens in Phazite with its icon, and a DAWproject (`.dawproject`) offers Phazite in Open With, importing it, without taking it from another DAW. A file double-clicked starts Phazite with it, or opens in the Phazite that runs, which asks to save the open project first (`ProjectSession::findFileToOpen()`, `openFile()`); after a crash, the crash's question is asked only if it is the project that was open then. Import DAWproject now asks whether to save the open project before the import replaces it, which it didn't.
-  - **The uninstaller** takes the app, its shortcuts and its file associations away, and leaves projects, presets, Phazite Sounds and the settings.
-  - **The update check** (`src/services/Updates.h`, `src/ui/shell/UpdatePanel.h`): Help > Check for Updates..., also last in the settings' menu, asks Phazite's latest GitHub release for its update file; Check for Updates When Phazite Opens, off until the user turns it on, asks each time Phazite opens. A newer release puts a badge on the settings' icon and names the command after it ("Update to Phazite 0.2.0..."); Download and Install downloads its installer, over HTTPS only (redirects too), only from Phazite's releases, stopping at its size, and checks its SHA-256; Install and Restart checks it again, closes Phazite (asking to save first), and the installer updates it silently and opens it again. Nothing is sent but the request.
-  - **Tests** in `tests/UpdatesTests.cpp` (the update file, versions, redirects, a check, a download, a wrong SHA-256, a download too large or too short, an installer changed after its check, the switch, the window), `tests/AppTests.cpp` (the file a command line names, startup with a file, a DAWproject double-clicked) and `tests/ActivityBarTests.cpp` (the badge); `tools/test-installer.ps1` installs the installer for the user, silently, into a folder of its own, checks its files, associations, shortcut and uninstaller's entry, uninstalls it and checks that all of it went, in CI too.
-  - **Left for later:** code signing (step 4.3), without which Windows' SmartScreen warns of the installer and its update; Phazite then also checks that an update is signed as it is. Publishing a release with the installer, its SHA-256 and its update file is step 4.5.
-
-**4.2 Licences and notices (S)**
-- Third-party notices in the app and installer (Rubber Band's GPL), and Inter's OFL text and copyright notice.
-- An About box and trademark notices, including the ASIO logo question.
-- *Status:* done (2026-11-07) ([design section 22](design.md#22-privacy-licences-and-trademarks), [third-party.md](third-party.md)).
-  - **One list of notices:** `resources/licenses/notices.json` names everything from others compiled into the app and its helper, 25 parts with JUCE's bundled libraries (from JUCE's own bill of materials, `external/JUCE/JUCE.spdx.json`), each with its version, licence, copyright and use; CMake copies each one's texts into `licenses/` next to the app as it configures, with Phazite's own (the AGPL) and the GPL, version 3, which the ASIO SDK is used under, and writes `NOTICES.txt` (`cmake/PhaziteNotices.cmake`); the installer shows `NOTICES.txt` on its first page and installs them. Inter's OFL text and copyright notice go next to its fonts, and into `licenses/Inter.txt`.
-  - **The About box** (Help > About Phazite, `src/ui/shell/AboutPanel.h`): the logo, the version (Copy Version copies it with the system), the copyright ("Copyright (C) 2026 the Phazite contributors", the owner's choice), the notice the AGPL asks every interactive program to show (no warranty, free to share and change, where the licence is), a link to the source code, and every licence, Phazite's first, the text of the one chosen beside the list; the trademarks under them. The app's and the helper's version information carry the copyright too.
-  - **The ASIO logo question, decided by the owner (2026-11-07):** no ASIO or VST logos. Phazite uses both SDKs under free licences (the GPL, version 3, and MIT), under which using the names or logos is optional, and if used, Steinberg's guidelines apply; Phazite names both in plain text, with ® at their first mention and the exact sentences the guidelines ask for, "ASIO is a registered trademark of Steinberg Media Technologies GmbH." and the same for VST, in the About box, `NOTICES.txt` and the documentation. The logos aren't under a free licence, so shipping them would break the licence-clean rule.
-  - **Tests** in `tests/AboutPanelTests.cpp`: every notice has its text in the licences' folder, which holds nothing else; the texts are the right licences (Rubber Band's GPL 2, Inter's OFL, the ASIO SDK's with the GPL 3); `NOTICES.txt` names each with its licence and copyright, and the trademarks; the About window shows each licence chosen.
-
-**4.6 Sampler (L)** (the owner, 2026-11-07: "add them to the roadmap for right now ... a robust plan of what controls they each need, and how best to hook them up ... the ui/ux should be solid")
-- One sound played across the keys, in three modes: Classic (at the note's pitch against its root key, with an envelope and a loop crossfaded at its seam), One-Shot (start to end, triggered or gated, with fades) and Slice (by transients, beats, equal parts or by hand, each slice on its own key from C2 up). Its controls are those Simpler, Quick Sampler, FL Studio's Sampler and Slicex and Bitwig's Sampler share, with what their users praise and without what they complain of ([design section 9](design.md#9-devices-containers-and-presets), [B153](design.md#appendix-b-sources)).
-- Its sound from the browser or Explorer, dropped on its drawing, or from its menu; its root key found as it loads (the file's, its name's, its pitch's); markers that drag and snap to zero crossings; slices by hand that stay whatever slices it; Slices to Clip; mono legato that glides, for 808 lines.
-- *Done when:* a drum loop dropped on it slices at its hits, each slice plays on its key, and Slices to Clip writes a clip that plays the loop in time with the song; an 808 dropped on it plays in tune across the keys and glides between held notes in mono; a held note loops without a click; and its editor fits the default dock.
-- *Status:* done (2026-11-07), pending a check by hand.
-  - **The device** (`src/devices/sampler/`): `Sampler.h`, 52 parameters; `SampleAnalysis.h`, the pitch found by YIN, the hits by the spectral flux of the sound's log magnitudes, each placed where its rise begins and on the zero crossing before it, and zero crossings for the markers; `FactorySamples.h`, an 808 bass at C2 that Phazite synthesizes, which a new sampler plays, and every factory drum sound. 16 voices or mono, read by the drum sampler's windowed sinc, forward or reversed, pitched up an octave or more from the sound's octaves, made as it loads ([performance-audit.md](performance-audit.md), section 17); the filter, its envelope and the LFO as the synth's; a sound swapped while it plays without the audio thread waiting or freeing memory.
-  - **The model** (`src/model/devices/internal/SamplerSound.h`, through `DeviceHandle`): a sound file put on it as one undo step, the project playing its own copy, its root key, fine and loop read from the file's data, its name or its pitch; its factory sounds; Find Root Key; slices moved, added and taken away by hand, saved in the song (`Schema.h`); Slices to Clip; presets that keep a factory sound by its name.
-  - **The editor** (`src/ui/devices/SamplerEditor.h`): the sound alone on the default dock's first page, its modes as buttons, its name's menu, the drawing with its markers, loop band and slices, each voice's place as it plays, a press on it playing the sound (or the slice under the pointer), and under it the controls of the mode it plays in; then Pitch over Voice and the Amp, the Filter and its Envelope, and the LFO.
-  - **Presets** (`resources/presets/Sampler/`): 808 Glide, 808 Punch, Lo-Fi 808, Distorted 808, Cowbell Lead, Reverse Crash, Ride Chops and Rising Toms (the two new ones from the preset pass of 2026-11-08, [presets.md](presets.md)).
-  - **Tests** in `tests/SamplerTests.cpp` (pitch and hits found, the root key and an octave up, notes pitched up read from the sound's octaves, loops without a click at the seam, One-Shot and Gate, slices by each method and by hand, choke, Play Through, reverse, mono legato, sounds swapped while playing, the same every time), `tests/SamplerModelTests.cpp` (a file's root key, fine and loop; its copy in the project; undo; slices by hand saved; Slices to Clip; presets), `tests/SamplerEditorTests.cpp` (a control for every parameter, the modes, the markers dragged and snapped, slices added and taken away, a file dropped, the dock); a guarded scenario in the [real-time audit](realtime-audit.md); and the golden renders `sampler` and `sampler-slices`.
-
-**4.7 FM synth (L)** (the same request)
-- Four operators in Yamaha's eight 4-operator algorithms, drawn as pictures, each with feedback of its own toward a saw or a square; each operator a sine or a band-limited wave at a ratio or a fixed frequency, with detune, level, velocity, key scaling and an envelope whose stages bend; Timbre, Key Time, Phase, a pitch envelope, the filter, an LFO, Spread, mono legato ([design section 9](design.md#9-devices-containers-and-presets), [B154](design.md#appendix-b-sources), [B156](design.md#appendix-b-sources)).
-- *Done when:* a new FM synth plays an electric piano; every algorithm plays at about the same level; a high note's sidebands don't fold back as aliasing; presets cover keys, bells, basses, plucks, leads, pads and effects; and its editor shows every parameter in the default dock.
-- *Status:* done (2026-11-07), pending a check by hand. On 2026-11-08, after research into the FM synths people use most and how their editors are laid out ([B156](design.md#appendix-b-sources)), as the owner found the algorithms' pictures clunky: feedback on every operator, toward a saw or a square, Spread and a DC blocker added, and the editor rebuilt ([question 24](design.md#25-open-questions) answered: side by side).
-  - **The device** (`src/devices/fm/FmSynth.h`): phase modulation at twice the sample rate through the half-band filters of the wavetable synth's drive, live and in renders alike; every operator's feedback averaged over two samples, as the DX7's, its wave fed back toward a saw or its wave squared toward a square, as the reface DX's; the carriers' sum a square root of their number down, with 5 dB of headroom, so that its chords are about as loud as the synth's; Spread, each note twice, detuned apart, left and right; a DC blocker; a soft electric piano at first; and what its editor draws of its sound (`FmSynth::draw()`).
-  - **The editor** (`src/ui/devices/FmEditor.h`): the algorithm played drawn large, its operators numbered, carriers in the device's colour along the line out and modulators in modulation's over them, each fed back with a loop, glowing as the newest note's envelopes move, stepped by arrows beside its name or the arrow keys, a click showing all eight with what each is good for; the harmonics the operators make under it; Timbre. Beside it the four operators side by side, each headed by its switch, its number in its role's colour and what it does ("Heard", "→ 1"), with its envelope (points drag, stages bend), its Level as a bar and its Ratio and Fine (or its frequency, while fixed); under them, tabs for a group of all four's controls at a time: Envelope, Tone (wave and feedback), Pitch (Fixed and detune) and Scaling. Then Pitch over Voice, the Filter and the LFO.
-  - **Presets** (`resources/presets/FM/`): 36 since the preset pass of 2026-11-08 ([presets.md](presets.md)), among them E-Piano, Tine E-Piano, Tubular Bells, Organ, Lately Bass, Marimba, Brass, Chip Square (one operator fed back toward a square), Glass Pad and Warm Strings (both spread), FM drums and the Log Drum.
-  - **Tests** in `tests/FmSynthTests.cpp` (ratios, detune and fixed operators in tune; sidebands as deep as the level, Timbre and velocity; each algorithm's carriers and modulators, and what each operator modulates; every operator's feedback toward a saw or a square, bounded and centred, and Timbre turning it down; key scaling and Key Time; Phase; the electric piano; mono glide; Spread, detuned apart left and right, in mono too; every algorithm at about the same level; the pitch envelope; no aliasing at a high note; what the editor draws; the same every time) and `tests/FmEditorTests.cpp` (a control for every parameter, the eight shown by a click and one picked as one undo step, the arrows and the arrow keys, each operator's role, the tabs, Fixed showing the frequency, a strip dragged as one undo step, an operator switched off shown faint, the operator under the pointer lit, the dock); a guarded scenario in the [real-time audit](realtime-audit.md); and the golden render `fm`.
-
-**4.8 Tempo changes along the song (M)** (the owner, 2026-11-08, after a survey of how the popular DAWs handle tempo: "implement all of the reccomended system for the tempo work")
-- A tempo lane under the time bar while the song has more than one tempo; tempo changes that hold and jump or ramp, ramps bent as automation's lines are, edited with the automation lanes' gestures; the top bar's tempo the one where the playhead is; samples that follow the tempo stretched along its changes; and tempo maps in and out, from MIDI files and in DAWprojects, ramps included ([design section 4](design.md#4-the-window)). Tempo detection from audio and tap tempo wait until after v1.
-- *Done when:* a song's tempo ramps from 90 to 120 BPM over a bar and steps back, made with the mouse in the tempo lane, each edit one undo step; a loop that follows the tempo plays every hit on its beat through the ramp and the step; and the Exodus example plays with the original's tempo.
-- *Status:* done (2026-11-08), pending a check by hand. The song keeps each tempo's line to the next on its element (`schema::tempoCurve`); Phazite's engine plays ramps exactly and bent ones in straight pieces (`src/engine/core/TempoMap.h`); the model adds, moves, bends, deletes and removes them (`src/model/transport/internal/Tempo.h`, by the context for the UI in `TempoModel.h`), with the commands Add Tempo Change and Remove Tempo Changes; the tempo lane and its header (`src/ui/playlist/TempoLane.h`), and Add Tempo Change Here on the time bar's menu; a sample that follows the tempo where it changes renders along a time map, R3 in real-time mode with its stretch set at each of its hops to land on the map, from where its output has come to (`src/devices/stretch/Stretch.h`, `src/model/arrangement/internal/AudioClips.h`); a MIDI file's tempo changes come into a song without clips, and DAWprojects carry them both ways. Exodus has the original's tempo. Its hits keep to their beats through a ramp that doubles the stretch as at one tempo, within half a millisecond through a ritardando; on its own after silence, a hit stretched to twice as long comes out 5 to 8 ms early from R3, at one tempo as along changes (measured 2026-11-08). Rubber Band's key frames, the first way, drifted a few milliseconds more (replaced the same day). Tests in `tests/EngineTests.cpp` (ramps, steps, jumps and bends, each beat back from its sample), `tests/StretchTests.cpp` (a drum loop along a time map that doubles its stretch, every hit once and on its beat), `tests/TempoTests.cpp` (the edits and their undo steps, the commands and the top bar's tempo at the playhead, a loop's every hit on its beat through a ramp and a step, a MIDI file's tempo map), `tests/TempoLaneTests.cpp` (the lane shown and taken away, a point dragged, a line ramped, bent and straightened, a click and a double-click) and `tests/DawProjectTests.cpp` (both ways, in beats and in seconds).
-
-**4.9 Recording, warping and consolidating after Ableton Live (L)** (the owner, 2026-11-08: "do we currently have a "bounce in place"/"consolidate" feature. if not, we should add it ... I want an audit of what ableton gets right for audio recording, and i want it implemented in phazite")
-- What Live gets right for recording audio, warping and quantizing it, and consolidating clips, checked in its manual and against what users say ([recording-audit.md](recording-audit.md)), and built: where a recording goes shown on every track, what is recorded growing in the playlist as it comes in, recordings that follow the tempo, Consolidate, warp markers with the hits in a clip's audio, and Quantize Audio ([design section 17](design.md#17-recording-and-capture), [section 7](design.md#the-audio-clip-editor), [section 6](design.md#6-the-playlist)).
-- *Done when:* a vocal recorded onto a new track for its input shows growing with its waveform as it records, and a keyboard part on an instrument track with its notes, each track's switch and header saying what it records; two clips on a track, and a range across two tracks, consolidate into one clip each as one undo step, audio without the track's effects; a drum loop's hit dragged in the audio clip editor plays where it was dropped, and Quantize Audio puts a loose loop's hits on the grid, each within 2.5 ms.
-- *Status:* done (2026-11-08), pending a check by hand. The arm switch on every track that records and what each records under its name (`src/ui/components/ArmButton.h`; `setMidiArmed()`, `describeRecordTargets()` and `addTrackForInput()` in `src/model/transport/RecordingModel.h`); Record's tooltip and its menu's Record an Input on a New Track (`src/ui/shell/TopBar.h`); what is being recorded, growing in the playlist (`getRecordingsInProgress()`, `src/ui/playlist/PlaylistRecording.cpp`); recordings following the tempo; Consolidate (`src/model/arrangement/internal/Consolidate.h`, `src/model/mixer/FreezeModel.h`); warp markers (`src/model/arrangement/AudioClipModel.h`, `internal/AudioClips.h`), the hits found in the background (`internal/Transients.h`) and the audio clip editor's warp strip (`src/ui/audioclip/AudioClipEditor.h`); Quantize Audio. Tests in `tests/AudioRecordingTests.cpp`, `tests/RecordingTests.cpp`, `tests/PlaylistTests.cpp`, `tests/ConsolidateTests.cpp`, `tests/WarpTests.cpp` and `tests/AudioClipEditorTests.cpp`. Take lanes and comping stay after v1 (item 4 there), with the rest the audit lists in its section 6.
-
-**4.10 Sampled instruments (XL)** (the owner, 2026-11-08: "What is the best way to get piano and guitar instruments into Phazite? ... it would be great to support other real instruments as well", then "yes, add it to the roadmap and design.md with a github issue")
-- The Multisampler, a device of its own beside the Sampler, as every DAW plays its real instruments on one engine: instruments of many recordings, each over a range of keys and velocities, with round robins, release recordings, keyswitches, controller crossfades and choke groups, up to 128 voices, read from SFZ files by Phazite's own reader and streamed from disk ([design section 9](design.md#9-devices-containers-and-presets), [B158](design.md#appendix-b-sources)).
-- A piano played as one: the sustain pedal at every position, pedalling again, the pedal's noises, a key struck again fading its old note, and the open strings resonating while the pedal is down.
-- Its instruments are its presets, by name (Grand Piano, Violins, Electric Bass), each a pack of Phazite Sounds (CC0) downloaded when the user first picks it, its size shown first: a grand and an upright piano, the VSCO 2 orchestra, an electric bass and a double bass, each edited before release and leveled as the presets are. An SFZ file of the user's plays from where it is.
-- *Done when:* the Grand Piano, picked in the browser after a new install, downloads its pack and plays, keeping only its recordings' starts in memory; in the preset report, a velocity sweep on every key gets louder at every step, neighbouring keys alike in level and tuning; a passage held on the pedal rings on and resonates, half-pedal shortens it, and a key struck again doesn't click; 128 voices play from disk without a dropout, and the real-time audit's guarded scenario doesn't allocate; and an SFZ instrument from the web, dropped on a track, plays, listing what it uses that Phazite doesn't read.
-- *Later, after v1:* articulations in the piano roll, guitars, and an organ, an electric piano and plucked strings, synthesized (items 5 to 7 [there](#after-v1)).
-
-**4.11 Chains, splits and instrument containers (L)** (the owner, 2026-11-09, after a survey of what containers are like in other DAWs and whether FL Studio's Patcher is worth having: "ok lets have you fully implement your suggestion for phazite")
-- Containers of chains side by side, as Ableton Live's racks and Bitwig's layers have them, rather than a wired graph as the Patcher's: each chain its devices, its volume, pan and switch for mute and solo, lined up with the latest and added up; a container of effects splitting what comes in between its chains, all of it (layers), frequency bands at crossovers, the middle and the side, or the left and the right; and instrument containers, a track's instrument, each chain playing its instrument on the notes in its key and velocity ranges ([design section 9](design.md#9-devices-containers-and-presets)).
-- *Done when:* a container of two empty chains plays twice the sound, each chain's volume, mute and solo heard, and a chain whose effect is 64 samples late is lined up with one that isn't; split into two or three bands, into the middle and side, or into the left and right, its parts add up to the sound, each band where its crossover puts it; a chain's volume follows its automation and its container's macro; an instrument container plays each chain's instrument on the notes in its keys or velocities, a note ending in the chain it started in after its keys change; containers' presets and tracks' keep their chains, splits and ranges; each edit is one named undo step but a chain's mute and solo; and the real-time audit's guarded scenario of bands, layers and two synths split by keys doesn't allocate.
-- *Status:* done (2026-11-09), pending a check by hand. The song's chains (`schema::CHAIN`, with the container's `containerSplit` and `containerInstrument`); the model (`src/model/mixer/internal/Containers.h`, and by IDs for the UI `ContainerModel.h` with the plain values of `ContainerValues.h`); a chain's volume, pan and crossover as parameters (`src/model/devices/internal/Parameters.h`); Phazite's engine plays each chain in a buffer of its own, splits the sound into their parts and shares out an instrument container's notes (`src/engine/nodes/Container.h`, `Plan::Container`); the Devices view shows a container as one line in the column (the owner, 2026-11-09, after using them: in the column its chains made it "very busy and cluttered") and, beside it, its chains side by side as cards with their devices, split and + Chain, a device clicked there showing under a path back to them (`src/ui/mixer/ContainerEditor.h`); the instruments' menu offers an instrument container first, and a device's menu moves an effect into another chain. Tests in `tests/ContainerChainTests.cpp` (the edits and their undo steps, the split's rules and the crossovers' order, the parameters' automation and modulation, what the engine plays of layers, bands, the middle and side and the left and right, an instrument container's keys and velocities, presets and copies), `tests/ContainerTests.cpp` and `tests/DevicesViewTests.cpp` (a container one line in the column, its chains beside it and the path from a device of it back to them, an effect dragged into another chain, the Instrument page, and a container of three chains whole in the dock), and a guarded scenario in the [real-time audit](realtime-audit.md).
-
-**4.12 The drum sampler, as the drum samplers people use (L)** (the owner, 2026-11-09: "is our drum sampler instrument good, or is it missing things other drum samplers have that people really use? is 16 pads the normal amount?", then "do the full reccommended roadmap for the drum sampler")
-- What Ableton Live's Drum Rack, FL Studio's FPC, Bitwig's Drum Machine, Logic Pro's Drum Machine Designer, Battery and the MPC give every pad, in the order their users reach for it ([design section 9](design.md#9-devices-containers-and-presets)):
-  1. An envelope on every pad (attack, hold and decay), triggered or gated, and how much velocity turns a pad down.
-  2. Each pad on a mixer channel of its own, as Drum Rack's chains and FL Studio's FPC outputs are, with its own effects, sends and sidechain: one pad's kick ducking a bass.
-  3. A pad on every MIDI note, 128, sixteen shown at a time with a map of them all, as Drum Rack and the MPC's eight banks have them, so that a General MIDI drum part plays every drum on its note.
-  4. A filter on every pad, low-pass, high-pass or band-pass, which velocity can close.
-  5. Up to four sounds on a pad: velocity layers, round robin, random without repeats, or stacked, each layer at a level of its own.
-  6. Where a sound starts, reverse, fine tuning in cents, a sweep from above or below its pitch as synthesized drums have, and mute and solo on every pad.
-- *Done when:* a General MIDI drum file plays every drum on its note once its pads have sounds; an open hat's hold and decay shorten it, each change one undo step, and a gated pad stops with its note; a snare with two velocity layers plays the soft one for soft hits and the hard one for hard ones, and a hat with four round robins never plays one twice in a row; the kick's pad on a channel of its own ducks the bass through the bass's sidechain; the editor fits the default dock; and steady playback doesn't allocate (the [real-time audit](realtime-audit.md)).
-- *Status:* done (2026-11-09), pending a check by hand ([design section 9](design.md#9-devices-containers-and-presets)).
-  - **The device** (`src/devices/drums/DrumSampler.h`): 25 parameters on each of 128 pads, 3,201 with the output, named after their pads' notes ("pad38Level") and found by their IDs at once (`DeviceInfo::findByID`); the attack, hold and decay envelope, One Shot or Gate; start and reverse; tune and fine; the sweep; a state-variable filter that velocity closes; velocity's amount; level, pan and filter following their values as a hit rings; mute and solo; eight choke groups; four layers, stacked, by velocity, in turn or at random without repeats, each at its level; and a pad on a track of its own played into an output of its own (`devices::PartOutput`).
-  - **The engine** (`src/engine/nodes/PartOutput.h`): a device's part played into a buffer of its own, which the pad's track adds up as it adds up another strip (`Plan::Input::part`), lined up with where the pad leaves the sampler; a strip that feeds parts plays while it is muted, so that each pad follows its own track's mute.
-  - **The model:** pads by their notes in the song (`pad36Sound`; a layer's `pad36Sound2`), empty pads, layers, and pad tracks (`schema::trackPadDevice`, `trackPad`; `givePadItsOwnTrack()`, `bringPadBack()` in `src/model/devices/internal/DrumKit.h`); the piano roll's drum rows the pads that play; automation's menus listing a drum sampler's parameters under their pads, those that play.
-  - **The editor** (`src/ui/devices/DrumSamplerEditor.h`): sixteen pads shown beside a map of all 128; the selected pad's sound with its envelope's handles; its controls, which follow the pad selected (`ParameterControls::showParameters()`); its layers; Own Track.
-  - **Presets:** the kits on the pads from 36, each naming every parameter, as Save Preset writes them.
-  - **Tests** in `tests/DrumSamplerTests.cpp` (the description and its lookup; one-shots, gates, level, pan, velocity, tune, fine, hold and decay; start, reverse, attack, sweep and the filters; mute, solo and a level followed as it rings; choke groups; layers in each mode; a pad on its own track, its mute, its effects, a sidechain listening to it, and back) and `tests/DrumSamplerEditorTests.cpp` (the pads, the map and the wheel, the controls of the pad selected, the handles dragged, layers dropped and cleared, Own Track).
-  - **Left for later:** Swap on a layer but the first (it swaps the pad's own sound); and freezing or bouncing a track whose pads play on tracks of their own, which Freeze and Bounce refuse, saying why, until the pads come back (the render would leave them out: each pad's part would need a frozen file of its own track's).
-
-**4.13 The sounds of dark synthwave, after Exodus (L)** (the owner, 2026-11-09: "i want the plugins and drums that we make as presets to be very similar to what is in the song, just higher quality and labeled well. i think those sounds are valuable to someone trying to make dark synthwave music ... i think we really need to nail down what all the effects and settings the original sounds used in order to create those presets. also figure out if we are using the right synths for the job", then, 2026-11-10: "do the entire plan except shipping factory track presets. make sure whatever you add is of high quality and can be used in other projects in the future as well (not just one-offs for the demo song)")
-- The example song Exodus (XCALIBUR, CC BY) taken apart: each of its parts rendered alone from its LMMS project by LMMS 1.2.2, its recording separated into stems (BS-RoFormer, MDX23C DrumSep), and every effect's and instrument's settings read from the project and measured. What Phazite lacked to play its sounds was built for any song, each feature's defaults keeping every existing sound as it was, and each of its sounds made a preset that stands alone, named by its sound ([presets.md](presets.md), "Dark synthwave, after Exodus"):
-  1. Drum synthesis for natural, dark drums: a kick's swell, boom and knock, claps of more strikes and a little wide, hats held and cut, a snare's shell modes, struck metal by its modes, and a room that isn't gated; the Dark Synthwave Kit.
-  2. Sounds made from their spectra (Paul Nasca's PADsynth), and the sampler's Start Random, Key Time and Filter Velocity; Wide Saw and three presets on it.
-  3. A chorus of up to eight voices a side, with Voice Phase, Spread and Shimmer in Mode's place; Deep Swirl, Warble and three more.
-  4. A plate in the reverb, Dattorro's, with Diffusion and the High Cut's slope for both modes; Dark Plate, Long Dark Plate, Airy Plate and Snare Plate, and Vocal Plate and Bright Plate as plates.
-  5. The FM synth's start phase on each operator, and the synth's filter envelope and Filter Velocity on its filter; Darksynth Bass, Sparkle Pluck and three more.
-  6. The Exciter, a device of its own; Saturated Highs and seven more.
-  7. The wavetable's unison stack and drift; Octave Supersaw Pluck, Slow Sweep Bass and three more.
-  8. Every note of the synth, the FM synth, the wavetable synth and the sampler on a voice of its own in poly mode: a key played again as it rings out lets its tail ring on under the new note, which starts from its waves' starts (a key still held lets go first, as JUCE's synthesiser does).
-  9. The Vinyl, a device of its own: a record's wow, with its second hump, and flutter; the groove's distortion of the loud highs; its lows in mono, its narrower sides and its band; and its hiss and crackle, each click drawn from where the song is; Warped Record, after the original's, and eight more.
-  10. Buses that duck under another track, as tracks do; and the presets the song's mix plays: Square Pluck, Low-End Lift, Deep Sub Lift, Amp Mid Scoop, Warm Dark Master, Peaked High-Pass, Gentle Low-Pass, Dense Squeeze, Sidechain Full Pump and Sidechain Deep Pump.
-  11. Exodus remade on them, each preset as it comes, and only mixed: every part in the octave its recording plays (`tools/lmms-to-midi.ps1` puts the notes of LMMS's MIDI instruments where LMMS sounds them), the intro's drums, its two buses pumping under a muted track's kick, each layer's plate before its bus, and the master's filters in automation lanes at the frequencies they had (LMMS's knob values decoded into hertz).
-- *Not built, on purpose:* factory track presets (the owner's exception); a mirrored stereo detune of its own (the FM's Spread and the wavetable's unison of two voices spread wide are one already); and an auto-pan in the Stereo Expander (an LFO on the track's pan does it, one way per task, and a preset that pans is what track presets will give).
-- *Done when:* each preset meets its measured targets on Phazite's own renders against the original's part rendered alone; every existing preset of a device that changed sounds as before, to the bit, but where a change was meant (the voices of a key played again); Exodus's parts sit in its mix as the original's do (the pump's depth and return, the parts' levels, the master limiter's work and the loudness); and steady playback doesn't allocate (the [real-time audit](realtime-audit.md)).
-- *Status:* done (2026-11-10), pending a check by ear: every number was measured, none heard.
-  - **Drums** (`src/devices/drums/DrumSynthesis.h`, `FactoryDrums.cpp`): the recipes' new fields, each off at its default (`KickShape`'s swell, boost, shelf and knock; `ClapShape`'s strikes and width; `HatShape`'s hold and cut; `SnareShape`'s modes; `makeStruck()`; `addRoom()`), and the kit's sixteen sounds fitted to the original's, the 192 factory sounds before them unchanged to the bit.
-  - **Sampler** (`src/devices/dsp/SpectralLoop.h`, `src/devices/sampler/`): the spectral loop and Wide Saw; Start Random, Key Time and Filter Velocity.
-  - **Chorus** (`src/devices/motion/Chorus.h`): Voices, Voice Phase, Spread and Shimmer; the copies crossfade over 10 ms as Voices changes. Safe Bass in the chorus, the phaser and the flanger split by a Linkwitz-Riley crossover (`src/devices/motion/SafeBass.h`, with the runner's dry split alike through `ProcessContext::dry`), where it had let the lows into the effect only 3 dB down an octave under it; Negative Flange and Metallic Ring moved up to 150 and 190 Hz to keep their bass.
-  - **Reverb** (`src/devices/reverb/Reverb.h`): Mode, Diffusion and High Cut Slope, the plate's decay from a table measured on it.
-  - **FM** (`src/devices/fm/FmSynth.h`): each operator's Phase (`Unit::degrees`), and the filter envelope and Filter Velocity, which the synth's filter shares (`dsp::filterVelocityRange`).
-  - **Exciter** (`src/devices/saturation/Exciter.h`, `src/ui/devices/ExciterEditor.h`).
-  - **Wavetable** (`src/devices/wavetable/WavetableSynth.h`): Unison Stack and Unison Drift.
-  - **Vinyl** (`src/devices/vinyl/Vinyl.h`, `SurfaceNoise.h`, `src/ui/devices/VinylEditor.h`).
-  - **The device runner** hands each stretch of a block where the song is as the stretch starts (`DeviceRunner::process()`), which had pulled the chorus's, phaser's and flanger's LFOs in time with the song back every 32 samples while a parameter moved.
-  - **The synth's filter envelope** starts at its top on a note with no attack (it started at its bottom for up to 16 samples).
-  - **Voices** (the synth's, the FM synth's, the wavetable synth's and the sampler's `findVoice()` and `letGoOf()`): every poly note on a voice of its own, the tests rendering a key played again against its two notes rendered apart and added.
-  - **The song** (`src/model/project/ExampleSongs.cpp`, `resources/songs/Exodus.mid`): the notes sorted before they are laid into clips, so that the intro's kicks play; buses duck under a track (`duckUnder()` takes a bus).
-  - **Checks:** the preset report measures the exciter's and the EQ's presets too; the song export (`--test-suite=song-export`) writes the example songs' mixes, stems and solos to measure them against their originals.
-
-**4.3 Code signing (S, decision)**
-- A certificate, or an open-source signing program, so Windows doesn't warn users.
-
-**4.4 Documentation (M)**
-- The basics of a user guide, a README update and a contributor guide.
-- *Status:* begun (2026-11-09): the guide's first pages in `docs/guide/` (Getting started, Troubleshooting, Questions and Privacy), which Phazite's website publishes. The website is a repository of its own, `phazite-site`: Astro with Starlight on GitHub Pages, in the app's colors, font and icons, its Download page filled from the latest release's `phazite-update.json`, as the update check reads it ([design section 26](design.md#26-decision-log)). The guide's pages for each area, and pictures of them painted by tests as the README's is, are to come.
-
-**4.5 Release process (S)**
-- Versioning, a changelog and release builds from CI.
-- A Linux build as a beta.
-
-## After v1
-
-The steps moved here from phase 3, in the order they would come:
-
-**Usability rounds (S each)** (step 3.8 until the owner moved it here, 2026-11-04)
-- Repeat the milestone test with new people and fix what they trip over.
-- *Done when:* new users finish the milestone task without help.
-
-**The browser, grown on its folders (M, then L)** (the owner's question of 2026-11-04, researched that day: [design section 11](design.md#11-the-browser)):
-- First, filters and swapping in place: a row of filters over what the browser shows (type, loop or one-shot, tempo and key), each offering only what is there, with counts, as chips that one Clear empties with the search words; keys read from sounds' names and loop data; Swap on a drum pad or one of Phazite's devices, so that the browser plays each sound or preset it moves to in that place, in the beat, Enter keeping it as one undo step and Esc putting the old one back; and collections, kept by file (M).
-- Then the user's own sounds known by analysis, in the background and paused at will (loop or one-shot, drum type, tempo, key, brightness), shown as guesses the user corrects, with Show Similar and a drum pad's previous and next similar sound, and loops in key (L): the same work as item 10 below.
-- *Done when:* a beat maker narrows a big folder to the kicks in a key by the filters alone, and swaps a playing pad's kick for another and back with the keys.
-- *Status:* the first phase built (2026-11-07, the owner: "do the first part of" issue #24), pending a check by hand ([design section 11](design.md#11-the-browser)): the filters under the browser's search (`src/ui/browser/FilterBar.h`, `src/services/BrowserModel.h`), each offering only what is there with counts, as chips with Clear, the places listing their matching sounds as one list each; keys from names, folders and loop data, the loop data read once by the index and kept beside the settings (`src/model/engine/AudioFiles.h`, `src/services/Library.h`); Swap on a drum pad (its editor's Swap) and on one of Phazite's devices (its Presets menu), the browser trying each sound or preset in place, Enter keeping it as one undo step and Esc putting the old one back, anything else that changes the song keeping it first (`src/model/devices/SwapModel.h`, the undo convention's `Trial`); and collections kept by file, by each file's size and the SHA-256 of its start, favorites too. Sounds by Type and a drum pad's Load... went, the filters and Swap doing their work, and the Presets menu stayed as it was, Swap first in it (Claude's calls, as the owner asked, the same day). After the owner tried it (2026-11-08: "I did get a bit lost"), a device's swap shows its presets alone, every folder open, from the top, and the browser is as it was once it ends. Tests: `tests/BrowserFilterTests.cpp` (the "done when" by the keys and the filters), `tests/SwapTests.cpp`, `tests/SoundKeyTests.cpp`. The second phase (analysis) is to come.
-
-**Chord suggestions (L)** (step 3.1 until the owner moved it here, 2026-11-04)
-- The theory engine, which scores candidate chords and explains its choices.
-- Next chord, fill a section, replace, and fit my melody.
-- The safe ↔ adventurous slider.
-- Local learning from accepted suggestions.
-- Optionally, pop and rock calibration from the public-domain McGill Billboard data.
-- *Done when:*
-  - suggestions respond to the project's key, melody and section;
-  - each suggestion explains itself;
-  - accepting one is a single undo step.
-
-**Sound generator (XL)** (step 2.8, then 3.2, until the owner moved it here, 2026-11-04)
-- **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
-- **The generator panel:**
-  - a grid of sounds, with audition in context;
-  - keep, favorite and lock;
-  - more like this, and history.
-- **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
-- **Then:** breeding favorites, kit-aware generation (which complements the drums already used), and automatic tags.
-- *Done when:*
-  - generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe;
-  - breeding two favorite kicks produces new kicks with traits of both.
-
-The rest, roughly in order of value:
-
-1. CLAP hosting (L).
-2. The clip launcher, as a jam panel that records into the playlist (L).
-3. The AI assistant, acting through commands (L).
-4. Audio take lanes and comping (L).
-5. Articulations in the piano roll (M): each note's articulation in a lane under it, as Cubase's Expression Maps, Logic Pro's Articulation Sets and Studio Pro's Sound Variations show them, for the Multisampler's keyswitched instruments (step 4.10) and plug-ins' alike ([design section 9](design.md#9-devices-containers-and-presets)).
-6. Guitars on the Multisampler (L): one note per string, a strummer that turns a held chord into a strum, down or up, at a speed, articulations and legato for each note, bends, fret and release noises, and an amp and cabinet effect for electric guitars; with Karoryfer's CC0 electric guitars, and an acoustic guitar recorded for Phazite Sounds or modelled, as no well-sampled one is CC0 yet.
-7. An organ, an electric piano and plucked strings, synthesized (L): a drawbar organ with a rotary speaker, an electric piano modelled after the tine and reed ones, and plucked strings by physical modelling.
-8. A DAWproject's plug-ins and sends, imported into a new project (M): the rest of DAWproject import and export was built ahead of v1 with the versions, as D1 and D2 ([versions.md](versions.md)).
-9. Neural sound generation with our own model, trained on public-domain audio (XL).
-10. Audio-to-MIDI, automatic sample tags and "find similar" (L).
-11. macOS, with Audio Units (L).
-12. MPE controllers, Linux screen readers (AT-SPI), translations and a scripting API (M–L each).
-
-(Plug-in sandboxing moved before v1, into step 3.3, on 2026-10-16.)
-
-## Cross-cutting work
-
-- **Testing:**
-  - unit tests for model operations;
-  - DSP tests: frequency responses, gain curves, null tests;
-  - golden tests (architecture phase A0): saved projects compared with committed files, and short offline renders with committed fingerprints, within a tolerance;
-  - usability tests at each milestone.
-- **Architecture:** keep to the rules in `CLAUDE.md`, which `tools/check-architecture.sh` checks; each step moves the area it touches toward the [architecture track](#architecture-track)'s structure.
-- **Performance:** benchmarks for audio CPU and UI frame time, tracked from phase 1 onward.
-- **Documentation:** keep [design.md](design.md) and this roadmap current, and update the status table after each step.
-- **Known bugs:** [known-bugs.md](known-bugs.md) lists the bugs found and not fixed yet; each is fixed before v1 unless the owner says otherwise.
-- **Licences:** check every new dependency, model or dataset against the list in `CLAUDE.md` before using it.
+| S3.1 | M | Recording through an ASIO® interface, and playing and recording from a MIDI keyboard |
+| S3.2 | M | A session with Narrator and the keyboard alone, and its fixes |
+| S3.3 | S | A DAWproject from Phazite opened in Bitwig Studio or Studio One, and one of theirs opened in Phazite |
+| S3.4 | M | About twenty third-party VST3 plug-ins loaded, played, saved, reopened and automated |
+| S3.5 | M | The other open rows: phases 0, 1, 3 and 4 |
+
+### Stage 4. Decided: the owner's decisions, built
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S4.1 | S | A design note of the cut to source control | The owner has approved it |
+| S4.2 | L | Staging, the commit checked out on its own and a merge's ticked lines removed; each computer's records parked | The `version.stage*`, `version.checkout` and `version.backToBranch` commands are gone, and the goldens say so |
+| S4.3 | M | A history that cannot lose work | No command leaves a commit unreachable without asking |
+| S4.4 | M | Housekeeping: unused pieces swept, Clean Up aware of Local History, Verify History checking audio | Verify reports a missing audio file |
+| S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
+| S4.6 | S | Backups kept by age, not by count | A day's work leaves backups from an hour, a day and a week before |
+| S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
+| S4.8 | M | Mute and solo silence a track's output only: its sends before the fader, its sidechain and its tails go on | A muted track still feeds a compressor that listens to it |
+| S4.9 | L | Files from others are untrusted: values clamped, sound paths kept inside the project, DAWproject unpacking capped | The fuzz corpus and a hostile DAWproject open safely or are refused with a reason |
+
+### Stage 5. Wide: what a beat maker meets in the first week
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S5.1 | L | Stretched, pitched and reversed clips heard at once; then stretch modes and a formant switch | A warp marker dragged is heard on the next play, before any render finishes |
+| S5.2 | L | Wider notes: MIDI channel, pitch bend, controllers, pressure and program change, in the song and to plug-ins | A plug-in receives a pitch bend played live and one played from a clip |
+| S5.3 | L | Controllers recorded, played and edited in lanes beside the velocity lane | A sustain pedal recorded with a part shows in a lane, plays and can be deleted |
+| S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
+| S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
+| S5.6 | M | Arming never reopens the audio device; held live notes end when the track changes; automation written where it is heard | Arming a track during playback makes no gap in the sound |
+| S5.7 | M | The plan rebuilt only for what changed; notes and clips found by an index | An edit in a 100-track song costs the same as in a small one ([performance.md](performance.md)) |
+| S5.8 | M | MIDI import of every track of a file; MIDI export; range and loop export; project templates | A clip exported as a MIDI file and imported again holds the same notes |
+| S5.9 | M | Devices moved, copied, duplicated and deleted between tracks, by commands and by dragging | A device dragged to another strip keeps its automation and modulation |
+| S5.10 | M | The strip: trim, polarity, mono, pan law, track delay | Each is a parameter with a control, automation and a test |
+| S5.11 | M | Presets carry their own samples | A drum kit preset loads on another PC |
+| S5.12 | L | The audio clip editor zooms and scrolls; snapping to edges and markers | A hit in a four-minute file can be placed to the millisecond |
+| S5.13 | L | The mixer: undo for the wheel, a decimal comma, several strips edited at once, menus from the keyboard, keyboards other than US | Each has a test through `TestWindow` |
+| S5.14 | L | Secondary windows that do not block; one Settings window; browser search on a large library | Search answers within a frame's time on 100,000 sounds |
+| S5.15 | L | Each layer a library of its own; file sizes counted; the solo rule in one place | `check-architecture.sh` counts files over the limit |
+
+**Beta.** The steps above are done, and stage 3's rows are checked.
+
+### Stage 6. Deep: every device and editor to the standard of the best plug-ins
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S6.1 | S | A listening set for each device, and at the end a verdict on each | The set and the verdict are in the device's page under [design/devices](design/devices.md) |
+| S6.2 | M | The devices' small bugs left by the audit | Each is fixed with a test, or in known-bugs.md |
+| S6.3 | L | Compressor: a sidechain in Compress, look-ahead, automatic make-up, a curve whose points can be typed | Each has a DSP test |
+| S6.4 | L | EQ: mid and side, dynamic bands, linear phase | Each has a DSP test |
+| S6.5 | L | Reverb: a longer network for Room | A long decay has no audible ringing, by its test and by ear |
+| S6.6 | L | Saturator and Filter at four and eight times the rate; a filter that drives; a clean feedback path in the Delay | Aliasing measures below the level set in the device's page |
+| S6.7 | XL | Synths: modulation depth, band-limited sync and warps | A swept sync shows no aliasing above the level set |
+| S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
+| S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
+
+### Stage 7. Professional: what bands, vocalists and keyboard players need
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| S7.1 | XL | Mono tracks, more than one output pair, a cue mix | A performer hears a mix of their own on a second output pair |
+| S7.2 | XL | Scale, measured first: a 100-track benchmark, a scheduler that does not spin, read-ahead before a jump | The benchmark's numbers are in [performance.md](performance.md), with their limits |
+| S7.3 | L | Multi-out plug-ins and MIDI channels | A multi-out drum plug-in plays each output on a strip of its own |
+| S7.4 | L | Routing: buses send to returns, sidechains inside containers, macros automated, any track or bus as an output | Each has a model test and plays in a golden render |
+| S7.5 | L | Note effects, and MIDI from plug-ins | An arpeggiator before an instrument plays in time, live and rendered |
+| S7.6 | L | MIDI output, clock out, a MIDI input for each track | A hardware synth plays a track's notes in time with the song |
+| S7.7 | L | Take lanes and comping | A vocal is put together from three takes, each edit one undo step |
+| S7.8 | M | Time-signature changes along the song | A change added at a bar moves the bar lines, the metronome and the count-in |
+| S7.9 | L | Clips, notes and automation points reachable by a screen reader | Narrator reads the note under the keyboard's cursor |
+| 4.10 | XL | The Multisampler, as a plain SFZ player with one piano | The Grand Piano, picked in the browser, downloads its pack and plays from disk without a dropout; an SFZ file of the user's plays, listing what Phazite does not read |
+
+### Stage 8. Release
+
+| Step | Size | What | Done when |
+|---|---|---|---|
+| 4.3 | M | Code signing: the installer and its updates signed, and an update checked for the same signature | Windows shows the publisher and no SmartScreen warning |
+| 4.4 | L | The guide: a page for each view and each device, with pictures painted by tests | Every view and device has a page in [guide](guide/getting-started.md), and a keyboard reference |
+| 4.5 | S | The release process: the version from the tag, release builds and the installer from CI, the changelog by version | A tag produces a release with the installer, its SHA-256 and `phazite-update.json` |
+| A4 (part) | L | The text the user reads in a strings table | No user-facing string is left in C++ outside the table |
+| S8.1 | M | Release builds with symbols, and crash dumps the user can send | A crash in a release build gives a readable stack |
+| S8.2 | M | The compatibility promise: a format version in the file, a golden project for each release, newer files refused with a reason | The 1.0 golden project opens in every later build's tests |
+| S8.3 | L | Linux as a beta: PipeWire or JACK, HTTPS for the downloads, install rules, and the app tried by a person | The Linux rows of the hand checks are checked |
+| S8.4 | S | The installer's silent update tested | CI updates an installed older build and starts it |
+
+**1.0.** Every stage is done, and the hand checks have no open row.
+
+### After 1.0
+
+Not in 1.0, in no fixed order. More, with reasons, is in the [backlog](backlog.md).
+
+- **From the first plan:** usability rounds with new people (was 3.8); the browser's analysis of the user's own
+  sounds, with Show Similar (the second part of issue #24); chord suggestions (was 3.1); the sound generator and a
+  drum synth device (was 3.2); the AI assistant; articulations in the piano roll; guitars, and a synthesized organ,
+  electric piano and plucked strings; a DAWproject's plug-ins and sends imported; neural sound generation;
+  audio-to-MIDI; MPE; Linux screen readers.
+- **A4, the rest:** the design tokens in one file a designer edits, a gallery app and a guide for the designer. It
+  starts when a designer joins.
+- **Out of 1.0 by the plan:** video, notation, a clip launcher, scripting, CLAP, ARA, macOS with Audio Units,
+  translations, Ableton Link and control surfaces.
+- **Declined:** MP3 export.
+
+## Decisions still needed from the owner
+
+One line each; the rows, with what is built today, are in [open-questions.md](open-questions.md).
+
+| Decision | Needed before |
+|---|---|
+| Whether Source Control keeps git's words or takes plain ones | S4.2 |
+| The design note of the cut to source control | S4.2 |
+| What the activity bar holds beyond its three views | S5.14 |
+| Whether the Exciter and the Vinyl stay devices of their own | Stage 6 |
+| Whether the Multisampler stays in 1.0 | 4.10 |
+| A certificate, or an open-source signing program | 4.3 |
+| The limit on a source file's size | S5.15 |
+| Whether the usability test with new users is held before the beta | The beta |
+| The choices made on the owner's behalf and never reviewed | 1.0 |
 
 ## Risks
 
-| Risk | Mitigation |
+| Risk | What is done about it |
 |---|---|
-| The UI is by far the largest piece of work | Build vertical slices, run usability tests at each milestone, and use what JUCE gives instead of reinventing it |
-| Engine code breaks the real-time rules | Measured in step 0.3, and by the real-time audit after each change to playback, whose guarded scenarios fail if steady playback allocates; Phazite's own engine and devices keep the rules |
-| Built-in effects fall short of FL Studio's | Listening and A/B tests against references, plus DSP tests |
-| Sandboxing and CLAP are complex | Sandboxing is measured first (step 3.3) and becomes a choice per plug-in if it costs too much; CLAP waits until after v1 |
-| Scope creep | v1 scope is fixed in [design section 1](design.md#1-vision-and-scope); new ideas go under "After v1" |
-| Restructuring changes behavior by accident | Golden tests of saved projects, renders and commands (A0); every step builds and passes the tests, one commit each |
-| The architecture work holds up features | Only A0 and A1 pause features; A2 to A4 move each area when a feature touches it; A5 only after a dated decision |
-| The layers erode over time | `tools/check-architecture.sh` in CI and before every commit, with limits that can only go down |
+| The scope grows. It is not fixed: phase 4 took eight feature steps while its release steps waited, and the audit added most of the stages above | 1.0 is the eight stages and nothing else. A new idea goes to the backlog unless it replaces a step here |
+| Built is taken for working: most of phases 0, 1, 3 and 4 has passed its tests and been tried by nobody | Stage 3, before any more features; the README says which is which |
+| One PC, one user: no audio interface, MIDI keyboard, screen reader, other DAW or Linux desktop has met Phazite, and every measurement is from one machine | Stage 3, the Linux rows in stage 8, and usability rounds with new people |
+| Projects saved now may not open later, so nobody can keep real work in Phazite | Said in the README; compatibility starts at 1.0 (S8.2) |
+| Built-in devices fall short of the plug-ins people own | Stage 6: a listening set and a verdict for each device, with DSP tests |
+| The audio thread breaks the real-time rules | The real-time audit after every change to playback; its guarded scenarios fail if steady playback allocates (S2.5 widens them) |
+| A fix or a restructuring changes behaviour by accident | The golden tests of saved projects, renders and commands, and stage 2's nets |
+| The layers erode, and files grow | `tools/check-architecture.sh` in CI and before every commit, every budget at 0; file size is not counted yet (S5.15) |
+| The UI is the largest part of the work | One view at a time, on the model's functions, each with tests through `TestWindow` |
+| An unsigned installer is warned about by Windows | 4.3 |
 
-## Status
-
-| Phase | Status |
-|---|---|
-| 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
-| 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
-| 2. Finish a track | Done (2026-10-29), every step checked by hand and the new devices and stretching A/B listened to by the owner, who found them good (2026-10-29): 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets), 2026-10-16; 2.2 (lanes that go with the music), 2.5 (the window: the song in the centre, the Devices view, the properties inspector) and 2.6 (the audio clip editor), 2026-10-17; 2.7 (the chord lane and progressions), 2.9 (mixer depth), 2.10 (six new devices and the synth's unison), 2.11 (freeze, bounce in place and stems), 2.12 (plug-in windows and presets), 2.13 (the wavetable synth), 2.14 (comb filters) and 2.15 (more filter types), 2026-10-18; 2.16 (performance), 2026-10-21; 2.17 (devices and the window), 2026-10-29; 2.18 (Phazite's own time-stretching), 2026-10-28, with its progress shown on 2026-10-29; 2.8, the sound generator, moved to phase 3 (2026-10-18) |
-| 3. v1 polish | Done (2026-11-04), pending checks by hand: 3.3 (stability and plug-in sandboxing), done as T3, 2026-11-02, its plug-in windows and its plug-ins kept off after a crash tried by the owner on 2026-11-04; 3.4 (audio recording), 2026-10-29, pending a check with an ASIO interface; 3.5 (performance) and 3.6 (accessibility, pending a check with Narrator), 2026-11-04; 3.7 (keymaps and help: Cut, Copy and Paste, the Ableton Live keymap, help text and lessons), 2026-10-29, pending a check by hand. 3.1 (chord suggestions), 3.2 (the sound generator) and 3.8 (usability rounds) moved after v1 (the owner, 2026-11-04) |
-| Versions ([versions.md](versions.md)) | Done ahead of v1 (2026-11-04), on `main` since 2026-11-05, pending checks by hand (a DAWproject export opening in Bitwig Studio and Studio One, and a real VST3's preset going both ways): V1 (the activity bar, and versions saved, read again and compared with the song), V2 (going back to a version), V4 (branches, and merging another line into the song), V3 and V5 (bounces of versions, heard in place of the song), Clean Up Unused Audio, and D1 and D2 (DAWproject export and import); then branches switched in place, and the Source Control view in git's words (2026-11-05); then, from the [source control audit](source-control-audit.md) (2026-11-11), Undo Last Commit, Edit Commit Message..., a commit opened to show what it changed, Merge Branch... and Delete Branch..., Abort Merge once taken, and Local History. Not built: the playlist marking what changed, a branch's colour, and a DAWproject's plug-ins and sends imported into a new project. While Phazite keeps no backward compatibility, an update can make older versions unreadable, though their bounces still play ([design section 18](design.md#18-projects-saving-and-export)) |
-| 4. v1 release | In progress: 4.1 (the Windows installer and uninstaller, file associations and the opt-in update check) and 4.2 (the notices in the app and the installer, the About box, and no ASIO or VST logos), 2026-11-07, 4.1 pending a check by hand; 4.6 (the sampler) and 4.7 (the FM synth), added by the owner and built on 2026-11-07, pending checks by hand; 4.8 (tempo changes along the song, with the tempo lane), added by the owner and built on 2026-11-08, pending a check by hand; 4.9 (recording, warping and consolidating after Ableton Live), added by the owner and built on 2026-11-08, pending a check by hand; 4.11 (chains, splits and instrument containers), added by the owner and built on 2026-11-09, pending a check by hand; 4.12 (the drum sampler as the drum samplers people use: 128 pads, envelopes, filters, layers and pads on tracks of their own), asked for by the owner and built on 2026-11-09, pending a check by hand; 4.13 (the sounds of dark synthwave after Exodus: drum synthesis and the Dark Synthwave Kit, sounds made from their spectra, a chorus of many voices, a plate, the FM's start phases and filter envelope, the Exciter, the wavetable's stack and drift, every poly note on a voice of its own, the Vinyl, and Exodus remade on them), asked for by the owner and built on 2026-11-10, pending a check by ear; 4.10 (sampled instruments on the Multisampler, added by the owner on 2026-11-08), 4.3 (code signing), 4.4 (documentation) and 4.5 (the release process) to come |
-| Architecture track | A6, Phazite's own engine, done (2026-11-04): Phazite owns its song model, its playback engine, its plug-in hosting in helper processes, its audio and MIDI devices and its renders, and builds on JUCE alone (T0 and T1, 2026-10-30; T2 and T3, 2026-11-02; T5, 2026-11-02 to 2026-11-03; T4 and T6, to 2026-11-04), pending the checks by hand of T3 and T4. A5's parts decided 2026-10-30 done: presets, the selection, waveforms and sections, and modulation of Phazite's devices (for the whole device; per note next); sandboxing done as A6's T3 (2026-11-02). A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes none of the engine's types and compiles without its headers, and the model's headers that name them are in `internal/` folders. On 2026-10-18 the format versions, the migrations and the support for old projects' devices went: pre-alpha keeps no backward compatibility (design.md, section 18) |
-
-ASIO is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH. VST is a registered trademark of Steinberg Media
+Technologies GmbH.

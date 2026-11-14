@@ -2,7 +2,7 @@
 title: Source control
 description: Save versions of a song, go back to one, hear old mixes, try ideas on branches, and get back work you didn't commit.
 sidebar:
-  order: 2
+  order: 12
 ---
 
 Phazite keeps a history of each song inside its project folder, the way git keeps a history of code. Open it with the branch icon down the left of the window (**Source Control**). Everything here works without an account or a network.

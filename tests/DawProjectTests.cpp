@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// DAWproject (model/project/internal/DawProject.h; docs/versions.md: DAWproject with versions, steps D1 and D2): a song
+// DAWproject (model/project/internal/DawProject.h; docs/design/versions.md: DAWproject with versions, steps D1 and D2): a song
 // written as one, in DAWproject's names (Project.xsd, version 1.0), what another DAW can't play bounced beside it, and the
 // zip, from the song as it is and from an old version.
 #include "TestSong.h"

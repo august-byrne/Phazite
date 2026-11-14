@@ -60,7 +60,7 @@ void LevelHistoryView::push (double milliseconds, const SongTime& song, float in
     while (! lines.empty() && lines.front().milliseconds < oldest)
         lines.pop_front();
 
-    // Only what moves the picture repaints: a history of silence doesn't, scrolled on (docs/performance-audit.md, section 8).
+    // Only what moves the picture repaints: a history of silence doesn't, scrolled on (docs/archive/performance-audit.md, section 8).
     std::vector<float> numbers { line != nullptr ? line->getValue() : 0.0f, isLineLit() ? 1.0f : 0.0f, (float) span };
 
     if (! isFlat())

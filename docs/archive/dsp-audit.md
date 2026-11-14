@@ -1,3 +1,5 @@
+> **Archived on 2026-11-13.** Frozen history, kept whole and not updated: what it says may no longer be so, and its links may no longer lead anywhere. What is current starts at [docs/README.md](../README.md).
+
 # DSP audit
 
 *2026-11-06, the owner's request: "do an audit of all of the DSP tools and packages we use (or are in JUCE) and find out if

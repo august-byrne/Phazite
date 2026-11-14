@@ -1,7 +1,7 @@
 # The project format
 
 *How a Phazite project is kept on disk, for anyone writing a tool that reads or writes one: its folder, its `.phazite`
-file and what the song in it holds. Written 2026-11-09, from the [format audit](format-audit.md). The song's elements and
+file and what the song in it holds. Written 2026-11-09, from the [format audit](archive/format-audit.md). The song's elements and
 properties are described one by one, with their types and ranges, in
 [`src/model/base/internal/Schema.h`](../src/model/base/internal/Schema.h), the one place Phazite names them; the
 history beside the project is [versions-format.md](versions-format.md). Where this file and the code disagree, the code is
@@ -100,6 +100,6 @@ and macros as Phazite names them. Phazite makes new IDs as it loads one.
 
 ## 6. Other DAWs
 
-DAWproject is how a project goes to and from other DAWs ([versions.md](versions.md#dawproject-with-versions)): what they
+DAWproject is how a project goes to and from other DAWs ([versions.md](archive/versions-plan.md#dawproject-with-versions)): what they
 can't hold (Phazite's own devices, containers, modulators, the chord lane) goes as bounces beside the notes. A VST3's
 state goes into a DAWproject as it is, since both hold its preset file.

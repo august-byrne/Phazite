@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The activity bar down the window's left edge and the left panel's two views, the browser and the versions
-// (docs/versions.md: What the user sees), in the whole window as the app builds it.
+// (docs/design/versions.md: What the user sees), in the whole window as the app builds it.
 #include "AppScreen.h"
 #include "TestClips.h"
 #include "TestSong.h"

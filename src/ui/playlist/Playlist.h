@@ -163,7 +163,7 @@ private:
     // The clips on the rows, row by row as the model lists them, which the tools find and select, and where each is in that
     // list. Clips that overlap show one under another in their row (getClipSubRows()); where two crossfade, a later one
     // shows over an earlier one. Only the clips in view have components, made as they come into view: a song can hold
-    // thousands of clips (docs/performance-audit.md, section 8). An audio clip's waveform stays until the clip leaves the
+    // thousands of clips (docs/archive/performance-audit.md, section 8). An audio clip's waveform stays until the clip leaves the
     // rows, so that it doesn't load again each time the clip scrolls back into view.
     std::vector<ClipInfo> shownClips;
     std::vector<ClipSubRow> shownSubRows; // shownSubRows[i] is shownClips[i]'s
@@ -175,7 +175,7 @@ private:
 
     // Where audio clips on a track meet, by track, as the model found them at the zoom of crossfadeZoom (its pixels a beat),
     // asked for when the mouse first comes over the track: a mouse move asks the model nothing, which made a move over a
-    // track of a dozen audio clips take a frame's time (docs/performance-audit.md, section 16). rebuildClips() forgets them.
+    // track of a dozen audio clips take a frame's time (docs/archive/performance-audit.md, section 16). rebuildClips() forgets them.
     std::unordered_map<TrackID, std::vector<CrossfadeSpot>> crossfadeSpots;
     double crossfadeZoom = 0.0;
 

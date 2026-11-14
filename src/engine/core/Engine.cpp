@@ -1200,7 +1200,14 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     for (; state.nextEvent < events.size() && events[state.nextEvent].beat < toBeat; ++state.nextEvent)
     {
         const auto& event = events[state.nextEvent];
-        const auto sample = std::clamp ((int) (std::llround (plan.tempo.toSamples (event.beat)) - transport.sample), 0, numSamples - 1);
+        const auto at = std::llround (plan.tempo.toSamples (event.beat)) - transport.sample;
+
+        // Its beat is in this stretch's last half sample, and its sample, the nearest, the next stretch's first: the next
+        // plays it there, so that it is on the same sample wherever a block ends. At the loop's end there is no next.
+        if (at >= numSamples && ! endsAtLoop)
+            break;
+
+        const auto sample = (int) std::clamp<std::int64_t> (at, 0, numSamples - 1);
 
         // A slide's length, in beats in the sequence, as the instrument takes it: in seconds at the song's tempo.
         const auto value =

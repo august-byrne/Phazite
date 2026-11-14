@@ -1,4 +1,4 @@
-# The command script (tests/CommandGoldenTests.cpp): after each step, every command whose state changed (on, or off when greyed out; ticked; the name menus show), and what is selected, where the playhead is and the loop's range (in beats), each if it changed. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+# The command script (tests/CommandGoldenTests.cpp): after each step, every command whose state changed (on, or off when greyed out; ticked; the name menus show), and what is selected, where the playhead is, the loop's range (in beats) and whether the song plays or records, each if it changed. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
 after start:
   edit.undo: off "Undo"
   edit.redo: off "Redo"
@@ -100,6 +100,7 @@ after start:
   selected: nothing
   playhead at 0.000
   loop 0.000-4.000 beats
+  stopped
 after select One:
   edit.delete: on "Delete Track"
   edit.duplicate: on "Duplicate Track"
@@ -214,10 +215,43 @@ after track.collapse:
   track.collapse: on, ticked "Collapse Track"
 after track.collapse:
   track.collapse: on "Collapse Track"
+after select nothing:
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.deselectAll: off "Deselect All"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
+  selected: nothing
+after track.collapseAll:
+  track.collapseAll: on "Expand All"
+after track.collapseAll:
+  track.collapseAll: on "Collapse All"
 after select One and Two:
   edit.delete: on "Delete 2 Tracks"
   edit.duplicate: on "Duplicate 2 Tracks"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
   track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
   selected: track One, track Two
 after track.groupIntoFolder:
   edit.undo: on "Undo Group into Folder"
@@ -395,10 +429,40 @@ after edit.delete:
   edit.deselectAll: off "Deselect All"
   section.loop: off "Loop Section"
   selected: nothing
+after section.outline.electronic:
+  edit.undo: on "Undo Apply Outline: Electronic (house, EDM)"
+  edit.undoOrRedo: on "Undo Apply Outline: Electronic (house, EDM)"
+  section.outline.electronic: on, ticked "Apply Outline: Electronic (house, EDM)"
+after section.outline.hipHop:
+  edit.undo: on "Undo Apply Outline: Hip-hop and trap"
+  edit.undoOrRedo: on "Undo Apply Outline: Hip-hop and trap"
+  section.outline.electronic: on "Apply Outline: Electronic (house, EDM)"
+  section.outline.hipHop: on, ticked "Apply Outline: Hip-hop and trap"
+after section.outline.lofi:
+  edit.undo: on "Undo Apply Outline: Lo-fi beat"
+  edit.undoOrRedo: on "Undo Apply Outline: Lo-fi beat"
+  section.outline.hipHop: on "Apply Outline: Hip-hop and trap"
+  section.outline.lofi: on, ticked "Apply Outline: Lo-fi beat"
+after section.outline.rnb:
+  edit.undo: on "Undo Apply Outline: R&B"
+  edit.undoOrRedo: on "Undo Apply Outline: R&B"
+  section.outline.lofi: on "Apply Outline: Lo-fi beat"
+  section.outline.rnb: on, ticked "Apply Outline: R&B"
+after section.outline.drumAndBass:
+  edit.undo: on "Undo Apply Outline: Drum and bass"
+  edit.undoOrRedo: on "Undo Apply Outline: Drum and bass"
+  section.outline.rnb: on "Apply Outline: R&B"
+  section.outline.drumAndBass: on, ticked "Apply Outline: Drum and bass"
+after section.outline.techno:
+  edit.undo: on "Undo Apply Outline: Techno"
+  edit.undoOrRedo: on "Undo Apply Outline: Techno"
+  section.outline.drumAndBass: on "Apply Outline: Drum and bass"
+  section.outline.techno: on, ticked "Apply Outline: Techno"
 after section.outline.pop:
   edit.undo: on "Undo Apply Outline: Pop"
   edit.undoOrRedo: on "Undo Apply Outline: Pop"
   section.outline.pop: on, ticked "Apply Outline: Pop"
+  section.outline.techno: on "Apply Outline: Techno"
 after section.outline.rock:
   edit.undo: on "Undo Apply Outline: Rock"
   edit.undoOrRedo: on "Undo Apply Outline: Rock"
@@ -532,6 +596,18 @@ after note.chop:
   edit.cut: on "Cut 6 Notes"
   edit.copy: on "Copy 6 Notes"
   selected: 6 notes (60 at 0.000 for 0.250, 60 at 0.250 for 0.250, 60 at 0.500 for 0.250, 60 at 0.750 for 0.250, 64 at 1.000 for 0.250, 64 at 1.250 for 0.250)
+after note.slide:
+  edit.undo: on "Undo Slide Note"
+  edit.undoOrRedo: on "Undo Slide Note"
+  note.slide: on, ticked "Slide Note"
+after note.slide:
+  note.slide: on "Slide Note"
+after note.portamento:
+  edit.undo: on "Undo Portamento"
+  edit.undoOrRedo: on "Undo Portamento"
+  note.portamento: on, ticked "Portamento"
+after note.portamento:
+  note.portamento: on "Portamento"
 after edit.mute:
   edit.undo: on "Undo Mute"
   edit.undoOrRedo: on "Undo Mute"
@@ -566,7 +642,58 @@ after edit.delete:
   note.portamento: off "Portamento"
   note.chop: off "Chop"
   selected: nothing
+after select the clip's notes again, and put the playhead at beat 1:
+  edit.delete: on "Delete 6 Notes"
+  edit.duplicate: on "Duplicate 6 Notes"
+  edit.mute: on "Mute"
+  edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut 6 Notes"
+  edit.copy: on "Copy 6 Notes"
+  note.transposeUp: on "Transpose Up"
+  note.transposeDown: on "Transpose Down"
+  note.octaveUp: on "Octave Up"
+  note.octaveDown: on "Octave Down"
+  note.lengthen: on "Lengthen Notes"
+  note.shorten: on "Shorten Notes"
+  note.legato: on "Legato"
+  note.slide: on "Slide Note"
+  note.portamento: on "Portamento"
+  note.chop: on "Chop"
+  selected: 6 notes (60 at 0.000 for 0.250, 60 at 0.250 for 0.250, 60 at 0.500 for 0.250, 60 at 0.750 for 0.250, 64 at 1.000 for 0.250, 64 at 1.250 for 0.250)
+  playhead at 1.000
+after edit.copy:
+  edit.paste: on "Paste 6 Notes"
+after edit.paste:
+  edit.undo: on "Undo Paste 6 Notes"
+  edit.undoOrRedo: on "Undo Paste 6 Notes"
+  edit.delete: on "Delete 4 Notes"
+  edit.duplicate: on "Duplicate 4 Notes"
+  edit.cut: on "Cut 4 Notes"
+  edit.copy: on "Copy 4 Notes"
+  selected: 4 notes (60 at 1.000 for 0.250, 60 at 1.250 for 0.250, 60 at 1.500 for 0.250, 60 at 1.750 for 0.250)
+after edit.cut:
+  edit.undo: on "Undo Cut 4 Notes"
+  edit.undoOrRedo: on "Undo Cut 4 Notes"
+  edit.delete: off "Delete"
+  edit.duplicate: off "Duplicate"
+  edit.mute: off "Mute"
+  edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  edit.paste: on "Paste 4 Notes"
+  note.transposeUp: off "Transpose Up"
+  note.transposeDown: off "Transpose Down"
+  note.octaveUp: off "Octave Up"
+  note.octaveDown: off "Octave Down"
+  note.lengthen: off "Lengthen Notes"
+  note.shorten: off "Shorten Notes"
+  note.legato: off "Legato"
+  note.slide: off "Slide Note"
+  note.portamento: off "Portamento"
+  note.chop: off "Chop"
+  selected: nothing
 after select nothing, and drop the notes' selection:
+  edit.paste: off "Paste 4 Notes"
 after import a tone onto Two at beat 8, and select it:
   edit.undo: on "Undo Script: import a tone onto Two at beat 8, and select it"
   edit.undoOrRedo: on "Undo Script: import a tone onto Two at beat 8, and select it"
@@ -608,6 +735,119 @@ after clip.fadeLinear:
   edit.undoOrRedo: on "Undo Linear Fades"
   clip.fadeLinear: on, ticked "Linear Fades"
   clip.fadeSCurve: on "S-Curve Fades"
+after clip.reverse:
+  edit.undo: on "Undo Reverse"
+  edit.undoOrRedo: on "Undo Reverse"
+  clip.reverse: on, ticked "Reverse"
+after clip.reverse:
+  clip.reverse: on "Reverse"
+after clip.followTempo:
+  edit.undo: on "Undo Follow Tempo"
+  edit.undoOrRedo: on "Undo Follow Tempo"
+  clip.followTempo: on, ticked "Follow Tempo"
+  transport.samplesFollowTempo: on, ticked "Samples Follow Tempo"
+after clip.followTempo:
+  clip.followTempo: on "Follow Tempo"
+  transport.samplesFollowTempo: on "Samples Follow Tempo"
+after transport.samplesFollowTempo:
+  edit.undo: on "Undo Samples Follow Tempo"
+  edit.undoOrRedo: on "Undo Samples Follow Tempo"
+  clip.followTempo: on, ticked "Follow Tempo"
+  transport.samplesFollowTempo: on, ticked "Samples Follow Tempo"
+after transport.samplesFollowTempo:
+  clip.followTempo: on "Follow Tempo"
+  transport.samplesFollowTempo: on "Samples Follow Tempo"
+after clip.normalize:
+  edit.undo: on "Undo Normalize"
+  edit.undoOrRedo: on "Undo Normalize"
+after edit.copy:
+  edit.paste: on "Paste Clip"
+after put the playhead at beat 16:
+  playhead at 16.000
+after edit.paste:
+  edit.undo: on "Undo Paste Clip"
+  edit.undoOrRedo: on "Undo Paste Clip"
+  selected: clip on Two at 16.000
+after edit.cut:
+  edit.undo: on "Undo Cut Clip"
+  edit.undoOrRedo: on "Undo Cut Clip"
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  clip.fadeLinear: off "Linear Fades"
+  clip.fadeConvex: off "Convex Fades"
+  clip.fadeConcave: off "Concave Fades"
+  clip.fadeSCurve: off "S-Curve Fades"
+  clip.reverse: off "Reverse"
+  clip.followTempo: off "Follow Tempo"
+  clip.normalize: off "Normalize"
+  edit.split: off "Split"
+  edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  clip.consolidate: off "Consolidate"
+  selected: nothing
+after select Two:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  edit.deselectAll: on "Deselect All"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  track.freeze: on "Freeze Track"
+  track.bounceInPlace: on "Bounce in Place"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
+  selected: track Two
+after track.freeze:
+  track.freeze: on, ticked "Unfreeze Track"
+after track.freeze:
+  track.freeze: on "Freeze Track"
+after track.bounceInPlace:
+  edit.undo: on "Undo Bounce in Place"
+  edit.undoOrRedo: on "Undo Bounce in Place"
+  selected: track Two (Bounce)
+after select the tone on Two:
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  clip.fadeLinear: on, ticked "Linear Fades"
+  clip.fadeConvex: on "Convex Fades"
+  clip.fadeConcave: on "Concave Fades"
+  clip.fadeSCurve: on "S-Curve Fades"
+  clip.reverse: on "Reverse"
+  clip.followTempo: on "Follow Tempo"
+  clip.normalize: on "Normalize"
+  edit.split: on "Split"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
+  clip.consolidate: on "Consolidate"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
+  selected: clip on Two at 8.000
 after edit.deleteAndCloseGap:
   edit.undo: on "Undo Delete and Close Gap"
   edit.undoOrRedo: on "Undo Delete and Close Gap"
@@ -673,6 +913,10 @@ after clear the range:
   edit.cut: off "Cut"
   edit.copy: off "Copy"
   selected: nothing
+after transport.punch:
+  transport.punch: on, ticked "Punch In"
+after transport.punch:
+  transport.punch: on "Punch In"
 after transport.loop:
   transport.loop: on "Loop"
   transport.punch: off "Punch In"
@@ -682,32 +926,398 @@ after transport.loop:
 after transport.loopSong:
   transport.loopSong: on, ticked "Loop the Song"
   transport.punch: off "Punch In"
-  loop 0.000-8.000 beats
+  loop 0.000-12.000 beats
 after transport.loop:
   transport.loop: on "Loop"
   transport.loopSong: on "Loop the Song"
 after transport.loopSelection:
   transport.loop: on, ticked "Loop"
   transport.loopSong: on, ticked "Loop the Song"
-after select nothing:
-after edit.selectAll:
-  edit.delete: on "Delete 3 Clips"
+after add two reverbs to One, and select them:
+  edit.undo: on "Undo Script: add two reverbs to One, and select them"
+  edit.undoOrRedo: on "Undo Script: add two reverbs to One, and select them"
+  edit.deselectAll: on "Deselect All"
+  device.group: on "Group into Container"
+after device.group:
+  edit.undo: on "Undo Group into Container"
+  edit.undoOrRedo: on "Undo Group into Container"
+  device.group: off "Group into Container"
+  device.ungroup: on "Ungroup Container"
+after device.ungroup:
+  edit.undo: on "Undo Ungroup Container"
+  edit.undoOrRedo: on "Undo Ungroup Container"
+  device.group: on "Group into Container"
+  device.ungroup: off "Ungroup Container"
+after device.group:
+  edit.undo: on "Undo Group into Container"
+  edit.undoOrRedo: on "Undo Group into Container"
+  device.group: off "Group into Container"
+  device.ungroup: on "Ungroup Container"
+after select One:
+  edit.delete: on "Delete Track"
+  edit.duplicate: on "Duplicate Track"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on, ticked "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  track.freeze: on "Freeze Track"
+  track.bounceInPlace: on "Bounce in Place"
+  device.ungroup: off "Ungroup Container"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
+  selected: track One
+after automation.showLanes:
+  automation.showLanes: on, ticked "Show Automation"
+after automation.showLanes:
+  automation.showLanes: on "Show Automation"
+after automation.touch:
+  automation.read: on "Read Automation"
+  automation.touch: on, ticked "Touch Automation"
+after automation.latch:
+  automation.touch: on "Touch Automation"
+  automation.latch: on, ticked "Latch Automation"
+after automation.write:
+  automation.latch: on "Latch Automation"
+  automation.write: on, ticked "Write Automation"
+after automation.read:
+  automation.read: on, ticked "Read Automation"
+  automation.write: on "Write Automation"
+after add two points to One's volume, and select them:
+  edit.undo: on "Undo Script: add two points to One's volume, and select them"
+  edit.undoOrRedo: on "Undo Script: add two points to One's volume, and select them"
+  edit.delete: on "Delete 2 Automation Points"
+  edit.duplicate: on "Duplicate 2 Automation Points"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
+  automation.showLanes: off "Show Automation"
+  automation.raisePoints: on "Raise Automation Points"
+  automation.lowerPoints: on "Lower Automation Points"
+  automation.raisePointsMore: on "Raise Automation Points More"
+  automation.lowerPointsMore: on "Lower Automation Points More"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
+  selected: nothing
+after automation.raisePoints:
+  edit.undo: on "Undo Raise Automation Points"
+  edit.undoOrRedo: on "Undo Raise Automation Points"
+after automation.lowerPoints:
+  edit.undo: on "Undo Lower Automation Points"
+  edit.undoOrRedo: on "Undo Lower Automation Points"
+after automation.raisePointsMore:
+  edit.undo: on "Undo Raise Automation Points More"
+  edit.undoOrRedo: on "Undo Raise Automation Points More"
+after automation.lowerPointsMore:
+  edit.undo: on "Undo Lower Automation Points More"
+  edit.undoOrRedo: on "Undo Lower Automation Points More"
+after turn One's pan:
+  edit.undo: on "Undo Change Pan"
+  edit.undoOrRedo: on "Undo Change Pan"
+  automation.automateLastTouched: on "Automate Pan"
+after automation.automateLastTouched:
+after add a clip to One at beat 32:
+  edit.undo: on "Undo Script: add a clip to One at beat 32"
+  edit.undoOrRedo: on "Undo Script: add a clip to One at beat 32"
+  loop 0.000-36.000 beats
+after remove the lane of One's pan:
+after add a clip to One at beat 40, and select both:
+  edit.undo: on "Undo Script: add a clip to One at beat 40, and select both"
+  edit.undoOrRedo: on "Undo Script: add a clip to One at beat 40, and select both"
+  edit.delete: on "Delete 2 Clips"
   edit.deleteAndCloseGap: on "Delete and Close Gap"
-  edit.duplicate: on "Duplicate 3 Clips"
+  edit.duplicate: on "Duplicate 2 Clips"
   edit.duplicateAsAlias: on "Duplicate as Alias"
   edit.mute: on "Mute"
   edit.split: on "Split"
-  edit.deselectAll: on "Deselect All"
-  edit.cut: on "Cut 3 Clips"
-  edit.copy: on "Copy 3 Clips"
+  edit.cut: on "Cut 2 Clips"
+  edit.copy: on "Copy 2 Clips"
   clip.consolidate: on "Consolidate"
-  selected: clip on One at 0.000, clip on One at 2.000, clip on One at 4.000
+  automation.raisePoints: off "Raise Automation Points"
+  automation.lowerPoints: off "Lower Automation Points"
+  automation.raisePointsMore: off "Raise Automation Points More"
+  automation.lowerPointsMore: off "Lower Automation Points More"
+  selected: clip on One at 32.000, clip on One at 40.000
+  loop 0.000-44.000 beats
+after clip.consolidate:
+  edit.undo: on "Undo Consolidate"
+  edit.undoOrRedo: on "Undo Consolidate"
+  edit.delete: on "Delete Clip"
+  edit.duplicate: on "Duplicate Clip"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
+  selected: clip on One at 32.000
+after transport.metronome:
+  transport.metronome: on, ticked "Metronome"
+after transport.metronome:
+  transport.metronome: on "Metronome"
+after transport.countIn:
+  transport.countIn: on, ticked "Count-In"
+after transport.countIn:
+  transport.countIn: on "Count-In"
+after transport.overdub:
+  transport.overdub: on "Overdub"
+after transport.overdub:
+  transport.overdub: on, ticked "Overdub"
+after transport.quantizeRecordings:
+  transport.quantizeRecordings: on, ticked "Quantize Recordings"
+after transport.quantizeRecordings:
+  transport.quantizeRecordings: on "Quantize Recordings"
+after transport.lowLatency:
+  transport.lowLatency: on, ticked "Low Latency"
+after transport.lowLatency:
+  transport.lowLatency: on "Low Latency"
+after transport.patternsFollowTempo:
+  edit.undo: on "Undo Patterns Follow Tempo"
+  edit.undoOrRedo: on "Undo Patterns Follow Tempo"
+  transport.patternsFollowTempo: on "Patterns Follow Tempo"
+after transport.patternsFollowTempo:
+  transport.patternsFollowTempo: on, ticked "Patterns Follow Tempo"
+after put the playhead at beat 8:
+  playhead at 8.000
+after transport.addTempoChange:
+  edit.undo: on "Undo Add Tempo Change"
+  edit.undoOrRedo: on "Undo Add Tempo Change"
+  transport.removeTempoChanges: on "Remove Tempo Changes"
+after transport.removeTempoChanges:
+  edit.undo: on "Undo Remove Tempo Changes"
+  edit.undoOrRedo: on "Undo Remove Tempo Changes"
+  transport.removeTempoChanges: off "Remove Tempo Changes"
+after transport.addTempoChange:
+  edit.undo: on "Undo Add Tempo Change"
+  edit.undoOrRedo: on "Undo Add Tempo Change"
+  transport.removeTempoChanges: on "Remove Tempo Changes"
+after add a track Take, which records input 1 unheard, loop beats 0 to 2, and put the playhead at the start:
+  edit.undo: on "Undo Change Input Monitoring"
+  edit.undoOrRedo: on "Undo Change Input Monitoring"
+  transport.loopSong: on "Loop the Song"
+  transport.punch: on "Punch In"
+  playhead at 0.000
+  loop 0.000-2.000 beats
+after select Take:
+  edit.delete: on "Delete Track"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Track"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  edit.split: off "Split"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  clip.consolidate: off "Consolidate"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
+  track.arm: on "Arm Track"
+  selected: track Take
+after track.arm:
+  transport.record: on "Record"
+  track.arm: on, ticked "Arm Track"
+after transport.record:
+  transport.record: on, ticked "Record"
+  recording
+after playing for 2.50 s:
+after transport.record:
+  edit.undo: on "Undo Record"
+  edit.undoOrRedo: on "Undo Record"
+  track.freeze: on "Freeze Track"
+  track.bounceInPlace: on "Bounce in Place"
+  transport.record: on "Record"
+  stopped
+after select the clip recorded:
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  clip.fadeLinear: on, ticked "Linear Fades"
+  clip.fadeConvex: on "Convex Fades"
+  clip.fadeConcave: on "Concave Fades"
+  clip.fadeSCurve: on "S-Curve Fades"
+  clip.reverse: on "Reverse"
+  clip.followTempo: on, ticked "Follow Tempo"
+  clip.normalize: on "Normalize"
+  edit.split: on "Split"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
+  clip.consolidate: on "Consolidate"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
+  track.arm: off "Arm Track"
+  clip.previousTake: on "Previous Take"
+  clip.nextTake: on "Next Take"
+  selected: clip on Take at 0.000
+after clip.previousTake:
+  edit.undo: on "Undo Previous Take"
+  edit.undoOrRedo: on "Undo Previous Take"
+after clip.nextTake:
+  edit.undo: on "Undo Next Take"
+  edit.undoOrRedo: on "Undo Next Take"
+after select Take:
+  edit.delete: on "Delete Track"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Track"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  clip.fadeLinear: off "Linear Fades"
+  clip.fadeConvex: off "Convex Fades"
+  clip.fadeConcave: off "Concave Fades"
+  clip.fadeSCurve: off "S-Curve Fades"
+  clip.reverse: off "Reverse"
+  clip.followTempo: off "Follow Tempo"
+  clip.normalize: off "Normalize"
+  edit.split: off "Split"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  track.groupIntoFolder: on "Group into Folder"
+  track.collapse: on "Collapse Track"
+  track.pin: on "Pin Track"
+  track.moveUp: on "Move Track Up"
+  track.moveDown: on "Move Track Down"
+  track.mute: on "Mute Track"
+  track.solo: on "Solo Track"
+  track.freeze: on "Freeze Track"
+  track.bounceInPlace: on "Bounce in Place"
+  clip.consolidate: off "Consolidate"
+  automation.showLanes: on "Show Automation"
+  automation.read: on, ticked "Read Automation"
+  automation.touch: on "Touch Automation"
+  automation.latch: on "Latch Automation"
+  automation.write: on "Write Automation"
+  track.arm: on, ticked "Arm Track"
+  clip.previousTake: off "Previous Take"
+  clip.nextTake: off "Next Take"
+  selected: track Take
+after track.arm:
+  transport.record: off "Record"
+  track.arm: on "Arm Track"
+after transport.playStop:
+  playing
+after playing for 0.50 s:
+after transport.playStop:
+  stopped
+after transport.playPause:
+  playing
+after playing for 0.50 s:
+after transport.playPause:
+  playhead at 1.000
+  stopped
+after add a track Keys with a synth, which live MIDI plays:
+  edit.undo: on "Undo Add Track"
+  edit.undoOrRedo: on "Undo Add Track"
+  track.freeze: off "Freeze Track"
+  track.bounceInPlace: off "Bounce in Place"
+  transport.record: on "Record"
+  track.arm: off "Arm Track"
+  transport.capture: on "Capture"
+  selected: track Keys
+after transport.capture:
+  edit.undo: on "Undo Capture"
+  edit.undoOrRedo: on "Undo Capture"
+  edit.delete: on "Delete Clip"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate Clip"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  edit.split: on "Split"
+  edit.cut: on "Cut Clip"
+  edit.copy: on "Copy Clip"
+  track.groupIntoFolder: off "Group into Folder"
+  track.collapse: off "Collapse Track"
+  track.pin: off "Pin Track"
+  track.moveUp: off "Move Track Up"
+  track.moveDown: off "Move Track Down"
+  track.mute: off "Mute Track"
+  track.solo: off "Solo Track"
+  clip.consolidate: on "Consolidate"
+  automation.showLanes: off "Show Automation"
+  automation.read: off "Read Automation"
+  automation.touch: off "Touch Automation"
+  automation.latch: off "Latch Automation"
+  automation.write: off "Write Automation"
+  selected: clip on Keys at 0.000
+after edit.delete:
+  edit.undo: on "Undo Delete Clip"
+  edit.undoOrRedo: on "Undo Delete Clip"
+  edit.delete: off "Delete"
+  edit.deleteAndCloseGap: off "Delete and Close Gap"
+  edit.duplicate: off "Duplicate"
+  edit.duplicateAsAlias: off "Duplicate as Alias"
+  edit.mute: off "Mute"
+  edit.split: off "Split"
+  edit.deselectAll: off "Deselect All"
+  edit.cut: off "Cut"
+  edit.copy: off "Copy"
+  clip.consolidate: off "Consolidate"
+  selected: nothing
+after select nothing:
+after edit.selectAll:
+  edit.delete: on "Delete 7 Clips"
+  edit.deleteAndCloseGap: on "Delete and Close Gap"
+  edit.duplicate: on "Duplicate 7 Clips"
+  edit.duplicateAsAlias: on "Duplicate as Alias"
+  edit.mute: on "Mute"
+  clip.fadeLinear: on, ticked "Linear Fades"
+  clip.fadeConvex: on "Convex Fades"
+  clip.fadeConcave: on "Concave Fades"
+  clip.fadeSCurve: on "S-Curve Fades"
+  clip.reverse: on "Reverse"
+  clip.followTempo: on "Follow Tempo"
+  clip.normalize: on "Normalize"
+  edit.split: on "Split"
+  edit.deselectAll: on "Deselect All"
+  edit.cut: on "Cut 7 Clips"
+  edit.copy: on "Copy 7 Clips"
+  clip.consolidate: on "Consolidate"
+  clip.previousTake: on "Previous Take"
+  clip.nextTake: on "Next Take"
+  selected: clip on One at 0.000, clip on One at 2.000, clip on One at 4.000, clip on One at 32.000, clip on Two (Bounce) at 0.000, clip on Two (Bounce) at 2.000, clip on Take at 0.000
 after select One:
   edit.delete: on "Delete Track"
   edit.deleteAndCloseGap: off "Delete and Close Gap"
   edit.duplicate: on "Duplicate Track"
   edit.duplicateAsAlias: off "Duplicate as Alias"
   edit.mute: off "Mute"
+  clip.fadeLinear: off "Linear Fades"
+  clip.fadeConvex: off "Convex Fades"
+  clip.fadeConcave: off "Concave Fades"
+  clip.fadeSCurve: off "S-Curve Fades"
+  clip.reverse: off "Reverse"
+  clip.followTempo: off "Follow Tempo"
+  clip.normalize: off "Normalize"
   edit.split: off "Split"
   edit.cut: off "Cut"
   edit.copy: off "Copy"
@@ -726,15 +1336,18 @@ after select One:
   automation.touch: on "Touch Automation"
   automation.latch: on "Latch Automation"
   automation.write: on "Write Automation"
+  clip.previousTake: off "Previous Take"
+  clip.nextTake: off "Next Take"
   selected: track One
 after edit.selectAll:
-  edit.delete: on "Delete 4 Tracks"
-  edit.duplicate: on "Duplicate 4 Tracks"
+  edit.delete: on "Delete 7 Tracks"
+  edit.duplicate: on "Duplicate 7 Tracks"
   track.ungroup: on "Ungroup Folder"
   track.pin: on "Pin Track"
   track.freeze: off "Freeze Track"
   track.bounceInPlace: off "Bounce in Place"
-  selected: track Group, track One, track Two, track Return 1
+  track.arm: on "Arm Track"
+  selected: track Group, track One, track Two, track Two (Bounce), track Return 1, track Take, track Keys
 after edit.deselectAll:
   edit.delete: off "Delete"
   edit.duplicate: off "Duplicate"
@@ -752,24 +1365,21 @@ after edit.deselectAll:
   automation.touch: off "Touch Automation"
   automation.latch: off "Latch Automation"
   automation.write: off "Write Automation"
+  track.arm: off "Arm Track"
   selected: nothing
 after edit.undo:
-  edit.undo: on "Undo Duplicate Range"
-  edit.redo: on "Redo Delete Range"
-  edit.undoOrRedo: on "Redo Delete Range"
-  loop 0.000-12.000 beats
+  edit.undo: on "Undo Capture"
+  edit.redo: on "Redo Delete Clip"
+  edit.undoOrRedo: on "Redo Delete Clip"
 after edit.redo:
-  edit.undo: on "Undo Delete Range"
+  edit.undo: on "Undo Delete Clip"
   edit.redo: off "Redo"
-  edit.undoOrRedo: on "Undo Delete Range"
-  loop 0.000-8.000 beats
+  edit.undoOrRedo: on "Undo Delete Clip"
 after edit.undoOrRedo:
-  edit.undo: on "Undo Duplicate Range"
-  edit.redo: on "Redo Delete Range"
-  edit.undoOrRedo: on "Redo Delete Range"
-  loop 0.000-12.000 beats
+  edit.undo: on "Undo Capture"
+  edit.redo: on "Redo Delete Clip"
+  edit.undoOrRedo: on "Redo Delete Clip"
 after edit.undoOrRedo:
-  edit.undo: on "Undo Delete Range"
+  edit.undo: on "Undo Delete Clip"
   edit.redo: off "Redo"
-  edit.undoOrRedo: on "Undo Delete Range"
-  loop 0.000-8.000 beats
+  edit.undoOrRedo: on "Undo Delete Clip"

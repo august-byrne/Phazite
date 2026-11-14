@@ -1,3 +1,5 @@
+> **Archived on 2026-11-13.** Frozen history, kept whole and not updated: what it says may no longer be so, and its links may no longer lead anywhere. What is current starts at [docs/README.md](../README.md).
+
 # Versions
 
 *Status: built (2026-11-04 and 2026-11-05) and on `main`. Written at the owner's request on 2026-11-04 as a plan, revised the same day after a survey of [what others tried](#what-others-tried), and kept as the design, with [what was built](#as-built) beside it.* It covers three things:

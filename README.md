@@ -20,7 +20,11 @@ Phazite is a free, open-source digital audio workstation (DAW) for making beats 
 
 **Pre-alpha.** There are no downloads yet, so you [build it yourself](#try-it). Projects saved now may not open in later builds.
 
-What works today, on Windows:
+Everything listed here is built and passes its automated tests. Much of it has not yet been tried by a person: the
+"Tried by hand" list after it says which is which, and [the hand checks](docs/hand-checks.md) have every check that
+is still open, as steps you can follow.
+
+What is built, on Windows:
 
 - **Arrange:** a playlist of tracks, folders and clips, song sections and outlines, a chord lane with 40 progressions, a tempo lane whose tempo holds, jumps or ramps, automation lanes, and Cut, Copy, Paste and Undo throughout.
 - **Write:** a piano roll with a drum mode, keys and scales, chord stamps and transforms; audio clips that follow the tempo, through its changes too, change pitch or play backwards.
@@ -34,7 +38,16 @@ What works today, on Windows:
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
 
-The passes on performance and accessibility are done, and so are a Windows installer (which you [build yourself](docs/building.md#the-installer) until the first release), an update check you can turn on, every license shown in the app, and two more instruments: a sampler that plays a sound across the keys and slices loops, and an FM synth. Next come code signing, a user guide and version 1; the browser's filters, keys, collections and Swap (trying sounds and presets in place as the beat plays), planned for after it, came early. After it come rounds of testing with new users, the browser's analysis of your own sounds, chord suggestions and the sound generator. The [roadmap](docs/roadmap.md) has the plan step by step.
+There is also a Windows installer (which you [build yourself](docs/building.md#the-installer) until the first release), an update check you can turn on, and every license shown in the app.
+
+Tried by hand:
+
+- **Tried by the owner:** automation, modulators and macros, containers and presets, the audio clip editor, the chord lane, the mixer's sends and sidechains, freeze, bounce and stems, the devices' sound against reference plug-ins, time-stretching, the presets by ear, plug-in windows, reopening with plug-ins off after a crash, and the installer.
+- **Passed its tests only:** recording through an audio interface, a MIDI keyboard, a screen reader (Narrator) reading the window, a DAWproject opened in Bitwig Studio or Studio One, a wide set of third-party VST3 plug-ins, the update from a published release, and a first session by someone new to Phazite.
+
+What is not there yet, among the things you may expect: MIDI controllers (the sustain pedal, pitch bend and the mod wheel are not recorded or edited), MIDI learn and MIDI output, plug-ins with more than one stereo output, take lanes and comping, time-signature changes along the song, and sampled acoustic instruments. A stretched or warped clip is silent until its render finishes.
+
+A whole-project audit found about 300 problems; its 16 worst are fixed, and the rest are the plan. Next come the remaining bugs that can lose work, the hand checks above, and the features a beat maker meets first, then a beta; a signed installer, the full user guide and projects that open in every later version come with 1.0. The [roadmap](docs/roadmap.md) has the plan stage by stage, and the [changelog](docs/changelog.md) what was built so far.
 
 | Platform | Status |
 |---|---|

@@ -1,3 +1,5 @@
+> **Archived on 2026-11-13.** Frozen history, kept whole and not updated: what it says may no longer be so, and its links may no longer lead anywhere. What is current starts at [docs/README.md](../README.md).
+
 # Source control audit
 
 *2026-11-11, the owner's request: "I want an audit on how our current source control works. I also want you to research

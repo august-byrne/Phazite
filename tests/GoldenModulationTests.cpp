@@ -36,10 +36,15 @@ phazite::test::GoldenRender golden (const char* name, const char* about)
 // Renders a song as it is, then with a change, as a golden render (RenderHarness.h: checkGoldenChange()). Phazite's engine
 // plays modulation on the song's control points, its modulators from their own starts, the same every time.
 void checkChange (TestSong& song, const std::function<void()>& change, const char* name, const char* about,
-                  const phazite::test::ChangeCheck& check)
+                  const phazite::test::ChangeCheck& check, const char* liveDiffers = "")
 {
-    phazite::test::checkGoldenChange (song.context, change, golden (name, about), check);
+    phazite::test::checkGoldenChange (song.context, change, golden (name, about), check, liveDiffers);
 }
+
+// Why a song with a modulator as it is made doesn't sound live as its render does (RenderHarness.h: liveDiffers): its sync is
+// Free, so its cycle runs on while the song is stopped and playback finds it wherever it is, while a render starts it at
+// its beginning. Synced to the transport or to its notes it would play live as rendered.
+constexpr const char* runsFree = "a modulator whose sync is Free runs on while the song is stopped; a render starts it afresh";
 
 // A tone on the first track, from the song's start for 4 s at 120 BPM.
 void addTone (TestSong& song, double frequency = 440.0)
@@ -78,7 +83,8 @@ TEST_SUITE ("golden")
                 song.modulate (lfo, song.getVolumeParameter (song.firstTrack), 0.5f);
             },
             "modulation-lfo", "an LFO, as it is made, swinging a tone's volume by half its range.",
-            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 10.0f, "the LFO swings the volume"); });
+            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 10.0f, "the LFO swings the volume"); },
+            runsFree);
     }
 
     TEST_CASE ("Golden render: an envelope follower pans a tone as loud as its track is")
@@ -118,7 +124,8 @@ TEST_SUITE ("golden")
             },
             "modulation-steps", "a step sequencer, its steps rising, stepping a tone's volume by half its range.",
             // Its steps last a bar each (2 s): from the song's start, its first (-1) and its second, 4.9 dB louder.
-            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 4.0f, "the steps move the volume"); });
+            [] (const Fingerprint&, const Fingerprint& after) { return swings (after, 2, 38, 4.0f, "the steps move the volume"); },
+            runsFree);
     }
 
     TEST_CASE ("Golden render: a breakpoint envelope moves a tone's volume")
@@ -136,7 +143,8 @@ TEST_SUITE ("golden")
             [] (const Fingerprint& before, const Fingerprint& after)
             {
                 return phazite::test::differSomewhere (before, after, 3.0f) && swings (after, 2, 38, 3.0f, "the envelope moves the volume");
-            });
+            },
+            runsFree);
     }
 
     TEST_CASE ("Golden render: a note follower moves a filter with the notes played")

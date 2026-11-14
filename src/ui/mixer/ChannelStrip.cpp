@@ -342,7 +342,7 @@ juce::String ChannelStrip::describeInput() const
 
 void ChannelStrip::timerCallback()
 {
-    if (! isShowing()) // what is due waits until it shows (docs/performance-audit.md, U5)
+    if (! isShowing()) // what is due waits until it shows (docs/archive/performance-audit.md, U5)
         return;
 
     if (refreshDue)

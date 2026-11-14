@@ -1,0 +1,206 @@
+# Phazite's engine
+
+*Design section 23.*
+
+Phazite plays, records and renders its songs with code of its own. It builds on JUCE for the audio and MIDI devices,
+audio files, the plug-in formats and the windows, and on nothing else for playback. This page describes the three
+parts and how they meet: the song, which is Phazite's own document; the engine, which plays a plan; and the step
+between them, which compiles the song into what plays. The layers and where the code lives are in
+[../architecture.md](../architecture.md).
+
+## Status
+
+| Feature | State | Note |
+| --- | --- | --- |
+| The song as Phazite's own document, with one undo history | Built | |
+| Playback by Phazite's own engine | Built | |
+| The same sound at any buffer size | Built | |
+| Delay compensation on every path, sends and sidechains too | Built | |
+| Several threads playing each block | Built | |
+| Audio files streamed from disk, and resampled where their rate differs | Built | |
+| Tempo changes, ramps and time signatures along the song | Built | |
+| Recording through the engine, known to the sample | Built | Not yet tried by a person with an ASIO® interface |
+| Offline renders the same to the last bit on any number of threads | Built | |
+| Plug-ins in helper processes | Built | [plugin-hosting.md](plugin-hosting.md) |
+| Phazite's own devices, engine-neutral | Built | [devices.md](devices.md) |
+| Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
+| Browser previews on an engine of their own | Built | |
+| Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
+| Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
+
+## The song
+
+The song is Phazite's own document: its tempo map, tracks and folders, clips with their notes, devices, containers,
+sends, automation, modulators and macros, sections and the chord lane.
+
+- **IDs.** Each item has an ID that the song gives. An ID is never given twice and never taken back by an undo.
+  Everything outside the model names tracks, clips, notes, sections and devices by these IDs.
+- **One schema.** Every name the song holds is defined once. A project file is the song alone, saved as XML
+  ([projects-saving-export.md](projects-saving-export.md)).
+- **One undo history.** The song keeps its own undo history, in which every change is one named step. Undo puts
+  back what plays as well, the values set by hand included.
+- **What is not an undo step:** mute and solo, freezing a track, the loop, and view state.
+- **A device's own state.** What a plug-in holds of its own (its settings, program and channel layout) is stored
+  into the song outside the undo history, before the song is saved or copied. A change made in the plug-in's window
+  counts as an unsaved change.
+- **Unsaved changes are found by comparing.** A value written again as another type notifies without changing
+  anything, so the project keeps a copy of the song as opened or last saved and counts a change only when what
+  counts differs from it.
+- **Aliases.** Each clip of an alias group holds the group's notes in its own element, so an edit changes every
+  clip of the group in the same undo step.
+- **Time edits** make a section longer or shorter rather than cutting it in two.
+
+### Time
+
+- **Positions are beats,** and a beat is a quarter note whatever the time signature, as MIDI and DAWproject count
+  them. A tempo counts quarter notes a minute. So clips, notes, automation and sections stay on their beats when
+  the tempo or the time signature changes.
+- **A time signature sets two things only:** how long its bar is (numerator x 4 / denominator quarter notes: 3 in
+  6/8, 3.5 in 7/8, 4 in 2/2), and its own beat, the note it counts (4 / denominator quarter notes). The grid's Beat,
+  the inspector's bar and beat, the count-in and the metronome go by that beat.
+- **The tempo map** holds each tempo and time signature from a beat on. A tempo holds until the next and then
+  jumps, or ramps to it, straight or bent. The engine plays ramps exactly, and bent ones in straight pieces.
+- **A device's rate in time with the song** is a note value, in quarter notes, or so many of the song's bars, each
+  as long as its time signature makes it. A "1 bar" LFO or delay is three quarter notes in 6/8, and a bar's LFO
+  starts its cycle with each bar, across a change of time signature too.
+- **A plug-in's playhead** has the song's place in quarter notes, its time in samples, the time signature, and the
+  bar it is in. While the song is stopped, every piece of a block is where the playhead is.
+
+## From the song to what plays
+
+The model compiles the song into a **plan**: each track's notes, audio clips, devices, automation and fader, its
+sends, and the buses and the master they reach.
+
+- **The engine is handed each plan whole** and frees nothing on the audio thread. The old plan is freed on the
+  message thread.
+- **What sounds, sounds on.** What plays from one plan to the next (each strip and channel, each device, each
+  modulator) is kept by the song's IDs, so a note rings on through an edit.
+- **A value set by hand reaches what plays at once,** without a new plan: a device's parameter or switch, a
+  channel's volume, pan, mute and solo, and a plug-in's parameter.
+- **Each open project has a playback session.** It gives the engine the song again as it changes, owns the song's
+  plug-in instances and its recorder, plays the transport, takes live MIDI into the song, and keeps the take it
+  records.
+- **The engine context** owns the audio device, the plug-in host and the engine on the device. It is made once, as
+  the app starts, and outlives every project.
+- **A second engine** beside the song's plays the browser's previews and the startup sound, so a preview never
+  disturbs the song.
+
+## The playback engine
+
+The engine is engine-neutral: it knows nothing of the song model. It uses JUCE's core, audio and DSP modules,
+r8brain-free-src and Phazite's devices only.
+
+- **The transport** is driven by the message thread through a lock-free queue, and read back through the engine's
+  playhead. The window reads where the playhead was at its frames' own times, from a clock smoothed over the last
+  blocks.
+- **Control points.** Automation and modulation move what they move on the song's control points, one every 32
+  samples from its start. So a song plays the same at any buffer size
+  ([automation-and-modulation.md](automation-and-modulation.md)).
+- **Delay compensation** lines up every path to the master, the sends' and the sidechains' too. The Low Latency
+  switch leaves it off for what is played live ([performance.md](performance.md)).
+- **Worker threads** help play each block, each strip a task, at the audio thread's priority.
+- **Audio files** are read ahead of where they play by a reading thread, so the audio thread never waits for the
+  disk. A file at another rate than the engine's is resampled as it plays.
+- **Live notes** come from any thread through a lock-free queue. The engine keeps the notes played live in the last
+  30 seconds, for Capture.
+- **Recording** is the engine's too: it knows the sample a take started on, and copies the armed inputs into buffers
+  that a thread of Phazite's writes into files ([recording.md](recording.md)).
+- **The metronome's click** is synthesized, and the master's loudness is measured by EBU R128
+  ([mixer.md](mixer.md)).
+- **A commit's bounce** is heard in place of the song by a part of the plan that plays it after the master, in time
+  with the playhead ([versions.md](versions.md)).
+
+### Offline
+
+Exports, stems, freezes, bounces and consolidations play the song, or a part of it, offline on a thread of their
+own, through the same engine. The result is the same to the last bit however many threads play it. While the open
+song renders, the render has the song's plug-ins and playback stops.
+
+## Devices
+
+Phazite's own instruments and effects are engine-neutral DSP: each knows only how it is described and what it does
+with a block ([devices.md](devices.md)). The engine plays each through a runner, which gives every device the same
+surroundings:
+
+- it glides each continuous parameter from one block's value to the next, and moves the automated and modulated
+  ones on the control points;
+- it applies an effect's mix, with the sound coming in delayed as much as the effect delays its own;
+- it plays a mono channel in stereo;
+- it lets a device sleep on silence.
+
+A container of devices plays as one device, its chains each in a buffer of its own. A part of a device's sound can
+play on a mixer channel of its own: a drum sampler's pad on a track of its own.
+
+**Plug-ins run in helper processes:** `PhaziteHost`, one for each plug-in file, each block a round trip through
+shared memory with a deadline. A plug-in that crashes or hangs takes only its own helper with it. The engine plays a
+plug-in through the same runner as its own devices, and names its parameters by the plug-in's own IDs
+([plugin-hosting.md](plugin-hosting.md)).
+
+## Stretching and pitching audio clips
+
+A clip that follows the song's tempo, is pitched or is reversed plays a render that Phazite makes in the background
+with Rubber Band Library's R3 engine, into the project's `Cache` folder.
+
+- A clip under the song's tempo changes, or with warp markers, is rendered along a time map.
+- A clip that needs none of this plays its file as it is. A recording that follows the tempo is not rendered until
+  the tempo changes.
+- The browser's previews stretch the same way, rendered into memory as a loop starts and played as soon as a
+  quarter of a second is ready, the render keeping ahead, so that a preview sounds as its clip will.
+- Tests check that a stretched drum loop plays every hit once, on its beat, and that a held chord stays clean
+  between its notes (`tests/StretchTests.cpp`).
+
+## Decisions
+
+- **An engine of Phazite's own, on JUCE alone.** Phazite owns its song model, its playback, its plug-in hosting and
+  its renders, so that each can be fixed and measured where it is. Nothing else is built on for playback.
+- **The song is the model's; the engine plays plans.** The engine and the devices know nothing of the song, so
+  that either side can change, or be replaced, without the other.
+- **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
+  Everything that keeps time then agrees, in every meter.
+- **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
+  the audio device's buffer.
+- **Plans are handed over whole,** and what sounds is kept by ID, rather than the engine being edited in place: the
+  audio thread never sees a half-made change.
+- **Values set by hand bypass the plan,** so a knob is heard at once.
+- **Stretching is done offline, by one stretcher.** Rubber Band's R3 engine was the one stretcher measured that did
+  well on everything: no drum hit played twice, each hit on its beat, and the cleanest held chords. It is too slow
+  to run as the song plays, so clips play renders. Stretchers that cut the sound into overlapping pieces play some
+  drum hits twice when slowing a loop down; slicing at each hit leaves gaps and can't stretch a held note.
+- **Previews stretch as clips do,** so that a sound auditioned in the browser is the sound that lands in the song.
+- **Renders use the same engine as playback,** so an export is what was heard.
+- **Rubber Band Library is GPL-2.0-or-later,** which Phazite's AGPL-3.0-or-later allows
+  ([privacy-licences.md](privacy-licences.md)).
+
+## Not built
+
+- Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
+- Tracks that aren't being edited pre-rendered in the background: Planned, after v1.
+- Audio Units and CLAP in the helper: Planned, after v1 ([plugin-hosting.md](plugin-hosting.md)).
+
+## In the code
+
+- `src/model/base/Song.h`: the song, its undo history, `Song::makeID()`, `Song::storeDeviceStates()`.
+- `src/model/base/internal/Schema.h`: every name the song holds.
+- `src/model/commands/internal/Undo.h`: undo steps, `phazite::undo()` and `redo()`.
+- `src/model/transport/TempoValues.h` (`TimeSignature`, `Bars`), `src/engine/core/TempoMap.h`,
+  `src/devices/dsp/NoteValues.h`: time.
+- `src/model/playback/internal/SongPlayer.h`: the song compiled into plans.
+- `src/model/playback/internal/PlaybackSession.h`: an open song's session.
+- `src/model/playback/internal/PlaybackHost.h`: the engine on the audio device, with the previews' engine beside it.
+- `src/model/playback/internal/OfflineRender.h`: the song played offline.
+- `src/model/engine/EngineContext.h`, `internal/EngineContext.h`, `internal/AudioIO.h`: the engine context and the
+  audio and MIDI devices.
+- `src/engine/core/`: `Engine.h`, `Plan.h`, `Handover.h`, `Workers.h`, `Recording.h`, `PlayheadClock.h`,
+  `EventQueue.h`.
+- `src/engine/nodes/`: `DeviceRunner.h`, `DeviceNode.h`, `Strip.h`, `Channel.h`, `Container.h`, `PartOutput.h`,
+  `LoudnessMeter.h`, `Comparison.h`.
+- `src/engine/audio/` (`FileReader.h`, `AudioRegion.h`, `Resampler.h`), `src/engine/automation/Curve.h`
+  (`controlPointSpacing`), `src/engine/modulation/ModulatorNode.h`, `src/engine/transport/Click.h`.
+- `src/devices/`: the devices' DSP; `src/devices/stretch/Stretch.h`: stretching.
+- `src/model/arrangement/internal/ClipRenders.h`, `AudioClips.h`: clips' renders;
+  `src/model/engine/internal/PreviewLoop.h`: previews.
+- `src/sandbox/`, `src/host/`, `src/model/plugins/internal/`: plug-ins in helpers.
+- Tests: `tests/EngineTests.cpp`, `tests/EnginePlaybackTests.cpp`, `tests/PlaybackTests.cpp`,
+  `tests/GoldenRenderTests.cpp`, `tests/StretchTests.cpp`, `tests/RealtimeAuditTests.cpp`.
+
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.

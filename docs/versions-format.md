@@ -2,7 +2,7 @@
 
 *How Phazite keeps a project's history, for anyone writing a tool that reads or writes it: a project's `Versions` folder,
 its packs of pieces, its commits and branches, and how two songs are compared and merged. Written 2026-11-09, from the
-[format audit](format-audit.md). The code is `src/model/versions/`; where this file and the code disagree, the code is
+[format audit](archive/format-audit.md). The code is `src/model/versions/`; where this file and the code disagree, the code is
 right and this file has a bug.*
 
 This text is under the AGPL, as all of Phazite is. Implementing the format it describes, in software of any license, open
@@ -10,7 +10,7 @@ or closed, needs no permission: copyright covers the text, not the format.
 
 Phazite is pre-alpha, and the format has no version yet: an update may change it, until the owner says compatibility
 starts ([design.md, section 18](design.md#18-projects-saving-and-export)). Then a file naming the format and its version
-comes first ([format audit, P5](format-audit.md#34-portability-as-a-concept)).
+comes first ([format audit, P5](archive/format-audit.md#34-portability-as-a-concept)).
 
 ## 1. The idea
 

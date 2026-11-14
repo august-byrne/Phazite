@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Consolidate (src/model/mixer/FreezeModel.h, src/model/arrangement/internal/Consolidate.h; docs/recording-audit.md), as
+// Consolidate (src/model/mixer/FreezeModel.h, src/model/arrangement/internal/Consolidate.h; docs/archive/recording-audit.md), as
 // Ableton Live's: the selected clips on each track, or what lies in a time range selected across tracks, joined into one
 // clip, a MIDI clip of the notes as they play, an audio file rendered before the track's devices, as one undo step.
 #include "TestClips.h"

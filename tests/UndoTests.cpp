@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Undo, redo and the undo convention (src/model/commands/internal/Undo.h): a change of its own begins a named UndoStep, which
-// joins a step already in progress for the same song, and a drag is a Gesture.
+// joins a step already in progress for the same song, and a drag is a Gesture. And the check that Undo and Redo are exact
+// (UndoCheck.h): what it finds and what it leaves out, and the song's changes it guards beyond the commands' script
+// (tests/CommandGoldenTests.cpp).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
+#include "devices/reverb/Reverb.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/UndoHistory.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -301,4 +307,294 @@ TEST_CASE ("The undo history lists the song's steps by name, oldest first, and g
     phazite::ProjectContext none { phazite::test::getEngineContext() };
     CHECK (phazite::getUndoHistory (none).steps.empty());
     phazite::goToUndoStep (none, 3);
+}
+
+//==============================================================================
+// The check that Undo and Redo are exact (UndoCheck.h).
+namespace
+{
+// A check whose failures are kept rather than failing the test, for the tests of what it finds.
+struct KeptFailures
+{
+    explicit KeptFailures (phazite::Song& song)
+        : check (song)
+    {
+        check.onFailure = [this] (const juce::String& failure) { failures.add (failure); };
+    }
+
+    phazite::test::UndoCheck check;
+    juce::StringArray failures;
+};
+} // namespace
+
+TEST_CASE ("The undo check passes a change that is one exact undo step, and one that changes only what no undo step keeps")
+{
+    auto song = newSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    phazite::test::UndoCheck check (*song);
+
+    check.check ("Set Value",
+                 [&song]
+                 {
+                     const phazite::UndoStep step (*song, "Set Value");
+                     change (*song, "a", 1);
+                 });
+    CHECK (check.getNumSteps() == 1);
+    CHECK ((int) song->getState()["a"] == 1); // the song is left as the change left it
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Set Value"));
+
+    // A switch that is no undo step, a view setting, and how the song plays: no step, and nothing to undo.
+    check.check ("Mute", [&song, track] { phazite::setTrackMuted (*song, track, true, nullptr); });
+    check.check ("Collapse", [&song, track] { phazite::setCollapsed (*song, track, true); });
+    check.check ("Metronome", [&song] { song->getState().setProperty (phazite::schema::metronome, true, nullptr); });
+    CHECK (check.getNumSteps() == 1);
+
+    // The test's own changes, with the model's functions that join their caller's step: one step, or several.
+    check.checkSeveral ("a track, named and turned down",
+                        [&song, track]
+                        {
+                            const auto added = phazite::insertPlainTrack (*song, track);
+                            REQUIRE (added.isValid());
+                            phazite::setTrackName (*song, added, "Bass");
+                            phazite::setChannelVolume (*song, added, -6.0f);
+                        });
+    CHECK (check.getNumSteps() >= 2);
+
+    // An undo and a redo that the test runs itself.
+    check.stepBackOrForth ("Undo", [&song] { phazite::undo (*song); });
+    CHECK (phazite::ensureTracks (*song, 1).size() == 1);
+    check.stepBackOrForth ("Redo", [&song] { phazite::redo (*song); });
+    CHECK (phazite::ensureTracks (*song, 1).size() == 2);
+
+    // Back through every step and forth: the song at each as it was, and at the end all of it, the mute too.
+    check.walkBackAndForth();
+    CHECK (phazite::ensureTracks (*song, 1).size() == 2);
+    CHECK ((bool) phazite::findTrackState (*song, track)[phazite::schema::trackMute]);
+}
+
+TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and what makes a later Undo take the wrong thing")
+{
+    auto song = newSong();
+
+    SUBCASE ("A part of the change made round the undo history: Undo leaves it")
+    {
+        KeptFailures kept (*song);
+        kept.check.check ("Half a Step",
+                          [&song]
+                          {
+                              const phazite::UndoStep step (*song, "Half a Step");
+                              change (*song, "a", 1);
+                              song->getState().setProperty ("b", 2, nullptr);
+                          });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("Half a Step: Undo doesn't give the song as it was before:"));
+        CHECK (kept.failures[0].contains ("PHAZITE@b"));
+        CHECK_FALSE (kept.failures[0].contains ("PHAZITE@a"));
+    }
+
+    SUBCASE ("A change without a step of its own, to what undo steps keep")
+    {
+        KeptFailures kept (*song);
+        kept.check.check ("No Step", [&song] { song->getState().setProperty ("a", 1, nullptr); });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("No Step: changed what undo steps keep without an undo step of its own"));
+        CHECK (kept.failures[0].contains ("PHAZITE@a"));
+    }
+
+    SUBCASE ("A change that joins the step before")
+    {
+        // A change through the history that begins no step joins the one in progress: the check sees no step of its own.
+        song->getUndoManager().beginNewTransaction ("First");
+        change (*song, "a", 1);
+        KeptFailures kept (*song);
+        kept.check.check ("Joins", [&song] { change (*song, "b", 2); });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("Joins: changed what undo steps keep without an undo step of its own"));
+
+        // After a change the check has undone and redone, no step is in progress: the change is a step without a name.
+        kept.check.check ("Second",
+                          [&song]
+                          {
+                              const phazite::UndoStep step (*song, "Second");
+                              change (*song, "c", 3);
+                          });
+        kept.check.check ("Joins Again", [&song] { change (*song, "d", 4); });
+
+        REQUIRE (kept.failures.size() == 2);
+        CHECK (kept.failures[1].startsWith ("Joins Again: made an undo step without a name"));
+    }
+
+    SUBCASE ("Two steps where a change is one")
+    {
+        KeptFailures kept (*song);
+        kept.check.check ("Twice",
+                          [&song]
+                          {
+                              {
+                                  const phazite::UndoStep one (*song, "One");
+                                  change (*song, "a", 1);
+                              }
+
+                              const phazite::UndoStep two (*song, "Two");
+                              change (*song, "b", 2);
+                          });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("Twice: made 2 undo steps"));
+    }
+
+    SUBCASE ("A switch that is no undo step, changed round the history by a change that is one")
+    {
+        KeptFailures kept (*song);
+        const auto track = phazite::ensureTracks (*song, 1).front();
+        kept.check.check ("Rename and Mute",
+                          [&song, track]
+                          {
+                              const phazite::UndoStep step (*song, "Rename and Mute");
+                              phazite::setTrackName (*song, track, "Lead");
+                              phazite::setTrackMuted (*song, track, true, nullptr);
+                          });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("Rename and Mute: Undo doesn't give the song as it was before:"));
+        CHECK (kept.failures[0].contains ("@mute"));
+    }
+
+    SUBCASE ("An element taken away round the history between two steps: the walk's Undo takes the wrong one")
+    {
+        // As automation lanes were, among a track's elements, until 2026-11-13: the history finds an element by its place.
+        KeptFailures kept (*song);
+        auto state = song->getState();
+        const auto add = [&song, &state] (const char* type)
+        {
+            const phazite::UndoStep step (*song, juce::String ("Add ") + type);
+            state.appendChild (juce::ValueTree (type), &song->getUndoManager());
+        };
+
+        state.appendChild (juce::ValueTree (phazite::schema::PIANOROLL), nullptr); // view settings, which the texts leave out
+        kept.check.check ("Add FIRST", [&add] { add ("FIRST"); });
+        kept.check.check ("Add SECOND", [&add] { add ("SECOND"); });
+        CHECK (kept.failures.isEmpty());
+
+        state.removeChild (state.getChildWithName (phazite::schema::PIANOROLL), nullptr);
+        kept.check.walkBackAndForth();
+
+        REQUIRE (! kept.failures.isEmpty());
+        CHECK (kept.failures[0].startsWith ("The walk: Undo to step 1 of 2"));
+        CHECK (kept.failures[0].contains ("doesn't give the song as it was there"));
+    }
+
+    SUBCASE ("An undo that the check wasn't told of")
+    {
+        KeptFailures kept (*song);
+        kept.check.check ("Set Value",
+                          [&song]
+                          {
+                              const phazite::UndoStep step (*song, "Set Value");
+                              change (*song, "a", 1);
+                          });
+        kept.check.check ("Undo", [&song] { phazite::undo (*song); });
+
+        REQUIRE (kept.failures.size() == 1);
+        CHECK (kept.failures[0].startsWith ("Undo: the song's undo history went back"));
+    }
+}
+
+TEST_CASE ("The undo check's texts leave out what no undo step keeps, and nothing else")
+{
+    using phazite::test::SongPart;
+    using phazite::test::writeSong;
+    auto song = newSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    auto state = song->getState();
+    auto trackState = phazite::findTrackState (*song, track);
+    REQUIRE (trackState.isValid());
+
+    const auto whole = writeSong (*song, SongPart::whole);
+    const auto undoable = writeSong (*song, SongPart::undoable);
+    const auto withoutSwitches = writeSong (*song, SongPart::undoableWithoutSwitches);
+    CHECK (whole.contains ("nextID=")); // the count of IDs, which an undo never takes back
+    CHECK_FALSE (undoable.contains ("nextID="));
+
+    // View settings, how the song plays and what the project remembers outside the history: in the whole song only.
+    trackState.setProperty (phazite::schema::trackHeight, 96, nullptr);
+    trackState.getOrCreateChildWithName (phazite::schema::LANES, nullptr).appendChild (juce::ValueTree (phazite::schema::LANE), nullptr);
+    state.setProperty (phazite::schema::loop, true, nullptr);
+    state.getOrCreateChildWithName (phazite::schema::LASTKEY, nullptr).setProperty (phazite::schema::keyRoot, 2, nullptr);
+    trackState.setProperty (phazite::schema::trackFrozen, true, nullptr);
+    CHECK (writeSong (*song, SongPart::whole) != whole);
+    CHECK (writeSong (*song, SongPart::undoable) == undoable);
+    CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) == withoutSwitches);
+
+    // The switches that are no undo steps: compared around one change, left out between steps.
+    trackState.setProperty (phazite::schema::trackMute, true, nullptr);
+    trackState.setProperty (phazite::schema::trackSolo, true, nullptr);
+    trackState.setProperty (phazite::schema::trackAutomationMode, phazite::schema::automationTouch, nullptr);
+    CHECK (writeSong (*song, SongPart::undoable) != undoable);
+    CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) == withoutSwitches);
+
+    // Anything else is the song's: a name, and the order of a parent's elements.
+    trackState.setProperty (phazite::schema::trackName, "Lead", nullptr);
+    CHECK (writeSong (*song, SongPart::undoableWithoutSwitches) != withoutSwitches);
+
+    const auto second = phazite::insertPlainTrack (*song, track);
+    REQUIRE (second.isValid());
+    const auto inOrder = writeSong (*song, SongPart::undoableWithoutSwitches);
+    auto tracks = trackState.getParent();
+    tracks.moveChild (0, 1, nullptr);
+    const auto swapped = writeSong (*song, SongPart::undoableWithoutSwitches);
+    CHECK (swapped != inOrder);
+    CHECK_FALSE (phazite::test::describeSongDifferences (inOrder, swapped).isEmpty());
+    CHECK (phazite::test::describeSongDifferences (inOrder, inOrder).isEmpty());
+}
+
+TEST_CASE ("Automation lanes shown and removed between undo steps leave each step's undo and redo its own clip")
+{
+    // Until 2026-11-13 a track's lanes were among its elements, added and removed outside the undo history, which finds an
+    // element by its place: after a lane went, the undo of a clip added after it took another clip, or none.
+    phazite::test::TestSong song;
+    const auto track = song.firstTrack;
+    const auto volume = song.getVolumeParameter (track);
+    const auto pan = song.getPanParameter (track);
+    phazite::test::UndoCheck check (song.context);
+    const auto countClips = [&song, track] { return phazite::getClips (song.context, track).size(); };
+
+    check.checkSeveral ("a clip in bar 1", [&song, track] { song.addMidiClip (track, 0.0, 4.0); });
+    phazite::showAutomationLane (song.context, volume);
+    phazite::showAutomationLane (song.context, pan);
+    CHECK (phazite::getAutomationLanes (song.context, track).size() == 2);
+    check.checkSeveral ("a clip in bar 2", [&song, track] { song.addMidiClip (track, 4.0, 4.0); });
+    phazite::removeAutomationLane (song.context, volume);
+    check.checkSeveral ("a clip in bar 3", [&song, track] { song.addMidiClip (track, 8.0, 4.0); });
+    check.check ("Add Effect", [&song, track] { song.addEffect (track, phazite::devices::Reverb::typeID); });
+    phazite::removeAutomationLane (song.context, pan);
+    CHECK (phazite::getAutomationLanes (song.context, track).empty());
+    REQUIRE (countClips() == 3);
+
+    // Every step back, the song at each as it was there, and forth again.
+    check.walkBackAndForth();
+    CHECK (countClips() == 3);
+
+    // And as someone does it: Undo takes the effect, then the last clip, whole, and Redo brings each back.
+    auto& songState = *phazite::findSong (song.context);
+    check.stepBackOrForth ("Undo Add Effect", [&songState] { phazite::undo (songState); });
+    CHECK (phazite::getEffects (song.context, track).empty());
+    CHECK (countClips() == 3);
+
+    while (countClips() == 3 && phazite::canUndo (songState))
+        check.stepBackOrForth ("Undo the clip in bar 3", [&songState] { phazite::undo (songState); });
+
+    const auto clips = phazite::getClips (song.context, track);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (4.0));
+
+    while (phazite::canRedo (songState))
+        check.stepBackOrForth ("Redo", [&songState] { phazite::redo (songState); });
+
+    CHECK (countClips() == 3);
+    CHECK (phazite::getEffects (song.context, track).size() == 1);
 }

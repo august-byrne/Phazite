@@ -1,3 +1,5 @@
+> **Archived on 2026-11-13.** Frozen history, kept whole and not updated: what it says may no longer be so, and its links may no longer lead anywhere. What is current starts at [docs/README.md](../README.md).
+
 # Recording audit
 
 *2026-11-08, the owner's request: "do we currently have a "bounce in place"/"consolidate" feature. if not, we should add

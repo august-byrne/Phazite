@@ -48,33 +48,33 @@ Build Phazite first, as [docs/building.md](docs/building.md) describes: on Windo
 | Path | Contents |
 |---|---|
 | `src/app/` | The app: startup, the main window with its menus and dialogs, the open project, and the services it owns |
-| `src/ui/` | What you see and touch, by area: the theme and design tokens, base controls, keys and keymaps, device editors, and one folder per view (playlist, piano roll, audio clip editor, mixer, browser, and the window's shell) |
-| `src/services/` | What the app keeps outside a project: settings, recent projects, the browser's library and the Phazite Sounds download |
-| `src/model/` | The song model, by area (commands, engine, project, transport, arrangement, notes, chords, mixer, automation, modulation, presets), with what compiles the song into what the engine plays (playback) and the plug-ins hosted in helpers (plugins), without window code |
+| `src/ui/` | What you see and touch, by area: the theme and design tokens, base controls, keys and keymaps, device editors, the time line the editors share, and one folder per view (playlist, piano roll, audio clip editor, mixer, browser, project, versions, and the window's shell) |
+| `src/services/` | What the app keeps outside a project: settings, recent projects, the browser's library, the Phazite Sounds download and the update check |
+| `src/model/` | The song model, by area (base, commands, devices, engine, project, transport, arrangement, notes, chords, mixer, presets, automation, modulation, versions), with what compiles the song into what the engine plays (playback) and the plug-ins hosted in helpers (plugins), without window code |
 | `src/engine/` | Phazite's own playback engine, which plays what the model compiles from the song, live and in renders |
 | `src/sandbox/` | What Phazite shares with the helper processes that host plug-ins, so that one that crashes can't take Phazite with it: shared memory, the channel a plug-in's blocks go through, the control channel's messages |
 | `src/host/` | The helper program that hosts plug-ins for Phazite (`PhaziteHost`, next to the app) |
 | `src/devices/` | The DSP of Phazite's own instruments and effects, using JUCE's core and DSP modules only, so that a device could run on another engine |
 | `resources/` | Keymaps, song outlines, chord progressions, presets, icons and the Inter font |
 | `tests/` | The unit, golden and real-time tests, and the benchmarks (`phazite_tests`, with doctest) |
-| `docs/` | The design, the roadmap, the known bugs and the audits |
+| `docs/` | The design, the plans, the references and the user guide ([docs/README.md](docs/README.md) lists them) |
 | `tools/` | Machine setup, `format.sh`, `check-architecture.sh`, and `soundkit/`, which makes [Phazite Sounds](https://github.com/august-byrne/phazite-sounds) |
-| `external/` | The submodules: JUCE, Rubber Band Library, doctest and WindowsToolchain. Read-only |
+| `external/` | The submodules: JUCE, Rubber Band Library, r8brain-free-src, doctest and WindowsToolchain. Read-only |
 | `.githooks/`, `.github/` | The git hooks, and the continuous integration (CI) on GitHub Actions |
 
-[CLAUDE.md](CLAUDE.md#repository-layout) describes every folder and file in detail.
+Each folder under `src/`, and `tests/`, `tools/` and `resources/`, has a `README.md` that lists its files and what each holds.
 
 ### The layers
 
-The code is layered so that the UI can change without touching the rules of editing, every edit can be tested without a window, and parts of the engine could be replaced later ([design, section 24](docs/design.md#24-code-structure)):
+The code is layered so that the UI can change without touching the rules of editing, every edit can be tested without a window, and parts of the engine could be replaced later. [docs/architecture.md](docs/architecture.md) draws the layers, says which may include which and how the song becomes sound, and explains why each rule exists. In short:
 
-- **Dependencies point down:** the app uses the UI, the UI uses the services and the model, the services may use the model, the model may use the engine (`src/engine/`) and the sandbox (`src/sandbox/`), and never the other way round; the helper program (`src/host/`) uses the sandbox, and nothing uses it. Every layer may use `src/devices/`, which uses none of them.
+- **Dependencies point down**, as the map in [docs/architecture.md](docs/architecture.md#the-layers) shows, and never the other way round.
 - **No window code below the UI**, and **the model's insides stay in the model**: the UI calls model functions that take and return Phazite's own types (IDs and plain values), and includes none of the model's `internal/` headers.
 - **The UI decides nothing about the project:** it runs a command or calls a model function, and every change to a project is one named undo step.
 - **Every user action is a command**, with a stable id such as `edit.undo`, a name and a description; default shortcuts go in the keymaps in `resources/keymaps/`, not in code.
 - **Colors, sizes and fonts come from the design tokens** (`src/ui/theme/DesignTokens.h`), never literals.
 
-`sh tools/check-architecture.sh` counts what these rules forbid and compares each count with `tools/architecture-budget.txt`; CI and the pre-commit hook run it. The counts may only go down: when your change lowers one, run it with `--update` and commit the new budget with the change.
+`sh tools/check-architecture.sh` counts what these rules forbid and compares each count with its budget in `tools/architecture-budget.txt`, where every budget is 0; CI and the pre-commit hook run it. Every count must equal its budget: when your change removes matches, run it with `--update` and commit the new budget with the change; when it adds matches, change the code instead.
 
 ### The audio thread
 
@@ -100,7 +100,7 @@ Threads share data only through lock-free FIFOs and `std::atomic` values. Phazit
 
 - **Every change comes with tests**, and a UI bug is reproduced in a test before it is fixed: `tests/UiTestHelpers.h` gives a window that isn't on any screen, with a mouse and keys that reach components the way JUCE delivers real events. A test that builds a song does it through the model, with `tests/TestSong.h`. Add each new test file to `target_sources(phazite_tests ...)` in `CMakeLists.txt`.
 - **The golden tests** (`--test-suite=golden`) compare what Phazite saves, plays and registers as commands with committed files in `tests/golden/`. A refactoring must leave them as they are. When a change is meant to alter them, run that suite with the environment variable `PHAZITE_UPDATE_GOLDEN=1`, read `git diff tests/golden` in full, and say in the commit message why they changed.
-- **The benchmarks** (`--test-suite=benchmark --no-skip`, from a `windows-profile` build) time the devices, playback, saving and the UI; ctest skips them. For performance work, run them before and after, and update [docs/performance-audit.md](docs/performance-audit.md).
+- **The benchmarks** (`--test-suite=benchmark --no-skip`, from a `windows-profile` build) time the devices, playback, saving and the UI; ctest skips them. For performance work, run them before and after, and update [docs/archive/performance-audit.md](docs/archive/performance-audit.md).
 
 ## Sending a change
 

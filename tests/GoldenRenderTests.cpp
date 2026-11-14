@@ -647,13 +647,40 @@ void renders (void (*make) (TestSong&), const phazite::test::GoldenRender& rende
 }
 
 //==============================================================================
-// A fingerprint as long as a 4-second render's, with the same levels in every block and on both sides.
+// A fingerprint as long as a 4-second render's, with the same levels in every block and on both sides: every band 10 dB
+// under the sides' level, around 220 Hz, in the block's middle.
 Fingerprint makeFingerprint (float rms, float peak)
 {
     phazite::test::BlockLevels levels;
     levels.rms.fill (rms);
     levels.peak.fill (peak);
+    levels.bands.fill (rms - 10.0f);
+    levels.hertz.fill (220.0f);
+    levels.centre.fill (50.0f);
     return Fingerprint (40, levels);
+}
+
+// Stereo audio at the renders' rate, each sample what a function gives for it, the same on both sides.
+juce::AudioBuffer<float> makeAudio (double seconds, const std::function<double (int sample)>& valueAt)
+{
+    juce::AudioBuffer<float> audio (2, (int) std::lround (seconds * phazite::test::renderSampleRate));
+
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+        for (int channel = 0; channel < 2; ++channel)
+            audio.setSample (channel, i, (float) valueAt (i));
+
+    return audio;
+}
+
+double toneAt (int sample, double hertz, double amplitude)
+{
+    return amplitude * std::sin (juce::MathConstants<double>::twoPi * hertz * sample / phazite::test::renderSampleRate);
+}
+
+// Whether a comparison lists a difference in something ("8 kHz band", "left frequency").
+bool lists (const juce::StringArray& differences, const char* what)
+{
+    return std::any_of (differences.begin(), differences.end(), [what] (const juce::String& line) { return line.contains (what); });
 }
 } // namespace
 
@@ -668,8 +695,11 @@ TEST_SUITE ("golden")
         const auto golden = makeFingerprint (-20.0f, -17.0f);
         const auto goldenText = writeFingerprint (golden, "about");
 
-        // One block on each line, with two decimals; a fingerprint matches itself.
-        CHECK (goldenText.contains ("\n    { \"start\": 1.2, \"rms\": [-20.00, -20.00], \"peak\": [-17.00, -17.00] },\n"));
+        // One block on each line, its levels with two decimals; a fingerprint matches itself.
+        CHECK (goldenText.contains ("\n    { \"start\": 1.2, \"rms\": [-20.00, -20.00], \"peak\": [-17.00, -17.00], \"bands\": [-30.00, "
+                                    "-30.00, -30.00, -30.00, -30.00, -30.00, -30.00, -30.00, -30.00, -30.00], \"hertz\": [220.0, 220.0], "
+                                    "\"centre\": [50.00, 50.00] },\n"));
+        CHECK (goldenText.contains ("\n  \"bandEdges\": [44.2, 88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9, 11313.7],\n"));
         CHECK (compareFingerprints (goldenText, goldenText).isEmpty());
 
         // Within the tolerance: a level 0.04 dB louder.
@@ -690,6 +720,48 @@ TEST_SUITE ("golden")
         quieter[30].peak.fill (-95.0f);
         CHECK (compareFingerprints (writeFingerprint (quiet, "about"), writeFingerprint (quieter, "about")).isEmpty());
 
+        // A band matches as a level does: 0.04 dB off is the same, 3 dB off a difference that names the band.
+        auto brighter = golden;
+        brighter[12].bands[8] = -29.96f;
+        CHECK (compareFingerprints (goldenText, writeFingerprint (brighter, "about")).isEmpty());
+        brighter[12].bands[8] = -27.0f;
+        const auto bandChange = compareFingerprints (goldenText, writeFingerprint (brighter, "about"));
+        REQUIRE (bandChange.size() == 1);
+        CHECK (bandChange[0] == juce::String ("1.20-1.30 s, 8 kHz band: expected -30.00 dBFS, got -27.00 dBFS"));
+
+        // A frequency within half a percent is the same; a semitone up is a difference.
+        auto sharper = golden;
+        sharper[12].hertz[0] = 221.0f;
+        CHECK (compareFingerprints (goldenText, writeFingerprint (sharper, "about")).isEmpty());
+        sharper[12].hertz[0] = 233.1f;
+        const auto pitchChange = compareFingerprints (goldenText, writeFingerprint (sharper, "about"));
+        REQUIRE (pitchChange.size() == 1);
+        CHECK (pitchChange[0] == juce::String ("1.20-1.30 s, left frequency: expected 220.0 Hz, got 233.1 Hz"));
+
+        // A centre within 0.03 ms is the same; 0.05 ms later, two samples, is a difference.
+        auto later = golden;
+        later[12].centre[1] = 50.03f;
+        CHECK (compareFingerprints (goldenText, writeFingerprint (later, "about")).isEmpty());
+        later[12].centre[1] = 50.05f;
+        const auto timeChange = compareFingerprints (goldenText, writeFingerprint (later, "about"));
+        REQUIRE (timeChange.size() == 1);
+        CHECK (timeChange[0] == juce::String ("1.20-1.30 s, right centre: expected 50.00 ms, got 50.05 ms"));
+
+        // Under the floor, a side's frequency and centre are noise, and aren't compared.
+        auto noise = quiet;
+        quiet[30].rms.fill (-80.0f);
+        noise[30].rms.fill (-90.0f);
+        noise[30].hertz.fill (5000.0f);
+        noise[30].centre.fill (10.0f);
+        CHECK (compareFingerprints (writeFingerprint (quiet, "about"), writeFingerprint (noise, "about")).isEmpty());
+
+        // A fingerprint without the bands isn't compared block by block.
+        const auto withoutBands =
+            goldenText.replace ("  \"bandEdges\": [44.2, 88.4, 176.8, 353.6, 707.1, 1414.2, 2828.4, 5656.9, 11313.7],\n", "");
+        const auto formatChange = compareFingerprints (withoutBands, goldenText);
+        REQUIRE (formatChange.size() == 1);
+        CHECK (formatChange[0].startsWith ("bandEdges: expected nothing, got"));
+
         // A render of another length differs in its number of blocks, which aren't compared one by one.
         auto shorter = golden;
         shorter.pop_back();
@@ -705,6 +777,57 @@ TEST_SUITE ("golden")
         // A render that differs everywhere lists only the first differences.
         CHECK (compareFingerprints (goldenText, writeFingerprint (makeFingerprint (-10.0f, -7.0f), "about")).size()
                == phazite::test::maxListedDifferences);
+    }
+
+    TEST_CASE ("Golden files: a fingerprint tells a tone's band and frequency and where a hit is, which its level alone doesn't")
+    {
+        using phazite::test::compareAudio;
+        using phazite::test::getFingerprint;
+        constexpr double rate = phazite::test::renderSampleRate;
+
+        // A 1 kHz tone at half of full scale: in its band (the sixth, 707 Hz to 1.4 kHz), which is well above its neighbours
+        // and far above the ends; at 1 kHz; and, steady, in the block's middle.
+        const auto tone = getFingerprint (makeAudio (1.0, [] (int i) { return toneAt (i, 1000.0, 0.5); }));
+        REQUIRE (tone.size() == 10);
+        const auto& steady = tone[5];
+        CHECK (steady.rms[0] == doctest::Approx (-9.03f).epsilon (0.001));
+        CHECK (steady.bands[5] > steady.rms[0] - 3.0f); // both sides together, a little under through its band's edges
+        CHECK (steady.bands[5] > steady.bands[4] + 8.0f);
+        CHECK (steady.bands[5] > steady.bands[6] + 8.0f);
+        CHECK (steady.bands[0] < -80.0f);
+        CHECK (steady.bands[9] < -80.0f);
+        CHECK (steady.hertz[0] == doctest::Approx (1000.0f).epsilon (0.001));
+        CHECK (steady.hertz[1] == doctest::Approx (1000.0f).epsilon (0.001));
+        CHECK (steady.centre[0] == doctest::Approx (50.0f).epsilon (0.001));
+
+        // The same an octave up is in the next band, at twice the frequency, as loud.
+        const auto octaveUp = getFingerprint (makeAudio (1.0, [] (int i) { return toneAt (i, 2000.0, 0.5); }));
+        CHECK (octaveUp[5].rms[0] == doctest::Approx (steady.rms[0]).epsilon (0.001));
+        CHECK (octaveUp[5].bands[6] > octaveUp[5].bands[5] + 8.0f);
+        CHECK (octaveUp[5].hertz[0] == doctest::Approx (2000.0f).epsilon (0.001));
+
+        // A single sample in the third block, 1234 samples into it: its centre is there, to the sample.
+        const auto hit = getFingerprint (makeAudio (1.0, [] (int i) { return i == 2 * 4410 + 1234 ? 0.5 : 0.0; }));
+        CHECK (hit[2].centre[0] == doctest::Approx (1234.5 / rate * 1000.0).epsilon (0.0001));
+        CHECK (hit[3].rms[0] == -100.0f);
+        CHECK (hit[3].hertz[0] == 0.0f);
+
+        // A loud low tone with a little 10 kHz, 46 dB under it; and the same with the 10 kHz 3 dB louder, as a filter wrong
+        // there would leave it. The sides' RMS and peak are the same within the tolerance; the 8 kHz band and the frequency
+        // tell them apart.
+        const auto lowAndHigh = [] (double high)
+        { return makeAudio (1.0, [high] (int i) { return toneAt (i, 200.0, 0.5) + toneAt (i, 10000.0, high); }); };
+        const auto differences = compareAudio (lowAndHigh (0.0025), lowAndHigh (0.0025 * 1.4125), rate);
+        CHECK (lists (differences, "8 kHz band"));
+        CHECK (lists (differences, "frequency"));
+        CHECK (! lists (differences, "RMS"));
+        CHECK (! lists (differences, "peak"));
+
+        // The same hit two samples late: as loud in every band, and its centre tells.
+        const auto hitAt = [] (int sample) { return makeAudio (0.5, [sample] (int i) { return i == sample ? 0.5 : 0.0; }); };
+        const auto late = compareAudio (hitAt (5000), hitAt (5002), rate);
+        REQUIRE (late.size() == 2);
+        CHECK (late[0] == juce::String ("0.10-0.20 s, left centre: expected 13.39 ms, got 13.44 ms"));
     }
 
     TEST_CASE ("Golden render: two tones through a bus, a send to a reverb return, automation and pan")

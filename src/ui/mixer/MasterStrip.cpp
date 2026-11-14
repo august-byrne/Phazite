@@ -72,7 +72,7 @@ void MasterStrip::songChanged (const SongChanges& changes)
 
 void MasterStrip::timerCallback()
 {
-    if (! isShowing()) // docs/performance-audit.md, U5
+    if (! isShowing()) // docs/archive/performance-audit.md, U5
         return;
 
     volumeAttachment.update();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A project's versions (docs/versions.md): saving them, reading them back as the project opens, and the changes since the
+// A project's versions (docs/design/versions.md): saving them, reading them back as the project opens, and the changes since the
 // last one, by track, in Phazite's own words.
 #include "TestPlugin.h"
 #include "TestSong.h"

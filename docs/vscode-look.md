@@ -1,6 +1,6 @@
 # Phazite's look, from VS Code's
 
-Phazite's dark and light themes are VS Code's **2026 Dark** and **2026 Light**, and its window is laid out as VS Code's **Modern UI** lays out its own (the owner's decision, 2026-11-05: [design.md](design.md#design-language)). This page says what was taken, where from, and where Phazite does otherwise. The values themselves live in one place, `src/ui/theme/DesignTokens.h`, and JUCE's controls are drawn with them in `src/ui/theme/LookAndFeel.cpp`.
+Phazite's dark and light themes are VS Code's **2026 Dark** and **2026 Light**, and its window is laid out as VS Code's **Modern UI** lays out its own (the owner's decision, 2026-11-05: [design.md](design/window.md#design-language)). This page says what was taken, where from, and where Phazite does otherwise. The values themselves live in one place, `src/ui/theme/DesignTokens.h`, and JUCE's controls are drawn with them in `src/ui/theme/LookAndFeel.cpp`.
 
 ## May Phazite copy it?
 

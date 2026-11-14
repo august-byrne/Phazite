@@ -116,7 +116,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     float shownValue = 0.0f;             // without points: the value its dashed line shows
 
     // Without points, the line shows the parameter's value, which a knob may move at any time: read a few times a second,
-    // rather than heard of as a change to the song (docs/performance-audit.md, U1), and the whole line drawn again when it
+    // rather than heard of as a change to the song (docs/archive/performance-audit.md, U1), and the whole line drawn again when it
     // moved. Read as a part of the lane repaints (under the playhead, at each frame), it kept the timer from seeing the change,
     // and the line showed the new value only where the playhead had been.
     void timerCallback() override;

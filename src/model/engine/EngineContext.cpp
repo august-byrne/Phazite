@@ -33,7 +33,7 @@ std::unique_ptr<EngineContext> createEngineContext (EngineOptions options)
     JUCE_ASSERT_MESSAGE_THREAD
 
     // Not one thread per logical CPU: the second thread of a core adds little to audio, and the window and the system need a
-    // core of their own (docs/performance-audit.md, A2).
+    // core of their own (docs/archive/performance-audit.md, A2).
     const auto threads = options.numAudioThreads > 0 ? options.numAudioThreads : std::max (1, juce::SystemStats::getNumPhysicalCpus() - 1);
     return std::make_unique<EngineContext> (std::make_unique<EngineContext::Impl> (threads));
 }

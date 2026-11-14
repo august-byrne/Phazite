@@ -109,7 +109,7 @@ public:
     bool hasChangesToAutosave();
 
     // As autosave(), with the state copied here and its XML made and written on a background thread, so that the window
-    // and what is played don't wait for it (docs/performance-audit.md, U2). Nothing while one is being written. Whether the
+    // and what is played don't wait for it (docs/archive/performance-audit.md, U2). Nothing while one is being written. Whether the
     // last one failed is told once, by takeAutosaveFailure(), and its changes are written again at the next.
     void autosaveInBackground();
     bool isAutosaving() const;
@@ -168,7 +168,7 @@ private:
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
     // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
     // to it or change it. Only the elements of the song that notified are compared (the tracks, the tempo map...), unless
-    // the song itself did (docs/performance-audit.md, U3). No song at all while the project file doesn't hold the song that
+    // the song itself did (docs/archive/performance-audit.md, U3). No song at all while the project file doesn't hold the song that
     // was opened (a restored autosave, or a song from elsewhere: forgetSavedState()): then the song is unsaved, whatever it
     // is compared with, until it is saved.
     juce::ValueTree savedState;
@@ -213,7 +213,7 @@ public:
     explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
-    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/performance-audit.md, R7); and
+    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/archive/performance-audit.md, R7); and
     // whether they have, until one works, which the status bar says.
     std::function<void()> onRepeatedFailures;
     static constexpr int failuresToReport = 3;

@@ -178,7 +178,7 @@ private:
 
     // What the note grid and the velocity lane draw: the clips' notes, their colours and which are selected, read again
     // once the song (ProjectContext::getSongVersion()), the clips shown or the selection changed, rather than at each
-    // paint, as the playhead repaints a strip of the grid at each frame while playing (docs/performance-audit.md, U5 and
+    // paint, as the playhead repaints a strip of the grid at each frame while playing (docs/archive/performance-audit.md, U5 and
     // section 8). Only for painting: the tools read the song as it is (getAllNotes()).
     struct DrawnNotes
     {

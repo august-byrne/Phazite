@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // DAWproject (https://github.com/bitwig/dawproject, its version 1.0, which Bitwig Studio, Studio One, Cubase and others
-// open), as Phazite writes a song into one (docs/versions.md: DAWproject with versions; step D1): a zip of project.xml,
+// open), as Phazite writes a song into one (docs/design/versions.md: DAWproject with versions; step D1): a zip of project.xml,
 // metadata.xml and the files they name.
 //
 // What goes in: the song's tracks, its folders (their tracks in them, a bus's channel a submix), its returns (effect

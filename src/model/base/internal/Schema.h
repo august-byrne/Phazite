@@ -538,7 +538,7 @@ juce::StringArray getKeyProperties (const juce::Identifier& type);
 juce::var describeSongRules();
 
 //==============================================================================
-// The project's versions (model/versions/; docs/versions.md, and docs/versions-format.md for another tool): the song as it
+// The project's versions (model/versions/; docs/design/versions.md, and docs/versions-format.md for another tool): the song as it
 // was at each version the user saved, and its branches, in the project's Versions folder
 // (model/versions/internal/VersionStore.h). Nothing written there changes again, but each computer's record of a branch,
 // its own files and the name of the current branch, which are replaced whole, and a branch's log, which is appended to.

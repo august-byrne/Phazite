@@ -643,7 +643,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     std::array<float, maxUnison> detunes {}, lefts {}, rights {};
 
     // Each oscillator's pitch as a ratio of the voice's, worked out once a block rather than at each voice's every step
-    // (docs/performance-audit.md, A4).
+    // (docs/archive/performance-audit.md, A4).
     std::array<double, maxUnison> ratios1 {}, ratios2 {};
     const auto osc2Ratio = std::exp2 ((double) osc2Offset / 12.0);
 

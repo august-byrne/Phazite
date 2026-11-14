@@ -175,7 +175,7 @@ TEST_CASE ("The limiter keeps loud sound under its ceiling, between samples too"
     SUBCASE ("Bright full-scale sines at 44.1 kHz, up to 19 kHz, whose peaks mostly fall between their samples")
     {
         // Measured exactly: once the limiter has settled, each comes out a sine, whose amplitude is its true peak. The
-        // limiter's earlier 8-tap interpolation let 18 kHz past the ceiling by 3.8 dB (docs/dsp-audit.md).
+        // limiter's earlier 8-tap interpolation let 18 kHz past the ceiling by 3.8 dB (docs/archive/dsp-audit.md).
         constexpr double rate = 44100.0;
         values[Limiter::gain] = 0.0f;
 

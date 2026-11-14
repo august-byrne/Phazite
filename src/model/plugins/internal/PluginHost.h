@@ -57,7 +57,7 @@ public:
     // didn't open.
     bool reload (SandboxedInstance&, juce::String& error);
 
-    // Whether plug-ins load as projects open (docs/performance-audit.md, R2): while this is off, the plug-ins of a project
+    // Whether plug-ins load as projects open (docs/archive/performance-audit.md, R2): while this is off, the plug-ins of a project
     // that opens stay as they were saved, unloaded and silent, so that one that crashes as it loads can't take Phazite down
     // again.
     void setLoadsPlugins (bool load) noexcept { loads = load; }

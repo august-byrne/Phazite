@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own engine playing the open project as the app plays it (model/playback/),
 // driven by a test a block at a time, as an audio device would drive it, but not in real time: what it plays is the same
-// every time. For as long as it lasts, the app's engine plays on a device with two inputs.
+// every time. For as long as it lasts, the app's engine plays on a device with two inputs: at 48 kHz in blocks of 256
+// samples, or at a rate and in blocks of its own (a condition's, PlaybackConditions.h).
 #pragma once
 
+#include "PlaybackConditions.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/engine/EngineContext.h"
@@ -17,6 +19,7 @@ namespace phazite::test
 class EnginePlayback
 {
 public:
+    // The device's rate and block size unless others are given, and once it has gone.
     static constexpr double sampleRate = 48000.0;
     static constexpr int blockSize = 256;
 
@@ -39,15 +42,27 @@ public:
         asRender
     };
 
-    explicit EnginePlayback (Input in = Input::silence, Timing timing = Timing::realTime)
-        : input (in)
+    explicit EnginePlayback (Input in = Input::silence, Timing timing = Timing::realTime, double deviceRate = sampleRate,
+                             int deviceBlock = blockSize)
+        : input (in),
+          rate (deviceRate),
+          block (deviceBlock)
     {
         auto& host = getPlaybackHost (getEngineContext());
-        host.prepare (sampleRate, blockSize, 2, input == Input::loopback ? blockSize : 0);
+        host.prepare (rate, block, 2, input == Input::loopback ? block : 0);
         host.getEngine().setPlayingAsRender (timing == Timing::asRender);
         previous.clear();
         nextInput();
     }
+
+    // On a device at a condition's rate, in its blocks.
+    explicit EnginePlayback (const PlaybackCondition& condition, Input in = Input::silence, Timing timing = Timing::realTime)
+        : EnginePlayback (in, timing, condition.getSampleRate(), condition.blockSize)
+    {
+    }
+
+    double getSampleRate() const noexcept { return rate; }
+    int getBlockSize() const noexcept { return block; }
 
     // Stopped, keeping to real time, and on a device without inputs again.
     ~EnginePlayback()
@@ -59,16 +74,18 @@ public:
     }
 
     // Plays so many seconds of what the engine plays, the song's changes given to it first (dispatchPendingMessages()).
-    juce::AudioBuffer<float> play (double seconds)
+    juce::AudioBuffer<float> play (double seconds) { return playSamples ((int) std::lround (seconds * rate)); }
+
+    // The same, for so many samples: in the device's blocks, and a shorter one last if they don't fill them.
+    juce::AudioBuffer<float> playSamples (int numSamples)
     {
         dispatchPendingMessages();
         auto& engine = getPlaybackHost (getEngineContext()).getEngine();
-        const auto numSamples = (int) std::lround (seconds * sampleRate);
         juce::AudioBuffer<float> audio (2, numSamples);
 
-        for (int done = 0; done < numSamples; done += blockSize)
+        for (int done = 0; done < numSamples; done += block)
         {
-            const auto length = std::min (blockSize, numSamples - done);
+            const auto length = std::min (block, numSamples - done);
             const float* inputs[] = { previous.getReadPointer (0), previous.getReadPointer (1) };
             float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
             engine.process (inputs, 2, channels, 2, length);
@@ -124,18 +141,19 @@ public:
 
 private:
     const Input input;
-    juce::AudioBuffer<float> previous { 2, blockSize }; // what comes in
+    const double rate;
+    const int block;
+    juce::AudioBuffer<float> previous { 2, block }; // what comes in
     std::int64_t toneSample = 0;
 
     // The tone's next block.
     void nextInput()
     {
         if (input == Input::tone)
-            for (int i = 0; i < blockSize; ++i, ++toneSample)
+            for (int i = 0; i < block; ++i, ++toneSample)
                 for (int channel = 0; channel < 2; ++channel)
-                    previous.setSample (
-                        channel, i,
-                        0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * (double) toneSample / sampleRate));
+                    previous.setSample (channel, i,
+                                        0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * (double) toneSample / rate));
     }
 
     EnginePlayback (const EnginePlayback&) = delete;

@@ -340,7 +340,7 @@ void Compressor::compress (const ProcessContext& block)
 
     dryInStep = turnsDry;
 
-    // The gain is worked out again only when it changes (docs/performance-audit.md, A5).
+    // The gain is worked out again only when it changes (docs/archive/performance-audit.md, A5).
     auto loudestPeak = 0.0f, most = 0.0f, least = 0.0f;
 
     for (int i = 0; i < block.numSamples; ++i)

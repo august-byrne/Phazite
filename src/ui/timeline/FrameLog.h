@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the display's frames did while the song played, in an editor that shows the playhead, for Phazite's log once the
-// song stops (docs/performance-audit.md, section 16): how late the message thread took them after their vertical blank and
+// song stops (docs/archive/performance-audit.md, section 16): how late the message thread took them after their vertical blank and
 // how many it missed; how long a move of the playhead or the view waited for its paint, and how many waited until a later
 // frame (JUCE's Direct2D window paints at a vertical blank only once its swap chain is ready); and how evenly the playhead
 // moved: frames in which it stood still while the song played on, and how much its step changed from one frame to the next.

@@ -8,6 +8,8 @@ track.taller: Ungroup Folder
 track.pin: Ungroup Folder
 track.collapse: Ungroup Folder
 track.collapse: Ungroup Folder
+track.collapseAll: Ungroup Folder
+track.collapseAll: Ungroup Folder
 track.groupIntoFolder: Group into Folder
 track.mute: Script: name the new folder Group
 track.mute: Script: name the new folder Group
@@ -27,6 +29,12 @@ edit.duplicate: Duplicate Section
 edit.duplicateAsAlias: Duplicate Section as Aliases
 section.loop: Duplicate Section as Aliases
 edit.delete: Delete Section
+section.outline.electronic: Apply Outline: Electronic (house, EDM)
+section.outline.hipHop: Apply Outline: Hip-hop and trap
+section.outline.lofi: Apply Outline: Lo-fi beat
+section.outline.rnb: Apply Outline: R&B
+section.outline.drumAndBass: Apply Outline: Drum and bass
+section.outline.techno: Apply Outline: Techno
 section.outline.pop: Apply Outline: Pop
 section.outline.rock: Apply Outline: Rock
 edit.mute: Mute
@@ -46,14 +54,34 @@ note.lengthen: Lengthen Notes
 note.shorten: Shorten Notes
 note.legato: Legato
 note.chop: Chop
+note.slide: Slide Note
+note.slide: Slide Note
+note.portamento: Portamento
+note.portamento: Portamento
 edit.mute: Mute
 edit.mute: Mute
 edit.duplicate: Duplicate 6 Notes
 edit.delete: Delete 2 Notes
+edit.copy: Delete 2 Notes
+edit.paste: Paste 6 Notes
+edit.cut: Cut 4 Notes
 clip.fadeConvex: Convex Fades
 clip.fadeConcave: Concave Fades
 clip.fadeSCurve: S-Curve Fades
 clip.fadeLinear: Linear Fades
+clip.reverse: Reverse
+clip.reverse: Reverse
+clip.followTempo: Follow Tempo
+clip.followTempo: Follow Tempo
+transport.samplesFollowTempo: Samples Follow Tempo
+transport.samplesFollowTempo: Samples Follow Tempo
+clip.normalize: Normalize
+edit.copy: Normalize
+edit.paste: Paste Clip
+edit.cut: Cut Clip
+track.freeze: Cut Clip
+track.freeze: Cut Clip
+track.bounceInPlace: Bounce in Place
 edit.deleteAndCloseGap: Delete and Close Gap
 edit.insertTime: Insert Time
 edit.removeTime: Remove Time
@@ -61,15 +89,59 @@ transport.loopSelection: Remove Time
 edit.split: Split
 edit.duplicate: Duplicate Range
 edit.delete: Delete Range
+transport.punch: Delete Range
+transport.punch: Delete Range
 transport.loop: Delete Range
 transport.loop: Delete Range
 transport.loopSong: Delete Range
 transport.loop: Delete Range
 transport.loopSelection: Delete Range
-edit.selectAll: Delete Range
-edit.selectAll: Delete Range
-edit.deselectAll: Delete Range
-edit.undo: Duplicate Range
-edit.redo: Delete Range
-edit.undoOrRedo: Duplicate Range
-edit.undoOrRedo: Delete Range
+device.group: Group into Container
+device.ungroup: Ungroup Container
+device.group: Group into Container
+automation.showLanes: Group into Container
+automation.showLanes: Group into Container
+automation.touch: Group into Container
+automation.latch: Group into Container
+automation.write: Group into Container
+automation.read: Group into Container
+automation.raisePoints: Raise Automation Points
+automation.lowerPoints: Lower Automation Points
+automation.raisePointsMore: Raise Automation Points More
+automation.lowerPointsMore: Lower Automation Points More
+automation.automateLastTouched: Change Pan
+clip.consolidate: Consolidate
+transport.metronome: Consolidate
+transport.metronome: Consolidate
+transport.countIn: Consolidate
+transport.countIn: Consolidate
+transport.overdub: Consolidate
+transport.overdub: Consolidate
+transport.quantizeRecordings: Consolidate
+transport.quantizeRecordings: Consolidate
+transport.lowLatency: Consolidate
+transport.lowLatency: Consolidate
+transport.patternsFollowTempo: Patterns Follow Tempo
+transport.patternsFollowTempo: Patterns Follow Tempo
+transport.addTempoChange: Add Tempo Change
+transport.removeTempoChanges: Remove Tempo Changes
+transport.addTempoChange: Add Tempo Change
+track.arm: Change Input Monitoring
+transport.record: Change Input Monitoring
+transport.record: Record
+clip.previousTake: Previous Take
+clip.nextTake: Next Take
+track.arm: Next Take
+transport.playStop: Next Take
+transport.playStop: Next Take
+transport.playPause: Next Take
+transport.playPause: Next Take
+transport.capture: Capture
+edit.delete: Delete Clip
+edit.selectAll: Delete Clip
+edit.selectAll: Delete Clip
+edit.deselectAll: Delete Clip
+edit.undo: Capture
+edit.redo: Delete Clip
+edit.undoOrRedo: Capture
+edit.undoOrRedo: Delete Clip

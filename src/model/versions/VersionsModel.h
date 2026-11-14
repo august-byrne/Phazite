@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The open project's versions, as the Versions view, the activity bar, the status bar and the commands reach them
-// (docs/versions.md): by plain values, versions and branches by their ids. What changes is told by the project context's
+// (docs/design/versions.md): by plain values, versions and branches by their ids. What changes is told by the project context's
 // listeners (ProjectContext::Listener::versionsChanged()).
 #pragma once
 
@@ -79,7 +79,7 @@ std::vector<BranchInfo> getBranches (const ProjectContext&);
 std::optional<BranchInfo> getCurrentBranch (const ProjectContext&);
 std::optional<VersionInfo> getLastVersion (const ProjectContext&);
 
-// What changed since the current branch's last commit, as git sees it (docs/versions.md: Staging): the changes in the
+// What changed since the current branch's last commit, as git sees it (docs/design/versions.md: Staging): the changes in the
 // working tree, from the staged song to the song, and whether anything changed since the commit, staged or not; the staged
 // changes, what the next commit records; and how many things changed, staged or not, each once (the activity bar's badge).
 std::vector<VersionChange> getChangesSinceLastVersion (const ProjectContext&);
@@ -134,7 +134,7 @@ bool undoLastCommit (ProjectContext&);
 juce::int64 getVersionsSize (const ProjectContext&);
 
 //==============================================================================
-// Going back (docs/versions.md: Going back): each a named undo step, which what plays follows as it follows an undo. What
+// Going back (docs/design/versions.md: Going back): each a named undo step, which what plays follows as it follows an undo. What
 // isn't counted (view state, how the song plays) stays as it is now, and the history keeps every version.
 
 // Bring Back This Version: the song made what it was then ("Bring Back "Verse 2""). False for a version it can't read.
@@ -196,7 +196,7 @@ bool canUnstageAll (const ProjectContext&);
 // the project first, and a switch to another branch saves it after.
 using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
 
-// Branches (docs/versions.md: Branches). Switching makes the song the other branch's in place, as it was left there: the
+// Branches (docs/design/versions.md: Branches). Switching makes the song the other branch's in place, as it was left there: the
 // song as it is now, its view state and unsaved changes included, is kept on the branch it leaves; what both branches have
 // stays as it is (its plug-ins loaded, the song playing on); the undo history starts again, and the project is saved, so
 // that its file is the branch's song, as the versions say. Not undo steps.
@@ -213,7 +213,7 @@ bool canSwitchBranch (const ProjectContext&);
 bool canMakeBranch (const ProjectContext&);
 
 // Checkout (Detached) (version.checkout, a commit's in the graph, which a double-click runs too; git switch --detach, as VS
-// Code's graph names it; docs/versions.md: Checking out a commit): the song made a commit's in place, as a switch to a branch
+// Code's graph names it; docs/design/versions.md: Checking out a commit): the song made a commit's in place, as a switch to a branch
 // makes it, to see and hear it whole as it was then; the branch's song kept on the branch as it is, to come back to. Meanwhile
 // the song is on no branch (getCurrentBranch() is detached): it plays and can change, but nothing is committed or merged;
 // Create Branch makes a branch here that takes what changed, and going back keeps what changed in Local History first. Back to
@@ -268,7 +268,7 @@ juce::String getThisComputer();
 void selectBranch (ProjectContext&, const juce::String& branchID);
 
 //==============================================================================
-// Merging (docs/versions.md: Merging). A version of another line (another branch's, or one the current branch's past doesn't
+// Merging (docs/design/versions.md: Merging). A version of another line (another branch's, or one the current branch's past doesn't
 // hold) into the song: its window lists what it changed since the newest version both have, by line, each with whether it
 // clashes with what the song changed; Merge takes the lines ticked as one undo step ("Merge "Half-time""). Then, until the
 // next version is saved (which follows both lines), each clash switches between its three values, each switch an undo step.
@@ -314,7 +314,7 @@ bool chooseClash (ProjectContext&, int clash, int value); // 0 before both, 1 th
 juce::String getClashChoiceName (int value);
 
 //==============================================================================
-// Bounces, and hearing them (docs/versions.md: Hearing a version). A version's bounce is the song as it was then, rendered as
+// Bounces, and hearing them (docs/design/versions.md: Hearing a version). A version's bounce is the song as it was then, rendered as
 // Export Song renders it (model/project/Export.h: the whole song with its tails, muted tracks silent; playback stops for it),
 // into the project's versions, while a progress window shows it (TrackRender, model/mixer/FreezeModel.h). Not undo steps:
 // they change the history, not the song.
@@ -340,7 +340,7 @@ std::optional<float> getBounceProgress (const ProjectContext&, const juce::Strin
 juce::String getBounceProblem (const ProjectContext&);
 
 //==============================================================================
-// Local History (docs/versions.md: Local History), as VS Code's and JetBrains' keep a file's saves: the song as it was at
+// Local History (docs/design/versions.md: Local History), as VS Code's and JetBrains' keep a file's saves: the song as it was at
 // times while it differed from its last commit, taken without asking (as the project opens with changes, every few minutes
 // while it changes, and before Restore from This Commit, Discard All Changes, a merge taken or a snapshot restored), kept in
 // the project's Versions folder on this computer, newest first, thinned as they grow old. Each restored as one undo step,
@@ -364,7 +364,7 @@ bool canRestoreSelectedSnapshot (const ProjectContext&);
 void restoreSelectedSnapshot (ProjectContext&);
 
 //==============================================================================
-// Keeping the history whole (docs/format-audit.md, R3 and R4).
+// Keeping the history whole (docs/archive/format-audit.md, R3 and R4).
 
 // Verify History (version.verify, git's fsck): every piece read and checked, every commit's song walked, and the commits no
 // branch holds found, in the background; whether it is under way; and what it found, as the Versions view says it ("12
@@ -384,7 +384,7 @@ int recoverLostVersions (ProjectContext&);
 // says it ("Bass: a clip"): none while it took everything, and why when it could take nothing.
 juce::String getRestoreProblem (const ProjectContext&);
 
-// The current branch's lines that went their own way on another computer (docs/format-audit.md, R8): their last
+// The current branch's lines that went their own way on another computer (docs/archive/format-audit.md, R8): their last
 // versions, which Merge into the current branch joins again; and as the Versions view says it. None while the computers
 // agree.
 juce::StringArray getDivergentVersions (const ProjectContext&);
@@ -407,7 +407,7 @@ bool hearVersion (ProjectContext&, const juce::String& versionID);
 juce::String getHeardVersion (const ProjectContext&); // none while the song itself is heard
 juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version is heard, for the transport bar
 
-// A/B (version.compare, the transport bar's A/B; docs/versions.md: Hearing a version), as a reference plug-in switches a mix
+// A/B (version.compare, the transport bar's A/B; docs/design/versions.md: Hearing a version), as a reference plug-in switches a mix
 // and its earlier version: a press hears B, a commit's bounce, in place of the song, A, at the same point and as loud; another,
 // the song again. B is the commit heard last (Hear It), else the one the song comes from: the current branch's last commit,
 // or the one checked out, so that the changes not committed yet are heard against it. A commit without a bounce is bounced

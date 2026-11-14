@@ -12,7 +12,7 @@
 namespace phazite::engine
 {
 // The control rate: automation and modulation move what they move on the song's control points, one every so many
-// samples from its start, so that a song sounds the same at any block size (docs/performance-audit.md, A7;
+// samples from its start, so that a song sounds the same at any block size (docs/archive/performance-audit.md, A7;
 // docs/design.md, section 10).
 inline constexpr int controlPointSpacing = 32;
 

@@ -932,7 +932,7 @@ void LevelMeter::tick()
     }
 
     // Only what moves what is drawn repaints: levels below the meter's range all look the same, so a silent meter, or
-    // one that holds still, repaints nothing (docs/performance-audit.md, section 8).
+    // one that holds still, repaints nothing (docs/archive/performance-audit.md, section 8).
     const auto moves = [] (float value, float drawn)
     {
         return std::abs (juce::jmax (value, minDb) - juce::jmax (drawn, minDb)) > meterMoveDb || (value > minDb) != (drawn > minDb)

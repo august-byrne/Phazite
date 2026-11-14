@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Two lines of a song merged (docs/versions.md: Merging by IDs): what the other side changed since the newest version both
+// Two lines of a song merged (docs/design/versions.md: Merging by IDs): what the other side changed since the newest version both
 // have, taken into this side's, a line at a time (a track, the master, the song's own), each element by its key
 // (model/base/internal/Schema.h: getElementKey()), each property on its own. A property changed on one side takes that
 // side's value; changed on both to different values, it is a clash, which keeps this side's value and all three. An element
@@ -38,7 +38,7 @@ struct MergeClash
 
 // An ID a merge gave anew to what the other side added, as the other side has it and as this one does now: an item's, or a
 // note's in a clip, by the clip's alias group or itself ("link 12", "clip 66"), as the merge's commit keeps it
-// (VersionStore.h: VersionRecord::renumbered), so that a later merge of that line knows them again (docs/format-audit.md, R9).
+// (VersionStore.h: VersionRecord::renumbered), so that a later merge of that line knows them again (docs/archive/format-audit.md, R9).
 struct RenumberedID
 {
     juce::String clip;

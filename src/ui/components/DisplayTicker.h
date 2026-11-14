@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // One timer for every display that changes while it shows (level meters, and device editors' meters, curves, scopes and
-// knobs' values), rather than one each (docs/performance-audit.md, U5 and section 8): it ticks 30 times a second, and only
+// knobs' values), rather than one each (docs/archive/performance-audit.md, U5 and section 8): it ticks 30 times a second, and only
 // the displays that show, so that one behind another tab, of a device not shown or in a closed window costs nothing; and what
 // they repaint is painted together, in one pass of the window.
 #pragma once
@@ -47,7 +47,7 @@ private:
     void timerCallback() override { tickNow(); }
 };
 
-// The numbers a display draws from, so that its tick() repaints it only when they change (docs/performance-audit.md,
+// The numbers a display draws from, so that its tick() repaints it only when they change (docs/archive/performance-audit.md,
 // section 8): the tick gathers them (its parameters' values, where an LFO is, levels, a history's readings) and repaints if
 // they differ from the last tick's. In silence, with nothing turned, a display then repaints nothing.
 class DrawnNumbers

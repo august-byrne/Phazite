@@ -311,7 +311,7 @@ void StatusBar::showAudioOutput (const EngineContext::AudioOutput& output)
 
 void StatusBar::showBranch()
 {
-    // The branch the song is on, once the project has a version (docs/versions.md), marked with a star while the song has
+    // The branch the song is on, once the project has a version (docs/design/versions.md), marked with a star while the song has
     // changes since its last version, as VS Code marks one; a click opens the branch picker.
     const auto branch = getCurrentBranch (context);
     const auto wasVisible = branchItem->isVisible();

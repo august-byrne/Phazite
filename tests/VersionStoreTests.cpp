@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The versions' store (docs/versions.md): a song in pieces and back, the packs they go in, and the branches, the current
+// The versions' store (docs/design/versions.md): a song in pieces and back, the packs they go in, and the branches, the current
 // one and the audio files' hashes beside them.
 #include "TestClips.h"
 #include "TestHelpers.h"

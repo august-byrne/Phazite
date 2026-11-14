@@ -30,7 +30,7 @@ enum class Panel
 };
 
 // What the left panel shows: the browser, what the project holds (its notes, audio files and plug-ins), or the project's
-// versions (docs/versions.md), in that order down the activity bar.
+// versions (docs/design/versions.md), in that order down the activity bar.
 enum class LeftView
 {
     browser,
