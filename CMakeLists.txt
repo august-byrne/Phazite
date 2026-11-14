@@ -1144,7 +1144,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/AutomationModelTests.cpp
         tests/BackgroundJobsTests.cpp
         tests/BeatsTests.cpp
+        tests/BenchmarkGates.cpp
         tests/Benchmarks.cpp
+        tests/BenchmarkSong.cpp
+        tests/BenchmarkSong.h
         tests/BrowserFilterTests.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
@@ -1198,6 +1201,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/FmEditorTests.cpp
         tests/FmSynthTests.cpp
         tests/FrameLogTests.cpp
+        tests/FuzzTests.cpp
+        tests/Fuzzer.cpp
+        tests/Fuzzer.h
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
@@ -1213,12 +1219,15 @@ if(PHAZITE_BUILD_TESTS)
         tests/HostedDevice.h
         tests/IconTests.cpp
         tests/ImportTests.cpp
+        tests/InconsistentProjectTests.cpp
         tests/InspectorTests.cpp
         tests/LibraryTests.cpp
         tests/LimiterEditorTests.cpp
         tests/LimiterTests.cpp
         tests/LessonsTests.cpp
         tests/LiveInputTests.cpp
+        tests/MainWindowTests.cpp
+        tests/LongRun.cpp
         tests/MessageQueueTests.cpp
         tests/MetronomeTests.cpp
         tests/ModulationModelTests.cpp
@@ -1235,9 +1244,15 @@ if(PHAZITE_BUILD_TESTS)
         tests/NoteTests.cpp
         tests/NoticesTests.cpp
         tests/NotesModelTests.cpp
+        tests/PaintCheck.cpp
+        tests/PaintCheck.h
+        tests/PaintTests.cpp
         tests/PanelLayoutTests.cpp
         tests/PanelsTests.cpp
         tests/ParameterHandleTests.cpp
+        tests/PerformanceCounts.cpp
+        tests/PerformanceCounts.h
+        tests/PerformanceGateTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackConditionTests.cpp
         tests/PlaybackConditions.h
@@ -1251,16 +1266,22 @@ if(PHAZITE_BUILD_TESTS)
         tests/PopupsTests.cpp
         tests/PresetReport.cpp
         tests/PresetTests.cpp
+        tests/ProcessMemory.cpp
+        tests/ProcessMemory.h
         tests/ProjectContentsTests.cpp
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/ProjectViewTests.cpp
+        tests/RandomEdits.cpp
+        tests/RandomEdits.h
+        tests/RandomSongTests.cpp
         tests/ReadmePicture.cpp
         tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
         tests/RenderHarness.cpp
         tests/RenderHarness.h
         tests/RecordingTests.cpp
+        tests/RepresentativeSong.h
         tests/RoutingTests.cpp
         tests/ReverbEditorTests.cpp
         tests/ReverbTests.cpp
@@ -1280,6 +1301,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/ShortcutTests.cpp
         tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
+        tests/SongCheck.cpp
+        tests/SongCheck.h
         tests/SongIDs.h
         tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp

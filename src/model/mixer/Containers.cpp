@@ -387,13 +387,13 @@ float getChainPan (const Song& song, DeviceID chain)
 void setChainVolume (Song& song, DeviceID chain, float decibels)
 {
     if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainValue (state, schema::channelVolume, std::max (decibels, -100.0f), 0.0f, getUndo (song));
+        setChainValue (state, schema::channelVolume, keepVolumeInRange (decibels), 0.0f, getUndo (song));
 }
 
 void setChainPan (Song& song, DeviceID chain, float pan)
 {
     if (auto state = findContainerChain (song, chain); state.isValid())
-        setChainValue (state, schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), 0.0f, getUndo (song));
+        setChainValue (state, schema::channelPan, std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f, getUndo (song));
 }
 
 //==============================================================================

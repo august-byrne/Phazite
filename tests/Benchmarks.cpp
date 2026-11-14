@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Benchmarks (docs/archive/performance-audit.md): what each device costs and how soon it sounds, how soon a live note sounds
-// through Phazite's engine, what a project costs stopped and playing, how long saving, opening and the UI's work take, and what
-// scrolling and zooming a big song cost.
+// Benchmarks (docs/performance.md): what each device costs and how soon it sounds, how soon a live note sounds through
+// Phazite's engine, what a project costs stopped and playing (and a song of 100 tracks at 128 and 512 samples), how long
+// saving, opening and the UI's work take, and what scrolling and zooming a big song cost.
 // ctest and CI skip them; run them from an optimised build (windows-profile or windows-release) with
 //   phazite_tests.exe --test-suite=benchmark --no-skip
-// and record the numbers in docs/archive/performance-audit.md. Times depend on the machine: compare runs on the same one.
+// and record the numbers in docs/performance.md. Times depend on the machine: compare runs on the same one. What can be
+// compared across machines is gated elsewhere: counts in PerformanceGateTests.cpp (ctest), ratios in BenchmarkGates.cpp.
 #include "AppScreen.h"
+#include "BenchmarkSong.h"
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
 #include "SandboxedPlugins.h"
@@ -37,6 +40,7 @@
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/audio/AudioRegion.h"
 #include "host/ThreadCpu.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/ParameterHandle.h"
@@ -47,6 +51,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
@@ -643,6 +648,95 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
 
     playing.setNumThreads (threads);
 
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, its plan and an edit" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // The engine's scale (docs/performance.md): the benchmark song (BenchmarkSong.h) of 100 tracks, each an instrument
+    // playing all the way, an EQ and a compressor (and a saturator or a chorus on some), sends to a reverb and a delay on
+    // returns, buses of ten with a compressor each, automation on a quarter of the faders and on every Synth's cutoff. Its
+    // blocks played one after another on the calling thread as the audio device's thread plays them, at 48 kHz, each
+    // block's time as a share of its length (100 % = a dropout); its plan's compile, and the message thread's work for an
+    // edit (the model, the session's new plan; no window is open, so no view's work is in it).
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 100, 64.0);
+    auto* open = phazite::findSong (s.context);
+    REQUIRE (open != nullptr);
+    auto& song = *open;
+    REQUIRE (s.getProject().save().wasOk());
+
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    const auto threads = engine.getNumThreads();
+    juce::String report ("\n| 100 tracks, 48 kHz | Threads | Stopped: mean / 99th percentile / most | Playing: mean / 99th percentile / "
+                         "most |\n|---|---|---|---|\n");
+
+    const auto shares = [] (const std::vector<double>& times, int block)
+    {
+        const auto length = block / benchRate;
+        return juce::String (100.0 * phazite::test::meanOf (times) / length, 1) + " / "
+               + juce::String (100.0 * phazite::test::percentileOf (times, 0.99) / length, 1) + " / "
+               + juce::String (100.0 * phazite::test::percentileOf (times, 1.0) / length, 1) + " %";
+    };
+
+    for (const auto block : { 128, 512 })
+    {
+        phazite::test::EnginePlayback device (phazite::test::EnginePlayback::Input::silence,
+                                              phazite::test::EnginePlayback::Timing::realTime, benchRate, block);
+        const auto count = (int) (10.0 * benchRate / block); // ten seconds
+
+        for (const auto numThreads : { 1, 4 })
+        {
+            engine.setNumThreads (numThreads);
+            phazite::test::timeEngineBlocks (100, block);
+            const auto stopped = phazite::test::timeEngineBlocks (count, block);
+            phazite::playOrStop (song);
+            phazite::test::timeEngineBlocks (100, block);
+            const auto playing = phazite::test::timeEngineBlocks (count, block);
+            phazite::stopAndReturn (song);
+            report << "| Blocks of " << block << " samples (" << milliseconds (block * 1000.0 / benchRate) << ") | " << numThreads << " | "
+                   << shares (stopped, block) << " | " << shares (playing, block) << " |\n";
+        }
+    }
+
+    engine.setNumThreads (threads);
+
+    // The message thread's work.
+    auto* session = phazite::findPlayingSession (song);
+    REQUIRE (session != nullptr);
+    std::vector<double> compiles, notes, moves;
+
+    for (int i = 0; i < 20; ++i)
+    {
+        compiles.push_back (millisecondsOf ([session] { session->update(); }));
+        notes.push_back (millisecondsOf (
+            [&]
+            {
+                phazite::addNote (s.context, built.clips[(size_t) i], 72, phazite::BeatPosition::fromBeats (2.5),
+                                  phazite::BeatDuration::fromBeats (0.25), 100);
+                phazite::test::dispatchPendingMessages();
+            }));
+        moves.push_back (millisecondsOf (
+            [&]
+            {
+                phazite::moveClip (s.context, built.clips[(size_t) i], phazite::BeatPosition::fromBeats (1.0), built.tracks[(size_t) i]);
+                phazite::test::dispatchPendingMessages();
+            }));
+    }
+
+    report << "\n| 100 tracks, the message thread | Median | Most |\n|---|---|---|\n";
+    report << "| The plan's compile, given to the engine | " << milliseconds (phazite::test::percentileOf (compiles, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (compiles, 1.0)) << " |\n";
+    report << "| A note added, with its new plan | " << milliseconds (phazite::test::percentileOf (notes, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (notes, 1.0)) << " |\n";
+    report << "| A clip moved, with its new plan | " << milliseconds (phazite::test::percentileOf (moves, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (moves, 1.0)) << " |\n";
+    report << "| Save, after the song played and was edited | "
+           << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1) << " |  |\n";
+    report << "| Save again, nothing changed | " << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1)
+           << " |  |\n";
+    report << "\nThe project's file: " << juce::String (s.getProject().getFile().getSize() / 1024) << " KB\n";
     MESSAGE (report);
 }
 

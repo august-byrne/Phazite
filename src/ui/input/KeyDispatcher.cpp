@@ -7,12 +7,34 @@ namespace phazite::ui
 {
 namespace
 {
-    // Whether a command would change the song, or step through its history, which a drag in progress holds a step of: Ctrl+Z
-    // in the middle of a clip's drag took the drag's step back and left the rest of the drag in a step without a name, redo's
-    // history gone (known bug 45 until 2026-11-14). Undo and Redo name no undoTarget: they are the history's own.
-    bool changesSong (const Command& command)
+    // The commands a key runs while a mouse button is down: those that change nothing in the song, its undo history or its
+    // files, but how it plays and how it shows (playing and stopping, the tools, which take over as the mouse goes up, and the
+    // editors' zoom). A drag is one undo step from its press to its release: Ctrl+Z in the middle of a clip's drag took the
+    // drag's step back and left the rest of it in a step without a name (known bug 45 until 2026-11-14), and a command that
+    // begins a step of its own (Capture, Consolidate) joined the drag's, which Escape then took back with it. Named one by one,
+    // so that a command added later waits for the mouse to go up until it is shown to change nothing
+    // (tests/EditorDragTests.cpp runs every command by its key in the middle of a drag).
+    bool runsWhileMouseIsDown (const Command& command)
     {
-        return command.undoTarget != nullptr || command.id == "edit.undo" || command.id == "edit.redo" || command.id == "edit.undoOrRedo";
+        static const juce::StringArray ids { "transport.playStop",
+                                             "transport.playPause",
+                                             "tool.smart",
+                                             "tool.draw",
+                                             "tool.paint",
+                                             "tool.slice",
+                                             "tool.slip",
+                                             "tool.mute",
+                                             "tool.delete",
+                                             "tool.select",
+                                             "tool.zoom",
+                                             "view.zoomIn",
+                                             "view.zoomOut",
+                                             "view.zoomToFit",
+                                             "view.zoomToSelection",
+                                             "view.zoomBack",
+                                             "view.centreOnPlayhead",
+                                             "view.followPlayback" };
+        return ids.contains (command.id);
     }
 
     bool isMouseButtonDown()
@@ -83,7 +105,7 @@ bool KeyDispatcher::keyPressedOverPlugin (const juce::KeyPress& key)
 bool KeyDispatcher::runForKey (const Command& command, const juce::KeyPress& key)
 {
     // With a mouse button down, the key is used up: what the mouse does goes on as it began.
-    if (isMouseButtonDown() && changesSong (command))
+    if (isMouseButtonDown() && ! runsWhileMouseIsDown (command))
         return true;
 
     // A held key repeats. Only commands that take a step run again; for the others the repeat is used up.

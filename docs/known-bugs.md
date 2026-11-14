@@ -10,12 +10,13 @@ The file holds two kinds of entries, under the same headings:
 - **Entries 19 to 43** are bugs seen in the code while the quality audit's 16 priorities were fixed, each by the session
   that fixed its neighbour, none yet reproduced by a test. Some are notes still to be traced: where an entry gives no
   cause or no fix, that is the first step.
-- **Entries from 44 on** are the open faults of the whole-project quality audit: its bugs, and those of its real-time,
+- **Entries 44 to 133** are the open faults of the whole-project quality audit: its bugs, and those of its real-time,
   security and performance findings that are faults rather than wishes. The audit read the code and ran nothing, so each
   entry ends with whether its second reader confirmed it ("confirmed by a second reading", "partly confirmed") or it is
   "not yet checked": check an entry against the code, and reproduce it with a test, before fixing it. Each names the
   audit's area and finding number, by which the audit's own files hold it in full. Timings in them are estimates unless
   they say "measured".
+- **Entries from 134 on** were found by the tests of the plan's stage 2, or seen while they were built; each says how.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -153,13 +154,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Why: `SandboxedInstance::getDeadlineNanoseconds()` (`src/model/plugins/SandboxedInstance.cpp`) is the part's length.
   Fix: take the deadline from the device's block, with a floor near a millisecond. Not measured. Partly confirmed by a
   second reading (plugin-hosting 5).
-- **66. Phazite trusts counts that a helper can write.** After a block it copies as many channels as the shared
-  memory's header says, read again from memory the helper writes (`src/model/plugins/SandboxedProcessor.cpp`), and
-  `readParameters()` and `readPluginInfo()` (`src/sandbox/core/PluginInfo.cpp`) size their lists from a count in the
-  message: a helper gone wrong can make Phazite read and write out of bounds, or fail an allocation on the pipe's
-  thread. The helper keeps what it reads within limits; Phazite doesn't. Fix: use the count Phazite handed over, cap a
-  message's counts by the bytes it has left, and take a malformed message for a lost helper. Not yet checked
-  (plugin-hosting 9).
+- **66. Phazite trusts the channel count a helper writes into shared memory.** After a block,
+  `SandboxedProcessor::collect()` (`src/model/plugins/SandboxedProcessor.cpp`) copies as many channels as the shared
+  memory's header says, read again from memory the helper writes, so a helper gone wrong can make Phazite read and
+  write out of bounds on the audio thread. The helper's messages are safe since 2026-11-14: their counts are capped by
+  the bytes left (`MessageReader::getNumBytesLeft()`, `src/sandbox/core/Messages.h`), and a plug-in's latency, tail and
+  channel counts are clamped (`readPluginInfo()`, `keepLatency()`, `src/sandbox/core/PluginInfo.cpp`); the fuzzer
+  feeds them damaged messages (`tests/FuzzTests.cpp`). Fix: use the count Phazite handed over, and take a header that
+  says another for a lost helper. Not yet checked (plugin-hosting 9).
 - **68. A plug-in's editor has the wrong size whenever Interface Size isn't 100 %:** cropped below it, with black
   margins above it, and a resizable editor is made larger at each opening. Why: `SandboxedEditor`
   (`src/app/SandboxedEditor.cpp`) takes the plug-in's size in pixels for its own size in the scaled window, and the
@@ -389,10 +391,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   engine can't play: the pad isn't separated any more, its track is silent, and the device never ducks. Why:
   `isFedBy()` (`src/model/mixer/Sidechain.cpp`) doesn't know that a pad's track takes its sound from its sampler's
   track. Fix: add that rule. Not yet checked (model-mixer 11).
-- **102. Pads' tracks are left behind when their drum sampler is removed or replaced:** they play nothing, and Bring
-  Pad Back can't be reached. Why: `removeDevice()` and `setInstrument()` (`src/model/mixer/Mixer.cpp`) and
-  `deleteTracks()` leave the tracks' pad properties. Fix: clear them, or delete the empty tracks, in the same undo
-  step. Not yet checked (model-mixer 14).
+- **102. Pads' tracks are left behind when their drum sampler is removed or replaced:** until the project is opened
+  again they play nothing, and Bring Pad Back can't be reached. Opening it clears the pad properties that name a
+  sampler the song hasn't (`makeConsistent()`, `src/model/project/Project.cpp`), so the tracks become plain tracks
+  then. Why: `removeDevice()` and `setInstrument()` (`src/model/mixer/Mixer.cpp`) and `deleteTracks()` leave the
+  tracks' pad properties. Fix: clear them, or delete the empty tracks, in the same undo step. `tests/SongIDs.h` lists it
+  as a known exception (model-mixer 14).
 - **103. Automation is written at the engine's playhead, not where it is heard,** so what is written lands late by
   the output's latency and the song's delay compensation; and a jump back while writing with the loop on is taken for
   the loop's wrap, which writes the held value through to the loop's end. Why: `AutomationWriter`
@@ -404,27 +408,47 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   own; "dry level" and "wet level" are names no device has (`src/model/automation/Automation.cpp`); the cache of
   wavetables read
   never lets one go (`src/model/devices/Wavetables.cpp`). Not yet checked (model-mixer 15).
+- **143. Removing a device leaves the modulations that name it.** A modulator's or a macro's `MODULATES` element
+  that names a parameter of the removed device stays in the song, modulating nothing, until the project is opened
+  again, when `makeConsistent()` (`src/model/project/Project.cpp`) drops it. Why: `removeDeviceState()`
+  (`src/model/mixer/Mixer.cpp`) removes the device's element alone. Its automation curves stay on purpose, so that Undo
+  brings them back with the device (`AUTOMATION` in `Schema.h`), but nothing says the same of modulations. Fix: remove
+  them in the same undo step, or keep them on purpose as the curves are and say so in `Schema.h`. Found by the random
+  songs (`tests/RandomSongTests.cpp`), which leave them out before they compare (`leaveOutWhatNamesNothing()`);
+  `tests/SongIDs.h` lists it as a known exception.
 
 ## Files from others, and privacy
 
-- **105. A preset's file is trusted.** A track preset's volume has no upper limit and plays as written, hundreds of
-  decibels if the file says so; and a pad's, a wavetable's or a sample's path may be any file of the computer, which
-  is copied into the project's Audio folder, or a network path, which makes Windows connect to it. Why:
-  `setChannelVolume()` (`src/model/mixer/Mixer.cpp`) keeps no upper limit, and the presets' paths go to
-  `copyIntoProject()` unchecked (`src/model/presets/Presets.cpp`, `src/model/devices/DeviceFiles.cpp`). Fix: keep
-  channels' and chains' volumes within the fader's range wherever they are written and read; take a preset's paths for
-  audio files only, never network paths, and say which were refused. Confirmed by a second reading (model-mixer 0).
-- **106. A DAWproject archive is unpacked without limits, and one written past 4 GB is damaged.** A small hostile
-  archive can use up the memory or the disk: its `project.xml` is read whole and its files are copied out whatever
-  their size (`src/model/project/DawProject.cpp`). Names are made safe, so no file lands outside the project. Written,
-  an archive with 4 GB of audio or more is damaged and the export says it worked: JUCE's zip writer keeps sizes in 32
-  bits. Fix: cap `project.xml` and each file by its stated size and the space left; refuse or warn past 4 GB. Not yet
-  checked (model-project-services 12).
+- **105. A preset's sound may be any audio file on the computer.** A pad's, a wavetable's or a sample's path in a
+  preset is copied into the project's Audio folder from wherever it is, outside the library's folders too. Since
+  2026-11-14 a preset's volumes are held to the fader's range, and a path that is a network path, or a file that isn't
+  audio, is refused without being touched (`isSoundFileToTake()`, `src/model/devices/DeviceFiles.cpp`); a refused
+  sound is not reported. Why: the model doesn't know the library's folders, which the services keep
+  (`src/services/Library.h`). Fix: hand the model the library's folders, take a preset's sounds from those and from
+  the preset's own folder only, and say which were refused. The song check (`tests/SongCheck.h`, its `path` rule)
+  already allows the library's folders for this (model-mixer 0).
+- **106. A DAWproject written with 4 GB of audio or more is damaged,** and the export says it worked: JUCE's zip
+  writer keeps sizes in 32 bits (`src/model/project/DawProject.cpp`). Reading one is capped since 2026-11-14:
+  `project.xml` and `metadata.xml` at 256 MB each, and what it unpacks at what an archive of its size can hold
+  (`getUnpackLimit()`, `src/model/project/internal/DawProject.h`). Fix: refuse the export past 4 GB, or warn, until
+  JUCE writes ZIP64. Not yet checked (model-project-services 12).
+- **148. Casts of a number that is not finite to `int` remain in the model outside the file readers.** A value that is
+  infinite or not a number reaching such a cast (from a plug-in's parameter, or a calculation that divides by nothing)
+  is undefined behaviour in C++. The readers keep what a file says finite (`makeConsistent()`, `setTempo()`, the
+  settings and the helper's messages), but nothing checks each cast's other sources. Seen while the readers were
+  fuzzed. Fix:
+  find the casts (`(int)` and `static_cast<int>` of a float or a double in `src/model/`) and make each safe, or keep its
+  input finite where it comes from; UBSan in `linux-asan` reports one that runs.
 - **107. A saved preset holds the full paths of its sound files, the user's name in them,** and its sounds don't go
   with it. Why: saving a preset turns each path in the project into the file's full path
   (`src/model/presets/Presets.cpp`, `src/model/devices/DeviceFiles.cpp`). The privacy page promises that for project
   files only. Fix: copy a preset's samples beside it and keep their paths from the preset; until then, say it on the
   privacy page. Not yet checked (docs 8).
+
+- **151. A preset's sound on a network path is left out without a word.** A preset whose pad's or sampler's file is on
+  a share (`\NAS\Samples\...`) loads with the device's own sound and no message, since such a path is refused without
+  being touched (`isSoundFileToTake()`, `src/model/devices/DeviceFiles.cpp`); a mapped drive letter still works. Fix:
+  a notice that names the sounds that weren't taken.
 
 ## Window, shell and keys
 
@@ -462,6 +486,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   with repeats; and each listing of Favorites hashes up to 64 files of the same size for every member that is missing,
   again each time (`findMovedMembers()`, `src/services/Library.cpp`). Fix: don't follow loops; look for moved members
   on the indexer's thread, once for each index. Not yet checked (model-project-services 11).
+- **146. Thirteen controls have no tooltip,** so the hint bar says nothing over them: the Project view's Notes field,
+  the header of Source Control's Graph, seven of the EQ editor's band controls (Band On, Band Shape, Slope, Frequency,
+  Gain, Q, Output), and the Low Cut and High Cut knobs of the Vinyl and of the Delay (`src/ui/project/ProjectView.cpp`,
+  `src/ui/versions/VersionsView.cpp`, `src/ui/devices/EqEditor.cpp`, `src/ui/devices/VinylEditor.cpp`,
+  `src/ui/devices/DelayEditor.cpp`). The walk of every control (`tests/AppShellTests.cpp`) lists them in `knownSilent`
+  and fails once one has a tooltip, so take each out of the list with its fix. Their wording waits for an answer
+  ([open-questions.md](open-questions.md), row 56).
 
 ## Device editors
 
@@ -503,7 +534,8 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Slow on the message thread
 
-None of these is measured: each is the audit's reading of the code, and each needs a benchmark before and after its fix.
+Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
+its fix.
 
 - **122. Notes and clips are found by looking through the song at every call, so editing many notes is quadratic.**
   Each move of the mouse in a drag of notes looks through every track's children several times for each note
@@ -518,8 +550,8 @@ None of these is measured: each is the audit's reading of the code, and each nee
   hits at once (`src/model/arrangement/Transients.cpp`). A long recording stops the window for seconds. Fix: background
   jobs with their progress, the undo step made as they finish. Not yet checked (model-arrangement 12).
 - **124. Every new plan reads all the automation again, asks the disk about each audio clip's file twice and makes the
-  tempo map several times for each clip,** and changes of view state make a new plan too, so a drag of the playhead
-  compiles at every turn of the message loop (`src/model/playback/SongPlayer.cpp`,
+  tempo map several times for each clip,** and changes of view state make a new plan too (moving the playhead no longer
+  does, since 2026-11-14) (`src/model/playback/SongPlayer.cpp`,
   `src/model/arrangement/AudioClips.cpp`, `src/model/playback/PlaybackSession.cpp`). The benchmark's song has no audio
   clips. Fix: one tempo map for each compile, what is known of a file kept until it changes, no plan for view state;
   benchmark a song of 500 audio clips. Not yet checked (model-playback 10).
@@ -547,10 +579,46 @@ None of these is measured: each is the audit's reading of the code, and each nee
   for each column of its curve, 30 times a second while its analyzer moves (`src/ui/devices/EqEditor.cpp`); the
   reverb's and the sampler's pictures do alike (`src/ui/devices/ReverbEditor.cpp`, `src/ui/devices/SamplerEditor.cpp`).
   Fix: keep the curve until a value changes. Not yet checked (ui-device-editors 13).
+- **144. A note added repaints the playlist's whole lane area and makes every clip component again,** and the playlist
+  makes seven components for every track's header, in view or not. Why: `Playlist::songChanged()`
+  (`src/ui/playlist/Playlist.cpp`) treats any change in the clips' group of changes, a note's included, as a change of
+  every clip; the headers are made for the whole song. The performance gates (`tests/PerformanceGateTests.cpp`) hold
+  both: the repaint as a known exception, which fails once a note repaints its clip alone, so that the exception goes
+  with the fix; and the headers as at most seven components a track, to be lowered with a fix. Fix: lay out and repaint
+  the clips that changed, and make headers only for the tracks in view, as the clips are.
+- **145. A plan's compile costs about 0.4 ms a track, on every edit.** With 100 busy tracks every edit, and every step
+  of a drag, takes about 40 ms of the message thread, measured on 2026-11-14 ([performance.md](performance.md),
+  "a song of 100 tracks"), so a drag stutters in a large song. Why: every edit compiles the whole song again
+  (`src/model/playback/SongPlayer.cpp`; see also 124). Fix: compile again only what changed (roadmap step S5.7), with
+  the 100-track benchmark before and after.
 
 ## Tests
 
-## Build and packaging
+- **152. In a sanitizer build, closing a helper waits for its error output to end** (`Relay` in
+  `src/sandbox/client/Helper.cpp`): a plug-in that started a process of its own, which inherited that pipe, would keep
+  Phazite's message thread waiting. Only builds with a sanitizer pipe the helper's output; the others start it as before.
+- **153. In a Debug build an assertion that fires on the audio thread writes to the log** (`JUCE_LOG_ASSERTIONS`, which
+  the tests' assertion net needs): a string made and a file written there, which the real-time audit then counts. No
+  assertion fires on the audio thread in the audit's scenarios today; one that did would show as an allocation as well
+  as a failed test.
+
+- **147. Two tests fail when most test files run in one process, though each passes alone and under ctest.** The
+  command script's golden (`tests/CommandGoldenTests.cpp`) comes out with another `nextID`, and the Capture check of
+  "Capture in 6/8 makes a clip of whole bars..." (`tests/TempoTests.cpp`) fails. ctest runs a process for each test
+  file, so CI doesn't see it. Why: something one test file leaves behind in the process (the shared engine context,
+  settings, a static) changes what a later one makes; not traced. Fix: run the files in one process in another order to
+  find which file leaves it, and make that test clean up, or make the two tests start from nothing.
+- **149. JUCE asserts on a date that is no date in a damaged zip** (`juce_core/time/juce_Time.cpp`, in Debug builds) as
+  `juce::ZipFile` reads an entry. Phazite never uses an entry's date, so a damaged DAWproject only raises the assertion;
+  the DAWproject fuzz case declares it (`ExpectedAssertion` in `tests/FuzzTests.cpp`). Whether Phazite reads the zip's
+  entries without JUCE's date, or the assertion stays declared, is open question Q7 in
+  [juce-workarounds.md](juce-workarounds.md#open-questions).
+- **150. Full screen is switched in no test, and the main window's tests run on Windows only.**
+  `tests/MainWindowTests.cpp` switches the theme, the interface size and the keymap, but not Full Screen
+  (`view.fullScreen`): Windows' kiosk mode needs a real window, and JUCE asserts for one on no screen. And the file is
+  compiled for Windows alone, as the window reads its theme and the screens from the system, which Linux CI can't
+  without a display server. Fix: a full-screen case in a real window, as the devices' windows in that file are; on
+  Linux, a virtual display (Xvfb) in CI, or the window's theme and screens taken through `MainWindow::Surroundings`.
 
 - **132. The folder beside the app goes stale, and the installer packs it.** Presets deleted from `resources/presets`
   stay next to the app, and an older `PhaziteHost` can: the copies are steps after the app's link, which run only when

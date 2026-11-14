@@ -24,3 +24,8 @@ tracktion                      0
 
 # No thread is ended by force (stopThread with a time limit, killThread, JUCE's ThreadPool), and this stays 0.
 thread-kills                   0
+
+# Colours, font sizes and corner radii written as literals in src/ui and src/app outside src/ui/theme, rather than taken
+# from the design tokens (src/ui/theme/DesignTokens.h). The one budget above 0: it is the count there was when the rule
+# came, and it only falls, as each literal moves into the tokens. Never raise it: add a token instead.
+ui-design-literals            33

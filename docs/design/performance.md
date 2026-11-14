@@ -22,7 +22,8 @@ them. What has been measured, and how, is in [../performance.md](../performance.
 | Latency and delay compensation shown in the audio settings | Built | |
 | CPU load in the status bar and on each mixer strip | Built | |
 | Freeze Track and Bounce in Place for heavy tracks | Built | [projects-saving-export.md](projects-saving-export.md) |
-| Benchmarks of the devices, the engine, saving and the UI | Built | Run by hand; not part of `ctest` |
+| Benchmarks of the devices, the engine (a song of 100 tracks among them), saving and the UI | Built | Run by hand; not part of `ctest` |
+| Gates that fail a change that makes Phazite slower | Built | Counts of work in every `ctest` run; the benchmark gates and an hour's long run nightly, which hasn't run yet |
 | The targets below, measured on a mid-range laptop | Partly built | Measured on the development PC only |
 | Tracks that aren't being edited pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -128,9 +129,13 @@ The engine's design is in [engine.md](engine.md). The parts that matter for spee
 ## Measuring
 
 - The benchmarks (`tests/Benchmarks.cpp`, run with `phazite_tests --test-suite=benchmark --no-skip` from the
-  `windows-profile` build) time the devices, live notes, a project stopped and playing, saving and the UI's work.
-  `tests/SandboxBenchmarks.cpp` times plug-ins in helpers.
+  `windows-profile` build) time the devices, live notes, a project stopped and playing, a song of 100 tracks, saving
+  and the UI's work. `tests/SandboxBenchmarks.cpp` times plug-ins in helpers.
 - Performance work runs them before and after, and records the numbers in [../performance.md](../performance.md).
+- Gates fail a change that makes Phazite slower, without comparing a time with a stored number: counts of the work an
+  edit makes, in every test run (`tests/PerformanceGateTests.cpp`), and costs as ratios to a fixed reference within
+  one run, nightly (`tests/BenchmarkGates.cpp`). The long run plays an hour of music while the song is edited
+  (`tests/LongRun.cpp`). [../performance.md](../performance.md#the-gates) says what each can and can't catch.
 - While the song plays, the display's frames are logged, and what they did is written to Phazite's log as the song
   stops.
 
@@ -166,6 +171,7 @@ The engine's design is in [engine.md](engine.md). The parts that matter for spee
 - `src/ui/timeline/FrameLog.h`: the display's frames while the song plays.
 - `src/model/base/BackgroundJobs.h`: jobs in the background.
 - Tests: `tests/RealtimeAuditTests.cpp`, `tests/Benchmarks.cpp`, `tests/SandboxBenchmarks.cpp`,
-  `tests/ScrollingFrameTests.cpp`, `tests/AudioDevicesTests.cpp`, `tests/DeviceNoticesTests.cpp`.
+  `tests/PerformanceGateTests.cpp`, `tests/BenchmarkGates.cpp`, `tests/LongRun.cpp`, `tests/ScrollingFrameTests.cpp`,
+  `tests/AudioDevicesTests.cpp`, `tests/DeviceNoticesTests.cpp`.
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.

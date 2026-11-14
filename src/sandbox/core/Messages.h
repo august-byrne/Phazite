@@ -93,6 +93,10 @@ public:
     juce::String readString();
     juce::MemoryBlock readBlock();
 
+    // What is left to read: a count of what follows (a list's items), read from a helper that may have crashed halfway
+    // through writing it, is never more than what is left could hold.
+    juce::int64 getNumBytesLeft() { return in.getNumBytesRemaining(); }
+
 private:
     juce::MemoryInputStream in;
     MessageType type = MessageType::reply;

@@ -104,6 +104,20 @@ void writeDeviceFilePaths (const Song& song, juce::ValueTree& state)
         writeDeviceFilePaths (song, child);
 }
 
+bool isSoundFileToTake (const juce::String& path)
+{
+    // Never a network path, which Windows would connect to as it is asked whether the file is there (the first two
+    // characters slashes: "\\server\share", "//server/share", "\\?\UNC\..."); only a full path, of a file whose name says it
+    // is audio; and one that is there.
+    const auto isNetwork = path.length() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
+
+    if (isNetwork || ! juce::File::isAbsolutePath (path))
+        return false;
+
+    const juce::File file (path);
+    return getFileKind (file) == FileKind::audio && file.existsAsFile();
+}
+
 void copyDeviceFilesInto (Song& song, juce::ValueTree& state)
 {
     for (const auto& property : getFileProperties (state))
@@ -113,8 +127,8 @@ void copyDeviceFilesInto (Song& song, juce::ValueTree& state)
         if (path.isEmpty())
             continue;
 
-        // A file that isn't there any more: the device plays its own sound.
-        if (const juce::File file (juce::File::isAbsolutePath (path) ? path : juce::String()); file.existsAsFile())
+        // A file that isn't there any more, or that the device can't take: it plays its own sound.
+        if (const juce::File file (isSoundFileToTake (path) ? path : juce::String()); file != juce::File())
             state.setProperty (property, getProjectPath (song, copyIntoProject (song, file)), nullptr);
         else
             state.removeProperty (property, nullptr);

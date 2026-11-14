@@ -87,8 +87,10 @@ namespace
     };
 } // namespace
 
-MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
-    : juce::DocumentWindow ("Phazite", lf.getPalette().surface, juce::DocumentWindow::allButtons),
+MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices,
+                        Surroundings surroundingsToUse)
+    : juce::DocumentWindow ("Phazite", lf.getPalette().surface, juce::DocumentWindow::allButtons, surroundingsToUse.addToDesktop),
+      surroundings (std::move (surroundingsToUse)),
       commands (bridge),
       session (s),
       lookAndFeel (lf),
@@ -251,7 +253,20 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeButtonPressed()
 {
-    juce::JUCEApplication::getInstance()->systemRequestedQuit(); // asks to save unsaved changes first
+    requestQuit();
+}
+
+void MainWindow::requestQuit()
+{
+    if (surroundings.quit != nullptr)
+        surroundings.quit();
+    else
+        juce::JUCEApplication::getInstance()->systemRequestedQuit(); // asks to save unsaved changes first
+}
+
+juce::DialogWindow* MainWindow::launch (juce::DialogWindow::LaunchOptions& options)
+{
+    return surroundings.launchDialog != nullptr ? surroundings.launchDialog (options) : options.launchAsync();
 }
 
 void MainWindow::activeWindowStatusChanged()
@@ -353,7 +368,7 @@ void MainWindow::addCommands()
                     .category = "App",
                     .description = "Closes Phazite. It asks first if the project has unsaved changes.",
                     .synonyms = { "exit", "close", "leave" },
-                    .perform = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); } });
+                    .perform = [this] { requestQuit(); } });
 
     registry.add ({ .id = "options.settings",
                     .name = "Settings",
@@ -571,7 +586,7 @@ void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    settingsWindow = o.launchAsync();
+    settingsWindow = launch (o);
 }
 
 void MainWindow::showWelcome (ui::WelcomePanel::Page page)
@@ -607,7 +622,7 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    welcomeWindow = o.launchAsync();
+    welcomeWindow = launch (o);
 }
 
 void MainWindow::showAbout()
@@ -629,7 +644,7 @@ void MainWindow::showAbout()
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    aboutWindow = o.launchAsync();
+    aboutWindow = launch (o);
 }
 
 void MainWindow::showUpdates()
@@ -655,7 +670,7 @@ void MainWindow::showUpdates()
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    updatesWindow = o.launchAsync();
+    updatesWindow = launch (o);
 }
 
 void MainWindow::installUpdate()
@@ -730,7 +745,7 @@ void MainWindow::showExport()
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    exportWindow = o.launchAsync();
+    exportWindow = launch (o);
 }
 
 void MainWindow::showCleanUp()
@@ -752,7 +767,7 @@ void MainWindow::showCleanUp()
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    cleanUpWindow = o.launchAsync();
+    cleanUpWindow = launch (o);
 }
 
 void MainWindow::runRender (std::unique_ptr<TrackRender> render)
@@ -770,7 +785,7 @@ void MainWindow::runRender (std::unique_ptr<TrackRender> render)
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    renderWindow = o.launchAsync();
+    renderWindow = launch (o);
 }
 
 void MainWindow::renderFinished (const juce::String& title, const juce::Result& result)
@@ -838,7 +853,7 @@ void MainWindow::showProgressions()
     o.componentToCentreAround = this;
     o.content.setOwned (panel);
 
-    progressionsWindow = o.launchAsync();
+    progressionsWindow = launch (o);
 }
 
 void MainWindow::showWelcomeOnFirstRun()
@@ -882,7 +897,7 @@ void MainWindow::showPluginList()
     o.componentToCentreAround = this;
     o.content.setOwned (list);
 
-    pluginListWindow = o.launchAsync();
+    pluginListWindow = launch (o);
 
     // Start a VST3 scan, as the list's "Options... > Scan for new or updated VST3 plug-ins" would.
     for (auto* format : host.getFormats().getFormats())
@@ -1069,7 +1084,10 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
     const auto addOne = [this, &commandManager] (juce::PopupMenu& m, const juce::String& id)
     {
-        if (const auto commandID = commands.getCommandID (id); commandID != 0)
+        const auto commandID = commands.getCommandID (id);
+        jassert (commandID != 0); // a command the menu names that the app doesn't have: renamed, or gone
+
+        if (commandID != 0)
             m.addCommandItem (&commandManager, commandID);
     };
 

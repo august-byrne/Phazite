@@ -43,7 +43,7 @@ below are the plan for the rest.
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stage 1 in progress (the audit's 16 priorities are fixed). Stage 2 in progress. Stages 3 to 8 not started. |
+| The plan below | Stage 1 in progress (the audit's 16 priorities are fixed). Stage 2 built on Windows, but for the allocation guard on Linux and S2.13; what it added to CI and the nightly workflow waits for a push and has never run. Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -77,22 +77,17 @@ test that failed before its fix, unless its row says more.
 
 ### Stage 2. Caught: the tests that would have found those bugs, and the docs
 
+Built on Windows (2026-11-14), each in the [changelog](changelog.md): S2.1 to S2.4, S2.6 to S2.12 and S2.14 whole,
+and S2.5 on Windows. What only a push runs has never run: the Linux builds with their sanitizers, what the steps added
+to CI (UBSan's reports, the helper's sanitizer reports, the real VST3s' targets, `windows-profile`, the app started by
+ctest) and the nightly workflow (`.github/workflows/nightly.yml`). The nets these steps built are listed in
+[tests/README.md](../tests/README.md), "The nets"; the smaller test gaps left are in the [backlog](backlog.md), "Tests".
+
 | Step | Size | What | Done when |
 |---|---|---|---|
-| S2.1 | S | UBSan and a JUCE assertion each fail their test; the helper's sanitizer reports are kept | A test that asserts, or trips UBSan, fails in CI |
-| S2.2 | M | Engine and device tests at 44.1 kHz, 441-sample blocks and 140 BPM | The suites pass at that rate, block size and tempo as well as their own |
-| S2.3 | M | A golden for live playback; fingerprints that see pitch and spectrum | A song played block by block matches its committed fingerprint, and a wrong pitch fails it |
-| S2.4 | M | Undo and Redo exact after every command; the command script runs every command; the golden project holds everything | Undo after each command gives back the song as it was, to the property |
-| S2.5 | M | The allocation guard on a song being edited, from the first block, on Linux too | The real-time audit's guarded scenarios run in CI on both systems |
-| S2.6 | M | Versions tests with folders, moved clips, restarts and random edits | A seeded run of edits, commits, restores and merges never loses an item or reuses an ID |
-| S2.7 | M | All nine timeline tools driven by the mouse; a song change between press and release | Each tool has a test through `TestWindow` |
-| S2.8 | M | The shipped programs started in CI; the main window built in a test; every device editor painted | CI starts `Phazite` and `PhaziteHost` and ends them cleanly |
-| S2.9 | L | Fuzzing the readers of project files, packs, presets, DAWprojects and audio files | A fuzz run of fixed length finds no crash or hang |
-| S2.10 | M | A gate on speed; a long nightly run under ASan and TSan | A benchmark that slows past its limit fails ([performance.md](performance.md)) |
-| S2.11 | M | Tests in the light theme and at other sizes and scales; the design-token rule counted | `check-architecture.sh` counts colour and size literals in `src/ui/` |
-| S2.12 | M | A device conformance suite; a real VST®3 built in the repository and loaded by the tests | Every device passes one shared list of checks |
+| S2.5 (rest) | M | The allocation guard on Linux too, and with the engine on more than one thread | The real-time audit's guarded scenarios run in CI on both systems |
 | S2.13 | M | Precompiled headers for JUCE; a Clang build with static analysis; ASan on Windows | CI runs them |
-| S2.14 | L | The docs consolidated: this page, the changelog, the hand checks, the design as pages by area, the open questions, the backlog, `architecture.md`, `performance.md`, a page of source control as built | Each page says what is, and none repeats another |
+| S2.15 | S | A push: CI and the nightly workflow run for the first time, and what they find is fixed | CI is green on every preset, and a nightly run passes |
 
 ### Stage 3. Checked: a person tries what only tests have tried
 
@@ -119,7 +114,7 @@ what they found is fixed or in known-bugs.md.
 | S4.6 | S | Backups kept by age, not by count | A day's work leaves backups from an hour, a day and a week before |
 | S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
 | S4.8 | M | Mute and solo silence a track's output only: its sends before the fader, its sidechain and its tails go on | A muted track still feeds a compressor that listens to it |
-| S4.9 | L | Files from others are untrusted: values clamped, sound paths kept inside the project, DAWproject unpacking capped | The fuzz corpus and a hostile DAWproject open safely or are refused with a reason |
+| S4.9 (rest) | S | Files from others are untrusted, the rest: a preset's sounds taken from the library's folders only, the channel count a helper writes, casts of numbers that are not finite, DAWprojects past 4 GB (known bugs 66, 105, 106, 148). Built (2026-11-14): a song made consistent as it opens, values clamped, sound paths kept inside the project, DAWproject unpacking capped, the readers fuzzed | Each of the four has its test |
 
 ### Stage 5. Wide: what a beat maker meets in the first week
 
@@ -162,7 +157,7 @@ what they found is fixed or in known-bugs.md.
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S7.1 | XL | Mono tracks, more than one output pair, a cue mix | A performer hears a mix of their own on a second output pair |
-| S7.2 | XL | Scale, measured first: a 100-track benchmark, a scheduler that does not spin, read-ahead before a jump | The benchmark's numbers are in [performance.md](performance.md), with their limits |
+| S7.2 | XL | Scale: a scheduler that does not spin, read-ahead before a jump, the benchmarks on a laptop. The 100-track benchmark is built, its numbers in [performance.md](performance.md) | 100 busy tracks play at 128 samples on four threads with room to spare |
 | S7.3 | L | Multi-out plug-ins and MIDI channels | A multi-out drum plug-in plays each output on a strip of its own |
 | S7.4 | L | Routing: buses send to returns, sidechains inside containers, macros automated, any track or bus as an output | Each has a model test and plays in a golden render |
 | S7.5 | L | Note effects, and MIDI from plug-ins | An arpeggiator before an instrument plays in time, live and rendered |
@@ -229,7 +224,7 @@ One line each; the rows, with what is built today, are in [open-questions.md](op
 | Built-in devices fall short of the plug-ins people own | Stage 6: a listening set and a verdict for each device, with DSP tests |
 | The audio thread breaks the real-time rules | The real-time audit after every change to playback; its guarded scenarios fail if steady playback allocates (S2.5 widens them) |
 | A fix or a restructuring changes behaviour by accident | The golden tests of saved projects, renders and commands, and stage 2's nets |
-| The layers erode, and files grow | `tools/check-architecture.sh` in CI and before every commit, every budget at 0; file size is not counted yet (S5.15) |
+| The layers erode, and files grow | `tools/check-architecture.sh` in CI and before every commit, every budget at 0 but that of the literals the design tokens should hold, which only falls; file size is not counted yet (S5.15) |
 | The UI is the largest part of the work | One view at a time, on the model's functions, each with tests through `TestWindow` |
 | An unsigned installer is warned about by Windows | 4.3 |
 

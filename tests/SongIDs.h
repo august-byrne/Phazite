@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A song's IDs checked: every item's once in the song (Schema.h: holdsID(); a channel's fader and VCA too), a note's
 // once in its clip, and what names an item naming one the song has. For the tests of what puts a song together from
-// others: a merge, a version brought back, a line discarded or restored.
+// others: a merge, a version brought back, a line discarded or restored; and for the consistency check of a song as it
+// loads (SongCheck.h), which takes the problems as lines rather than as failed checks.
 #pragma once
 
 #include "TestHelpers.h"
@@ -10,12 +11,37 @@
 
 #include <functional>
 #include <set>
+#include <string>
+#include <vector>
 
 namespace phazite::test
 {
-// Every item's ID once in the song, and notes' once in their clips. Returns the items' IDs.
-inline std::set<std::uint64_t> checkUniqueIDs (const juce::ValueTree& song)
+// Whether Phazite knows an element's type (Schema.h). One it doesn't, a later build's or another tool's, stays in a song as it is,
+// with everything in it (docs/project-format.md), and nothing reads it: the checks leave it and what is in it alone.
+inline bool isKnownElementType (const juce::ValueTree& element)
 {
+    static const juce::StringArray types { "PHAZITE",    "LASTKEY",   "TEMPOMAP", "TEMPO",    "TIMESIGNATURE", "PIANOROLL", "TRACKS",
+                                           "TRACK",      "MASTER",    "LANES",    "LANE",     "DEVICE",        "VALUES",    "SOUNDS",
+                                           "VALUE",      "CONTAINER", "CHAIN",    "SEND",     "MODULATOR",     "MACRO",     "MODULATES",
+                                           "AUTOMATION", "CURVE",     "POINT",    "SECTIONS", "SECTION",       "CHORDLANE", "CHORD",
+                                           "CHORDKEY",   "CLIP",      "NOTE",     "CONTROL",  "WARP" };
+    return types.contains (element.getType().toString());
+}
+
+// Each problem with a song's IDs, as a line: "id: ..." for an ID held twice (an item's in the song, a note's in its clip),
+// "names: ..." for what names an item the song hasn't (a sidechain, a lane's, a curve's and a modulation's device, a pad's
+// drum sampler); but a send's return, which the song keeps for an undo that brings the return back. The items' IDs, if
+// asked.
+//
+// A song as it is being edited (not asLoaded) keeps more that names what is gone, which opening it leaves out (Project.h:
+// makeConsistent()): the curves and lanes of a device taken away, as Schema.h says (AUTOMATION, LANE), so that an undo
+// brings them back with it; and, as known exceptions (docs/known-bugs.md), what modulated a device taken away, which
+// removing it leaves too (Mixer.cpp: removeDeviceState()), and the track of a drum sampler's pad whose sampler went
+// (model-mixer 14: a pad's track is left when its sampler is removed or replaced).
+inline std::vector<std::string> findIDProblems (const juce::ValueTree& song, std::set<std::uint64_t>* itemsFound = nullptr,
+                                                bool asLoaded = true)
+{
+    std::vector<std::string> problems;
     std::set<std::uint64_t> items;
     const std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& tree)
     {
@@ -23,54 +49,84 @@ inline std::set<std::uint64_t> checkUniqueIDs (const juce::ValueTree& song)
 
         for (const auto& child : tree)
         {
+            if (! isKnownElementType (child))
+                continue;
+
             if (child.hasType (schema::NOTE))
             {
-                INFO ("a note's ID twice in its clip");
-                CHECK (notes.insert (readID (child[schema::noteID])).second);
+                if (! notes.insert (readID (child[schema::noteID])).second)
+                    problems.push_back ("id: a note's ID twice in its clip: " + child[schema::noteID].toString().toStdString());
+
                 continue;
             }
 
             for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
-            {
                 if (child.hasProperty (*property) && schema::holdsID (child, *property))
-                {
-                    INFO ("twice in the song: " << (child.getType().toString() + " " + child[*property].toString()).toStdString());
-                    CHECK (items.insert (readID (child[*property])).second);
-                }
-            }
+                    if (! items.insert (readID (child[*property])).second)
+                        problems.push_back ("id: twice in the song: "
+                                            + (child.getType().toString() + " " + child[*property].toString()).toStdString());
 
             collect (child);
         }
     };
 
     collect (song);
-    return items;
-}
 
-// The same, and what names an item (a sidechain, a lane's, a curve's and a modulation's device, a pad's drum sampler)
-// names one the song has; but a send's return, which the song keeps for an undo that brings the return back.
-inline void checkIDs (const juce::ValueTree& song)
-{
-    const auto items = checkUniqueIDs (song);
     const std::function<void (const juce::ValueTree&)> check = [&] (const juce::ValueTree& tree)
     {
         for (const auto& child : tree)
         {
+            if (! isKnownElementType (child))
+                continue;
+
             for (int i = 0; i < child.getNumProperties(); ++i)
-            {
-                if (const auto property = child.getPropertyName (i); schema::namesID (child, property) && ! child.hasType (schema::SEND))
-                {
-                    INFO ("names nothing: "
-                          << (child.getType().toString() + "@" + property.toString() + " " + child[property].toString()).toStdString());
-                    CHECK (items.count (readID (child[property])) == 1);
-                }
-            }
+                if (const auto property = child.getPropertyName (i);
+                    schema::namesID (child, property) && ! child.hasType (schema::SEND)
+                    && (asLoaded
+                        || ! (child.hasType (schema::CURVE) || child.hasType (schema::LANE) || child.hasType (schema::MODULATES)
+                              || property == schema::trackPadDevice)))
+                    if (items.count (readID (child[property])) != 1)
+                        problems.push_back (
+                            "names: names nothing: "
+                            + (child.getType().toString() + "@" + property.toString() + " " + child[property].toString()).toStdString());
 
             check (child);
         }
     };
 
     check (song);
+
+    if (itemsFound != nullptr)
+        *itemsFound = std::move (items);
+
+    return problems;
+}
+
+// Every item's ID once in the song, and notes' once in their clips. Returns the items' IDs.
+inline std::set<std::uint64_t> checkUniqueIDs (const juce::ValueTree& song)
+{
+    std::set<std::uint64_t> items;
+
+    for (const auto& problem : findIDProblems (song, &items))
+    {
+        if (problem.rfind ("id:", 0) == 0)
+        {
+            INFO (problem);
+            CHECK (false);
+        }
+    }
+
+    return items;
+}
+
+// The same, and what names an item names one the song has.
+inline void checkIDs (const juce::ValueTree& song)
+{
+    for (const auto& problem : findIDProblems (song, nullptr, false))
+    {
+        INFO (problem);
+        CHECK (false);
+    }
 }
 
 // A song's own, and that the next ID it gives is one nothing in it has.

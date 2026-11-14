@@ -62,7 +62,7 @@ and nothing is listed in both.
 | Stretched, pitched and reversed clips heard at once, stretched as they play, instead of silent until their render is done | `src/model/arrangement/ClipRenders.cpp` | L | 5 | model-arrangement 4, product-gaps 3 |
 | Time-signature changes along the song | `src/model/transport/Tempo.cpp` | M | 5 | model-playback 12, product-gaps 14 |
 | Wider strips: mono tracks, more than one output pair, a cue mix | `src/engine/nodes/Strip.cpp` | XL | 7 | plan, product-gaps 10 |
-| Scale, measured first: a benchmark of 100 tracks, the project benchmark at 128 samples and on a laptop, a scheduler that doesn't spin on what it waits for, strips played in smaller blocks than the device's, read-ahead before a jump | `src/engine/core/Workers.cpp` | XL | 7 | engine 11, performance audit |
+| Scale: the benchmarks on a laptop, a scheduler that doesn't spin on what it waits for, strips played in smaller blocks than the device's, read-ahead before a jump. The 100-track benchmark is built and measured ([performance.md](performance.md)): one thread can't play 100 busy tracks, four can at 128 samples with little room | `src/engine/core/Workers.cpp` | XL | 7 | engine 11, performance audit |
 | Parameter smoothing that lasts longer than one block, and channel meters that keep less than 64 blocks | `src/engine/nodes/DeviceRunner.cpp` | — | — | engine 14 |
 | The click: a level to set and an output to choose; audio files of more than two channels played whole | `src/engine/transport/Click.cpp` | — | — | engine 15 |
 | Files at another rate than the engine's converted once into the song's cache, if many such clips at once ever weigh on a song | `src/engine/audio/Resampler.cpp` | — | — | performance audit, DSP audit |
@@ -90,7 +90,6 @@ and nothing is listed in both.
 |---|---|---|---|---|
 | An undo depth to set (about 30 steps in practice now) | `src/model/base/Song.cpp` | (S) | 1 | model-project-services 10 |
 | Backups kept by age, not by a count of ten that Auto Save turns over in under two hours | `src/model/project/Project.cpp` | S | 4 | model-project-services 6 |
-| Files from others untrusted: a song's values checked against their ranges as it opens, sound paths kept inside the project, readers fuzzed | `src/model/project/Project.cpp` | L | 4 | format audit, plan |
 | A project and its versions keep no full path that can hold the user's name: an audio file whose copy into the project failed, a plug-in's file in a per-user folder | `src/model/base/internal/Schema.h` | — | — | format audit |
 | The formats named and versioned when compatibility starts: a file that names the store's format, its version and its hash, room for a pack's entries to grow, a format name and version on the project file | `src/model/versions/PieceStore.cpp` | (L) | 8 | format audit, product-gaps 12 |
 
@@ -152,7 +151,6 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Escape abandons any drag, in every editor and lane (it does in the piano roll alone) | `src/ui/playlist/PlaylistTools.cpp` | (M) | 1 | ui-timeline-editors 6, tests-ui 10 |
 | Automation lanes' drags scroll the view at its edges, and points are selected across lanes | `src/ui/playlist/PlaylistAutomation.cpp` | — | — | ui-timeline-editors 11 |
 | A clip dragged or drawn onto a track of the other kind is refused, as the design's rule says that audio and notes don't share a track | `src/ui/playlist/PlaylistTools.cpp` | — | — | ui-timeline-editors 8 |
 | The audio clip editor zooms and scrolls | `src/ui/audioclip/AudioClipEditor.cpp` | L | 5 | ui-timeline-editors 4 |
@@ -211,53 +209,31 @@ and nothing is listed in both.
 
 ## Tests
 
-"In progress" rows are being built in stage 2 now.
+Stage 2 built the audit's test nets on Windows ([tests/README.md](../tests/README.md), "The nets"); the rows here are
+what is left of them, and what came up while they were built.
 
 | Item | Where | Size | Stage | Status | Source |
 |---|---|---|---|---|---|
-| UBSan fails a test, and the helper's sanitizer reports are kept | `CMakePresets.json` | S | 2 | In progress | tests-infrastructure 0, tests-infrastructure 1, build-ci-tools 1 |
-| A JUCE assertion fails its test | `tests/TestMain.cpp` | S | 2 | In progress | tests-infrastructure 5 |
-| Engine and device tests at other conditions: 44.1 kHz, blocks of 441 samples, 140 BPM, with the cases that hid the audit's bugs | `tests/EnginePlayback.h` | M | 2 | In progress | tests-audio 6, tests-audio 7, devices-instruments 10, devices-effects 9 |
-| A golden for live playback, which the renders don't cover | `tests/GoldenRenderTests.cpp` | M | 2 | In progress | tests-audio 10 |
-| Undo and Redo exact after every command | `tests/UndoTests.cpp` | M | 2 | In progress | tests-model 4, tests-ui 12 |
-| The allocation guard on a song being edited, from the first block, on Linux too, and on more than one thread | `tests/RealtimeAuditTests.cpp` | M | 2 | In progress | tests-infrastructure 3, tests-infrastructure 4 |
-| The command script runs every command, and the golden project holds every kind of data | `tests/CommandGoldenTests.cpp` | M | 2 | In progress | tests-model 6, tests-model 7 |
-| All nine timeline tools driven by the mouse; the song changed between a press and its release; items off the grid and parts of a wheel notch | `tests/PlaylistTests.cpp` | M | 2 | In progress | tests-ui 0, tests-ui 4, ui-timeline-editors 14 |
-| The shipped programs started in CI; MainWindow and the devices' windows made in a test; the device editors painted | `tests/AppScreen.h` | M | 2 | In progress | tests-infrastructure 6, tests-infrastructure 7, tests-ui 1, tests-ui 2 |
-| The readers fuzzed: project files, presets, DAWproject, the versions' packs, the sandbox's messages and shared memory | `tests/SandboxTests.cpp` | L | 2 | In progress | tests-infrastructure 8, tests-model 9, tests-audio 11 |
-| Fingerprints of the golden renders that see pitch, spectrum and small timing errors | `tests/RenderHarness.h` | M | 2 | In progress | tests-infrastructure 11 |
-| A gate on speed: a device that gets much slower fails a check | `tests/Benchmarks.cpp` | M | 2 | In progress | tests-infrastructure 9 |
-| Tests in the light theme and at other window sizes and scales; the design-token rule counted by the architecture check | `tools/check-architecture.sh` | M | 2 | In progress | tests-ui 7, tests-ui 8 |
-| A long run every night under ASan and TSan, with songs of several configurations | `.github/workflows/ci.yml` | M | 2 | In progress | tests-infrastructure 14 |
-| A device conformance suite on a shared library of DSP probes: every device through the same checks (values that aren't numbers, blocks of no length, mono, extremes, reported latency against measured delay) | `tests/TestDevices.h` | M | 2 | In progress | tests-audio 8, tests-audio 3, tests-audio 9 |
-| A real VST3 built in the repository and loaded by the tests | `tests/host/TestPlugins.cpp` | M | 2 | In progress | tests-infrastructure 2, plugin-hosting 14 |
-| Versions tests with folders and buses, clips moved between tracks, restarts, and random edits; random tests of the song's text, the pieces and apply-song | `tests/VersionsMergeTests.cpp` | M | 2 | Open | tests-model 3, tests-model 10, model-versions 14 |
+| The nets that run only on a push or at night run once, and what they find is fixed: CI's Linux builds with ASan, UBSan and TSan, the UBSan reports and the helper's sanitizer reports, the real VST3s' targets, `windows-profile` in CI, `PhaziteStarts`; and the nightly workflow (the long run under `linux-asan` and `linux-tsan`, the fuzzer and random songs with many rounds, the benchmark gates), which has never run | `.github/workflows/nightly.yml` | M | 2 | Open | plan |
+| The allocation guard, and the performance gates' allocation counts, on Linux too, and with the engine on more than one thread: both count in Windows Debug builds only | `tests/AudioThreadMonitor.h` | M | 2 | Open | tests-infrastructure 3, tests-infrastructure 4 |
+| The long run over songs of several configurations (audio clips, plug-ins in helpers, containers, a tempo map), not the one busy song of eight tracks | `tests/LongRun.cpp` | S | — | Open | tests-infrastructure 14 |
+| The benchmark gates' bounds for GCC's optimised builds, so that they can run on Linux too: today they hold for MSVC's alone | `tests/BenchmarkGates.cpp` | S | — | Open | plan |
 | The failure paths of saving and recovery: a save that fails, a first save that fails and leaves its folder, undo across view-state changes | `tests/ProjectTests.cpp` | — | 2 | Open | model-project-services 14, tests-model 8 |
 | The lock-free parts raced: the event queue (which has no test), the handover, the playhead's stamps | `src/engine/core/EventQueue.h` | — | 2 | Open | tests-audio 5 |
 | Cut, Copy and Paste tested beyond their five cases | `tests/ClipboardTests.cpp` | — | 2 | Open | tests-model 13 |
 | Tests that wait on the wall clock made to wait for a condition, and kept apart from the files that load every core | `tests/RealTimePlayback.h` | — | 2 | Open | tests-infrastructure 12, tests-audio 14, tests-model 15 |
 | The drum machines' voices pinned by more than a peak level and two levels over time | `tests/DrumSynthesisTests.cpp` | — | 2 | Open | tests-audio 13 |
-| The screen-reader walk and the "every control explains itself" walk run over a song with tracks, clips and devices, not one track or an empty project | `tests/AppShellTests.cpp` | — | 2 | Open | tests-ui 5, tests-ui 6 |
-| Graph-drag tests that pin the axes; the keymaps' Shift rule asserted on the keymap files; smoke tests renamed or made to assert; the hard-coded device list replaced | `tests/EffectEditorTests.cpp` | — | 2 | Open | tests-ui 11, tests-ui 13, tests-ui 14 |
+| Graph-drag tests that pin the axes; smoke tests renamed or made to assert; the hard-coded device list of the dock-fit test replaced by `getOwnDevices()` | `tests/EffectEditorTests.cpp` | — | 2 | Open | tests-ui 11, tests-ui 13, tests-ui 14 |
 | The components with no test or a token one, most important first, by the count of test cases against lines for each folder | `tests/MixerViewTests.cpp` | — | 2 | Open | tests-ui 9, tests-ui 15 |
 | Golden renders regenerated one at a time, each with its reason, not all at once inside large commits | `tests/GoldenFiles.cpp` | — | 2 | Open | tests-infrastructure 10 |
 
 ## Docs
 
-All of these are stage 2, and in progress now, except the guide's pages that wait for a later stage.
+Stage 2 put the docs in order: pages that say what is, with the history in `archive/`. What is left is the guide's.
 
 | Item | Where | Size | Stage | Status | Source |
 |---|---|---|---|---|---|
-| The checks by hand in one list, so that "done" says what a person has checked | `docs/hand-checks.md` | S | 2 | In progress | docs 2, product-gaps 7 |
-| The audits' open findings in known-bugs.md and this backlog, the audits kept as history | `docs/backlog.md` | M | 2 | In progress | docs 6, docs 14, devices-effects 14 |
-| CLAUDE.md's layout as a table, with the detail in a README for each folder, and one layer map | `CLAUDE.md` | M | 2 | In progress | docs 0, docs 12, docs 13 |
-| The architecture on a page of its own, where three documents each hold a layer map | `CONTRIBUTING.md` | S | 2 | In progress | docs 12 |
-| design.md as present-tense pages, a table of decisions and an archive | `docs/design/decisions.md` | L | 2 | In progress | docs 1, product-gaps 13, ui-shell-browser 15, ui-timeline-editors 13 |
-| The open questions, and the choices made for review, in one list | `docs/open-questions.md` | M | 2 | In progress | docs 3 |
-| roadmap.md cut down to its status, the open steps and the risks, with the scope it really has | `docs/roadmap.md` | M | 2 | In progress | docs 4, docs 15, product-gaps 8 |
-| The versions as built, on one page in one vocabulary | `docs/design/versions.md` | S | 2 | In progress | docs 9, model-versions 15 |
-| The current performance numbers on one page | `docs/performance.md` | S | 2 | In progress | docs 11 |
-| The guide: a page for each view and each device (the devices' pages wait for stage 6, the versions' page for stage 4) | `docs/guide/` | L | 2 | Open | product-gaps 15 |
+| The guide: a page for each device, once stage 6 has finished it, and the source control page written again once stage 4 cuts the feature down; the views have their pages | `docs/guide/` | L | 4, 6 | Open | product-gaps 15 |
 
 ## Product gaps
 
@@ -284,6 +260,7 @@ ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 | A Clang build with static analysis, and ASan on Windows; after them macOS and a measure of coverage | `CMakePresets.json` | M | 2 | build-ci-tools 3, tests-infrastructure 13 |
 | Each layer a library of its own, so that the build proves the layers and the architecture check doesn't only count them | `CMakeLists.txt` | L | 5 | build-ci-tools 7 |
 | The size of files counted by the architecture check, as phase A2's limit of 1,000 lines isn't | `tools/check-architecture.sh` | S | 5 | docs 10 |
+| The 33 colours, font sizes and corner radii written as literals in `src/ui` and `src/app` moved into the design tokens, taking the `ui-design-literals` budget to 0 (`sh tools/check-architecture.sh --list ui-design-literals` lists them) | `src/ui/theme/DesignTokens.h` | M | — | tests-ui 8 |
 | The solo rule in one place, where the track list and the song player each have it; with it the previews' sync and the song player's size | `src/model/playback/SongPlayer.cpp` | M | 5 | model-playback 15 |
 | Release builds with symbols kept, and a dump left by a user's crash | `CMakeLists.txt` | M | 8 | build-ci-tools 2 |
 | Linux for a beta: PipeWire or JACK beside ALSA, HTTPS, install rules | `CMakeLists.txt` | L | 8 | build-ci-tools 5 |

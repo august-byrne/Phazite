@@ -8,6 +8,36 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 2. Caught: the tests that would have found the audit's bugs, and the docs (2026-11-14)
+
+Built on Windows; the Linux builds, CI's new jobs and the nightly workflow had not run yet. Each net was shown to hold
+by breaking the code it guards and seeing its test fail.
+
+- **S2.14 The docs as pages that say what is** (commit f997822): the design as a page for each area and each device,
+  with a table of decisions and the open questions; the roadmap cut to its status and stages; this changelog; the hand
+  checks; the audit's open findings in the known bugs and the backlog; one map of the layers; the performance numbers
+  on one page; the old documents kept in `archive/`.
+- **S2.2, S2.3, S2.4, S2.12 Playback, undo and the devices** (commit f997822): every command's Undo and Redo checked
+  to the property; the golden project holds every saved name; playback checked at five pairs of rate, block size and
+  tempo; every golden song also played live against its render; fingerprints that see spectrum and pitch; every device
+  through one conformance suite. A note in a stretch's last half sample no longer plays a sample early, and an export's
+  first block has the effects' mix right.
+- **S2.1, S2.5, S2.7, S2.8, S2.12 A real VST3, assertions that fail, editors driven by the mouse** (commit 3e7def0): two
+  VST3s built for the tests and loaded as a user's are; a JUCE assertion fails its test; the real-time audit counts
+  every block while the song is edited; every tool of the playlist and the piano roll is driven by the mouse, with the
+  song changed in the middle of a drag; the app is started by ctest. A mono plug-in plays to both sides, a plug-in's
+  program no longer overrides its state, no key changes the song while a mouse button is down, and Escape takes a drag
+  back in the playlist, its lanes and the audio clip editor.
+- **S2.6, S2.9, S2.10, S2.11, and most of S4.9: files from others, speed, the whole window**: every file reader is
+  fuzzed in every test run; songs made by seeded random edits read back, join from their pieces and merge into songs
+  that hold together; counts of work that don't depend on the machine fail a change that does more per edit; a nightly
+  workflow runs an hour of music under the sanitizers and the benchmark gates; the real main window is built in a test,
+  every view is painted in every theme, and the walks of every control run in three themes at three sizes; the
+  architecture check counts literal colours and sizes in the UI. A project from anyone opens as a song that holds
+  together, its numbers within their ranges and its sounds inside its folder; a preset's sound on a network path, or
+  one that isn't audio, is refused; a DAWproject unpacks no more than an archive of its size can hold; moving the
+  playhead compiles no plan; a second theme switch no longer leaves text in the first's colour.
+
 ## The quality audit's 16 priorities (2026-11-13, commit 3b70986)
 
 A whole-project audit listed about 300 findings. Its 16 worst were fixed, each with a test that failed before:

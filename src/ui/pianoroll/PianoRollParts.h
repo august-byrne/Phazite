@@ -198,7 +198,8 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     BeatDuration movedBy;                       // a move: how far the notes are from where they began,
     int movedRows = 0;                          // along and in rows
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
-    std::vector<NoteRef> selectionBefore;       // what was selected when the mouse went down, for Escape
+    std::vector<NoteRef> selectionBefore;       // the notes here selected when the mouse went down, for a click that slipped
+    SelectionAtPress selectionAtPress;          // and all that was selected, whatever its kind, for Escape
     bool deselectIfNothingDeleted = false;      // a right-click on empty grid
     BeatPosition panViewStart;                  // the middle button: where the view started
 

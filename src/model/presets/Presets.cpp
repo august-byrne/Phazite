@@ -451,11 +451,11 @@ namespace
             if (const auto chainName = chainPreset[keys::name].toString().trim(); chainName.isNotEmpty())
                 chain.setProperty (schema::chainName, chainName, nullptr);
 
-            if (const auto volume = std::max (-100.0f, (float) chainPreset.getProperty (keys::volume, 0.0f)); std::abs (volume) >= 1.0e-4f)
+            if (const auto volume = keepVolumeInRange ((float) chainPreset.getProperty (keys::volume, 0.0f)); std::abs (volume) >= 1.0e-4f)
                 chain.setProperty (schema::channelVolume, volume, nullptr);
 
-            if (const auto pan = juce::jlimit (-1.0f, 1.0f, (float) chainPreset.getProperty (keys::pan, 0.0f)); std::abs (pan) >= 1.0e-4f)
-                chain.setProperty (schema::channelPan, pan, nullptr);
+            if (const auto pan = (float) chainPreset.getProperty (keys::pan, 0.0f); std::isfinite (pan) && std::abs (pan) >= 1.0e-4f)
+                chain.setProperty (schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), nullptr);
 
             for (const auto& [property, key] :
                  { std::pair { &schema::chainMute, &keys::mute }, std::pair { &schema::chainSolo, &keys::solo } })
@@ -590,7 +590,7 @@ namespace
         {
             // Where they are, but those that aren't there any more, as copying leaves them out.
             for (const auto& property : getSoundProperties (info))
-                if (const auto path = sounds[property].toString(); juce::File::isAbsolutePath (path) && ! juce::File (path).existsAsFile())
+                if (const auto path = sounds[property].toString(); schema::isSoundFileProperty (property) && ! isSoundFileToTake (path))
                     sounds.removeProperty (property, nullptr);
         }
 

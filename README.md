@@ -47,7 +47,7 @@ Tried by hand:
 
 What is not there yet, among the things you may expect: MIDI controllers (the sustain pedal, pitch bend and the mod wheel are not recorded or edited), MIDI learn and MIDI output, plug-ins with more than one stereo output, take lanes and comping, time-signature changes along the song, and sampled acoustic instruments. A stretched or warped clip is silent until its render finishes.
 
-A whole-project audit found about 300 problems; its 16 worst are fixed, and the rest are the plan. Next come the remaining bugs that can lose work, the hand checks above, and the features a beat maker meets first, then a beta; a signed installer, the full user guide and projects that open in every later version come with 1.0. The [roadmap](docs/roadmap.md) has the plan stage by stage, and the [changelog](docs/changelog.md) what was built so far.
+A whole-project audit found about 300 problems; its 16 worst are fixed, the tests that would have caught them are built (a fuzzer of every file Phazite reads, random songs, checks of every command's undo, of playback at several rates and block sizes, of every device and of the whole window), and the rest are the plan. Next come the remaining bugs that can lose work, the hand checks above, and the features a beat maker meets first, then a beta; a signed installer, the full user guide and projects that open in every later version come with 1.0. The [roadmap](docs/roadmap.md) has the plan stage by stage, and the [changelog](docs/changelog.md) what was built so far.
 
 | Platform | Status |
 |---|---|

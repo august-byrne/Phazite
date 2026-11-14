@@ -1,0 +1,196 @@
+# Phazite's nightly checks: what takes too long for every push. Each night (and when started by hand):
+# - the long run (tests/LongRun.cpp): a song played block by block through Phazite's engine for an hour of music while a
+#   seeded sequence of edits changes it, under AddressSanitizer (linux-asan) and ThreadSanitizer (linux-tsan);
+# - the fuzzer of the file readers, with many rounds, under AddressSanitizer;
+# - the benchmark gates (tests/BenchmarkGates.cpp): each device's cost against a fixed reference workload, and the engine
+#   and the model with 100 tracks against 10, from windows-profile (an optimised build with symbols), against bounds
+#   stored in the test.
+# Jobs are set up as CI's (.github/workflows/ci.yml): actions pinned to full commit hashes, read-only permissions, the
+# compiler cache, the problem matchers. They take the compiler cache CI keeps for each preset and save none, so that CI's
+# caches stay CI's; they configure as CI does (warnings as errors), so that the cache's entries match.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *" # 02:17 UTC, off the hour when GitHub's scheduler is busiest
+  workflow_dispatch:
+    inputs:
+      long_run_seconds:
+        description: "Seconds of music the long run plays"
+        default: "3600"
+      long_run_seed:
+        description: "The seed of the long run's edits"
+        default: "1"
+      fuzz_rounds:
+        description: "Rounds of the fuzzer"
+        default: "20000"
+      random_songs:
+        description: "Random songs for the text, pieces and apply-song checks"
+        default: "1000"
+
+permissions:
+  contents: read
+
+concurrency: # one nightly run at a time; a run started by hand waits for the scheduled one
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PHAZITE_LONG_RUN_SECONDS: ${{ github.event.inputs.long_run_seconds || '3600' }}
+  PHAZITE_LONG_RUN_SEED: ${{ github.event.inputs.long_run_seed || '1' }}
+  PHAZITE_FUZZ_ROUNDS: ${{ github.event.inputs.fuzz_rounds || '20000' }}
+  PHAZITE_RANDOM_SONGS: ${{ github.event.inputs.random_songs || '1000' }}
+
+jobs:
+  long-run:
+    name: Long run (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    # The build (from CI's compiler cache, a few minutes; without it about an hour) and an hour of music played several
+    # times slower than it plays under a sanitizer; GitHub ends a job at six hours anyway.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: linux-asan
+            tests: build/linux-asan/phazite_tests_artefacts/Debug/phazite_tests
+          - preset: linux-tsan
+            tests: build/linux-tsan/phazite_tests_artefacts/RelWithDebInfo/phazite_tests
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Restore the compiler cache (CI's)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.preset }}-nightly-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.preset }}-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/ccache.tar.xz" https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-glibc.tar.xz
+          echo "bd1313f5316f594443dcb4113a4191c666ac6450e0cf016ff8cb8b080f46c160  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc/ccache" --dir "$RUNNER_TEMP/ccache" --zero-stats
+
+      - name: Install JUCE's Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libfreetype-dev \
+              libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: Build the tests
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          cmake --build --preset ${{ matrix.preset }} --target phazite_tests -- -k 0
+
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      # As in CI: the sanitizer runtimes of GCC 13 can't handle the runners' 32 bits of memory-mapping entropy.
+      - name: Allow the sanitizers' memory layout
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      # The sanitizers' options as the test presets set them (CMakePresets.json), since this runs the test program itself:
+      # ctest's limit of 10 minutes a test file would end an hour's run.
+      - name: Long run
+        shell: bash # with pipefail: the step fails when the run does
+        env:
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/lsan-suppressions.txt
+          ASAN_OPTIONS: allow_user_segv_handler=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/tsan-suppressions.txt:allow_user_segv_handler=0
+        run: |
+          echo "::add-matcher::.github/problem-matchers/tests.json"
+          "${{ matrix.tests }}" --test-suite=long-run --no-skip --duration=true 2>&1 | tee "$RUNNER_TEMP/long-run.log"
+
+      # The file readers' fuzzer (tests/FuzzTests.cpp), the random songs (tests/RandomSongTests.cpp) and the random merges
+      # (tests/VersionsMergeTests.cpp), which every ctest run does with few rounds: here with many, set by
+      # PHAZITE_FUZZ_ROUNDS and PHAZITE_RANDOM_SONGS. Under AddressSanitizer only: what they find is memory errors and
+      # crashes.
+      - name: Fuzzer (many rounds)
+        if: ${{ !cancelled() && matrix.preset == 'linux-asan' }}
+        shell: bash
+        env:
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/lsan-suppressions.txt
+          ASAN_OPTIONS: allow_user_segv_handler=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          echo "::add-matcher::.github/problem-matchers/tests.json"
+          "${{ matrix.tests }}" --source-file="*FuzzTests*,*RandomSongTests*,*VersionsMergeTests*" --duration=true 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
+
+      # Each sanitizer report whole, as one annotation (as in CI).
+      - name: Sanitizer reports
+        if: ${{ !cancelled() }}
+        run: |
+          cat "$RUNNER_TEMP"/*.log > "$RUNNER_TEMP/all.txt" || true
+          sh tools/ci-sanitizer-reports.sh "$RUNNER_TEMP/all.txt"
+
+  benchmark-gates:
+    name: Benchmark gates (windows-profile)
+    runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
+    timeout-minutes: 120
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Restore the compiler cache (CI's)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-windows-profile-nightly-${{ github.run_id }}
+          restore-keys: ccache-windows-profile-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          $zip = "$env:RUNNER_TEMP\ccache.zip"
+          Invoke-WebRequest https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-windows-x86_64.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne "6993ce645e53192cec592ee23186200b574ac4c59097ecde8d9cfd681b47ae84") {
+              throw "The ccache download doesn't have the SHA-256 it should."
+          }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64" >> $env:GITHUB_PATH
+          "CCACHE_DIR=$env:RUNNER_TEMP\ccache" >> $env:GITHUB_ENV
+          & "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64\ccache.exe" --dir "$env:RUNNER_TEMP\ccache" --zero-stats
+
+      - name: Configure
+        run: cmake --preset windows-profile -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON
+
+      - name: Build the tests
+        run: |
+          echo "::add-matcher::.github/problem-matchers/msvc.json"
+          cmake --build --preset windows-profile --target phazite_tests -- -k 0
+
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      # The gates, then the benchmarks' tables for the log (they check nothing of their numbers).
+      - name: Benchmark gates
+        run: |
+          echo "::add-matcher::.github/problem-matchers/tests.json"
+          build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=benchmark-gate --no-skip --duration=true
+          if ($LASTEXITCODE -ne 0) { throw "The benchmark gates failed." }
+
+      - name: Benchmarks (for the log)
+        if: ${{ !cancelled() }}
+        run: |
+          build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=benchmark --no-skip --duration=true
+          if ($LASTEXITCODE -ne 0) { throw "A benchmark failed." }

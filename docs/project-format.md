@@ -26,8 +26,8 @@ starts ([design.md, section 18](design.md#18-projects-saving-and-export)).
   Versions/        the project's history (versions-format.md)
 ```
 
-The song names its files by paths relative to the project's folder, with `/` between their parts. A file the song couldn't
-copy in keeps its full path. A project is portable as its folder: copy or zip the folder.
+The song names its files by paths relative to the project's folder, with `/` between their parts. A file the song
+couldn't copy in keeps its full path. A project is portable as its folder: copy or zip the folder.
 
 ## 2. The file
 
@@ -45,7 +45,8 @@ numbers in 15 significant digits, true and false as `1` and `0`, text without th
 `<` `>` `"` tab, line feed and carriage return escaped. Every other character is written as it is, in UTF-8.
 
 A reader must take any XML 1.0 (other writers may indent differently) and must keep what it doesn't know: Phazite keeps
-an element or property it doesn't know through a load and a save.
+an element or property it doesn't know through a load and a save (an element with all it holds, but not text between
+its tags). An element it does know, where `Schema.h` doesn't put it, it leaves out as it opens the file (section 7).
 
 ## 3. The song
 
@@ -103,3 +104,33 @@ and macros as Phazite names them. Phazite makes new IDs as it loads one.
 DAWproject is how a project goes to and from other DAWs ([versions.md](archive/versions-plan.md#dawproject-with-versions)): what they
 can't hold (Phazite's own devices, containers, modulators, the chord lane) goes as bounces beside the notes. A VST3's
 state goes into a DAWproject as it is, since both hold its preset file.
+
+## 7. A file that breaks the rules
+
+Phazite opens projects that others made, so it takes every project file as untrusted, its own included. A file that
+isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other is made consistent as it opens
+(`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
+file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
+- **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
+  Phazite hasn't, is left out with all it holds; an element of a type Phazite doesn't know stays where it is, untouched; a property that should be one of a set of words
+  (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
+  tags is dropped.
+- **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
+  that is no number at all takes its default (a tempo of 0 opens at the slowest tempo, one that is no number at 120
+  BPM). A channel's volume and a send's level are held to -100 to +6 dB, places to a million beats, every value set by
+  hand and every automation point to its parameter's range, and a parameter its device hasn't is left out.
+- **IDs:** an item without an ID, or with one another item holds, gets a new one; IDs stay below 2^62, and `nextID`
+  is set past every ID the song holds.
+- **References:** a lane, a curve or a modulation of a device the song hasn't is left out, and a sidechain or a pad's
+  track that names a device the song hasn't is cleared. Of two elements of one parent with one key (two curves of one
+  parameter, two tempos on one beat), the first stays.
+- **Sound files:** a sound file named on a network path, or by a path that climbs out of the project's folder with
+  `..`, is named `Audio/<its name>` instead, its name unchanged, so it is never looked for there; the Project view lists
+  it as missing until it is located. A full path on this computer stays as it is. An audio clip that names no file is
+  left out.
+
+A preset is untrusted too: its volumes are held to the same range, and a sound it names on a network path, or one that
+isn't an audio file, is refused without being opened. A DAWproject's `project.xml` and `metadata.xml` are read only up
+to 256 MB each, and what it unpacks only up to what an archive of its size can hold. The rules are stated a second
+time, apart from the loader, in [`tests/SongCheck.h`](../tests/SongCheck.h), and the readers are fuzzed in every test
+run ([`tests/FuzzTests.cpp`](../tests/FuzzTests.cpp)).

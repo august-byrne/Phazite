@@ -74,7 +74,7 @@ The code is layered so that the UI can change without touching the rules of edit
 - **Every user action is a command**, with a stable id such as `edit.undo`, a name and a description; default shortcuts go in the keymaps in `resources/keymaps/`, not in code.
 - **Colors, sizes and fonts come from the design tokens** (`src/ui/theme/DesignTokens.h`), never literals.
 
-`sh tools/check-architecture.sh` counts what these rules forbid and compares each count with its budget in `tools/architecture-budget.txt`, where every budget is 0; CI and the pre-commit hook run it. Every count must equal its budget: when your change removes matches, run it with `--update` and commit the new budget with the change; when it adds matches, change the code instead.
+`sh tools/check-architecture.sh` counts what these rules forbid and compares each count with its budget in `tools/architecture-budget.txt`, where every budget is 0 but one (`ui-design-literals`, the colours, font sizes and corner radii still written as literals in the UI, which only falls); CI and the pre-commit hook run it. Every count must equal its budget: when your change removes matches, run it with `--update` and commit the new budget with the change; when it adds matches, change the code instead.
 
 ### The audio thread
 

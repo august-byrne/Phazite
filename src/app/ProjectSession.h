@@ -46,6 +46,8 @@ public:
     std::function<void()> onExport;          // shows the export window (the main window's), for Export Song
     std::function<void()> onCleanUpAudio;    // shows the window of Clean Up Unused Audio... (the main window's)
     juce::Component* dialogParent = nullptr; // dialogs appear over this
+    // Opens the New Project window, modal; unset, launchAsync(). Tests open it on no screen (tests/MainWindowTests.cpp).
+    std::function<juce::DialogWindow*(juce::DialogWindow::LaunchOptions&)> launchDialog;
     std::function<void (const juce::String& title, const juce::String& message)> onError;  // shows an error; unset, a dialog
     std::function<void (const juce::String& title, const juce::String& message)> onNotice; // says what Phazite did; unset, a dialog
 

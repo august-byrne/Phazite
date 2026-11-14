@@ -5,6 +5,69 @@
 
 namespace phazite::ui
 {
+SelectionAtPress SelectionAtPress::take (ProjectContext& context)
+{
+    const auto& selection = context.getSongSelection();
+    const auto& songRange = context.getSongRange();
+    SelectionAtPress taken;
+    taken.tracks = selection.getTracks();
+    taken.clips = selection.getClips();
+    taken.sections = selection.getSections();
+    taken.devices = selection.getDevices();
+    taken.noteClips = selection.getNoteClips();
+    taken.notes = selection.getNotes();
+    taken.points = selection.getSelectedAutomationPoints();
+
+    if (! songRange.isEmpty())
+        taken.range = std::pair (songRange.getRange(), songRange.getTracks());
+
+    return taken;
+}
+
+void SelectionAtPress::putBack (ProjectContext& context) const
+{
+    const auto now = take (context);
+    auto& selection = context.getSongSelection();
+
+    // Devices, notes and points are selected on their own (SongSelection.h): what was selected is one of them, or tracks,
+    // clips and sections. Notes are of the clips an editor showed: those go back first, which the piano roll then shows.
+    if (now.tracks != tracks || now.clips != clips || now.sections != sections || now.devices != devices || now.notes != notes
+        || now.points.parameter != points.parameter || now.points.indices != points.indices)
+    {
+        selection.clear();
+
+        for (const auto track : tracks)
+            selection.add (track);
+
+        for (const auto clip : clips)
+            selection.add (clip);
+
+        for (const auto section : sections)
+            selection.add (section);
+
+        for (const auto device : devices)
+            selection.add (device);
+
+        if (! notes.empty())
+        {
+            selection.setNoteClips (noteClips);
+            selection.selectNotes (notes);
+        }
+        else if (points.parameter.isValid())
+        {
+            selection.selectAutomationPoints (points.parameter, points.indices);
+        }
+    }
+
+    if (now.range == range)
+        return;
+
+    if (range.has_value())
+        context.getSongRange().set (range->first, range->second);
+    else
+        context.getSongRange().clear();
+}
+
 juce::Point<int> TimelineGesture::getStart (const TimelineView& view, int scrollYNow, int unscrolledHeight) const
 {
     // In the column the beat's own place rounds to, as lines and edges are (TimelineView::beatToColumn()): rounded where it is

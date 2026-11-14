@@ -5,10 +5,13 @@
 // that comes back to its start. Each ends with the song as the model says, every undo step exact (UndoCheck.h). And the
 // wheel, turned by the parts of a notch a trackpad sends, over each place it acts; and automation and tempo points off the
 // grid, which keep their offset from it as they are dragged.
+#include "AppScreen.h"
 #include "EditorScreens.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/transport/TempoModel.h"
+#include "model/transport/TransportModel.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/components/Controls.h"
 #include "ui/theme/DesignTokens.h"
@@ -1086,5 +1089,262 @@ TEST_CASE ("A trackpad's parts of a notch add up over each place the wheel acts 
 
         CHECK ((screen.playlist.getView().start.inBeats() - startBefore) * screen.playlist.getView().pixelsPerBeat
                == doctest::Approx (48.0));
+    }
+}
+
+//==============================================================================
+namespace
+{
+// The files under a folder, each with its size and when it was written, a line each.
+juce::String describeFiles (const juce::File& folder)
+{
+    juce::StringArray lines;
+
+    for (const auto& entry : juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFiles))
+        lines.add (entry.getFile().getRelativePathFrom (folder) + " " + juce::String (entry.getFileSize()) + " "
+                   + juce::String (entry.getModificationTime().toMilliseconds()));
+
+    lines.sort (false);
+    return lines.joinIntoString ("\n");
+}
+
+// What a song's undo history holds: its steps' names either way, and the changes in the step in progress (a drag's).
+juce::String describeHistory (phazite::Song& song)
+{
+    const auto& history = song.getUndoManager();
+    return history.getUndoDescriptions().joinIntoString (", ") + " | " + history.getRedoDescriptions().joinIntoString (", ") + " | "
+           + juce::String (history.getNumActionsInCurrentTransaction());
+}
+
+// The first of Phazite's own devices, on a track.
+phazite::DeviceID addOwnDevice (phazite::ProjectContext& context, phazite::TrackID track)
+{
+    for (const auto& type : phazite::getDeviceTypes (context))
+        if (type.isBuiltIn)
+            return phazite::addDeviceTo (*phazite::findSong (context), track, type, nullptr);
+
+    return {};
+}
+} // namespace
+
+TEST_CASE ("While the mouse drags in the playlist or the piano roll, no command the app registers changes the song, its history or "
+           "its files from its key")
+{
+    // The app's window, with every command it registers, as AppShellTests.cpp's catalogue lists them, and its keys on it, as
+    // the main window's are (ui/input/WindowKeys.h). Each command in turn gets a key of its own, which is pressed in the
+    // middle of a drag: whatever it is, the song, its undo history and the project's files are as they were. A command that
+    // could change them waits for the mouse to go up (ui/input/KeyDispatcher.h): Capture and Consolidate, which begin undo
+    // steps of their own, joined the drag's step, which Escape then took back with them (2026-11-14).
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    screen.window.addKeyListener (&screen.shortcutKeys);
+    auto& context = screen.session.getContext();
+    auto& song = *phazite::findSong (context);
+    const auto tracks = phazite::ensureTracks (song, 2);
+    const auto clip = phazite::insertMidiClip (song, tracks[0], { beatAt (0.0), beatAt (8.0) }, nullptr);
+    REQUIRE (clip.isValid());
+    song.getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    const auto project = context.getProjectNumber();
+
+    const auto projectFiles = [&screen]
+    {
+        return describeFiles (screen.temp.folder.getChildFile ("Projects")) + "\n"
+               + describeFiles (screen.temp.folder.getChildFile ("Unsaved"));
+    };
+
+    const auto pressEveryCommandsKey = [&]
+    {
+        const auto key = juce::KeyPress (juce::KeyPress::F20Key);
+        auto& mappings = screen.commands.getKeyMappings();
+        REQUIRE (mappings.findCommandForKeyPress (key) == 0);
+
+        for (int i = 0; i < screen.registry.getNumCommands(); ++i)
+        {
+            const auto id = screen.registry.getCommand (i)->id;
+            CAPTURE (id.toStdString());
+            const auto text = writeSong (song, SongPart::whole);
+            const auto history = describeHistory (song);
+            const auto files = projectFiles();
+            mappings.addKeyPress (screen.commands.getCommandID (id), key);
+            screen.window.keyGoesDown();
+            screen.window.pressKey (key);
+            screen.window.releaseKeys();
+            mappings.removeKeyPress (key);
+
+            REQUIRE (phazite::findSong (context) == &song);
+            REQUIRE (context.getProjectNumber() == project);
+            CHECK (phazite::test::describeSongDifferences (text, writeSong (song, SongPart::whole)).isEmpty());
+            CHECK (describeHistory (song) == history);
+            CHECK (projectFiles() == files);
+        }
+    };
+
+    UndoCheck undo (song);
+
+    // A copy of a clip dragged in the playlist.
+    {
+        auto& playlist = screen.showView<phazite::ui::Playlist> ("view.playlist");
+        auto* lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
+        REQUIRE (lanes != nullptr);
+        juce::Rectangle<int> bounds;
+
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (playlist))
+            if (component->getClip() == clip)
+                bounds = lanes->getLocalArea (component, component->getLocalBounds());
+
+        REQUIRE_FALSE (bounds.isEmpty());
+        Mouse mouse (*lanes);
+        const auto grip = bounds.getCentre().translated (0, bounds.getHeight() / 4); // the lower half moves it
+
+        undo.check ("a copy dragged with every command's key pressed in it",
+                    [&]
+                    {
+                        mouse.press (grip, ctrl);
+                        mouse.dragTo (grip.translated (10, 0));
+                        mouse.dragTo (grip.translated (juce::roundToInt (4.0 * playlist.getView().pixelsPerBeat), 0));
+                        pressEveryCommandsKey();
+                        mouse.dragTo (grip.translated (juce::roundToInt (4.0 * playlist.getView().pixelsPerBeat) + 1, 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        if (phazite::isPlaying (context))
+            REQUIRE (screen.registry.invoke ("transport.playStop"));
+
+        CHECK (phazite::getClips (context, tracks[0]).size() == 2);
+    }
+
+    // A note dragged in the piano roll.
+    {
+        phazite::getSelection (context).selectOnly (clip);
+        phazite::test::dispatchPendingMessages();
+        auto& roll = screen.showView<phazite::ui::PianoRoll> ("view.pianoRoll");
+        auto* notes = phazite::test::findComponentWithTitle (roll, "Notes");
+        REQUIRE (notes != nullptr);
+        Mouse mouse (*notes);
+        const juce::Point<int> at (juce::roundToInt (roll.getView().beatToX (beatAt (1.1))), notes->getHeight() / 2);
+        mouse.click (at); // a note
+        phazite::test::deliverChanges();
+        REQUIRE (phazite::getNotes (context, { clip }).size() == 1);
+
+        undo.check ("a note dragged with every command's key pressed in it",
+                    [&]
+                    {
+                        mouse.press (at);
+                        mouse.dragTo (at.translated (10, 0));
+                        mouse.dragTo (at.translated (juce::roundToInt (2.0 * roll.getView().pixelsPerBeat), 0));
+                        pressEveryCommandsKey();
+                        mouse.dragTo (at.translated (juce::roundToInt (2.0 * roll.getView().pixelsPerBeat) + 1, 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        if (phazite::isPlaying (context))
+            REQUIRE (screen.registry.invoke ("transport.playStop"));
+
+        CHECK (phazite::getNotes (context, { clip }).size() == 1);
+    }
+
+    undo.walkBackAndForth();
+    screen.window.removeKeyListener (&screen.shortcutKeys);
+}
+
+TEST_CASE ("Escape puts back exactly what was selected as the mouse went down, whatever it was: a device, notes, points or clips")
+{
+    SUBCASE ("In the playlist's lanes")
+    {
+        LanesScreen screen;
+        const auto clip = screen.addMidiClip (1, 0.0, 2.0), other = screen.addMidiClip (1, 4.0, 2.0);
+        const auto device = addOwnDevice (screen.context, screen.tracks[2]);
+        REQUIRE (device.isValid());
+        const auto note = phazite::addNote (screen.context, other, 60, beatAt (4.0), phazite::BeatDuration::fromBeats (1.0), 100);
+        phazite::addAutomationPoint (screen.context, screen.volume, { beatAt (4.0), 0.5f });
+        screen.getSong().getUndoManager().clearUndoHistory();
+        phazite::test::dispatchPendingMessages();
+        auto& selection = screen.selection();
+        Mouse mouse (*screen.lanes);
+        const auto onClip = screen.lower (1.0, 1).translated (0, phazite::AutomationLane::defaultHeight);
+
+        const auto dragAndEscape = [&]
+        {
+            mouse.press (onClip);
+            mouse.dragTo (onClip.translated (10, 0));
+            mouse.dragTo (onClip.translated (screen.widthOf (2.0), 0));
+            phazite::test::deliverChanges();
+            screen.window.pressKey (escape);
+            mouse.release();
+            mouse.pause();
+            phazite::test::deliverChanges();
+            CHECK (screen.get (clip).range.getStart().inBeats() == doctest::Approx (0.0));
+        };
+
+        selection.selectOnly (device);
+        dragAndEscape();
+        CHECK (selection.getDevices() == std::vector { device });
+        CHECK (selection.getClips().empty());
+
+        selection.setNoteClips ({ other });
+        selection.selectNotes ({ note });
+        dragAndEscape();
+        CHECK (selection.getNotes() == std::vector { note });
+
+        selection.selectAutomationPoints (screen.volume, { 0 });
+        dragAndEscape();
+        CHECK (selection.getSelectedAutomationPoints().parameter == screen.volume);
+        CHECK (selection.getSelectedAutomationPoints().indices == std::vector { 0 });
+
+        // A point's drag in its lane, with a device selected.
+        selection.selectOnly (device);
+        Mouse laneMouse (screen.playlist);
+        laneMouse.press (screen.inLane (4.0, 0.5f));
+        laneMouse.dragTo (screen.inLane (6.0, 0.8f));
+        screen.window.pressKey (escape);
+        laneMouse.release();
+        laneMouse.pause();
+        phazite::test::deliverChanges();
+        CHECK (selection.getDevices() == std::vector { device });
+        CHECK (screen.getPoints()[0].beat.inBeats() == doctest::Approx (4.0));
+        CHECK_FALSE (screen.getSong().getUndoManager().canUndo());
+    }
+
+    SUBCASE ("In the piano roll")
+    {
+        PianoRollScreen screen;
+        const auto note = screen.addNote (1.0);
+        const auto device = addOwnDevice (screen.context, screen.tracks[1]);
+        REQUIRE (device.isValid());
+        screen.getSong().getUndoManager().clearUndoHistory();
+        phazite::test::dispatchPendingMessages();
+        auto& selection = screen.selection();
+        Mouse mouse (*screen.notes);
+
+        const auto dragAndEscape = [&]
+        {
+            const auto from = screen.middleOf (note);
+            mouse.press (from);
+            mouse.dragTo (from.translated (screen.widthOf (2.0), 0));
+            phazite::test::deliverChanges();
+            screen.window.pressKey (escape);
+            mouse.release();
+            mouse.pause();
+            phazite::test::deliverChanges();
+            CHECK (screen.get (note).start.inBeats() == doctest::Approx (1.0));
+        };
+
+        // The clip, as the playlist selects it, and a device.
+        selection.selectOnly (screen.clip);
+        dragAndEscape();
+        CHECK (selection.getClips() == std::vector { screen.clip });
+        CHECK (selection.getNotes().empty());
+
+        selection.selectOnly (device);
+        dragAndEscape();
+        CHECK (selection.getDevices() == std::vector { device });
+        CHECK (selection.getNotes().empty());
+        CHECK_FALSE (screen.getSong().getUndoManager().canUndo());
     }
 }

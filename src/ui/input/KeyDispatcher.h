@@ -11,10 +11,10 @@ namespace phazite::ui
 {
 // Runs commands from keys, with the keys the bridge gives them: when commands share a key, the enabled one with the
 // highest keyPriority runs; a held key runs its command once, unless it repeatsWhileHeld; a command hears when its key
-// is let go (keyReleased); some keys work over plug-in windows (overPlugins). While a mouse button is down, a key runs no
-// command that changes the song (one with an undoTarget), nor Undo or Redo: what the mouse is doing (a clip dragged, a knob
-// turned) is one undo step from the press to the release, which such a command would land in or take apart. The others
-// (play and stop, the tools, zooming) still run.
+// is let go (keyReleased); some keys work over plug-in windows (overPlugins). While a mouse button is down, a key runs only
+// the few commands named in KeyDispatcher.cpp that change nothing in the song, its history or its files (play and stop, the
+// tools, the editors' zoom): what the mouse is doing (a clip dragged, a knob turned) is one undo step from the press to the
+// release, which any other command could land in or take apart. The rest wait for the mouse to go up.
 class KeyDispatcher : public juce::KeyListener
 {
 public:

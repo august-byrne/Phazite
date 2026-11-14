@@ -5,17 +5,40 @@
 #pragma once
 
 #include "TimelineView.h"
+#include "model/arrangement/SongRange.h"
+#include "model/arrangement/SongSelection.h"
 #include "model/base/IDs.h"
 #include "model/commands/SongGesture.h"
+#include "model/project/ProjectContext.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite::ui
 {
+// Everything selected in the open project as the mouse went down, whatever its kind (tracks, clips, sections, devices, notes
+// with the clips they are of, automation points), and the time range selected across tracks: what Escape puts back as it
+// takes a drag back (TimelineEditor::keyPressed()).
+struct SelectionAtPress
+{
+    static SelectionAtPress take (ProjectContext&);
+    void putBack (ProjectContext&) const; // changes nothing where it is so already
+
+    std::vector<TrackID> tracks;
+    std::vector<ClipID> clips;
+    std::vector<SectionID> sections;
+    std::vector<DeviceID> devices;
+    std::vector<ClipID> noteClips;
+    std::vector<NoteRef> notes;
+    SongSelection::AutomationPoints points;
+    std::optional<std::pair<BeatRange, std::vector<TrackID>>> range;
+};
+
 struct TimelineGesture
 {
     // A press becomes a drag once the mouse moves this many pixels.

@@ -620,17 +620,22 @@ juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)
     return {};
 }
 
+float keepVolumeInRange (float decibels)
+{
+    return std::isfinite (decibels) ? juce::jlimit (lowestVolume, highestVolume, decibels) : 0.0f;
+}
+
 void setChannelVolume (Song& song, TrackID channel, float decibels)
 {
     if (auto state = findChainState (song, channel); state.isValid())
-        setChannelValue (state, schema::channelVolume, decibels, state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f,
-                         getUndo (song));
+        setChannelValue (state, schema::channelVolume, keepVolumeInRange (decibels),
+                         state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f, getUndo (song));
 }
 
 void setChannelPan (Song& song, TrackID channel, float pan)
 {
     if (auto state = findChainState (song, channel); state.isValid() && getPanParameterID (song, channel).isNotEmpty())
-        setChannelValue (state, schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), 0.0f, getUndo (song));
+        setChannelValue (state, schema::channelPan, std::isfinite (pan) ? juce::jlimit (-1.0f, 1.0f, pan) : 0.0f, 0.0f, getUndo (song));
 }
 
 float getChannelVolume (const Song& song, TrackID channel)
@@ -790,7 +795,7 @@ void setPreFader (Song& song, DeviceID send, bool preFader)
 void setSendLevel (Song& song, DeviceID send, float decibels)
 {
     if (auto state = findSendState (song, send); state.isValid())
-        setChannelValue (state, schema::sendLevel, decibels, 0.0f, getUndo (song));
+        setChannelValue (state, schema::sendLevel, keepVolumeInRange (decibels), 0.0f, getUndo (song));
 }
 
 float getSendLevel (const Song& song, DeviceID send)

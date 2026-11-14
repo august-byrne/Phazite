@@ -242,7 +242,12 @@ namespace
         std::unique_ptr<juce::XmlElement> parse (const juce::String& name) const
         {
             const auto bytes = read (name);
-            return bytes.has_value() ? juce::parseXML (bytes->toString()) : nullptr;
+            // A piece whose bytes are no UTF-8 text is damaged, as one whose text is no XML.
+            if (! bytes.has_value()
+                || ! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (bytes->getData()), (int) bytes->getSize()))
+                return nullptr;
+
+            return juce::parseXML (bytes->toString());
         }
 
         // A piece that couldn't be read: listed, or the whole join fails.
@@ -261,6 +266,9 @@ namespace
         // What a reference names, made of what the reference says of it: a stand-in, its type and key alone.
         static juce::ValueTree makeStandIn (const juce::XmlElement& reference)
         {
+            if (! juce::XmlElement::isValidXmlName (reference.getStringAttribute (versions::pieceType)))
+                return {}; // a damaged reference names no type an element can have
+
             juce::ValueTree standIn (reference.getStringAttribute (versions::pieceType));
 
             for (const auto& attribute : reference.getAttributeIterator())
@@ -297,6 +305,9 @@ namespace
 
             for (const auto* child : xml.getChildIterator())
             {
+                if (child->isTextElement())
+                    continue; // text between tags, which a piece never holds
+
                 if (child->hasTagName (versions::BYTES.toString()))
                 {
                     const auto piece = child->getStringAttribute (versions::bytesHash);
@@ -334,7 +345,7 @@ namespace
                             const auto standIn = makeStandIn (*child);
                             lose (path, describe (standIn), piece);
 
-                            if (missing != nullptr)
+                            if (missing != nullptr && standIn.isValid())
                                 tree.appendChild (standIn, nullptr);
                         }
 

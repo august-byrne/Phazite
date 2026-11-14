@@ -4,19 +4,35 @@
 // the plug-in picker, Detach, New, Open or Save As): Linux CI has no display.
 #include "AppScreen.h"
 #include "GoldenFiles.h"
+#include "PaintCheck.h"
+#include "RepresentativeSong.h"
+#include "SandboxedPlugins.h"
 #include "TestClips.h"
+#include "TestPlugin.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/audioclip/AudioClipEditor.h"
+#include "ui/browser/Browser.h"
 #include "ui/input/Keymap.h"
 #include "ui/mixer/DevicesView.h"
+#include "ui/mixer/Inspector.h"
+#include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
+#include "ui/playlist/Playlist.h"
+#include "ui/project/ProjectView.h"
 #include "ui/shell/ActivityBar.h"
 #include "ui/shell/PanelLayout.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/versions/VersionsView.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
+#include <map>
+#include <optional>
 #include <typeinfo>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -71,6 +87,48 @@ void checkPartsApart (juce::Component& shell)
     }
 }
 
+// What a walk of the window found that a user can't use alone: controls a screen reader has no name or role for, and
+// controls that don't explain themselves in the hint bar (with a tooltip or a description); each by the titles of the
+// components it is in.
+struct Unexplained
+{
+    juce::StringArray nameless, silent;
+};
+
+// Walks what shows of a component: each visible control (a button, slider, combo box or text field, whose own parts, a
+// slider's text box say, are its) and each component that takes the keyboard (which Narrator moves to). A list's scroll
+// bar is the list's.
+void walkControls (juce::Component& c, const juce::String& path, Unexplained& found)
+{
+    if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
+        return;
+
+    const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
+    const auto isControl = dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
+                           || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr;
+
+    if (isControl || c.getWantsKeyboardFocus())
+    {
+        const auto handler = c.isAccessible() ? c.createAccessibilityHandler() : nullptr;
+
+        if (handler == nullptr || handler->getTitle().trim().isEmpty() || handler->getRole() == juce::AccessibilityRole::ignored)
+            found.nameless.addIfNotAlreadyThere (here);
+    }
+
+    if (! isControl)
+    {
+        for (auto* child : c.getChildren())
+            walkControls (*child, here, found);
+
+        return;
+    }
+
+    auto* client = dynamic_cast<juce::TooltipClient*> (&c);
+
+    if ((client == nullptr || client->getTooltip().isEmpty()) && c.getDescription().isEmpty())
+        found.silent.addIfNotAlreadyThere (here);
+}
+
 constexpr const char* aboutTheAppCatalogue =
     "# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps "
     "and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), "
@@ -88,17 +146,24 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
-    for (const auto* id :
-         { "view.toggleLeftPanel",   "view.toggleLeftPanel", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
-           "view.instrument",        "view.effects",         "view.mixer",           "view.playlist",        "view.toggleEditor",
-           "view.toggleEditor",      "view.toggleSong",      "view.toggleSong",      "view.maximizeEditor",  "view.maximizeLeftPanel",
-           "view.maximizeLeftPanel", "view.maximizePanel",   "view.maximizePanel",   "view.layoutBeat",      "view.layoutMix",
-           "view.layoutFull" })
+    // At the smallest size the window can be (MainWindow's resize limits), at a large screen's, and at the size it opens at.
+    for (const auto& size : { juce::Point<int> (800, 500), juce::Point<int> (1920, 1080), juce::Point<int> (1280, 800) })
     {
-        INFO ("after " << id);
-        CHECK (screen.registry.invoke (id));
-        phazite::test::dispatchPendingMessages();
-        checkPartsApart (screen.shell);
+        CAPTURE (size.toString().toStdString());
+        screen.window.setSize (size.x, size.y);
+
+        for (const auto* id :
+             { "view.toggleLeftPanel",   "view.toggleLeftPanel", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
+               "view.instrument",        "view.effects",         "view.mixer",           "view.playlist",        "view.toggleEditor",
+               "view.toggleEditor",      "view.toggleSong",      "view.toggleSong",      "view.maximizeEditor",  "view.maximizeLeftPanel",
+               "view.maximizeLeftPanel", "view.maximizePanel",   "view.maximizePanel",   "view.layoutBeat",      "view.layoutMix",
+               "view.layoutFull" })
+        {
+            INFO ("after " << id);
+            CHECK (screen.registry.invoke (id));
+            phazite::test::dispatchPendingMessages();
+            checkPartsApart (screen.shell);
+        }
     }
 
     CHECK (screen.window.paintEverything().isValid());
@@ -555,6 +620,52 @@ TEST_CASE ("Every command the built-in keymaps give a key to is one the app has"
     }
 }
 
+TEST_CASE ("No built-in keymap gives Shift and a letter another command than the letter alone")
+{
+    // While the computer keyboard plays notes, Shift and a letter run that letter's single-key shortcut (CLAUDE.md, "Code
+    // conventions"): a keymap's own Shift+B would take B's command from anyone playing. Shift and a letter that has no key
+    // of its own may have a command (FL Studio's Shift+Q).
+    for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
+    {
+        CAPTURE (keymap.name.toStdString());
+        std::map<int, juce::StringArray> letters, shiftedLetters; // by the letter, in capitals, the commands on it
+
+        for (const auto& [id, descriptions] : keymap.keys)
+        {
+            for (const auto& description : descriptions)
+            {
+                // The key is a letter by its name, the description's last word ("shift + B"): a function key's code can be a
+                // letter's (Windows' F6 is 'u').
+                const auto key = juce::KeyPress::createFromDescription (description);
+                const auto name = description.fromLastOccurrenceOf ("+", false, false).trim();
+                const auto code = juce::CharacterFunctions::toUpperCase (name[0]);
+
+                if (! key.isValid() || name.length() != 1 || ! juce::CharacterFunctions::isLetter (code))
+                    continue;
+
+                if (key.getModifiers() == juce::ModifierKeys())
+                    letters[(int) code].addIfNotAlreadyThere (id);
+                else if (key.getModifiers() == juce::ModifierKeys (juce::ModifierKeys::shiftModifier))
+                    shiftedLetters[(int) code].addIfNotAlreadyThere (id);
+            }
+        }
+
+        for (const auto& [code, commands] : shiftedLetters)
+        {
+            CAPTURE (juce::String::charToString ((juce::juce_wchar) code).toStdString());
+            CAPTURE (commands.joinIntoString (", ").toStdString());
+
+            if (const auto alone = letters.find (code); alone != letters.end())
+            {
+                auto shifted = commands, plain = alone->second;
+                shifted.sort (false);
+                plain.sort (false);
+                CHECK (shifted == plain);
+            }
+        }
+    }
+}
+
 TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name, for working with the keyboard alone")
 {
     Screen screen;
@@ -612,99 +723,109 @@ TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name
     CHECK (focusedView() == "Piano roll");
 }
 
-TEST_CASE ("Every control in the window has a name and a role for screen readers, as Narrator reads them")
+TEST_CASE ("Every control in the window has a name and a role for screen readers and explains itself in the hint bar, in each "
+           "theme and at each size, over a song with something of everything")
 {
+    // The song has the tests' stand-in plug-ins, and every kind of track, clip, lane and strip (RepresentativeSong.h), and a
+    // track for each of Phazite's own devices. Each look walks the window and each view in turn, every one checked showing
+    // before it is walked: the dark theme at the size the window opens at, the light one at the smallest it can be
+    // (MainWindow's resize limits), where tool rows fold into their More menus, and high contrast on a large screen.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    const phazite::test::TestPlugin testPlugin;
+    const phazite::test::SandboxedPlugins sandboxedPlugins;
     Screen screen;
     screen.session.openAtStartup();
-    REQUIRE (screen.registry.invoke ("help.example.exodus")); // tracks, clips and devices to show
     phazite::test::dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    phazite::test::addRepresentativeSong (*screen.session.getProject(), context, screen.temp.folder.getChildFile ("Sounds"));
+    const auto devices = screen.addEveryOwnDevice();
     phazite::test::settle();
-    juce::StringArray nameless;
 
-    // Each visible control, and each component that takes the keyboard (which Narrator moves to), by the titles of the
-    // components it is in. A control's own parts (a slider's text box, a list's scroll bar) are its.
-    std::function<void (juce::Component&, const juce::String&)> visit = [&nameless, &visit] (juce::Component& c, const juce::String& path)
+    // A MIDI clip and an audio clip, for the piano roll and the audio clip editor.
+    std::optional<phazite::ClipID> notes, audio;
+
+    for (const auto track : phazite::getAllPlaylistTracks (context))
+        for (const auto& clip : phazite::getClips (context, track))
+            (clip.kind == phazite::ClipType::audio ? audio : notes) = clip.id;
+
+    REQUIRE (notes.has_value());
+    REQUIRE (audio.has_value());
+
+    struct Look
     {
-        if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
-            return;
-
-        const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
-        const auto isControl = dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
-                               || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr;
-
-        if (isControl || c.getWantsKeyboardFocus())
-        {
-            const auto handler = c.isAccessible() ? c.createAccessibilityHandler() : nullptr;
-
-            if (handler == nullptr || handler->getTitle().trim().isEmpty() || handler->getRole() == juce::AccessibilityRole::ignored)
-                nameless.addIfNotAlreadyThere (here);
-        }
-
-        if (isControl)
-            return;
-
-        for (auto* child : c.getChildren())
-            visit (*child, here);
+        phazite::ui::ThemeName theme;
+        int width, height;
     };
 
-    visit (screen.shell, "Window");
-
-    for (const auto* view : { "view.mixer", "view.pianoRoll", "view.instrument", "view.effects" })
+    for (const auto& look : { Look { phazite::ui::ThemeName::dark, 1280, 800 }, Look { phazite::ui::ThemeName::light, 800, 500 },
+                              Look { phazite::ui::ThemeName::highContrast, 1920, 1080 } })
     {
-        REQUIRE (screen.registry.invoke (view));
+        const auto where = "Window at " + juce::String (look.width) + " x " + juce::String (look.height);
+        CAPTURE (where.toStdString());
+        lookAndFeel.setTheme (look.theme);
+        phazite::ui::refreshTheme (screen.window);
+        screen.window.setSize (look.width, look.height);
         phazite::test::dispatchPendingMessages();
-        visit (screen.shell, juce::String ("Window, ") + view);
-    }
+        Unexplained found;
+        const auto walk = [&found, &where] (juce::Component& view, const juce::String& what)
+        { walkControls (view, where + ", " + what, found); };
 
-    INFO (nameless.joinIntoString ("\n").toStdString());
-    CHECK (nameless.isEmpty());
-}
+        walk (screen.shell, "as it opens");
+        walk (screen.showView<phazite::ui::Playlist> ("view.playlist"), "playlist");
+        walk (screen.showView<phazite::ui::MixerView> ("view.mixer"), "mixer");
+        context.getSongSelection().selectOnly (*notes);
+        walk (screen.showView<phazite::ui::PianoRoll> ("view.pianoRoll"), "piano roll");
+        context.getSongSelection().selectOnly (*audio);
+        walk (screen.showView<phazite::ui::AudioClipEditor> ("view.pianoRoll"), "audio clip editor");
+        walk (screen.showView<phazite::ui::Inspector> ("view.toggleInspector"), "inspector, an audio clip");
+        walk (screen.showView<phazite::ui::Browser> ("view.browser"), "browser");
+        walk (screen.showView<phazite::ui::ProjectView> ("view.project"), "project");
+        walk (screen.showView<phazite::ui::VersionsView> ("view.versions"), "source control");
 
-TEST_CASE ("Every control in the window explains itself in the hint bar, with a tooltip or a description")
-{
-    Screen screen;
-    screen.session.openAtStartup();
-    phazite::test::dispatchPendingMessages();
-    juce::StringArray silent;
+        for (const auto device : devices)
+            walk (screen.showInDevicesView (device), "Devices view, " + phazite::getDeviceName (*phazite::findSong (context), device));
 
-    // Each visible control, by the titles of the components it is in. A control's own parts (a slider's text box, a list's
-    // scroll bar) are its.
-    std::function<void (juce::Component&, const juce::String&)> visit = [&silent, &visit] (juce::Component& c, const juce::String& path)
-    {
-        if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
-            return;
+        // The controls known not to explain themselves yet, by the end of where they are, each found in each look (an entry
+        // that no control matches any more fails, so that the list goes once they explain themselves).
+        static const std::vector<std::pair<juce::String, juce::String>> knownSilent {
+            { "Project > Notes", "the project's notes field has no tooltip (src/ui/project/ProjectView.cpp)" },
+            { "Source Control > Graph", "the Graph pane's header is set with no help text (src/ui/versions/VersionsView.cpp)" },
+            { "EqEditor > Band On", "the EQ's band controls have no tooltips (src/ui/devices/EqEditor.cpp)" },
+            { "EqEditor > Band Shape", "as Band On" },
+            { "EqEditor > Slope", "as Band On" },
+            { "EqEditor > Frequency", "as Band On" },
+            { "EqEditor > Gain", "as Band On" },
+            { "EqEditor > Q", "as Band On" },
+            { "EqEditor > Output", "as Band On" },
+            { "Vinyl > Record > Low Cut", "the knobs at the band's ends have no tooltips (src/ui/devices/VinylEditor.cpp: makeKnob())" },
+            { "Vinyl > Record > High Cut", "as Vinyl's Low Cut" },
+            { "Delay > Echoes > Low Cut", "as Vinyl's (src/ui/devices/DelayEditor.cpp)" },
+            { "Delay > Echoes > High Cut", "as Vinyl's" },
+        };
 
-        const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
+        juce::StringArray silent;
 
-        if (dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
-            || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr)
+        for (const auto& control : found.silent)
+            if (std::none_of (knownSilent.begin(), knownSilent.end(),
+                              [&control] (const auto& known) { return control.endsWith (known.first); }))
+                silent.add (control);
+
+        for (const auto& known : knownSilent)
         {
-            auto* client = dynamic_cast<juce::TooltipClient*> (&c);
-
-            if ((client == nullptr || client->getTooltip().isEmpty()) && c.getDescription().isEmpty())
-                silent.addIfNotAlreadyThere (here);
-
-            return;
+            CAPTURE (known.first.toStdString());
+            CHECK (std::any_of (found.silent.begin(), found.silent.end(),
+                                [&known] (const auto& control) { return control.endsWith (known.first); }));
         }
 
-        for (auto* child : c.getChildren())
-            visit (*child, here);
-    };
-
-    visit (screen.shell, "Window");
-    REQUIRE (screen.registry.invoke ("view.mixer"));
-    phazite::test::dispatchPendingMessages();
-    visit (screen.shell, "Window, mixer");
-
-    for (const auto* view : { "view.pianoRoll", "view.instrument", "view.effects" })
-    {
-        REQUIRE (screen.registry.invoke (view));
-        phazite::test::dispatchPendingMessages();
-        visit (screen.shell, juce::String ("Window, ") + view);
+        INFO (found.nameless.joinIntoString ("\n").toStdString());
+        CHECK (found.nameless.isEmpty());
+        INFO (silent.joinIntoString ("\n").toStdString());
+        CHECK (silent.isEmpty());
     }
 
-    INFO (silent.joinIntoString ("\n").toStdString());
-    CHECK (silent.isEmpty());
+    screen.window.setSize (1280, 800);
 }
 
 TEST_CASE ("Switching the theme puts what the window shows already in the new theme's colours")
@@ -757,27 +878,51 @@ TEST_CASE ("Switching the theme puts what the window shows already in the new th
     REQUIRE (nameField != nullptr);
     REQUIRE_FALSE (tinted().isEmpty());
 
-    lookAndFeel.setTheme (phazite::ui::ThemeName::light);
-    phazite::ui::refreshTheme (screen.window);
-    phazite::test::dispatchPendingMessages();
+    // Each theme in turn, from the one before: the button's tint is the theme's, and the name is in the theme's text colour.
+    // Its pixel that stands out most from the field's background (the colour most of the field is) is nearer the theme's
+    // text than the last theme's: light grey on white was the bug; and, from the second switch on, the first switch's text
+    // colour, which refreshing a field made its own colour (black on black in high contrast after the light theme).
+    auto previousText = lookAndFeel.getPalette().text;
 
-    // The button's tint is the light theme's.
-    const auto& light = lookAndFeel.getPalette();
-    const auto attention = light.surfaceRaised.interpolatedWith (light.warning, phazite::ui::attentionTint);
-    REQUIRE_FALSE (tinted().isEmpty());
+    for (const auto theme : { phazite::ui::ThemeName::light, phazite::ui::ThemeName::highContrast, phazite::ui::ThemeName::dark })
+    {
+        CAPTURE (static_cast<int> (theme));
+        lookAndFeel.setTheme (theme);
+        phazite::ui::refreshTheme (screen.window);
+        phazite::test::dispatchPendingMessages();
 
-    for (auto* button : tinted())
-        CHECK (button->findColour (juce::TextButton::buttonColourId) == attention);
+        const auto& palette = lookAndFeel.getPalette();
+        const auto attention = palette.surfaceRaised.interpolatedWith (palette.warning, phazite::ui::attentionTint);
+        REQUIRE_FALSE (tinted().isEmpty());
 
-    // The name reads dark on the field's light background: its darkest pixels are about the light theme's text, not the dark
-    // theme's light grey.
-    const auto image = nameField->createComponentSnapshot (nameField->getLocalBounds(), true, 1.0f);
-    auto darkest = 1.0f;
+        for (auto* button : tinted())
+            CHECK (button->findColour (juce::TextButton::buttonColourId) == attention);
 
-    for (int y = 0; y < image.getHeight(); ++y)
-        for (int x = 0; x < image.getWidth(); ++x)
-            if (const auto pixel = image.getPixelAt (x, y); pixel.isOpaque()) // not the corners outside its rounded box
-                darkest = std::min (darkest, pixel.getBrightness());
+        const auto image = phazite::test::paintComponent (*nameField);
+        const auto inside = image.getBounds().reduced (3); // not its border, nor the corners outside its rounded box
+        std::map<juce::uint32, int> counts;
 
-    CHECK (darkest < 0.5f);
+        for (int y = inside.getY(); y < inside.getBottom(); ++y)
+            for (int x = inside.getX(); x < inside.getRight(); ++x)
+                ++counts[image.getPixelAt (x, y).getARGB()];
+
+        REQUIRE_FALSE (counts.empty());
+        const auto background = juce::Colour (
+            std::max_element (counts.begin(), counts.end(), [] (const auto& a, const auto& b) { return a.second < b.second; })->first);
+        auto text = background;
+
+        for (const auto& [argb, count] : counts)
+            if (phazite::ui::getContrastRatio (juce::Colour (argb), background) > phazite::ui::getContrastRatio (text, background))
+                text = juce::Colour (argb);
+
+        const auto distance = [] (juce::Colour a, juce::Colour b)
+        {
+            return std::abs ((int) a.getRed() - (int) b.getRed()) + std::abs ((int) a.getGreen() - (int) b.getGreen())
+                   + std::abs ((int) a.getBlue() - (int) b.getBlue());
+        };
+
+        CAPTURE (text.toDisplayString (false).toStdString());
+        CHECK (distance (text, palette.text) < distance (text, previousText));
+        previousText = palette.text;
+    }
 }

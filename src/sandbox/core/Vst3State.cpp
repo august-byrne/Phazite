@@ -20,6 +20,19 @@ namespace
     {
         return std::memcmp (data, id, 4) == 0;
     }
+
+    // The class ID a preset holds: up to 32 characters of ASCII (hexadecimal digits, as the SDK writes it), zeros after it;
+    // nothing for bytes that aren't, as in a damaged file.
+    std::optional<juce::String> readClassID (const char* data)
+    {
+        int length = 0;
+
+        while (length < classIDSize && data[length] != 0)
+            if (const auto c = data[length++]; c < 0x20 || c > 0x7e)
+                return std::nullopt;
+
+        return juce::String (data, (size_t) length);
+    }
 } // namespace
 
 std::optional<Vst3State> readVst3Preset (const juce::MemoryBlock& block)
@@ -41,7 +54,13 @@ std::optional<Vst3State> readVst3Preset (const juce::MemoryBlock& block)
         return std::nullopt;
 
     Vst3State state;
-    state.classID = juce::String::fromUTF8 (data + 8, classIDSize);
+    const auto classID = readClassID (data + 8);
+
+    if (! classID.has_value())
+        return std::nullopt;
+
+    state.classID = *classID;
+
     bool hasComponent = false;
 
     for (int i = 0; i < count; ++i)
@@ -120,7 +139,7 @@ juce::String readVst3ClassID (const juce::MemoryBlock& block)
     if (block.getSize() < (size_t) headerSize || ! hasID (static_cast<const char*> (block.getData()), "VST3"))
         return {};
 
-    return juce::String::fromUTF8 (static_cast<const char*> (block.getData()) + 8, classIDSize);
+    return readClassID (static_cast<const char*> (block.getData()) + 8).value_or (juce::String());
 }
 
 std::optional<Vst3State> readJuceVst3State (const juce::MemoryBlock& block, const juce::String& classID)
@@ -134,6 +153,9 @@ std::optional<Vst3State> readJuceVst3State (const juce::MemoryBlock& block, cons
 
     if (length == 0 || length > block.getSize() - 8)
         return std::nullopt;
+
+    if (! juce::CharPointer_UTF8::isValidString (data + 8, (int) length))
+        return std::nullopt; // no text, as a damaged state isn't
 
     const auto xml = juce::parseXML (juce::String::fromUTF8 (data + 8, (int) length));
 

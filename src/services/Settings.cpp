@@ -2,6 +2,8 @@
 #include "Settings.h"
 #include "model/engine/AppInfo.h"
 
+#include <cmath>
+
 namespace phazite
 {
 Settings::Settings (juce::PropertiesFile* propertiesFile)
@@ -33,14 +35,17 @@ bool Settings::get (const BoolSetting& setting) const
     return storage->getBoolValue (setting.key, setting.defaultValue);
 }
 
+// A number from the file, which anything could have written: its default for what is no finite number.
 double Settings::get (const NumberSetting& setting) const
 {
-    return storage->getDoubleValue (setting.key, setting.defaultValue);
+    const auto value = storage->getDoubleValue (setting.key, setting.defaultValue);
+    return std::isfinite (value) ? value : setting.defaultValue;
 }
 
 double Settings::get (const NumberSettingWithoutDefault& setting, double defaultValue) const
 {
-    return storage->getDoubleValue (setting.key, defaultValue);
+    const auto value = storage->getDoubleValue (setting.key, defaultValue);
+    return std::isfinite (value) ? value : defaultValue;
 }
 
 juce::String Settings::get (const TextSetting& setting) const

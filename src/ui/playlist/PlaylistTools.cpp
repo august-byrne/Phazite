@@ -338,13 +338,7 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     gesture->startBeat = getView().xToBeat (e.position.x);
     gesture->startRow = getRowAt (e.y);
     gesture->startScrollY = scrollY;
-    gesture->tracksAtPress = selection.getTracks();
-    gesture->clipsAtPress = selection.getClips();
-    gesture->sectionsAtPress = selection.getSections();
-
-    if (! range.isEmpty())
-        gesture->rangeAtPress = std::pair (range.getRange(), range.getTracks());
-
+    gesture->selectionAtPress = SelectionAtPress::take (context);
     beginDragAutoRepeat (autoRepeatInterval); // so the lanes go on scrolling while the mouse rests past an edge
 
     const auto* hit = getClipAt (e.getPosition());
@@ -954,21 +948,7 @@ bool Playlist::cancelDrag()
     }
     else
     {
-        selection.clear();
-
-        for (const auto track : gesture->tracksAtPress)
-            selection.add (track);
-
-        for (const auto clip : gesture->clipsAtPress)
-            selection.add (clip);
-
-        for (const auto section : gesture->sectionsAtPress)
-            selection.add (section);
-
-        if (gesture->rangeAtPress.has_value())
-            range.set (gesture->rangeAtPress->first, gesture->rangeAtPress->second);
-        else
-            range.clear();
+        gesture->selectionAtPress.putBack (context);
     }
 
     gesture = nullptr;

@@ -2,6 +2,7 @@
 // Merging two lines of a song by IDs (docs/design/versions.md: Merging by IDs, step V4): each side a song of its own made from the
 // same base, changed through the model, and the other side's lines taken into this side's.
 #include "EnginePlayback.h"
+#include "RandomEdits.h"
 #include "SongIDs.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
@@ -93,18 +94,6 @@ std::vector<juce::ValueTree> findItems (const juce::ValueTree& song, const juce:
 
     visit (song);
     return found;
-}
-
-// A track and the tracks in it, a folder's, however deep.
-size_t countTracks (const juce::ValueTree& track)
-{
-    size_t tracks = 1;
-
-    for (const auto& child : track)
-        if (child.hasType (schema::TRACK))
-            tracks += countTracks (child);
-
-    return tracks;
 }
 
 int countNotes (const juce::ValueTree& clip)
@@ -316,7 +305,8 @@ TEST_CASE ("Merging what this side has already changes nothing")
 
 TEST_CASE ("Random edits on two sides always merge into a song whose IDs are each once, and whose references name what is there")
 {
-    juce::Random random (20261104);
+    // Every kind of edit the model has (RandomEdits.h), round r's sides from the seeds 20261104 + 2r and the one after.
+    TemporaryFolder sounds;
 
     // The tracks and the clips of a song, by their IDs.
     const auto itemsOf = [] (const juce::ValueTree& song)
@@ -344,68 +334,11 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
         if (round % 2 == 1)
             groupBase (sides);
 
-        for (auto* side : { sides.ours.get(), sides.theirs.get() })
+        for (int side = 0; side < 2; ++side)
         {
-            for (int edit = 0; edit < 8; ++edit)
-            {
-                const auto tracks = phazite::getTrackIDs (*side);
-
-                if (tracks.empty()) // its last folder ungrouped with nothing in it
-                {
-                    phazite::insertTrack (*side, {}, nullptr);
-                    continue;
-                }
-
-                const auto track = tracks[(size_t) random.nextInt ((int) tracks.size())];
-                const auto other = tracks[(size_t) random.nextInt ((int) tracks.size())];
-
-                switch (random.nextInt (9))
-                {
-                    case 0:
-                        phazite::setChannelVolume (*side, track, -random.nextFloat() * 30.0f);
-                        break;
-                    case 1:
-                        phazite::insertTrack (*side, track, nullptr);
-                        break;
-                    case 2:
-                        phazite::insertDeviceState (*side, track, phazite::makeOwnDeviceState (*side, phazite::devices::Equalizer::typeID));
-                        break;
-                    case 3:
-                        if (! phazite::isFolder (*side, track))
-                            if (const auto clip = addMidiClip (*side, track, { at (random.nextInt (16)), at (20.0) }); clip.isValid())
-                                addMidiNote (*side, clip, 40 + random.nextInt (20), at (0.0), lasting (0.5));
-                        break;
-                    case 4:
-                        if (phazite::findClipState (*side, sides.clip).isValid())
-                        {
-                            // Each number drawn on its own: the order two calls in one are made in isn't the same everywhere.
-                            const auto key = 30 + random.nextInt (40);
-                            const auto beat = random.nextInt (8);
-                            addMidiNote (*side, sides.clip, key, at (beat), lasting (0.25));
-                        }
-                        break;
-                    case 5:
-                        if (tracks.size() > countTracks (phazite::findTrackState (*side, track))) // a folder goes with its tracks
-                            phazite::deleteTracks (*side, { track }, nullptr);
-                        break;
-                    case 6:
-                        phazite::groupIntoFolder (*side, track == other ? std::vector { track } : std::vector { track, other }, nullptr);
-                        break;
-                    case 7:
-                        phazite::ungroupFolder (*side, track); // if it is a folder
-                        break;
-                    case 8:
-                    default:
-                        // A clip of the track onto another, at another beat.
-                        if (const auto clips = phazite::getClips (*side, track); ! clips.empty() && ! phazite::isFolder (*side, other))
-                        {
-                            const auto moved = clips[(size_t) random.nextInt ((int) clips.size())];
-                            const auto beat = random.nextInt (16);
-                            phazite::moveClip (*side, moved, at (beat), other);
-                        }
-                        break;
-                }
-            }
+            const auto seed = 20261104 + 2 * round + side;
+            INFO ("side " << side << ", seed " << seed);
+            RandomEdits (side == 0 ? *sides.ours : *sides.theirs, seed, sounds.folder).edit (8);
         }
 
         const auto merged = sides.merge();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PlaybackSession.h"
 #include "internal/PlaybackHost.h"
+#include "model/base/internal/Schema.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Playback.h"
@@ -77,6 +78,10 @@ void PlaybackSession::changed (const juce::ValueTree&)
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    // Where playback starts is the transport's (movePlayhead() locates the engine itself): nothing a plan holds.
+    if (tree == songState && property == schema::playStart)
+        return;
+
     // A value set by hand plays at once; anything else, in a new plan.
     if (! player.takeValue (tree, property))
         triggerAsyncUpdate();

@@ -1,19 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
+#include "devices/modulation/Modulators.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/engine/AppInfo.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
+#include <functional>
+#include <map>
+#include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -21,12 +33,25 @@ namespace phazite
 {
 namespace
 {
+    // Text between an element's tags, which a song never holds (its values are attributes), and which a value tree has
+    // nothing for: left out of a file from elsewhere before it becomes one.
+    void removeText (juce::XmlElement& element)
+    {
+        element.deleteAllTextElements();
+
+        for (auto* child : element.getChildIterator())
+            removeText (*child);
+    }
+
     // The song a project file holds (Schema.h: PHAZITE, the file's one element), or an invalid tree for a file that holds
     // none.
     juce::ValueTree readSong (const juce::File& file)
     {
         if (const auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->hasTagName (schema::PHAZITE.toString()))
+        {
+            removeText (*xml);
             return juce::ValueTree::fromXml (*xml);
+        }
 
         return {};
     }
@@ -81,7 +106,641 @@ namespace
 
         return folder;
     }
+
+    //==============================================================================
+    // A song as a file holds it made one the model can work with, whoever wrote the file: Phazite takes in projects and
+    // presets from others, so whatever a file says is checked as it loads, and what doesn't hold together is left out or
+    // brought back within what Schema.h allows. Each step keeps one of the song's rules (tests/SongCheck.h states them
+    // again, on their own). A song Phazite saved itself is consistent already, and none of this changes it.
+    namespace consistent
+    {
+        // Where each element goes, by its parent's type (Schema.h: "Child of").
+        const std::map<juce::String, juce::StringArray>& getPlaces()
+        {
+            static const std::map<juce::String, juce::StringArray> places {
+                { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE" } },
+                { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
+                { "TRACKS", { "TRACK" } },
+                { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
+                { "MASTER", { "LANES", "DEVICE", "CONTAINER", "MODULATOR" } },
+                { "LANES", { "LANE" } },
+                { "DEVICE", { "VALUES", "SOUNDS", "VALUE" } },
+                { "CONTAINER", { "CHAIN", "MACRO" } },
+                { "CHAIN", { "DEVICE" } },
+                { "MODULATOR", { "MODULATES", "VALUES" } },
+                { "MACRO", { "MODULATES" } },
+                { "AUTOMATION", { "CURVE" } },
+                { "CURVE", { "POINT" } },
+                { "SECTIONS", { "SECTION" } },
+                { "CHORDLANE", { "CHORD", "CHORDKEY" } },
+                { "CLIP", { "NOTE", "CONTROL", "WARP" } },
+            };
+            return places;
+        }
+
+        // Whether Phazite knows an element's type. One it doesn't (a later build's, another tool's) stays where it is, as it is, with
+        // everything in it, and is written back (docs/project-format.md): nothing reads it.
+        bool isKnown (const juce::ValueTree& element)
+        {
+            static const auto known = []
+            {
+                std::set<juce::String> types { "PHAZITE" };
+
+                for (const auto& [parent, children] : getPlaces())
+                {
+                    types.insert (parent);
+
+                    for (const auto& child : children)
+                        types.insert (child);
+                }
+
+                return types;
+            }();
+
+            return known.count (element.getType().toString()) > 0;
+        }
+
+        // The furthest place in beats a song holds anything at, and in seconds of a file.
+        constexpr double maxBeat = maxSongBeats, maxSeconds = 1.0e7, some = 1.0e-9;
+
+        // The IDs a song gives stay well below where counting them on would overflow.
+        constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
+
+        // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value.
+        struct Range
+        {
+            const juce::Identifier* type;
+            const juce::Identifier* property;
+            double low, high;
+            bool whole = false;
+            std::optional<double> fallback {};
+        };
+
+        const std::vector<Range>& getRanges()
+        {
+            using namespace schema;
+            static const std::vector<Range> ranges {
+                { &PHAZITE, &loopStart, 0.0, maxBeat },
+                { &PHAZITE, &loopEnd, 0.0, maxBeat },
+                { &PHAZITE, &gridOffset, -3.0, 3.0, true },
+                { &PIANOROLL, &gridOffset, -3.0, 3.0, true },
+                { &TEMPO, &mapBeat, 0.0, maxBeat, false, 0.0 },
+                { &TEMPO, &bpm, 20.0, 300.0, false, 120.0 },
+                { &TEMPO, &tempoCurve, -1.0, 1.0 },
+                { &TIMESIGNATURE, &mapBeat, 0.0, maxBeat, false, 0.0 },
+                { &TIMESIGNATURE, &numerator, 1.0, 32.0, true, 4.0 },
+                { &TIMESIGNATURE, &denominator, 2.0, 16.0, true, 4.0 },
+                { &TRACK, &channelVolume, -100.0, 6.0 },
+                { &TRACK, &channelPan, -1.0, 1.0 },
+                { &TRACK, &keyRoot, 0.0, 11.0, true },
+                { &TRACK, &trackPad, 0.0, 127.0, true },
+                { &TRACK, &trackHeight, 32.0, 320.0, true },
+                { &MASTER, &channelVolume, -100.0, 6.0 },
+                { &MASTER, &channelPan, -1.0, 1.0 },
+                { &MASTER, &trackHeight, 32.0, 320.0, true },
+                { &LASTKEY, &keyRoot, 0.0, 11.0, true },
+                { &LANE, &laneHeight, 32.0, 320.0, true },
+                { &DEVICE, &deviceMix, 0.0, 1.0 },
+                { &VALUE, &valueSetByHand, 0.0, 1.0, false, 0.0 },
+                { &CONTAINER, &deviceMix, 0.0, 1.0 },
+                { &CHAIN, &channelVolume, -100.0, 6.0 },
+                { &CHAIN, &channelPan, -1.0, 1.0 },
+                { &CHAIN, &chainCrossover, 20.0, 20000.0 },
+                { &CHAIN, &chainLowKey, 0.0, 127.0, true },
+                { &CHAIN, &chainHighKey, 0.0, 127.0, true },
+                { &CHAIN, &chainLowVelocity, 1.0, 127.0, true },
+                { &CHAIN, &chainHighVelocity, 1.0, 127.0, true },
+                { &SEND, &sendLevel, -100.0, 6.0 },
+                { &MACRO, &macroValue, 0.0, 1.0 },
+                { &MODULATES, &modulatesAmount, -1.0, 1.0, false, 0.0 },
+                { &POINT, &pointBeat, 0.0, maxBeat, false, 0.0 },
+                { &POINT, &pointCurve, -1.0, 1.0 },
+                { &SECTION, &sectionStart, 0.0, maxBeat, false, 0.0 },
+                { &SECTION, &sectionLength, some, maxBeat, false, 4.0 },
+                { &SECTION, &sectionEnergy, 0.0, 1.0 },
+                { &CHORD, &chordStart, 0.0, maxBeat, false, 0.0 },
+                { &CHORD, &chordLength, some, maxBeat, false, 4.0 },
+                { &CHORD, &chordDegree, 1.0, 7.0, true, 1.0 },
+                { &CHORD, &chordAccidental, -1.0, 1.0, true },
+                { &CHORD, &chordInversion, 0.0, 16.0, true },
+                { &CHORDKEY, &chordStart, 0.0, maxBeat, false, 0.0 },
+                { &CHORDKEY, &keyRoot, 0.0, 11.0, true },
+                { &CLIP, &clipStart, 0.0, maxBeat, false, 0.0 },
+                { &CLIP, &clipLength, some, maxBeat, false, 4.0 },
+                { &CLIP, &clipOffset, 0.0, maxBeat },
+                { &CLIP, &clipFileStart, 0.0, maxSeconds, false, 0.0 },
+                { &CLIP, &clipFileEnd, 0.0, maxSeconds, false, 0.0 },
+                { &CLIP, &clipTempo, 20.0, 300.0 },
+                { &CLIP, &clipPitch, -48.0, 48.0 },
+                { &CLIP, &clipGain, -60.0, 24.0 },
+                { &CLIP, &clipFadeIn, 0.0, maxSeconds },
+                { &CLIP, &clipFadeOut, 0.0, maxSeconds },
+                { &CLIP, &clipFadeInBend, -1.0, 1.0 },
+                { &CLIP, &clipFadeOutBend, -1.0, 1.0 },
+                { &CLIP, &clipTakes, 2.0, 1.0e6, true },
+                { &CLIP, &clipTake, 1.0, 1.0e6, true },
+                { &CLIP, &clipTakeLength, some, maxSeconds },
+                { &NOTE, &notePitch, 0.0, 127.0, true, 60.0 },
+                { &NOTE, &noteStart, -maxBeat, maxBeat, false, 0.0 },
+                { &NOTE, &noteLength, some, maxBeat, false, 1.0 }, // more than 0: a tempo change scales notes past getMinimumNoteLength()
+                { &NOTE, &noteVelocity, 1.0, 127.0, true, 100.0 },
+                { &CONTROL, &controlNumber, 0.0, 127.0, true, 0.0 },
+                { &CONTROL, &controlBeat, -maxBeat, maxBeat, false, 0.0 },
+                { &CONTROL, &controlValue, 0.0, 16383.0, true, 0.0 },
+                { &WARP, &warpTime, 0.0, maxSeconds, false, 0.0 },
+                { &WARP, &warpPlaysAt, -maxSeconds, maxSeconds, false, 0.0 },
+            };
+            return ranges;
+        }
+
+        // Words a property is one of, by its element's type; anything else goes, as if it had none.
+        struct Words
+        {
+            const juce::Identifier* type;
+            const juce::Identifier* property;
+            juce::StringArray words;
+        };
+
+        const std::vector<Words>& getWords()
+        {
+            using namespace schema;
+            static const std::vector<Words> words {
+                { &TRACK, &trackAutomationMode, { automationTouch, automationLatch, automationWrite } },
+                { &MASTER, &trackAutomationMode, { automationTouch, automationLatch, automationWrite } },
+                { &TRACK, &trackMonitoring, { monitorAlways, monitorNever } },
+                { &CONTAINER, &containerSplit, { splitBands, splitMidSide, splitLeftRight } },
+                { &CLIP, &clipFadeInShape, { fadeIsCurve, fadeIsSCurve } },
+                { &CLIP, &clipFadeOutShape, { fadeIsCurve, fadeIsSCurve } },
+            };
+            return words;
+        }
+
+        // A value as a number: a number's own, or text that is a number and nothing else; none for anything else, and
+        // infinity for text too large for one.
+        std::optional<double> readNumber (const juce::var& value)
+        {
+            if (value.isInt() || value.isInt64() || value.isDouble() || value.isBool())
+                return (double) value;
+
+            if (! value.isString())
+                return std::nullopt;
+
+            const auto text = value.toString().trim().toStdString();
+            double number = 0.0;
+            const auto read = std::from_chars (text.data(), text.data() + text.size(), number);
+
+            if (read.ec == std::errc::result_out_of_range)
+                return std::numeric_limits<double>::infinity();
+
+            if (text.empty() || read.ec != std::errc() || read.ptr != text.data() + text.size())
+                return std::nullopt;
+
+            return number;
+        }
+
+        // A number within its range: brought in, made whole, or for what is no finite number, its fallback (or none).
+        void keepInRange (juce::ValueTree element, const juce::Identifier& property, double low, double high, bool whole,
+                          std::optional<double> fallback)
+        {
+            const auto number = readNumber (element[property]);
+
+            if (! number.has_value() || ! std::isfinite (*number))
+            {
+                if (fallback.has_value())
+                    element.setProperty (property, whole ? juce::var ((juce::int64) *fallback) : juce::var (*fallback), nullptr);
+                else
+                    element.removeProperty (property, nullptr);
+
+                return;
+            }
+
+            auto kept = juce::jlimit (low, high, whole ? std::round (*number) : *number);
+
+            // A time signature's note value is a power of two.
+            if (element.hasType (schema::TIMESIGNATURE) && property == schema::denominator)
+                kept = std::exp2 (std::round (std::log2 (kept)));
+
+            if (! juce::exactlyEqual (kept, *number))
+                element.setProperty (property, whole ? juce::var ((juce::int64) kept) : juce::var (kept), nullptr);
+        }
+
+        // A full path on any system: this one's, one from the root ("/home/...", "\..."), or a Windows drive's ("C:..."). A
+        // ':' anywhere else is part of a file's name, which Linux allows ("Audio/Loop 1:2.wav").
+        bool isFullPath (const juce::String& path)
+        {
+            return juce::File::isAbsolutePath (path) || path.startsWithChar ('\\') || path.startsWithChar ('/')
+                   || (path.length() >= 2 && juce::CharacterFunctions::isLetter (path[0]) && path[1] == ':');
+        }
+
+        // A path on a network share ("\\server\share", "//server/share", "\\?\UNC\..."), which Windows connects to as it is
+        // looked at.
+        bool isNetworkPath (const juce::String& path)
+        {
+            return path.length() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
+        }
+
+        struct Keeper
+        {
+            Song& song;
+            juce::File folder; // the project's, or none
+
+            //==============================================================================
+            // Each element of a type Phazite knows where Schema.h puts it; one somewhere else goes, with everything in it. One
+            // of a type it doesn't know stays as it is (isKnown()).
+            void keepPlaces (juce::ValueTree parent)
+            {
+                const auto& places = getPlaces();
+                const auto found = places.find (parent.getType().toString());
+
+                for (auto i = parent.getNumChildren(); --i >= 0;)
+                {
+                    auto child = parent.getChild (i);
+                    const auto type = child.getType().toString();
+
+                    if (! isKnown (child))
+                        continue;
+
+                    if (child.hasType (schema::TRACK)
+                        && ! juce::StringArray { schema::trackIsTrack, schema::trackIsFolder, schema::trackIsReturn }.contains (
+                            child[schema::trackKind].toString()))
+                        child.setProperty (schema::trackKind,
+                                           child.getChildWithName (schema::TRACK).isValid() ? schema::trackIsFolder : schema::trackIsTrack,
+                                           nullptr);
+
+                    const auto belongs =
+                        found != places.end() && found->second.contains (type)
+                        && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
+                              && parent[schema::trackKind].toString() != schema::trackIsFolder)
+                        && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() == schema::trackIsFolder)
+                        && ! (child.hasType (schema::CLIP)
+                              && ! juce::StringArray { schema::clipIsMidi, schema::clipIsAudio }.contains (
+                                  child[schema::clipKind].toString()))
+                        && ! ((child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+                              && parent[schema::clipKind].toString() != schema::clipIsMidi)
+                        && ! (child.hasType (schema::WARP) && parent[schema::clipKind].toString() != schema::clipIsAudio)
+                        && ! (child.hasType (schema::CONTROL)
+                              && ! juce::StringArray { schema::controlIsController, schema::controlIsPitchWheel,
+                                                       schema::controlIsChannelPressure, schema::controlIsAftertouch,
+                                                       schema::controlIsProgramChange }
+                                       .contains (child[schema::controlKind].toString()));
+
+                    if (! belongs)
+                        parent.removeChild (i, nullptr);
+                    else
+                        keepPlaces (child); // in an element nothing goes in, only what Phazite doesn't know stays
+                }
+            }
+
+            //==============================================================================
+            // Every device of a type Phazite has, and its values set by hand, as every modulator's, of parameters it has,
+            // within their ranges.
+            // A parameter by its ID, as a device's or a modulator's description finds it (by an index of its own for one of
+            // many: the drum sampler's 3,201), or none.
+            using FindParameter = std::function<const devices::ParameterInfo*(std::string_view id)>;
+
+            void keepValuesSetByHand (juce::ValueTree element, const FindParameter& find)
+            {
+                auto values = element.getChildWithName (schema::VALUES);
+
+                for (auto i = values.getNumProperties(); --i >= 0;)
+                {
+                    const auto name = values.getPropertyName (i);
+                    const auto saved = values[name];
+                    const auto* parameter = find (std::string_view (name.getCharPointer().getAddress()));
+
+                    if (parameter == nullptr)
+                    {
+                        values.removeProperty (name, nullptr);
+                        continue;
+                    }
+
+                    if (parameter->unit == devices::Unit::choice && saved.isString())
+                    {
+                        if (! devices::findChoice (*parameter, saved.toString().toStdString()).has_value())
+                            values.removeProperty (name, nullptr);
+
+                        continue;
+                    }
+
+                    if (const auto number = readNumber (saved); ! number.has_value() || ! std::isfinite (*number))
+                        values.removeProperty (name, nullptr);
+                    else if (const auto kept = devices::constrain (*parameter, (float) *number);
+                             ! juce::exactlyEqual ((double) kept, *number))
+                        values.setProperty (name, toSavedValue (*parameter, kept), nullptr);
+                }
+            }
+
+            void keepDevices (juce::ValueTree parent)
+            {
+                for (auto i = parent.getNumChildren(); --i >= 0;)
+                {
+                    auto child = parent.getChild (i);
+
+                    if (child.hasType (schema::DEVICE))
+                    {
+                        const auto type = child[schema::deviceType].toString();
+
+                        if (const auto* info = findOwnDevice (type.toStdString()))
+                            keepValuesSetByHand (child,
+                                                 [info] (std::string_view id) -> const devices::ParameterInfo*
+                                                 {
+                                                     const auto index = devices::findParameter (*info, id);
+                                                     return index >= 0 ? &info->parameters[(size_t) index] : nullptr;
+                                                 });
+                        else if (type == schema::deviceIsPlugin)
+                            child.removeChild (child.getChildWithName (schema::VALUES), nullptr); // a plug-in's are its VALUEs
+                        else
+                            parent.removeChild (i, nullptr);
+
+                        continue;
+                    }
+
+                    if (child.hasType (schema::MODULATOR))
+                    {
+                        if (const auto kind = getModulatorKind (child))
+                            keepValuesSetByHand (child,
+                                                 [kind = *kind] (std::string_view id) -> const devices::ParameterInfo*
+                                                 {
+                                                     const auto index = devices::findModulatorParameter (kind, id);
+                                                     return index >= 0 ? &devices::getModulatorParameters (kind)[(size_t) index] : nullptr;
+                                                 });
+                        else
+                            parent.removeChild (i, nullptr);
+
+                        continue;
+                    }
+
+                    if (isKnown (child))
+                        keepDevices (child);
+                }
+            }
+
+            //==============================================================================
+            // Every number Schema.h gives a range within it, and every word one of its words.
+            void keepNumbers (juce::ValueTree element)
+            {
+                for (const auto& range : getRanges())
+                    if (element.hasType (*range.type) && element.hasProperty (*range.property))
+                        keepInRange (element, *range.property, range.low, range.high, range.whole, range.fallback);
+
+                for (const auto& words : getWords())
+                    if (element.hasType (*words.type) && element.hasProperty (*words.property)
+                        && ! words.words.contains (element[*words.property].toString()))
+                        element.removeProperty (*words.property, nullptr);
+
+                for (auto child : element)
+                    if (isKnown (child))
+                        keepNumbers (child);
+            }
+
+            //==============================================================================
+            // The largest ID a song holds that it can count on from.
+            static std::uint64_t findLargestID (const juce::ValueTree& tree)
+            {
+                std::uint64_t largest = 0;
+
+                for (int i = 0; i < tree.getNumProperties(); ++i)
+                    if (const auto property = tree.getPropertyName (i);
+                        schema::holdsID (tree, property) || (tree.hasType (schema::NOTE) && property == schema::noteID))
+                        if (const auto id = readID (tree[property]); id < maxID)
+                            largest = std::max (largest, id);
+
+                for (const auto& child : tree)
+                    largest = std::max (largest, findLargestID (child));
+
+                return largest;
+            }
+
+            // Every item's ID its own, a note's in its clip; one that isn't, or none, given a new one. An alias group's too
+            // large to count on from goes, its clips each alone.
+            void keepIDs (juce::ValueTree tree, std::set<std::uint64_t>& seen)
+            {
+                std::set<std::uint64_t> notes;
+
+                for (auto child : tree)
+                {
+                    if (! isKnown (child))
+                        continue;
+
+                    if (child.hasType (schema::CLIP) && child.hasProperty (schema::clipLink))
+                        if (const auto link = readID (child[schema::clipLink]); link == 0 || link >= maxID)
+                            child.removeProperty (schema::clipLink, nullptr);
+
+                    if (child.hasType (schema::NOTE))
+                    {
+                        if (const auto id = readID (child[schema::noteID]); id == 0 || id >= maxID || ! notes.insert (id).second)
+                        {
+                            const auto made = song.makeID();
+                            notes.insert (made);
+                            child.setProperty (schema::noteID, (juce::int64) made, nullptr);
+                        }
+
+                        continue;
+                    }
+
+                    for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+                    {
+                        if (! schema::holdsID (child, *property) || (property != &schema::trackID && ! child.hasProperty (*property)))
+                            continue;
+
+                        if (const auto id = readID (child[*property]); id == 0 || id >= maxID || ! seen.insert (id).second)
+                        {
+                            const auto made = song.makeID();
+                            seen.insert (made);
+                            child.setProperty (*property, (juce::int64) made, nullptr);
+                        }
+                    }
+
+                    keepIDs (child, seen);
+                }
+            }
+
+            //==============================================================================
+            // What names an item naming one the song has (a send's return aside, which the song keeps for an undo): a lane,
+            // a curve and a modulation of what isn't there go, and so does a sidechain or a pad's track's sampler.
+            void keepNames (juce::ValueTree tree, const std::set<std::uint64_t>& items)
+            {
+                for (auto i = tree.getNumChildren(); --i >= 0;)
+                {
+                    auto child = tree.getChild (i);
+
+                    if (! isKnown (child))
+                        continue;
+
+                    auto gone = false;
+
+                    std::vector<juce::Identifier> properties;
+
+                    for (int p = 0; p < child.getNumProperties(); ++p)
+                        properties.push_back (child.getPropertyName (p));
+
+                    for (const auto& property : properties)
+                    {
+                        if (! schema::namesID (child, property) || child.hasType (schema::SEND)
+                            || items.count (readID (child[property])) > 0)
+                            continue;
+
+                        if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
+                            gone = true;
+                        else if (property == schema::trackPadDevice)
+                            child.removeProperty (schema::trackPad, nullptr);
+
+                        child.removeProperty (property, nullptr);
+                    }
+
+                    if (gone)
+                        tree.removeChild (i, nullptr);
+                    else
+                        keepNames (child, items);
+                }
+            }
+
+            //==============================================================================
+            // No two of a parent's elements with one key (items aside, whose IDs keepIDs() made their own): the first stays.
+            void keepKeys (juce::ValueTree tree)
+            {
+                std::set<juce::String> keys;
+
+                for (auto i = 0; i < tree.getNumChildren();)
+                {
+                    auto child = tree.getChild (i);
+
+                    if (! isKnown (child))
+                    {
+                        ++i;
+                        continue;
+                    }
+
+                    if (! schema::holdsID (child, schema::trackID))
+                        if (const auto key = schema::getElementKey (child);
+                            key.isNotEmpty() && ! keys.insert (child.getType().toString() + "/" + key).second)
+                        {
+                            tree.removeChild (i, nullptr);
+                            continue;
+                        }
+
+                    keepKeys (child);
+                    ++i;
+                }
+            }
+
+            //==============================================================================
+            // Each curve's points within its parameter's range, and none of a parameter its device hasn't. A plug-in tells
+            // its parameters only once it plays (from 0 to 1); a chain's crossover is kept while its container isn't split
+            // into bands, or while it is the first chain, which have none for now (describeParameter() finds none).
+            void keepCurves()
+            {
+                auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+
+                for (auto i = automation.getNumChildren(); --i >= 0;)
+                {
+                    auto curve = automation.getChild (i);
+
+                    if (! curve.hasType (schema::CURVE))
+                        continue; // one of a type Phazite doesn't know
+
+                    const ParameterRef parameter { DeviceID::fromRaw (readID (curve[schema::curveDevice])),
+                                                   curve[schema::curveParameter].toString() };
+                    auto low = 0.0, high = 1.0;
+
+                    if (const auto description = describeParameter (song, parameter))
+                    {
+                        low = (double) description->range.start;
+                        high = (double) description->range.end;
+                    }
+                    else if (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
+                    {
+                        low = (double) lowestCrossover;
+                        high = (double) highestCrossover;
+                    }
+                    else if (findDeviceState (song, parameter.device)[schema::deviceType].toString() != schema::deviceIsPlugin)
+                    {
+                        automation.removeChild (i, nullptr);
+                        continue;
+                    }
+
+                    for (auto point : curve)
+                        if (point.hasType (schema::POINT))
+                            keepInRange (point, schema::pointValue, low, high, false, low);
+                }
+            }
+
+            //==============================================================================
+            // Every sound file where this computer can look for it without going elsewhere: a path within the project's
+            // folder, or a full path of this computer's or another's, as Phazite writes one where a file couldn't be copied
+            // in (Import.h: copyIntoProject()), stays as it is. One that no Phazite writes is looked for in the project's
+            // Audio folder by its name, as it is, which the Project view lists as missing until it is found: a network
+            // share's, which Windows would connect to as it looks, and one that leaves the project's folder with "..". And an
+            // audio clip without a file goes.
+            void keepPath (juce::ValueTree element, const juce::Identifier& property)
+            {
+                const auto path = element[property].toString();
+
+                if (path.isEmpty() || folder == juce::File())
+                    return;
+
+                if (isNetworkPath (path) ? false : isFullPath (path) || folder.getChildFile (path).isAChildOf (folder))
+                    return;
+
+                const auto name = path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false);
+                element.setProperty (property, "Audio/" + (name.isNotEmpty() && name != ".." ? name : juce::String ("missing")), nullptr);
+            }
+
+            void keepPaths (juce::ValueTree tree)
+            {
+                for (auto i = tree.getNumChildren(); --i >= 0;)
+                {
+                    auto child = tree.getChild (i);
+
+                    if (! isKnown (child))
+                        continue;
+
+                    if (child.hasType (schema::CLIP))
+                    {
+                        if (child[schema::clipKind].toString() == schema::clipIsAudio && child[schema::clipFile].toString().isEmpty())
+                        {
+                            tree.removeChild (i, nullptr);
+                            continue;
+                        }
+
+                        keepPath (child, schema::clipFile);
+                    }
+
+                    if (child.hasType (schema::SOUNDS))
+                        for (auto p = child.getNumProperties(); --p >= 0;)
+                            if (const auto property = child.getPropertyName (p); schema::isSoundFileProperty (property))
+                                keepPath (child, property);
+
+                    keepPaths (child);
+                }
+            }
+
+            void keep()
+            {
+                auto state = song.getState();
+                keepPlaces (state);
+                keepDevices (state);
+                keepNumbers (state);
+
+                // The song's next ID past what it holds (not past an ID too large to count on from), then each its own.
+                const auto saved = readID (state[schema::nextID]);
+                state.setProperty (schema::nextID, (juce::int64) std::max (findLargestID (state) + 1, saved < maxID ? saved : 0), nullptr);
+                std::set<std::uint64_t> items;
+                keepIDs (state, items);
+                countIDs (song);
+                keepNames (state, items);
+                keepKeys (state);
+                keepCurves();
+                keepPaths (state);
+            }
+        };
+    } // namespace consistent
 } // namespace
+
+void makeConsistent (Song& song)
+{
+    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File() }.keep();
+}
 
 //==============================================================================
 juce::ValueTree makeNewSong()
@@ -117,6 +776,7 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const 
     Song::Ptr song (new Song (state));
     song->setFile (file);
     song->setCacheFolder (cacheFolder);
+    makeConsistent (*song);
     ensureTempoMap (*song);
     getTrackList (*song);
     countIDs (*song);

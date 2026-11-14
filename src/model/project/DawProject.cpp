@@ -898,17 +898,34 @@ std::unique_ptr<TrackRender> startDawProjectExport (Song& song, PluginHost* plug
 }
 
 //==============================================================================
+juce::int64 getUnpackLimit (const juce::File& archive)
+{
+    return std::max ((juce::int64) 64 << 20, archive.getSize() * 1100);
+}
+
 DawProjectFile readDawProject (const juce::File& file)
 {
     DawProjectFile read;
     read.file = file;
     juce::ZipFile zip (file);
+    const auto limit = std::min (maxDawProjectText, getUnpackLimit (file));
 
-    const auto parse = [&zip] (const char* name) -> std::unique_ptr<juce::XmlElement>
+    // Read whole, up to what such a text can be: one larger is no DAWproject Phazite reads.
+    const auto parse = [&zip, limit] (const char* name) -> std::unique_ptr<juce::XmlElement>
     {
         const auto index = zip.getIndexOfFileName (name);
         const std::unique_ptr<juce::InputStream> stream (index >= 0 ? zip.createStreamForEntry (index) : nullptr);
-        return stream != nullptr ? juce::parseXML (stream->readEntireStreamAsString()) : nullptr;
+        juce::MemoryBlock text;
+
+        if (stream == nullptr || (juce::int64) stream->readIntoMemoryBlock (text, (juce::ssize_t) limit + 1) > limit)
+            return nullptr;
+
+        // Text that is no UTF-8 is no XML a DAWproject holds.
+        if (! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (text.getData()), (int) text.getSize()))
+            return nullptr;
+
+        // As readEntireStreamAsString() reads it: without a byte order mark at its start.
+        return juce::parseXML (juce::String::createStringFromData (text.getData(), (int) text.getSize()));
     };
 
     read.project = parse ("project.xml");
@@ -1004,6 +1021,16 @@ namespace
         return element != nullptr ? element->getDoubleAttribute ("value", otherwise) : otherwise;
     }
 
+    // A number a file says, as Phazite takes it: within a range, and what it is otherwise for what is no finite number.
+    double readNumber (const juce::XmlElement& element, const char* name, double otherwise, double low, double high)
+    {
+        const auto value = element.getDoubleAttribute (name, otherwise);
+        return std::isfinite (value) ? juce::jlimit (low, high, value) : otherwise;
+    }
+
+    // Places and lengths in beats, and times in a file, in seconds.
+    constexpr double maxSeconds = 1.0e7;
+
     bool readMute (const juce::XmlElement* channel)
     {
         const auto* element = channel != nullptr ? channel->getChildByName ("Mute") : nullptr;
@@ -1020,6 +1047,7 @@ namespace
         Song& song;
         const DawProjectFile& in;
         juce::StringArray notTaken {};
+        juce::int64 unpacked = 0; // what copyOut() has written, against getUnpackLimit()
 
         void take()
         {
@@ -1165,9 +1193,9 @@ namespace
         void addNoteFrom (ClipID clip, BeatPosition contentStart, const juce::XmlElement& note)
         {
             addNote (song, clip, juce::jlimit (0, 127, note.getIntAttribute ("key")),
-                     contentStart + BeatDuration::fromBeats (note.getDoubleAttribute ("time")),
-                     BeatDuration::fromBeats (std::max (1.0 / 64.0, note.getDoubleAttribute ("duration"))),
-                     juce::jlimit (1, 127, juce::roundToInt (note.getDoubleAttribute ("vel", 0.8) * 127.0)));
+                     contentStart + BeatDuration::fromBeats (readNumber (note, "time", 0.0, -maxSongBeats, maxSongBeats)),
+                     BeatDuration::fromBeats (readNumber (note, "duration", 1.0, 1.0 / 64.0, maxSongBeats)),
+                     juce::jlimit (1, 127, juce::roundToInt (readNumber (note, "vel", 0.8, 0.0, 1.0) * 127.0)));
         }
 
         void addTrack (const juce::XmlElement& track, const ReadTracks& theirs)
@@ -1199,20 +1227,20 @@ namespace
             {
                 // A clip with its track's name gets none of its own: it is called after its track, as Phazite's are
                 // (getClipName()).
-                const auto start = clip->getDoubleAttribute ("time");
+                const auto start = readNumber (*clip, "time", 0.0, 0.0, maxSongBeats);
                 const auto name = clip->getStringAttribute ("name");
                 const auto clipID = placeClipState (
                     song,
                     makeMidiClipState (song, name == getTrackName (song, id) ? juce::String() : name,
                                        { BeatPosition::fromBeats (start),
-                                         BeatPosition::fromBeats (start + std::max (0.25, clip->getDoubleAttribute ("duration"))) }),
+                                         BeatPosition::fromBeats (start + readNumber (*clip, "duration", 4.0, 0.25, maxSongBeats)) }),
                     id);
 
                 if (! clipID.isValid())
                     continue;
 
                 auto clipState = findClipState (song, clipID);
-                clipState.setProperty (schema::clipOffset, std::max (0.0, clip->getDoubleAttribute ("playStart")), nullptr);
+                clipState.setProperty (schema::clipOffset, readNumber (*clip, "playStart", 0.0, 0.0, maxSongBeats), nullptr);
 
                 for (const auto* note : clip->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
                     addNoteFrom (clipID, getContentStart (clipState), *note);
@@ -1242,16 +1270,16 @@ namespace
                 return;
             }
 
-            const auto from = clip.getDoubleAttribute ("playStart");
-            const auto to = clip.getDoubleAttribute ("playStop", audio->getDoubleAttribute ("duration"));
-            auto state =
-                makeAudioClipState (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
-                                    BeatPosition::fromBeats (clip.getDoubleAttribute ("time")), { from, std::max (from + 0.001, to) });
+            const auto from = readNumber (clip, "playStart", 0.0, 0.0, maxSeconds);
+            const auto to = readNumber (clip, "playStop", readNumber (*audio, "duration", from + 1.0, 0.0, maxSeconds), 0.0, maxSeconds);
+            auto state = makeAudioClipState (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
+                                             BeatPosition::fromBeats (readNumber (clip, "time", 0.0, 0.0, maxSongBeats)),
+                                             { from, std::max (from + 0.001, to) });
 
             if (clip.getStringAttribute ("fadeTimeUnit", "seconds") == "seconds")
             {
-                state.setProperty (schema::clipFadeIn, clip.getDoubleAttribute ("fadeInTime"), nullptr);
-                state.setProperty (schema::clipFadeOut, clip.getDoubleAttribute ("fadeOutTime"), nullptr);
+                state.setProperty (schema::clipFadeIn, readNumber (clip, "fadeInTime", 0.0, 0.0, maxSeconds), nullptr);
+                state.setProperty (schema::clipFadeOut, readNumber (clip, "fadeOutTime", 0.0, 0.0, maxSeconds), nullptr);
             }
 
             placeClipState (song, state, track);
@@ -1277,10 +1305,36 @@ namespace
             if (stream == nullptr)
                 return {};
 
-            juce::FileOutputStream out (target);
+            // No more than the entry says it holds, nor, with what came out before it, than an archive of this size can
+            // hold (getUnpackLimit()): a hostile archive never fills the disk (entries can share their compressed bytes).
+            // One that doesn't fit is refused before anything of it is written.
+            const auto declared = zip.getEntry (index)->uncompressedSize;
 
-            if (! out.openedOk() || out.writeFromInputStream (*stream, -1) < 0)
+            if (declared < 0 || declared > getUnpackLimit (in.file) - unpacked)
                 return {};
+
+            bool whole = false;
+
+            {
+                juce::FileOutputStream out (target);
+
+                if (! out.openedOk())
+                {
+                    target.deleteFile();
+                    return {};
+                }
+
+                const auto written = out.writeFromInputStream (*stream, declared);
+                unpacked += std::max ((juce::int64) 0, written);
+                char beyond = 0;
+                whole = written == declared && stream->read (&beyond, 1) <= 0;
+            }
+
+            if (! whole)
+            {
+                target.deleteFile();
+                return {};
+            }
 
             return target;
         }
@@ -1290,7 +1344,7 @@ namespace
             if (const auto* transport = in.project->getChildByName ("Transport"))
             {
                 if (const auto* tempo = transport->getChildByName ("Tempo"))
-                    setTempo (song, tempo->getDoubleAttribute ("value", 120.0));
+                    setTempo (song, readNumber (*tempo, "value", 120.0, minTempo, maxTempo));
 
                 if (const auto* signature = transport->getChildByName ("TimeSignature"))
                     setTimeSignature (song, { signature->getIntAttribute ("numerator", 4), signature->getIntAttribute ("denominator", 4) });
@@ -1316,8 +1370,8 @@ namespace
             // Each a section, up to the next.
             for (size_t i = 0; i < all.size(); ++i)
             {
-                const auto start = all[i]->getDoubleAttribute ("time");
-                const auto end = i + 1 < all.size() ? all[i + 1]->getDoubleAttribute ("time") : start + 32.0;
+                const auto start = readNumber (*all[i], "time", 0.0, 0.0, maxSongBeats);
+                const auto end = i + 1 < all.size() ? readNumber (*all[i + 1], "time", 0.0, 0.0, maxSongBeats) : start + 32.0;
                 SectionInfo section;
                 section.name = all[i]->getStringAttribute ("name");
                 section.length = BeatDuration::fromBeats (std::max (1.0, end - start));
@@ -1338,7 +1392,8 @@ namespace
             std::vector<Point> points;
 
             for (const auto* point : automation.getChildWithTagNameIterator ("RealPoint"))
-                points.push_back ({ point->getDoubleAttribute ("time"), point->getDoubleAttribute ("value", 120.0),
+                points.push_back ({ readNumber (*point, "time", 0.0, -maxSongBeats, maxSongBeats),
+                                    readNumber (*point, "value", 120.0, minTempo, maxTempo),
                                     point->getStringAttribute ("interpolation") == "linear" });
 
             std::stable_sort (points.begin(), points.end(), [] (const Point& a, const Point& b) { return a.time < b.time; });

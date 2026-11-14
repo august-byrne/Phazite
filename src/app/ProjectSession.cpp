@@ -295,7 +295,11 @@ void ProjectSession::newProject()
             o.resizable = false;
             o.componentToCentreAround = dialogParent;
             o.content.setOwned (panel);
-            o.launchAsync();
+
+            if (launchDialog != nullptr)
+                launchDialog (o);
+            else
+                o.launchAsync();
         });
 }
 

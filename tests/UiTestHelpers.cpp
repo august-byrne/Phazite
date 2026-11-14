@@ -149,8 +149,8 @@ namespace
     class HeadlessPeer final : public juce::ComponentPeer
     {
     public:
-        explicit HeadlessPeer (juce::Component& c)
-            : juce::ComponentPeer (c, 0)
+        HeadlessPeer (juce::Component& c, int styleFlags)
+            : juce::ComponentPeer (c, styleFlags)
         {
         }
 
@@ -234,9 +234,14 @@ TestWindow::~TestWindow()
     removeFromDesktop();
 }
 
-juce::ComponentPeer* TestWindow::createNewPeer (const juce::DesktopWindowOptions&)
+juce::ComponentPeer* createHeadlessPeer (juce::Component& component, const juce::DesktopWindowOptions& options)
 {
-    return new HeadlessPeer (*this);
+    return new HeadlessPeer (component, options.getStyleFlags());
+}
+
+juce::ComponentPeer* TestWindow::createNewPeer (const juce::DesktopWindowOptions& options)
+{
+    return new HeadlessPeer (*this, options.getStyleFlags());
 }
 
 void TestWindow::pressKey (const juce::KeyPress& key)

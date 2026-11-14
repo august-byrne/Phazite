@@ -827,6 +827,10 @@ void PianoRoll::changeListenerCallback (juce::ChangeBroadcaster*)
     {
         setClips (selectedClips);
     }
+    else if (const auto noteClips = selection.getNoteClips(); ! selection.getNotes().empty() && noteClips != clips)
+    {
+        setClips (noteClips); // notes of other clips selected again (Escape put back what a press in the playlist changed)
+    }
     else if (const auto tracks = selection.getTracks(); ! tracks.empty())
     {
         if (const auto track = tracks.front(); canHoldNotes (context, track) && track != getTrack())

@@ -1,8 +1,10 @@
 # Performance
 
-Phazite's performance targets, its benchmarks, and the latest number recorded for each.
+Phazite's performance targets, its benchmarks, and the latest number recorded for each; the gates that fail a change
+that makes Phazite slower; and the long run.
 
-**The numbers on this page are the latest that the performance audit records. None was measured again for this page.**
+**The numbers on this page are the latest that the performance audit records, but those of the song of 100 tracks and
+of the long run, which were measured on 2026-11-14.**
 The audit ([archive/performance-audit.md](archive/performance-audit.md)) is a history of sessions, each of which
 measured what it changed; the "From" column of each table names the audit's section a number comes from, where the way
 it was measured and the numbers before it are. A benchmark, or a row of one, for which the audit records no number is
@@ -25,7 +27,7 @@ The design sets four targets ([design/performance.md](design/performance.md)), a
 
 | Target | Met? |
 |---|---|
-| Audio: no dropouts at a buffer of 128 samples (about 3 ms) with a typical electronic project, 20 to 40 tracks and a dozen third-party synths, on a mid-range laptop | On the PC above, with room to spare. Not measured at 128 samples for Phazite's own devices, and not on a laptop |
+| Audio: no dropouts at a buffer of 128 samples (about 3 ms) with a typical electronic project, 20 to 40 tracks and a dozen third-party synths, on a mid-range laptop | On the PC above, with room to spare. At 128 samples, 100 busy tracks of Phazite's own devices play on four threads with little room, and not on one (the song of 100 tracks below). Not measured on a laptop |
 | UI: 60 frames a second scrolling and zooming the playlist and the piano roll with 100 tracks or more | Yes, when judged (section 13): under 4 ms of a frame's 16.7 ms. A clip's move has grown to 8.1 ms since |
 | UI: near-zero CPU at rest, only what changed repainted | Nothing repaints at rest. The CPU is low, not zero: about 1 % of a core goes to the views' own timers |
 | Startup: under 3 seconds to a project that plays, on an SSD, with the plug-in scan in the background | What Phazite does itself takes under 0.2 s. The whole start, with the process and the audio device, is not timed |
@@ -52,6 +54,8 @@ doctest splits a filter at commas, so use a part of the name that has none. Each
 benchmarks play Surge XT where it is installed (`tools\setup-windows.cmd -WithTestPlugin` installs it), and the tests'
 stand-in plug-ins otherwise. Run them on a machine that does nothing else, before and after a change, and record the
 new numbers here.
+
+The benchmarks only print their numbers. What fails a change is in [The gates](#the-gates) below.
 
 ## The benchmarks
 
@@ -151,6 +155,41 @@ what it records for "20 synths' tracks stopped", taken here for this song.
 
 The process's figures of section 9 are older than the changes that made the devices' song cost more to play
 (sections 15 and 19).
+
+### Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, its plan and an edit
+
+The benchmark song (`tests/BenchmarkSong.h`) of 100 tracks, every one playing all the way through: an instrument on
+each, in turn a Synth, a Wavetable, an FM synth, a Drum Sampler and a Sampler, each with a part that suits it; an EQ
+and a compressor after it, a saturator on every third track and a chorus on every fifth; a send to a reverb from every
+track and to a delay from every other; buses of ten, each with a compressor; and automation on every fourth track's
+volume and every Synth's cutoff. Ten seconds of blocks at 48 kHz, played one after another on the test's thread as the
+audio device's thread plays them. The figure is each block's time as a share of the block's length, 2.67 ms at 128
+samples and 10.67 ms at 512: over 100 % is a dropout.
+
+Measured on 2026-11-14 on the PC above, from `windows-profile`, two runs, **while other builds loaded the machine**:
+the numbers are high if anything, the most a block took above all.
+
+| Blocks of | Threads | Stopped: mean / 99th percentile / most | Playing: mean / 99th percentile / most |
+|---|---|---|---|
+| 128 samples | 1 | 8.8 to 11.3 % / 17 to 23 % / 29 to 30 % | 200 to 205 % / 326 to 342 % / 431 to 445 % |
+| 128 samples | 4 | 4.7 to 5.4 % / 27 to 30 % / 44 to 53 % | 48 to 52 % / 73 to 79 % / 92 to 106 % |
+| 512 samples | 1 | 5.2 to 5.5 % / 7 to 9 % / 9 to 10 % | 181 to 195 % / 245 to 307 % / 295 to 396 % |
+| 512 samples | 4 | 2.9 to 3.1 % / 6 % / 7 to 8 % | 51 to 52 % / 72 to 75 % / 81 to 91 % |
+
+| The message thread, with 100 tracks | Median | Most |
+|---|---|---|
+| The plan's compile, given to the engine | 38 to 42 ms | 49 to 60 ms |
+| A note added, with its new plan | 38 to 42 ms | |
+| A clip moved, with its new plan | 39 to 43 ms | |
+| Save, for a project file of 3,115 KB | 106 to 113 ms | |
+
+What it says of scale:
+- **One thread can't play 100 busy tracks:** it takes about twice each block's length, at either block size.
+- **Four threads use about half of each block,** and the worst block of a run went over its length once at 128
+  samples. So the limit is near 100 busy tracks on four threads at 128 samples, and near 50 on one.
+- **Every edit costs a compile of the whole song,** about 0.4 ms a track: at 100 tracks a note added or each step of
+  a drag takes about 40 ms of the message thread, more than two frames (known bug 145 in
+  [known-bugs.md](known-bugs.md)). Roadmap step S5.7 compiles only what changed.
 
 ### Benchmark: saving and opening a big project
 
@@ -276,6 +315,70 @@ Eight Surge XTs, a chord each, in a block of 128 samples.
 | A helper each, each waited for in turn | 451 µs | 717 µs | 7.8 ms | 1.0 % here, 17.9 % in the helpers | 311 MB | 10 |
 | A helper each, all handed over first, then waited for | 239 µs | 341 µs | 1.7 ms | 2.3 % here, 54 % in the helpers | 310 MB | 13 (times), 10 |
 | One helper with all eight, handed over first | 236 µs | 337 µs | 1.3 ms | 1.9 % here, 45 % in the helpers | 232 MB | 10 |
+
+## The gates
+
+Timings can't be compared with stored numbers on a shared or another machine, so two kinds of gate fail a change that
+makes Phazite slower without comparing a time with a number.
+
+**The performance gates** (`tests/PerformanceGateTests.cpp`) run in every ctest run, on every preset. They count work,
+which is the same on any machine (`tests/PerformanceCounts.h`):
+- each edit gives the engine one plan, however many changes it makes in one turn of the message loop, and a value set
+  by hand, a mute, a selection, the playhead moved or a save gives it none (`PlanCounter`);
+- a new plan keeps what didn't change: a note added on one track compiles that track's notes again and no other's,
+  and every device sounds on;
+- the playlist of 200 tracks makes as many clip components as that of 20, and at most seven more components a track;
+- what an edit repaints in the playlist: nothing for a volume or a pan set by hand, and only its clip for a note added
+  (today it repaints every lane: a known exception, known bug 144, which fails once fixed);
+- the allocations a note added and a save make, at 16 and 64 tracks, grow no faster than the song, and a save writes
+  the song's text once (`countAllocations()`, counted in Windows Debug builds only; elsewhere the case checks nothing
+  and says so).
+
+They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
+paint.
+
+**The benchmark gates** (`tests/BenchmarkGates.cpp`, suite `benchmark-gate`) measure costs as ratios within one run,
+each the least of seven tries, taking turns with what it is compared with:
+- each of Phazite's devices against a fixed reference workload written in the test (a row of biquad filters on
+  noise), which no change to Phazite touches;
+- the benchmark song of 100 tracks against the same song of 10, stopped and playing at 512 samples on one thread, the
+  plan's compile, a note added and a save: about ten times the work is allowed (15 or 20 times), far short of the 100
+  times of work that grows as the square of the tracks.
+
+Their bounds are twice what a `windows-profile` build measured on the PC above, so they catch a device that has become
+two or three times as costly, not one 30 % slower, and they hold for MSVC's optimised builds only; a Debug build
+reports the ratios without checking them. They don't see a cost that grows in both of what is compared (the engine's
+own work for each track, doubled, shows only where it is a device's). ctest skips them; the nightly workflow
+(`.github/workflows/nightly.yml`) runs them, or run them from `windows-profile`:
+
+```
+build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=benchmark-gate --no-skip
+```
+
+After a change that makes a device costlier on purpose, measure again and set its bound to twice the new ratio, saying
+why in the commit message.
+
+## The long run
+
+`tests/LongRun.cpp` (suite `long-run`) plays the benchmark song of 8 tracks, looped, through Phazite's engine, in blocks
+of 256 samples at 48 kHz, one after another as the audio device plays them, for an hour of music. Meanwhile it edits the
+song from a fixed seed every two seconds of music (notes, clips, values set by hand, effects added and removed, Undo
+and Redo, the loop, the tempo and the playhead moved) and saves it every 60 edits. It checks that nothing allocates on
+the audio thread (in Windows Debug builds); that the process's memory, once the run has warmed up, grows by no more
+than 64 MB (512 MB under a sanitizer) and 16 KB an edit for its undo steps; that what plays stays finite and within
+reason; that the song's IDs stay whole; and that the song saved and opened again at the end is the same song.
+
+Measured on 2026-11-14 from `windows-profile`, on the PC above: an hour of music in 674 seconds, with 1,919 edits and
+31 saves; the process's memory went from 85 to 103 MB. In a Debug build an hour of music takes about an hour.
+
+ctest skips it; the nightly workflow runs it under `linux-asan` and `linux-tsan`. Run it from any build:
+
+```
+build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=long-run --no-skip
+```
+
+`PHAZITE_LONG_RUN_SECONDS` sets the seconds of music (3600 unless set; 60 tries it quickly), and
+`PHAZITE_LONG_RUN_SEED` the seed of its edits (1 unless set).
 
 ## Measured outside the benchmarks
 

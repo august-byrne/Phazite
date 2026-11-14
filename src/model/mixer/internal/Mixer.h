@@ -156,6 +156,13 @@ juce::ValueTree findChannelOfFader (const Song&, DeviceID fader);
 // fader plays (a plain folder's VCA has no pan); the master's are the master's, whose volume is -3 dB until it is set, as a
 // new song's. Set in the caller's undo step.
 inline constexpr float defaultMasterVolume = -3.0f;
+
+// The range of a fader's volume, and of a send's level: silence (-100 dB, and nothing below) to the top of its travel (+6
+// dB: engine/nodes/Channel.h). What a file or a preset says is kept within it as it comes in, whoever wrote it; no number
+// at all is 0 dB.
+inline constexpr float lowestVolume = -100.0f, highestVolume = 6.0f;
+float keepVolumeInRange (float decibels);
+
 void setChannelVolume (Song&, TrackID channel, float decibels);
 void setChannelPan (Song&, TrackID channel, float pan);
 float getChannelVolume (const Song&, TrackID channel);

@@ -121,11 +121,14 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
 `tools/check-architecture.sh` counts what breaks these rules, and more: includes that point up a layer, window modules
 and classes below the UI, undo steps begun outside the undo code or in the UI, include loops in the model and the
 services, `internal/` headers included in the UI, source files outside an area's folder, includes and CMake source paths
-that name no file exactly, Tracktion Engine, and threads ended by force. It compares each count with its budget in
-`tools/architecture-budget.txt`, where every budget is 0, and every count must equal its budget. CI and the pre-commit
-hook run it; run `sh tools/check-architecture.sh` after changing `src/`, `tests/` or `CMakeLists.txt`. A budget goes up
-only when a planned step moves code between layers on purpose, and the commit that raises it says why in an
+that name no file exactly, Tracktion Engine, threads ended by force, and colours, font sizes and corner radii written
+as literals in the UI rather than taken from the design tokens. It compares each count with its budget in
+`tools/architecture-budget.txt`, where every budget is 0 but the literals', the count there was when that rule came,
+which only falls; every count must equal its budget. CI and the pre-commit hook run it; run
+`sh tools/check-architecture.sh` after changing `src/`, `tests/` or `CMakeLists.txt`. A budget goes up only when a
+planned step moves code between layers on purpose, and the commit that raises it says why in an
 `Architecture-Budget-Raise:` line, which CI and the pre-push hook check.
 
 The script doesn't count everything: which JUCE modules the engine-neutral layers use, the undo steps' names and owners,
-view state, the schema's names and the design tokens are kept by review and by the tests (the golden files among them).
+view state, the schema's names and the sizes the design tokens should hold beyond fonts and corners are kept by review
+and by the tests (the golden files among them).

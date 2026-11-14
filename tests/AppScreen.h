@@ -11,11 +11,18 @@
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
+#include "ui/mixer/DevicesView.h"
 #include "ui/shell/AppShell.h"
+
+#include <vector>
 
 namespace phazite::test
 {
@@ -57,5 +64,69 @@ struct AppScreen
     ui::AppShell shell { services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
                          services.settings,      services.soundPack, services.library, *services.previewer };
     TestWindow window { shell, 1280, 800 };
+
+    // Runs a command that shows a view until a view of a type shows (a view's command hides it where it showed already,
+    // the piano roll's say: then it shows it again), and returns it.
+    template <typename View>
+    View& showView (const juce::String& commandID)
+    {
+        View* shown = nullptr;
+
+        for (int tries = 0; tries < 2 && shown == nullptr; ++tries)
+        {
+            REQUIRE (registry.invoke (commandID));
+            dispatchPendingMessages();
+
+            for (auto* view : findAll<View> (shell))
+                if (view->isShowing())
+                    shown = view;
+        }
+
+        INFO ("no view shows after " << commandID);
+        REQUIRE (shown != nullptr);
+        return *shown;
+    }
+
+    // One track for each of Phazite's own devices (getOwnDevices()), named after it, with the device on it: an instrument as
+    // its instrument, an effect after its effects. The devices, in the order the device list offers them.
+    std::vector<DeviceID> addEveryOwnDevice()
+    {
+        auto& song = *findSong (session.getContext());
+        std::vector<DeviceID> added;
+
+        for (const auto& type : getDeviceTypes (session.getContext()))
+        {
+            if (! type.isBuiltIn)
+                continue;
+
+            const auto track = addTrackAtEnd (song, false, nullptr);
+            REQUIRE (track.isValid());
+            setTrackName (song, track, type.name);
+            const auto device = addDeviceTo (song, track, type, nullptr);
+            INFO (type.name);
+            REQUIRE (device.isValid());
+            added.push_back (device);
+        }
+
+        dispatchPendingMessages();
+        return added;
+    }
+
+    // The Devices view, on the page of a device, showing it.
+    ui::DevicesView& showInDevicesView (DeviceID device)
+    {
+        // The view is made as it first shows.
+        auto* view = findAll<ui::DevicesView> (shell).getFirst();
+
+        if (view == nullptr || ! view->isShowing())
+            view = &showView<ui::DevicesView> ("view.effects");
+
+        const auto onInstrumentPage = view->getPageOf (device) == ui::DevicesView::Page::instrument;
+        auto& shown = showView<ui::DevicesView> (onInstrumentPage ? "view.instrument" : "view.effects");
+        shown.showDevice (device);
+        dispatchPendingMessages();
+        CHECK (shown.getShownBody() != nullptr);
+        return shown;
+    }
 };
 } // namespace phazite::test

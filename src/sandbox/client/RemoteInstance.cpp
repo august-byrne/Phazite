@@ -246,7 +246,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
 
         case MessageType::latencyChanged:
         {
-            const auto samples = notice.readInt();
+            const auto samples = keepLatency (notice.readInt());
             latency = samples;
             told->latencyChanged (samples);
             break;

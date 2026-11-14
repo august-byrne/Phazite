@@ -28,6 +28,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
     gesture->startPosition = e.getPosition();
     gesture->startScrollY = roll.scrollY;
     gesture->selectionBefore = roll.getSelectedRefsHere();
+    gesture->selectionAtPress = SelectionAtPress::take (roll.context);
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval); // so the grid goes on scrolling while the mouse rests past an edge
 
     // A middle drag moves the view, whatever the tool, as in FL Studio: it never edits.
@@ -768,7 +769,7 @@ void PianoRoll::NoteGrid::cancelDrag()
     roll.stopAudition();
     roll.setDragReadout ({});
     gesture->rollBack();
-    roll.selectNotes (gesture->selectionBefore, false);
+    gesture->selectionAtPress.putBack (roll.context); // whatever it was: a clip selected in the playlist, a device
 
     if (gesture->kind == Gesture::Kind::pan)
     {

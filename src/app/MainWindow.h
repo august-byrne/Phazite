@@ -30,7 +30,17 @@ class MainWindow : public juce::DocumentWindow,
                    private juce::Timer
 {
 public:
-    MainWindow (ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&);
+    // How the window meets the system: by default as the app runs, on the screen and in JUCE's application. The tests
+    // (tests/MainWindowTests.cpp) build it with neither: they put it on the desktop themselves, as a window on no screen,
+    // open its dialogs the same way, and say what quitting does.
+    struct Surroundings
+    {
+        bool addToDesktop = true; // false: whoever made it adds it, once it is made
+        std::function<juce::DialogWindow*(juce::DialogWindow::LaunchOptions&)> launchDialog; // null: launchAsync()
+        std::function<void()> quit; // null: the application's systemRequestedQuit(), which asks to save first (Main.cpp)
+    };
+
+    MainWindow (ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&, Surroundings = {});
     ~MainWindow() override;
 
     // A freeze or a bounce, in a progress window with Cancel; and what came of it, an error if it failed.
@@ -59,6 +69,7 @@ public:
     juce::BorderSize<int> getBorderThickness() const override { return {}; }
 
 private:
+    const Surroundings surroundings;
     ui::CommandBridge& commands;
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
@@ -78,6 +89,9 @@ private:
         renderWindow, cleanUpWindow, aboutWindow, updatesWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
+
+    juce::DialogWindow* launch (juce::DialogWindow::LaunchOptions&); // a dialog, modal, over this window
+    void requestQuit();                                              // as the close button and Quit do
 
     void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
     void showPluginList();                                     // the plug-ins scanning found, with a scan for VST3s

@@ -281,6 +281,9 @@ double getTempo (const Song& song)
 
 void setTempo (Song& song, double bpm)
 {
+    if (! std::isfinite (bpm))
+        return; // no tempo at all
+
     const auto rounded = std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
 
     if (juce::approximatelyEqual (getTempo (song), rounded))
@@ -296,7 +299,8 @@ namespace
 {
     double roundTempo (double bpm)
     {
-        return std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
+        // What is no number at all: the slowest.
+        return std::isfinite (bpm) ? std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0 : minTempo;
     }
 
     // The song's tempos' elements, in getTempoChanges()'s order, the tempo map made first if it has none.

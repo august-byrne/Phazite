@@ -571,10 +571,10 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    pointsAtPress = playlist.selection.getSelectedAutomationPoints();
+    selectionAtPress = SelectionAtPress::take (playlist.context);
 
-    if (pointsAtPress.parameter == parameter)
-        selectedBefore = pointsAtPress.indices;
+    if (selectionAtPress.points.parameter == parameter)
+        selectedBefore = selectionAtPress.points.indices;
     else
         selectedBefore.clear();
 
@@ -999,11 +999,7 @@ bool Playlist::AutomationLaneView::cancelDrag()
 
     gesture.rollBack();
 
-    // The points selected as they were: those of the press's lane, or none, if the press selected some here.
-    if (const auto now = playlist.selection.getSelectedAutomationPoints();
-        now.parameter != pointsAtPress.parameter || now.indices != pointsAtPress.indices)
-        playlist.selection.selectAutomationPoints (pointsAtPress.parameter.isValid() ? pointsAtPress.parameter : parameter,
-                                                   pointsAtPress.indices);
+    selectionAtPress.putBack (playlist.context); // whatever it was, a device or clips as much as points
 
     drag = pendingDrag = Drag::none;
     clickSelectsAlone = false;

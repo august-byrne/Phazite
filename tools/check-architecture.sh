@@ -59,6 +59,18 @@
 #                             can leave a lock it held held for ever (the system's loader lock, held by a thread
 #                             still starting, hung every thread started after it): stop a thread with
 #                             stopThread (-1), and run jobs with phazite::BackgroundJobs.
+#   ui-design-literals        colours, font sizes and corner radii written as literals in src/ui and src/app outside
+#                             src/ui/theme, where the design tokens are (src/ui/theme/DesignTokens.h): a juce::Colours
+#                             name (but transparentBlack and transparentWhite, which mean no colour), juce::Colour or
+#                             Colour::from... with a number first; a number as a font's size (FontOptions, Font,
+#                             getNumberFont, withPointHeight, FontOptions().withHeight, Graphics::setFont); a number as
+#                             the corner of fillRoundedRectangle, drawRoundedRectangle or addRoundedRectangle, in a
+#                             call whose arguments end on its line; and a const, constexpr or static named for a corner
+#                             or a font's or text's size (corner, noteCorner, fontHeight, textSize...) set to a number.
+#                             Layout arithmetic (removeFromLeft (36), reduced (2), a component's height), line
+#                             thicknesses, alphas, and sizes worked out from tokens or geometry (TextSize::body * 0.8f,
+#                             area.getHeight() / 2.0f) aren't counted. Its budget is the one above 0, today's count,
+#                             and only falls, as each literal moves into the tokens.
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the eight
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
@@ -134,7 +146,7 @@ function setup(    i, n, s, parts) {
 
     ruleNames = "upward-includes model-window-includes model-window-references model-undo-steps"
     ruleNames = ruleNames " model-include-loops ui-internal-includes ui-undo-steps flat-files unresolved-includes"
-    ruleNames = ruleNames " cmake-sources tracktion thread-kills"
+    ruleNames = ruleNames " cmake-sources tracktion thread-kills ui-design-literals"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -166,6 +178,15 @@ function setup(    i, n, s, parts) {
     # and JUCE's ThreadPool (and its ThreadPoolJob and ThreadPoolOptions), which ends a thread that hasn't stopped in
     # half a second.
     reThreadKill = W "(stopThread[[:blank:]]*[(][[:blank:]]*[^-)[:blank:]]|killThread[[:blank:]]*[(]|(juce::)?ThreadPool)"
+    # What ui-design-literals counts (designLiterals()): a number as C++ writes one (3, 3.0f, .5f, 0xff102030 by its
+    # first digit), a colour, a font's size and a constant named for a corner or a text's size.
+    NUMBER = "([0-9]+([.][0-9]*)?|[.][0-9]+)[fF]?"
+    reLiteralColour = W "(Colours::[A-Za-z_][A-Za-z0-9_]*|Colour[[:blank:]]*[({][[:blank:]]*[0-9.]|Colour::from[A-Za-z]+[[:blank:]]*[(][[:blank:]]*[0-9.])"
+    reNoColour = W "Colours::transparent(Black|White)" W
+    reLiteralFont = W "((FontOptions|Font|getNumberFont|withPointHeight|setFont)[[:blank:]]*[({][[:blank:]]*[0-9.]"
+    reLiteralFont = reLiteralFont "|FontOptions[[:blank:]]*[(][[:blank:]]*[)][[:blank:]]*[.][[:blank:]]*withHeight[[:blank:]]*[(][[:blank:]]*[0-9.])"
+    reStyleConstant = W "[A-Za-z_]*([Cc]orner|[Ff]ont[A-Za-z]*|[Tt]ext[Ss]ize|[Ll]etter[Ss]ize)[A-Za-z0-9_]*[[:blank:]]*"
+    reStyleConstant = reStyleConstant "([=][[:blank:]]*" NUMBER "[[:blank:]]*[,;)]|[{][[:blank:]]*" NUMBER "[[:blank:]]*[}])"
 
     n = split(undo_implementation, parts, " ")
     for (i = 1; i <= n; i++) isUndoCode[parts[i]] = 1
@@ -198,6 +219,8 @@ function setup(    i, n, s, parts) {
     instead["tracktion"] = "Phazite has no Tracktion Engine; nothing may name or include it. Use Phazite" q "s own engine (src/engine), devices (src/devices) and model, by IDs, beats and plain values."
     what["thread-kills"] = "calls that can end a thread by force in src/, tests/ or tools/: stopThread with a time limit, killThread, and JUCE" q "s ThreadPool (which ends a thread that hasn" q "t stopped within half a second)"
     instead["thread-kills"] = "stop a thread with stopThread (-1), once whatever it waits on is woken or cancelled, and run jobs with phazite::BackgroundJobs (src/model/base/BackgroundJobs.h): on Windows a thread ended by force can leave a lock it held held for ever."
+    what["ui-design-literals"] = "colours, font sizes and corner radii written as literals in src/ui and src/app outside src/ui/theme: juce::Colours names (but transparent ones), juce::Colour from a number, a number as a font" q "s size or a rounded rectangle" q "s corner, and constants named for corners or text sizes set to a number"
+    instead["ui-design-literals"] = "take it from the design tokens (src/ui/theme/DesignTokens.h, read with ui::getPalette (component)), adding a token where none fits. This budget only falls: never raise it."
 }
 
 { sub(CR "$", "") }
@@ -361,7 +384,64 @@ function treeLine(line,    path, lineno, text, s, n) {
         if ((curLayer == "model" || curLayer == "services") && index(s, "beginNewTransaction") && !(path in isUndoCode))
             hitLine("model-undo-steps", path, lineno, text, count(s, reModelUndo))
     }
-    else if (curLayer == "ui" || curLayer == "app") hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
+    else if (curLayer == "ui" || curLayer == "app") {
+        hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
+        if (index(path, "src/ui/theme/") != 1) hitLine("ui-design-literals", path, lineno, text, designLiterals(s))
+    }
+}
+
+# The colours, font sizes and corner radii written as literals in a line of code (rule ui-design-literals).
+function designLiterals(s,    n) {
+    n = 0
+    if (index(s, "Colour")) n += count(s, reLiteralColour) - count(s, reNoColour)
+    if (index(s, "Font") || index(s, "withPointHeight")) n += count(s, reLiteralFont)
+    if (index(s, "RoundedRectangle")) n += cornerLiterals(s)
+    if (index(s, "const") || index(s, "static")) n += count(s, reStyleConstant)
+    return n
+}
+
+# Whether an argument is a number alone (3, 3.0f, .5f).
+function isNumber(a) {
+    sub("^[[:blank:]]+", "", a)
+    sub("[[:blank:]]+$", "", a)
+    return (a ~ ("^" NUMBER "$")) ? 1 : 0
+}
+
+# How many corners are numbers in the calls of fillRoundedRectangle, drawRoundedRectangle and addRoundedRectangle whose
+# arguments end on the line: the corner is the argument after the rectangle, or after its x, y, width and height in the
+# overloads that take those (Path::addRoundedRectangle's take a corner's width and height).
+function cornerLiterals(s,    n, kind, rest, i, c, depth, cur, closed, nargs, args) {
+    n = 0
+    while (match(s, "(fill|draw|add)RoundedRectangle[[:blank:]]*[(]")) {
+        kind = substr(s, RSTART, 1)
+        rest = substr(s, RSTART + RLENGTH)
+        s = rest
+        split("", args)
+        nargs = 0; depth = 0; cur = ""; closed = 0
+        for (i = 1; i <= length(rest); i++) {
+            c = substr(rest, i, 1)
+            if (c == "(" || c == "[" || c == "{") depth++
+            else if (c == ")" || c == "]" || c == "}") {
+                if (depth == 0) { closed = 1; break }
+                depth--
+            }
+            else if (c == "," && depth == 0) { args[++nargs] = cur; cur = ""; continue }
+            cur = cur c
+        }
+        if (!closed) continue
+        args[++nargs] = cur
+        if (kind == "a") {
+            if (nargs == 2 || nargs == 3) n += isNumber(args[2]) + (nargs == 3 ? isNumber(args[3]) : 0)
+            else if (nargs >= 5) n += isNumber(args[5]) + (nargs >= 6 ? isNumber(args[6]) : 0)
+        }
+        else if (kind == "f") {
+            if (nargs == 2) n += isNumber(args[2])
+            else if (nargs == 5) n += isNumber(args[5])
+        }
+        else if (nargs == 3) n += isNumber(args[2])
+        else if (nargs == 6) n += isNumber(args[5])
+    }
+    return n
 }
 
 function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
@@ -881,7 +961,11 @@ AWK
 # The built-in examples of the self-test: lines as git grep prints them. The self-test treats src/model/Undo.cpp
 # as the undo code. tracktion counts 32 in them: in every layer, in src/Fixture.cpp (in no layer), in tests/ and
 # in tools/, but none in comments, in strings (src/model/Flat.h) or in src/ui/Fixture.txt; ui-internal-includes
-# counts 2, both in src/ui (src/services, src/app and src/devices include the same header).
+# counts 2, both in src/ui (src/services, src/app and src/devices include the same header). ui-design-literals counts
+# 14: 12 in src/ui/Fixture.cpp (lines 14 to 20: two colours, one, three font sizes, two corners, one, two constants, one
+# corner) and 2 in src/app/Fixture.cpp, but none in src/ui/theme, in a transparent colour, a colour or size worked out
+# from variables or tokens, a line thickness, layout, a string, a comment, a call whose arguments go on to the next line,
+# or a variable that isn't const.
 fixture() {
     cat <<'FIXTURE'
 src/model/a/Fixture.h:1:#include "../../ui/Panels.h"
@@ -921,10 +1005,20 @@ src/ui/Fixture.cpp:10:undo.beginNewTransaction ("Add"); // beginNewTransaction
 src/ui/Fixture.cpp:11:auto m = R"(te::E
 src/ui/Fixture.cpp:12:te::F)"; te::G g; auto c = L'x'; auto u = u8'y';
 src/ui/Fixture.cpp:13:#include "model/a/internal/Side.h"
+src/ui/Fixture.cpp:14:g.setColour (juce::Colours::red); g.fillAll (juce::Colours::transparentBlack); auto c = juce::Colour (0xff102030);
+src/ui/Fixture.cpp:15:auto d = juce::Colour::fromRGB (10, 20, 30); auto e = juce::Colour::fromHSV (hue, 0.5f, 0.5f, 1.0f); juce::Colour f (r, g, b);
+src/ui/Fixture.cpp:16:g.setFont (juce::FontOptions (12.0f)); g.setFont (juce::FontOptions (TextSize::body)); auto n = getNumberFont (11.0f); g.setFont (9.5f);
+src/ui/Fixture.cpp:17:g.fillRoundedRectangle (area, 3.0f); g.drawRoundedRectangle (area, cornerRadius, 1.0f); g.drawRoundedRectangle (area.reduced (0.5f), 2.0f, 1.0f);
+src/ui/Fixture.cpp:18:path.addRoundedRectangle (0.0f, 0.0f, 10.0f, 10.0f, 4.0f); g.fillRoundedRectangle (1, 2, 3, 4, radius); area.removeFromLeft (36).reduced (2, 0.5f);
+src/ui/Fixture.cpp:19:constexpr float corner = 3.0f, gap = 2.0f; constexpr int fontHeight { 14 }; const auto cornerSize = std::min (2.0f, w); // juce::Colours::blue
+src/ui/Fixture.cpp:20:auto s = "juce::Colours::green"; g.fillRoundedRectangle (juce::Rectangle<float> (0.0f, 0.0f, 4.0f, 4.0f), 2.0f); g.fillRoundedRectangle (area,
+src/ui/Fixture.cpp:21:    2.0f); auto h = juce::FontOptions (TextSize::body * 0.8f); float cornerRadius = 4.0f;
 src/ui/views/Fixture3.cpp:1:#include "../../model/a/internal/Side.h"
 src/ui/views/Fixture3.cpp:2:#include "../../app/MainWindow.h"
 src/app/Fixture.cpp:1:e->getUndoManager().beginNewTransaction ("Rename"); te::Edit* e2;
 src/app/Fixture.cpp:2:#include "model/a/internal/Side.h"
+src/app/Fixture.cpp:3:g.setColour (juce::Colours::white.withAlpha (0.5f)); g.fillRoundedRectangle (area, 6.0f);
+src/ui/theme/Look.cpp:1:g.setColour (juce::Colours::black); g.fillRoundedRectangle (area, 3.0f); g.setFont (juce::FontOptions (12.0f));
 src/app/MainWindow.h:1:// the main window
 src/devices/x/Dsp.h:1:#include <juce_dsp/juce_dsp.h>
 src/devices/x/Dsp.h:2:#include <tracktion_engine/tracktion_engine.h>
@@ -972,7 +1066,7 @@ target_sources(fixture PRIVATE
     src/model/a/Fixture.h src/model/a/internal/Side.h src/model/Flat.h src/model/Undo.cpp
     src/model/b/One.h src/model/b/Two.h src/model/b/Two.cpp
     src/services/Fixture.cpp "src/ui/Fixture.cpp" src/ui/Fixture2.cpp src/ui/views/Fixture3.cpp
-    src/app/Fixture.cpp src/app/MainWindow.h src/Fixture.cpp
+    src/app/Fixture.cpp src/app/MainWindow.h src/Fixture.cpp src/ui/theme/Look.cpp
     src/devices/x/Dsp.h src/devices/x/Dsp.cpp src/devices/Flat.h
     src/engine/x/Eng.h src/engine/x/Eng.cpp src/engine/Flat.cpp src/sandbox/x/Shm.h src/host/x/Host.cpp
     src/ui/fixture.cpp # src/ui/Commented.cpp
@@ -995,6 +1089,7 @@ fixture_expectations() {
 @expect cmake-sources 3
 @expect tracktion 32
 @expect thread-kills 5
+@expect ui-design-literals 14
 @expect no-layer 1
 EXPECT
 }

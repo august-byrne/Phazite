@@ -20,6 +20,7 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 | A project file that can't be read: its backup or its last commit offered | Built | |
 | View state saved without counting as a change | Built | |
 | The format written down for other tools | Built | [project-format.md](../project-format.md) |
+| Files from others taken as untrusted | Partly built | A song is made consistent as it opens; a preset's sounds are not yet limited to the library's folders |
 | Format versions and upgrades of older projects | Planned | When compatibility starts; no roadmap step |
 | Export Song to WAV or FLAC, with Normalize | Built | |
 | Export to MP3 | Declined | WAV and FLAC only |
@@ -72,6 +73,32 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 - A beta comes before 1.0. The beta does not promise that its projects open in later versions.
 - 1.0 is for music professionals in general, with production first. Format versions, upgrades of older projects and
   the handling of a newer Phazite's projects start when compatibility starts.
+
+## Files from others
+
+Projects, presets and DAWprojects come from other people, so every file Phazite reads is untrusted input: whatever it
+says, it can't crash Phazite or make it do anything but open a song.
+
+- **A project is made consistent as it opens** (`makeConsistent()`), whoever wrote it, and the same for its autosave,
+  a backup and a commit's song. An element Phazite knows, where it doesn't belong, is left out, and one of a type it doesn't know stays untouched; every
+  number is brought within its range, and one that is no number at all takes its default; IDs held twice or missing
+  are given anew; what names something the song hasn't (a lane, a curve, a modulation, a sidechain, a pad's track) is
+  dropped or cleared; and a sound file named on a network path, or by a path that climbs out of the project's folder, is looked for in its
+  `Audio` folder by its name, listed as missing in the Project view until it is located; a full path on this computer stays. A file Phazite wrote comes through unchanged.
+  [project-format.md](../project-format.md), section 7, lists the rules.
+- **A preset** keeps its volumes within a fader's range (-100 to +6 dB, as everywhere a volume is set), and a sound it
+  names on a network path, or one that isn't an audio file, is refused without being opened.
+- **A DAWproject's** `project.xml` and `metadata.xml` are read only up to 256 MB each, and what it unpacks only up to
+  what an archive of its size can hold, so a small archive can't fill the memory or the disk.
+- **The helper of a plug-in** is read with its lists capped by its message's length, and a plug-in's latency, tail and
+  channel counts clamped.
+- **The settings file** gives its default for a number that isn't a finite one.
+- **The readers are fuzzed** in every test run: project files, a version's pieces and records, presets, DAWprojects, a
+  VST3's state, the helper's messages, the settings, keymaps and audio files' headers (`tests/FuzzTests.cpp`).
+
+Not built yet: a preset's sounds limited to the library's folders and its own, the channel count a helper writes into
+shared memory checked, and a DAWproject written past 4 GB refused (known bugs 105, 66 and 106 in
+[known-bugs.md](../known-bugs.md)).
 
 ## Saving
 
@@ -313,7 +340,7 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 ## In the code
 
 - `src/model/project/internal/Project.h`: the project folder, `Project::create()`, `open()`, `save()`, the autosave,
-  Auto Save (`AutosaveTimer`), backups, `openWithSong()`, `readNewestBackup()`.
+  Auto Save (`AutosaveTimer`), backups, `openWithSong()`, `readNewestBackup()`, and `makeConsistent()`.
 - `src/model/base/WholeFile.h`: `writeWholeFile()`.
 - `src/model/project/internal/UnsavedProjects.h`: untitled projects' folders and what a crash left in them.
 - `src/model/project/ProjectContext.h`: the open project as commands and views find it.
@@ -327,4 +354,5 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 - `src/model/project/UnusedAudio.h`, `src/ui/shell/CleanUpPanel.h`: Clean Up Unused Audio.
 - `src/model/project/internal/DawProject.h`: DAWproject export and import.
 - Tests: `tests/ProjectTests.cpp`, `tests/WholeFileTests.cpp`, `tests/ExportTests.cpp`, `tests/FreezeTests.cpp`,
-  `tests/CleanUpTests.cpp`, `tests/DawProjectTests.cpp`, `tests/GoldenFormatTests.cpp`.
+  `tests/CleanUpTests.cpp`, `tests/DawProjectTests.cpp`, `tests/GoldenFormatTests.cpp`; for files from others,
+  `tests/InconsistentProjectTests.cpp`, `tests/FuzzTests.cpp` and `tests/SongCheck.h`.

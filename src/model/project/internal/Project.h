@@ -28,6 +28,23 @@ juce::File getDefaultProjectsFolder();
 // its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song.
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
+// The furthest place in beats a song holds anything at, as a file from elsewhere is taken in: a million beats, days of music
+// at any tempo.
+inline constexpr double maxSongBeats = 1.0e6;
+
+// What makeSong() does first, for a song whose file anyone could have written (Phazite takes in projects from others): it
+// repairs only what no Phazite could have written, and changes nothing in a song Phazite saved, whichever build or
+// computer saved it. Each element of a type Phazite knows where Schema.h puts it (one somewhere else goes), and one of a type
+// it doesn't know left as it is, with everything in it, to be written back (docs/project-format.md); a device or modulator
+// of a type Phazite has; every number Schema.h gives a range brought within it (a channel's volume, a tempo, a note's
+// pitch, places in beats up to a million), and every parameter's value set by hand and automation point within its
+// parameter's range; every item's ID its own and below 2^62; a lane, a curve or a modulation of something the song hasn't
+// left out, as a sidechain or a pad's sampler that isn't there; no two elements of a parent with one key (Schema.h:
+// getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder
+// with "..", looked for by its name in the project's Audio folder (a full path of a computer's stays: Phazite writes one
+// where a file couldn't be copied in). No undo steps.
+void makeConsistent (Song&);
+
 //==============================================================================
 // The project folder:
 //   <name>.phazite   the project file: the song (Schema.h)

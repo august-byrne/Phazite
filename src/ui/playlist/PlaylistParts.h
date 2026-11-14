@@ -159,9 +159,9 @@ struct Playlist::AutomationLaneView : public juce::Component,
     std::unique_ptr<TypedField> valueField;
 
     // Escape while the mouse is down (Playlist::cancelDrag()): what the press and its drag did goes, leaving nothing to redo,
-    // and the points selected are as they were. False if nothing was being done, or the playlist's own tools do it (Zoom).
+    // and what was selected is as it was. False if nothing was being done, or the playlist's own tools do it (Zoom).
     bool cancelDrag();
-    SongSelection::AutomationPoints pointsAtPress; // selected as the mouse went down
+    SelectionAtPress selectionAtPress;
 
     void pressPoint (int index, const juce::ModifierKeys&); // selects it as a click does, ready to move it
     void pullPointFrom (const juce::MouseEvent&);           // a press on the line: a point there, which a drag moves
@@ -301,10 +301,6 @@ struct Playlist::Gesture : public TimelineGesture
     std::vector<ClipID> clipsBefore;
     std::vector<SectionID> sectionsBefore;
 
-    // What was selected as the mouse went down, and the time range, which Escape puts back (Playlist::cancelDrag()).
-    std::vector<TrackID> tracksAtPress;
-    std::vector<ClipID> clipsAtPress;
-    std::vector<SectionID> sectionsAtPress;
-    std::optional<std::pair<BeatRange, std::vector<TrackID>>> rangeAtPress;
+    SelectionAtPress selectionAtPress; // which Escape puts back (Playlist::cancelDrag())
 };
 } // namespace phazite::ui

@@ -103,7 +103,7 @@ Build choices that aren't workarounds: JUCE compiled once, in `phazite_core` (`p
 
 **T1. Messages delivered at once (*JUCE's insides*).** The tests deliver what was posted to the message thread through `juce::detail::dispatchNextMessageOnSystemQueue()`, a function of JUCE's that its headers don't declare (`juce_events/messages/juce_MessageManager.cpp`). JUCE posts its one wake-up only into an empty queue, so `queueWithoutWakeUp()` posts with JUCE's number for it, `WM_USER + 123` (`juce_events/native/juce_Messaging_windows.cpp`), and fails loudly if that changes (`tests/UiTestHelpers.cpp`).
 
-**T2. A window without a native one.** JUCE has no window peer that is on no screen, so the tests' windows have one of their own, `HeadlessPeer` (`tests/UiTestHelpers.cpp`). It implements `getFrameSize()`, which JUCE deprecates on Linux but keeps pure virtual, with the deprecation warning off.
+**T2. A window without a native one.** JUCE has no window peer that is on no screen, so the tests' windows have one of their own, `HeadlessPeer` (`tests/UiTestHelpers.cpp`). It implements `getFrameSize()`, which JUCE deprecates on Linux but keeps pure virtual, with the deprecation warning off. `createHeadlessPeer()` (`tests/UiTestHelpers.h`) gives one to a window the app makes, the main window and its dialogs, whose `createNewPeer()` a test's subclass overrides (`tests/MainWindowTests.cpp`, with `MainWindow::Surroundings`); the peer takes the style flags the window asks for, as a top-level window whose peer has another style makes its peer again, and again.
 
 **T3. A display where the machine has none.** JUCE's `ComponentAnimator` uses the display it finds for a component without checking that it found one (`juce_gui_basics/layout/juce_ComponentAnimator.cpp`), and a machine without a screen has none: a drag's image let go crashed Linux CI (2026-11-01). `ScopedDisplay` adds one while a test needs it (`tests/UiTestHelpers.*`).
 
@@ -142,7 +142,7 @@ Some code works around the operating system, not JUCE: the tests' timers, which 
 
 ## Open questions
 
-None now.
+**Q7. A damaged zip's dates.** As `juce::ZipFile` reads an archive's entries, it turns each entry's date into a `juce::Time` (`parseFileTime()`, `juce_core/zip/juce_ZipFile.cpp`), and for a date that is no date (a month past December, say) `juce_core/time/juce_Time.cpp` asserts, in Debug builds only. Phazite never uses an entry's date, so a damaged DAWproject raises the assertion and nothing else; the DAWproject fuzz case declares it with `ExpectedAssertion` (`tests/FuzzTests.cpp`; known bug 149 in [known-bugs.md](known-bugs.md)). What decides it: whether a Debug build should stop on a user's damaged file at all. If not, Phazite reads DAWprojects' entries through a zip reader that takes no dates, or JUCE checks the date before it makes a `Time` of it; if so, the declaration stays, and this becomes a correct pattern.
 
 ## Removed and settled
 

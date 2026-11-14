@@ -27,5 +27,10 @@ juce::File findProjectFile (const Song&, const juce::String& path);
 // sound, or a factory table). Each goes through a state and everything in it (a container's, a track's), and isn't an
 // undo step: the state isn't in a project.
 void writeDeviceFilePaths (const Song& from, juce::ValueTree& state);
+
+// Whether a path a preset names is a sound file a device can take from it: a full path to a file there, whose name says it
+// is audio (model/arrangement/internal/Import.h: getFileKind()), and never a network path, which isn't even looked at. A
+// preset is a file from anyone: what it names is copied into the project, or played from where it is.
+bool isSoundFileToTake (const juce::String& path);
 void copyDeviceFilesInto (Song&, juce::ValueTree& state);
 } // namespace phazite

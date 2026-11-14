@@ -854,7 +854,9 @@ namespace
 
         if (auto* field = dynamic_cast<juce::TextEditor*> (&component))
         {
-            field->applyColourToAllText (field->findColour (juce::TextEditor::textColourId), true);
+            // Not as the field's own colour (true would set its textColourId): that would keep this theme's after the next
+            // switch, which the look and feel's colour follows.
+            field->applyColourToAllText (field->findColour (juce::TextEditor::textColourId), false);
 
             if (const auto placeholder = field->getTextToShowWhenEmpty(); placeholder.isNotEmpty())
                 field->setTextToShowWhenEmpty (placeholder, getPalette (*field).textMuted);

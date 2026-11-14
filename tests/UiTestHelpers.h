@@ -78,6 +78,11 @@ public:
     juce::ComponentPeer* createNewPeer (const juce::DesktopWindowOptions&) override;
 };
 
+// A peer for a component on the desktop that has no window behind it, as TestWindow's: for a window that the app makes
+// (the main window, a dialog), whose createNewPeer() a test's subclass of it gives this. It has the style the options ask
+// for: a top-level window whose peer's style differs from what it wants makes its peer again, and again.
+juce::ComponentPeer* createHeadlessPeer (juce::Component&, const juce::DesktopWindowOptions&);
+
 // The components of a type in a tree (the root included).
 template <typename ComponentType>
 juce::Array<ComponentType*> findAll (juce::Component& root)

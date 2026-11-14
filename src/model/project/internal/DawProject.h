@@ -71,6 +71,14 @@ struct DawProjectFile
 
 DawProjectFile readDawProject (const juce::File&);
 
+// What a DAWproject unpacks to at most as Phazite reads it, whoever made it: its project.xml and metadata.xml no larger
+// than maxDawProjectText each, and every file it copies out of it no larger than its entry says, nor, all together, than
+// an archive of its size can hold (getUnpackLimit(): 1100 times its size, as deflate packs at most about 1032 to 1, and 64
+// MB at least), so that one whose entries share their compressed bytes never fills the memory or the disk. What goes past
+// is no DAWproject, or an audio file not taken.
+inline constexpr juce::int64 maxDawProjectText = (juce::int64) 256 << 20;
+juce::int64 getUnpackLimit (const juce::File& archive);
+
 // What a DAWproject holds, taken into a song, which then is what it says; what it couldn't take, said. Its tracks are matched
 // to the song's by the IDs Phazite wrote, where they were kept, or else by their names, the bounces Phazite added left out:
 // a track it has none of goes, and one it adds comes, with its clips' notes and its audio clips' files (copied out of the

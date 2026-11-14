@@ -7,6 +7,7 @@
 // says why it can't.
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
+#include "RepresentativeSong.h"
 #include "SandboxedPlugins.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -454,7 +455,7 @@ void freeze (phazite::ProjectContext& context, phazite::TrackID track)
 // Every kind of track and every piece of Phazite's data that a project keeps, so that its golden file covers them all:
 // the test below fails for a name Schema.h declares, or the song's rules name, that the project doesn't hold. The song is
 // open in the context, as the app has it, for the model's functions that take one and for what plays it (a plug-in, a
-// take).
+// take). The whole window's tests show and paint it too (RepresentativeSong.h).
 void addRepresentativeContent (phazite::Project& project, phazite::ProjectContext& context, const juce::File& scratch)
 {
     using phazite::test::makeBuiltInDevice;
@@ -616,6 +617,18 @@ void addRepresentativeContent (phazite::Project& project, phazite::ProjectContex
     addSongSettings (song, context, tracks, recorded.folder);
     freeze (context, recorded.voice);
 }
+} // namespace
+
+void phazite::test::addRepresentativeSong (Project& project, ProjectContext& context, const juce::File& scratch)
+{
+    if (phazite::getTrackIDs (project.getSong()).empty())
+        REQUIRE (phazite::addTrackAtEnd (project.getSong(), false, nullptr).isValid());
+
+    ::addRepresentativeContent (project, context, scratch);
+}
+
+namespace
+{
 
 //==============================================================================
 // The saves each golden project test compares: S1, the project as made; S2, saved after reopening S1; S3, saved after
