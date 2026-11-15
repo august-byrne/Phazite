@@ -30,8 +30,13 @@ juce::File getSystemTemporaryFolder();
 // How long a test waits for something it waits on to happen, unless it says otherwise: two minutes, which only a hang
 // reaches. A test waits for a condition, never for a time, so that a machine busy with other work (ctest runs four test
 // files at once, CI's sanitizers run slowly) slows it rather than fails it; and a short limit is kept only where how soon
-// is what is tested, and says so.
+// is what is tested, and says so. Eight minutes with MSVC's AddressSanitizer (windows-asan, a Debug build), where what
+// takes seconds takes minutes: its first run stretched a loop for more than two (StatusBarTests, 2026-11-15).
+#if defined(_MSC_VER) && defined(__SANITIZE_ADDRESS__)
+inline constexpr int hangTimeout = 480000;
+#else
 inline constexpr int hangTimeout = 120000;
+#endif
 
 // The tests have no message loop, but some engine work happens on the message thread's timers (finding
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the

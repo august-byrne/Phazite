@@ -218,13 +218,13 @@ TEST_CASE ("The limiter lets go at its release time, and its gain raises quiet s
     // Pushed 13 dB over the ceiling for a fifth of a second, then quiet: 100 ms later, the gain has come 63 % of the
     // way back up (counted as a gain, not in decibels).
     std::vector<float> reductions;
-    const auto burst = 9600;
+    static constexpr int burst = 9600;
     play (
         limiter, values, 48000,
-        [burst] (int t) { return t < burst ? (float) std::sin (twoPi * 997.0 * t / testRate) : (t % 2 == 0 ? 0.01f : -0.01f); },
+        [] (int t) { return t < burst ? (float) std::sin (twoPi * 997.0 * t / testRate) : (t % 2 == 0 ? 0.01f : -0.01f); },
         [&reductions] (int, float most) { reductions.push_back (most); });
 
-    const auto blocksAfter = [burst] (double seconds) { return (size_t) ((burst + seconds * testRate) / testBlockSize); };
+    const auto blocksAfter = [] (double seconds) { return (size_t) ((burst + seconds * testRate) / testBlockSize); };
     const auto expected = 1.0 - (1.0 - std::pow (10.0, -13.0 / 20.0)) * std::exp (-1.0);
     CHECK (reductions[blocksAfter (0.1)] == doctest::Approx (-20.0 * std::log10 (expected)).epsilon (0.15));
     CHECK (reductions.back() < 0.01f);

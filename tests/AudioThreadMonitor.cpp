@@ -374,6 +374,8 @@ extern "C"
         return __libc_realloc (block, size);
     }
 
+    void* memalign (size_t, size_t) noexcept; // glibc's, which only its <malloc.h> declares
+
     void* memalign (size_t alignment, size_t size) noexcept
     {
         phazite::test::noteAllocation (false);

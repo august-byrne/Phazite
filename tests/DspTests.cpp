@@ -769,11 +769,11 @@ TEST_CASE ("The vowel filter's formants are a sung vowel's, which the cutoff pic
 
 TEST_CASE ("The phaser's notches sit at a quarter of the cutoff, the cutoff and nearly four times it, and feedback raises its peaks")
 {
-    constexpr auto pi = juce::MathConstants<double>::pi;
+    static constexpr auto pi = juce::MathConstants<double>::pi;
 
     // Where the stages' phase turns against what goes in by an odd number of half turns: tan (15, 45 and 75 degrees)
     // times the cutoff, as the bilinear transform warps it; the peaks between, at whole turns.
-    const auto at = [pi] (double ratio, double cutoff) { return testRate / pi * std::atan (ratio * std::tan (pi * cutoff / testRate)); };
+    const auto at = [] (double ratio, double cutoff) { return testRate / pi * std::atan (ratio * std::tan (pi * cutoff / testRate)); };
 
     for (const auto cutoff : { 1000.0, 2000.0 })
     {

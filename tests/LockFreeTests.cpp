@@ -148,7 +148,7 @@ namespace
 // see that what it holds wasn't freed under it.
 struct Given
 {
-    static constexpr std::uint8_t notMade = 0, alive = 1, freed = 2, freedTwice = 3;
+    [[maybe_unused]] static constexpr std::uint8_t notMade = 0, alive = 1, freed = 2, freedTwice = 3;
 
     explicit Given (std::uint64_t n, std::vector<std::atomic<std::uint8_t>>& s)
         : number (n),

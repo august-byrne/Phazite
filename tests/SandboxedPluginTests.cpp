@@ -2025,6 +2025,7 @@ TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for 
     CHECK (closes == 1);
     CHECK (changes == 0); // the save was for the project closed: it saved no other
     CHECK (session.getProject()->getFile() != file);
+    session.onProjectChanged = nullptr; // the session tells of its project as it goes too, after the count has gone
 }
 
 TEST_CASE ("A helper ended before it starts never starts: Phazite quitting while plug-ins open waits for none of them")

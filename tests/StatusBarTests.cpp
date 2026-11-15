@@ -226,6 +226,5 @@ TEST_CASE ("While clips are stretched in the background after a tempo change, th
         {
             status.refreshNow();
             return status.getRenderText().isEmpty();
-        },
-        120000));
+        }));
 }

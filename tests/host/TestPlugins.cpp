@@ -2,9 +2,25 @@
 #include "TestPlugins.h"
 
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <limits>
+
+// Whether this is a Linux build with AddressSanitizer or ThreadSanitizer (crashNow()).
+#if defined(__has_feature)
+ #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+  #define PHAZITE_TEST_ENDS_ITSELF 1
+ #endif
+#endif
+#if ! defined(PHAZITE_TEST_ENDS_ITSELF) && (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+ #define PHAZITE_TEST_ENDS_ITSELF 1
+#endif
+#if ! defined(PHAZITE_TEST_ENDS_ITSELF) || JUCE_WINDOWS
+ #undef PHAZITE_TEST_ENDS_ITSELF
+ #define PHAZITE_TEST_ENDS_ITSELF 0
+#endif
 
 namespace phazite::test
 {
@@ -12,11 +28,17 @@ namespace
 {
     using Kind = TestPlugins::Kind;
 
-    // As a plug-in that crashes does: an access to memory that isn't there.
+    // As a plug-in that crashes does: an access to memory that isn't there. In a Linux build with a sanitizer the helper
+    // ends itself instead, as abruptly: a sanitizer reports that access, the helper's reports reach the test's output
+    // (src/sandbox/client/Helper.cpp), and CI takes any report there for a fault (tools/ci-sanitizer-reports.sh).
     void crashNow()
     {
+#if PHAZITE_TEST_ENDS_ITSELF
+        std::abort();
+#else
         volatile int* nowhere = nullptr;
         *nowhere = 1;
+#endif
     }
 
     // A parameter as a plug-in format hosts one (a VST3's): with the plug-in's own ID for it.
@@ -394,7 +416,8 @@ namespace
         StandInParameter* hang = nullptr;
     };
 
-    class TestLatency final : public StandIn
+    class TestLatency final : public StandIn,
+                              private juce::AsyncUpdater
     {
     public:
         TestLatency()
@@ -404,13 +427,17 @@ namespace
             setLatencySamples (64);
         }
 
+        ~TestLatency() override { cancelPendingUpdate(); }
+
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
         {
             const auto latency = longer->getValue() > 0.5f ? 128 : 64;
 
-            if (latency != getLatencySamples())
-                setLatencySamples (latency);
+            // Said on the message thread, as a VST3's is (JUCE's host passes a plug-in's restartComponent() on there): what a
+            // host reads there, the thread that plays never writes (CI's linux-tsan saw it written here, 2026-11-15).
+            if (said.exchange (latency) != latency)
+                triggerAsyncUpdate();
 
             // A delay of latency samples, through a ring of 128 for each side.
             for (int i = 0; i < buffer.getNumSamples(); ++i)
@@ -427,7 +454,10 @@ namespace
         }
 
     private:
+        void handleAsyncUpdate() override { setLatencySamples (said.load()); }
+
         StandInParameter* longer = nullptr;
+        std::atomic<int> said { 64 };
         std::array<std::array<float, 128>, 2> rings {};
         int at = 0;
     };

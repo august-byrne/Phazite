@@ -2259,14 +2259,14 @@ TEST_CASE ("A device's automation moves its parameter on the song's control poin
         engine::DeviceRunner::Block block;
         block.isPlaying = true;
         block.sample = sample;
-        block.automationBeat = block.beat = sample / samplesPerBeat;
+        block.automationBeat = block.beat = (double) sample / samplesPerBeat;
         block.beatsPerSample = 1.0 / samplesPerBeat;
         node.process (buffer, 0, samplesInBlock, block, automation);
         sample += samplesInBlock;
 
         // Its last stretch's: on the control point at or before the block's last sample.
         const auto point = (sample - 1) / engine::controlPointSpacing * engine::controlPointSpacing;
-        CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (curve->getValueAt (point / samplesPerBeat)));
+        CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (curve->getValueAt ((double) point / samplesPerBeat)));
     }
 
     // Written by hand, it plays its value set by hand.
@@ -2275,7 +2275,7 @@ TEST_CASE ("A device's automation moves its parameter on the song's control poin
     engine::DeviceRunner::Block block;
     block.isPlaying = true;
     block.sample = sample;
-    block.automationBeat = block.beat = sample / samplesPerBeat;
+    block.automationBeat = block.beat = (double) sample / samplesPerBeat;
     block.beatsPerSample = 1.0 / samplesPerBeat;
     node.process (buffer, 0, 512, block, automation);
     CHECK (node.getPlayedBaseValue (depth) == doctest::Approx (0.25f));
@@ -2332,7 +2332,7 @@ TEST_CASE ("A device that takes its blocks whole gets each in one call, its auto
         engine::DeviceRunner::Block block;
         block.isPlaying = true;
         block.sample = sample;
-        block.automationBeat = block.beat = sample / samplesPerBeat;
+        block.automationBeat = block.beat = (double) sample / samplesPerBeat;
         block.beatsPerSample = 1.0 / samplesPerBeat;
         buffer.clear();
         node.process (buffer, 0, numSamples, block, automated);

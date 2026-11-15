@@ -68,8 +68,8 @@ TEST_CASE ("The session opens and saves a project")
     phazite::RecentProjects recent (settings);
 
     {
+        int changes = 0; // before the session, which tells of its project as it goes too
         phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
-        int changes = 0;
         session.onProjectChanged = [&changes] { ++changes; };
 
         // Without an autosave to restore, it opens at once, as the project the commands and live MIDI act on.

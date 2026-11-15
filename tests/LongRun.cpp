@@ -351,10 +351,10 @@ TEST_CASE ("Long run: an hour of music played block by block while the song is e
     CHECK (after == before);
     phazite::test::checkIDs (getSong (s));
 
-    MESSAGE ("Played " << juce::String (played / rate, 1) << " s of music in " << blocks << " blocks, in " << juce::String (elapsed, 1)
-                       << " s (" << juce::String (played / rate / elapsed, 2) << " times as fast as it plays); " << edits << " edits ("
-                       << undos << " Undo, " << redos << " Redo), " << saves << " saves; peak "
-                       << juce::String (juce::Decibels::gainToDecibels (peak), 1)
+    MESSAGE ("Played " << juce::String ((double) played / rate, 1) << " s of music in " << blocks << " blocks, in "
+                       << juce::String (elapsed, 1) << " s (" << juce::String ((double) played / rate / elapsed, 2)
+                       << " times as fast as it plays); " << edits << " edits (" << undos << " Undo, " << redos << " Redo), " << saves
+                       << " saves; peak " << juce::String (juce::Decibels::gainToDecibels (peak), 1)
                        << " dBFS; the process's memory at each tenth: " << memoryReport << "(the most " << megabytes (mostMemory) << ")"
                        << (phazite::test::AudioThreadMonitor::isAvailable() ? "; nothing allocated on the audio thread"
                                                                             : "; allocations not counted in this build"));

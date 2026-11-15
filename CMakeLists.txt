@@ -1579,6 +1579,14 @@ if(PHAZITE_BUILD_TESTS)
     # get twice as long; a hang still ends there.
     set_tests_properties(FactoryPresetTests PROPERTIES TIMEOUT 1200)
 
+    # With MSVC's AddressSanitizer (windows-asan, a Debug build) everything takes several times as long: its first run
+    # (the nightly workflow, 2026-11-15) ended AppShellTests and FuzzTests at 10 minutes, with PaintTests done in 8. Three
+    # times as long there; the tests' own waits are longer there too (tests/TestHelpers.h: hangTimeout).
+    if(PHAZITE_ADDRESS_SANITIZER)
+        set_tests_properties(${_phazite_test_names} OtherTestFiles PROPERTIES TIMEOUT 1800)
+        set_tests_properties(FactoryPresetTests PROPERTIES TIMEOUT 3600)
+    endif()
+
     # It asserts that each of the audio device's calls played its block within a block's length, by the wall clock while the
     # song plays in real time: a test file beside it, busy on every core, could keep its device's thread from a core that
     # long (known bug 139). It runs alone. The other files that play in real time wait for blocks played rather than time

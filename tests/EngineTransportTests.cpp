@@ -518,8 +518,8 @@ TEST_CASE ("An audio clip moved, slipped or rendered again under the playhead pl
         for (int i = 48; i < played.getNumSamples(); ++i)
         {
             const auto songSample = changedAt + i;
-            const auto expected =
-                CountingReader::at ((std::int64_t) (songSample - change.start + change.fileStart) + (change.otherFile ? 500 : 0));
+            const auto expected = CountingReader::at ((std::int64_t) ((double) (songSample - change.start) + change.fileStart)
+                                                      + (change.otherFile ? 500 : 0));
 
             if (std::abs (played.getSample (0, i) - expected) > 1.0e-4f && wrong++ == 0)
                 firstWrong = i;
