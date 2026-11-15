@@ -1190,6 +1190,8 @@ if(PHAZITE_BUILD_TESTS)
     target_sources(phazite_tests PRIVATE
         tests/TestMain.cpp
         tests/TestHelpers.h
+        tests/StallReport.cpp
+        tests/StallReport.h
         tests/AboutPanelTests.cpp
         tests/ActivityBarTests.cpp
         tests/AntialiasingTests.cpp

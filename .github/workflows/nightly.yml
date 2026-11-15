@@ -29,12 +29,15 @@ on:
       random_songs:
         description: "Random songs for the text, pieces and apply-song checks"
         default: "1000"
+      only:
+        description: "One job alone: long-run, benchmark-gates or windows-asan (empty: all of them)"
+        default: ""
 
 permissions:
   contents: read
 
-concurrency: # one nightly run at a time; a run started by hand waits for the scheduled one
-  group: nightly-${{ github.ref }}
+concurrency: # one nightly run at a time; a run started by hand waits for the scheduled one, unless it is of one job alone
+  group: nightly-${{ github.ref }}-${{ github.event.inputs.only || 'all' }}
   cancel-in-progress: false
 
 # The long run's alone. The fuzzer's rounds and the random songs are set on the one step that runs them with many: set for
@@ -47,6 +50,7 @@ env:
 jobs:
   long-run:
     name: Long run (${{ matrix.preset }})
+    if: ${{ !github.event.inputs.only || github.event.inputs.only == 'long-run' }}
     runs-on: ubuntu-24.04
     # The build (from CI's compiler cache, a few minutes; without it about an hour) and an hour of music played several
     # times slower than it plays under a sanitizer; GitHub ends a job at six hours anyway.
@@ -145,6 +149,7 @@ jobs:
 
   benchmark-gates:
     name: Benchmark gates (windows-profile)
+    if: ${{ !github.event.inputs.only || github.event.inputs.only == 'benchmark-gates' }}
     runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
     timeout-minutes: 120
     env:
@@ -206,6 +211,7 @@ jobs:
   # compiler cache is its own (no CI job builds the preset), kept from night to night.
   windows-asan:
     name: Windows ASan (windows-asan)
+    if: ${{ !github.event.inputs.only || github.event.inputs.only == 'windows-asan' }}
     runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
     timeout-minutes: 300
     env:
@@ -260,8 +266,11 @@ jobs:
           key: ccache-windows-asan-${{ github.run_id }}
 
       # Every test file, as ctest runs them; an AddressSanitizer report ends its test program with the report and its stack,
-      # which the test's output shows.
+      # which the test's output shows. A test case that has run for two minutes says so, with where it is, and again every
+      # two minutes (tests/StallReport.h): the sanitizer makes some of them many times slower, and no PC here runs them.
       - name: Test
+        env:
+          PHAZITE_TEST_STALL_SECONDS: "120"
         run: |
           echo "::add-matcher::.github/problem-matchers/tests.json"
           ctest --preset windows-asan

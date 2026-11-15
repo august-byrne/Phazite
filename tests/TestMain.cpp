@@ -4,6 +4,7 @@
 // e.g. `phazite_tests --test-case="*project*"` or `phazite_tests --help`.
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include "StallReport.h"
 #include "TestHelpers.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
@@ -296,14 +297,30 @@ private:
     bool ended = false;
 };
 
-// Tells the net which test case runs, as doctest starts and ends each.
+// Says where a test case that takes too long is, where the environment asks (StallReport.h): main()'s, while it runs.
+phazite::test::StallReport* stallReport = nullptr;
+
+// Tells the net, and the stall report, which test case runs, as doctest starts and ends each.
 struct AssertionNetListener final : public doctest::IReporter
 {
     explicit AssertionNetListener (const doctest::ContextOptions&) {}
 
-    void test_case_start (const doctest::TestCaseData& data) override { AssertionNet::get().testCaseStarted (data.m_name); }
+    void test_case_start (const doctest::TestCaseData& data) override
+    {
+        AssertionNet::get().testCaseStarted (data.m_name);
+
+        if (stallReport != nullptr)
+            stallReport->testCaseStarted (data.m_name);
+    }
+
     void test_case_reenter (const doctest::TestCaseData&) override {}
-    void test_case_end (const doctest::CurrentTestCaseStats&) override { AssertionNet::get().testCaseEnded(); }
+    void test_case_end (const doctest::CurrentTestCaseStats&) override
+    {
+        AssertionNet::get().testCaseEnded();
+
+        if (stallReport != nullptr)
+            stallReport->testCaseEnded();
+    }
 
     void report_query (const doctest::QueryData&) override {}
     void test_run_start() override {}
@@ -384,6 +401,15 @@ int main (int argc, char** argv)
     __sanitizer_set_death_callback (&sayWhichTestDied);
 #endif
 
+    // From here until main() returns, so that a wait as the engine context or JUCE goes is seen too.
+    std::unique_ptr<phazite::test::StallReport> stalls;
+
+    if (const auto seconds = phazite::test::StallReport::getSecondsAsked(); seconds > 0)
+    {
+        stalls = std::make_unique<phazite::test::StallReport> (seconds);
+        stallReport = stalls.get();
+    }
+
     // Before anything asks for the temporary folder (getSystemTemporaryFolder() says why).
     const auto temporaryFolder = useTemporaryFolderOfOwn();
 
@@ -413,6 +439,7 @@ int main (int argc, char** argv)
         result = EXIT_FAILURE;
 
     assertions.runEnded();
+    stallReport = nullptr;
     temporaryFolder.deleteRecursively();
     return result;
 }

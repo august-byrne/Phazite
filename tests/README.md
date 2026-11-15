@@ -9,6 +9,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | File | What it gives a test |
 |---|---|
 | `TestMain.cpp` | The test runner: doctest inside a JUCE environment. |
+| `StallReport.h` | Where the tests are when a test case takes too long: with `PHAZITE_TEST_STALL_SECONDS` set, its name and (on Windows) the tests' thread's stack, written every so many seconds, for a test file that reaches ctest's limit in CI. |
 | `TestHelpers.h` | The shared includes and helpers; every test file includes it: among them `RenderHost` (runs freezes, bounces and large first saves as the main window does, letting go of the render before it uses what the render said) and `linkFolder()` (a junction on Windows, a symbolic link elsewhere); and `hangTimeout`, how long `runTimersUntil()` and `dispatchMessagesUntil()` wait for a condition unless told otherwise: two minutes, which only a hang reaches. |
 | `TestSong.h` | A project in a temporary folder, open in a project context of its own, with the app's commands, for building a song through the model as the UI does. |
 | `TestClips.h` | MIDI clips, audio clips and notes made through the model, by the song and IDs, for a song made without a project (`phazite::createSong()`). |
