@@ -146,13 +146,18 @@ BeatPosition getPlayStartBeat (const Song& song)
     return BeatPosition::fromBeats ((double) song.getState().getProperty (schema::playStart, 0.0));
 }
 
-void movePlayhead (Song& song, BeatPosition position)
+void setPlayStart (Song& song, BeatPosition position)
 {
     // The song's start isn't written: a project that never played from elsewhere has nothing new to save.
     if (position.inBeats() > 0.0)
         song.getState().setProperty (schema::playStart, position.inBeats(), nullptr);
     else
         song.getState().removeProperty (schema::playStart, nullptr);
+}
+
+void movePlayhead (Song& song, BeatPosition position)
+{
+    setPlayStart (song, position);
 
     auto* session = findPlayingSession (song);
 

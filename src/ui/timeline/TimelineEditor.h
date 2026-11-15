@@ -90,8 +90,8 @@ private:
     bool laneHovered = false;      // the loop's lane, under the pointer
     double loopAnchor = 0.0;       // the beat where the press was, snapped
     double loopStartAtPress = 0.0, loopEndAtPress = 0.0;
-    LoopState loopAtPress;        // all of it, for Escape
-    BeatPosition playheadAtPress; // where the playhead was, for Escape
+    LoopState loopAtPress;                          // all of it, for Escape
+    BeatPosition playheadAtPress, playStartAtPress; // where the playhead was, and where Stop went back to, for Escape
 
     void movePlayhead (const juce::MouseEvent&);
     double getBeatAt (const juce::MouseEvent&) const; // snapped, unless Alt is held

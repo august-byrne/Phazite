@@ -5,8 +5,11 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
+#include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -335,5 +338,54 @@ TEST_CASE ("With a folder or a return selected, Paste puts clips from the first 
     CHECK_FALSE (phazite::getParentFolder (document, added).isValid());
     REQUIRE (phazite::getClips (document, added).size() == 1);
     CHECK (song.rangeOf (phazite::getClips (document, added)[0]).getStart().inBeats() == doctest::Approx (8.0));
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("Pasted clips go to the next track below that holds their kind, or to a track added for them: never notes beside audio")
+{
+    // Paste chose tracks by their order alone: notes copied and pasted with an audio track selected went onto it, beside
+    // its audio, and audio onto a track with an instrument, which silenced it.
+    Song song;
+    auto& document = song.getSong();
+    phazite::test::TemporaryFolder temp;
+    const auto audioTrack = phazite::insertTrack (document, song.tracks[1], nullptr);
+    const auto audio =
+        phazite::importFile (document, audioTrack, phazite::test::writeSound (temp.folder.getChildFile ("Loop.wav"), 1.0), at (0.0));
+    REQUIRE (phazite::isAudioState (phazite::findClipState (document, audio)));
+    phazite::insertMidiClip (document, song.tracks[1], { at (0.0), at (2.0) }, nullptr); // notes there too
+    document.getUndoManager().clearUndoHistory();
+    auto& selection = getSelection (song.context);
+    phazite::test::UndoCheck undo (document);
+
+    // The notes, with the audio track selected: onto a track added for them, after the last.
+    selection.selectOnly (song.clip);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (audioTrack);
+    song.playheadAt (8.0);
+    const auto before = phazite::getTrackIDs (document);
+    undo.command (song.registry, "edit.paste");
+    CHECK (phazite::getClips (document, audioTrack).size() == 1);
+    const auto after = phazite::getTrackIDs (document);
+    REQUIRE (after.size() == before.size() + 1);
+    REQUIRE (phazite::getClips (document, after.back()).size() == 1);
+    CHECK (phazite::isMidiState (phazite::findClipState (document, phazite::getClips (document, after.back())[0])));
+
+    // The audio, with the first track selected, which holds notes: onto the audio track below it.
+    selection.selectOnly (audio);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (song.tracks[0]);
+    song.playheadAt (16.0);
+    undo.command (song.registry, "edit.paste");
+    CHECK (phazite::getClips (document, song.tracks[0]).size() == 1);
+    CHECK (phazite::getClips (document, audioTrack).size() == 2);
+
+    // Nor does a move put a clip beside clips of the other kind.
+    undo.check ("Move Clip",
+                [&]
+                {
+                    const phazite::UndoStep step (document, "Move Clip");
+                    phazite::moveClip (song.context, song.clip, at (32.0), audioTrack);
+                });
+    CHECK (phazite::getClipTrack (document, song.clip) == song.tracks[0]);
     undo.walkBackAndForth();
 }

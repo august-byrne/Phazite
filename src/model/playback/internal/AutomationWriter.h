@@ -33,6 +33,14 @@ public:
     void gestureBegan (const ParameterRef&);
     void gestureEnded (const ParameterRef&);
 
+    // A control's drag taken back (Escape: ParameterHandle::cancelGesture()), as its undo step is rolled back: what its pass
+    // recorded since the grab goes, and the pass is as it was before the grab: in touch, as if never grabbed; in latch, back to
+    // what it held; in write, on from the value before the drag. rememberGrab() notes the pass as the control is grabbed,
+    // just before gestureBegan(). Ended as the drag was, the points it recorded came back as automation (latch), or what write
+    // had recorded since playback started went with the rolled-back step (2026-11-14).
+    void rememberGrab (const ParameterRef&);
+    void gestureCancelled (const ParameterRef&);
+
     // The same by a plug-in's own window (the session tells it): what it writes as it is let go is one "Record
     // Automation" step, as no control's drag holds one.
     void pluginGestureChanged (const ParameterRef&, bool starting);
@@ -43,6 +51,10 @@ public:
     // Whether a pass writes a parameter now, which plays its value set by hand meanwhile: a value set by hand moves no
     // curve's one point then (model/devices/internal/Parameters.h).
     bool isWriting (const ParameterRef&) const;
+
+    // A parameter that its curve now names otherwise (a folder's volume, its fader of the other kind: model/mixer/
+    // internal/Buses.h): a pass that writes it goes on writing it by its new name, so that what was ridden is written.
+    void parameterRenamed (const ParameterRef& from, const ParameterRef& to);
 
     // What sets many values at once sets them meanwhile (model/devices/internal/Parameters.h: ManyValuesSetByHand): no pass
     // punches in for them, and those already writing take none of them.
@@ -63,6 +75,15 @@ private:
     Song& song;
     PlaybackSession& session;
     std::vector<Pass> passes;
+
+    struct Grab
+    {
+        ParameterRef parameter;
+        bool hadPass = false; // a pass wrote it before the grab
+        size_t points = 0;    // and its points then
+    };
+
+    std::vector<Grab> grabs;   // the controls grabbed now (rememberGrab())
     bool settingValue = false; // as a pass starts from its lane's value
     int settingManyValues = 0; // as beginManyValues() and endManyValues() count
 

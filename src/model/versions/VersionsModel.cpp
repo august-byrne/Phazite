@@ -1160,6 +1160,7 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     auto result = mergeSongs (merge.base, song->getState(), merge.theirs, toMergeLines (lines), [song] { return song->makeID(); });
     const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
     makeSongLike (*song, result.song);
+    removeBrokenReferences (*song); // what one side names that the other took away: a send to a return it deleted
     countIDs (*song);
 
     merge.clashes = std::move (result.clashes);

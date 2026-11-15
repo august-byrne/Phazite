@@ -24,6 +24,7 @@ public:
     void beginGesture();
     void setValue (float mix);
     void endGesture();
+    void cancelGesture(); // takes back all the drag changed, leaving nothing to redo (Escape during the drag)
 
     struct Impl;
     explicit MixHandle (std::unique_ptr<Impl>);

@@ -178,7 +178,8 @@ Trial::Trial (Song& s, const juce::String& stepName, std::function<void()> keepW
       name (stepName),
       keepFirst (std::move (keepWhatWasTried))
 {
-    jassert (! isInProgress (s)); // one at a time for a song
+    // One trial with changes at a time for a history: one tried meanwhile is kept first, as a step beginning would keep it.
+    keepOpenTrial (s.getUndoManager());
     getOpenTrials().push_back (this);
 }
 
@@ -214,6 +215,9 @@ void Trial::apply (const std::function<void()>& change, bool fromStart)
 
     if (! hasChanges())
     {
+        // Another trial of the history with changes is kept first, closed, so that each has its own step: begun alongside it,
+        // each counted the other's changes as its own, and one kept or put back the other's with its own (2026-11-14).
+        keepOpenTrial (*undoManager);
         undoManager->beginNewTransaction (name);
         begun = true;
     }

@@ -164,19 +164,18 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
-- **140. Escape doesn't take a drag back in the devices' graphs, on a device's Mix knob, or on a knob's modulation
-  ring.** It does in every part of the time line's editors (`TimelineEditor::keyPressed()`) and on every control linked
-  to a parameter (`ValueSlider`'s `onDragCancelled`, which `ParameterAttachment` answers with
-  `ParameterHandle::cancelGesture()`), the inspector's fields and a chain's key and velocity ranges; and no key runs a
-  command that changes the song while a mouse button is down, anywhere. Why: the graphs have no shared drag code, each
-  editor in `src/ui/devices/` begins its handles' gestures itself (`EqEditor.cpp`, `FilterEditor.cpp`,
-  `DynamicsCurve.cpp`, `DelayEditor.cpp`, `ReverbEditor.cpp`, `SamplerEditor.cpp`, `DrumSamplerEditor.cpp`,
-  `ModulatorEditor.cpp`, `MultibandEditor.cpp`, `LevelHistoryView.cpp` and the effects with one dot); the Mix knob's
-  `MixHandle` (`src/model/mixer/MixHandle.h`) and the ring's `ModulationDrag` (`src/model/modulation/`) have no way to
-  take their step back. Fix: a `graph::HandleDrag` in `DeviceGraph.h` that holds the handles a drag moves, with
+- **140. Escape doesn't take a drag back in the devices' graphs, or on a knob's modulation ring.** It does in every part of
+  the time line's editors (`TimelineEditor::keyPressed()`) and on every slider whose owner can take its drag back
+  (`ValueSlider::onDragCancelled`): controls linked to a parameter (`ParameterHandle::cancelGesture()`), a device's Mix
+  knob (`MixHandle::cancelGesture()`), the top bar's tempo, position and time, the inspector's fields, a chain's key and
+  velocity ranges, the transform bar and the browser's preview volume; and no key runs a command that changes the song
+  while a mouse button is down, anywhere. Why: the graphs have no shared drag code, each editor in `src/ui/devices/`
+  begins its handles' gestures itself (`EqEditor.cpp`, `FilterEditor.cpp`, `DynamicsCurve.cpp`, `DelayEditor.cpp`,
+  `ReverbEditor.cpp`, `SamplerEditor.cpp`, `DrumSamplerEditor.cpp`, `ModulatorEditor.cpp`, `MultibandEditor.cpp`,
+  `LevelHistoryView.cpp` and the effects with one dot); the ring's `ModulationDrag` (`src/model/modulation/`) has no way
+  to take its step back. Fix: a `graph::HandleDrag` in `DeviceGraph.h` that holds the handles a drag moves, with
   `keyPressed()` calling `ParameterHandle::cancelGesture()` on each, used by every graph; `cancelGesture()` on
-  `MixHandle` and `ModulationDrag`, called from `MixAttachment` (`src/ui/mixer/StripParts.cpp`) and `Knob`'s ring drag.
-  Found by the stage-2 tests; narrowed on 2026-11-14.
+  `ModulationDrag`, called from `Knob`'s ring drag. Found by the stage-2 tests; narrowed on 2026-11-14.
 
 ## Saving
 

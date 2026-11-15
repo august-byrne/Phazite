@@ -60,7 +60,8 @@ struct AppScreen
     ui::KeyDispatcher shortcutKeys { commands };
     ProjectSession session { getEngineContext(), services.recentProjects, temp.folder.getChildFile ("Projects"),
                              temp.folder.getChildFile ("Unsaved") };
-    ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
+    juce::Array<juce::MidiMessage> keyboardSent; // what the computer keyboard played, in order
+    ui::ComputerKeyboard keyboard { [this] (const juce::MidiMessage& message) { keyboardSent.add (message); } };
     ui::AppShell shell { services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
                          services.settings,      services.soundPack, services.library, *services.previewer };
     TestWindow window { shell, 1280, 800 };

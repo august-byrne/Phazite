@@ -116,6 +116,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
         showTempoStretch();
     };
     tempoField.onDragEnd = [this] { tempo.endGesture(); };
+    tempoField.onDragCancelled = [this] { tempo.cancelGesture(); }; // Escape: the tempo as it was, nothing to redo
     tempoField.onValueChange = [this]
     {
         tempo.setValue (tempoField.getValue());
@@ -145,7 +146,25 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
 
     for (auto* field : { &positionField, &timeField })
     {
-        field->onDragStart = [this] { pausedForPositionDrag = pausePlayback (projectContext); };
+        field->onDragStart = [this]
+        {
+            playheadAtDrag = getPlayheadBeat (projectContext);
+            playStartAtDrag = getPlayStart (projectContext);
+            pausedForPositionDrag = pausePlayback (projectContext);
+        };
+
+        // Escape during the drag: the playhead where it was, playing on from there if it played, and Stop going back where
+        // it went before (no undo step is involved).
+        field->onDragCancelled = [this]
+        {
+            movePlayhead (projectContext, playheadAtDrag);
+
+            if (std::exchange (pausedForPositionDrag, false))
+                resumePlayback (projectContext);
+
+            setPlayStart (projectContext, playStartAtDrag);
+        };
+
         field->onDragEnd = [this]
         {
             if (std::exchange (pausedForPositionDrag, false))

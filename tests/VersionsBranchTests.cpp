@@ -9,6 +9,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
@@ -544,4 +545,37 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     REQUIRE (waitForVersionHistory (b.s.context));
     checkIDs (*phazite::findSong (b.s.context));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (b.s.context));
+}
+
+TEST_CASE ("A merge leaves out a send the other side added to a return this side deleted, with what modulated it")
+{
+    // Deleting the return took its sends away here; the send the other side added came in with the merge, naming a return
+    // the song hadn't, and Phazite saved what the next opening changed.
+    Branches b;
+    const auto reverb = b.s.addReturn (b.bass, "phaziteReverb");
+    keepVersion (b.s.context, "Reverb");
+
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    b.s.addSend (b.drums, reverb, -12.0f);
+    const auto send = phazite::getSends (*phazite::findSong (b.s.context), b.drums).front();
+    const auto lfo = b.s.addModulator (b.drums, phazite::ModulatorType::lfo);
+    b.s.modulate (lfo, { send, phazite::schema::sendLevelParameter }, 0.5f);
+    const auto drumsSend = keepVersion (b.s.context, "Drums to the reverb");
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+
+    {
+        auto& mainSong = *phazite::findSong (b.s.context);
+        const phazite::UndoStep step (mainSong, "Delete Track");
+        phazite::deleteTracks (mainSong, { reverb }, nullptr);
+    }
+
+    keepVersion (b.s.context, "No reverb");
+    REQUIRE (phazite::startMerge (b.s.context, drumsSend));
+    phazite::finishTickedMerge (b.s.context);
+
+    auto& merged = *phazite::findSong (b.s.context);
+    CHECK_FALSE (phazite::findTrackState (merged, reverb).isValid());
+    CHECK (phazite::getSends (merged, b.drums).empty());
+    checkIDs (merged.getState());
 }

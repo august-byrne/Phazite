@@ -741,6 +741,9 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
         previewer.setVolume ((float) volumeFader.getValue());
         settings.set (Settings::browserPreviewVolume, volumeFader.getValue());
     };
+
+    // Escape during a drag: the fader shows the level from before, which the previews take again.
+    volumeFader.onDragCancelled = [this] { volumeFader.onValueChange(); };
     previewer.setVolume ((float) volumeFader.getValue());
 
     // The filters under the search, what each offers as the search and the others leave it, and Clear.

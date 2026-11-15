@@ -81,6 +81,10 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
 
     ~PanelWindow() override
     {
+        // Closed, or its panel docked again, before it heard that it lost the keyboard: the notes held here end now.
+        if (keys != nullptr)
+            keys->releaseKeys();
+
         keys = nullptr;
         clearContentComponent(); // the panel belongs to the main window
     }

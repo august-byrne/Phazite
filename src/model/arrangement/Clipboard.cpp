@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Clipboard.h"
 #include "SongSelection.h"
+#include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Selection.h"
 #include "internal/Tracks.h"
@@ -13,6 +14,7 @@
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <map>
 #include <optional>
 
 namespace phazite
@@ -233,23 +235,51 @@ namespace
 
         const auto isRange = clipboard.kind == Clipboard::Kind::range;
 
-        const auto trackAt = [&tracks] (int index)
-        { return juce::isPositiveAndBelow (index, (int) tracks.size()) ? tracks[(size_t) index] : TrackID(); };
+        // Each clip's track: its own place from the target down, or the next below that can hold its kind (audio and notes
+        // don't share a track: Clips.h, canTrackHold()), counting what this paste puts on each; or a track added for it.
+        std::vector<TrackID> destinations;
+        std::map<TrackID, bool> given; // whether each track this paste uses takes audio clips
+
+        for (const auto& copied : clipboard.clips)
+        {
+            const auto audio = isAudioState (copied.state);
+            const auto canTake = [&] (TrackID track)
+            {
+                const auto found = given.find (track);
+                return found != given.end() ? found->second == audio : canTrackHold (*song, track, ! audio);
+            };
+
+            TrackID track;
+
+            for (auto index = first + copied.trackOffset; first >= 0 && index < (int) tracks.size() && ! track.isValid(); ++index)
+                if (index >= 0 && canTake (tracks[(size_t) index]))
+                    track = tracks[(size_t) index];
+
+            if (! track.isValid() && first >= 0)
+                if ((track = addTrackForPaste (*song)).isValid())
+                    tracks.push_back (track);
+
+            if (track.isValid())
+                given[track] = audio;
+
+            destinations.push_back (track);
+        }
 
         // Where each lands (a range's clips cut to it): cleared first, so that no pasted clip cuts another.
         const auto landingOf = [&clipboard, isRange, distance] (const Clipboard::CopiedClip& copied)
         { return (isRange ? copied.beats.getIntersectionWith (clipboard.range) : copied.beats).movedBy (distance); };
 
-        for (const auto& copied : clipboard.clips)
-            if (const auto track = trackAt (first + copied.trackOffset); track.isValid())
-                clearClipsIn (*song, track, landingOf (copied));
+        for (size_t i = 0; i < clipboard.clips.size(); ++i)
+            if (destinations[i].isValid())
+                clearClipsIn (*song, destinations[i], landingOf (clipboard.clips[i]));
 
         // Each a copy, not an alias, as Duplicate makes them: made where it was, cut to the range, and moved to where it lands.
         std::vector<ClipID> pasted;
 
-        for (const auto& copied : clipboard.clips)
+        for (size_t i = 0; i < clipboard.clips.size(); ++i)
         {
-            const auto track = trackAt (first + copied.trackOffset);
+            const auto& copied = clipboard.clips[i];
+            const auto track = destinations[i];
 
             if (! track.isValid())
                 continue;
@@ -283,10 +313,9 @@ namespace
         {
             std::vector<TrackID> landed;
 
-            for (int i = 0; i < (int) tracks.size(); ++i)
-                if (std::any_of (clipboard.clips.begin(), clipboard.clips.end(),
-                                 [i, first] (const Clipboard::CopiedClip& copied) { return copied.trackOffset == i - first; }))
-                    landed.push_back (tracks[(size_t) i]);
+            for (const auto track : tracks)
+                if (std::find (destinations.begin(), destinations.end(), track) != destinations.end())
+                    landed.push_back (track);
 
             if (landed.empty())
                 landed.push_back (target);

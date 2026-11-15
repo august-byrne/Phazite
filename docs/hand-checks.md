@@ -121,6 +121,34 @@ Needs Bitwig Studio or Studio One (a demo will do).
 | E12 | The presets added since phase 2 (the Sampler's, the FM synth's, the classic drum machines' kits, the Chorus's, the dark synthwave set, the Exciter's and the Vinyl's), each played alone | Each sounds like its name, at an even level | Checked by the owner |
 | E13 | Phase 2's steps: automation lanes and write modes, modulators and macros, containers and presets, the Devices view and the inspector, the audio clip editor, the chord lane, the mixer's sends, Out menu and sidechains, freeze, bounce and stems, plug-in windows and presets, the wavetable synth, the filter types, Low Latency, time-stretching | Each step's "Done when" as it was written ([archive](archive/roadmap-2026-11-13.md)) | Checked by the owner |
 
+## What stage 1 fixed (2026-11-14)
+
+Each has its test; these rows are what a test can't hear, see on a real screen or try with another program.
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| F1 | Play a held pad or a sine clip; press Stop in mid-note, click elsewhere in the ruler while it plays, and loop a part that cuts it | No click at the stop, at the jump or at the loop's end | |
+| F2 | Put a plug-in with a long look-ahead on the master, turn the click on with a count-in, and record MIDI to it | The click is in time with the song, and the recorded notes land on their beats | |
+| F3 | Hold a key on a MIDI keyboard and unplug it; hold a key and select another track while the song plays a long note on the first | The held note ends; the song's own note plays on | |
+| F4 | With a real effect plug-in on a return (a limiter, a wet reverb), end its PhaziteHost.exe in Task Manager while the song plays, then reload it | It fades out without a click and comes back without one; nothing passes through dry | |
+| F5 | Export a song that plays a sampler plug-in which streams from disk | No note is missing: the plug-in was told that it renders offline | |
+| F6 | End Phazite.exe in Task Manager with plug-ins loaded | No PhaziteHost.exe is left | |
+| F7 | Record or import a few gigabytes into a new project, then Save; press Cancel half-way, then Save again | A progress window shows; Cancel leaves no folder; the second save finishes | |
+| F8 | With Auto Save on, open a project from a USB drive, change it, pull the drive out, then quit | The question offers Save As; saving elsewhere then quits | |
+| F9 | Keep a project in a OneDrive or Dropbox folder and Save As to another drive | Every file of Audio and Versions is in the copy | |
+| F10 | Save a Drum Sampler preset with samples of your own; copy the preset and its "Sounds" folder to another PC and load it | The pads play; the preset file holds no user name | |
+| F11 | Double-click a `.phazite` file in Explorer while Phazite's Settings are open | It opens once Settings closes | |
+| F12 | Make a reversed clip, then make the project's Cache folder read-only and change the clip; make it writable again | The clip shows a warning bar and the audio clip editor says the audio couldn't be prepared; then it renders by itself | |
+| F13 | On a precision touchpad: pinch in the playlist and the piano roll; scroll with two fingers over a note's stem in the velocity lane, then press Ctrl+Z once | The view zooms about the pointer; the whole burst is undone by one Undo | |
+| F14 | Drag a fader while the song plays with its track in Latch, and press Escape before letting go; the same with the loop's edge in the ruler and with a section | Each is back where it was, nothing is written and nothing is left to undo | |
+| F15 | Drag an audio file over an instrument track, a folder and a return | The line shows where a new track will be made, and the hint bar says why | |
+| F16 | Close Phazite maximized on a second monitor and open it again; unplug that monitor and open it again | It opens where it was; then on the main screen, whole | |
+| F17 | Press Escape during a long stems export; then close the export's window during one | Escape asks first; closing stops it and a notice says so | |
+| F18 | With the computer keyboard on, give the lower panel a window of its own and play A S D F in it; close that window with a key held | The notes play, and the held note ends | |
+| F19 | Remove a drum sampler that has two pads on tracks of their own, one of them with a clip; press Ctrl+Z | The empty pad's track goes, the other stays as a plain track; Undo brings both back as pads | |
+| F20 | Switch a bus with volume automation to a plain folder and back, while it plays | The automation plays throughout | |
+| F21 | After the first push: read CI's `linux-clang` job, the nightly `windows-asan` job and the real-time audit on Linux | Each ran, and what it found is fixed or in known-bugs.md | |
+
 ## Known bugs that need an ear or a real plug-in
 
 Numbers are those of [known-bugs.md](known-bugs.md).

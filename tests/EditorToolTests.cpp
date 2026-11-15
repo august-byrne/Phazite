@@ -128,6 +128,35 @@ TEST_CASE ("A Shift+click or Ctrl+click on a track far from the one selected lea
     phazite::test::deliverChanges();
     CHECK (screen.selection().getTracks() == std::vector { tracks[1] });
     CHECK (getRowsScroll (screen.playlist) < scrolled);
+
+    // The command onto a track half hidden at the lanes' foot: it comes into view whole. Counted in view by any pixel of it, it
+    // stayed half hidden (a reviewer, 2026-11-14).
+    scrollTo (0.0);
+    auto top = 0, half = -1, bottom = 0;
+
+    for (size_t i = 0; i < tracks.size(); ++i)
+    {
+        const auto height = phazite::ui::getTrackHeight (phazite::getTrackRow (screen.context, tracks[i]).value());
+
+        if (top < screen.lanes->getHeight() && top + height > screen.lanes->getHeight())
+        {
+            half = (int) i;
+            bottom = top + height;
+            break;
+        }
+
+        top += height;
+    }
+
+    REQUIRE (half > 0);
+    mouse.click (onHeader (tracks[(size_t) half - 1]));
+    phazite::test::deliverChanges();
+    REQUIRE (getRowsScroll (screen.playlist) == doctest::Approx (0.0));
+    REQUIRE (screen.registry.invoke ("track.selectNext"));
+    phazite::test::deliverChanges();
+    CHECK (screen.selection().getTracks() == std::vector { tracks[(size_t) half] });
+    CHECK (getRowsScroll (screen.playlist) > 0.0);
+    CHECK (getRowsScroll (screen.playlist) + screen.lanes->getHeight() >= bottom);
 }
 
 TEST_CASE ("A clip dragged onto a track of the other kind, a folder or a return stays on a track it can go on, the hint bar saying "
@@ -190,6 +219,34 @@ TEST_CASE ("A clip dragged onto a track of the other kind, a folder or a return 
     dragOnto (audio, screen.tracks[0], screen.tracks[1], "An audio clip can't go on a track of notes");
     dragOnto (notes, screen.tracks[1], screen.tracks[0], "A note clip can't go on a track of audio");
     dragOnto (audio, screen.tracks[0], folder, "A folder holds no clips");
+
+    // Copies of both, Ctrl+dragged a row down: the audio's copy would go beside the notes, which stay where they are. Counted
+    // as leaving their track, they let it go there (a reviewer, 2026-11-14).
+    {
+        const auto audioStart = screen.get (audio).range.getStart().inBeats();
+        mouse.click (rowAt (screen.tracks[0], audioStart + 0.5));
+        mouse.click (rowAt (screen.tracks[1], screen.get (notes).range.getStart().inBeats() + 0.5), ctrl);
+        phazite::test::deliverChanges();
+        REQUIRE (screen.selection().getClips().size() == 2);
+
+        undo.check ("copies dragged a row down, where the audio's can't go",
+                    [&]
+                    {
+                        mouse.press (rowAt (screen.tracks[0], audioStart + 0.5), ctrl);
+                        mouse.dragTo (rowAt (screen.tracks[0], audioStart + 0.5).translated (0, 5)); // down alone: no copy yet
+                        mouse.dragTo (rowAt (screen.tracks[1], audioStart + 0.5));
+                        CHECK (screen.playlist.getDragReadout().contains ("An audio clip can't go on a track of notes"));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        for (const auto& clip : phazite::getClips (screen.context, screen.tracks[1]))
+            CHECK (clip.kind == phazite::ClipType::midi);
+
+        screen.selection().clear();
+        phazite::test::deliverChanges();
+    }
 
     // An empty track without an instrument takes either; then it is the audio's.
     undo.check ("an audio clip onto an empty track",

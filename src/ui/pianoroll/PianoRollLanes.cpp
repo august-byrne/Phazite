@@ -482,6 +482,10 @@ void PianoRoll::VelocityLane::mouseWheelMove (const juce::MouseEvent& e, const j
         return;
     }
 
+    // A trackpad's momentum after the fingers lift changes nothing: only what the hand turned does.
+    if (details.isInertial)
+        return;
+
     // By whole notches: a trackpad's parts of one are added up, rather than each moving the velocities a whole step, which ran
     // them to 127 or 1 in a short scroll.
     if (const auto notches = takeWheelSteps (details.deltaY, 1.0, wheelRest); notches != 0)
@@ -527,6 +531,7 @@ PianoRoll::TransformBar::TransformBar (PianoRoll& r)
     {
         slider->setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, controlHeight - Space::xs);
         slider->onValueChange = [this] { controlsChanged(); };
+        slider->onDragCancelled = [this] { controlsChanged(); }; // Escape: the preview with the value from before the drag
     }
 
     option.onClick = [this] { controlsChanged(); };

@@ -16,6 +16,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/NotesModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -659,4 +660,62 @@ TEST_CASE ("The undo history keeps the steps its setting says, however much each
         CHECK (phazite::Song::getUndoSteps() == phazite::Song::minimumUndoSteps);
         phazite::Song::setUndoSteps (phazite::Song::defaultUndoSteps);
     }
+}
+
+TEST_CASE ("Two trials of a song's history never share a step: a wheel's burst and a Swap tried meanwhile are each a step of their "
+           "own")
+{
+    // Begun alongside each other, each counted the other's changes as its own: the burst's next moves went into the Swap's step,
+    // which putting the Swap back took away with them, and a Swap begun while a burst had changes stopped on an assertion
+    // (a reviewer, 2026-11-14). Now a trial beginning or trying something keeps another's first, as a step beginning does.
+    phazite::test::TestSong song;
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    const auto note = phazite::addNote (song.context, clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 60);
+    REQUIRE (note.isValid());
+    auto& target = *phazite::findSong (song.context);
+    target.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (target);
+    const auto velocity = [&] { return phazite::getNote (song.context, note).value().velocity; };
+    const auto tryName = [&] (phazite::Trial& trial, const juce::String& name)
+    { trial.apply ([&] { phazite::setTrackName (target, song.firstTrack, name); }, true); };
+    const auto history = [&] { return target.getUndoManager().getUndoDescriptions().joinIntoString (", ").toStdString(); };
+
+    SUBCASE ("A Swap open with nothing tried, a burst, a try, and the burst going on")
+    {
+        undo.checkSeveral ("a burst and a try, taking turns",
+                           [&]
+                           {
+                               phazite::Trial swap (target, "Swap Preset", nullptr);
+                               phazite::VelocityWheel wheel (song.context);
+                               wheel.change ({ note }, 4);
+                               tryName (swap, "Tried");    // keeps the burst first
+                               wheel.change ({ note }, 4); // keeps the try first
+                               wheel.end();
+                               swap.putBack(); // kept already: nothing to put back
+                           });
+
+        CHECK (velocity() == 68);
+        CHECK (phazite::getTrackName (target, song.firstTrack) == "Tried");
+        CHECK (history() == "Change Velocity, Swap Preset, Change Velocity");
+    }
+
+    SUBCASE ("A burst with changes, then a Swap begun, tried and put back")
+    {
+        const auto nameBefore = phazite::getTrackName (target, song.firstTrack);
+        undo.checkSeveral ("a burst, then a Swap",
+                           [&]
+                           {
+                               phazite::VelocityWheel wheel (song.context);
+                               wheel.change ({ note }, 4);
+                               phazite::Trial swap (target, "Swap Preset", nullptr); // keeps the burst first
+                               tryName (swap, "Tried");
+                               swap.putBack();
+                           });
+
+        CHECK (velocity() == 64);
+        CHECK (phazite::getTrackName (target, song.firstTrack) == nameBefore);
+        CHECK (history() == "Change Velocity");
+    }
+
+    undo.walkBackAndForth();
 }

@@ -80,7 +80,14 @@ void AutomationWriter::playbackStarted()
         {
             if (getModeOf (song, ref) == AutomationMode::write && findPass (ref) == nullptr)
             {
-                if (! step.has_value())
+                // Begun only for a punch-in that sets a value (as punchIn() does): beginning a step keeps an open trial
+                // (Swap), which nothing else here changes.
+                const auto* lane = session.getPlayer().findCurve (ref);
+                const auto setByHand = getValueSetByHand (song, ref);
+                const auto value = lane != nullptr ? lane->getValueAt (session.getPlayhead().inBeats())
+                                                   : session.getPlayer().getPlayedValue (ref, false).value_or (setByHand);
+
+                if (! step.has_value() && ! juce::exactlyEqual (value, setByHand))
                     step.emplace (song, "Record Automation");
 
                 punchIn (ref, AutomationMode::write, false);
@@ -140,6 +147,16 @@ void AutomationWriter::gestureEnded (const ParameterRef& parameter)
 bool AutomationWriter::isWriting (const ParameterRef& parameter) const
 {
     return std::any_of (passes.begin(), passes.end(), [&parameter] (const Pass& pass) { return pass.parameter == parameter; });
+}
+
+void AutomationWriter::parameterRenamed (const ParameterRef& from, const ParameterRef& to)
+{
+    if (auto* pass = findPass (from); pass != nullptr && from != to)
+    {
+        session.getPlayer().setWriting (from, false);
+        session.getPlayer().setWriting (to, true);
+        pass->parameter = to;
+    }
 }
 
 AutomationWriter::Pass* AutomationWriter::findPass (const ParameterRef& parameter)
@@ -245,17 +262,54 @@ void AutomationWriter::pluginGestureChanged (const ParameterRef& parameter, bool
 
 void AutomationWriter::parameterChanged (const ParameterRef& parameter, float valueSetByHand)
 {
-    // A control moved by hand: written if its pass is on, or if its track is in latch or write (touch needs it grabbed).
-    if (settingValue || settingManyValues > 0 || ! session.isPlaying() || ! parameter.isValid())
+    // A control moved by hand: written if its pass is on, or if its track is in latch or write (touch needs it grabbed). What
+    // sets many values at once (a preset) begins no pass, but one that runs writes what it set, as the engine plays it.
+    if (settingValue || ! session.isPlaying() || ! parameter.isValid())
         return;
 
     auto* pass = findPass (parameter);
 
-    if (pass == nullptr)
+    if (pass == nullptr && settingManyValues == 0)
         if (const auto mode = getModeOf (song, parameter); mode == AutomationMode::latch || mode == AutomationMode::write)
             pass = punchIn (parameter, mode, true);
 
     if (pass != nullptr)
         record (*pass, valueSetByHand);
+}
+
+void AutomationWriter::rememberGrab (const ParameterRef& parameter)
+{
+    std::erase_if (grabs, [&parameter] (const Grab& grab) { return grab.parameter == parameter; });
+    const auto* pass = findPass (parameter);
+    grabs.push_back ({ parameter, pass != nullptr, pass != nullptr ? pass->points.size() : 0 });
+}
+
+void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
+{
+    const auto found = std::find_if (grabs.begin(), grabs.end(), [&parameter] (const Grab& grab) { return grab.parameter == parameter; });
+
+    if (found == grabs.end())
+        return;
+
+    const auto grab = *found;
+    grabs.erase (found);
+    auto* pass = findPass (parameter);
+
+    if (pass == nullptr)
+        return;
+
+    // A pass the grab began (touch, or latch until then): gone, as if the control was never grabbed.
+    if (! grab.hadPass)
+    {
+        session.getPlayer().setWriting (parameter, false);
+        std::erase_if (passes, [&parameter] (const Pass& each) { return each.parameter == parameter; });
+        return;
+    }
+
+    // One that wrote before (latch, write): the moves since go, and it goes on from where it was.
+    if (pass->points.size() > grab.points)
+        pass->points.resize (std::max<size_t> (1, grab.points));
+
+    pass->held = false;
 }
 } // namespace phazite

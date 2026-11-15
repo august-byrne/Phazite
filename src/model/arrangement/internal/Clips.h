@@ -98,7 +98,8 @@ std::vector<ClipID> copyClips (Song&, const std::vector<ClipID>&, bool asAliases
 // playhead is there already), or no clip linked to them does.
 std::optional<double> getLinkedPlayBeat (const Song&, const std::vector<ClipID>& shown, double songBeat);
 
-// Moves a clip to start at a beat (not before the song does) on a track, keeping its length.
+// Moves a clip to start at a beat (not before the song does) on a track, keeping its length. Onto another track only if
+// that track can hold it (canTrackHold()); else nothing changes.
 void moveClip (Song&, ClipID, BeatPosition start, TrackID);
 
 // Moves a clip's start or end to a beat, leaving its content where it is. A clip can't start before its

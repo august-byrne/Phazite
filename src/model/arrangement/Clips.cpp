@@ -553,9 +553,12 @@ std::vector<ClipID> copyClips (Song& song, const std::vector<ClipID>& clips, boo
 
 void moveClip (Song& song, ClipID clip, BeatPosition start, TrackID track)
 {
-    // To its new start (playing what it did) and track.
+    // To its new start (playing what it did) and track: another only if it can hold it.
     if (auto clipState = findClipState (song, clip); clipState.isValid())
     {
+        if (clipState.getParent() != findTrackState (song, track) && ! canTrackHold (song, track, isMidiState (clipState)))
+            return;
+
         clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), &song.getUndoManager());
         placeClipState (song, clipState, track);
     }

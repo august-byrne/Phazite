@@ -132,6 +132,15 @@ namespace strip
         };
 
         slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); }; // a key press: a step of its own
+
+        // Escape during the drag: the mix as it was, nothing to redo.
+        if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+            valueSlider->onDragCancelled = [this]
+            {
+                handle.cancelGesture();
+                dragging = false;
+            };
+
         update();
     }
 

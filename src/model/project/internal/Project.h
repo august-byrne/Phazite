@@ -2,6 +2,7 @@
 // A Phazite project: a folder that holds the project file and everything the project uses.
 #pragma once
 
+#include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -47,6 +48,21 @@ inline constexpr double maxSongBeats = 1.0e6;
 // where a file couldn't be copied in). No undo steps.
 void makeConsistent (Song&);
 
+// Whether an entry of a project's folders is a link that leads elsewhere, which a copy of the project leaves out with what
+// it leads to (a symbolic link or a junction: anywhere, or round to the project itself), given what its isSymbolicLink() and
+// getLinkedTarget() said. On Windows isSymbolicLink() is true for any reparse point, a folder OneDrive or Dropbox keeps
+// among them, whose target is itself: that is the user's, and copied. JUCE workaround W35 (docs/juce-workarounds.md).
+bool isLinkElsewhere (const juce::File& entry, bool isSymbolicLink, const juce::File& linkedTarget);
+
+// Whether a folder is a copy a first save or Save As left when Phazite stopped in the middle of it, which the next one into
+// that folder moves to the system's trash (Project::moveTo()): named "<name> (saving)", with Phazite's marker in it
+// (Project::copyMarkerName) from before this run started, and no project file in it, so never a project the user named so.
+bool isLeftoverCopy (const juce::File& folder);
+
+// How a leftover copy is removed, for the tests, which delete it so that a test run fills nobody's trash: null, by moving it
+// to the system's trash. Set on the message thread; a removal already running keeps the way it began with.
+void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
+
 //==============================================================================
 // The project folder:
 //   <name>.phazite   the project file: the song (Schema.h)
@@ -54,9 +70,10 @@ void makeConsistent (Song&);
 //   Generated/       sounds made by Phazite's generators
 //   Renders/         exports: the song, and its stems
 //   Backups/         earlier versions of the project file (newest numBackupsToKeep), and the autosave
-//   Cache/           what Phazite can make again: frozen tracks' files (model/mixer/internal/Freeze.h) and renders of
-//                    stretched audio clips (the song's cache folder). Closing the project deletes what nothing in it uses
-//                    any more.
+//   Cache/           frozen tracks' files (model/mixer/internal/Freeze.h) and renders of stretched audio clips (the song's
+//                    cache folder). Closing the project deletes what nothing in it uses any more. Only the clips' renders
+//                    can always be made again: a frozen track's file may be all that is left of a plug-in this computer
+//                    hasn't, so a copy of the project never leaves one behind.
 //   Versions/        the versions of the song the user saved, and their branches (model/versions/; Schema.h:
 //                    schema::versions), once there is one
 //
@@ -174,10 +191,11 @@ public:
     // returns nothing; more is copied on a background thread (known bug 90: the message thread copied gigabytes of
     // recordings), which this returns as a TrackRender: its progress window's, whose deletion cancels it, leaving nothing
     // behind and without calling back. Message thread; the project must outlive what it returns.
-    // The copy takes no link inside those folders, nor what it leads to; a file of the Cache folder that goes or changes
-    // while it copies is left behind, as Phazite makes it again. Its "(saving)" folder holds a marker file (copyMarkerName),
-    // which proves it Phazite's: the next first save or Save As into that folder deletes one a run that crashed left there
-    // (marked before this run started), and nothing else.
+    // The copy takes no link inside those folders, nor what it leads to (isLinkElsewhere()); a clip's render in the Cache
+    // folder that goes or changes while it copies is left behind, as Phazite renders it again, and nothing else is (a frozen
+    // track's file may be all that is left of a plug-in). Its "(saving)" folder holds a marker file (copyMarkerName), which
+    // proves it Phazite's: the next first save or Save As into that folder moves one a run that crashed left there (marked
+    // before this run started, with no project file in it) to the system's trash, in the background, and nothing else.
     std::unique_ptr<TrackRender> moveTo (const juce::File& parentFolder, const juce::String& name,
                                          std::function<void (const juce::Result&)> onFinished);
     static constexpr juce::int64 copyAtOnceBytes = (juce::int64) 8 << 20;
@@ -193,6 +211,10 @@ private:
 
     class BackgroundWriter; // one file at a time; its destructor waits for the one under way
     std::unique_ptr<BackgroundWriter> autosaveWriter;
+
+    // The copies a save that never finished left beside one, moved to the trash in the background as the next first save or
+    // Save As goes there (Project.cpp: removeLeftoverCopies()).
+    mutable BackgroundJobs leftoverRemovals { "Phazite leftover copies", 1, juce::Thread::Priority::low };
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
     juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
 

@@ -482,6 +482,7 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
     loopDragged = false;
     loopAtPress = getLoopState (editor.getContext());
     playheadAtPress = editor.getPlayheadBeat();
+    playStartAtPress = getPlayStart (editor.getContext());
 
     // A press below the loop's lane takes the playhead there, and a drag takes it along, snapping to the grid (Alt places it
     // freely). While it is held the song is silent, paused where it was if it played, and it plays on from where the
@@ -591,11 +592,17 @@ bool TimelineRuler::cancelDrag()
 
         // While a take records, the press alone moved the playhead, ending the take there (phazite::movePlayhead()): taken
         // back, it would end the next one too.
-        if (! isRecording (editor.getContext()))
-            editor.movePlayheadTo (playheadAtPress);
+        if (isRecording (editor.getContext()))
+            return true;
+
+        // The playhead where it was, playing on from there if it played; then where Stop goes back to, which moving the
+        // playhead moved too (while it played, the place it started from, not where it was).
+        editor.movePlayheadTo (playheadAtPress);
 
         if (std::exchange (pausedForDrag, false))
             resumePlayback (editor.getContext());
+
+        setPlayStart (editor.getContext(), playStartAtPress);
 
         return true;
     }

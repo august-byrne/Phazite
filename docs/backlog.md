@@ -56,7 +56,6 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Short fades at Stop, at the loop's end and at a jump, where audio is cut now | `src/engine/core/Engine.cpp` | S | 1 | engine 10 |
 | Mute and solo silence a strip's output only, its instruments and effects playing on (which also ends known bug 78) | `src/engine/core/Engine.cpp` | M | 4 | plan |
 | Wider notes: a MIDI channel, pitch bend, controllers, aftertouch and poly pressure, program change | `src/devices/core/Processor.h` | L | 5 | engine 12, plugin-hosting 7 |
 | Stretched, pitched and reversed clips heard at once, stretched as they play, instead of silent until their render is done | `src/model/arrangement/ClipRenders.cpp` | L | 5 | model-arrangement 4, product-gaps 3 |
@@ -67,20 +66,21 @@ and nothing is listed in both.
 | The click: a level to set and an output to choose; audio files of more than two channels played whole | `src/engine/transport/Click.cpp` | — | — | engine 15 |
 | Files at another rate than the engine's converted once into the song's cache, if many such clips at once ever weigh on a song | `src/engine/audio/Resampler.cpp` | — | — | performance audit, DSP audit |
 | A key to its sound measured with a wired output (the target is under 15 ms), and the whole start timed, by hand | `docs/hand-checks.md` | — | 3 | performance audit |
+| A MIDI input that closes ends only the notes it held: live notes don't carry their input, so every note held live ends | `src/engine/core/Engine.cpp` | S | — | plan |
+| An export started while a block is stalled fails after a limit, saying that playback is busy, where it now waits for the block | `src/model/playback/PlaybackSession.cpp` | S | — | plan |
 
 ## Plug-in hosting
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Plug-ins told that a render is offline | `src/host/core/Instance.cpp` | (M) | 1 | plugin-hosting 6 |
-| A late, busy or crashed effect faded to silence, in time with the song, instead of its input passed through dry | `src/model/plugins/SandboxedProcessor.cpp` | (M) | 1 | plugin-hosting 13 |
-| No helpers or shared memory left behind after a crash of Phazite's; the helper's platform code for macOS and Linux | `src/host/core/Platform.cpp` | S | 1 | plugin-hosting 15 |
+| The helper's platform code for macOS, and its Linux code tried by a person: the watch of the parent that ends a helper with Phazite, and shared memory unlinked once opened, are built and run only by the tests | `src/host/core/Platform.cpp` | S | — | plugin-hosting 15 |
 | About twenty VST3s tried by hand | `docs/hand-checks.md` | M | 3 | product-gaps 7 |
 | Channels, pitch bend, controllers and pressure to plug-ins, SysEx, and MIDI out of them | `src/model/plugins/SandboxedProcessor.cpp` | L | 5 | plugin-hosting 7, product-gaps 2 |
 | Multi-out plug-ins, and plug-ins that aren't stereo | `src/host/core/Instance.cpp` | L | 7 | plugin-hosting 7, product-gaps 4 |
 | A merge of two edits inside one plug-in, offered and never done by itself | `src/model/versions/SongMerge.cpp` | — | — | format audit |
 | The knob values of a plug-in that wasn't playing as a version was saved | `src/model/plugins/PluginInstances.cpp` | — | — | format audit |
 | The files a plug-in loads by itself kept with the project. Not planned: nothing outside the plug-in knows them | `src/model/plugins/PluginInstances.cpp` | — | — | format audit |
+| A plug-in's two-step parameters shown as switches: the helper says which they are, and `ParameterHandle::getInfo()` gives nothing for plug-ins | `src/model/devices/ParameterHandle.cpp` | S | — | plan |
 
 ## Song model
 
@@ -88,10 +88,12 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| An undo depth to set (about 30 steps in practice now) | `src/model/base/Song.cpp` | (S) | 1 | model-project-services 10 |
 | Backups kept by age, not by a count of ten that Auto Save turns over in under two hours | `src/model/project/Project.cpp` | S | 4 | model-project-services 6 |
 | A project and its versions keep no full path that can hold the user's name: an audio file whose copy into the project failed, a plug-in's file in a per-user folder | `src/model/base/internal/Schema.h` | — | — | format audit |
 | The formats named and versioned when compatibility starts: a file that names the store's format, its version and its hash, room for a pack's entries to grow, a format name and version on the project file | `src/model/versions/PieceStore.cpp` | (L) | 8 | format audit, product-gaps 12 |
+| Save As copies the project's folders in the background with progress, as the first save does | `src/model/project/Project.cpp` | S | — | plan |
+| A preset's Sounds folder swept of the files its preset no longer names | `src/model/presets/Presets.cpp` | S | — | plan |
+| The undo history's depth in the Settings window, which needs a General tab; and its memory measured in a large song, as it keeps its 1000 steps whatever their size | `src/ui/shell/SettingsPanel.cpp` | S | — | plan |
 
 ### Recording
 
@@ -114,6 +116,7 @@ and nothing is listed in both.
 | Notes and clips found by an index, and linked clips that share their notes instead of each keeping a copy | `src/model/notes/Notes.cpp` | L | 5 | model-arrangement 5 |
 | Duplicate Track makes clips of its own, not clips linked to the original's (a decision to take) | `src/model/arrangement/Tracks.cpp` | — | — | model-arrangement 9 |
 | Warp markers written into and read from DAWproject files | `src/model/project/DawProject.cpp` | — | — | recording audit |
+| DAWproject import of what it now reports as left out: automation, sends, groups as folders, time-signature changes, clips with more than two warps | `src/model/project/DawProject.cpp` | M | — | plan |
 
 ### Mixer, automation and presets
 
@@ -189,8 +192,6 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| The main window remembers its size, place, monitor and whether it was maximised | `src/app/MainWindow.cpp` | S | 1 | ui-shell-browser 0 |
-| Esc or the window's close button asks before it cancels a running export | `src/ui/shell/ExportPanel.cpp` | (M) | 1 | ui-shell-browser 8 |
 | The Account button, which does nothing, taken out of the activity bar until it does something | `src/ui/shell/ActivityBar.cpp` | — | — | ui-shell-browser 14 |
 | Secondary windows that don't block the main one: Settings, the plug-in scan, Chord Progressions and the rest | `src/app/MainWindow.cpp` | M | 5 | ui-shell-browser 2, ui-core-mixer-app 6 |
 | One Settings window that holds what is spread over three tabs and four menus | `src/ui/shell/SettingsPanel.cpp` | L | 5 | ui-shell-browser 9 |
@@ -202,10 +203,9 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Clean Up Unused Audio counts what the backups, the autosave and the file as saved play | `src/model/project/UnusedAudio.cpp` | S | 1 | model-project-services 13 |
-| DAWproject import: a report of what a file held that Phazite left out, and files written by other DAWs in the tests | `src/model/project/DawProject.cpp` | M | 1 | model-project-services 4, tests-model 12 |
 | Updates and the installer signed: the update file's signature checked with a key built into Phazite, the installer's with Windows, and the file held from its check to its start | `src/services/Updates.cpp` | M | 8 | model-project-services 7, tests-model 14, product-gaps 15 |
 | The rescan of the MIDI inputs every four seconds taken off the message thread; what the autosave costs on the message thread measured apart | `src/model/engine/AudioIO.cpp` | — | — | performance audit |
+| The browser library's loop check keyed by volume and file identifier: an inode or an NTFS file index alone can be shared by folders on different volumes, so a linked folder can be skipped | `src/services/Library.cpp` | S | — | plan |
 
 ## Tests
 
@@ -215,7 +215,6 @@ what is left of them, and what came up while they were built.
 | Item | Where | Size | Stage | Status | Source |
 |---|---|---|---|---|---|
 | The nets that run only on a push or at night run once, and what they find is fixed: CI's Linux builds with ASan, UBSan and TSan, the UBSan reports and the helper's sanitizer reports, the real VST3s' targets, `windows-profile` in CI, `PhaziteStarts`; and the nightly workflow (the long run under `linux-asan` and `linux-tsan`, the fuzzer and random songs with many rounds, the benchmark gates), which has never run | `.github/workflows/nightly.yml` | M | 2 | Open | plan |
-| The allocation guard, and the performance gates' allocation counts, on Linux too, and with the engine on more than one thread: both count in Windows Debug builds only | `tests/AudioThreadMonitor.h` | M | 2 | Open | tests-infrastructure 3, tests-infrastructure 4 |
 | The long run over songs of several configurations (audio clips, plug-ins in helpers, containers, a tempo map), not the one busy song of eight tracks | `tests/LongRun.cpp` | S | — | Open | tests-infrastructure 14 |
 | The benchmark gates' bounds for GCC's optimised builds, so that they can run on Linux too: today they hold for MSVC's alone | `tests/BenchmarkGates.cpp` | S | — | Open | plan |
 | The failure paths of saving and recovery: a save that fails, a first save that fails and leaves its folder, undo across view-state changes | `tests/ProjectTests.cpp` | — | 2 | Open | model-project-services 14, tests-model 8 |
@@ -255,9 +254,7 @@ ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| CI builds `windows-profile`, the preset the README names; its jobs have time limits; the version comes from the tag | `.github/workflows/ci.yml` | S | 1 | build-ci-tools 10, docs 7 |
-| Precompiled headers for JUCE's module headers in Phazite's own files (a full build is about 5,300 compile-seconds, most of it those headers read again) | `cmake/PhaziteHelpers.cmake` | M | 2 | build-ci-tools 4 |
-| A Clang build with static analysis, and ASan on Windows; after them macOS and a measure of coverage | `CMakePresets.json` | M | 2 | build-ci-tools 3, tests-infrastructure 13 |
+| The `windows-asan` preset built and run on a PC with the x64 ASan component (`tools\setup-windows.cmd` installs it), and what it finds fixed; the analyzer checks turned off in `.clang-tidy`, and Clang's own warnings, triaged and then made errors; after them macOS and a measure of coverage | `CMakePresets.json` | M | — | build-ci-tools 3, tests-infrastructure 13 |
 | Each layer a library of its own, so that the build proves the layers and the architecture check doesn't only count them | `CMakeLists.txt` | L | 5 | build-ci-tools 7 |
 | The size of files counted by the architecture check, as phase A2's limit of 1,000 lines isn't | `tools/check-architecture.sh` | S | 5 | docs 10 |
 | The 33 colours, font sizes and corner radii written as literals in `src/ui` and `src/app` moved into the design tokens, taking the `ui-design-literals` budget to 0 (`sh tools/check-architecture.sh --list ui-design-literals` lists them) | `src/ui/theme/DesignTokens.h` | M | — | tests-ui 8 |
@@ -266,3 +263,4 @@ ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 | Linux for a beta: PipeWire or JACK beside ALSA, HTTPS, install rules | `CMakeLists.txt` | L | 8 | build-ci-tools 5 |
 | The installer's silent update tested, and an uninstaller that minds a helper still running | `tools/test-installer.ps1` | S | 8 | build-ci-tools 6 |
 | The pins made whole: clang-format by its hash, `format.sh` warning of another version, action and submodule pins refreshed by a bot, a SECURITY.md | `tools/format.sh` | — | — | build-ci-tools 9 |
+| The real-time audit's allocation stacks under the sanitizers, where it only counts | `tests/AudioThreadMonitor.cpp` | S | — | plan |

@@ -64,9 +64,11 @@ public:
     // each time this is asked (the playlist asks while it shows any).
     const std::vector<ClipID>& getFailedClips() const noexcept { return failedClips; }
 
-    // What its timer does every two seconds while any failed: tries again each whose source changed, or whose folder can
-    // be written now. Called by a test, at once.
+    // What its timer does every two seconds while any failed: tries again each whose source changed; and has the folders of
+    // those whose folders couldn't be written looked at in the background, trying again, as that check ends, each whose
+    // folder can be written now. Called by a test, at once.
     void checkFailedAgain();
+    bool isCheckingFolders() const noexcept { return checkingFolders; }
 
     // How many renders it has started, all told: for the tests that one isn't tried again.
     int getRendersStarted() const noexcept { return rendersStarted; }
@@ -139,9 +141,13 @@ private:
 
     juce::CriticalSection finishedLock;
     std::vector<Finished> finished;
+    std::vector<juce::File> foldersChecked; // by the check of folders, those that can be written (under finishedLock)
+    bool folderCheckEnded = false;          // likewise
+    bool checkingFolders = false;           // a check of folders is under way
 
     void update();
     void findFailedClips();
+    void clipsChanged();
     void jobFinished (Finished); // on its thread
 
     void timerCallback() override;

@@ -113,6 +113,18 @@ void movePlayhead (ProjectContext& context, BeatPosition beat)
         movePlayhead (*song, beat);
 }
 
+BeatPosition getPlayStart (const ProjectContext& context)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? getPlayStartBeat (*song) : BeatPosition();
+}
+
+void setPlayStart (ProjectContext& context, BeatPosition beat)
+{
+    if (auto* song = findSong (context))
+        setPlayStart (*song, beat);
+}
+
 double getSecondsAt (const ProjectContext& context, BeatPosition beat)
 {
     constexpr double secondsPerBeatAt120 = 0.5;

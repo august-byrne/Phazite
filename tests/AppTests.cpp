@@ -33,6 +33,17 @@
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
 
+// Last, so that its macros can't change the headers above: a file held by another program, as Windows lets one hold it.
+#if JUCE_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace
 {
 // A project made and closed again, as an earlier session would have left it.
@@ -1204,6 +1215,23 @@ TEST_CASE ("A window opens where it was if that is on the screens, fitted to one
     CHECK (phazite::placeWindow ({ 1500, 600, 1000, 700 }, { screens.getFirst() }) == std::optional<Box> (Box (920, 340, 1000, 700)));
     CHECK (phazite::placeWindow ({ -50, -30, 2500, 1400 }, screens) == std::optional<Box> (screens.getFirst()));
     CHECK (phazite::placeWindow ({ 2100, -200, 900, 700 }, screens) == std::optional<Box> (Box (2100, 0, 900, 700)));
+
+    // Two 2560-pixel screens at 150 %, 1706.67 wide each, rounded up so that they meet: they share a pixel, and a window
+    // across both stays as it was; partly off them, it is fitted to the one that holds most of it.
+    const juce::Array<Box> scaled { Box (0, 0, 1707, 960), Box (1706, 0, 1707, 960) };
+    CHECK (phazite::placeWindow ({ 1200, 50, 1000, 700 }, scaled) == std::optional<Box> (Box (1200, 50, 1000, 700)));
+    CHECK (phazite::placeWindow ({ 1200, 500, 1000, 700 }, scaled) == std::optional<Box> (Box (707, 260, 1000, 700)));
+}
+
+TEST_CASE ("A copy of a project leaves out a link that leads elsewhere, and copies a reparse point that leads to itself")
+{
+    // The reviewer's finding: on Windows JUCE's isSymbolicLink() is true for any reparse point, a folder OneDrive keeps among
+    // them, which the copy left out (JUCE workaround W35).
+    const auto entry = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Project/Audio/Takes");
+    const auto elsewhere = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    CHECK (phazite::isLinkElsewhere (entry, true, elsewhere));    // a symbolic link or a junction
+    CHECK_FALSE (phazite::isLinkElsewhere (entry, true, entry));  // a reparse point that is itself: the cloud's
+    CHECK_FALSE (phazite::isLinkElsewhere (entry, false, entry)); // a folder
 }
 
 namespace
@@ -1308,13 +1336,13 @@ TEST_CASE ("A first save copies what the project's folders hold, but not what a 
     CHECK (outside.getChildFile ("memo.wav").existsAsFile());
 }
 
-TEST_CASE ("A first save goes on without a file of the Cache folder that went while it copied")
+TEST_CASE ("A first save goes on without a clip's render in the Cache folder that went while it copied")
 {
-    // The reviewer's finding on the first wave: a file of the Cache folder (which holds only what Phazite makes again) that
-    // changed or went during the background copy failed the whole save.
+    // The reviewer's finding on the first wave: a render of a clip, which Phazite renders again as the clip plays, that changed
+    // or went during the background copy failed the whole save.
     FirstSave s;
     s.addRecording (phazite::Project::copyAtOnceBytes * 4);
-    const auto cached = s.session.getProject()->getCacheFolder().getChildFile ("Frozen.wav");
+    const auto cached = s.session.getProject()->getCacheFolder().getChildFile (juce::String (phazite::renderFilePrefix) + "1234.wav");
     REQUIRE (cached.getParentDirectory().createDirectory());
     REQUIRE (cached.replaceWithText ("frozen"));
 
@@ -1350,9 +1378,59 @@ TEST_CASE ("A first save removes the copies a crashed save left beside it, and o
     makeCopy ("Old (saving)", true, before);                                                             // left by a crash: goes
     makeCopy ("Mine (saving)", false, before);                                                           // not Phazite's: stays
     makeCopy ("Running (saving)", true, juce::Time::getCurrentTime() + juce::RelativeTime::minutes (1)); // as one being written: stays
-    s.addRecording (1024);
 
+    // A project the user named so, whose marker a program held as it was made: never taken for one (the reviewer's finding).
+    makeCopy ("Named (saving)", true, before);
+    REQUIRE (s.projects.getChildFile ("Named (saving)/Named (saving).phazite").replaceWithText ("<PHAZITE/>"));
+
+    CHECK (phazite::isLeftoverCopy (s.projects.getChildFile ("Old (saving)")));
+    CHECK_FALSE (phazite::isLeftoverCopy (s.projects.getChildFile ("Mine (saving)")));
+    CHECK_FALSE (phazite::isLeftoverCopy (s.projects.getChildFile ("Running (saving)")));
+    CHECK_FALSE (phazite::isLeftoverCopy (s.projects.getChildFile ("Named (saving)")));
+
+    // The save removes the leftover in the background (to the system's trash as the app runs; deleted here, so that a test
+    // run fills nobody's trash); the others stay.
+    phazite::setLeftoverCopyRemoval ([] (const juce::File& folder) { return folder.deleteRecursively(); });
+    const juce::ScopeGuard asTheAppDoes { [] { phazite::setLeftoverCopyRemoval (nullptr); } };
+    s.addRecording (1024);
     REQUIRE (s.registry.invoke ("project.save"));
     CHECK (s.errors.isEmpty());
-    CHECK (s.listProjects() == juce::StringArray ("Beat", "Mine (saving)", "Running (saving)"));
+    const juce::StringArray staying ("Beat", "Mine (saving)", "Named (saving)", "Running (saving)");
+    CHECK (phazite::test::dispatchMessagesUntil ([&s, &staying] { return s.listProjects() == staying; }));
 }
+
+#if JUCE_WINDOWS
+TEST_CASE ("A first save fails, saying which, when a frozen track's file or a clip's render can't be copied")
+{
+    // The reviewer's finding: every failure to copy a file of the Cache folder was passed over, a full disk or a file another
+    // program holds included, and a frozen track's file may be all that is left of a plug-in this computer hasn't.
+    FirstSave s;
+    s.addRecording (1024);
+    const auto cache = s.session.getProject()->getCacheFolder();
+    REQUIRE (cache.createDirectory());
+
+    for (const auto& name : { juce::String ("Frozen 5.wav"), juce::String (phazite::renderFilePrefix) + "1234.wav" })
+    {
+        CAPTURE (name.toStdString());
+        const auto file = cache.getChildFile (name);
+        REQUIRE (file.replaceWithText ("audio"));
+
+        {
+            // Held by another program, sharing it with none: the copy can't read it.
+            const auto held = CreateFileW (file.getFullPathName().toWideCharPointer(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                                           FILE_ATTRIBUTE_NORMAL, nullptr);
+            REQUIRE (held != INVALID_HANDLE_VALUE);
+            s.errors.clear();
+            const auto saveRan = s.registry.invoke ("project.save");
+            CloseHandle (held);
+            REQUIRE (saveRan);
+            REQUIRE (s.errors.size() == 1);
+            CHECK (s.errors[0].contains (name));
+            CHECK (s.session.isUntitled());
+            CHECK (s.listProjects().isEmpty());
+        }
+
+        REQUIRE (file.deleteFile());
+    }
+}
+#endif

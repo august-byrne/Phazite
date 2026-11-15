@@ -105,4 +105,13 @@ void MixHandle::endGesture()
         impl->gesture.reset();
     }
 }
+
+void MixHandle::cancelGesture()
+{
+    if (impl != nullptr && impl->gesture != nullptr)
+    {
+        impl->gesture->rollBack();
+        impl->gesture.reset();
+    }
+}
 } // namespace phazite

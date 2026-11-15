@@ -137,6 +137,23 @@ private:
     ClipID lastClip;                                                    // the clip the Draw and Paint tools place copies of
     std::vector<ClipID> clipsSelectedBefore;                            // as the selection was last heard of: what a change selected anew
     std::vector<TrackID> tracksSelectedBefore;                          // (changeListenerCallback())
+
+    // A press anywhere in the playlist: the change of the selection it makes is the mouse's, on what the user sees, which needn't be
+    // brought into view (changeListenerCallback()); a message after the mouse goes up, after that change is heard, a change is a
+    // key's or a command's again.
+    struct ClickWatcher : public juce::MouseListener
+    {
+        explicit ClickWatcher (Playlist& p)
+            : playlist (p)
+        {
+        }
+        void mouseDown (const juce::MouseEvent&) override { playlist.selectionByMouse = true; }
+        void mouseUp (const juce::MouseEvent&) override;
+        Playlist& playlist;
+    };
+
+    bool selectionByMouse = false;
+    ClickWatcher clickWatcher { *this };
     bool loopsSelection = false; // with a keymap whose selection loops: the loop is the selected time range's
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
@@ -263,7 +280,7 @@ private:
     TrackHeader* getHeaderFor (TrackID) const;
     void setScrollY (int);
     void scrollToShow (int row);
-    bool isRowInView (int row) const; // any of it, between the pinned rows and the lanes' foot (or a pinned row)
+    bool isRowFullyInView (int row) const; // all of it, between the pinned rows and the lanes' foot (or a pinned row)
     void updateVerticalScrollBar();
 
     // The clips.

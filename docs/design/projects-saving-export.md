@@ -113,9 +113,11 @@ shared memory checked, and a DAWproject written past 4 GB refused (known bugs 10
   when the project closes, saved or not. The folders are copied into "*name* (saving)" beside, which takes the
   project's name only once it is whole; until then the project stays where it was. Past 8 MB the copy runs in the
   background, in a progress window with Cancel, which leaves nothing behind. The copy takes no link inside the
-  folders, nor what it leads to, and leaves behind a file of `Cache` that goes or changes while it copies, as Phazite
-  makes those again. A "(saving)" folder holds a marker of Phazite's; one that a crash left is deleted at the next first
-  save into that folder, and a folder of that name without the marker is never touched.
+  folders (a symbolic link or a junction), nor what it leads to, and copies what OneDrive or Dropbox keep. It leaves
+  behind a clip's render in `Cache` that goes or changes while it copies, as Phazite renders it again; any other file
+  it can't copy, a frozen track's among them, fails the save. A "(saving)" folder holds a marker of Phazite's; one that
+  a crash left goes to the system's trash, in the background, at the next first save into that folder. A folder of that
+  name without the marker, or with a project file in it, is never touched.
 - An untitled project is not in Open Recent, and Export Song offers `Documents/Phazite/Exports` for it.
 - A lock keeps a second Phazite running at the same time away from the folders the first one uses.
 - What a new project starts with (its tempo, key and outline) is part of its first save. It is not an undo step and

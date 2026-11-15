@@ -81,6 +81,7 @@ private:
     NumberField positionField, timeField;
     juce::VBlankAttachment positionFrames;
     bool pausedForPositionDrag = false;
+    BeatPosition playheadAtDrag, playStartAtDrag; // as a drag of the position or the time began, which Escape puts back
     void updatePosition (std::optional<double> frameMilliseconds = {});
     bool isEditing (const NumberField&) const; // dragged or typed in: what it shows is what is being set
     LevelMeter masterMeter { "Master level" };

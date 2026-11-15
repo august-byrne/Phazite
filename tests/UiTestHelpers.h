@@ -138,7 +138,8 @@ public:
 
     // A trackpad's scroll, both ways at once, as JUCE reports a precision touchpad's (smooth, parts of a notch); and its
     // pinch, by a factor (above 1 spreading the fingers).
-    void scroll (juce::Point<int>, float deltaX, float deltaY, juce::ModifierKeys = {});
+    void scroll (juce::Point<int>, float deltaX, float deltaY, juce::ModifierKeys = {},
+                 bool inertial = false); // inertial: after the fingers lift
     void pinch (juce::Point<int>, float scaleFactor);
 
     // Lets time pass, long enough that the next click isn't part of a double-click with the last press (clicks and

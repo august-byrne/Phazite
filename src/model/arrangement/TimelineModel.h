@@ -51,6 +51,11 @@ void saveGridSettings (ProjectContext&, GridOwner, const GridSettings&);
 BeatPosition getPlayheadBeat (const ProjectContext&);
 void movePlayhead (ProjectContext&, BeatPosition);
 
+// Where playback starts, and Stop goes back to (Playback.h: getPlayStartBeat()), apart from the playhead: while the song plays
+// the playhead goes on where it is. Escape after a drag of the playhead along a ruler, which moved both, puts this back too.
+BeatPosition getPlayStart (const ProjectContext&);
+void setPlayStart (ProjectContext&, BeatPosition);
+
 // Where the playhead is heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()), which a frame of the
 // display shows while the song plays: where playback was as long before as its sound takes to reach the speakers.
 BeatPosition getHeardPlayheadBeat (const ProjectContext&, double milliseconds);

@@ -6,6 +6,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
@@ -43,15 +44,26 @@ namespace
             }
         }
 
-        for (auto lane : findTrackState (song, folder).getChildWithName (schema::LANES))
+        // A lane for the new name after the old one's, as it was (its height, collapsed or not): the old one stays, ignored
+        // while its fader is gone, for an undo that brings that fader back (lanes are view state, outside the history).
+        auto lanes = findTrackState (song, folder).getChildWithName (schema::LANES);
+
+        for (auto i = lanes.getNumChildren(); --i >= 0;)
         {
-            if (lane[schema::laneDevice].toString() == juce::String ((juce::int64) was.device.getRaw())
+            if (const auto lane = lanes.getChild (i);
+                lane[schema::laneDevice].toString() == juce::String ((juce::int64) was.device.getRaw())
                 && lane[schema::laneParameter].toString() == was.parameter)
             {
-                lane.setProperty (schema::laneDevice, device, nullptr);
-                lane.setProperty (schema::laneParameter, now.parameter, nullptr);
+                auto copy = lane.createCopy();
+                copy.setProperty (schema::laneDevice, device, nullptr);
+                copy.setProperty (schema::laneParameter, now.parameter, nullptr);
+                lanes.addChild (copy, i + 1, nullptr);
             }
         }
+
+        // A pass that writes the volume as the song plays goes on by its new name.
+        if (auto* session = findSession (song))
+            session->getWriter().parameterRenamed (was, now);
 
         forgetWhatNamesTheGone (song);
     }

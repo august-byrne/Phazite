@@ -3,7 +3,9 @@
 #include "internal/SongDiff.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/mixer/internal/Mixer.h"
 
+#include <functional>
 #include <map>
 #include <set>
 
@@ -671,6 +673,27 @@ int removeBrokenReferences (Song& song)
     for (auto& device : sidechains)
         device.removeProperty (schema::deviceSidechain, undo);
 
-    return (int) (modulations.size() + sidechains.size());
+    // And what an edit takes away with what it names (model/mixer/internal/Mixer.h): a send to a return that is gone, with
+    // what modulated it, and a pad's track whose drum sampler is gone; so that the song is as makeConsistent() leaves it.
+    const auto countSends = [&state]
+    {
+        auto count = 0;
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                count += child.hasType (schema::SEND) ? 1 : 0;
+                visit (child);
+            }
+        };
+
+        visit (state);
+        return count;
+    };
+
+    const auto sendsBefore = countSends();
+    forgetWhatNamesTheGone (song);
+
+    return (int) (modulations.size() + sidechains.size()) + sendsBefore - countSends();
 }
 } // namespace phazite

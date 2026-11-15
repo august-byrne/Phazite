@@ -373,10 +373,12 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     context.addListener (this);
     showProject();
     toolChanged(); // the Smart Tool's pointer and hint
+    addMouseListener (&clickWatcher, true);
 }
 
 Playlist::~Playlist()
 {
+    removeMouseListener (&clickWatcher);
     context.removeListener (this);
     range.removeChangeListener (this);
     selection.removeChangeListener (this);
@@ -769,10 +771,10 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
 
     clipsSelectedBefore = clips;
 
-    // A track selected out of view, by a key or a command, is brought into view; none is when what the change selected shows
-    // already (a click, a Shift+click on a track far from the first selected), or it selected no track anew (a clip clicked,
-    // a track taken out). Every change scrolled back to the first selected track, hiding what was clicked (known bug 54
-    // until 2026-11-14).
+    // A track a key or a command selects, not all of it in view, is brought whole into view; nothing is scrolled for a selection
+    // the mouse made in the playlist, on what the user sees (a click, a Shift+click on a track far from the first selected), or
+    // one that selected no track anew (a clip clicked, a track taken out). Every change scrolled back to the first selected
+    // track, hiding what was clicked (known bug 54 until 2026-11-14).
     const auto tracks = selection.getTracks();
     std::vector<int> newRows;
 
@@ -783,7 +785,23 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
 
     tracksSelectedBefore = tracks;
 
-    if (! newRows.empty() && std::none_of (newRows.begin(), newRows.end(), [this] (int row) { return isRowInView (row); }))
+    if (std::exchange (selectionByMouse, false) || newRows.empty())
+        return;
+
+    if (std::none_of (newRows.begin(), newRows.end(), [this] (int row) { return isRowFullyInView (row); }))
         scrollToShow (*std::min_element (newRows.begin(), newRows.end()));
+}
+
+void Playlist::ClickWatcher::mouseUp (const juce::MouseEvent&)
+{
+    // A click may select as the mouse goes up; a message later, after that change is heard (posted before this), what changes
+    // the selection is a key or a command again.
+    playlist.selectionByMouse = true;
+    juce::MessageManager::callAsync (
+        [safe = juce::Component::SafePointer<Playlist> (&playlist)]
+        {
+            if (safe != nullptr)
+                safe->selectionByMouse = false;
+        });
 }
 } // namespace phazite::ui

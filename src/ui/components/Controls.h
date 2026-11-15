@@ -41,9 +41,11 @@ public:
     // that shows it doesn't move the value.
     std::function<void()> onContextMenu;
 
-    // Escape while it is dragged: the value goes back to where it was as the mouse went down, without a change message, and
-    // the drag does nothing more until the mouse goes up, as in Ableton Live and most DAWs. This is called first, to take
-    // back what the drag changed (ParameterAttachment takes back its undo step, leaving nothing to redo).
+    // Escape while it is dragged, where this is set: the value goes back to where it was as the mouse went down, without a
+    // change message, the drag does nothing more until the mouse goes up, as in Ableton Live and most DAWs, and this is called
+    // then, to take back what the drag changed (ParameterAttachment takes back its undo step, leaving nothing to redo; a
+    // preview takes the value from before again). Without it, Escape isn't the slider's: put back alone, the slider showed
+    // the value from before while what it controls kept the dragged one.
     std::function<void()> onDragCancelled;
 
     // Opens the field a value is typed in, with this text (as typed, the caret after it) or, with none, the value's text, all

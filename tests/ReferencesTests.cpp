@@ -26,8 +26,11 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/SwapModel.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -545,4 +548,132 @@ TEST_CASE ("Points selected on a device's lane are neither found nor counted onc
     phazite::undo (song);
     CHECK (phazite::getSelectedPoints (selection).has_value());
     CHECK (selection.getNumObjectsSelected() == 2);
+}
+
+//==============================================================================
+TEST_CASE ("A plain folder's volume ridden in Latch is written, though an effect dropped on the folder meanwhile makes it a bus")
+{
+    // The pass kept the plain folder's VCA, which the bus's fader replaced: as playback stopped, it found no parameter and
+    // wrote nothing.
+    TestSong s;
+    s.setTempo (120.0);
+    auto& song = *phazite::findSong (s.context);
+    const auto inside = s.addTrack ("Inside");
+    s.addMidiClip (inside, 0.0, 16.0);
+    const auto folder = s.addBus ("Bus", { inside });
+    phazite::setMixedAsBus (song, folder, false);
+    REQUIRE_FALSE (phazite::isBus (song, folder));
+    const auto vca = s.getVolumeParameter (folder);
+    phazite::setAutomationMode (s.context, folder, phazite::AutomationMode::latch);
+
+    EnginePlayback playback;
+    s.run ("transport.playStop");
+    playback.play (0.5);
+    phazite::getVolume (s.context, folder).setValue (0.3f);
+    playback.play (0.5);
+    s.addEffect (folder, phazite::devices::Equalizer::typeID);
+    REQUIRE (phazite::isBus (song, folder));
+    playback.play (0.5);
+    s.run ("transport.playStop");
+
+    const auto fader = s.getVolumeParameter (folder);
+    REQUIRE (fader != vca);
+    const auto points = phazite::getPoints (song, fader);
+    CHECK (
+        std::any_of (points.begin(), points.end(), [] (const phazite::AutomationPoint& p) { return std::abs (p.value - 0.3f) < 0.001f; }));
+}
+
+TEST_CASE ("Undone, a folder's switch between a bus and a plain folder gives its volume's lane back its place and its height")
+{
+    // The lane was named after the new fader alone: undone, the curve showed as a lane of its own after the others.
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto inside = s.addTrack ("Inside");
+    const auto bus = s.addBus ("Bus", { inside });
+    const auto volume = s.getVolumeParameter (bus), pan = s.getPanParameter (bus);
+    s.addAutomation (volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f } });
+    s.addAutomation (pan, { { at (0.0), -0.5f }, { at (4.0), 0.5f } });
+    phazite::showLane (song, bus, volume);
+    phazite::showLane (song, bus, pan);
+    phazite::setLaneHeight (song, bus, volume, 100);
+
+    const auto checkLanes = [&] (const ParameterRef& first, bool withPan)
+    {
+        const auto lanes = phazite::getLanes (song, bus);
+        REQUIRE (lanes.size() == (withPan ? 2u : 1u));
+        CHECK (lanes[0].parameter == first);
+        CHECK (lanes[0].height == 100);
+    };
+
+    checkLanes (volume, true);
+    phazite::setMixedAsBus (song, bus, false);
+    checkLanes (s.getVolumeParameter (bus), false);
+    phazite::undo (song);
+    checkLanes (volume, true);
+    phazite::redo (song);
+    checkLanes (s.getVolumeParameter (bus), false);
+}
+
+TEST_CASE ("Playing in Write mode keeps a Swap open while no punch-in changes a value")
+{
+    // Playback in Write began a step for any automated parameter, which kept the preset a Swap was trying and ended the Swap.
+    TestSong s;
+    s.setTempo (120.0);
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto synth = s.setInstrument (track, phazite::devices::Synth::typeID);
+    s.addMidiClip (track, 0.0, 16.0);
+    const auto volume = s.getVolumeParameter (track);
+    const auto byHand = phazite::getValueSetByHand (song, volume);
+    s.addAutomation (volume, { { at (0.0), byHand }, { at (16.0), byHand } });
+
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Dark.phazitepreset");
+    s.setParameter (synth, "cutoff", 400.0f);
+    REQUIRE (phazite::saveDevicePreset (s.context, synth, file));
+    s.setParameter (synth, "cutoff", 8000.0f);
+
+    phazite::Swap swap (s.context, synth);
+    REQUIRE (swap.tryFile (file));
+    REQUIRE (swap.isOpen());
+    phazite::setAutomationMode (s.context, track, phazite::AutomationMode::write);
+    EnginePlayback playback;
+    s.run ("transport.playStop");
+    playback.play (0.25);
+    CHECK (swap.isOpen());
+    s.run ("transport.playStop");
+}
+
+TEST_CASE ("A Latch pass that already runs writes the value a preset sets, as the engine plays it")
+{
+    // A pass running while a preset loaded took none of its values: the lane it wrote ended where the hand left it, not
+    // where the preset put it, which the engine played.
+    TestSong s;
+    s.setTempo (120.0);
+    auto& song = *phazite::findSong (s.context);
+    const auto track = s.firstTrack;
+    const auto synth = s.setInstrument (track, phazite::devices::Synth::typeID);
+    s.addMidiClip (track, 0.0, 16.0);
+
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Dark.phazitepreset");
+    s.setParameter (synth, "cutoff", 400.0f);
+    REQUIRE (phazite::saveDevicePreset (s.context, synth, file));
+    s.setParameter (synth, "cutoff", 8000.0f);
+
+    phazite::setAutomationMode (s.context, track, phazite::AutomationMode::latch);
+    EnginePlayback playback;
+    s.run ("transport.playStop");
+    playback.play (0.25);
+    phazite::setValueSetByHand (song, { synth, "cutoff" }, 2000.0f); // the pass begins
+    playback.play (0.25);
+    REQUIRE (phazite::loadPresetInto (s.context, synth, file));
+    playback.play (0.25);
+    s.run ("transport.playStop");
+
+    const auto points = phazite::getPoints (song, { synth, "cutoff" });
+    REQUIRE (points.size() >= 2);
+    CHECK (
+        std::any_of (points.begin(), points.end(), [] (const phazite::AutomationPoint& p) { return std::abs (p.value - 400.0f) < 1.0f; }));
+    CHECK (countNaming (song, schema::CURVE, schema::curveDevice, synth.getRaw()) == 1); // no other parameter's
 }

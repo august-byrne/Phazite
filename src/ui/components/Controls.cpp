@@ -213,18 +213,18 @@ bool ValueSlider::keyPressed (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
     const auto typed = key.getTextCharacter();
 
-    if (key == juce::KeyPress::escapeKey && pressed && ! cancelled)
+    // Escape takes a drag back only where its owner can take back what the drag did (onDragCancelled): put back alone, the
+    // slider showed the value from before while what it controls kept the dragged one.
+    if (key == juce::KeyPress::escapeKey && pressed && ! cancelled && onDragCancelled != nullptr)
     {
         cancelled = true;
-
-        if (onDragCancelled != nullptr)
-            onDragCancelled();
 
         if (isTwoValue() || isThreeValue())
             setMinAndMaxValues (rangeAtPress.getStart(), rangeAtPress.getEnd(), juce::dontSendNotification);
         else
             setValue (valueAtPress, juce::dontSendNotification);
 
+        onDragCancelled(); // after the slider shows the value from before, which an owner may read
         return true;
     }
 

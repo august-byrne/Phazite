@@ -600,9 +600,15 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                 std::vector<ClipID> leaving;
                 auto fits = true;
 
+                // What leaves the tracks it is on: the clips moved, or a copy drag's copies once made; not the originals a copy
+                // drag holds until then, which stay where they are (a copy of audio went beside notes, 2026-11-14).
+                const auto originalsStay = gesture->copies && ! gesture->copying;
+
                 for (const auto& moving : gesture->moving)
                 {
-                    leaving.push_back (moving.clip);
+                    if (! originalsStay)
+                        leaving.push_back (moving.clip);
+
                     const auto target = moving.row + offset;
                     fits = fits && juce::isPositiveAndBelow (target, (int) rows.size());
                     byTarget[target].push_back (moving.clip);

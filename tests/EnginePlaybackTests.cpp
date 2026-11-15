@@ -493,6 +493,96 @@ TEST_CASE ("Latch writes from a control's first move until playback stops, and w
     CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.25f) < 0.001f; }));
 }
 
+TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: touch as never grabbed, latch and write going on as "
+           "before the grab")
+{
+    // Taken back as a drag ends, a latch pass kept the drag's moves, to write as playback stopped, and a write pass wrote all
+    // it had recorded since playback started into the drag's step, which the rollback then removed (2026-11-14).
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    EnginePlayback playback;
+    const auto hasValue = [] (const std::vector<phazite::AutomationPoint>& points, float value)
+    { return std::any_of (points.begin(), points.end(), [value] (const auto& p) { return std::abs (p.value - value) < 0.001f; }); };
+
+    SUBCASE ("Touch")
+    {
+        const auto lane = song.getVolumeParameter (track);
+        song.addAutomation (lane, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (16.0), 0.5f } });
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::touch);
+        auto volume = phazite::getVolume (song.context, track);
+
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        volume.beginGesture();
+        volume.setValue (0.3f);
+        playback.play (0.5);
+        volume.setValue (0.6f);
+        playback.play (0.5);
+        volume.cancelGesture();
+        playback.play (0.5);
+        CHECK (volume.getValue() == doctest::Approx (0.5f)); // the lane plays again
+        song.run ("transport.playStop");
+
+        const auto points = phazite::getAutomationPoints (song.context, lane);
+        CHECK (points.size() == 2);
+        CHECK_FALSE (hasValue (points, 0.3f));
+        CHECK_FALSE (hasValue (points, 0.6f));
+    }
+
+    SUBCASE ("Latch")
+    {
+        const auto lane = song.getPanParameter (track);
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+        auto pan = phazite::getPan (song.context, track);
+
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        pan.setValue (-0.5f); // latched from here
+        playback.play (0.5);
+        pan.beginGesture();
+        pan.setValue (0.8f);
+        playback.play (0.5);
+        pan.cancelGesture();
+        CHECK (pan.getValue() == doctest::Approx (-0.5f));
+        playback.play (0.5);
+        song.run ("transport.playStop");
+
+        const auto points = phazite::getAutomationPoints (song.context, lane);
+        REQUIRE (points.size() >= 2);
+        CHECK_FALSE (hasValue (points, 0.8f));
+        CHECK (points.back().value == doctest::Approx (-0.5f));
+        CHECK (points.back().beat.inBeats() == doctest::Approx (4.0).epsilon (0.05)); // written to where playback stopped
+    }
+
+    SUBCASE ("Write")
+    {
+        const auto lane = song.getPanParameter (track);
+        song.addAutomation (lane, { { phazite::BeatPosition(), -0.5f }, { phazite::BeatPosition::fromBeats (16.0), -0.5f } });
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+        auto pan = phazite::getPan (song.context, track);
+
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        pan.beginGesture();
+        pan.setValue (0.25f);
+        playback.play (0.5);
+        pan.cancelGesture();
+        CHECK (phazite::getAutomationMode (song.context, track) == phazite::AutomationMode::write); // not let go into latch
+        playback.play (0.5);
+        song.run ("transport.playStop");
+
+        // The pass from playback's start, as before the drag, to where it stopped; without the drag's value.
+        const auto points = phazite::getAutomationPoints (song.context, lane);
+        REQUIRE (points.size() >= 2);
+        CHECK (points.front().beat.inBeats() == doctest::Approx (0.0));
+        CHECK_FALSE (hasValue (points, 0.25f));
+        CHECK (std::any_of (points.begin(), points.end(),
+                            [] (const auto& p) { return std::abs (p.beat.inBeats() - 3.0) < 0.15 && std::abs (p.value + 0.5f) < 0.001f; }));
+    }
+}
+
 TEST_CASE ("Phazite's engine plays a track's LFO on its volume, which the LFO's editor and the fader's ring show, and a macro")
 {
     TestSong song;

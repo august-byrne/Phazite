@@ -100,7 +100,8 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
 
     void setClip (ClipID);
-    void refresh(); // shows the clip as it is now
+    void refresh();   // shows the clip as it is now
+    void lookAgain(); // preparingCheck's: shows the clip again only once its audio's state changed or its hits were found
     void updateControls();
     void fitView(); // the clip's whole audio, as wide as the editor
     void setUpField (NumberField&, const juce::String& undoName, std::function<void()> change);

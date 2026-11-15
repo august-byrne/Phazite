@@ -186,7 +186,10 @@ struct ParameterHandle::Impl
     void beginRecording (const ParameterRef& found) const
     {
         if (auto* session = findPlayingSession (*song.get()))
+        {
+            session->getWriter().rememberGrab (found); // for Escape (cancelGesture())
             session->getWriter().gestureBegan (found);
+        }
     }
 };
 
@@ -437,16 +440,17 @@ void ParameterHandle::cancelGesture()
     if (! isInGesture())
         return;
 
-    // What automation wrote meanwhile joined the step (endGesture()), and goes with it.
-    if (auto* song = impl->song.get())
-        if (auto* session = findPlayingSession (*song))
-            session->getWriter().gestureEnded (impl->findRef());
-
     if (impl->gesture != nullptr)
     {
         impl->gesture->rollBack();
         impl->gesture.reset();
     }
+
+    // And automation being written by hand goes on as it was before the grab, without what the drag recorded: ended as the
+    // drag ends, a latch pass kept it, to write as playback stopped, and a write pass wrote all it had into the rolled-back step.
+    if (auto* song = impl->song.get())
+        if (auto* session = findPlayingSession (*song))
+            session->getWriter().gestureCancelled (impl->findRef());
 
     impl->joined = false;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
 #include "devices/modulation/Modulators.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/BackgroundJobs.h"
@@ -33,6 +34,13 @@
 
 namespace phazite
 {
+bool isLinkElsewhere (const juce::File& entry, bool isSymbolicLink, const juce::File& linkedTarget)
+{
+    // A reparse point that leads to itself (a folder or a file the cloud keeps, on Windows) isn't a link. JUCE workaround
+    // W35 (docs/juce-workarounds.md).
+    return isSymbolicLink && linkedTarget != entry;
+}
+
 namespace
 {
     // Text between an element's tags, which a song never holds (its values are attributes), and which a value tree has
@@ -125,12 +133,47 @@ namespace
     // versions (model/versions/), if it keeps any: a copy of a project is a copy with its past. Its backups don't come.
     constexpr const char* foldersCopied[] = { "Audio", "Generated", "Renders", "Cache", "Versions" };
 
-    // Those folders' folders and files, and how many bytes the files hold, listed before any is copied.
+    // Those folders' folders and files, each file with its size and time of change as listed, and how many bytes the files
+    // hold, listed before any is copied.
+    struct ListedFile
+    {
+        juce::File file;
+        juce::int64 size = 0;
+        juce::Time modified;
+    };
+
     struct FoldersToCopy
     {
-        std::vector<juce::File> folders, files;
+        std::vector<juce::File> folders;
+        std::vector<ListedFile> files;
         juce::int64 bytes = 0;
     };
+
+    // A folder's folders and files, and theirs, walked here rather than by JUCE's recursive listing, which on Windows
+    // doesn't go into a folder the cloud keeps (JUCE workaround W35, docs/juce-workarounds.md). Never through a link: a
+    // project from someone else may hold one to anywhere (its home folder, or the project itself, a loop); a link to a folder
+    // is left out with what it leads to, and a link to a file too.
+    void listFolder (const juce::File& folder, FoldersToCopy& list)
+    {
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories))
+        {
+            const auto file = entry.getFile();
+
+            if (file.isSymbolicLink() && isLinkElsewhere (file, true, file.getLinkedTarget()))
+                continue;
+
+            if (entry.isDirectory())
+            {
+                list.folders.push_back (file);
+                listFolder (file, list);
+            }
+            else
+            {
+                list.files.push_back ({ file, entry.getFileSize(), entry.getModificationTime() });
+                list.bytes += entry.getFileSize();
+            }
+        }
+    }
 
     FoldersToCopy listFoldersToCopy (const juce::File& projectFolder)
     {
@@ -140,38 +183,28 @@ namespace
         {
             const auto folder = projectFolder.getChildFile (name);
 
-            if (! folder.isDirectory())
-                continue;
-
-            list.folders.push_back (folder);
-
-            // Never through a link: a project from someone else may hold one to anywhere (its home folder, or the project
-            // itself, a loop). A folder that is a link is left out, with what is in it; so is a file that is one, except on
-            // Windows, where JUCE can't tell a link to a file from a file the cloud keeps (OneDrive's), which is the user's.
-            for (const auto& entry :
-                 juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFilesAndDirectories, juce::File::FollowSymlinks::no))
+            if (folder.isDirectory() && ! (folder.isSymbolicLink() && isLinkElsewhere (folder, true, folder.getLinkedTarget())))
             {
-#if JUCE_WINDOWS
-                if (entry.isDirectory() && entry.getFile().isSymbolicLink())
-                    continue;
-#else
-                if (entry.getFile().isSymbolicLink())
-                    continue;
-#endif
-
-                if (entry.isDirectory())
-                {
-                    list.folders.push_back (entry.getFile());
-                }
-                else
-                {
-                    list.files.push_back (entry.getFile());
-                    list.bytes += entry.getFileSize();
-                }
+                list.folders.push_back (folder);
+                listFolder (folder, list);
             }
         }
 
         return list;
+    }
+
+    // Whether a file the copy couldn't copy may be left behind: a render of an audio clip in the Cache folder, which Phazite
+    // renders again from the clip as it plays, that went or changed since it was listed (closing the project tidied it up, or
+    // a clip rendered it again). Nothing else: a frozen track's file there may be all that is left of a plug-in this
+    // computer hasn't, so it is never left behind, and any other failure (a full disk, a file another program holds) fails
+    // the copy.
+    bool mayLeaveBehind (const ListedFile& listed, const juce::File& cacheFolder)
+    {
+        if (! listed.file.isAChildOf (cacheFolder) || ! listed.file.getFileName().startsWith (renderFilePrefix))
+            return false;
+
+        return ! listed.file.existsAsFile() || listed.file.getSize() != listed.size
+               || listed.file.getLastModificationTime() != listed.modified;
     }
 
     // A file copied into a new one, a piece at a time, so that a copy can stop between pieces, with its time of change kept
@@ -231,11 +264,12 @@ namespace
 
         const auto cache = from.getChildFile ("Cache");
 
-        for (const auto& file : list.files)
+        for (const auto& listed : list.files)
         {
             if (shouldStop())
                 return juce::Result::fail ("The copy was cancelled.");
 
+            const auto& file = listed.file;
             const auto target = to.getChildFile (file.getRelativePathFrom (from));
 
             if (copyFile (file, target, shouldStop, copied))
@@ -244,9 +278,8 @@ namespace
             if (shouldStop())
                 return juce::Result::fail ("The copy was cancelled.");
 
-            // The Cache folder holds only what Phazite makes again (a frozen track's file, a render's): one of its files that
-            // went or changed while the copy ran is left behind, as if it hadn't been made yet.
-            if (file.isAChildOf (cache))
+            // A clip's render that went or changed while the copy ran is left behind, as if it hadn't been made yet.
+            if (mayLeaveBehind (listed, cache))
             {
                 target.deleteFile();
                 continue;
@@ -267,24 +300,46 @@ namespace
     // Phazite runs at a time: PhaziteRunning, src/app/Main.cpp).
     const juce::Time processStart = juce::Time::getCurrentTime();
 
-    // The copies a save that never finished left in a folder (a crash in the middle of one): "(saving)" folders that hold
-    // Phazite's marker, made before this run started. Nothing else is deleted: a folder without the marker may be the user's.
-    void removeLeftoverCopies (const juce::File& parentFolder)
+    // Whether a folder is a copy that a save that never finished left (a crash in the middle of one): named "(saving)", with
+    // Phazite's marker in it, made before this run started, and holding no project file, so never a project the user named
+    // so (whose marker a program held for a moment as it was made: putInPlace()). Nothing else is one: a folder without the
+    // marker may be the user's.
+    bool isLeftover (const juce::File& folder)
     {
-        for (const auto& folder : parentFolder.findChildFiles (juce::File::findDirectories, false, "* (saving)*"))
-        {
-            const auto marker = folder.getChildFile (Project::copyMarkerName);
+        const auto marker = folder.getChildFile (Project::copyMarkerName);
+        return folder.getFileName().contains (" (saving)") && folder.isDirectory() && ! folder.isSymbolicLink() && marker.existsAsFile()
+               && marker.getLastModificationTime() < processStart
+               && folder.findChildFiles (juce::File::findFiles, false, juce::String ("*") + Project::fileExtension).isEmpty();
+    }
 
-            if (! folder.isSymbolicLink() && marker.existsAsFile() && marker.getLastModificationTime() < processStart)
-                folder.deleteRecursively();
-        }
+    // How a leftover copy is removed: null, by moving it to the system's trash (setLeftoverCopyRemoval()).
+    std::function<bool (const juce::File&)> leftoverCopyRemoval;
+
+    // The leftover copies in a folder moved to the system's trash, where the user can still get one back, on a background
+    // thread: one can hold gigabytes of audio, on a network drive.
+    void removeLeftoverCopies (const juce::File& parentFolder, BackgroundJobs& jobs)
+    {
+        jobs.add (
+            [parentFolder, remove = leftoverCopyRemoval] (const BackgroundJobs::ShouldStop& shouldStop)
+            {
+                for (const auto& folder : parentFolder.findChildFiles (juce::File::findDirectories, false, "* (saving)*"))
+                {
+                    if (shouldStop() || ! isLeftover (folder))
+                        continue;
+
+                    if (remove != nullptr)
+                        remove (folder);
+                    else
+                        folder.moveToTrash();
+                }
+            });
     }
 
     // Where the copy goes until it is whole, beside the folder it becomes: "<name> (saving)", with Phazite's marker in it, which
-    // says that it is Phazite's to delete if it is ever left behind (removeLeftoverCopies()).
-    juce::File makeCopyFolder (const juce::File& folder, juce::String& error)
+    // says that it is Phazite's to remove if it is ever left behind (removeLeftoverCopies()).
+    juce::File makeCopyFolder (const juce::File& folder, BackgroundJobs& removals, juce::String& error)
     {
-        removeLeftoverCopies (folder.getParentDirectory());
+        removeLeftoverCopies (folder.getParentDirectory(), removals);
         const auto copy = folder.getParentDirectory().getNonexistentChildFile (folder.getFileName() + " (saving)", {}, true);
 
         if (const auto result = copy.createDirectory(); result.failed())
@@ -313,7 +368,13 @@ namespace
         if (! copy.moveFileTo (folder))
             return juce::Result::fail ("Phazite couldn't name the project's folder \"" + folder.getFileName() + "\".");
 
-        folder.getChildFile (Project::copyMarkerName).deleteFile(); // a project's folder now, the user's
+        // A project's folder now, the user's: its marker goes, tried again while another program (an antivirus, the indexer)
+        // holds it a moment. One that stays does no harm: a folder with a project file in it is never taken for a leftover.
+        const auto marker = folder.getChildFile (Project::copyMarkerName);
+
+        for (int attempt = 0; attempt < 5 && ! marker.deleteFile(); ++attempt)
+            juce::Thread::sleep (20);
+
         return juce::Result::ok();
     }
 
@@ -968,6 +1029,16 @@ namespace
     } // namespace consistent
 } // namespace
 
+bool isLeftoverCopy (const juce::File& folder)
+{
+    return isLeftover (folder);
+}
+
+void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal)
+{
+    leftoverCopyRemoval = std::move (removal);
+}
+
 void makeConsistent (Song& song)
 {
     consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File() }.keep();
@@ -1499,7 +1570,7 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
 
     juce::String error;
     const auto folder = findNewProjectFolder (parentFolder, name, error);
-    const auto copy = folder != juce::File() ? makeCopyFolder (folder, error) : juce::File();
+    const auto copy = folder != juce::File() ? makeCopyFolder (folder, leftoverRemovals, error) : juce::File();
 
     if (copy == juce::File())
     {
@@ -1550,7 +1621,7 @@ juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& fo
 juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const
 {
     const auto folder = findNewProjectFolder (parentFolder, name, error);
-    const auto copy = folder != juce::File() ? makeCopyFolder (folder, error) : juce::File();
+    const auto copy = folder != juce::File() ? makeCopyFolder (folder, leftoverRemovals, error) : juce::File();
 
     if (copy == juce::File())
         return {};

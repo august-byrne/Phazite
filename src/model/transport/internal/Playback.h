@@ -67,6 +67,10 @@ void loopSections (Song&, const std::vector<Section>&);
 // again while it is tweaked; pausing leaves the playhead where it is. The song keeps it in beats.
 BeatPosition getPlayStartBeat (const Song&);
 
+// Where playback starts from now on, and Stop goes back to, the playhead staying where it is while the song plays (stopped, it
+// shows there): what movePlayhead() sets, and Escape puts back after a drag of the playhead.
+void setPlayStart (Song&, BeatPosition);
+
 // Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,
 // if it is playing). While it records, recording goes on from there too, as Ableton Live's does: what was recorded up to
 // the jump is kept as Stop keeps it (its own Record step), and another take starts there.

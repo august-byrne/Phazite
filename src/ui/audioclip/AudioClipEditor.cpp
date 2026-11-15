@@ -725,7 +725,7 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
       fineField ("Fine tuning", fineInfo.minimum, fineInfo.maximum, 1.0, 0.0),
       tempoField ("Clip tempo", minClipTempo, maxClipTempo, 1.0, 120.0),
       waveform (std::make_unique<Waveform> (*this)),
-      preparingCheck ([this] { refresh(); })
+      preparingCheck ([this] { lookAgain(); })
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
@@ -895,6 +895,19 @@ void AudioClipEditor::refresh()
     {
         preparingCheck.stopTimer();
     }
+}
+
+void AudioClipEditor::lookAgain()
+{
+    // Refreshed at each look, it fitted the view, read the hits and repainted the waveform four times a second for as long as
+    // a render had failed (2026-11-14): only what changed is shown again.
+    const auto now = clip.isValid() ? getAudioClip (context, clip) : std::nullopt;
+    const auto stateChanged = now.has_value() != info.has_value() || (now.has_value() && info.has_value() && now->state != info->state);
+    const auto hitsFound =
+        info.has_value() && info->state != AudioState::missing && ! waveform->hits.has_value() && getTransients (context, clip).has_value();
+
+    if (stateChanged || hitsFound)
+        refresh();
 }
 
 bool AudioClipEditor::canQuantizeSelection() const

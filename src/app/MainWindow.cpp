@@ -357,7 +357,7 @@ juce::Array<juce::Rectangle<int>> MainWindow::getScreens() const
     juce::Array<juce::Rectangle<int>> screens;
 
     for (const auto& display : juce::Desktop::getInstance().getDisplays().displays)
-        screens.add (display.userBounds.getLargestIntegerWithin());
+        screens.add (display.userBounds.getSmallestIntegerContainer()); // neighbours at a fractional scale meet, not a pixel apart
 
     return screens;
 }
@@ -427,15 +427,17 @@ std::optional<juce::Rectangle<int>> placeWindow (juce::Rectangle<int> saved, con
     if (saved.isEmpty())
         return std::nullopt;
 
-    // The screen that holds most of it, and how much of it they all hold (screens don't overlap).
+    // The screen that holds most of it, and what of it they all hold (neighbours may share a pixel, rounded up from a
+    // fractional scale).
     const juce::Rectangle<int>* best = nullptr;
-    juce::int64 bestArea = 0, onScreens = 0;
+    juce::int64 bestArea = 0;
+    juce::RectangleList<int> onScreens;
 
     for (const auto& screen : screens)
     {
         const auto shared = screen.getIntersection (saved);
         const auto area = (juce::int64) shared.getWidth() * shared.getHeight();
-        onScreens += area;
+        onScreens.add (shared);
 
         if (area > bestArea && shared.getWidth() >= windowShownAtLeast && shared.getHeight() >= windowShownAtLeast)
         {
@@ -448,7 +450,7 @@ std::optional<juce::Rectangle<int>> placeWindow (juce::Rectangle<int> saved, con
         return std::nullopt;
 
     // All on the screens: where it was.
-    if (onScreens == (juce::int64) saved.getWidth() * saved.getHeight())
+    if (onScreens.containsRectangle (saved))
         return saved;
 
     // Partly off them: no larger than that screen, and on it.

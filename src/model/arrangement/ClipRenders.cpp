@@ -6,6 +6,9 @@
 #include "model/engine/AudioFiles.h"
 #include "model/playback/internal/PlaybackSession.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace phazite
 {
 namespace
@@ -231,11 +234,10 @@ void ClipRenders::update()
             continue;
 
         // One that failed waits for its source to change, or, for one that failed as its folder couldn't be written, for
-        // the folder to be one that can.
+        // the folder to be one that can (which a check in the background finds: checkFailedAgain(), and forgets it then).
         if (const auto found = failed.find (render); found != failed.end())
         {
-            if (Source::of (recipe.source) == found->second.source
-                && ! (found->second.folderShut && canWriteInto (render.getParentDirectory())))
+            if (Source::of (recipe.source) == found->second.source)
                 continue;
 
             failed.erase (found);
@@ -276,6 +278,41 @@ void ClipRenders::findFailedClips()
 void ClipRenders::checkFailedAgain()
 {
     stopTimer();
+
+    // The folders of those that failed as they couldn't be written, looked at off the message thread (a drive that is slow
+    // or gone mustn't hold the window), one check at a time: those that can be written now are tried again as it ends.
+    if (! checkingFolders)
+    {
+        std::vector<juce::File> folders;
+
+        for (const auto& [render, failure] : failed)
+            if (failure.folderShut)
+                if (const auto folder = render.getParentDirectory(); std::find (folders.begin(), folders.end(), folder) == folders.end())
+                    folders.push_back (folder);
+
+        if (! folders.empty())
+        {
+            checkingFolders = true;
+            jobs.add (
+                [this, folders] (const BackgroundJobs::ShouldStop&)
+                {
+                    std::vector<juce::File> open;
+
+                    for (const auto& folder : folders)
+                        if (canWriteInto (folder))
+                            open.push_back (folder);
+
+                    {
+                        const juce::ScopedLock sl (finishedLock);
+                        foldersChecked = std::move (open);
+                        folderCheckEnded = true;
+                    }
+
+                    triggerAsyncUpdate();
+                });
+        }
+    }
+
     update();
 
     // While some failed, their sources are looked at now and then: one that changed is tried again.
@@ -302,10 +339,24 @@ void ClipRenders::handleAsyncUpdate()
 {
     std::vector<Finished> done;
     juce::Array<juce::File> made;
+    std::vector<juce::File> open;
+    auto checked = false;
 
     {
         const juce::ScopedLock sl (finishedLock);
         done.swap (finished);
+        open.swap (foldersChecked);
+        checked = std::exchange (folderCheckEnded, false);
+    }
+
+    // Those whose folders can be written now are forgotten, so that update() tries them again.
+    if (checked)
+    {
+        checkingFolders = false;
+
+        for (auto i = failed.begin(); i != failed.end();)
+            i = i->second.folderShut && std::find (open.begin(), open.end(), i->first.getParentDirectory()) != open.end() ? failed.erase (i)
+                                                                                                                          : std::next (i);
     }
 
     for (const auto& job : done)
@@ -339,18 +390,27 @@ void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::I
 {
     // A clip's sound, or the tempo it follows.
     if (tree.hasType (schema::CLIP) || tree.hasType (schema::TEMPO))
-        startTimer (quietMilliseconds);
+        clipsChanged();
 }
 
 void ClipRenders::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&)
 {
-    startTimer (quietMilliseconds); // a clip, or a track with clips, back from undo, say
+    clipsChanged(); // a clip, or a track with clips, back from undo, say
 }
 
 void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
 {
     // A tempo change taken away, or a clip's last warp marker: the clips under it play at another speed now, from a render
     // of their own.
+    clipsChanged();
+}
+
+void ClipRenders::clipsChanged()
+{
     startTimer (quietMilliseconds);
+
+    // The clips whose renders failed at once, while there are any: not one deleted, or one that needs another render now.
+    if (! failed.empty() || ! failedClips.empty())
+        findFailedClips();
 }
 } // namespace phazite

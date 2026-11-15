@@ -156,6 +156,47 @@ TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it i
     CHECK (phazite::test::dispatchMessagesUntil ([&field] { return juce::approximatelyEqual (field.getValue(), 95.5); }));
 }
 
+TEST_CASE ("Escape in the middle of a drag of the tempo, the playhead's position or its time puts back what was there")
+{
+    // The fields put their own value back, while the tempo stayed where it was dragged, its step kept, and the playhead where
+    // the drag took it (a reviewer, 2026-11-14).
+    TopBarScreen screen;
+    auto& tempo = screen.getTempoField();
+    const auto escape = juce::KeyPress (juce::KeyPress::escapeKey);
+
+    const auto dragThenEscape = [&screen, &escape] (juce::Component& field, const std::function<bool()>& moved)
+    {
+        const auto centre = field.getLocalBounds().getCentre();
+        phazite::test::Mouse mouse (field);
+        mouse.press (centre);
+        mouse.dragTo (centre.translated (0, -10));
+        mouse.dragTo (centre.translated (0, -20));
+        CHECK (moved());
+        screen.window.pressKey (escape);
+        mouse.dragTo (centre.translated (0, -40)); // nothing more until the mouse goes up
+        mouse.release();
+        mouse.pause();
+    };
+
+    dragThenEscape (tempo, [&screen] { return phazite::getTempo (*screen.song) > 121.0; });
+    CHECK (phazite::getTempo (*screen.song) == doctest::Approx (120.0));
+    CHECK (tempo.getValue() == doctest::Approx (120.0));
+    CHECK_FALSE (screen.song->getUndoManager().canUndo());
+    CHECK_FALSE (screen.song->getUndoManager().canRedo());
+
+    phazite::movePlayhead (*screen.song, phazite::BeatPosition::fromBeats (8.0));
+    phazite::test::dispatchPendingMessages();
+
+    for (const auto* title : { "Playhead position", "Playhead time" })
+    {
+        auto* field = phazite::test::findComponentWithTitle (screen.topBar, title);
+        REQUIRE (field != nullptr);
+        dragThenEscape (*field, [&screen] { return ! juce::approximatelyEqual (phazite::getPlayheadBeat (*screen.song).inBeats(), 8.0); });
+        CHECK (phazite::getPlayheadBeat (*screen.song).inBeats() == doctest::Approx (8.0));
+        CHECK (phazite::getPlayStartBeat (*screen.song).inBeats() == doctest::Approx (8.0));
+    }
+}
+
 TEST_CASE ("The top bar's controls are drawn along its top, all as tall, the tempo field's box too")
 {
     // The owner, 2026-11-07: the tempo field looked shorter than the buttons beside it (JUCE kept a pixel around a bar slider's

@@ -435,7 +435,8 @@ struct Library::Indexer : public juce::Thread
     // (File::getFileIdentifier(), which follows links), so a loop is found however its links are written. That identifier is
     // the inode on Linux and macOS and the file index on Windows, neither with the volume it is on, so two folders on
     // different volumes can share one (every NTFS volume's root has the same index), and a folder linked from another volume
-    // could be taken for one the walk is inside, and skipped (docs/backlog.md).
+    // could be taken for one the walk is inside, and skipped (docs/backlog.md: "The browser library's loop check keyed by
+    // volume and file identifier").
     void walk (const juce::File& folder, const juce::File& root, std::vector<juce::uint64>& inside, std::vector<Found>& files)
     {
         const auto id = folder.getFileIdentifier();

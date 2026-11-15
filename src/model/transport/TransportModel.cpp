@@ -146,6 +146,15 @@ void TempoHandle::endGesture()
         impl->gesture.reset(); // which keeps the drag's change as its step
 }
 
+void TempoHandle::cancelGesture()
+{
+    if (impl != nullptr && impl->gesture != nullptr)
+    {
+        impl->gesture->rollBack();
+        impl->gesture.reset();
+    }
+}
+
 bool TempoHandle::isInGesture() const
 {
     return impl != nullptr && impl->gesture != nullptr;

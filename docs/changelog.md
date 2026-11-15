@@ -8,6 +8,77 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 1. Safe: the bugs that lose work or sound (2026-11-14)
+
+Built on Windows. Each bug has a test that failed before its fix; a reviewer then read each part's changes, and what
+the reviews found is fixed too. The numbers in brackets are those the bugs had in [known-bugs.md](known-bugs.md).
+
+- **S1.1 Playback:** the click and the count-in come as late as the song's sound does; an audio clip moved or slipped
+  under the playhead plays from its new place; the transport is state the engine reads, not a queue that could fill
+  and lose a Stop; notes and the transport asked for during a render are kept; the engine's workers flush denormals;
+  one output channel plays both sides; plans are freed only once a block that stalled has ended; notes held live end
+  when live MIDI moves to another track or its input goes, and the song's own notes play on; an instrument holding a
+  note never sleeps (37, 76, 77, 79 to 84).
+- **S1.2 Fades:** 3 ms at Stop (the audio clips that were playing), at the loop's end (the clips it cuts) and at a
+  jump (the whole mix, out and in). A render without a loop is bit for bit as it was.
+- **S1.3 Plug-ins:** a block's deadline is a millisecond at least; a late, busy or crashed effect fades to silence
+  in time with the song and fades back in, where it passed its input through dry; plug-ins are told that a render
+  plays them offline, and that they play live again after it; a render waits for a late live block, fails at once
+  naming a plug-in that had crashed, and never waits on a cancel; a crashed plug-in reloads at the engine's rate;
+  only the channels handed over are read back; a VST3's switch is described as a switch (27 to 31, 64, 66, 141, 152).
+- **S1.6 No helper left behind:** the helpers end with Phazite however it ends (a job on Windows, which leaves out
+  what a plug-in starts; a watch of the parent on Linux and macOS), and POSIX shared memory is unlinked once the
+  helper has opened it.
+- **S1.7 Saving:** an autosave that can't be read gives way to the project's own file; a save that fails while
+  closing offers Save As, Don't Save and Cancel; a backup that can't be made is told; the library's facts and the run
+  marker are written whole (40, 41, 87, 88).
+- **S1.8 Selection and undo:** selected automation points are held by their elements in the song, so points added
+  before them, Undo and Redo leave the same points selected; the undo history keeps 1000 steps, set by
+  `phaziteUndoSteps`, where a size budget left about 30 (53).
+- **S1.9 The first save:** a new project's folders are copied beside the destination and renamed when whole, in the
+  background with progress and Cancel when they are large; a failed copy says why and leaves nothing; a copy left by
+  a crash is removed at the next save beside it (90).
+- **S1.10 Renders and drags:** a clip render that fails stops, the clip says so, and it is tried again when its
+  source or the Cache folder changes; a note dragged past its clip's end and back leaves the clip as it was (44, 86).
+- **S1.11 The small bugs:** only tracks hold clips, and a paste that runs out of tracks adds them; a clip can't land
+  on a track of the other kind; keys are spelled as their chords are; Spread uses the chord's own notes; Chop and
+  Arpeggiate keep their remainder; Quantize takes the nearest swung line; typed lengths can be as short as dragged
+  ones; Bounce in Place no longer collapses the original track; a Shift or Ctrl click on a distant track no longer
+  scrolls back; the small ones in the lanes' gestures; the first lesson's second step; a preview stops when the left
+  panel hides; a panel's own window plays the computer keyboard; a branch that can't be made renames nothing; Escape
+  asks before it stops an export; the Stereo Expander's scope, the compressor's history and the random LFO are drawn
+  as they sound (46 to 52, 54, 56, 57, 63, 108, 109, 111, 115, 119, 121, 138). The shortcuts editor that takes away
+  shared keys (110) is left: it needs an editor of Phazite's own.
+- **S1.12 References follow their targets:** what leaves the song takes what names it along in the same undo step
+  (a removed device's modulations, the sends to a deleted return, a removed drum sampler's pad tracks); a folder
+  switched between a bus and a plain folder keeps its volume's automation and modulation; bent automation keeps its
+  shape through clip moves, Paste and the time edits; the automation of plug-ins that aren't loaded moves with the
+  rest; a preset loaded while a track writes automation writes no lanes; a device on a drum sampler's track can't
+  listen to its own pads (96 to 102, 104, 143).
+- **S1.13 Escape:** takes back a drag of the ruler's loop and playhead, a section, a chord's edge and every control
+  linked to a parameter, with nothing left to undo. The devices' graphs and a knob's modulation ring are left (140).
+- **S1.14 The wheel and pinch:** the wheel acts by its distance everywhere; a burst over the velocity lane is one
+  undo step, and where no note is it scrolls; pinch zooms the playlist and the piano roll about the pointer (55).
+- **S1.15 The window:** opens where it was closed, maximized if it was, on a screen that still exists.
+- **S1.16 Files and the library:** a project double-clicked while a dialog is open opens after it; the library's
+  indexer skips folders that lead back into themselves; a preset keeps its sounds in a folder beside it, holds no
+  path of the computer it was saved on, and says which sounds it couldn't take; Clean Up Unused Audio counts what the
+  saved file, the autosave and the backups play; a DAWproject's files are unpacked once, Bitwig's clips in clips are
+  read, and the import says what it left out (91, 107, 113, 114, 151).
+- **S1.17 Build:** the folder beside the app is made the same as its sources at every build; line endings are LF by
+  the repository's rules; a pushed tag must be the project's version (132, 133).
+- **Guide notes aren't recorded:** a click in the piano roll, or a preset tried in the browser, no longer lands in
+  Capture and in takes (147).
+
+## Stage 2, the rest: the build (2026-11-14)
+
+- **S2.13 Precompiled headers, AddressSanitizer on Windows, Clang:** JUCE's module headers are precompiled
+  (`PHAZITE_PRECOMPILED_HEADERS`), which took a full Debug build on the owner's PC from about 28 minutes to about 6;
+  CI builds without them, so every push also shows that each file includes what it uses. A `windows-asan` preset for
+  the nightly run, and a `linux-clang` preset and CI job with clang-tidy; neither could be run where they were
+  written.
+- **S2.5 The allocation guard:** counts what the engine's worker threads allocate too, and has a Linux half.
+
 ## Stage 2. Caught: the tests that would have found the audit's bugs, and the docs (2026-11-14)
 
 Built on Windows; the Linux builds, CI's new jobs and the nightly workflow had not run yet. Each net was shown to hold

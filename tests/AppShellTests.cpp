@@ -551,6 +551,38 @@ TEST_CASE ("In a panel's own window the computer keyboard plays its letters, and
     screen.shell.setDetached (Panel::editor, false);
     screen.registry.removeListener (&invoked);
 }
+
+TEST_CASE ("A note held in a panel's own window ends as the panel docks again or its window closes")
+{
+    // The reviewer's finding: the window let go of its keys before it heard that it lost the keyboard, so the note sounded on.
+    using phazite::ui::Panel;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    screen.keyboard.setEnabled (true);
+    screen.shell.setDetached (Panel::editor, true);
+
+    // A held, as the window's keys hear it.
+    const auto before = screen.keyboardSent.size();
+    screen.keyboard.update ([] (int keyCode) { return keyCode == 'a'; }, {});
+    REQUIRE (screen.keyboardSent.size() == before + 1);
+    const auto note = screen.keyboardSent.getLast();
+    REQUIRE (note.isNoteOn());
+
+    const auto ended = [&screen, &note, before]
+    {
+        for (int i = before + 1; i < screen.keyboardSent.size(); ++i)
+            if (screen.keyboardSent[i].isNoteOff() && screen.keyboardSent[i].getNoteNumber() == note.getNoteNumber())
+                return true;
+
+        return false;
+    };
+
+    CHECK_FALSE (ended());
+    screen.shell.setDetached (Panel::editor, false);
+    CHECK (ended());
+    screen.keyboard.setEnabled (false);
+}
 #endif
 
 TEST_CASE ("The hint bar shows the guide's next step, which a note on the computer keyboard moves on")

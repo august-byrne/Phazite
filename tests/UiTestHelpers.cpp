@@ -414,7 +414,7 @@ void Mouse::wheel (juce::Point<int> where, float deltaY, juce::ModifierKeys mods
     juce::ModifierKeys::currentModifiers = {};
 }
 
-void Mouse::scroll (juce::Point<int> where, float deltaX, float deltaY, juce::ModifierKeys mods)
+void Mouse::scroll (juce::Point<int> where, float deltaX, float deltaY, juce::ModifierKeys mods, bool inertial)
 {
     auto* peer = relativeTo.getPeer();
     jassert (peer != nullptr);
@@ -430,6 +430,7 @@ void Mouse::scroll (juce::Point<int> where, float deltaX, float deltaY, juce::Mo
     details.deltaX = deltaX;
     details.deltaY = deltaY;
     details.isSmooth = true;
+    details.isInertial = inertial;
     peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse,
                             peer->getComponent().getLocalPoint (&relativeTo, where).toFloat(), time, details);
     juce::ModifierKeys::currentModifiers = {};

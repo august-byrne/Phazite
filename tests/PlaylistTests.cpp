@@ -2167,6 +2167,21 @@ TEST_CASE (
     editor.showClip (id);
     CHECK (editor.getShownState() == phazite::AudioState::failed);
 
+    // While nothing changes, it looks again a few times a second and repaints nothing: it fitted its view and repainted its
+    // waveform at each look (a reviewer, 2026-11-14). Over a second of its looks, once the file's picture has loaded (in
+    // pieces, each repainting it).
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&editorWindow, &editor]
+        {
+            editorWindow.takeRepaintedArea();
+            phazite::test::dispatchMessagesUntil ([] { return false; }, 400);
+            return editorWindow.takeRepaintedArea().isEmpty() || editor.getShownState() != phazite::AudioState::failed;
+        },
+        8000));
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 1100);
+    CHECK (editorWindow.takeRepaintedArea().isEmpty());
+    CHECK (editor.getShownState() == phazite::AudioState::failed);
+
     // It isn't tried again while nothing changed: the check the renders make every two seconds while one has failed, made
     // at once, starts nothing. (Rounds of messages alone, which pass in microseconds, never reached that check.)
     auto* renders = phazite::getClipRenders (screen.context);
@@ -2175,18 +2190,28 @@ TEST_CASE (
 
     for (int round = 0; round < 3; ++round)
     {
-        renders->checkFailedAgain();
-        phazite::test::dispatchPendingMessages();
+        renders->checkFailedAgain(); // its folder looked at in the background
+        REQUIRE (phazite::test::dispatchMessagesUntil ([renders] { return ! renders->isCheckingFolders(); }, 20000));
         REQUIRE (renders->getRendersStarted() == started);
         REQUIRE (stateOf() == phazite::AudioState::failed);
     }
+
+    // The clip deleted, it isn't listed as failed at once, before the renders look again; back by Undo, it is again.
+    {
+        const phazite::UndoStep step (screen.getSong(), "Delete Clip");
+        phazite::deleteClips (screen.getSong(), { id }, false);
+    }
+
+    CHECK (phazite::getClipsWhoseRenderFailed (screen.context).empty());
+    phazite::undo (screen.getSong());
+    CHECK (phazite::getClipsWhoseRenderFailed (screen.context) == std::vector { id });
 
     // The cache can be written now, the file unchanged: the next check tries it again (it was never tried again while the
     // file stayed the same), and the render is made and played, and the clip no longer says so.
     REQUIRE (cache.deleteFile());
     REQUIRE (cache.createDirectory());
     renders->checkFailedAgain();
-    CHECK (renders->getRendersStarted() == started + 1);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([renders, started] { return renders->getRendersStarted() == started + 1; }, 20000));
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&findComponent, &stateOf]
         {
