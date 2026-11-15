@@ -21,7 +21,7 @@ namespace
     // Its rate, in hertz (0) or in lengths of the song: four bars, two, one (1 to 3), each as long as the time signature
     // makes a bar, then each note value from a half to a sixty-fourth as a triplet, straight and dotted (4 to 21), whatever
     // the time signature.
-    constexpr int inHertz = 0, longestLength = 1, longestNote = 4, shortestLength = 21;
+    constexpr int longestLength = 1, longestNote = 4, shortestLength = 21;
 
     bool isInBars (int rateType) noexcept
     {

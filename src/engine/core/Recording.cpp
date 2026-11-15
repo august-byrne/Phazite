@@ -10,7 +10,7 @@ Recording::Input::Input (std::vector<int> inputChannels, int capacity)
 {
 }
 
-void Recording::Input::write (const float* const* inputs, int numInputs, int offset, int numSamples) noexcept
+void Recording::Input::write (const float* const* deviceInputs, int numInputs, int offset, int numSamples) noexcept
 {
     // Lost without room for it, or while the gap before it can't be noted yet: what comes after a gap waits for it.
     if (fifo.getFreeSpace() < numSamples || (lost.length > 0 && gapFifo.getFreeSpace() < 1))
@@ -39,7 +39,7 @@ void Recording::Input::write (const float* const* inputs, int numInputs, int off
     for (size_t c = 0; c < channels.size(); ++c)
     {
         const auto channel = channels[c];
-        const auto* in = channel >= 0 && channel < numInputs && inputs[channel] != nullptr ? inputs[channel] + offset : nullptr;
+        const auto* in = channel >= 0 && channel < numInputs && deviceInputs[channel] != nullptr ? deviceInputs[channel] + offset : nullptr;
 
         const auto part = [this, c, in] (int start, int count, int from)
         {

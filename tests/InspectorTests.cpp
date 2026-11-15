@@ -432,7 +432,7 @@ TEST_CASE ("Enter in a name field renames and gives the keys back to the window,
 
     // Clicked, it has the keys and its text is selected; typed over and Enter, the track has the name, and the keys are the
     // window's again (Space plays), the field showing no selection.
-    const auto click = [&screen, name]
+    const auto click = [name]
     {
         phazite::test::Mouse mouse (*name);
         mouse.click (name->getLocalBounds().getCentre());

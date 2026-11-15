@@ -92,7 +92,7 @@ public:
         auto slowest = 0.0;
 
         for (int row = 0; row < rows; ++row)
-            slowest = std::max (slowest, Reverb::getDecayAt (values, getPitch (row + 0.5f), getSampleRate()));
+            slowest = std::max (slowest, Reverb::getDecayAt (values, getPitch ((float) row + 0.5f), getSampleRate()));
 
         return (getPredelaySeconds() + slowest) * 1.15;
     }

@@ -24,9 +24,9 @@ namespace
 class DeviceNotices::Notice final : public NoticeCard
 {
 public:
-    Notice (DeviceNotices& notices, AudioDeviceName name)
+    Notice (DeviceNotices& shownIn, AudioDeviceName name)
         : device (std::move (name)),
-          owner (notices),
+          owner (shownIn),
           icon (device.isInput ? Icon::sound : Icon::preview)
     {
         setTitle (device.isInput ? "Audio Input Connected" : "Audio Output Connected");

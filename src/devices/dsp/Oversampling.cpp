@@ -48,13 +48,13 @@ float AntialiasedShaper::getLatencySamples()
     static const float latency = []
     {
         // The half-band filters' delay at 0 Hz, the centre of their impulse response's weight; and the curve's.
-        Oversampler2x oversampler;
+        Oversampler2x filters;
         auto weight = 0.0, moment = 0.0;
 
         for (int n = 0; n < 4096; ++n)
         {
-            const auto [first, second] = oversampler.up (n == 0 ? 1.0f : 0.0f);
-            const auto out = (double) oversampler.down (first, second);
+            const auto [first, second] = filters.up (n == 0 ? 1.0f : 0.0f);
+            const auto out = (double) filters.down (first, second);
             weight += out;
             moment += n * out;
         }

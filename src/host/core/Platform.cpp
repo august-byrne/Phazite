@@ -129,8 +129,8 @@ double getProcessCpuSeconds()
 #else
     rusage usage {};
     getrusage (RUSAGE_SELF, &usage);
-    return (double) usage.ru_utime.tv_sec + usage.ru_utime.tv_usec * 1.0e-6 + (double) usage.ru_stime.tv_sec
-           + usage.ru_stime.tv_usec * 1.0e-6;
+    return (double) usage.ru_utime.tv_sec + (double) usage.ru_utime.tv_usec * 1.0e-6 + (double) usage.ru_stime.tv_sec
+           + (double) usage.ru_stime.tv_usec * 1.0e-6;
 #endif
 }
 

@@ -918,7 +918,7 @@ DawProjectFile readDawProject (const juce::File& file)
         const std::unique_ptr<juce::InputStream> stream (index >= 0 ? zip.createStreamForEntry (index) : nullptr);
         juce::MemoryBlock text;
 
-        if (stream == nullptr || (juce::int64) stream->readIntoMemoryBlock (text, (juce::ssize_t) limit + 1) > limit)
+        if (stream == nullptr || (juce::int64) stream->readIntoMemoryBlock (text, (std::ptrdiff_t) limit + 1) > limit)
             return nullptr;
 
         // Text that is no UTF-8 is no XML a DAWproject holds.
@@ -1426,7 +1426,7 @@ namespace
 
         // A file of the zip copied into the song's Audio folder: once, however many clips play it; and not at all where the
         // Audio folder has a file of its name that holds the same (a DAWproject Phazite wrote, coming back).
-        std::map<juce::String, juce::File> unpackedFiles;
+        std::map<juce::String, juce::File> unpackedFiles {};
 
         juce::File copyOut (const juce::String& path)
         {

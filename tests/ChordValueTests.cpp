@@ -270,13 +270,13 @@ TEST_CASE ("Chords written as notes: held chords that move little, around middle
     const auto spreadOf = [clip] (const char* numeral)
     {
         const auto chord = bars ({ numeral });
-        const auto notes = phazite::makePartNotes (chord, PartStyle::spreadChords, { beat (0.0), beat (4.0) }, clip);
+        const auto part = phazite::makePartNotes (chord, PartStyle::spreadChords, { beat (0.0), beat (4.0) }, clip);
         const auto classes = phazite::getPitchClassesIn (chord.front().numeral, cMajor);
         INFO (numeral);
-        REQUIRE (! notes.empty());
-        CHECK (getPitchClasses (notes) == std::set<int> (classes.begin(), classes.end()));
-        CHECK (notes.front().pitch % 12 == classes.front()); // the bass lowest
-        return getPitches (notes);
+        REQUIRE (! part.empty());
+        CHECK (getPitchClasses (part) == std::set<int> (classes.begin(), classes.end()));
+        CHECK (part.front().pitch % 12 == classes.front()); // the bass lowest
+        return getPitches (part);
     };
 
     CHECK (spreadOf ("viio") == std::vector<int> { 59, 65, 74, 77 }); // B dim: B with its flat fifth, F

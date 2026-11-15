@@ -314,7 +314,7 @@ class ViewArea::TabButton : public juce::TabBarButton
 public:
     TabButton (const juce::String& name, juce::TabbedButtonBar& bar, ViewArea& area)
         : juce::TabBarButton (name, bar),
-          owner (area)
+          viewArea (area)
     {
     }
 
@@ -324,13 +324,13 @@ public:
         const auto index = getIndex();
 
         if (dragging || e.mods.isPopupMenu() || e.getDistanceFromDragStart() < dragThreshold
-            || ! juce::isPositiveAndBelow (index, (int) owner.tabs.size()))
+            || ! juce::isPositiveAndBelow (index, (int) viewArea.shownTabs.size()))
             return;
 
         if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
         {
             dragging = true;
-            container->startDragging (makeViewDrag (getView (owner.tabs[(size_t) index])), this,
+            container->startDragging (makeViewDrag (getView (viewArea.shownTabs[(size_t) index])), this,
                                       juce::ScaledImage (createComponentSnapshot (getLocalBounds())));
         }
     }
@@ -342,7 +342,7 @@ public:
     }
 
 private:
-    ViewArea& owner;
+    ViewArea& viewArea;
     bool dragging = false;
 };
 
@@ -407,21 +407,21 @@ void ViewArea::setViews (const std::vector<View>& shown)
         }
     }
 
-    if (newTabs == tabs)
+    if (newTabs == shownTabs)
         return;
 
     const auto before = getShownTab();
     clearTabs();
-    tabs = std::move (newTabs);
+    shownTabs = std::move (newTabs);
 
-    for (const auto tab : tabs)
+    for (const auto tab : shownTabs)
         addTab (describeTab (tab).name, juce::Colours::transparentBlack, &holders[(size_t) tab], false); // each view paints its own
 
     refreshTabs();
 
     if (before.has_value() && holds (*before))
         showTab (*before);
-    else if (! tabs.empty())
+    else if (! shownTabs.empty())
         setCurrentTabIndex (0);
 
     resized();
@@ -429,30 +429,30 @@ void ViewArea::setViews (const std::vector<View>& shown)
 
 bool ViewArea::holds (ViewTab tab) const
 {
-    return std::find (tabs.begin(), tabs.end(), tab) != tabs.end();
+    return std::find (shownTabs.begin(), shownTabs.end(), tab) != shownTabs.end();
 }
 
 void ViewArea::showTab (ViewTab tab)
 {
-    if (const auto at = std::find (tabs.begin(), tabs.end(), tab); at != tabs.end())
-        setCurrentTabIndex ((int) std::distance (tabs.begin(), at));
+    if (const auto at = std::find (shownTabs.begin(), shownTabs.end(), tab); at != shownTabs.end())
+        setCurrentTabIndex ((int) std::distance (shownTabs.begin(), at));
 }
 
 std::optional<ViewTab> ViewArea::getShownTab() const
 {
-    if (const auto index = getCurrentTabIndex(); juce::isPositiveAndBelow (index, (int) tabs.size()))
-        return tabs[(size_t) index];
+    if (const auto index = getCurrentTabIndex(); juce::isPositiveAndBelow (index, (int) shownTabs.size()))
+        return shownTabs[(size_t) index];
 
     return {};
 }
 
 void ViewArea::currentTabChanged (int index, const juce::String&)
 {
-    if (! juce::isPositiveAndBelow (index, (int) tabs.size()))
+    if (! juce::isPositiveAndBelow (index, (int) shownTabs.size()))
         return;
 
     // The tab's view moves into its holder here (from wherever it was), and the device tabs pick the Devices view's page.
-    const auto tab = tabs[(size_t) index];
+    const auto tab = shownTabs[(size_t) index];
     auto& holder = holders[(size_t) tab];
     holder.addAndMakeVisible (getViewComponent (tab));
     holder.resized();
@@ -503,11 +503,11 @@ void ViewArea::markEditorInUse()
 {
     auto& bar = getTabbedButtonBar();
 
-    for (int i = 0; i < (int) tabs.size(); ++i)
+    for (int i = 0; i < (int) shownTabs.size(); ++i)
     {
         if (auto* button = bar.getTabButton (i))
         {
-            const auto* editor = getEditor (tabs[(size_t) i]);
+            const auto* editor = getEditor (shownTabs[(size_t) i]);
             setTabInUse (*button, editor != nullptr && editor->isActive() && i == getCurrentTabIndex());
         }
     }
@@ -560,9 +560,9 @@ void ViewArea::refreshTabs()
 {
     auto& bar = getTabbedButtonBar();
 
-    for (int i = 0; i < (int) tabs.size(); ++i)
+    for (int i = 0; i < (int) shownTabs.size(); ++i)
     {
-        const auto tab = tabs[(size_t) i];
+        const auto tab = shownTabs[(size_t) i];
         const auto [name, about] = describeTab (tab);
         setTabName (i, name);
 
@@ -587,10 +587,10 @@ juce::TabBarButton* ViewArea::createTabButton (const juce::String& name, int)
 
 void ViewArea::popupMenuClickOnTab (int index, const juce::String&)
 {
-    if (! juce::isPositiveAndBelow (index, (int) tabs.size()))
+    if (! juce::isPositiveAndBelow (index, (int) shownTabs.size()))
         return;
 
-    const auto view = getView (tabs[(size_t) index]);
+    const auto view = getView (shownTabs[(size_t) index]);
     const auto other = getOtherRow (place.row);
     const juce::Component::SafePointer<ViewArea> safeThis (this);
     juce::PopupMenu menu;
@@ -640,12 +640,12 @@ int ViewArea::getDropIndexAt (juce::Point<int> position) const
 
     int index = 0;
 
-    for (size_t i = 0; i < tabs.size(); ++i)
+    for (size_t i = 0; i < shownTabs.size(); ++i)
     {
         // Each view's tabs together: the devices' two are one view.
         auto last = i;
 
-        while (last + 1 < tabs.size() && getView (tabs[last + 1]) == getView (tabs[i]))
+        while (last + 1 < shownTabs.size() && getView (shownTabs[last + 1]) == getView (shownTabs[i]))
             ++last;
 
         const auto* first = bar.getTabButton ((int) i);
@@ -666,9 +666,9 @@ float ViewArea::getDropLineX (int index) const
     auto& bar = getTabbedButtonBar();
     int viewIndex = 0;
 
-    for (size_t i = 0; i < tabs.size(); ++i)
+    for (size_t i = 0; i < shownTabs.size(); ++i)
     {
-        if (i > 0 && getView (tabs[i]) == getView (tabs[i - 1]))
+        if (i > 0 && getView (shownTabs[i]) == getView (shownTabs[i - 1]))
             continue;
 
         if (viewIndex++ == index)
@@ -677,7 +677,7 @@ float ViewArea::getDropLineX (int index) const
     }
 
     // After the views: past the last tab.
-    if (const auto* last = tabs.empty() ? nullptr : bar.getTabButton ((int) tabs.size() - 1))
+    if (const auto* last = shownTabs.empty() ? nullptr : bar.getTabButton ((int) shownTabs.size() - 1))
         return (float) (bar.getX() + last->getRight());
 
     return (float) bar.getX();

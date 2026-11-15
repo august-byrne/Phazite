@@ -144,7 +144,7 @@ ExportPanel::ExportPanel (Settings& s, const juce::File& defaultFile, double sec
                 .withButton ("Replace", 1)
                 .withButton ("Cancel", 0)
                 .withAssociatedComponent (this),
-            [callback = std::move (callback)] (int result) { callback (result == 1); });
+            [answer = std::move (callback)] (int result) { answer (result == 1); });
     };
 
     askToStop = [this] (std::function<void (bool)> callback)
@@ -156,7 +156,7 @@ ExportPanel::ExportPanel (Settings& s, const juce::File& defaultFile, double sec
                                           .withButton ("Stop Exporting", 1)
                                           .withButton ("Keep Exporting", 0)
                                           .withAssociatedComponent (this),
-                                      [callback = std::move (callback)] (int result) { callback (result == 1); });
+                                      [answer = std::move (callback)] (int result) { answer (result == 1); });
     };
 
     for (auto* c : std::initializer_list<juce::Component*> {

@@ -1456,10 +1456,10 @@ void DevicesView::showBody()
 
         // A drum sampler's Swap tries the browser's sounds on a pad (onSwap: the app's browser).
         if (auto* drums = dynamic_cast<DrumSamplerEditor*> (shown.get()); drums != nullptr && onSwap != nullptr)
-            drums->onSwap = [this, id = device->id] (int pad)
+            drums->onSwap = [this, sampler = device->id] (int pad)
             {
                 if (onSwap != nullptr)
-                    onSwap (id, pad);
+                    onSwap (sampler, pad);
             };
 
         if (shown == nullptr)

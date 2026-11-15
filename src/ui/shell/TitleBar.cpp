@@ -503,7 +503,7 @@ void TitleBar::resized()
 {
     auto area = getLocalBounds();
     const auto buttonSize = controlHeight;
-    const auto centred = [buttonSize] (juce::Rectangle<int> slot) { return slot.withSizeKeepingCentre (buttonSize, buttonSize); };
+    const auto centred = [] (juce::Rectangle<int> slot) { return slot.withSizeKeepingCentre (controlHeight, controlHeight); };
 
     // Right: the window's buttons, then the panels' switches and the Layout menu.
     if (closeButton != nullptr)

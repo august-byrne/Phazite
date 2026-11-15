@@ -59,10 +59,10 @@ namespace
 class Instance::PlayHead final : public juce::AudioPlayHead
 {
 public:
-    void set (const sandbox::BlockInfo& info, double rate, int offset) noexcept
+    void set (const sandbox::BlockInfo& info, double sampleRate, int offset) noexcept
     {
         const auto moved = info.isPlaying != 0 ? offset : 0;
-        const auto ppq = info.beat + moved * info.tempo / (60.0 * rate);
+        const auto ppq = info.beat + moved * info.tempo / (60.0 * sampleRate);
         const auto barLength = info.barLength > 0.0 ? info.barLength : 4.0;
         const auto barsOn = moved > 0 ? std::max (0.0, std::floor ((ppq - info.barStart) / barLength + 1.0e-9)) : 0.0;
 
@@ -70,7 +70,7 @@ public:
         position.setBpm (info.tempo);
         position.setTimeSignature (juce::AudioPlayHead::TimeSignature { info.timeSignatureNumerator, info.timeSignatureDenominator });
         position.setTimeInSamples (info.sample + moved);
-        position.setTimeInSeconds ((double) (info.sample + moved) / rate);
+        position.setTimeInSeconds ((double) (info.sample + moved) / sampleRate);
         position.setPpqPosition (ppq);
         position.setPpqPositionOfLastBarStart (info.barStart + barsOn * barLength);
         position.setBarCount (info.barCount + (std::int64_t) barsOn);

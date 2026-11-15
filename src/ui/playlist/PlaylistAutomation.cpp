@@ -175,7 +175,7 @@ int Playlist::AutomationLaneView::getViewOffset() const
 
 BeatPosition Playlist::AutomationLaneView::xToBeat (float x) const
 {
-    return playlist.getView().xToBeat (x + playlist.lanes->getLocalPoint (this, juce::Point<int>()).x);
+    return playlist.getView().xToBeat (x + (float) playlist.lanes->getLocalPoint (this, juce::Point<int>()).x);
 }
 
 BeatPosition Playlist::AutomationLaneView::limitBeat (BeatPosition beat) const

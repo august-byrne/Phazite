@@ -43,6 +43,7 @@ public:
         at = 0;
     }
 
+    using juce::AudioProcessor::processBlock;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
     {
         if (buffer.getNumChannels() < 1)

@@ -46,6 +46,7 @@ public:
             voice = {};
     }
 
+    using juce::AudioProcessor::processBlock;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
     {
         // What came in is left out: the output is the notes alone.

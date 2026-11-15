@@ -728,10 +728,10 @@ juce::PopupMenu ParameterAttachment::getMenu()
     const juce::Component::SafePointer<juce::Slider> safeSlider (&slider);
     const auto act = [this, safeSlider] (std::function<void (ParameterHandle&)> action)
     {
-        return [this, safeSlider, action = std::move (action)]
+        return [this, safeSlider, chosen = std::move (action)]
         {
             if (safeSlider != nullptr)
-                action (handle);
+                chosen (handle);
         };
     };
 

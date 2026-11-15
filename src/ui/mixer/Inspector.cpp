@@ -587,8 +587,8 @@ namespace
             colourButton.setTooltip ("The track's color, which its clips and its channel show. Click for another");
             colourButton.onClick = [this]
             {
-                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, id = track] (juce::Colour chosen)
-                                { setTrackColours (projectContext, { id }, chosen); });
+                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, shownTrack = track] (juce::Colour chosen)
+                                { setTrackColours (projectContext, { shownTrack }, chosen); });
             };
 
             showAsDecibels (volume);
@@ -1320,8 +1320,8 @@ namespace
             colourButton.setTooltip ("The section's color, behind the tracks. Click for another");
             colourButton.onClick = [this]
             {
-                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, id = section] (juce::Colour chosen)
-                                { setSectionColour (projectContext, id, chosen); });
+                showColourMenu (colourButton, colourButton.colour, [&projectContext = context, shownSection = section] (juce::Colour chosen)
+                                { setSectionColour (projectContext, shownSection, chosen); });
             };
 
             for (auto* label : { &startLabel, &lengthLabel, &energyLabel, &tipLabel })

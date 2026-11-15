@@ -152,7 +152,7 @@ public:
     // Shows these views' tabs, in this order; the tab that showed still shows if it is here.
     void setViews (const std::vector<View>&);
     bool holds (ViewTab) const;
-    bool isEmpty() const noexcept { return tabs.empty(); }
+    bool isEmpty() const noexcept { return shownTabs.empty(); }
 
     void showTab (ViewTab); // one it holds
     std::optional<ViewTab> getShownTab() const;
@@ -215,7 +215,7 @@ private:
 
     const ViewPlace place;
     const Views views;
-    std::vector<ViewTab> tabs; // in the tabs' order
+    std::vector<ViewTab> shownTabs; // in the tabs' order
     std::array<Holder, 5> holders;
     const CommandBridge* shortcuts = nullptr;
     bool canGoBeside = false, canMakeRow = false;

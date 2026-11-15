@@ -615,10 +615,10 @@ namespace
 class FmEditor::GroupTab : public juce::Button
 {
 public:
-    GroupTab (FmEditor& e, Group shownGroup, const juce::String& name, const juce::String& tooltip)
+    GroupTab (FmEditor& e, Group tabGroup, const juce::String& name, const juce::String& tooltip)
         : juce::Button (name),
           editor (e),
-          group (shownGroup)
+          group (tabGroup)
     {
         setTitle (name);
         setTooltip (tooltip);

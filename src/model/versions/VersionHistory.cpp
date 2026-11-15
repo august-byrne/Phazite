@@ -175,16 +175,16 @@ void VersionHistory::open()
 
     // Its branches, every version their last ones follow, and the current branch's last version's song.
     run (
-        [store = store, number = generation, weak = juce::WeakReference<VersionHistory> (this)]
+        [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this)]
         {
             // Its packs joined into one once there are many, as each is read as the store opens.
-            if (store->getPieces().getNumPacks() > maxPacks)
-                store->getPieces().joinPacks();
+            if (shared->getPieces().getNumPacks() > maxPacks)
+                shared->getPieces().joinPacks();
 
             // Every computer's record of each branch, and every version their last ones follow; then each branch as this
             // computer takes them together.
-            const auto records = store->readBranches();
-            auto current = store->readCurrentBranch();
+            const auto records = shared->readBranches();
+            auto current = shared->readCurrentBranch();
             std::map<juce::String, VersionRecord> versionsRead;
             juce::StringArray toRead;
 
@@ -200,14 +200,14 @@ void VersionHistory::open()
                 if (versionsRead.count (id) > 0)
                     continue;
 
-                if (auto version = store->readVersion (id))
+                if (auto version = shared->readVersion (id))
                 {
                     toRead.addArray (version->parents);
                     versionsRead.emplace (id, std::move (*version));
                 }
             }
 
-            auto branchesRead = joinBranchRecords (records, versionsRead, store->getComputer());
+            auto branchesRead = joinBranchRecords (records, versionsRead, shared->getComputer());
             keepReachable (versionsRead, branchesRead); // not what deleted branches alone held
             juce::ValueTree head;
             PluginParameterValues parameters;
@@ -221,11 +221,11 @@ void VersionHistory::open()
             for (const auto& branch : branchesRead)
                 if (branch.id == current)
                     if (const auto found = versionsRead.find (branch.head); found != versionsRead.end())
-                        head = store->readSong (found->second.song, &parameters);
+                        head = shared->readSong (found->second.song, &parameters);
 
-            store->getPieces().closeFiles();
-            auto messages = store->readMessages();
-            auto snapshotsRead = store->readSnapshots();
+            shared->getPieces().closeFiles();
+            auto messages = shared->readMessages();
+            auto snapshotsRead = shared->readSnapshots();
 
             juce::MessageManager::callAsync (
                 [weak, number, branchesRead, current, versionsRead, head, parameters, messages, snapshotsRead]() mutable
@@ -348,13 +348,13 @@ bool VersionHistory::checkHistory (std::function<void()> done)
     tellNow(); // "Verifying..."
 
     run (
-        [store = store, number = generation, known = versions, weak = juce::WeakReference<VersionHistory> (this), done]
+        [shared = store, number = generation, known = versions, weak = juce::WeakReference<VersionHistory> (this), done]
         {
             // Every pack the folder holds now, those written since the history opened too.
-            store->getPieces().readNewPacks();
+            shared->getPieces().readNewPacks();
 
             Check check;
-            const auto names = store->getPieces().getNames();
+            const auto names = shared->getPieces().getNames();
             check.numPieces = names.size();
             check.numVersions = (int) known.size();
 
@@ -363,7 +363,7 @@ bool VersionHistory::checkHistory (std::function<void()> done)
 
             for (const auto& name : names)
             {
-                const auto bytes = store->getPieces().read (name);
+                const auto bytes = shared->getPieces().read (name);
 
                 if (! bytes.has_value())
                 {
@@ -383,7 +383,7 @@ bool VersionHistory::checkHistory (std::function<void()> done)
             for (const auto& [id, version] : known)
             {
                 std::vector<MissingPiece> missing;
-                store->readSong (version.song, nullptr, &missing);
+                shared->readSong (version.song, nullptr, &missing);
 
                 if (! missing.empty())
                     check.damaged[id] = std::move (missing);
@@ -394,7 +394,7 @@ bool VersionHistory::checkHistory (std::function<void()> done)
                     check.lost.push_back (std::move (record));
 
             std::sort (check.lost.begin(), check.lost.end(), [] (const auto& a, const auto& b) { return a.saved > b.saved; });
-            store->getPieces().closeFiles();
+            shared->getPieces().closeFiles();
 
             juce::MessageManager::callAsync (
                 [weak, number, check, done]() mutable
@@ -591,12 +591,12 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     tellNow(); // "Saving..."
 
     run (
-        [store = store, number = generation, copy, parameters, committed, version, branch, mergesAnother,
+        [shared = store, number = generation, copy, parameters, committed, version, branch, mergesAnother,
          projectFolder = song.getFile().getParentDirectory(), weak = juce::WeakReference<VersionHistory> (this), done]() mutable
         {
             const auto pieces = splitSong (copy, parameters);
-            version.files = store->hashFiles (findAudioFilePaths (copy), projectFolder);
-            version.id = store->writeVersion (version, pieces);
+            version.files = shared->hashFiles (findAudioFilePaths (copy), projectFolder);
+            version.id = shared->writeVersion (version, pieces);
             version.song = pieces.song;
             auto ok = version.id.isNotEmpty();
 
@@ -606,11 +606,11 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
                 branch.head = version.id;
                 branch.working = {};
                 branch.divergent.clear(); // a merge's commit follows the other line; any other leaves it as it was
-                ok = store->writeBranch (branch) && store->writeCurrentBranch (branch.id);
-                store->logBranchMove (branch.id, before, version.id, mergesAnother ? "merge" : "commit");
+                ok = shared->writeBranch (branch) && shared->writeCurrentBranch (branch.id);
+                shared->logBranchMove (branch.id, before, version.id, mergesAnother ? "merge" : "commit");
             }
 
-            store->getPieces().closeFiles();
+            shared->getPieces().closeFiles();
 
             juce::MessageManager::callAsync (
                 [weak, number, ok, version, branch, copy, parameters, committed, done]() mutable
@@ -1712,21 +1712,21 @@ void VersionHistory::takeSnapshot (const juce::String& reason)
     lastSnapshotTime = juce::Time::currentTimeMillis();
 
     run (
-        [store = store, number = generation, copy = song.getState().createCopy(), parameters = readPluginParameters(),
+        [shared = store, number = generation, copy = song.getState().createCopy(), parameters = readPluginParameters(),
          branch = currentBranch, time = lastSnapshotTime, reason, weak = juce::WeakReference<VersionHistory> (this)]() mutable
         {
             // Only when the song differs from the snapshot before it; thinned as it grows.
             const auto pieces = splitSong (copy, parameters);
-            auto all = store->readSnapshots();
+            auto all = shared->readSnapshots();
 
-            if ((all.empty() || all.back().song != pieces.song) && store->writeSong (pieces))
+            if ((all.empty() || all.back().song != pieces.song) && shared->writeSong (pieces))
             {
                 all.push_back ({ time, branch, pieces.song, reason });
                 all = thinSnapshots (all, time);
-                store->writeSnapshots (all);
+                shared->writeSnapshots (all);
             }
 
-            store->getPieces().closeFiles();
+            shared->getPieces().closeFiles();
 
             juce::MessageManager::callAsync (
                 [weak, number, all]() mutable

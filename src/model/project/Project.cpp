@@ -729,10 +729,11 @@ namespace
                     {
                         if (const auto kind = getModulatorKind (child))
                             keepValuesSetByHand (child,
-                                                 [kind = *kind] (std::string_view id) -> const devices::ParameterInfo*
+                                                 [modulator = *kind] (std::string_view id) -> const devices::ParameterInfo*
                                                  {
-                                                     const auto index = devices::findModulatorParameter (kind, id);
-                                                     return index >= 0 ? &devices::getModulatorParameters (kind)[(size_t) index] : nullptr;
+                                                     const auto index = devices::findModulatorParameter (modulator, id);
+                                                     return index >= 0 ? &devices::getModulatorParameters (modulator)[(size_t) index]
+                                                                       : nullptr;
                                                  });
                         else
                             parent.removeChild (i, nullptr);

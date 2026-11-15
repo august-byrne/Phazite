@@ -22,7 +22,11 @@
 #   what an invariant the analyzer can't see rules out (2026-11-14): a ValueTree found in the song only when there is a
 #   song (NonNullParamChecker, 11 times); a helper's instance there whenever its channel opened (CallAndMessage); a voice
 #   to take whenever all are playing (UndefReturn, NullDereference); a lambda's moved std::function (StackAddressEscape);
-#   a sample rate under 100 Hz (UndefinedBinaryOperatorResult); a component's row height (DivideZero).
+#   a sample rate under 100 Hz (UndefinedBinaryOperatorResult); a component's row height (DivideZero). And for
+#   NewDeleteLeaks, which with GCC's standard library (CI's first run, 2026-11-14) reported five leaks, each a std::function
+#   or a std::unique_ptr handed on through a std::function, whose destructor it can't follow: a lambda that holds a
+#   std::function, returned as one (ContainerEditor.cpp, SidechainMenus.cpp), and a render returned from one (Freeze.cpp).
+#   The linux-asan tests find real leaks as they run (LeakSanitizer).
 #   tests/.clang-tidy turns its memory checks off for the tests, whose doctest macros trip them in doctest's own code.
 # Off: bugprone-incorrect-roundings, whose one finding, (int) (x + 0.5f) for a value never negative, is right; and
 # bugprone-swapped-arguments, whose one finding (a test's int and double, in the order its function takes them) is too.
@@ -60,7 +64,8 @@ Checks: >
   -clang-analyzer-core.UndefinedBinaryOperatorResult,
   -clang-analyzer-core.DivideZero,
   -clang-analyzer-core.NullDereference,
-  clang-analyzer-cplusplus.*
+  clang-analyzer-cplusplus.*,
+  -clang-analyzer-cplusplus.NewDeleteLeaks
 WarningsAsErrors: "*"
 # Findings in Phazite's own headers too; JUCE's, doctest's and the other submodules' are theirs.
 HeaderFilterRegex: '.*[/\\](src|tests)[/\\].*'

@@ -917,11 +917,11 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
                 backup.isValid() ? "the backup of " + backupFile.getLastModificationTime().formatted ("%d %b %Y %H:%M") : juce::String();
             const auto commitText = commit.isValid() ? "the last commit, \"" + commitName + "\"" : juce::String();
 
-            const auto choose = [this, file, backup = backup, commit = commit] (int choice)
+            const auto choose = [this, file, backupSong = backup, commitSong = commit] (int choice)
             {
                 juce::String copyError;
 
-                if (const auto& song = choice == 1 ? backup : commit; choice != 0 && song.isValid())
+                if (const auto& song = choice == 1 ? backupSong : commitSong; choice != 0 && song.isValid())
                 {
                     if (auto opened = Project::openWithSong (file, song, copyError))
                     {
