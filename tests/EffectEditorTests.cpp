@@ -128,7 +128,7 @@ TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves acros
 
     // A drag to the pixel nearest 1 kHz at half the resonance, and one nearest 100 Hz near the top: each lands on the value
     // at that pixel, and the dot is drawn under the pointer.
-    for (const auto [hz, resonance] : { std::pair (1000.0, 0.5), std::pair (100.0, 0.9) })
+    for (const auto& [hz, resonance] : { std::pair (1000.0, 0.5), std::pair (100.0, 0.9) })
     {
         CAPTURE (hz);
         const juce::Point<int> target (juce::roundToInt (area.getX() + std::log (hz / 20.0) / std::log (1000.0) * area.getWidth()),

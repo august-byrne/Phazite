@@ -270,7 +270,7 @@ TEST_CASE ("The EQ's graph runs from 20 Hz to 20 kHz evenly by octaves across, a
     auto& graph = editor.getGraph();
     const auto width = (double) graph.getWidth(), height = (double) graph.getHeight();
 
-    for (const auto [hz, decibels] : { std::pair (1000.0, 6.0), std::pair (5000.0, -12.0) })
+    for (const auto& [hz, decibels] : { std::pair (1000.0, 6.0), std::pair (5000.0, -12.0) })
     {
         CAPTURE (hz);
         const juce::Point<int> target (juce::roundToInt (std::log (hz / 20.0) / std::log (1000.0) * width),

@@ -456,11 +456,11 @@ namespace
         ui::DeviceWindowContent content;
 
         // "EQ - Bass": the device and its channel (the track it is on, or whose container it is in), or the master.
-        static juce::String getTitleOf (const Song& song, DeviceID id)
+        static juce::String getTitleOf (const Song& itsSong, DeviceID device)
         {
-            const auto channel = getDeviceChannel (song, id);
-            const auto onTrack = channel.isValid() && ! isMaster (song, channel);
-            return getDeviceName (song, id) + " - " + (onTrack ? getTrackName (song, channel) : juce::String ("Master"));
+            const auto channel = getDeviceChannel (itsSong, device);
+            const auto onTrack = channel.isValid() && ! isMaster (itsSong, channel);
+            return getDeviceName (itsSong, device) + " - " + (onTrack ? getTrackName (itsSong, channel) : juce::String ("Master"));
         }
 
         bool refresh (Song& shown) override // the device or its track renamed

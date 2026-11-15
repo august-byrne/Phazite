@@ -443,7 +443,7 @@ TEST_CASE ("Enter in a name field renames and gives the keys back to the window,
     click();
 
     for (const auto letter : { 'l', 'e', 'a', 'd' })
-        screen.window.pressKey (juce::KeyPress (letter, 0, letter));
+        screen.window.pressKey (juce::KeyPress (letter, 0, (juce::juce_wchar) letter));
 
     screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
     phazite::test::dispatchPendingMessages();
