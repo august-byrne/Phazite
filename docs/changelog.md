@@ -78,6 +78,11 @@ the reviews found is fixed too. The numbers in brackets are those the bugs had i
   the nightly run, and a `linux-clang` preset and CI job with clang-tidy; neither could be run where they were
   written.
 - **S2.5 The allocation guard:** counts what the engine's worker threads allocate too, and has a Linux half.
+- **The nets' gaps closed:** the event queue, the handover, the playhead's stamps and the transport raced on real
+  threads; saves that fail and first saves that fail part way; Cut, Copy and Paste of linked clips, audio, ranges and
+  what Undo makes of them; the drum machines' pitches, decays and bands; the effect graphs' axes; the command palette
+  and files dropped on a track; waits in the tests wait for a condition, with a limit only a hang reaches. Two tests
+  that failed when every test file ran in one process pass (154).
 
 ## Stage 2. Caught: the tests that would have found the audit's bugs, and the docs (2026-11-14)
 

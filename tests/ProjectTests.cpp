@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
+#include "HeldFile.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/fm/FmSynth.h"
@@ -11,6 +14,7 @@
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/Outlines.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
 #include "model/arrangement/internal/Import.h"
@@ -76,6 +80,11 @@ juce::Array<juce::File> getBackups (const phazite::Project& project)
     files.removeAllInstancesOf (phazite::Project::getAutosaveFile (project.getFile()));
     return files;
 }
+
+// How long an autosave timer of these tests (AutosaveTimer (project, 120, 1): its first autosave a second after the first
+// change, then every 120 s) may take to write its first: half its interval, so that a busy machine's late timers don't
+// fail a test, while an autosave that waited for the interval still does. How soon is what these checks test.
+constexpr int soonerThanTheInterval = 60000;
 
 // The song's first track, which every new song has.
 phazite::TrackID getFirstTrack (const phazite::Song& song)
@@ -368,7 +377,7 @@ TEST_CASE ("A change is autosaved in the background soon after it is made, and t
 
     const auto changed = juce::Time::getCurrentTime();
     project->getSong().getState().setProperty ("take", 1, nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return project->getLastAutosave().has_value(); }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return project->getLastAutosave().has_value(); }));
     CHECK (*project->getLastAutosave() >= changed);
     CHECK (autosaveFile.existsAsFile());
     CHECK (phazite::Project::hasNewerAutosave (project->getFile()));
@@ -401,7 +410,7 @@ TEST_CASE ("Autosave comes soon after the first change, then waits its interval"
     CHECK_FALSE (autosaveFile.exists()); // nothing changed
 
     project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
-    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, 4000));
+    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, soonerThanTheInterval));
 
     // The next change waits for the interval.
     const auto first = autosaveFile.loadFileAsString();
@@ -421,7 +430,7 @@ TEST_CASE ("Auto Save saves the project file a moment after the last change, in 
     // A change: saved into the project file itself, not into an autosave, a moment after it was made.
     project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
     CHECK (project->hasUnsavedChanges());
-    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
     CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "pop");
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
 
@@ -429,23 +438,24 @@ TEST_CASE ("Auto Save saves the project file a moment after the last change, in 
     for (const auto* outline : { "rock", "jazz", "house" })
         project->getSong().getState().setProperty (phazite::schema::outline, outline, nullptr);
 
-    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
     CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "house");
 
     // A change made while a save is being written stays unsaved until the next.
     project->getSong().getState().setProperty (phazite::schema::outline, "funk", nullptr);
     project->saveInBackground();
     project->getSong().getState().setProperty (phazite::schema::outline, "soul", nullptr);
-    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }, 5000));
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }));
     CHECK (project->finishBackgroundSave());
     CHECK (project->hasUnsavedChanges());
-    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
     CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "soul");
 
     // Off, it autosaves for a crash again, the project file as it was.
     timer.setAutoSave (false);
     project->getSong().getState().setProperty (phazite::schema::outline, "disco", nullptr);
-    CHECK (phazite::test::runTimersUntil ([&file] { return phazite::Project::getAutosaveFile (file).existsAsFile(); }, 5000));
+    CHECK (
+        phazite::test::runTimersUntil ([&file] { return phazite::Project::getAutosaveFile (file).existsAsFile(); }, soonerThanTheInterval));
     CHECK (project->hasUnsavedChanges());
 }
 
@@ -977,7 +987,7 @@ TEST_CASE ("Autosave writes in the background, and says once when it fails")
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Background");
     const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
-    const auto waitForIt = [&project] { return phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }, 5000); };
+    const auto waitForIt = [&project] { return phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }); };
 
     project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
     project->autosaveInBackground();
@@ -1016,7 +1026,7 @@ TEST_CASE ("Autosave waits while the song plays")
     CHECK_FALSE (autosaveFile.exists());
 
     phazite::stopPlaying (song);
-    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, 4000));
+    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, soonerThanTheInterval));
 }
 
 TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a save and a reopen, and its type with them")
@@ -1077,4 +1087,103 @@ TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a sav
             CHECK (phazite::getValueSetByHand (song, phazite::ParameterRef { id, parameter }) == doctest::Approx (values[i]));
         }
     }
+}
+
+TEST_CASE ("A save that can't write the project file leaves the file as it was last saved, whole, and the changes unsaved")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Held");
+    const auto file = project->getFile();
+    project->getSong().getState().setProperty ("take", 1, nullptr);
+    REQUIRE (project->save().wasOk());
+    juce::MemoryBlock saved;
+    REQUIRE (file.loadFileAsData (saved));
+
+    project->getSong().getState().setProperty ("take", 2, nullptr);
+
+    {
+        // Held by another program (or, outside Windows, in a folder that can't be written).
+        const phazite::test::HeldFile held (file);
+
+        if (! held.works())
+        {
+            MESSAGE ("The file can't be held from this user: nothing to fail.");
+            return;
+        }
+
+        const auto result = project->save();
+        CHECK (result.failed());
+        CHECK (result.getErrorMessage().contains (file.getFullPathName()));
+        CHECK (project->hasUnsavedChanges());
+        CHECK (project->checkUnsavedChanges());
+    }
+
+    // The file is as it was, byte for byte, with nothing left beside it.
+    juce::MemoryBlock after;
+    REQUIRE (file.loadFileAsData (after));
+    CHECK (after == saved);
+    CHECK (file.getParentDirectory().findChildFiles (juce::File::findFiles, false, "*_temp*").isEmpty());
+
+    // Once it can be written, the save works.
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+    project = nullptr;
+    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+}
+
+TEST_CASE ("A track's height and its collapse, changed between undo steps, stay through Undo and Redo, and are no unsaved change")
+{
+    phazite::test::TestSong song;
+    const auto first = song.firstTrack;
+    phazite::TrackID second;
+    const auto row = [&song] (phazite::TrackID track)
+    {
+        const auto found = phazite::getTrackRow (song.context, track);
+        REQUIRE (found.has_value());
+        return *found;
+    };
+
+    {
+        auto& project = song.getProject();
+        phazite::test::UndoCheck check (song.context);
+        check.checkSeveral ("a track", [&song, &second] { second = song.addTrack ("Bass"); });
+        REQUIRE (project.save().wasOk());
+
+        // Set between the steps, as the playlist sets them: no undo step, nothing unsaved.
+        phazite::setSavedTrackHeight (song.context, first, 120);
+        phazite::setCollapsed (song.context, first, true);
+        phazite::setSavedTrackHeight (song.context, second, 90);
+        CHECK_FALSE (project.hasUnsavedChanges());
+        CHECK_FALSE (project.checkUnsavedChanges());
+
+        check.checkSeveral ("a clip", [&song, &second] { song.addMidiClip (second, 0.0, 4.0); });
+        phazite::setCollapsed (song.context, second, true);
+
+        // Undone to before the track, and redone: the first track as it was set, and the second back as it was set too.
+        auto& songState = *phazite::findSong (song.context);
+        while (phazite::getTrackRow (song.context, second).has_value() && phazite::canUndo (songState))
+            check.stepBackOrForth ("Undo", [&songState] { phazite::undo (songState); });
+
+        CHECK_FALSE (phazite::getTrackRow (song.context, second).has_value());
+        CHECK (row (first).savedHeight == std::optional<int> (120));
+        CHECK (row (first).collapsed);
+
+        while (phazite::canRedo (songState))
+            check.stepBackOrForth ("Redo", [&songState] { phazite::redo (songState); });
+
+        CHECK (row (first).savedHeight == std::optional<int> (120));
+        CHECK (row (first).collapsed);
+        CHECK (row (second).savedHeight == std::optional<int> (90));
+        CHECK (row (second).collapsed);
+        CHECK (phazite::getClips (song.context, second).size() == 1);
+        check.walkBackAndForth();
+
+        // Saved and opened again, the view state with it.
+        REQUIRE (project.save().wasOk());
+    }
+
+    song.reopen();
+    CHECK (row (first).savedHeight == std::optional<int> (120));
+    CHECK (row (first).collapsed);
+    CHECK (row (second).savedHeight == std::optional<int> (90));
 }

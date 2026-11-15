@@ -96,8 +96,8 @@ says, it can't crash Phazite or make it do anything but open a song.
 - **The readers are fuzzed** in every test run: project files, a version's pieces and records, presets, DAWprojects, a
   VST3's state, the helper's messages, the settings, keymaps and audio files' headers (`tests/FuzzTests.cpp`).
 
-Not built yet: a preset's sounds limited to the library's folders and its own, the channel count a helper writes into
-shared memory checked, and a DAWproject written past 4 GB refused (known bugs 105, 66 and 106 in
+A preset takes its sounds from its own folder only (a full path in one is not followed), and only the channels handed
+to a helper are read back from shared memory. Not built yet: a DAWproject written past 4 GB refused (known bug 106 in
 [known-bugs.md](../known-bugs.md)).
 
 ## Saving

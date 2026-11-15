@@ -1227,6 +1227,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ClipTests.cpp
         tests/ClipWaveformTests.cpp
         tests/CommandGoldenTests.cpp
+        tests/CommandPaletteTests.cpp
         tests/CommandTests.cpp
         tests/CompressorEditorTests.cpp
         tests/CompressorTests.cpp
@@ -1283,6 +1284,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
         tests/GraphEditingTests.cpp
+        tests/HeldFile.cpp
+        tests/HeldFile.h
         tests/GuideTests.cpp
         tests/HostedDevice.h
         tests/IconTests.cpp
@@ -1294,6 +1297,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/LimiterTests.cpp
         tests/LessonsTests.cpp
         tests/LiveInputTests.cpp
+        tests/LockFreeTests.cpp
         tests/MainWindowTests.cpp
         tests/LongRun.cpp
         tests/MessageQueueTests.cpp

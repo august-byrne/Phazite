@@ -103,8 +103,7 @@ TEST_CASE ("Phazite's engine loops the range the song loops, and stops at the so
     followTheSong();
     CHECK (phazite::isPlaying (song.context));
     playback.play (0.2);
-    followTheSong();
-    CHECK_FALSE (phazite::isPlaying (song.context));
+    CHECK (phazite::test::dispatchMessagesUntil ([&song] { return ! phazite::isPlaying (song.context); }));
     CHECK (phazite::getPlayheadBeat (song.context).inBeats() == doctest::Approx (0.0));
 }
 

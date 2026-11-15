@@ -269,7 +269,7 @@ TEST_CASE ("A project's renders are made in the background, and one that no clip
     };
     CHECK (renders.isRendering());
     CHECK (renders.getProgress().renders == 0); // not before the tempo has stayed put a moment
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders > 0; }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders > 0; }));
     CHECK (renders.getProgress().done < 1.0);
 
     // Made, and played: no longer among the renders being made, which the message thread hands to what plays them.
@@ -288,8 +288,8 @@ TEST_CASE ("A project's renders are made in the background, and one that no clip
     // Back at their own tempo the loops play their files, and the long render stops, leaving nothing, and no progress.
     phazite::setTempo (song, 120.0);
     CHECK_FALSE (renders.isRendering());
-    CHECK (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders == 0; }, 10000));
-    CHECK (phazite::test::dispatchMessagesUntil ([&isWritingLongRender] { return ! isWritingLongRender(); }, 10000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&renders] { return renders.getProgress().renders == 0; }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&isWritingLongRender] { return ! isWritingLongRender(); }));
     CHECK_FALSE (longRender.existsAsFile());
     phazite::purgeClipRenders (song); // the short one's, which no clip plays now
 }
@@ -310,13 +310,13 @@ TEST_CASE ("Deleting a tempo change starts the renders it makes needed: a loop a
 
     const auto loop = phazite::importFile (song, track, writeClicks (temp.folder.getChildFile ("Loop"), 4, 140.0), phazite::test::at (8.0));
     REQUIRE (isAudioClip (song, loop));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.isRendering(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.isRendering(); }));
 
     phazite::deleteTempoChange (song, 1);
     REQUIRE (phazite::getTempoChanges (song).size() == 1);
     REQUIRE (phazite::isRendered (song, loop));
     const auto render = playedFileOf (song, loop);
-    CHECK (phazite::test::dispatchMessagesUntil ([&render] { return phazite::getAudioFileInfo (render).isValid(); }, 20000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&render] { return phazite::getAudioFileInfo (render).isValid(); }));
     phazite::purgeClipRenders (song);
 }
 

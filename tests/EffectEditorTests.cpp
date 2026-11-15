@@ -82,7 +82,7 @@ void checkEveryParameterButMixHasAControl (const phazite::ui::DeviceEditorBase& 
 }
 } // namespace
 
-TEST_CASE ("The Filter's editor draws its response, and its dot drags the cutoff and resonance as one undo step")
+TEST_CASE ("The Filter's editor has a control for each parameter but the mix, and its dot drags the cutoff and resonance as one undo step")
 {
     Song song (FilterEffect::typeID);
     const auto device = song.getDevice();
@@ -112,6 +112,37 @@ TEST_CASE ("The Filter's editor draws its response, and its dot drags the cutoff
     // The wheel turns the drive.
     mouse.wheel (middle, 0.5f);
     CHECK (song.valueOf ("drive") > 0.5f);
+}
+
+TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves across, and the resonance from none to all up it")
+{
+    // The axes as the graph says it draws them, apart from its own code: its curve inside its edge's pixel, 20 Hz at the
+    // left, 20 kHz at the right, each octave as wide as the next; the resonance from 0 at the bottom to 1 at the top.
+    Song song (FilterEffect::typeID);
+    phazite::ui::FilterEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& graph = editor.getGraph();
+    const auto area = graph.getLocalBounds().toFloat().reduced (1.0f);
+    const auto frequencyAt = [area] (int x) { return 20.0 * std::pow (1000.0, ((double) x - area.getX()) / area.getWidth()); };
+    const auto resonanceAt = [area] (int y) { return (area.getBottom() - (double) y) / area.getHeight(); };
+
+    // A drag to the pixel nearest 1 kHz at half the resonance, and one nearest 100 Hz near the top: each lands on the value
+    // at that pixel, and the dot is drawn under the pointer.
+    for (const auto [hz, resonance] : { std::pair (1000.0, 0.5), std::pair (100.0, 0.9) })
+    {
+        CAPTURE (hz);
+        const juce::Point<int> target (juce::roundToInt (area.getX() + std::log (hz / 20.0) / std::log (1000.0) * area.getWidth()),
+                                       juce::roundToInt (area.getBottom() - resonance * area.getHeight()));
+        phazite::test::Mouse mouse (graph);
+        mouse.press (editor.getDotPosition().roundToInt());
+        mouse.dragTo (target);
+        mouse.release();
+
+        CHECK (song.valueOf ("cutoff") == doctest::Approx (frequencyAt (target.x)).epsilon (0.002));
+        CHECK (song.valueOf ("cutoff") == doctest::Approx (hz).epsilon (0.03)); // a pixel is under 3 % of a frequency
+        CHECK (song.valueOf ("resonance") == doctest::Approx (resonanceAt (target.y)).epsilon (0.002));
+        CHECK (editor.getDotPosition().getDistanceFrom (target.toFloat()) < 0.5f);
+    }
 }
 
 TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their curves, and shows how far the sound reaches")

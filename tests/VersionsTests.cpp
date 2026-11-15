@@ -771,7 +771,7 @@ TEST_CASE ("Verify History finds the commits no branch holds and what is damaged
     const auto verify = [&s]
     {
         REQUIRE (phazite::verifyHistory (s.context));
-        REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, 20000));
+        REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }));
     };
 
     verify();

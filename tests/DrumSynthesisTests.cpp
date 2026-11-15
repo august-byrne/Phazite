@@ -3,11 +3,14 @@
 // body boost and click, a hat held and cut, a clap's strikes and width, what is struck, a room that isn't gated, a snare's
 // further modes and a Simmons drum's hold, each doing what it says and nothing at its default; their noise, the same on
 // every build; and the Dark Synthwave Kit's sixteen sounds (FactoryDrums.h), made of them.
+#include "DspProbe.h"
+#include "RenderHarness.h"
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/DrumSynthesis.h"
 #include "devices/drums/FactoryDrums.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -685,4 +688,194 @@ TEST_CASE ("The Dark Synthwave Kit's sixteen sounds: natural drums, the same eve
         CHECK (crossings > last);
         last = crossings;
     }
+}
+
+namespace
+{
+// The frequency, within a sixth of a guess either way, that a stretch of a sound's first side holds the most of: scanned
+// in steps of a tenth of a percent, each step's level as the tone that fits the stretch best (DspProbe.h).
+double findPitch (const Sound& sound, double guess, double from, double to)
+{
+    auto best = guess, bestLevel = -1.0;
+
+    for (auto hz = guess / 1.17; hz < guess * 1.17; hz *= 1.001)
+    {
+        const auto toneAt = phazite::test::probe::getToneLevel (sound, 0, hz, rate, at (from), at (to) - at (from));
+
+        if (toneAt > bestLevel)
+        {
+            bestLevel = toneAt;
+            best = hz;
+        }
+    }
+
+    return best;
+}
+
+// How long a tone takes to fall 20 dB, from its level in two stretches of the same length, the second `apart` seconds
+// after the first.
+double getT20 (const Sound& sound, double hz, double from, double length, double apart)
+{
+    const auto first = phazite::test::probe::getToneLevel (sound, 0, hz, rate, at (from), at (length));
+    const auto second = phazite::test::probe::getToneLevel (sound, 0, hz, rate, at (from + apart), at (length));
+    const auto fell = decibels (first) - decibels (second);
+    return fell > 0.0 ? 20.0 * apart / fell : 0.0;
+}
+
+// The first 100 ms of a sound as its fingerprint has it (RenderHarness.h): its bands' levels, below 44 Hz, the eight
+// octaves around 62.5 Hz to 8 kHz, and above 11.3 kHz.
+std::array<float, phazite::test::numBands> getBands (const Sound& sound)
+{
+    juce::AudioBuffer<float> stereo (2, at (0.1));
+    stereo.clear();
+
+    for (int channel = 0; channel < 2; ++channel)
+        stereo.copyFrom (channel, 0, sound, std::min (channel, sound.getNumChannels() - 1), 0, std::min (at (0.1), sound.getNumSamples()));
+
+    const auto fingerprint = phazite::test::getFingerprint (stereo, at (0.1));
+    REQUIRE (fingerprint.size() == 1);
+    return fingerprint.front().bands;
+}
+
+int getLoudestBand (const std::array<float, phazite::test::numBands>& bands)
+{
+    return (int) (std::max_element (bands.begin(), bands.end()) - bands.begin());
+}
+
+constexpr int band62Hz = 1, band125Hz = 2, band250Hz = 3, band500Hz = 4, band1kHz = 5, band2kHz = 6, band4kHz = 7, band8kHz = 8;
+} // namespace
+
+TEST_CASE ("The drum machines' tuned voices ring at their circuits' pitches and fall over their decays")
+{
+    // The pitch each was built to (DrumMachines.cpp, from the circuits as their makers' service notes and analyses give
+    // them), and how long its tone takes to fall 20 dB, its decay: each measured in its own tone, past its strike's bend,
+    // within 3 % and 15 %.
+    struct Voice
+    {
+        const char* name;
+        double hz, decay;
+        double from; // where its bend is over, in seconds
+    };
+
+    // clang-format off
+    for (const auto& voice : std::initializer_list<Voice> {
+             { "808 Kick", 50.0, 0.8, 0.45 },  { "808 Low Tom", 90.0, 0.2, 0.06 }, { "808 Mid Tom", 135.0, 0.13, 0.06 },
+             { "808 High Tom", 185.0, 0.1, 0.06 }, { "808 Low Conga", 185.0, 0.18, 0.05 }, { "808 Mid Conga", 280.0, 0.1, 0.05 },
+             { "808 High Conga", 400.0, 0.08, 0.04 }, { "909 Kick", 52.0, 0.438, 0.1 }, { "909 Low Tom", 82.0, 0.42, 0.2 },
+             { "909 Mid Tom", 120.0, 0.36, 0.2 }, { "909 High Tom", 165.0, 0.3, 0.2 }, { "909 High Tom 2", 190.0, 0.28, 0.2 },
+             { "Rhythm Box Kick", 62.0, 0.07 * 2.302585, 0.06 }, { "Rhythm Box Conga", 175.0, 0.25, 0.05 },
+             { "Rhythm Box Low Bongo", 290.0, 0.14, 0.04 }, { "Rhythm Box High Bongo", 410.0, 0.1, 0.04 } })
+    // clang-format on
+    {
+        CAPTURE (std::string (voice.name));
+        const auto drum = getDrum (voice.name);
+        const auto& sound = drum->audio;
+
+        // Its pitch, over a stretch as long as a fifth of its decay, or 50 ms.
+        const auto length = std::max (0.05, 0.2 * voice.decay);
+        const auto pitch = findPitch (sound, voice.hz, voice.from, voice.from + length);
+        CHECK (pitch == doctest::Approx (voice.hz).epsilon (0.03));
+
+        // Its decay, from two stretches half of it apart.
+        CHECK (getT20 (sound, pitch, voice.from, length, 0.5 * voice.decay) == doctest::Approx (voice.decay).epsilon (0.15).scale (0.0));
+
+        // A kick is mostly its tone: the band around it the loudest.
+        if (voice.hz < 70.0)
+            CHECK (getLoudestBand (getBands (sound)) == band62Hz);
+    }
+}
+
+TEST_CASE ("The drum machines' snares ring at their shells' pitches under their snares' hiss, as their circuits make them")
+{
+    // The 808's two resonators, 238 and 476 Hz; the 909's two triangles, 190 Hz and 1.585 times it; the Rhythm Box's body
+    // at 205 Hz: each heard in its first 50 ms after its strike's bump, and the snares' noise, high-passed, in the bands
+    // from 2 kHz up, as loud as the shell within 20 dB.
+    struct Snare
+    {
+        const char* name;
+        double hz, second, secondFrom; // its second tone, and from when it is past the bump
+    };
+
+    for (const auto& snare : std::initializer_list<Snare> { { "808 Snare", 238.0, 476.0, 0.005 },
+                                                            { "909 Snare", 190.0, 190.0 * 1.585, 0.02 },
+                                                            { "Rhythm Box Snare", 205.0, 0.0, 0.0 } })
+    {
+        CAPTURE (std::string (snare.name));
+        const auto drum = getDrum (snare.name);
+        const auto& sound = drum->audio;
+        CHECK (findPitch (sound, snare.hz, 0.02, 0.07) == doctest::Approx (snare.hz).epsilon (0.03));
+
+        if (snare.second > 0.0)
+            CHECK (findPitch (sound, snare.second, snare.secondFrom, snare.secondFrom + 0.025)
+                   == doctest::Approx (snare.second).epsilon (0.03));
+
+        const auto bands = getBands (sound);
+        const auto shell = std::max (bands[(size_t) band125Hz], bands[(size_t) band250Hz]);
+        const auto hiss = *std::max_element (bands.begin() + band2kHz, bands.end());
+        CHECK (hiss > shell - 20.0f);
+        CHECK (shell > hiss - 20.0f);
+    }
+}
+
+TEST_CASE ("The drum machines' hats, cymbals, claps and cowbells lie in the bands their circuits filter them to")
+{
+    struct Voice
+    {
+        const char* name;
+        int lowestLoudest, highestLoudest; // where the loudest band may be
+        int quietBelow;                    // the bands below this one
+        float under;                       // at least so many decibels under the loudest
+    };
+
+    // The 808's hats: its metal's 7.1 kHz band high-passed at 11.7 kHz (closed) or 7.8 kHz (open); the 909's: its metal
+    // high-passed at 7.5 and 6.5 kHz; the Rhythm Box's: noise ringing at 8.2 kHz over 6 kHz. Cymbals: the 808's bands at 3.44
+    // and 7.1 kHz rising 6 dB an octave, the 909's crash and ride high-passed at 3.2 and 4.5 kHz, the Rhythm Box's ringing at
+    // 6.2 kHz over 4.5 kHz. The 909's metal is six bits, as its ROMs hold it: their noise lies under all of it, so its low
+    // bands are only well under. Claps: noise band-passed at 1.1 kHz (808) and 1.25 kHz (909), over their rooms' noise
+    // low-passed at 1.2 and 1.5 kHz. Cowbells: the 808's 540 and 800 Hz squares band-passed at 890 Hz; the Rhythm Box's 587
+    // and 845 Hz squares band-passed at 2.64 kHz, their harmonics there.
+    // clang-format off
+    for (const auto& voice : std::initializer_list<Voice> {
+             { "808 Closed Hat",        band8kHz,  band8kHz + 1, band2kHz,  30.0f },
+             { "808 Open Hat",          band8kHz,  band8kHz + 1, band2kHz,  30.0f },
+             { "Rhythm Box Closed Hat", band8kHz,  band8kHz + 1, band2kHz,  30.0f },
+             { "Rhythm Box Open Hat",   band8kHz,  band8kHz + 1, band2kHz,  30.0f },
+             { "909 Closed Hat",        band8kHz,  band8kHz + 1, band1kHz,  12.0f },
+             { "909 Open Hat",          band8kHz,  band8kHz + 1, band1kHz,  12.0f },
+             { "909 Pedal Hat",         band8kHz,  band8kHz + 1, band1kHz,  12.0f },
+             { "808 Cymbal",            band4kHz,  band8kHz + 1, band250Hz, 30.0f },
+             { "Rhythm Box Cymbal",     band4kHz,  band8kHz + 1, band1kHz,  30.0f },
+             { "909 Crash",             band4kHz,  band8kHz + 1, band1kHz,  12.0f },
+             { "909 Ride",              band4kHz,  band8kHz + 1, band1kHz,  12.0f },
+             { "808 Clap",              band1kHz,  band2kHz,     band250Hz, 12.0f },
+             { "909 Clap",              band1kHz,  band2kHz,     band250Hz, 12.0f },
+             { "808 Cowbell",           band500Hz, band1kHz,     band250Hz, 30.0f },
+             { "Rhythm Box Cowbell",    band2kHz,  band2kHz,     band250Hz, 30.0f } })
+    // clang-format on
+    {
+        CAPTURE (std::string (voice.name));
+        const auto drum = getDrum (voice.name);
+        const auto bands = getBands (drum->audio);
+        juce::String levels;
+
+        for (const auto bandLevel : bands)
+            levels << juce::String (bandLevel, 1) << " ";
+
+        const auto levelText = levels.toStdString();
+        CAPTURE (levelText);
+        const auto loudest = getLoudestBand (bands);
+        CHECK (loudest >= voice.lowestLoudest);
+        CHECK (loudest <= voice.highestLoudest);
+
+        for (int band = 0; band < voice.quietBelow; ++band)
+        {
+            CAPTURE (band);
+            CHECK (bands[(size_t) band] < bands[(size_t) loudest] - voice.under);
+        }
+    }
+
+    // The 808's cowbell: its two squares, 540 and 800 Hz, each there.
+    const auto cowbell = getDrum ("808 Cowbell");
+    CHECK (findPitch (cowbell->audio, 540.0, 0.0, 0.05) == doctest::Approx (540.0).epsilon (0.01));
+    CHECK (findPitch (cowbell->audio, 800.0, 0.0, 0.05) == doctest::Approx (800.0).epsilon (0.01));
 }

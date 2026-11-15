@@ -260,13 +260,13 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     auto handle = phazite::getParameter (song.context, level);
     playback.play (0.55);
     const auto grabbedAt = playedTo();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (handle.getValue(), 0.75f); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (handle.getValue(), 0.75f); }));
     CHECK (phazite::getLastTouchedParameter (song.context) == level);
 
     // Played past the note's end: let go of there, which writes what it did.
     playback.play (0.55);
     const auto letGoAt = playedTo();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getAutomationPoints (song.context, level).empty(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getAutomationPoints (song.context, level).empty(); }));
 
     const auto points = phazite::getAutomationPoints (song.context, level);
     REQUIRE (points.size() >= 3);
@@ -310,7 +310,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     CHECK (instance->getCurrentProgram() == 1);
 
     // The old helper goes with the old instance, once nothing that played the old project holds it.
-    CHECK (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 1; }, 10000));
+    CHECK (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 1; }));
     playback.reset(); // before the next one, whose timing its going would undo
     playback = std::make_unique<EnginePlayback> (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
@@ -398,13 +398,13 @@ TEST_CASE ("What a plug-in in a helper tells of itself that changes nothing is n
 
     // Its settings said to have changed, though they didn't: closing asks it for them, and finds none to save.
     tell (gainNow, toneNow, dirty);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }));
     CHECK_FALSE (song.getProject().checkUnsavedChanges());
     CHECK_FALSE (song.getProject().hasUnsavedChanges());
 
     // Its gain told as another value is one, which closing finds too.
     tell (gainNow * 0.5f, toneNow, nothingMore);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }));
     CHECK (song.getProject().checkUnsavedChanges());
 }
 
@@ -459,7 +459,7 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
 
     // The plug-in makes its editor larger: Phazite's follows.
     song.setParameter (effect, "0", 1.0f); // its Tone
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return editor->getWidth() == 360; }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return editor->getWidth() == 360; }));
     CHECK (editor->getHeight() == 240);
 
     // Space pressed in the plug-in's window plays, as the helper hands it back (pressed again until the helper knows the
@@ -468,9 +468,8 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
         [&]
         {
             PostMessageW (child, WM_KEYDOWN, VK_SPACE, 0);
-            return phazite::test::dispatchMessagesUntil ([&] { return plays > 0; }, 100);
-        },
-        20000));
+            return phazite::test::dispatchMessagesUntil ([&] { return plays > 0; }, 100); // then pressed again
+        }));
 
     // With Send All Keys to the Plug-in on, the plug-in gets it.
     keys.setSendsAllKeys (window, true);
@@ -827,7 +826,7 @@ TEST_CASE ("A plug-in opened from its project keeps the settings the project hol
 
     // Its helper goes, as one that crashes or is ended for a hang.
     instance.getRemote().getHelper().kill();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }));
 
     // Saved while it is crashed, the project holds its settings still.
     REQUIRE (song.getProject().save().wasOk());
@@ -878,7 +877,7 @@ TEST_CASE ("A plug-in that crashes or hangs as its track is frozen fails the ren
     CHECK_FALSE (phazite::isFrozen (song.context, track));
 
     // Its slot says it crashed, and the song plays on, the crashed effect silent.
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getSandboxed (song, effect).hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getSandboxed (song, effect).hasCrashed(); }));
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getEffects (song.context, track)[0].crashed);
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
@@ -1238,7 +1237,7 @@ TEST_CASE ("A plug-in that crashed in a render at another rate is reloaded at th
     // A render at 96 kHz prepares it so, and it crashes in it; the engine prepares it at 48 kHz again, crashed.
     played.processor->prepare (96000.0, 256);
     played.instance->getRemote().getHelper().kill();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&played] { return played.instance->hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&played] { return played.instance->hasCrashed(); }));
     played.processor->prepare (48000.0, 256);
     CHECK (played.instance->getPreparedRate() == doctest::Approx (48000.0));
 
@@ -1272,7 +1271,7 @@ TEST_CASE ("A render of a plug-in that had crashed before it began fails at once
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
     auto& instance = getSandboxed (song, effect);
     instance.getRemote().getHelper().kill();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }));
 
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);
@@ -1405,7 +1404,7 @@ TEST_CASE ("A plug-in is told that it plays offline as its track is frozen, and 
     };
 
     CHECK (read().playedOffline);
-    CHECK (phazite::test::dispatchMessagesUntil ([&read] { return ! read().offline; }, 5000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&read] { return ! read().offline; }));
 }
 
 TEST_CASE ("A crashed plug-in that is switched off fails no render: it isn't heard")
@@ -1418,7 +1417,7 @@ TEST_CASE ("A crashed plug-in that is switched off fails no render: it isn't hea
     phazite::setDeviceOn (song.context, effect, false);
     auto& instance = getSandboxed (song, effect);
     instance.getRemote().getHelper().kill();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }));
 
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);

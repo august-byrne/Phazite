@@ -1129,13 +1129,18 @@ TEST_CASE ("The engine tells of blocks that started more than two blocks' length
     juce::AudioBuffer<float> block (2, 480);
     float* channels[] = { block.getWritePointer (0), block.getWritePointer (1) };
 
-    // Back to back: none late.
+    // Back to back: none late, unless the machine kept this thread from running for longer than two blocks between them
+    // (a busy machine can), which the time measured around them tells.
+    const auto before = juce::Time::getMillisecondCounterHiRes();
     player.process (channels, 2, 480);
     player.process (channels, 2, 480);
+    const auto took = (juce::Time::getMillisecondCounterHiRes() - before) / 1000.0;
     auto times = player.takeBlockTimes();
-    CHECK (times.late == 0);
     CHECK (times.blockLength == doctest::Approx (0.01));
-    CHECK (times.longestGap < 0.02);
+    CHECK (times.longestGap <= took + 0.001);
+
+    if (took < 0.02)
+        CHECK (times.late == 0);
 
     // One 30 ms after the one before: late, and told of once.
     juce::Thread::sleep (30);

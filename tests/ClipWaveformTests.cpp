@@ -82,7 +82,7 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
 
     // The clip's two beats, then two more past its end, where its file has no audio.
     const phazite::BeatRange span { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) };
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paint (*waveform, span), 0, 190) > 190 * 10; }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paint (*waveform, span), 0, 190) > 190 * 10; }));
     CHECK (phazite::test::dispatchMessagesUntil ([&loads] { return loads > 0; })); // its message can come after the levels
     const auto image = paint (*waveform, span);
     CHECK (countLit (image, 210, 400) == 0);
@@ -162,7 +162,7 @@ TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays 
     // JUCE's thumbnail reads the file's levels in pieces from its start, here a second and a half of it at a time, and each
     // is drawn as it comes: the burst straddles the first two, so its start can show before its end (CI's windows-debug
     // measured it half drawn, 2026-11-12). Once the column that plays the last of it lights, all of it is drawn.
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAll(), last, last + 1) > height / 4; }, 10000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAll(), last, last + 1) > height / 4; }));
     CAPTURE (expected);
     CHECK (std::abs (burstAt (paintAll()) - (expected + 0.5)) <= 2.0);
 
@@ -217,7 +217,7 @@ TEST_CASE ("A clip's waveform draws the same at every part of a pixel the playli
         return total;
     };
 
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAt (0.0f), 490, 890) > 400; }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAt (0.0f), 490, 890) > 400; }));
     phazite::test::dispatchPendingMessages(); // every level loaded
 
     // How much it draws in all is the same at every part of a pixel.

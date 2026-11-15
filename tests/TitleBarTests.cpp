@@ -57,19 +57,19 @@ TEST_CASE ("The title bar's Undo and Redo name the step they take, and the searc
     auto* redo = dynamic_cast<juce::Button*> (findButton (bar, "Redo"));
     REQUIRE (undo != nullptr);
     REQUIRE (redo != nullptr);
-    phazite::test::runTimersUntil ([undo] { return ! undo->isEnabled(); }, 2000);
+    phazite::test::runTimersUntil ([undo] { return ! undo->isEnabled(); });
     CHECK_FALSE (undo->isEnabled());
     CHECK_FALSE (redo->isEnabled());
 
     // A track added: Undo names it, and takes it away; then Redo can.
     const auto tracks = phazite::getAllPlaylistTracks (screen.session.getContext()).size();
     REQUIRE (screen.registry.invoke ("track.add"));
-    phazite::test::runTimersUntil ([undo] { return undo->isEnabled(); }, 2000);
+    phazite::test::runTimersUntil ([undo] { return undo->isEnabled(); });
     CHECK (undo->getTooltip().startsWith ("Undo Add Track"));
     phazite::test::Mouse mouse (*undo);
     mouse.click (undo->getLocalBounds().getCentre());
     CHECK (phazite::getAllPlaylistTracks (screen.session.getContext()).size() == tracks);
-    phazite::test::runTimersUntil ([redo] { return redo->isEnabled(); }, 2000);
+    phazite::test::runTimersUntil ([redo] { return redo->isEnabled(); });
     CHECK (redo->isEnabled());
 
     // The search in the middle of the bar, with Undo and Redo just left of it.

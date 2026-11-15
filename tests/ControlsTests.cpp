@@ -651,7 +651,7 @@ TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, an
     phazite::test::Mouse mouse (editor);
     mouse.moveTo ({ 50, 50 });
     CHECK (editor.fade.isShown());
-    const auto until = juce::Time::getMillisecondCounterHiRes() + 1000.0;
+    const auto until = juce::Time::getMillisecondCounterHiRes() + phazite::test::hangTimeout; // a fade lasts a fraction of a second
 
     for (int i = 0; ! juce::exactlyEqual (editor.bar.getAlpha(), 1.0f) && juce::Time::getMillisecondCounterHiRes() < until; ++i)
     {
@@ -663,7 +663,7 @@ TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, an
 
     // Gone from the editor, it fades out a moment later; faded, it still takes clicks where it is, and rests.
     mouse.moveTo ({ -20, -20 });
-    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return juce::exactlyEqual (editor.bar.getAlpha(), 0.0f); }, 4000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return juce::exactlyEqual (editor.bar.getAlpha(), 0.0f); }));
     CHECK_FALSE (editor.fade.isShown());
     CHECK (editor.getComponentAt (editor.bar.getBounds().getCentre()) == &editor.bar);
     CHECK (rests());

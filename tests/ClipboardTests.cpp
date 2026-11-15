@@ -2,6 +2,8 @@
 // Cut, Copy and Paste (src/model/arrangement/internal/Clipboard.h; roadmap step 3.7): clips, a time range's clips and
 // notes, put in at the playhead, each paste one named undo step that selects what it put in, with the automation under
 // clips going back onto their own tracks.
+#include "SongCheck.h"
+#include "SongIDs.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UndoCheck.h"
@@ -388,4 +390,218 @@ TEST_CASE ("Pasted clips go to the next track below that holds their kind, or to
                 });
     CHECK (phazite::getClipTrack (document, song.clip) == song.tracks[0]);
     undo.walkBackAndForth();
+}
+
+TEST_CASE ("A linked clip pastes as a copy of its own, with its notes, which an edit to the clip it was linked to leaves alone")
+{
+    Song song;
+    const auto linked = phazite::copyClips (song.getSong(), { song.clip }, true);
+    REQUIRE (linked.size() == 1);
+    REQUIRE (phazite::hasAliases (song.getSong(), linked));
+    song.getSong().getUndoManager().clearUndoHistory();
+
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (linked.front());
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (16.0);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.paste");
+
+    const auto pasted = song.clipsOf (1);
+    REQUIRE (pasted.size() == 1);
+    CHECK_FALSE (phazite::hasAliases (song.getSong(), pasted));
+    CHECK (song.notesOf (pasted.front()).size() == 2);
+    CHECK (song.rangeOf (pasted.front()).getStart().inBeats() == doctest::Approx (16.0));
+
+    // The clips still linked stay linked; a note added to them doesn't reach the copy.
+    CHECK (phazite::hasAliases (song.getSong(), { song.clip }));
+    check.checkSeveral ("a note in the linked clips",
+                        [&song] { phazite::addNote (song.getSong(), song.clip, 72, at (2.0), lasting (0.5), 100); });
+    CHECK (song.notesOf (linked.front()).size() == 3);
+    CHECK (song.notesOf (pasted.front()).size() == 2);
+    check.walkBackAndForth();
+    phazite::test::checkSong (song.getSong());
+}
+
+TEST_CASE ("An audio clip pastes with its file and the part of it it plays")
+{
+    Song song;
+    const phazite::test::TemporaryFolder temp;
+    const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Take.wav"), 4.0);
+    const auto take = phazite::test::addAudioClip (song.getSong(), song.tracks[0], "Take", file, 6.0, 1.5, 0.5); // beats 12 to 15
+    REQUIRE (take.isValid());
+    song.getSong().getUndoManager().clearUndoHistory();
+
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (take);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (20.0);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.paste");
+
+    const auto pasted = song.clipsOf (1);
+    REQUIRE (pasted.size() == 1);
+    const auto pastedState = phazite::findClipState (song.getSong(), pasted.front());
+    REQUIRE (phazite::isAudioState (pastedState));
+    CHECK (phazite::getClipFile (song.getSong(), pastedState) == file);
+    CHECK (song.rangeOf (pasted.front()).getStart().inBeats() == doctest::Approx (20.0));
+    CHECK (song.rangeOf (pasted.front()).getLength().inBeats() == doctest::Approx (song.rangeOf (take).getLength().inBeats()));
+    CHECK (phazite::getFileTimeAt (song.getSong(), pasted.front(), at (21.0))
+           == doctest::Approx (phazite::getFileTimeAt (song.getSong(), take, at (13.0))));
+    CHECK (song.clipsOf (0).size() == 2); // the one copied stays
+    phazite::test::checkSong (song.getSong());
+}
+
+TEST_CASE ("Paste twice in one place leaves one copy there, and in two places two, each with IDs of their own")
+{
+    Song song;
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (song.clip);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (8.0);
+    phazite::test::UndoCheck check (song.getSong());
+
+    check.command (song.registry, "edit.paste");
+    const auto first = song.clipsOf (1);
+    REQUIRE (first.size() == 1);
+
+    // The same again: in the first copy's place, so that nothing plays twice.
+    selection.selectOnly (song.tracks[1]);
+    check.command (song.registry, "edit.paste");
+    const auto second = song.clipsOf (1);
+    REQUIRE (second.size() == 1);
+    CHECK (second.front() != first.front());
+    CHECK (song.rangeOf (second.front()).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (song.notesOf (second.front()).size() == 2);
+
+    // Elsewhere: a second copy beside it.
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (12.0);
+    check.command (song.registry, "edit.paste");
+    const auto both = song.clipsOf (1);
+    REQUIRE (both.size() == 2);
+    CHECK (song.rangeOf (both[1]).getStart().inBeats() == doctest::Approx (12.0));
+    CHECK (phazite::test::findIDProblems (song.getSong().getState()).empty());
+    check.walkBackAndForth();
+}
+
+TEST_CASE ("Cut and then Undo puts the clip and the automation under it back as they were, and the cut clip still pastes")
+{
+    Song song;
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (song.clip);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.cut");
+    CHECK (song.clipsOf (0).empty());
+
+    auto& songState = song.getSong();
+    check.stepBackOrForth ("Undo Cut", [&songState] { phazite::undo (songState); });
+    REQUIRE (song.clipsOf (0) == std::vector<phazite::ClipID> { song.clip });
+    CHECK (song.notesOf (song.clip).size() == 2);
+    CHECK (song.volumeAt (1.0) == doctest::Approx (0.2f));
+    CHECK (song.volumeAt (3.0) == doctest::Approx (0.8f));
+
+    // What was cut is still on the clipboard: pasted, a copy beside the clip that came back.
+    selection.selectOnly (song.tracks[0]);
+    song.playheadAt (8.0);
+    check.command (song.registry, "edit.paste");
+    const auto clips = song.clipsOf (0);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0] == song.clip);
+    CHECK (song.rangeOf (clips[1]).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (song.volumeAt (9.0) == doctest::Approx (0.2f));
+    check.walkBackAndForth();
+}
+
+TEST_CASE ("A time range across two tracks pastes on both, each with its own track's automation, and becomes the range")
+{
+    Song song;
+    const auto other = phazite::insertMidiClip (song.getSong(), song.tracks[1], { at (0.0), at (4.0) }, nullptr);
+    REQUIRE (other.isValid());
+    phazite::addNote (song.getSong(), other, 48, at (2.0), lasting (1.0), 100);
+    const auto pan = phazite::getPan (song.context, song.tracks[1]).getRef();
+    phazite::addAutomationPoint (song.context, pan, { BeatPosition::fromBeats (1.0), 0.0f });
+    phazite::addAutomationPoint (song.context, pan, { BeatPosition::fromBeats (3.0), 1.0f });
+    song.getSong().getUndoManager().clearUndoHistory();
+    const auto panAt = [&song, pan] (double beat)
+    {
+        return phazite::getAutomationValues (song.context, pan, { BeatPosition::fromBeats (beat), BeatPosition::fromBeats (beat) }, 1)
+            .front();
+    };
+
+    auto& range = getRangeSelection (song.context);
+    range.set ({ at (1.0), at (3.0) }, { song.tracks[0], song.tracks[1] });
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    getSelection (song.context).deselectAll();
+    song.playheadAt (16.0);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.paste");
+
+    for (const auto track : { 0, 1 })
+    {
+        CAPTURE (track);
+        const auto clips = song.clipsOf (track);
+        REQUIRE (clips.size() == 2);
+        CHECK (song.rangeOf (clips[1]).getStart().inBeats() == doctest::Approx (16.0));
+        CHECK (song.rangeOf (clips[1]).getEnd().inBeats() == doctest::Approx (18.0));
+    }
+
+    // The second track's note, a beat into the range, is a beat into its copy.
+    const auto notes = song.notesOf (song.clipsOf (1)[1]);
+    REQUIRE (notes.size() == 1);
+    CHECK (notes[0].pitch == 48);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (17.0));
+    CHECK (song.volumeAt (17.0) == doctest::Approx (song.volumeAt (2.0)));
+    CHECK (panAt (17.0) == doctest::Approx (panAt (2.0)));
+    CHECK (panAt (16.5) == doctest::Approx (panAt (1.5)));
+    CHECK (range.getRange().getStart().inBeats() == doctest::Approx (16.0));
+    CHECK (range.getTracks() == std::vector<phazite::TrackID> { song.tracks[0], song.tracks[1] });
+    check.walkBackAndForth();
+}
+
+TEST_CASE ("Clips copied from a track that has gone since paste on the selected track, and with none selected there is nowhere to paste")
+{
+    Song song;
+    const auto third = phazite::ensureTracks (song.getSong(), 3).back();
+    const auto gone = phazite::insertMidiClip (song.getSong(), third, { at (0.0), at (2.0) }, nullptr);
+    REQUIRE (gone.isValid());
+    song.getSong().getUndoManager().clearUndoHistory();
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (gone);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+
+    phazite::deleteTracks (song.getSong(), { third }, &selection);
+    selection.deselectAll();
+    CHECK_FALSE (song.isEnabled ("edit.paste"));
+
+    selection.selectOnly (song.tracks[1]);
+    REQUIRE (song.isEnabled ("edit.paste"));
+    song.playheadAt (4.0);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.paste");
+    REQUIRE (song.clipsOf (1).size() == 1);
+    CHECK (song.rangeOf (song.clipsOf (1).front()).getStart().inBeats() == doctest::Approx (4.0));
+}
+
+TEST_CASE ("Notes pasted where they run past the clip's end are pasted whole, and Undo takes them all")
+{
+    Song song;
+    auto& songSelection = song.context.getSongSelection();
+    songSelection.setNoteClips ({ song.clip });
+    songSelection.selectNotes (phazite::getRefs (phazite::getClipNotes (song.getSong(), song.clip)));
+    REQUIRE (song.registry.invoke ("edit.copy"));
+
+    // The clip ends at beat 4: the second note, half a beat after the first and half a beat long, pasted at 3.75 runs a
+    // quarter past it.
+    song.playheadAt (3.75);
+    phazite::test::UndoCheck check (song.getSong());
+    check.command (song.registry, "edit.paste");
+    const auto notes = song.notesOf (song.clip);
+    REQUIRE (notes.size() == 4);
+    CHECK (notes[3].start.inBeats() == doctest::Approx (4.25));
+    CHECK (songSelection.getNotes().size() == 2);
+    CHECK (phazite::test::findIDProblems (song.getSong().getState()).empty());
 }

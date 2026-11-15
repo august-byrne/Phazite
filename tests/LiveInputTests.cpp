@@ -237,9 +237,17 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
         return samples;
     };
 
-    const auto atOnce = playNote();
+    // Played until it sounds: the engine is given the song in the message loop's own time, which a busy machine or a
+    // sanitizer's build makes slow (a note played before it had it went unheard, and the notes after were compared with
+    // that: known bug 154).
+    const auto atOnce = playUntil (playNote, [] (int samples) { return samples >= 0; });
+    const auto atOnceSlack = device.getUncertainty();
     CHECK (atOnce >= 0);
-    CHECK (atOnce < 16);
+    CHECK (atOnce < 16 + atOnceSlack);
+
+    // Another note's delay against the first's, as near as the times of playing both are known.
+    const auto nearFirst = [&device, atOnceSlack] (int samples, int expected)
+    { return isNear (samples, expected, atOnceSlack + device.getUncertainty()); };
 
     // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
     const auto limiter = addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
@@ -248,12 +256,12 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     itsDSP.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
     const auto latency = itsDSP.getLatencySamples();
     REQUIRE (latency > 0);
-    CHECK (isNear (playUntil (playNote, [&] (int samples) { return isNear (samples, atOnce + latency); }), atOnce + latency));
+    CHECK (nearFirst (playUntil (playNote, [&] (int samples) { return nearFirst (samples, atOnce + latency); }), atOnce + latency));
 
     // ...but not once it is switched off.
     phazite::setDeviceOn (song, limiter, false);
     phazite::test::settle (500);
-    CHECK (isNear (playUntil (playNote, [atOnce] (int samples) { return isNear (samples, atOnce); }), atOnce));
+    CHECK (nearFirst (playUntil (playNote, [&nearFirst, atOnce] (int samples) { return nearFirst (samples, atOnce); }), atOnce));
 }
 
 TEST_CASE ("Low latency plays live notes without delay compensation, and back with it when it is off")

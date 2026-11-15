@@ -80,7 +80,7 @@ void waitForClipRenders (phazite::ProjectContext& context)
         return false;
     };
 
-    REQUIRE (dispatchMessagesUntil ([&anyPreparing] { return ! anyPreparing(); }, 30000));
+    REQUIRE (dispatchMessagesUntil ([&anyPreparing] { return ! anyPreparing(); }));
 }
 
 // The differences between two saves of a project, but for the song's count of IDs, which no Bring Back takes back.

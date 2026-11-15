@@ -394,14 +394,14 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     song.reopen();
     instance = &getSandboxed (song, effect);
     CHECK (instance->getCurrentProgram() == 1);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return getHost().getNumHelpers() == 1; }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return getHost().getNumHelpers() == 1; }));
     playback = std::make_unique<EnginePlayback> (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     CHECK (levelNow() == doctest::Approx (quarter).epsilon (0.002));
 
     // Its helper gone, as one that crashes, and the plug-in reloaded: as it was.
     instance->getRemote().getHelper().kill();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([instance] { return instance->hasCrashed(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([instance] { return instance->hasCrashed(); }));
     CHECK_FALSE (phazite::reloadDevice (song.context, effect).has_value());
     REQUIRE_FALSE (instance->hasCrashed());
     CHECK (instance->getCurrentProgram() == 1);

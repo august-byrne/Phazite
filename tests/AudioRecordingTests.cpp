@@ -828,7 +828,7 @@ TEST_CASE ("The audio settings' correction moves what an input records earlier")
     phazite::setTrackInput (song.context, song.firstTrack, "1");
     phazite::setInputMonitoring (song.context, song.firstTrack, phazite::InputMonitoring::never);
     phazite::setArmed (song.context, song.firstTrack, true);
-    RealTimePlayback::wait (300); // the inputs opened
+    REQUIRE (playback.waitForBlocks (RealTimePlayback::blocksFor (0.3))); // the inputs opened, as the device plays again
     REQUIRE (phazite::isArmed (song.context, song.firstTrack));
     auto& audioIO = phazite::getAudioIO (phazite::test::getEngineContext());
     audioIO.setRecordingCorrection (256.0 / 48.0); // a block, in milliseconds

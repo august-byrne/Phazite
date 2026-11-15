@@ -113,7 +113,8 @@ public:
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
     // How many steps each project's undo history keeps (model/base/Song.h: setUndoSteps(), which keeps it from 10 to
-    // 100000), for the projects opened from then on; no window shows it yet: the settings file holds it.
+    // 100000), for the projects opened from then on; no window shows it yet: the settings file holds it. The steps are
+    // kept whatever their size, as in the DAWs that count steps: a thousand large edits hold their memory until they go.
     static constexpr NumberSetting undoSteps { "phaziteUndoSteps", 1000.0, SaveTiming::now };
 
     // This computer, as projects' histories know it (model/versions/VersionsModel.h: setThisComputer()): an ID made the first

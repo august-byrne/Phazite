@@ -294,7 +294,8 @@ void TestSong::waitForClipRenders()
         return false;
     };
 
-    REQUIRE (dispatchMessagesUntil ([&anyPreparing] { return ! anyPreparing(); }, 30000));
+    // Seen to take over 30 s while six other test programs ran: a limit only a hang reaches.
+    REQUIRE (dispatchMessagesUntil ([&anyPreparing] { return ! anyPreparing(); }, hangTimeout));
 }
 
 //==============================================================================

@@ -217,14 +217,11 @@ what is left of them, and what came up while they were built.
 | The nets that run only on a push or at night run once, and what they find is fixed: CI's Linux builds with ASan, UBSan and TSan, the UBSan reports and the helper's sanitizer reports, the real VST3s' targets, `windows-profile` in CI, `PhaziteStarts`; and the nightly workflow (the long run under `linux-asan` and `linux-tsan`, the fuzzer and random songs with many rounds, the benchmark gates), which has never run | `.github/workflows/nightly.yml` | M | 2 | Open | plan |
 | The long run over songs of several configurations (audio clips, plug-ins in helpers, containers, a tempo map), not the one busy song of eight tracks | `tests/LongRun.cpp` | S | — | Open | tests-infrastructure 14 |
 | The benchmark gates' bounds for GCC's optimised builds, so that they can run on Linux too: today they hold for MSVC's alone | `tests/BenchmarkGates.cpp` | S | — | Open | plan |
-| The failure paths of saving and recovery: a save that fails, a first save that fails and leaves its folder, undo across view-state changes | `tests/ProjectTests.cpp` | — | 2 | Open | model-project-services 14, tests-model 8 |
-| The lock-free parts raced: the event queue (which has no test), the handover, the playhead's stamps | `src/engine/core/EventQueue.h` | — | 2 | Open | tests-audio 5 |
-| Cut, Copy and Paste tested beyond their five cases | `tests/ClipboardTests.cpp` | — | 2 | Open | tests-model 13 |
-| Tests that wait on the wall clock made to wait for a condition, and kept apart from the files that load every core | `tests/RealTimePlayback.h` | — | 2 | Open | tests-infrastructure 12, tests-audio 14, tests-model 15 |
-| The drum machines' voices pinned by more than a peak level and two levels over time | `tests/DrumSynthesisTests.cpp` | — | 2 | Open | tests-audio 13 |
-| Graph-drag tests that pin the axes; smoke tests renamed or made to assert; the hard-coded device list of the dock-fit test replaced by `getOwnDevices()` | `tests/EffectEditorTests.cpp` | — | 2 | Open | tests-ui 11, tests-ui 13, tests-ui 14 |
-| The components with no test or a token one, most important first, by the count of test cases against lines for each folder | `tests/MixerViewTests.cpp` | — | 2 | Open | tests-ui 9, tests-ui 15 |
-| Golden renders regenerated one at a time, each with its reason, not all at once inside large commits | `tests/GoldenFiles.cpp` | — | 2 | Open | tests-infrastructure 10 |
+| A new project's first save that fails (known bug 160), and a write cut short in the middle, tested through a seam in `writeWholeFile()` | `tests/ProjectTests.cpp` | — | — | Open | model-project-services 14, tests-model 8 |
+| Waits for a helper or a timer that still pump a fixed time (SandboxedPluginTests' parameter and key pumps, PlaylistTests' playhead checks) made to wait for a condition; the autosave timer given a clock the tests drive; the files that measure call lengths kept apart from those that load every core | `tests/RealTimePlayback.h` | — | — | Open | tests-infrastructure 12, tests-audio 14, tests-model 15 |
+| The drum machines' short and noise voices (rims, claves, maracas, guiro, tambourine, metal, the Trap and Percussion kits' own) pinned by their bands and lengths as the tuned voices are | `tests/DrumSynthesisTests.cpp` | — | — | Open | tests-audio 13 |
+| Mouse-driven tests of the mixer strip's controls (fader, pan, sends, Pre/Post, arm), the settings panel's MIDI and Shortcuts tabs, and the render panel | `tests/MixerViewTests.cpp` | — | — | Open | tests-ui 9, tests-ui 15 |
+| Golden renders regenerated one at a time, each with its reason, not all at once inside large commits | `tests/GoldenFiles.cpp` | — | — | Open | tests-infrastructure 10 |
 
 ## Docs
 

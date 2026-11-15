@@ -2,6 +2,7 @@
 // The app's own code (src/app, the phazite_app library) without a window: the session that opens, makes and saves
 // projects. Nothing here may reach a dialog (an AlertWindow, a FileChooser or a menu): Linux CI has no display.
 #include "GoldenFiles.h"
+#include "HeldFile.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -1186,7 +1187,7 @@ TEST_CASE ("A new project's first save copies its folders in the background, wit
     // Again, to the end: the project in its folder, its recording whole there.
     REQUIRE (registry.invoke ("project.save"));
     REQUIRE (renders.render != nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.render == nullptr; }, 30000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.render == nullptr; }));
     CHECK (renders.finished == juce::StringArray ("Saving Beat: ok"));
     CHECK_FALSE (session.isUntitled());
     const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
@@ -1434,3 +1435,63 @@ TEST_CASE ("A first save fails, saying which, when a frozen track's file or a cl
     }
 }
 #endif
+
+TEST_CASE ("A first save that fails part way leaves no folder where it was going, and the project untitled where it was, with its changes")
+{
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    const auto unsaved = temp.folder.getChildFile ("Unsaved");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, projects, unsaved);
+    phazite::CommandRegistry registry;
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
+    session.chooseSaveFile = [&projects] (const juce::File&, std::function<void (const juce::File&)> callback)
+    { callback (projects.getChildFile ("Beat.phazite")); };
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
+
+    REQUIRE (session.createProject ({}).wasOk());
+    REQUIRE (session.isUntitled());
+    const auto untitledFile = session.getProject()->getFile();
+    auto& song = *findSong (session.getContext());
+    song.getState().setProperty (phazite::schema::outline, "pop", &song.getUndoManager());
+    REQUIRE (projects.createDirectory().wasOk());
+
+    // A take in its Audio folder that can't be read as the save copies it.
+    const auto take = untitledFile.getSiblingFile ("Audio").getChildFile ("Take 1.wav");
+    REQUIRE (take.getParentDirectory().createDirectory().wasOk());
+    REQUIRE (take.replaceWithText ("a take"));
+
+    {
+        const phazite::test::HeldFile held (take);
+
+        if (! held.works())
+        {
+            MESSAGE ("The file can't be held from this user: nothing to fail.");
+            return;
+        }
+
+        REQUIRE (registry.invoke ("project.save"));
+        CHECK (errors.size() == 1);
+        CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty()); // nothing, half made or not
+        CHECK (session.isUntitled());
+        CHECK (session.getProject()->getFile() == untitledFile);
+        CHECK (session.getProject()->hasUnsavedChanges());
+        CHECK (untitledFile.existsAsFile());
+        CHECK (song.getUndoManager().canUndo());
+        CHECK (recent.getProjects().isEmpty());
+    }
+
+    // Tried again with the same name once the take can be read, it is saved there, with its take.
+    REQUIRE (registry.invoke ("project.save"));
+    const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
+    CHECK (errors.size() == 1);
+    CHECK (session.getProject()->getFile() == file);
+    CHECK_FALSE (session.isUntitled());
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    CHECK (file.getSiblingFile ("Audio").getChildFile ("Take 1.wav").loadFileAsString() == "a take");
+    CHECK (file.loadFileAsString().contains ("pop"));
+}

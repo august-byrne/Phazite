@@ -14,6 +14,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
@@ -39,6 +40,8 @@
 
 #include <algorithm>
 #include <set>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -1146,31 +1149,36 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
         CHECK (shown == 1);
     };
 
-    // Each instrument alone on the Instrument tab.
-    phazite::chooseInstrument (context, track, findType ("phaziteSynth"));
+    // Each of Phazite's own instruments alone on the Instrument tab, and each of its effects alone in the chain, showing
+    // beside the column, on the Effects tab: every one getOwnDevices() lists, so that a new one is checked too.
+    std::vector<std::string> instruments, effectTypes;
+
+    for (const auto* info : phazite::getOwnDevices())
+        (info->kind == phazite::devices::DeviceKind::instrument ? instruments : effectTypes).emplace_back (info->typeID);
+
+    REQUIRE_FALSE (instruments.empty());
+    REQUIRE_FALSE (effectTypes.empty());
+    phazite::chooseInstrument (context, track, findType (instruments.front().c_str()));
     REQUIRE (screen.registry.invoke ("view.instrument"));
 
-    for (const auto* type : { "phaziteSynth", "phaziteWavetable", "phaziteFM", "phaziteSampler", "phaziteDrums" })
+    for (const auto& type : instruments)
     {
-        phazite::chooseInstrument (context, track, findType (type));
-        checkWhole (type);
+        phazite::chooseInstrument (context, track, findType (type.c_str()));
+        checkWhole (type.c_str());
     }
 
-    // Each effect alone in the chain, showing beside the column, on the Effects tab.
     REQUIRE (screen.registry.invoke ("view.effects"));
 
-    for (const auto* type : { "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteMultiband", "phaziteSaturator", "phaziteExciter",
-                              "phaziteVinyl", "phaziteFilter", "phaziteDelay", "phaziteReverb", "phazitePhaser", "phaziteFlanger",
-                              "phaziteChorus", "phaziteStereoExpander", "phaziteVocoder" })
+    for (const auto& type : effectTypes)
     {
-        phazite::addEffect (context, track, findType (type));
+        phazite::addEffect (context, track, findType (type.c_str()));
         phazite::test::dispatchPendingMessages();
         const auto effects = phazite::getEffects (context, track);
         REQUIRE_FALSE (effects.empty());
         auto* view = phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst();
         REQUIRE (view != nullptr);
         view->setOpen (effects.back().id, true);
-        checkWhole (type);
+        checkWhole (type.c_str());
         phazite::removeDevice (context, effects.back().id);
     }
 

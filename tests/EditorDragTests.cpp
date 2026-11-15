@@ -8,6 +8,7 @@
 #include "AppScreen.h"
 #include "EditorScreens.h"
 #include "EnginePlayback.h"
+#include "TestSong.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/chords/ChordModel.h"
@@ -1501,6 +1502,7 @@ TEST_CASE ("While the mouse drags in the playlist or the piano roll, no command 
             CAPTURE (id.toStdString());
             const auto text = writeSong (song, SongPart::whole);
             const auto history = describeHistory (song);
+            REQUIRE (phazite::test::waitForVersionHistory (context)); // what it began (its first commit, as the project opened) done
             const auto files = projectFiles();
             mappings.addKeyPress (screen.commands.getCommandID (id), key);
             screen.window.keyGoesDown();

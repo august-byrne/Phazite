@@ -23,8 +23,8 @@ void dispatchPendingMessages();
 
 // Delivers messages and runs the timers that are due until the condition holds, for a message another thread posts
 // (SoundPack's thread posts its change message after it sets the state that waitForSoundPack() sees). False if the
-// condition still doesn't hold after timeoutMilliseconds.
-bool dispatchMessagesUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 5000);
+// condition still doesn't hold after timeoutMilliseconds: by default hangTimeout (TestHelpers.h), which only a hang reaches.
+bool dispatchMessagesUntil (const std::function<bool()>& condition, int timeoutMilliseconds = hangTimeout);
 
 // Delivers what waits on the system queue now, and what that posts in turn, without waiting for more: for a loop that waits
 // as the app's does (host/ThreadCpu.h: waitForMessages()). How many it delivered.

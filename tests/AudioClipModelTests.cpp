@@ -189,7 +189,7 @@ TEST_CASE ("A reversed clip plays the same part of its audio, backwards, where i
 
     // Phazite renders the file reversed in the background; the clip is silent until the render is ready.
     CHECK (song.get().state != phazite::AudioState::missing);
-    CHECK (phazite::test::dispatchMessagesUntil ([&song] { return song.get().state == phazite::AudioState::ready; }, 10000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&song] { return song.get().state == phazite::AudioState::ready; }));
 
     phazite::undo (*song.song);
     CHECK_FALSE (song.get().reversed);

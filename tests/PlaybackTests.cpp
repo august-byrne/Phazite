@@ -455,8 +455,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
                         });
 
         // Back at the play start, though playback stopped within 200 ms of starting.
-        phazite::test::dispatchMessagesUntil ([] { return false; }, 400);
-        CHECK (phazite::getPlayheadBeat (*song) == phazite::BeatPosition());
+        CHECK (phazite::test::dispatchMessagesUntil ([&song] { return phazite::getPlayheadBeat (*song) == phazite::BeatPosition(); }));
         setSong (context, nullptr);
         return left;
     };

@@ -17,6 +17,8 @@ The file holds two kinds of entries, under the same headings:
   audit's area and finding number, by which the audit's own files hold it in full. Timings in them are estimates unless
   they say "measured".
 - **Entries from 134 on** were found by the tests of the plan's stage 2, or seen while they were built; each says how.
+- **Entries from 160 on** were found while the rest of stage 1 was built, by its tests and by the reviews of its
+  changes (2026-11-14).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -66,6 +68,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`src/model/versions/VersionHistory.cpp`) isn't refused while a commit saves, and both write the branch's record. Fix:
   on a read that fails, try the other packs and forget the bad entry; refuse the rename meanwhile. Not yet checked
   (model-versions 13).
+- **161. A merge's clash answered for the other side can bring back a send to a return this side deleted.** A merge
+  runs the sweep of what names the gone as it finishes (`removeBrokenReferences()`, `src/model/versions/ApplySong.cpp`),
+  but a clash chosen afterwards (`chooseClash()`) puts the other side's item back without it, so the song can be saved
+  with a send that the next opening leaves out. Fix: run the sweep after each choice, in its step. Seen while known bug
+  100 was fixed; not reproduced by a test.
 
 ## Plug-ins
 
@@ -176,6 +183,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   to take its step back. Fix: a `graph::HandleDrag` in `DeviceGraph.h` that holds the handles a drag moves, with
   `keyPressed()` calling `ParameterHandle::cancelGesture()` on each, used by every graph; `cancelGesture()` on
   `ModulationDrag`, called from `Knob`'s ring drag. Found by the stage-2 tests; narrowed on 2026-11-14.
+- **162. A Stop that comes within the 3 ms in which a jump fades out makes one small step in the sound.** The stop's
+  fade begins at the old place, as it should, and the jump is then taken at once, without the rest of its own fade
+  (`src/engine/core/Engine.cpp`, `stopTransport()`). Fix: let the jump's fade run out before the stop is applied.
+  Left by the fix of the fades (S1.2); not measured.
+- **163. A control's drag taken back by Escape, in Write, while the loop wrapped during the drag,** takes back the
+  points the writer wrote at the wrap too, which were in the drag's step; and a control grabbed before playback
+  started has no record of the pass as it was, so its Escape uses an earlier grab's record if one is left
+  (`AutomationWriter::rememberGrab()`, `src/model/playback/AutomationWriter.cpp`). Fix: keep the wrap's points in a
+  step of their own, and clear the grabs as playback starts. Seen while Escape was built; neither has a test.
 
 ## Saving
 
@@ -185,6 +201,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `saveInBackground()` stores the devices' states first, on the message thread (`src/model/project/Project.cpp`,
   `src/model/plugins/PluginInstances.cpp`). Fix: ask only the plug-ins that reported a change, without waiting on the
   message thread, and count a time-out as a save that failed. Confirmed by a second reading (model-project-services 3).
+- **160. A new project whose first save fails leaves its folder behind, and the same name is refused when tried again.**
+  `Project::create()` (`src/model/project/Project.cpp`) makes the project's folder and its subfolders, then saves; if
+  that save fails (a full disk, a folder another program holds) it returns nothing with the error, but the folder stays,
+  and `makeProjectFolder()` refuses a name whose folder exists. Found by reading (2026-11-14, tests-model 8); no test
+  reaches it, as nothing a test can arrange makes that save fail once the folder could be made. Fix: delete the folder
+  when the first save fails, as `saveCopyAs()` and `finishMoveTo()` do; test it with a write that fails (a seam in
+  `writeWholeFile()`, or `tests/HeldFile.h` on a file the save writes, if one can be held before it is made).
 
 ## Recording
 
@@ -214,17 +237,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   the loop's wrap, which writes the held value through to the loop's end. Why: `AutomationWriter`
   (`src/model/playback/AutomationWriter.cpp`) stamps points with the session's playhead. Fix: stamp them with the heard
   playhead, and end the pass at a jump. Not yet checked (model-playback 13).
+- **164. A project that already holds a device on a drum sampler's track listening to one of its own pads' tracks**
+  isn't put right as it opens: the model refuses the choice now (`isFedBy()`, `src/model/mixer/Sidechain.cpp`), but
+  `makeConsistent()` doesn't clear one a file brings. Fix: clear a sidechain that the model would refuse, with the
+  case in `tests/InconsistentProjectTests.cpp`. Seen while known bug 101 was fixed.
 
 ## Files from others, and privacy
 
-- **105. A preset's sound may be any audio file on the computer.** A pad's, a wavetable's or a sample's path in a
-  preset is copied into the project's Audio folder from wherever it is, outside the library's folders too. Since
-  2026-11-14 a preset's volumes are held to the fader's range, and a path that is a network path, or a file that isn't
-  audio, is refused without being touched (`isSoundFileToTake()`, `src/model/devices/DeviceFiles.cpp`); a refused
-  sound is not reported. Why: the model doesn't know the library's folders, which the services keep
-  (`src/services/Library.h`). Fix: hand the model the library's folders, take a preset's sounds from those and from
-  the preset's own folder only, and say which were refused. The song check (`tests/SongCheck.h`, its `path` rule)
-  already allows the library's folders for this (model-mixer 0).
 - **106. A DAWproject written with 4 GB of audio or more is damaged,** and the export says it worked: JUCE's zip
   writer keeps sizes in 32 bits (`src/model/project/DawProject.cpp`). Reading one is capped since 2026-11-14:
   `project.xml` and `metadata.xml` at 256 MB each, and what it unpacks at what an archive of its size can hold
@@ -350,15 +369,6 @@ its fix.
 
 ## Tests
 
-- **154. Two more tests fail when every test file runs in one process, though each passes alone and under ctest**
-  (found 2026-11-14, with known bug 147 fixed). "A live note sounds at once, and waits only for devices that are switched
-  on and look ahead" (`tests/LiveInputTests.cpp`) waited 120 s and never heard the note where it should; and "While the
-  mouse drags in the playlist or the piano roll, no command ... changes ... its files" (`tests/EditorDragTests.cpp`) saw
-  the versions' files change under it (`Versions/current_temp...`, a branch's log), which is the version history's
-  thread finishing its first commit while the test compares the folder. Why the first fails: not traced (something an
-  earlier test file leaves in the shared engine context, as bug 147 was). Fix: as for 147, run the files in one process
-  in halves to find the one that leaves it; for the second, wait for the history to be idle before taking the folder's
-  files.
 - **153. In a Debug build an assertion that fires on the audio thread writes to the log** (`JUCE_LOG_ASSERTIONS`, which
   the tests' assertion net needs): a string made and a file written there, which the real-time audit then counts. No
   assertion fires on the audio thread in the audit's scenarios today; one that did would show as an allocation as well

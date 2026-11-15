@@ -343,20 +343,46 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     CHECK (phazite::getClips (screen.song, second).empty());
 }
 
-TEST_CASE ("The piano roll paints notes, with and without a key")
+namespace
+{
+// How many pixels of an area differ between two pictures of the same window.
+int countChanged (const juce::Image& before, const juce::Image& after, juce::Rectangle<int> area)
+{
+    auto changed = 0;
+    area = area.getIntersection (before.getBounds()).getIntersection (after.getBounds());
+
+    for (int y = area.getY(); y < area.getBottom(); ++y)
+        for (int x = area.getX(); x < area.getRight(); ++x)
+            changed += before.getPixelAt (x, y) != after.getPixelAt (x, y) ? 1 : 0;
+
+    return changed;
+}
+} // namespace
+
+TEST_CASE ("The piano roll paints a clip's notes in its grid, and a track's key in its rows")
 {
     PianoRollScreen screen;
     const auto clip = screen.addClip (0, 0.0, 4.0);
+    screen.select (clip);
+    CHECK (screen.pianoRoll.getTrack().isValid());
+    const auto grid = screen.notesArea();
+    const auto empty = screen.window.paintEverything();
+
+    // Two notes, a beat each, on middle C and the E above: they show in the grid's first two beats, and nothing
+    // changes in its last beat.
     phazite::addNote (screen.song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100);
     phazite::addNote (screen.song, clip, 64, beats (1.0), phazite::BeatDuration::fromBeats (1.0), 100);
-    screen.select (clip);
-
-    CHECK (screen.pianoRoll.getTrack().isValid());
-    CHECK (screen.window.paintEverything().getWidth() == 1176);
-
-    phazite::setTrackKey (screen.song, screen.tracks[0], phazite::Key { 2, phazite::Scale::dorian });
     phazite::test::dispatchPendingMessages();
-    CHECK (screen.window.paintEverything().getWidth() == 1176);
+    const auto withNotes = screen.window.paintEverything();
+    const auto x = [&screen, grid] (double beat) { return grid.getX() + screen.at (beat).x; };
+    CHECK (countChanged (empty, withNotes, grid.withX (x (0.0)).withRight (x (2.0))) > 0);
+    CHECK (countChanged (empty, withNotes, grid.withX (x (3.0) + 2).withRight (x (4.0) - 2)) == 0);
+
+    // A key, F sharp major, whose notes are not the white keys': the rows out of it shade otherwise, across the grid.
+    phazite::setTrackKey (screen.song, screen.tracks[0], phazite::Key { 6, phazite::Scale::major });
+    phazite::test::dispatchPendingMessages();
+    const auto withKey = screen.window.paintEverything();
+    CHECK (countChanged (withNotes, withKey, grid.withX (x (3.0) + 2).withRight (x (4.0) - 2)) > 0);
 }
 
 TEST_CASE ("On a track without an instrument, the piano roll asks for one, since its notes make no sound")

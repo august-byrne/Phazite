@@ -119,14 +119,14 @@ TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and s
 
     // The song started: it stops.
     phazite::playOrStop (*screen.song);
-    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }));
 
     // One started while the song plays plays on, until the song stops.
     click ("Break 120 BPM");
     phazite::test::runTimersUntil ([] { return false; }, 300);
     CHECK (screen.previewer.isPlaying());
     phazite::playOrStop (*screen.song);
-    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }));
 
     // A one-shot clicked again plays again from its start.
     click ("Drums");
@@ -248,7 +248,7 @@ TEST_CASE ("The browser's search finds sounds and devices, and the star keeps fa
     {
         search.setText (query, true);
         phazite::test::dispatchPendingMessages();
-        phazite::test::runTimersUntil ([&screen, &expected] { return screen.getRows() == expected; }, 2000);
+        phazite::test::runTimersUntil ([&screen, &expected] { return screen.getRows() == expected; });
         return screen.getRows();
     };
 

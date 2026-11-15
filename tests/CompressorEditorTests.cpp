@@ -387,15 +387,24 @@ TEST_CASE ("How far the compressor turns the sound down reads the same for any n
 
     // 12 dB over its corner, turned down as its curve says; reading it takes nothing away from the next reader.
     play (*compressor, -6.0f, 24000);
-    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto now = [] { return juce::Time::getMillisecondCounterHiRes() / 1000.0; };
+    const auto beforeFirst = now();
     const auto first = reduction->get();
+    const auto afterFirst = now();
     CHECK (first == doctest::Approx (getDefaultReduction (-6.0f)).epsilon (0.02));
     CHECK (reduction->get() == doctest::Approx (first).epsilon (0.01));
 
-    // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second.
+    // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second, by the clock: as far
+    // as the time between the two readings, measured around each of them (however long the machine kept this thread from
+    // running), and no lower than none.
     juce::Thread::sleep (200);
-    const auto seconds = (float) ((juce::Time::getMillisecondCounterHiRes() - start) / 1000.0);
-    CHECK (reduction->get() == doctest::Approx (first - 15.0f * seconds).epsilon (0.06));
+    const auto beforeSecond = now();
+    const auto second = reduction->get();
+    const auto afterSecond = now();
+    const auto fell = [first] (double seconds) { return std::max (0.0f, first - 15.0f * (float) seconds); };
+    CHECK (second <= fell (beforeSecond - afterFirst) + 0.05f);
+    CHECK (second >= fell (afterSecond - beforeFirst) - 0.05f);
+    CHECK (second < first - 2.5f); // 200 ms at least: 3 dB
 }
 
 TEST_CASE ("Ducking, the compressor's key is picked over its cuts and Listen: a track chosen there, one undo step, sets it up to duck")

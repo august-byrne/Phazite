@@ -27,10 +27,16 @@ EngineContext& getEngineContext();
 // at once, and the tests give what they write there fixed names.
 juce::File getSystemTemporaryFolder();
 
+// How long a test waits for something it waits on to happen, unless it says otherwise: two minutes, which only a hang
+// reaches. A test waits for a condition, never for a time, so that a machine busy with other work (ctest runs four test
+// files at once, CI's sanitizers run slowly) slows it rather than fails it; and a short limit is kept only where how soon
+// is what is tested, and says so.
+inline constexpr int hangTimeout = 120000;
+
 // The tests have no message loop, but some engine work happens on the message thread's timers (finding
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.
-bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 2000);
+bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = hangTimeout);
 
 // While one lives, a JUCE assertion at this place (JUCE's file and line as its log names them,
 // "values/juce_ValueTree.cpp:569") doesn't fail the test it fires in (TestMain.cpp fails a test for any other): for a

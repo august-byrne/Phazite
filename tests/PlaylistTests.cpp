@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist, driven with the mouse and the keys as the user would.
+#include "AppScreen.h"
 #include "EnginePlayback.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
@@ -432,17 +433,56 @@ TEST_CASE ("An empty song's playlist says over its lanes how to start, and a dou
     CHECK (! hint->isVisible());
 }
 
-TEST_CASE ("The playlist paints, with sections, a clip and a selected track")
+namespace
+{
+// How many pixels of an area differ between two pictures of the same window.
+int countChanged (const juce::Image& before, const juce::Image& after, juce::Rectangle<int> area)
+{
+    auto changed = 0;
+    area = area.getIntersection (before.getBounds()).getIntersection (after.getBounds());
+
+    for (int y = area.getY(); y < area.getBottom(); ++y)
+        for (int x = area.getX(); x < area.getRight(); ++x)
+            changed += before.getPixelAt (x, y) != after.getPixelAt (x, y) ? 1 : 0;
+
+    return changed;
+}
+} // namespace
+
+TEST_CASE (
+    "The playlist paints a song's sections above its tracks, a clip where it lies and nowhere else, and a selected track's header apart")
 {
     PlaylistScreen screen;
+    const auto lanes = screen.lanesArea();
+    const auto empty = screen.window.paintEverything();
+
+    // The sections, in their strip above the lanes.
     REQUIRE (phazite::findOutline ("pop") != nullptr);
     phazite::applyOutline (screen.getSong(), *phazite::findOutline ("pop"));
-    screen.addClip (1, 4.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+    const auto withSections = screen.window.paintEverything();
+    CHECK (countChanged (empty, withSections, { lanes.getX(), 0, lanes.getWidth(), lanes.getY() }) > 0);
+
+    // A clip on the second track, from beat 4 to 12: most of its own area changes, and the first track's row doesn't.
+    const auto clip = screen.addClip (1, 4.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+    const auto withClip = screen.window.paintEverything();
+    const auto clipArea = screen.playlist.getLocalArea (screen.lanes, screen.boundsOf (clip)).reduced (2);
+    REQUIRE_FALSE (clipArea.isEmpty());
+    CHECK (countChanged (withSections, withClip, clipArea) > clipArea.getWidth() * clipArea.getHeight() / 2);
+    const auto firstRow =
+        screen.playlist.getLocalArea (screen.lanes, juce::Rectangle<int> (0, 0, screen.lanes->getWidth(), screen.heightOf (0)))
+            .getIntersection (lanes)
+            .reduced (0, 2);
+    CHECK (countChanged (withSections, withClip, firstRow) == 0);
+
+    // The third track selected: its header, left of the lanes, changes.
     screen.selection.selectOnly (screen.tracks[2]);
     phazite::test::dispatchPendingMessages();
-
-    const auto image = screen.window.paintEverything();
-    CHECK (image.getWidth() == 1000);
+    const auto selected = screen.window.paintEverything();
+    const auto thirdRowTop =
+        screen.playlist.getLocalPoint (screen.lanes, juce::Point<int> (0, screen.heightOf (0) + screen.heightOf (1))).y;
+    CHECK (countChanged (withClip, selected, { 0, thirdRowTop, lanes.getX(), screen.heightOf (2) }) > 0);
 }
 
 TEST_CASE ("A track's header shows how loud the track plays now in a narrow bar along its right edge, as tall as its row")
@@ -2109,8 +2149,7 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
 
     // Slower, it waits for its render, which a while later it plays.
     phazite::setTempo (screen.getSong(), 100.0);
-    REQUIRE (
-        phazite::test::dispatchMessagesUntil ([&shownRendering] { return shownRendering().value_or (std::nullopt).has_value(); }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&shownRendering] { return shownRendering().value_or (std::nullopt).has_value(); }));
     const auto progress = *shownRendering().value_or (std::nullopt);
     CHECK (progress >= 0.0);
     CHECK (progress < 1.0);
@@ -2733,4 +2772,50 @@ TEST_CASE ("A drag of selected clips that ends where it began keeps them all sel
     REQUIRE (selection.getClips().size() == 2);
     mouse.click (from);
     CHECK (selection.getClips() == std::vector { first });
+}
+
+TEST_CASE ("A sound file dropped on a track's row in the playlist becomes a clip there, from the beat under it, selected, in one undo step")
+{
+    // As Explorer drops a file: the playlist, a JUCE file drag's target, is asked whether it wants the files, told where they
+    // move, and given them, at a place in its own coordinates.
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    auto& song = *phazite::findSong (context);
+    const auto tracks = phazite::ensureTracks (song, 2);
+    song.getUndoManager().clearUndoHistory();
+    auto& playlist = screen.showView<phazite::ui::Playlist> ("view.playlist");
+    auto* lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
+    REQUIRE (lanes != nullptr);
+
+    auto& dropTarget = static_cast<juce::FileDragAndDropTarget&> (playlist); // as JUCE finds it under the files
+    const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Dropped.wav"), 1.0);
+    const auto text = screen.temp.folder.getChildFile ("Notes.txt");
+    REQUIRE (text.replaceWithText ("not a sound"));
+    CHECK (dropTarget.isInterestedInFileDrag ({ sound.getFullPathName() }));
+    CHECK_FALSE (dropTarget.isInterestedInFileDrag ({ text.getFullPathName() }));
+
+    // On the second track's row, half a beat after beat 4: from beat 4, the grid's line before it.
+    const auto rowHeight = [&context] (phazite::TrackID track)
+    { return phazite::ui::getTrackHeight (phazite::getTrackRow (context, track).value_or (phazite::TrackRow())); };
+    const juce::Point<int> inLanes (juce::roundToInt (playlist.getView().beatToX (beats (4.5))),
+                                    rowHeight (tracks[0]) + rowHeight (tracks[1]) / 2);
+    const auto at = playlist.getLocalPoint (lanes, inLanes);
+    dropTarget.fileDragMove ({ sound.getFullPathName() }, at.x, at.y);
+    dropTarget.filesDropped ({ sound.getFullPathName() }, at.x, at.y);
+    phazite::test::dispatchPendingMessages();
+
+    CHECK (phazite::getClips (context, tracks[0]).empty());
+    const auto clips = phazite::getClips (context, tracks[1]);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
+    const auto clipState = phazite::findClipState (song, clips[0].id);
+    REQUIRE (phazite::isAudioState (clipState));
+    CHECK (phazite::getClipFile (song, clipState).getFileNameWithoutExtension().startsWith ("Dropped"));
+    CHECK (getSelection (context).isSelected (clips[0].id));
+    REQUIRE (phazite::canUndo (song));
+    phazite::undo (song);
+    CHECK (phazite::getClips (context, tracks[1]).empty());
+    CHECK_FALSE (phazite::canUndo (song));
 }
