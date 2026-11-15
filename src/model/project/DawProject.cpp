@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/engine/AppInfo.h"
@@ -596,7 +597,7 @@ namespace
         {
             const auto path = clip[schema::clipFile].toString();
             const auto file =
-                juce::File::isAbsolutePath (path) ? juce::File (path) : song.getFile().getParentDirectory().getChildFile (path);
+                juce::File::isAbsolutePath (path) ? makeFileOfFullPath (path) : song.getFile().getParentDirectory().getChildFile (path);
             juce::AudioFormatManager formats;
             formats.registerBasicFormats();
             const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
@@ -932,7 +933,7 @@ DawProjectFile readDawProject (const juce::File& file)
     read.project = parse ("project.xml");
     read.metadata = parse ("metadata.xml");
 
-    if (read.project == nullptr || ! read.project->hasTagName ("Project"))
+    if (read.project == nullptr || read.project->getTagName() != "Project")
     {
         read.error = file.getFileName() + " isn't a DAWproject Phazite can read.";
         read.project = nullptr;
@@ -1199,7 +1200,7 @@ namespace
         static bool hasAutomation (const juce::XmlElement& lane)
         {
             for (const auto* child : lane.getChildIterator())
-                if (child->hasTagName ("Points") || (child->hasTagName ("Lanes") && hasAutomation (*child)))
+                if (child->getTagName() == "Points" || (child->getTagName() == "Lanes" && hasAutomation (*child)))
                     return true;
 
             return false;
@@ -1287,7 +1288,17 @@ namespace
 
                 for (const auto* note : added)
                     addNoteFrom (clipID, contentStart, *note);
+
+                keepWithinSong (clip);
             }
+        }
+
+        // A clip grows to hold a note put past its end: no longer than a song's clips can be, for a note a million beats
+        // along.
+        static void keepWithinSong (juce::ValueTree clip)
+        {
+            if ((double) clip[schema::clipLength] > maxSongBeats)
+                clip.setProperty (schema::clipLength, maxSongBeats, nullptr);
         }
 
         void addNoteFrom (ClipID clip, BeatPosition contentStart, const juce::XmlElement& note)
@@ -1339,6 +1350,8 @@ namespace
 
                 for (const auto* note : clip->getChildByName ("Notes")->getChildWithTagNameIterator ("Note"))
                     addNoteFrom (clipID, getContentStart (clipState), *note);
+
+                keepWithinSong (clipState);
             }
 
             juce::StringArray audioNotTaken;
@@ -1391,12 +1404,14 @@ namespace
                 return "audio clips whose files aren't in it";
 
             const auto start = readNumber (clip, "time", 0.0, 0.0, maxSongBeats) + found.offset + (warped ? points.front().time : 0.0);
-            const auto from = warped ? points.front().contentTime : readNumber (event, "playStart", 0.0, 0.0, maxSeconds);
+            const auto from =
+                std::min (maxSeconds - 0.001, warped ? points.front().contentTime : readNumber (event, "playStart", 0.0, 0.0, maxSeconds));
             const auto to = warped ? points.back().contentTime
                                    : readNumber (event, "playStop", readNumber (*found.audio, "duration", from + 1.0, 0.0, maxSeconds), 0.0,
                                                  maxSeconds);
             auto state = makeAudioClipState (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
-                                             BeatPosition::fromBeats (std::max (0.0, start)), { from, std::max (from + 0.001, to) });
+                                             BeatPosition::fromBeats (std::max (0.0, start)),
+                                             { from, std::min (maxSeconds, std::max (from + 0.001, to)) });
 
             // Fades in seconds, or in beats at the song's tempo.
             if (const auto unit = clip.getStringAttribute ("fadeTimeUnit", "seconds"); unit == "seconds" || unit == "beats")

@@ -139,6 +139,16 @@ bool isPlace (const juce::String& place, const juce::String& named)
     return line >= first && line <= last;
 }
 
+// The same, for several places named at once, with | between them.
+bool isAnyPlace (const juce::String& place, const juce::String& named)
+{
+    for (const auto& each : juce::StringArray::fromTokens (named, "|", {}))
+        if (isPlace (place, each))
+            return true;
+
+    return false;
+}
+
 class AssertionNet final : public juce::Logger
 {
 public:
@@ -228,7 +238,7 @@ public:
         const std::lock_guard held (lock);
 
         // One a test makes on purpose (ExpectedAssertion, TestHelpers.h).
-        if (! expected.empty() && isPlace (place, juce::String (expected)))
+        if (! expected.empty() && isAnyPlace (place, juce::String (expected)))
         {
             ++numExpected;
             return;

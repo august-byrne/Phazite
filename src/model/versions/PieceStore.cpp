@@ -132,7 +132,10 @@ void PieceStore::readIndex (const juce::File& file)
         location.compressedSize = juce::ByteOrder::littleEndianInt (entry + nameSize + 8);
         location.size = juce::ByteOrder::littleEndianInt (entry + nameSize + 12);
 
-        if (location.start >= markSize && location.start + location.compressedSize <= indexStart)
+        // Within the pack's pieces, counted so that a start no file has can't wrap round; and not empty, which nothing
+        // compressed is.
+        if (location.start >= markSize && location.start <= indexStart && location.compressedSize > 0
+            && (juce::int64) location.compressedSize <= indexStart - location.start)
             index.emplace (juce::String::toHexString (entry, nameSize, 0), location);
     }
 }
@@ -169,7 +172,13 @@ std::optional<juce::MemoryBlock> PieceStore::read (const juce::String& name) con
 
     if (! stream->setPosition (location.start)
         || stream->read (compressed.getData(), (int) location.compressedSize) != (int) location.compressedSize)
+    {
+        // A pack that couldn't be read is opened again for the next piece: its stream reads nothing more.
+        if (stream->getStatus().failed())
+            stream = nullptr;
+
         return std::nullopt;
+    }
 
     // What it holds, if it is what its name says.
     auto piece = decompress (compressed, location.size);

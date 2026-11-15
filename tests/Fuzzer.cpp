@@ -5,7 +5,6 @@
 #include <array>
 #include <cstring>
 #include <limits>
-#include <optional>
 
 namespace phazite::test::fuzz
 {
@@ -414,40 +413,68 @@ std::string joinProblems (const std::vector<std::string>& problems)
     return joined;
 }
 
+namespace
+{
+    // What JUCE's own readers assert against in a damaged file, in Debug builds, and go on from: a name its XML parser read
+    // that XML allows no element or attribute, a tag like the one asked for but for its case (its lookups of a child by
+    // name ask that way), and in a zip a date that is none and a file's name that isn't UTF-8. A damaged file is nothing
+    // Phazite did wrong, and what its readers make of one is what the cases check (open question Q7,
+    // docs/juce-workarounds.md).
+    constexpr const char* readersAssertions =
+        "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_Time.cpp:170-175|juce_String.cpp:2143";
+
+    // And, in JSON, an object's member with no name, which its parser makes an Identifier of, and a minus sign with no
+    // digit after it.
+    constexpr const char* jsonReadersAssertions =
+        "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_Time.cpp:170-175|juce_String.cpp:2143|"
+        "juce_Identifier.cpp:61|juce_JSON.cpp:268";
+
+    Totals runRoundsExpecting (const char* assertions, const juce::String& name, int ownRounds, const Round& round);
+} // namespace
+
 Totals runRounds (const juce::String& name, int ownRounds, const Round& round)
 {
-    const auto seed = name.hashCode64();
-    const auto rounds = getRounds (ownRounds);
-    const auto only = getEnvironment ("PHAZITE_FUZZ_ROUND");
-    const auto first = only.isNotEmpty() ? only.getIntValue() : 0;
-    const auto end = only.isNotEmpty() ? first + 1 : rounds;
-    Totals totals;
-
-    for (int r = first; r < end; ++r)
-    {
-        Mutator mutator (seed + r);
-        juce::MemoryBlock fed;
-        const auto problem = round (mutator, fed);
-        ++totals.rounds;
-
-        if (problem.empty())
-            continue;
-
-        ++totals.failures;
-        const auto saved = getActualFolder().getChildFile ("fuzz").getChildFile (juce::File::createLegalFileName (name) + " round "
-                                                                                 + juce::String (r) + ".bin");
-        saved.getParentDirectory().createDirectory();
-        saved.replaceWithData (fed.getData(), fed.getSize());
-        INFO ("fuzz case \"" << name << "\", seed " << seed << ", round " << r << " (PHAZITE_FUZZ_ROUND=" << r
-                             << " runs it alone; what it fed is in " << saved.getFullPathName() << "): " << problem);
-        CHECK (false);
-
-        if (totals.failures >= 5)
-            break; // enough to go on with
-    }
-
-    return totals;
+    return runRoundsExpecting (readersAssertions, name, ownRounds, round);
 }
+
+namespace
+{
+    Totals runRoundsExpecting (const char* assertions, const juce::String& name, int ownRounds, const Round& round)
+    {
+        const ExpectedAssertion ofReaders (assertions);
+        const auto seed = name.hashCode64();
+        const auto rounds = getRounds (ownRounds);
+        const auto only = getEnvironment ("PHAZITE_FUZZ_ROUND");
+        const auto first = only.isNotEmpty() ? only.getIntValue() : 0;
+        const auto end = only.isNotEmpty() ? first + 1 : rounds;
+        Totals totals;
+
+        for (int r = first; r < end; ++r)
+        {
+            Mutator mutator (seed + r);
+            juce::MemoryBlock fed;
+            const auto problem = round (mutator, fed);
+            ++totals.rounds;
+
+            if (problem.empty())
+                continue;
+
+            ++totals.failures;
+            const auto saved = getActualFolder().getChildFile ("fuzz").getChildFile (juce::File::createLegalFileName (name) + " round "
+                                                                                     + juce::String (r) + ".bin");
+            saved.getParentDirectory().createDirectory();
+            saved.replaceWithData (fed.getData(), fed.getSize());
+            INFO ("fuzz case \"" << name << "\", seed " << seed << ", round " << r << " (PHAZITE_FUZZ_ROUND=" << r
+                                 << " runs it alone; what it fed is in " << saved.getFullPathName() << "): " << problem);
+            CHECK (false);
+
+            if (totals.failures >= 5)
+                break; // enough to go on with
+        }
+
+        return totals;
+    }
+} // namespace
 
 Totals run (const juce::String& name, const std::vector<juce::MemoryBlock>& seeds, Shape shape, int ownRounds, const Reader& read)
 {
@@ -461,20 +488,12 @@ Totals run (const juce::String& name, const std::vector<juce::MemoryBlock>& seed
         CHECK (problem.empty());
     }
 
-    // JSON whose object has a member with no name is JSON still, and JUCE asserts as its parser makes an Identifier of the
-    // empty name (in Debug builds): what a reader makes of such a file is what the case checks (open question Q7,
-    // docs/juce-workarounds.md).
-    std::optional<ExpectedAssertion> emptyName;
-
-    if (shape == Shape::json)
-        emptyName.emplace ("juce_Identifier.cpp:61");
-
-    return runRounds (name, ownRounds,
-                      [&] (Mutator& mutator, juce::MemoryBlock& fed)
-                      {
-                          const auto& input = seeds[(size_t) mutator.random.nextInt ((int) seeds.size())];
-                          fed = mutator.mutate (input, shape);
-                          return read (fed);
-                      });
+    return runRoundsExpecting (shape == Shape::json ? jsonReadersAssertions : readersAssertions, name, ownRounds,
+                               [&] (Mutator& mutator, juce::MemoryBlock& fed)
+                               {
+                                   const auto& input = seeds[(size_t) mutator.random.nextInt ((int) seeds.size())];
+                                   fed = mutator.mutate (input, shape);
+                                   return read (fed);
+                               });
 }
 } // namespace phazite::test::fuzz

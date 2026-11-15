@@ -8,6 +8,7 @@
 #include "internal/Devices.h"
 #include "internal/DrumKit.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -42,7 +43,7 @@ namespace
             const auto property = sounds.getPropertyName (i);
 
             if (const auto path = sounds[property].toString(); juce::File::isAbsolutePath (path))
-                if (const juce::File file (path); file.existsAsFile())
+                if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
                     if (const auto copy = copyIntoProject (song, file); copy != file)
                         setDeviceSound (song, id, property, getProjectPath (song, copy));
         }

@@ -37,11 +37,12 @@ concurrency: # one nightly run at a time; a run started by hand waits for the sc
   group: nightly-${{ github.ref }}
   cancel-in-progress: false
 
+# The long run's alone. The fuzzer's rounds and the random songs are set on the one step that runs them with many: set for
+# the whole workflow, they also ran in windows-asan's ctest, whose FuzzTests then took more than half an hour and ended at
+# its limit (2026-11-15).
 env:
   PHAZITE_LONG_RUN_SECONDS: ${{ github.event.inputs.long_run_seconds || '3600' }}
   PHAZITE_LONG_RUN_SEED: ${{ github.event.inputs.long_run_seed || '1' }}
-  PHAZITE_FUZZ_ROUNDS: ${{ github.event.inputs.fuzz_rounds || '20000' }}
-  PHAZITE_RANDOM_SONGS: ${{ github.event.inputs.random_songs || '1000' }}
 
 jobs:
   long-run:
@@ -126,6 +127,8 @@ jobs:
         if: ${{ !cancelled() && matrix.preset == 'linux-asan' }}
         shell: bash
         env:
+          PHAZITE_FUZZ_ROUNDS: ${{ github.event.inputs.fuzz_rounds || '20000' }}
+          PHAZITE_RANDOM_SONGS: ${{ github.event.inputs.random_songs || '1000' }}
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/lsan-suppressions.txt
           ASAN_OPTIONS: allow_user_segv_handler=0
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1

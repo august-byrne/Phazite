@@ -345,7 +345,7 @@ namespace
                     continue;
 
                 if (schema::holdsID (child, schema::trackID))
-                    if (const auto id = readID (child[schema::trackID]); id == 0 || id >= ((std::uint64_t) 1 << 62))
+                    if (const auto id = readID (child[schema::trackID]); id == 0 || id >= schema::maxID)
                         add ("id", child, "an item without an ID the song can count on from");
 
                 checkItemIDs (child);

@@ -712,8 +712,8 @@ namespace
                        [&] (juce::DynamicObject& object)
                        {
                            if (const auto identifier = object.getProperty (keys::identifier).toString();
-                               juce::File::isAbsolutePath (identifier) && juce::File (identifier).isAChildOf (home))
-                               object.setProperty (keys::identifier, juce::File (identifier).getFileName());
+                               juce::File::isAbsolutePath (identifier) && makeFileOfFullPath (identifier).isAChildOf (home))
+                               object.setProperty (keys::identifier, makeFileOfFullPath (identifier).getFileName());
 
                            auto* sounds = object.getProperty (keys::sounds).getDynamicObject();
 

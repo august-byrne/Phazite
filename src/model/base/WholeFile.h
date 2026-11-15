@@ -23,4 +23,10 @@ juce::Result writeWholeFile (const juce::File& file, const std::function<bool (j
 
 // The same, for bytes that are at hand.
 juce::Result writeWholeFile (const juce::File& file, const void* data, size_t size);
+
+// The file of a full path that a file holds (a project's, a preset's, a version's: File::isAbsolutePath() says it is one),
+// as juce::File makes it. On Windows a path from a root with no drive ("\Sounds\Kick.wav", or a full path of a Mac's or
+// Linux's) counts as full too, and juce::File asserts before it takes it for one on the current drive: here it is that
+// file without the assertion, as such a path is nothing Phazite did wrong. JUCE workaround W37 (docs/juce-workarounds.md).
+juce::File makeFileOfFullPath (const juce::String& path);
 } // namespace phazite

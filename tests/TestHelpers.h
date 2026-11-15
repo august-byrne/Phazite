@@ -46,7 +46,7 @@ bool runTimersUntil (const std::function<bool()>& condition, int timeoutMillisec
 // While one lives, a JUCE assertion at this place (JUCE's file and line, "juce_ValueTree.cpp:569"; for an assertion
 // written over several lines its first and last, "juce_Time.cpp:170-175", as compilers differ in which they give) doesn't
 // fail the test it fires in (TestMain.cpp fails a test for any other): for a test that makes, on purpose, the very fault
-// JUCE asserts against. One at a time, on the test's own thread.
+// JUCE asserts against. Several places are named with | between them. One at a time, on the test's own thread.
 class ExpectedAssertion
 {
 public:

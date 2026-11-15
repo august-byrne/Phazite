@@ -57,7 +57,7 @@ namespace
     // none.
     juce::ValueTree readSong (const juce::File& file)
     {
-        if (const auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->hasTagName (schema::PHAZITE.toString()))
+        if (const auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->getTagName() == schema::PHAZITE.toString())
         {
             removeText (*xml);
             return juce::ValueTree::fromXml (*xml);
@@ -454,7 +454,7 @@ namespace
         constexpr double maxBeat = maxSongBeats, maxSeconds = 1.0e7, some = 1.0e-9;
 
         // The IDs a song gives stay well below where counting them on would overflow.
-        constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
+        constexpr auto maxID = schema::maxID;
 
         // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value.
         struct Range

@@ -196,6 +196,19 @@ TEST_CASE ("Two tracks with one ID both open, each with an ID of its own")
     CHECK (phazite::getTrackIDs (project->getSong()).size() == phazite::getTrackIDs (*phazite::findSong (edited.s.context)).size());
 }
 
+TEST_CASE ("A number where no item's ID is, too large to count on from, leaves the song counting from its own IDs")
+{
+    // The fuzzer's finding, with many rounds (the nightly run, 2026-11-15): "id" on the TRACKS element, which holds none,
+    // was counted as the song's largest ID, and the next item made got one past any the song can count on from.
+    Edited edited;
+    const auto project =
+        edited.open ([] (juce::XmlElement& song) { song.getChildByName ("TRACKS")->setAttribute ("id", "-9223372036854775808"); });
+    REQUIRE (project != nullptr);
+    const auto made = project->getSong().makeID();
+    CHECK (made > 0);
+    CHECK (made < phazite::schema::maxID);
+}
+
 TEST_CASE ("A device of a type Phazite hasn't is left out, with what names it")
 {
     Edited edited;

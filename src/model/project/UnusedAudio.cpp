@@ -3,6 +3,7 @@
 #include "internal/Project.h"
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/WholeFile.h"
 #include "model/transport/internal/Recording.h"
 #include "model/versions/internal/VersionHistory.h"
 
@@ -16,7 +17,7 @@ namespace
     // A path as a song holds it: within the project's folder, or a full one.
     juce::File resolve (const juce::File& projectFolder, const juce::String& path)
     {
-        return juce::File::isAbsolutePath (path) ? juce::File (path) : projectFolder.getChildFile (path);
+        return juce::File::isAbsolutePath (path) ? makeFileOfFullPath (path) : projectFolder.getChildFile (path);
     }
 
     // The songs the project's files on the disk hold: the project file as saved, its autosave and its backups, which closing

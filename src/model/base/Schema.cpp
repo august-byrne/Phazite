@@ -14,8 +14,12 @@ namespace
     {
         std::uint64_t largest = 0;
 
+        // Where the element holds one, and one the song can count on from: a file from others may have "id" on an element
+        // that holds none, with any number in it.
         for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink })
-            largest = std::max (largest, (std::uint64_t) (juce::int64) tree.getProperty (*property, (juce::int64) 0));
+            if (tree.hasProperty (*property) && (schema::holdsID (tree, *property) || tree.hasType (schema::NOTE)))
+                if (const auto id = (std::uint64_t) (juce::int64) tree[*property]; id < schema::maxID)
+                    largest = std::max (largest, id);
 
         for (const auto& child : tree)
             largest = std::max (largest, findLargestID (child));

@@ -159,7 +159,7 @@ std::optional<Vst3State> readJuceVst3State (const juce::MemoryBlock& block, cons
 
     const auto xml = juce::parseXML (juce::String::fromUTF8 (data + 8, (int) length));
 
-    if (xml == nullptr || ! xml->hasTagName ("VST3PluginState"))
+    if (xml == nullptr || xml->getTagName() != "VST3PluginState")
         return std::nullopt;
 
     Vst3State state;

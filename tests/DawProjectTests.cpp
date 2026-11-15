@@ -890,3 +890,32 @@ TEST_CASE ("A DAWproject shaped as Studio One writes one: one copy of a recordin
     CHECK (told.contains ("Vocals: its automation"));
     CHECK (told.contains ("Reverb: its devices (Room Reverb)"));
 }
+
+TEST_CASE ("A DAWproject with a note a million beats along, or audio from past where a file can end, opens within a song's ranges")
+{
+    TemporaryFolder folder;
+    const auto loopSeconds = 8.0 * 60.0 / 170.0;
+    const auto sound = writeSound (folder.folder.getChildFile ("Sound.wav"), loopSeconds);
+    juce::File file;
+
+    SUBCASE ("A note far past its clip's end: the clip that grows to hold it is no longer than a clip can be")
+    {
+        const auto text = getBitwigProject (loopSeconds).replace ("<Note time=\"1.500000\"", "<Note time=\"1e15\"");
+        REQUIRE (text.contains ("1e15"));
+        file = writeArchive (folder.folder.getChildFile ("Far note.dawproject"), text, { { "audio/Drumfunk3 170bpm.wav", sound } });
+    }
+
+    SUBCASE ("Audio played from past the last second a file can have: its end is that second")
+    {
+        const auto text = getStudioOneProject().replace ("playStart=\"0.000000\"", "playStart=\"1e15\"");
+        REQUIRE (text.contains ("1e15"));
+        file = writeArchive (folder.folder.getChildFile ("Far audio.dawproject"), text, { { "Audio/Vox.wav", sound } });
+    }
+
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+    TestSong into;
+    auto& song = *phazite::findSong (into.context);
+    phazite::takeDawProject (song, read);
+    phazite::test::checkSong (song);
+}

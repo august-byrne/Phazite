@@ -50,4 +50,17 @@ juce::Result writeWholeFile (const juce::File& file, const void* data, size_t si
 {
     return writeWholeFile (file, [data, size] (juce::OutputStream& out) { return size == 0 || out.write (data, size); });
 }
+
+juce::File makeFileOfFullPath (const juce::String& path)
+{
+#if JUCE_WINDOWS
+    const auto isSeparator = [] (juce::juce_wchar character) { return character == '\\' || character == '/'; };
+
+    // From a root, with no drive and no server before it: on the current drive, as juce::File has it.
+    if (isSeparator (path[0]) && ! isSeparator (path[1]))
+        return juce::File (juce::File::getCurrentWorkingDirectory().getFullPathName().substring (0, 2) + path);
+#endif
+
+    return juce::File (path);
+}
 } // namespace phazite

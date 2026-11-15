@@ -664,6 +664,29 @@ TEST_CASE ("A pack whose index doesn't hash to its name is left out, and a size 
         CHECK (! store.readVersion (id).has_value());
         CHECK (store.readSong (pieces.song).isValid());
     }
+
+    SUBCASE ("An index that says a piece is empty, or starts where no file reaches: that piece is left out, and the rest is read")
+    {
+        SUBCASE ("Empty")
+        {
+            const juce::uint32 none = 0;
+            std::memcpy (entry + 40, &none, sizeof (none));
+        }
+
+        SUBCASE ("Starting too far to count from")
+        {
+            const auto tooFar = std::numeric_limits<juce::int64>::max();
+            std::memcpy (entry + 32, &tooFar, sizeof (tooFar));
+        }
+
+        REQUIRE (pack.deleteFile());
+        REQUIRE (folder.getChildFile (changed.getIndexName() + ".pack").replaceWithData (changed.bytes.getData(), changed.bytes.getSize()));
+
+        phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+        CHECK (! store.getPieces().has (id));
+        CHECK (! store.readVersion (id).has_value());
+        CHECK (store.readSong (pieces.song).isValid());
+    }
 }
 
 TEST_CASE ("A branch's file keeps what this build doesn't know when the branch is written again")

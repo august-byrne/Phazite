@@ -4,6 +4,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 
 #include <vector>
@@ -87,7 +88,7 @@ juce::File findProjectFile (const Song& song, const juce::String& path)
         return {};
 
     if (juce::File::isAbsolutePath (path))
-        return juce::File (path);
+        return makeFileOfFullPath (path);
 
     const auto folder = getProjectFolder (song);
     return folder != juce::File() ? folder.getChildFile (path) : juce::File();

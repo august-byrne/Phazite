@@ -308,13 +308,18 @@ namespace
                 if (child->isTextElement())
                     continue; // text between tags, which a piece never holds
 
-                if (child->hasTagName (versions::BYTES.toString()))
+                if (child->getTagName() == versions::BYTES.toString())
                 {
                     const auto piece = child->getStringAttribute (versions::bytesHash);
+                    const auto name = child->getStringAttribute (versions::bytesName);
+
+                    // A damaged piece may name no property an element can have (none, or no name XML can write): left out.
+                    if (! juce::XmlElement::isValidXmlName (name))
+                        continue;
 
                     if (const auto bytes = read (piece))
                     {
-                        tree.setProperty (child->getStringAttribute (versions::bytesName), writeBytes (*bytes), nullptr);
+                        tree.setProperty (name, writeBytes (*bytes), nullptr);
                     }
                     else
                     {
@@ -322,17 +327,17 @@ namespace
                         tree.setProperty (versions::missing, true, nullptr);
                     }
                 }
-                else if (child->hasTagName (versions::PARAMETERS.toString()))
+                else if (child->getTagName() == versions::PARAMETERS.toString())
                 {
                     readParameters (tree, child->getStringAttribute (versions::parametersHash));
                 }
-                else if (child->hasTagName (versions::PIECE.toString()))
+                else if (child->getTagName() == versions::PIECE.toString())
                 {
                     const auto piece = child->getStringAttribute (versions::pieceHash);
                     const auto type = child->getStringAttribute (versions::pieceType);
                     const auto held = parse (piece);
 
-                    if (held == nullptr || ! held->hasTagName (type))
+                    if (held == nullptr || held->getTagName() != type)
                     {
                         // A run lost: the element it is in stands in for itself. Another piece: a stand-in in its place.
                         if (type == versions::RUN.toString())
@@ -412,18 +417,18 @@ std::vector<PieceReference> findReferences (const juce::MemoryBlock& piece)
     {
         for (const auto* child : element.getChildIterator())
         {
-            if (child->hasTagName (versions::PIECE.toString()))
+            if (child->getTagName() == versions::PIECE.toString())
             {
                 const auto type = child->getStringAttribute (versions::pieceType);
                 found.push_back ({ child->getStringAttribute (versions::pieceHash),
                                    type == versions::RUN.toString() ? type : describe (Joiner::makeStandIn (*child)) });
             }
-            else if (child->hasTagName (versions::BYTES.toString()))
+            else if (child->getTagName() == versions::BYTES.toString())
             {
                 found.push_back ({ child->getStringAttribute (versions::bytesHash),
                                    versions::BYTES.toString() + ":" + child->getStringAttribute (versions::bytesName) });
             }
-            else if (child->hasTagName (versions::PARAMETERS.toString()))
+            else if (child->getTagName() == versions::PARAMETERS.toString())
             {
                 found.push_back ({ child->getStringAttribute (versions::parametersHash), versions::PARAMETERS.toString() });
             }

@@ -196,7 +196,7 @@ std::vector<BranchRecord> VersionStore::readBranches() const
         {
             const auto xml = juce::parseXML (file);
 
-            if (xml == nullptr || ! xml->hasTagName (versions::BRANCH.toString()))
+            if (xml == nullptr || xml->getTagName() != versions::BRANCH.toString())
                 continue;
 
             BranchRecord branch;
@@ -351,7 +351,7 @@ namespace
     {
         std::map<juce::String, MessageEdit> edits;
 
-        if (const auto xml = juce::parseXML (file); xml != nullptr && xml->hasTagName (versions::MESSAGES.toString()))
+        if (const auto xml = juce::parseXML (file); xml != nullptr && xml->getTagName() == versions::MESSAGES.toString())
         {
             for (const auto* message : xml->getChildWithTagNameIterator (versions::MESSAGE.toString()))
             {
@@ -460,7 +460,7 @@ std::vector<VersionRecord::File> VersionStore::hashFiles (const juce::StringArra
 
     for (const auto& path : paths)
     {
-        const auto file = juce::File::isAbsolutePath (path) ? juce::File (path) : projectFolder.getChildFile (path);
+        const auto file = juce::File::isAbsolutePath (path) ? makeFileOfFullPath (path) : projectFolder.getChildFile (path);
 
         if (! file.existsAsFile())
             continue;

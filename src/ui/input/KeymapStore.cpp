@@ -49,7 +49,7 @@ void restoreKeyChanges (CommandBridge& bridge, const juce::String& xml)
 {
     const auto parsed = juce::parseXML (xml);
 
-    if (parsed == nullptr || ! parsed->hasTagName (keyChangesTag))
+    if (parsed == nullptr || parsed->getTagName() != keyChangesTag)
         return;
 
     auto& mappings = bridge.getKeyMappings();

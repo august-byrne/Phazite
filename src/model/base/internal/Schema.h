@@ -516,6 +516,10 @@ juce::String getOrderGroup (const juce::ValueTree&);
 // curve's and a modulation's device. What a copy gives anew and renames to match (giveNewIDs()), and so does a merge for
 // what the other branch added.
 bool holdsID (const juce::ValueTree&, const juce::Identifier& property);
+
+// What every ID of the song's is below: one at or past it (a file from others can hold any number) is none the song can
+// count on from, and is given anew as the song loads (model/project/internal/Project.h: makeConsistent()).
+inline constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
 bool namesID (const juce::ValueTree&, const juce::Identifier& property);
 
 // How a version's pieces split a song (model/versions/internal/SongPieces.h), which a reader needn't know: the elements its
