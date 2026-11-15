@@ -1431,14 +1431,17 @@ TEST_CASE ("A precision touchpad scrolls the editors by its own distance, either
 //==============================================================================
 namespace
 {
-// The files under a folder, each with its size and when it was written, a line each.
+// The files under a folder, each with its size and when it was written, a line each; but for the autosaves kept for a
+// crash (a project's Backups folder), which a timer writes whatever the keys do: where the keys take long (under MSVC's
+// AddressSanitizer, the nightly run of 2026-11-15) one came due in the middle of them.
 juce::String describeFiles (const juce::File& folder)
 {
     juce::StringArray lines;
 
     for (const auto& entry : juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFiles))
-        lines.add (entry.getFile().getRelativePathFrom (folder) + " " + juce::String (entry.getFileSize()) + " "
-                   + juce::String (entry.getModificationTime().toMilliseconds()));
+        if (entry.getFile().getParentDirectory().getFileName() != "Backups")
+            lines.add (entry.getFile().getRelativePathFrom (folder) + " " + juce::String (entry.getFileSize()) + " "
+                       + juce::String (entry.getModificationTime().toMilliseconds()));
 
     lines.sort (false);
     return lines.joinIntoString ("\n");

@@ -794,6 +794,18 @@ void resetLoudness (ProjectContext& context)
 }
 
 //==============================================================================
+double getEngineDelaySeconds (const ProjectContext& context)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr || getPlaybackHost (getEngineContext (context)).isLowLatency())
+        return 0.0;
+
+    auto* session = findPlayingSession (*song);
+    const auto* plan = session != nullptr ? session->getEngine().getPlan() : nullptr;
+    return plan != nullptr ? engine::Engine::getOutputLatency (*plan) / session->getEngine().getSampleRate() : 0.0;
+}
+
 DelayCompensation getDelayCompensation (const ProjectContext& context)
 {
     DelayCompensation compensation;
@@ -803,6 +815,7 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
         return compensation;
 
     // Each device's, as Phazite's engine plays it, while it plays the project: the master's first, then the channels'.
+    auto& host = getPlaybackHost (getEngineContext (context));
     std::vector<TrackID> channels { TrackID() };
 
     for (const auto track : getChannelTracks (*song))
@@ -810,7 +823,7 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
 
     for (const auto channel : channels)
         for (const auto device : getDevices (*song, channel))
-            if (const auto latency = makeDeviceSlot (context, device).latencySeconds; latency > 0.0)
+            if (const auto latency = getLatencySeconds (*song, device, host); latency > 0.0)
                 compensation.devices.push_back ({ getDeviceName (*song, device) + " on "
                                                       + (channel.isValid() ? getTrackName (*song, channel) : juce::String ("Master")),
                                                   latency });
@@ -820,13 +833,12 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
 
     // What the engine waits for, the longest of its paths; the latest device while it plays nothing. None while Low Latency
     // is on, which turns delay compensation off.
-    if (! getPlaybackHost (getEngineContext (context)).isLowLatency())
+    if (! host.isLowLatency())
     {
         auto* session = findPlayingSession (*song);
-        const auto* plan = session != nullptr ? session->getEngine().getPlan() : nullptr;
 
-        if (plan != nullptr)
-            compensation.seconds = engine::Engine::getOutputLatency (*plan) / session->getEngine().getSampleRate();
+        if (session != nullptr && session->getEngine().getPlan() != nullptr)
+            compensation.seconds = getEngineDelaySeconds (context);
         else if (! compensation.devices.empty())
             compensation.seconds = compensation.devices.front().second;
     }

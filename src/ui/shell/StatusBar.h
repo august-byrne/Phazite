@@ -71,7 +71,9 @@ private:
     ProjectContext& context;
     HintBar hintBar;
     std::unique_ptr<Item> saveItem, branchItem, selectionItem, midiItem, renderItem, delayItem, audioItem, cpuItem;
-    int shownCpu = -1; // the percentage shown, to repaint only on changes
+    int shownCpu = -1;         // the percentage shown, to repaint only on changes
+    double polledDelay = -1.0; // the engine's delay as the delay shown was worked out, to work it out again only on changes
+    bool polledLowLatency = false;
 
     void showSelection();
     void showBranch();

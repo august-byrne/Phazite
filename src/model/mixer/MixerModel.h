@@ -289,4 +289,9 @@ struct DelayCompensation
 };
 
 DelayCompensation getDelayCompensation (const ProjectContext&);
+
+// The seconds alone, as the engine has them while it plays the project (none otherwise, and none with low latency),
+// without the song gone through: what a display that looks many times a second asks, to work the whole out again only
+// once this has changed (a plug-in that said its latency late, Low Latency switched).
+double getEngineDelaySeconds (const ProjectContext&);
 } // namespace phazite

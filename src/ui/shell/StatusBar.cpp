@@ -134,7 +134,26 @@ struct StatusBar::Item : public juce::Button
                + (progress.has_value() ? Shell::statusProgressWidth + Space::s : 0);
     }
 
-    int getPreferredWidth() const { return getWidthFor (getButtonText()); }
+    // Its text's width, measured once for each text: the bar asks several times a second whether an item's width changed,
+    // and measuring shapes the text.
+    int getPreferredWidth() const
+    {
+        if (! measured || measuredText != getButtonText() || measuredWithProgress != progress.has_value())
+        {
+            measuredText = getButtonText();
+            measuredWithProgress = progress.has_value();
+            measuredWidth = getWidthFor (measuredText);
+            measured = true;
+        }
+
+        return measuredWidth;
+    }
+
+    void lookAndFeelChanged() override
+    {
+        juce::Button::lookAndFeelChanged();
+        measured = false; // another font, maybe
+    }
 
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
@@ -171,6 +190,11 @@ struct StatusBar::Item : public juce::Button
 
     Emphasis emphasis = Emphasis::quiet;
     std::optional<double> progress;
+
+private:
+    mutable juce::String measuredText;
+    mutable int measuredWidth = 0;
+    mutable bool measured = false, measuredWithProgress = false;
 };
 
 //==============================================================================
@@ -402,6 +426,8 @@ void StatusBar::showRenders()
 // does (MixerModel.h); what is played live comes out as late.
 void StatusBar::showDelay()
 {
+    polledDelay = context.hasProject() ? getEngineDelaySeconds (context) : 0.0;
+    polledLowLatency = engine.isLowLatency();
     const auto compensation = context.hasProject() ? getDelayCompensation (context) : DelayCompensation();
     const auto shown = compensation.seconds >= 0.0005;
     const auto wasVisible = delayItem->isVisible();
@@ -476,6 +502,7 @@ void StatusBar::projectChanged()
 {
     showSelection();
     showBranch();
+    showDelay();
     timerCallback();
 }
 
@@ -501,7 +528,12 @@ void StatusBar::timerCallback()
 {
     showRenders();
     showMidi();
-    showDelay();
+
+    // The delay is worked out as the song's tracks and devices change (songChanged()), which goes through the song; here
+    // only once what the engine waits has changed without them, or Low Latency was switched.
+    if (polledLowLatency != engine.isLowLatency()
+        || ! juce::exactlyEqual (polledDelay, context.hasProject() ? getEngineDelaySeconds (context) : 0.0))
+        showDelay();
 
     const auto percent = juce::roundToInt (engine.getCpuUsage() * 100.0);
 

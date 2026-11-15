@@ -691,7 +691,10 @@ TEST_CASE ("Phazite's side ended by force leaves neither a helper nor its shared
     REQUIRE (side.kill());
     const auto gone = waitFor ([helperID] { return ! isProcessRunning (helperID); }, 20000);
     CHECK (gone);
-    CHECK (sandbox::SharedMemory::open (channelName, 64) == nullptr);
+
+    // Once Phazite's side has gone too: ended by force, it keeps the memory until Windows has taken its process apart, which
+    // the helper's end can come before (under MSVC's AddressSanitizer it did, the nightly run of 2026-11-15).
+    CHECK (waitFor ([&channelName] { return sandbox::SharedMemory::open (channelName, 64) == nullptr; }, 20000));
 
     if (! gone)
         endProcess (helperID);
