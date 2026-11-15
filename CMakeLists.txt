@@ -319,6 +319,8 @@ target_sources(phazite_core PRIVATE
     src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
     src/model/base/IDs.h
+    src/model/base/Json.cpp
+    src/model/base/Json.h
     src/model/base/Selection.cpp
     src/model/base/Schema.cpp
     src/model/base/Song.cpp
@@ -1294,6 +1296,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ImportTests.cpp
         tests/InconsistentProjectTests.cpp
         tests/InspectorTests.cpp
+        tests/JsonTests.cpp
         tests/LibraryTests.cpp
         tests/LimiterEditorTests.cpp
         tests/LimiterTests.cpp

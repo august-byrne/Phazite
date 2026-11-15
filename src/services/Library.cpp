@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
+#include "model/base/Json.h"
 #include "model/base/WholeFile.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/EngineContext.h"
@@ -958,7 +959,7 @@ void Library::readSets()
 
     collections.clear();
 
-    const auto parsed = juce::JSON::parse (settings.get (Settings::browserCollections)); // which the list points into
+    const auto parsed = parseJson (settings.get (Settings::browserCollections)); // which the list points into
 
     if (const auto* list = parsed.getArray())
     {

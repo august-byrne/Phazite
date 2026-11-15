@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Updates.h"
+#include "model/base/Json.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -293,9 +294,9 @@ Updates::Source Updates::getReleases()
 
 std::optional<Updates::Release> Updates::parseUpdateFile (const juce::String& json, const Source& from, juce::String& error)
 {
-    juce::var parsed;
+    const auto parsed = parseJson (json);
 
-    if (juce::JSON::parse (json, parsed).failed() || ! parsed.isObject())
+    if (! parsed.isObject())
     {
         error = "isn't JSON.";
         return std::nullopt;

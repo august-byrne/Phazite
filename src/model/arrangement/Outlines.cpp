@@ -3,6 +3,7 @@
 #include "internal/Outlines.h"
 #include "internal/Sections.h"
 #include "internal/Tracks.h"
+#include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -31,7 +32,7 @@ int Outline::getLengthInBars() const
 
 std::optional<Outline> Outline::fromJSON (const juce::String& text)
 {
-    const auto json = juce::JSON::parse (text);
+    const auto json = parseJson (text);
     Outline outline;
     outline.id = json["id"].toString();
     outline.name = json["name"].toString();

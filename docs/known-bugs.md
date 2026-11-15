@@ -275,6 +275,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   fuzzed. Fix:
   find the casts (`(int)` and `static_cast<int>` of a float or a double in `src/model/`) and make each safe, or keep its
   input finite where it comes from; UBSan in `linux-asan` reports one that runs.
+- **170. A number in a project file with an exponent of ten digits or more overflows an `int` as it is read**
+  ("1e12345678901" as a clip's length, say): undefined behaviour in C++, in practice a wrong exponent, after which the
+  loader puts the value within its range. JUCE reads an exponent's digits into an `int` without a check
+  (`CharacterFunctions::readDoubleValue()`, which `String::getDoubleValue()` and so every number read from a song's
+  XML uses). JSON is guarded (`parseJson()`, JUCE workaround W38); the fuzzer hasn't made such an attribute yet. Fix:
+  as the song loads, before any number is read from it, take a property whose text has an exponent that long for one
+  out of its range (`makeConsistent()`, `src/model/project/Project.cpp`), the same for the versions' pieces and a
+  DAWproject's attributes; and have the fuzzer write such exponents (`makeExtremeNumber()`, `tests/Fuzzer.cpp`).
 
 ## Window, shell and keys
 

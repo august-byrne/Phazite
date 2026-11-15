@@ -2,6 +2,7 @@
 #include "internal/Presets.h"
 #include "PresetModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Json.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -1016,7 +1017,7 @@ juce::var readPreset (const juce::File& file)
     if (! file.existsAsFile())
         return {};
 
-    const auto preset = juce::JSON::parse (file);
+    const auto preset = parseJson (file);
 
     if (! preset.isObject() || ! findKind (preset[keys::kind].toString()).has_value())
         return {};

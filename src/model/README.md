@@ -30,6 +30,7 @@ What every area builds on.
 | `internal/Selection.h` | What is selected, by IDs: one `phazite::Selection` for the open project. |
 | `Toggles.h` | Switches that act on several things: `toggleAll()`, `areAllOn()`. |
 | `BackgroundJobs.h` | Jobs run in the background on threads of their own, never ended by force. |
+| `Json.h` | JSON read from text (`parseJson()`), wherever Phazite reads it, without the numbers JUCE's parser can't count. |
 | `WholeFile.h` | A file written whole or not at all, which the project file, the autosave, the versions' files and presets are written with; and the file of a full path that such a file holds (`makeFileOfFullPath()`). |
 
 ## commands/

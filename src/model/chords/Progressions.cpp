@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Progressions.h"
+#include "model/base/Json.h"
 
 #include <PhaziteData.h>
 
@@ -108,7 +109,7 @@ const std::vector<Progression>& getBuiltInProgressions()
                 continue;
 
             // Kept while its entries are read: they belong to it.
-            const auto file = juce::JSON::parse (juce::String::fromUTF8 (data, size));
+            const auto file = parseJson (juce::String::fromUTF8 (data, size));
 
             if (const auto* entries = file["progressions"].getArray())
                 for (const auto& entry : *entries)

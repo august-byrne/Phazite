@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SoundPack.h"
+#include "model/base/Json.h"
 #include "model/engine/AppInfo.h"
 
 #include <juce_cryptography/juce_cryptography.h>
@@ -11,7 +12,7 @@ namespace
     // The pack's own list of sounds, sources.json, names the pack and its version.
     int readVersion (const juce::File& folder, const juce::String& name)
     {
-        const auto manifest = juce::JSON::parse (folder.getChildFile ("sources.json"));
+        const auto manifest = parseJson (folder.getChildFile ("sources.json"));
         return manifest["pack"].toString() == name ? (int) manifest["version"] : 0;
     }
 } // namespace

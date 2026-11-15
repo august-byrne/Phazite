@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Fuzzer.h"
 #include "GoldenFiles.h"
+#include "model/base/Json.h"
 
 #include <array>
 #include <cstring>
@@ -283,7 +284,7 @@ juce::String Mutator::mutateXml (const juce::String& text)
 
 juce::String Mutator::mutateJson (const juce::String& text)
 {
-    auto json = juce::JSON::parse (text);
+    auto json = phazite::parseJson (text); // as Phazite reads it: what it refuses is fed as it is
     std::vector<juce::var> containers;
     collect (json, containers);
 

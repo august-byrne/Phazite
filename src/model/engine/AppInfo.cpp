@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppInfo.h"
+#include "model/base/Json.h"
 
 #include <PhaziteData.h>
 
@@ -13,7 +14,7 @@ namespace
         int size = 0;
 
         if (const auto* data = PhaziteData::getNamedResource ("notices_json", size))
-            return juce::JSON::parse (juce::String::fromUTF8 (data, size));
+            return parseJson (juce::String::fromUTF8 (data, size));
 
         jassertfalse; // the build compiles it in: CMakeLists.txt
         return {};

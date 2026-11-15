@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Keymap.h"
+#include "model/base/Json.h"
 
 #include <PhaziteData.h>
 
@@ -9,7 +10,7 @@ namespace phazite::ui
 {
 std::optional<Keymap> Keymap::fromJSON (const juce::String& text)
 {
-    const auto json = juce::JSON::parse (text);
+    const auto json = parseJson (text);
     Keymap keymap;
     keymap.name = json["name"].toString();
     keymap.description = json["description"].toString();
