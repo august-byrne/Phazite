@@ -79,6 +79,8 @@ namespace
                 return PluginState::missing;
             case PluginInstances::Status::off:
                 return PluginState::off;
+            case PluginInstances::Status::loading:
+                return PluginState::loading;
             case PluginInstances::Status::playing:
             default:
                 return PluginState::playing;

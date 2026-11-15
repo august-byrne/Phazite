@@ -49,6 +49,7 @@ bool locateAudioFile (ProjectContext&, const juce::String& path, const juce::Fil
 enum class PluginState
 {
     playing,
+    loading, // it opens in the background, as the project opened, and plays once it has
     crashed, // its helper went, or it crashed as it loaded: it plays nothing until it is reloaded (reloadDevice())
     missing, // it isn't installed here, or scanning hasn't found it
     off      // the project was opened with its plug-ins off, after a crash of Phazite's

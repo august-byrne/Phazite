@@ -1897,10 +1897,15 @@ void AutosaveTimer::timerCallback()
         const auto playingTooSoon = isSongPlaying (project.getSong()) && now - savedAt < (juce::uint32) playingSaveSeconds * 1000;
 
         if (recordingEnded || (quiet && ! playingTooSoon))
+            saveDue = true;
+
+        if (saveDue && havePluginStates())
         {
+            saveDue = false;
             project.saveInBackground();
             wasAutosaving = project.isAutosaving();
             savedAt = now;
+            tellOlderPluginStates();
         }
 
         return;
@@ -1924,10 +1929,32 @@ void AutosaveTimer::timerCallback()
 
     if (recordingEnded || (waited >= wait && (! playing || waited >= wait + (juce::uint32) maxWaitWhilePlayingSeconds * 1000)))
     {
+        if (! havePluginStates())
+            return;
+
         project.autosaveInBackground();
         wasAutosaving = project.isAutosaving();
         autosavedOnce = true;
         changedSince = 0;
+        tellOlderPluginStates();
+    }
+}
+
+bool AutosaveTimer::havePluginStates()
+{
+    // Asked at once, those that may have changed, again at each tick until every answer is in or given up on: the write then
+    // asks none (Project::saveInBackground()).
+    return askPluginStates (project.getSong(), false);
+}
+
+void AutosaveTimer::tellOlderPluginStates()
+{
+    if (auto older = getPluginsWithOlderStates (project.getSong()); older != toldOlder)
+    {
+        toldOlder = std::move (older);
+
+        if (! toldOlder.isEmpty() && onOlderPluginStates != nullptr)
+            onOlderPluginStates (toldOlder);
     }
 }
 } // namespace phazite

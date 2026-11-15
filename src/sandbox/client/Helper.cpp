@@ -182,7 +182,7 @@ private:
         {
             const juce::ScopedLock held (owner.lock);
 
-            if (! owner.waiting.empty())
+            if (owner.isWaiting())
             {
                 beatSent = now;
                 return false;
@@ -301,29 +301,59 @@ bool Helper::start (int timeoutMilliseconds)
 
 std::optional<juce::MemoryBlock> Helper::request (MessageWriter& message, int timeoutMilliseconds)
 {
-    if (! running)
+    const auto reply = send (message);
+
+    if (! reply->wait (timeoutMilliseconds) || ! running || reply->getReply().isEmpty())
         return {};
 
-    Waiting wait;
-    wait.request = message.getRequest();
+    return reply->getReply();
+}
+
+std::shared_ptr<Helper::Reply> Helper::send (MessageWriter& message)
+{
+    auto reply = std::make_shared<Reply>();
+    reply->request = message.getRequest();
 
     {
         const juce::ScopedLock held (lock);
-        waiting.push_back (&wait);
+
+        if (! running)
+        {
+            finish (*reply, {});
+            return reply;
+        }
+
+        std::erase_if (waiting, [] (const auto& wanted) { return wanted.expired(); });
+        waiting.push_back (reply);
     }
 
-    const auto sent = pipe->sendMessage (message.take());
-    const auto answered = sent && wait.answered.wait ((double) timeoutMilliseconds);
-
+    if (! pipe->sendMessage (message.take()))
     {
         const juce::ScopedLock held (lock);
-        std::erase (waiting, &wait);
+        finish (*reply, {});
     }
 
-    if (! answered || ! running || wait.reply.isEmpty())
-        return {};
+    return reply;
+}
 
-    return std::move (wait.reply);
+void Helper::finish (Reply& reply, const juce::MemoryBlock& message)
+{
+    if (reply.isDone())
+        return;
+
+    reply.reply = message; // read again whole with MessageReader
+    reply.done.store (true, std::memory_order_release);
+    reply.answered.signal();
+}
+
+bool Helper::isWaiting()
+{
+    return std::any_of (waiting.begin(), waiting.end(),
+                        [] (const auto& wanted)
+                        {
+                            const auto reply = wanted.lock();
+                            return reply != nullptr && ! reply->isDone();
+                        });
 }
 
 bool Helper::post (MessageWriter& message)
@@ -372,17 +402,22 @@ void Helper::received (const juce::MemoryBlock& message)
 
         const juce::ScopedLock held (lock);
 
-        for (auto* wait : waiting)
+        for (const auto& wanted : waiting)
         {
-            if (wait->request == reader.getRequest())
+            if (const auto reply = wanted.lock(); reply != nullptr && reply->request == reader.getRequest())
             {
-                wait->reply = message; // read again whole with MessageReader
-                wait->answered.signal();
-                return;
+                finish (*reply, message);
+                break;
             }
         }
 
-        return; // one given up on
+        std::erase_if (waiting,
+                       [] (const auto& wanted)
+                       {
+                           const auto reply = wanted.lock();
+                           return reply == nullptr || reply->isDone();
+                       });
+        return; // or one given up on
     }
 
     if (onNotice != nullptr)
@@ -402,7 +437,10 @@ void Helper::stopWaiting()
 {
     const juce::ScopedLock held (lock);
 
-    for (auto* wait : waiting)
-        wait->answered.signal();
+    for (const auto& wanted : waiting)
+        if (const auto reply = wanted.lock())
+            finish (*reply, {});
+
+    waiting.clear();
 }
 } // namespace phazite::sandbox

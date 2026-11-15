@@ -977,6 +977,10 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
     {
         juce::StringArray notices;
         auto session = openAfterCrash (AfterCrash::open, notices);
+
+        // It loads in the background, as the project opened (model/plugins/internal/PluginInstances.h).
+        CHECK (phazite::test::dispatchMessagesUntil ([&] { return getStatus (*session) != phazite::PluginInstances::Status::loading; },
+                                                     60000));
         CHECK (getStatus (*session) == phazite::PluginInstances::Status::playing);
         CHECK (phazite::findPluginInstance (session->getProject()->getSong(), plugin) != nullptr);
         CHECK (notices.isEmpty());

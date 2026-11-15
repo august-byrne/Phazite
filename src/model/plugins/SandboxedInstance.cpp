@@ -11,7 +11,8 @@ namespace phazite
 {
 namespace
 {
-    constexpr int stateMilliseconds = 10000; // how long a plug-in's state may take to come or go
+    constexpr int defaultStateMilliseconds = 10000; // how long a plug-in's state may take to come or go
+    std::atomic<int> stateMilliseconds { defaultStateMilliseconds };
     constexpr int prepareMilliseconds = 10000;
     constexpr int textMilliseconds = 250;                // how a value reads, for a tooltip or a field
     constexpr int smallestChannel = 4096;                // the longest block a channel takes at least
@@ -62,6 +63,8 @@ public:
 
         if (juce::MessageManager::existsAndIsCurrentThread())
         {
+            ++owner.stateChanges;
+
             if (! movedByEngine)
                 owner.remote->setParameter (index, newValue);
         }
@@ -150,6 +153,14 @@ SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> i
 
     setLatencySamples (latency);
     remote->setListener (this);
+
+    // Its channel is for the rate it opened at, which the engine's first preparing needn't ask of the helper again (a
+    // request the message thread would wait for, behind whatever else the helper does, such as opening another plug-in).
+    channelRate = remote->getSampleRate();
+
+    // Opened from a state the song holds: that is its state until it changes.
+    if (! openedFrom.isEmpty())
+        stateTakenAt = stateChanges;
 }
 
 SandboxedInstance::~SandboxedInstance()
@@ -219,6 +230,10 @@ void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> 
     remote->setListener (this);
     crashed.store (false, std::memory_order_release);
     let();
+
+    // Opened again from the state it last had, which it has now; an answer the helper that went owed never comes.
+    stateAsked = nullptr;
+    stateTakenAt = stateChanges;
 
     // Its values as the plug-in has them now, as if it had set them itself; and its latency.
     const auto& reopened = remote->getInfo().parameters;
@@ -563,7 +578,10 @@ int SandboxedInstance::getCurrentProgram()
 void SandboxedInstance::setCurrentProgram (int index)
 {
     if (! hasCrashed() && juce::isPositiveAndBelow (index, (int) remote->getInfo().programs.size()))
+    {
+        ++stateChanges;
         remote->setProgram (index, stateMilliseconds);
+    }
 }
 
 const juce::String SandboxedInstance::getProgramName (int index)
@@ -586,7 +604,12 @@ bool SandboxedInstance::takeState (juce::MemoryBlock& state)
         if (auto taken = remote->getState (stateMilliseconds))
         {
             lastState = std::move (*taken);
+            stateTakenAt = stateChanges;
             isNow = true;
+        }
+        else
+        {
+            stateMissedAt = stateChanges;
         }
     }
 
@@ -597,9 +620,81 @@ bool SandboxedInstance::takeState (juce::MemoryBlock& state)
 void SandboxedInstance::setStateInformation (const void* data, int size)
 {
     lastState.replaceAll (data, (size_t) std::max (0, size));
+    stateTakenAt = stateChanges; // the state it has now
 
     if (! hasCrashed())
         remote->setState (lastState, stateMilliseconds);
+}
+
+void SandboxedInstance::keepStateAsOpened() noexcept
+{
+    if (stateTakenAt >= 0)
+        stateTakenAt = stateChanges;
+}
+
+bool SandboxedInstance::mayHaveChangedState() const noexcept
+{
+    return stateTakenAt != stateChanges && stateMissedAt != stateChanges;
+}
+
+bool SandboxedInstance::isStateOlder() const noexcept
+{
+    return stateTakenAt != stateChanges;
+}
+
+void SandboxedInstance::askState (bool always)
+{
+    if (stateAsked != nullptr || hasCrashed() || ! (always || mayHaveChangedState()))
+        return;
+
+    stateAsked = remote->askState();
+    stateAskedAt = stateChanges;
+    stateAskedSince = juce::Time::getMillisecondCounterHiRes();
+}
+
+bool SandboxedInstance::takeAskedState (double waitUntil)
+{
+    if (stateAsked == nullptr)
+        return true;
+
+    if (const auto now = juce::Time::getMillisecondCounterHiRes(); ! stateAsked->isDone() && waitUntil > now)
+        stateAsked->wait ((int) std::ceil (waitUntil - now));
+
+    if (stateAsked->isDone())
+    {
+        // As it was when it was asked: changed since, it is asked again at the next save.
+        if (auto taken = sandbox::RemoteInstance::readState (*stateAsked))
+        {
+            lastState = std::move (*taken);
+            stateTakenAt = stateAskedAt;
+        }
+        else
+        {
+            stateMissedAt = stateAskedAt;
+        }
+
+        stateAsked = nullptr;
+        return true;
+    }
+
+    if (juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())
+    {
+        stateMissedAt = stateAskedAt; // given up on: the helper is taken for hung if it still doesn't answer
+        stateAsked = nullptr;
+        return true;
+    }
+
+    return false;
+}
+
+void SandboxedInstance::setStateMilliseconds (int milliseconds) noexcept
+{
+    stateMilliseconds = milliseconds > 0 ? milliseconds : defaultStateMilliseconds;
+}
+
+int SandboxedInstance::getStateMilliseconds() noexcept
+{
+    return stateMilliseconds.load();
 }
 
 //==============================================================================
@@ -718,6 +813,7 @@ void SandboxedInstance::handleAsyncUpdate()
         if (juce::isPositiveAndBelow (index, (int) parameters.size())
             && ! juce::exactlyEqual (parameters[(size_t) index]->getValue(), value))
         {
+            ++stateChanges;
             parameters[(size_t) index]->setFromPlugin (value);
 
             if (onParameterChanged != nullptr)
@@ -735,6 +831,9 @@ void SandboxedInstance::handleAsyncUpdate()
         if (onLatencyChanged != nullptr)
             onLatencyChanged();
     }
+
+    if (newState)
+        ++stateChanges;
 
     if (newState && onStateChanged != nullptr)
         onStateChanged();

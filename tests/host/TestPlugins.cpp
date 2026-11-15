@@ -519,6 +519,61 @@ namespace
         std::atomic<bool> playing { false }, playedOffline { false };
     };
 
+    // An effect in mono, in and out, as some plug-ins take no other layout: its sound at half.
+    class TestMono final : public StandIn
+    {
+    public:
+        TestMono()
+            : StandIn (Kind::mono, BusesProperties()
+                                       .withInput ("Input", juce::AudioChannelSet::mono(), true)
+                                       .withOutput ("Output", juce::AudioChannelSet::mono(), true))
+        {
+        }
+
+        bool isBusesLayoutSupported (const BusesLayout& layout) const override
+        {
+            return layout.getMainInputChannelSet() == juce::AudioChannelSet::mono()
+                   && layout.getMainOutputChannelSet() == juce::AudioChannelSet::mono();
+        }
+
+        using StandIn::processBlock;
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (0.5f); }
+    };
+
+    // While the slow gate is shut (TestPlugins::getSlowGate()), as a plug-in that takes long to load, to give its state or to
+    // close does.
+    void waitAtSlowGate (bool closing = false)
+    {
+        while (TestPlugins::getSlowGate (closing).existsAsFile())
+            juce::Thread::sleep (2);
+    }
+
+    class TestSlow final : public StandIn
+    {
+    public:
+        explicit TestSlow (Kind which)
+            : StandIn (which, stereoEffect())
+        {
+            level = add ("60", "Level", 1.0f);
+            TestPlugins::getSlowWaiting (which).create();
+            waitAtSlowGate();
+        }
+
+        ~TestSlow() override { waitAtSlowGate (true); }
+
+        using StandIn::processBlock;
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (level->getValue()); }
+
+        void getStateInformation (juce::MemoryBlock& data) override
+        {
+            waitAtSlowGate();
+            StandIn::getStateInformation (data);
+        }
+
+    private:
+        StandInParameter* level = nullptr;
+    };
+
     // Each kind's name, its "file" in the format, and its number.
     struct Described
     {
@@ -550,6 +605,12 @@ namespace
                 return { "Test Playhead", "PhaziteTestPlayhead", 0x7e57b1, false };
             case Kind::synthWithInput:
                 return { "Test Synth With Input", "PhaziteTestSynthWithInput", 0x7e5753, true };
+            case Kind::mono:
+                return { "Test Mono", "PhaziteTestMono", 0x7e5701, false };
+            case Kind::slow:
+                return { "Test Slow", "PhaziteTestSlow", 0x7e5761, false };
+            case Kind::slowToo:
+                return { "Test Slow Too", "PhaziteTestSlowToo", 0x7e5762, false };
         }
 
         return { "Test Effect", "PhaziteTestEffect", 0x7e57e5, false };
@@ -651,9 +712,25 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
             return nullptr;
         case Kind::playhead:
             return std::make_unique<TestPlayhead>();
+        case Kind::mono:
+            return std::make_unique<TestMono>();
+        case Kind::slow:
+        case Kind::slowToo:
+            return std::make_unique<TestSlow> (kind);
     }
 
     return nullptr;
+}
+
+juce::File TestPlugins::getSlowGate (bool closing)
+{
+    return juce::File::getSpecialLocation (juce::File::tempDirectory)
+        .getChildFile (closing ? "PhaziteTestSlowClosingGate" : "PhaziteTestSlowGate");
+}
+
+juce::File TestPlugins::getSlowWaiting (Kind kind)
+{
+    return getSlowGate().getSiblingFile (juce::String ("PhaziteTestSlowWaiting-") + describe (kind).file);
 }
 
 TestPlugins::Playhead TestPlugins::Playhead::read (const juce::MemoryBlock& state)

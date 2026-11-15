@@ -80,18 +80,23 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   times the live hang limit: `renderHangFactor` in `src/model/plugins/internal/SandboxedProcessor.h`). Before 2026-11-13
   a render waited without end, which hung Phazite on a real hang. Not seen with a real plug-in. Fix, if one needs it: a
   setting, or a question to the user once the limit is reached.
-- **68. A plug-in's editor has the wrong size whenever Interface Size isn't 100 %:** cropped below it, with black
-  margins above it, and a resizable editor is made larger at each opening. Why: `SandboxedEditor`
-  (`src/app/SandboxedEditor.cpp`) takes the plug-in's size in pixels for its own size in the scaled window, and the
-  helper sizes its window by the area that covers (`src/host/core/Editor.cpp`). Traced in the code, not run. Fix: size
-  it by the plug-in's size divided by the scale, place it again when the scale changes, and test editors at 75 and
-  150 %. Confirmed by a second reading (ui-core-mixer-app 0).
-- **69. Opening, closing and saving a project keep the message thread waiting for each plug-in in turn.** Each
-  plug-in opens with a request that may take a minute, with nothing shown and no way to cancel, though each has a
-  process of its own; closing costs up to 100 ms an instance; a save asks every plug-in for its state, one after
-  another (`src/model/plugins/PluginInstances.cpp`, `src/model/plugins/PluginHost.cpp`). Fix: open instances in the
-  background, several helpers at once, with a notice of the progress; wake the helper's thread as an instance stops; ask
-  only the plug-ins that reported a change for their state. Not yet checked (plugin-hosting 10).
+- **165. Closing a plug-in's window keeps the message thread waiting about 2 seconds,** so closing a project with
+  several plug-in windows open waits that long for each in turn. Why: `SandboxedEditor`'s destructor
+  (`src/app/SandboxedEditor.cpp`) asks the helper to close its editor and waits for the answer (`closeMilliseconds`),
+  while the helper's window, a child of Phazite's, can't be destroyed until Phazite's thread takes the messages Windows
+  sends it then, which it doesn't while it waits: the wait always runs out (measured 2.0 to 2.8 s with the tests'
+  stand-in, 2026-11-14, `tests/SandboxedPluginTests.cpp`). Fix: take the helper's window out of Phazite's (or give it
+  `WS_EX_NOPARENTNOTIFY`) and close it without waiting, then check that a hung helper can't hang Phazite's window as it
+  goes.
+- **166. What is left of the message thread waiting for plug-ins** after S1.4 (opening, saving, Auto Save and closing a
+  project wait for none): a store that isn't a save (Local History's snapshot, a commit, copying a track, a preset
+  saved) still asks the plug-ins whose states may have changed and waits for them together, up to 10 seconds; a
+  plug-in prepared for another sample rate or a longer block waits for its helper (`SandboxedInstance::prepareNow()`,
+  up to 10 seconds, behind whatever else the helper does, such as opening another plug-in); and a plug-in added, or
+  brought back by an undo once the project's plug-ins have loaded, opens while the message thread waits, as before
+  (`src/model/plugins/PluginInstances.cpp`). Fix: the same asks without waiting (`SandboxedInstance::askState()`,
+  `PluginInstances::whenStatesIn()`), and prepare and open in the background, the engine skipping the plug-in
+  meanwhile.
 
 ## Devices and playback
 
@@ -195,12 +200,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Saving
 
-- **89. Auto Save asks every plug-in for its whole state on the message thread, a second after each change, and saves
-  an old state where a plug-in doesn't answer.** Each request waits up to 10 seconds, for plug-ins that changed and
-  those that didn't; one that times out gives the state before, and the save says it worked. Why:
-  `saveInBackground()` stores the devices' states first, on the message thread (`src/model/project/Project.cpp`,
-  `src/model/plugins/PluginInstances.cpp`). Fix: ask only the plug-ins that reported a change, without waiting on the
-  message thread, and count a time-out as a save that failed. Confirmed by a second reading (model-project-services 3).
 - **160. A new project whose first save fails leaves its folder behind, and the same name is refused when tried again.**
   `Project::create()` (`src/model/project/Project.cpp`) makes the project's folder and its subfolders, then saves; if
   that save fails (a full disk, a folder another program holds) it returns nothing with the error, but the folder stays,

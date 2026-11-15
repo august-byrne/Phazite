@@ -2,8 +2,9 @@
 // A plug-in's editor in its helper process as Phazite's window shows it: a component for the plug-in's instance
 // (model/plugins/internal/SandboxedInstance.h), which a plug-in's window shows (PluginWindow.h). The helper's window for
 // the plug-in's editor is a child of the window this is in, which the helper places over it, again as it moves or is
-// resized; the two are as large as the plug-in makes its editor, and the plug-in's as large as this, where the plug-in can
-// be resized. Phazite never calls into the helper's window, so that a helper that hangs can't hang Phazite's window with
+// resized; the two are as large on the screen as the plug-in makes its editor, whatever the Interface Size (this one's size
+// is the plug-in's divided by it, fitted again as it changes), and the plug-in's as large as this, where the plug-in can be
+// resized. Phazite never calls into the helper's window, so that a helper that hangs can't hang Phazite's window with
 // it: everything goes through the control channel. The keys Phazite takes over a plug-in (ui/input/PluginKeys.h) the
 // helper hands back, which run here, unless the window's plug-in gets every key; the helper is told which they are, and
 // again as they change (the computer keyboard switched, Send All Keys to the Plug-in). A plug-in whose helper has gone
@@ -36,12 +37,16 @@ private:
 
     std::shared_ptr<SandboxedInstance> instance;
     const bool resizable;
+    juce::Point<int> pluginSize;   // the plug-in's editor's, as the helper told it, in the screen's units
+    float fittedScale = 1.0f;      // getScale() as it was last fitted to it
     std::int64_t placedWindow = 0; // where the helper was told to show it
     juce::Rectangle<int> placedArea;
     bool toldKeys = false, toldEveryKey = false;
     std::vector<juce::KeyPress> toldWanted;
 
     void paint (juce::Graphics&) override;
+    float getScale() const; // of its units in the screen's: the Interface Size, as its window has it
+    void fitPlugin();       // its size, the plug-in's in its own units
     void place();
     void componentMovedOrResized (bool, bool) override { place(); }
     void componentPeerChanged() override { place(); }

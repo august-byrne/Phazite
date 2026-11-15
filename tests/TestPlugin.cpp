@@ -19,9 +19,11 @@ namespace
         return getPluginHost (getEngineContext()).getKnownPlugins();
     }
 
-    // The plug-in's instance in its helper, through the song's session.
+    // The plug-in's instance in its helper, through the song's session, once it has loaded (a project's plug-ins load in the
+    // background as it opens: model/plugins/internal/PluginInstances.h).
     SandboxedInstance& getInstance (const Song& song, DeviceID id)
     {
+        dispatchMessagesUntil ([&] { return getPluginStatus (song, id) != PluginInstances::Status::loading; }, 60000);
         auto* instance = findPluginInstance (song, id);
         REQUIRE (instance != nullptr);
         return *instance;

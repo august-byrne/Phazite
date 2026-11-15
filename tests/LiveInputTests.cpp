@@ -238,8 +238,8 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     };
 
     // Played until it sounds: the engine is given the song in the message loop's own time, which a busy machine or a
-    // sanitizer's build makes slow (a note played before it had it went unheard, and the notes after were compared with
-    // that: known bug 154).
+    // sanitizer's build makes slow: a note played before it had it went unheard, and the notes after
+    // were compared with that.
     const auto atOnce = playUntil (playNote, [] (int samples) { return samples >= 0; });
     const auto atOnceSlack = device.getUncertainty();
     CHECK (atOnce >= 0);

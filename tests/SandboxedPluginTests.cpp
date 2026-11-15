@@ -972,7 +972,7 @@ TEST_CASE ("The notes of a block a plug-in couldn't be handed go with the next: 
     SandboxedPlugins sandboxed;
     juce::String error;
     const std::shared_ptr<phazite::SandboxedInstance> instance =
-        SandboxedPlugins::getHost().createInstance (TestPlugins::getDescription (TestPlugins::Kind::synth), {}, 48000.0, 256, error);
+        SandboxedPlugins::getHost().createInstance (TestPlugins::getDescription (TestPlugins::Kind::synth), {}, -1, 48000.0, 256, error);
     REQUIRE_MESSAGE (instance != nullptr, error);
     phazite::SandboxedProcessor processor (instance);
     processor.prepare (48000.0, 256);
@@ -1060,7 +1060,8 @@ struct Played
     explicit Played (phazite::test::TestPlugins::Kind kind)
     {
         juce::String error;
-        instance = SandboxedPlugins::getHost().createInstance (phazite::test::TestPlugins::getDescription (kind), {}, 48000.0, 256, error);
+        instance =
+            SandboxedPlugins::getHost().createInstance (phazite::test::TestPlugins::getDescription (kind), {}, -1, 48000.0, 256, error);
         REQUIRE_MESSAGE (instance != nullptr, error);
         processor = std::make_unique<phazite::SandboxedProcessor> (instance);
         processor->prepare (48000.0, 256);
@@ -1425,3 +1426,311 @@ TEST_CASE ("A crashed plug-in that is switched off fails no render: it isn't hea
     REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, 60000));
     CHECK (phazite::isFrozen (song.context, track));
 }
+
+namespace
+{
+using Kind = phazite::test::TestPlugins::Kind;
+using Status = phazite::PluginInstances::Status;
+
+// A slow stand-ins' gate (host/TestPlugins.h), for being made and giving a state or for closing: shut while this lives,
+// unless opened, and open again as it goes; the files they leave as they begin to wait cleared first.
+struct SlowGate
+{
+    explicit SlowGate (bool forClosing = false)
+        : closing (forClosing)
+    {
+        for (const auto kind : { Kind::slow, Kind::slowToo })
+            phazite::test::TestPlugins::getSlowWaiting (kind).deleteFile();
+
+        shut();
+    }
+
+    ~SlowGate() { open(); }
+
+    void shut() const { REQUIRE (phazite::test::TestPlugins::getSlowGate (closing).create()); }
+    void open() const { phazite::test::TestPlugins::getSlowGate (closing).deleteFile(); }
+
+    const bool closing;
+};
+
+// So many turns of the message loop (each a dispatch of what waits, as the window's paints and timers come), while what a
+// test waits for may come meanwhile: whether all of them came.
+bool turnMessageLoop (int turns)
+{
+    auto turned = 0;
+    return phazite::test::dispatchMessagesUntil ([&turned, turns] { return ++turned >= turns; }, 60000);
+}
+} // namespace
+
+TEST_CASE (
+    "A project with slow plug-ins opens at once: they load beside each other while the song is used, and each comes in as it is ready")
+{
+    // Known bug 69: opening a project kept the message thread waiting for each plug-in in turn, with nothing shown.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto slow = song.addEffect (track, "PhaziteTestSlow");
+    const auto slowToo = song.addEffect (track, "PhaziteTestSlowToo");
+    song.setParameter (slow, "60", 0.5f); // its Level
+    REQUIRE (song.getProject().save().wasOk());
+
+    // Shut: neither can be made until it opens. The project opens, and nothing waited for them: they load.
+    SlowGate gate;
+    song.reopen (false);
+    auto& opened = getSong (song);
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+    CHECK (phazite::getPluginStatus (opened, slowToo) == Status::loading);
+    CHECK (phazite::getPluginsLoading (opened) == juce::StringArray ("Test Slow", "Test Slow Too"));
+
+    // Each began in its own helper, beside the other.
+    CHECK (phazite::test::dispatchMessagesUntil (
+        []
+        {
+            return phazite::test::TestPlugins::getSlowWaiting (Kind::slow).existsAsFile()
+                   && phazite::test::TestPlugins::getSlowWaiting (Kind::slowToo).existsAsFile();
+        },
+        20000));
+
+    // The message loop turns on while they load, and the song is used: a change undone and made again; one of them taken
+    // away and back by undo, which loads it again in the background.
+    CHECK (turnMessageLoop (100));
+    song.setVolume (track, -6.0f);
+    phazite::undo (opened);
+    phazite::redo (opened);
+    phazite::removeDevice (song.context, slow);
+    CHECK (turnMessageLoop (10));
+    phazite::undo (opened);
+    CHECK (turnMessageLoop (10));
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+    CHECK (phazite::getPluginsLoading (opened).size() == 2);
+
+    // A render started meanwhile says why it can't, rather than render without them.
+    phazite::test::RenderHost host;
+    song.context.getSongSelection().selectOnly (track);
+    phazite::toggleFreeze (song.context, host);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, 60000));
+    CHECK (host.finished[0].contains ("still loading"));
+    CHECK_FALSE (phazite::isFrozen (song.context, track));
+
+    // Opened: each comes in, with what the song set it to, and plays (6 dB down, its track's volume as the redo left it).
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, 60000));
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::playing);
+    CHECK (phazite::getPluginStatus (opened, slowToo) == Status::playing);
+    auto& instance = getSandboxed (song, slow);
+    CHECK (instance.getParameterValue (instance.findParameter ("60")) == doctest::Approx (0.5f));
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    const auto audio = playback.play (0.6);
+    CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel - 6.02f - 6.0f).epsilon (0.002));
+}
+
+TEST_CASE ("A save asks slow plug-ins for their states at once while the message loop turns; Auto Save asks those that changed")
+{
+    // Known bugs 69 and 89: a save asked every plug-in for its state in turn, on the message thread, and Auto Save did so a
+    // second after each change, whether a plug-in had changed or not.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto track = song.firstTrack;
+    const auto slow = song.addEffect (track, "PhaziteTestSlow");
+    const auto slowToo = song.addEffect (track, "PhaziteTestSlowToo");
+    REQUIRE (song.getProject().save().wasOk());
+    auto& opened = getSong (song);
+
+    // Both set by hand: their states may have changed. Shut, the save waits for their answers, the message thread not.
+    song.setParameter (slow, "60", 0.5f);
+    song.setParameter (slowToo, "60", 0.25f);
+    SlowGate gate;
+    auto saved = false;
+    phazite::whenPluginStatesIn (opened, true, [&song, &saved] { saved = song.getProject().save().wasOk(); });
+    CHECK_FALSE (saved);
+    CHECK (turnMessageLoop (100));
+    CHECK_FALSE (saved);
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, 20000));
+    CHECK (phazite::getPluginsWithOlderStates (opened).isEmpty());
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+
+    // Auto Save asks only those that may have changed: shut, a change elsewhere saves without them.
+    gate.shut();
+    phazite::AutosaveTimer timer (song.getProject());
+    timer.setAutoSave (true);
+    song.setVolume (track, -6.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+
+    // One that changed is asked, and waited for while the message loop turns: the save comes with its answer.
+    song.setParameter (slow, "60", 0.75f);
+    CHECK (turnMessageLoop (400)); // past Auto Save's second of quiet
+    CHECK (song.getProject().hasUnsavedChanges());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+
+    // One that never answers is given up on once its time has passed: the project is saved, with the state it gave before,
+    // and the save says which; one that didn't change and didn't answer either keeps a state that is its own.
+    struct StateLimit
+    {
+        StateLimit() { phazite::SandboxedInstance::setStateMilliseconds (300); }
+        ~StateLimit() { phazite::SandboxedInstance::setStateMilliseconds (0); }
+    } limit;
+
+    juce::StringArray told;
+    timer.onOlderPluginStates = [&told] (const juce::StringArray& plugins) { told = plugins; };
+    gate.shut();
+    song.setParameter (slow, "60", 0.1f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+    CHECK (told == juce::StringArray ("Test Slow"));
+    CHECK (phazite::getPluginsWithOlderStates (opened) == juce::StringArray ("Test Slow"));
+
+    saved = false;
+    phazite::whenPluginStatesIn (opened, true, [&song, &saved] { saved = song.getProject().save().wasOk(); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, 20000));
+    CHECK (phazite::getPluginsWithOlderStates (opened) == juce::StringArray ("Test Slow"));
+}
+
+TEST_CASE ("Closing a project lets go of its slow plug-ins' helpers at once: they end on their own, beside each other")
+{
+    // Known bug 69: closing waited for each plug-in to close in its helper, and for each helper to quit, in turn.
+    SandboxedPlugins sandboxed;
+    SandboxedPlugins::getHost().waitForHelpersEnded();
+    auto song = std::make_unique<TestSong>();
+    song->addEffect (song->firstTrack, "PhaziteTestSlow");
+    song->addEffect (song->firstTrack, "PhaziteTestSlowToo");
+    REQUIRE (SandboxedPlugins::getHost().getNumHelpers() == 2);
+
+    // Shut, neither can close: the project closes, and their helpers end meanwhile, nothing waiting for them (each is asked
+    // to quit, and ended a second after if it hasn't).
+    SlowGate gate (true);
+    song = nullptr;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 0; }, 10000));
+    CHECK (SandboxedPlugins::getHost().getNumHelpersEnding() == 2);
+
+    gate.open();
+    SandboxedPlugins::getHost().waitForHelpersEnded();
+    CHECK (SandboxedPlugins::getHost().getNumHelpersEnding() == 0);
+}
+
+TEST_CASE ("A plug-in in mono alone, between Phazite's two sides, hears both and plays to both")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto mono = song.addEffect (track, "PhaziteTestMono");
+    CHECK (getSandboxed (song, mono).getRemote().getInfo().numInputChannels == 1);
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    const auto audio = playback.play (0.6);
+    CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
+    CHECK (levelOf (audio, 1, 0.1, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in whose program would override its settings opens again on its program, then its settings")
+{
+    // The stand-in's programs set its Gain (Half: 0.5); its Gain turned in its own window after that is its setting.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    auto* instance = &getSandboxed (song, effect);
+    instance->setCurrentProgram (1);
+    const auto gain = instance->findParameter (effectGain);
+
+    juce::MemoryOutputStream told;
+    told.writeFloat (0.8f); // its gain
+    told.writeFloat (0.5f); // its tone
+    told.writeFloat (1.0f); // as its own window would set them, telling the host
+    REQUIRE (instance->getRemote().setState (told.getMemoryBlock(), 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance->getParameterValue (gain), 0.8f); }, 20000));
+
+    song.reopen();
+    instance = &getSandboxed (song, effect);
+    CHECK (instance->getCurrentProgram() == 1);
+    const auto state = instance->getRemote().getState (10000);
+    REQUIRE (state.has_value());
+    CHECK (juce::MemoryInputStream (*state, false).readFloat() == doctest::Approx (0.8f));
+}
+
+TEST_CASE ("A block whose length the helper's side of the memory says otherwise of is as one it didn't play")
+{
+    // What a helper that went wrong (or crashed halfway) leaves in its side of the memory is never taken for how much to read.
+    SandboxedPlugins sandboxed;
+    Played played (Kind::synth);
+    juce::AudioBuffer<float> buffer (2, 256);
+    buffer.clear();
+    const std::vector<phazite::devices::NoteEvent> note { { phazite::devices::NoteEvent::Type::noteOn, 0, 69, 0.8f } };
+    phazite::devices::ProcessContext context;
+    context.channels = buffer.getArrayOfWritePointers();
+    context.numChannels = 2;
+    context.numSamples = 256;
+    context.events = note;
+    context.isRendering = true;
+
+    played.processor->start (context);
+    played.instance->getRemote().getChannel().getInfo().numSamples = 1 << 24;
+    played.processor->process (context);
+    CHECK (buffer.getMagnitude (0, 0, 256) == 0.0f); // silent, as for a block it didn't play
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("A plug-in's editor fits its plug-in at any Interface Size: as large on the screen as the plug-in makes it")
+{
+    // Known bug 68: the plug-in's size was taken for Phazite's own, cropped below 100 % and with margins above it.
+    SandboxedPlugins sandboxed;
+
+    struct InterfaceSize
+    {
+        ~InterfaceSize() { juce::Desktop::getInstance().setGlobalScaleFactor (1.0f); }
+    } restored;
+
+    for (const auto scale : { 0.75f, 2.0f })
+    {
+        CAPTURE (scale);
+        juce::Desktop::getInstance().setGlobalScaleFactor (scale);
+        TestSong song;
+        const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+        auto* session = phazite::getSession (song.context);
+        REQUIRE (session != nullptr);
+
+        // In Phazite's units, the plug-in's 300 by 200 at this Interface Size.
+        auto editor = phazite::createSandboxedEditor (session->getPlugins().find (effect));
+        REQUIRE (editor != nullptr);
+        CHECK (editor->getWidth() == juce::roundToInt (300.0f / scale));
+        CHECK (editor->getHeight() == juce::roundToInt (200.0f / scale));
+
+        // A size the helper tells is taken within a side's limits (before the editor shows, which would show it so).
+        auto* instance = session->getPlugins().find (effect).get();
+        instance->onEditorResized (-5, 1 << 30);
+        CHECK (editor->getWidth() == 1);
+        CHECK (editor->getHeight() == juce::roundToInt (16384.0f / scale));
+        instance->onEditorResized (300, 200);
+
+        juce::Component window;
+        window.setSize (editor->getWidth() + 40, editor->getHeight() + 40);
+        window.addAndMakeVisible (*editor);
+        editor->setTopLeftPosition (20, 20);
+        window.addToDesktop (0);
+        window.setVisible (true);
+
+        // The helper's window for it is as large on the screen as Phazite's area for it, which is the plug-in's editor.
+        const auto parent = static_cast<HWND> (window.getPeer()->getNativeHandle());
+        const auto platform = window.getPeer()->getPlatformScaleFactor();
+        const auto area = (window.getPeer()->getAreaCoveredBy (*editor).toDouble() * platform).toNearestInt();
+        CHECK (std::abs (area.getWidth() - juce::roundToInt (300.0 * platform)) <= 1);
+        CHECK (std::abs (area.getHeight() - juce::roundToInt (200.0 * platform)) <= 1);
+        RECT client {};
+        CHECK (phazite::test::dispatchMessagesUntil (
+            [&]
+            {
+                const auto child = FindWindowExW (parent, nullptr, nullptr, nullptr);
+                return child != nullptr && GetClientRect (child, &client) && std::abs (client.right - area.getWidth()) <= 1
+                       && std::abs (client.bottom - area.getHeight()) <= 1;
+            },
+            20000));
+
+        editor = nullptr;
+    }
+}
+#endif

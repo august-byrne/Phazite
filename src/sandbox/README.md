@@ -23,5 +23,5 @@ Phazite's side.
 
 | File | What it holds |
 |---|---|
-| `Helper.h` | A helper process, started with the name of a pipe of Phazite's, its requests answered within a time limit, watched by a thread of its own; on Windows in a job that ends it as Phazite ends. |
+| `Helper.h` | A helper process, started with the name of a pipe of Phazite's, its requests answered within a time limit (or sent without waiting, their answers taken as they come), watched by a thread of its own; on Windows in a job that ends it as Phazite ends. |
 | `RemoteInstance.h` | A plug-in instance in a helper. |

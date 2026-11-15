@@ -51,11 +51,16 @@ public:
     // plays.
     BlockChannel& getChannel() noexcept { return *channel; }
     bool prepare (double sampleRate, const BlockChannel::Limits&, int timeoutMilliseconds);
+    double getSampleRate() const noexcept { return channelRate; } // its channel's: as it opened, or was last prepared
 
     // Its state, as the plug-in keeps its settings (a VST3's as its format's preset file, which other hosts read:
     // sandbox/core/Vst3State.h), within the time; none if it didn't come.
     std::optional<juce::MemoryBlock> getState (int timeoutMilliseconds);
     bool setState (const juce::MemoryBlock&, int timeoutMilliseconds);
+
+    // Its state asked for without waiting (Helper::send()), and read from the answer once it is done: none if none came.
+    std::shared_ptr<Helper::Reply> askState();
+    static std::optional<juce::MemoryBlock> readState (const Helper::Reply&);
 
     // Its program (one of getInfo().programs): as it opened, then as it was set or the helper last told (any thread).
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
@@ -103,6 +108,7 @@ private:
     Helper& helper;
     const std::int64_t id;
     std::unique_ptr<BlockChannel> channel;
+    double channelRate = 0.0;
     PluginInfo info;
     std::atomic<int> latency { 0 }, program { 0 };
     std::atomic<Listener*> listener { nullptr };

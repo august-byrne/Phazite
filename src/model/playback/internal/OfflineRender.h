@@ -85,6 +85,7 @@ private:
     const Finished finished;
     std::vector<Compiled> jobs;
     std::atomic<float> progress { 0.0f };
+    juce::String whyNot; // a plug-in of the session's still loading as it began, which fails it at its start
 
     void run() override;
     juce::Result play (Compiled&, int index);

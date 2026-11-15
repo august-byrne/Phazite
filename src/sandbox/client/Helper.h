@@ -49,6 +49,28 @@ public:
     std::int64_t makeNumber() noexcept { return nextRequest++; }
     std::optional<juce::MemoryBlock> request (MessageWriter&, int timeoutMilliseconds);
 
+    // A request's answer, which comes on the pipe's thread: done once it has come, or once none will (the helper went, or
+    // the request couldn't be sent), with its reply then (empty for none). Its asker keeps it while it waits for it: one let
+    // go of is given up on, and an answer that comes after goes nowhere.
+    class Reply
+    {
+    public:
+        bool isDone() const noexcept { return done.load (std::memory_order_acquire); }
+        bool wait (int timeoutMilliseconds) { return answered.wait ((double) timeoutMilliseconds) && isDone(); }
+        const juce::MemoryBlock& getReply() const noexcept { return reply; } // once done
+
+    private:
+        friend class Helper;
+        std::int64_t request = 0;
+        juce::WaitableEvent answered { true }; // stays signalled once it is
+        juce::MemoryBlock reply;
+        std::atomic<bool> done { false };
+    };
+
+    // A request sent without waiting for its answer, from any thread but the pipe's: while its reply is kept and not done,
+    // the helper isn't taken for hung for not answering the heartbeat, as for request().
+    std::shared_ptr<Reply> send (MessageWriter&);
+
     // A message that wants no answer.
     bool post (MessageWriter&);
 
@@ -76,13 +98,6 @@ private:
     class Pipe;
     class Watch;
 
-    struct Waiting
-    {
-        std::int64_t request = 0;
-        juce::WaitableEvent answered;
-        juce::MemoryBlock reply;
-    };
-
     const juce::File program;
     juce::ChildProcess process;
     std::atomic<std::int64_t> processID { 0 };
@@ -94,7 +109,10 @@ private:
     std::atomic<std::int64_t> heartbeat { 0 }; // the heartbeat's request not answered yet, or 0
     std::atomic<double> startDeadline { 0.0 }; // while it starts: when it must have answered (getMillisecondCounterHiRes())
     juce::CriticalSection lock, pipeLock;
-    std::vector<Waiting*> waiting;
+    std::vector<std::weak_ptr<Reply>> waiting; // the requests whose answers are still wanted (those let go of are pruned)
+
+    bool isWaiting();                               // for an answer still wanted (lock held)
+    void finish (Reply&, const juce::MemoryBlock&); // done, with the reply (lock held)
 
     // The process is looked at by the watching thread while others end it or wait for it, and JUCE's ChildProcess isn't safe
     // to share (finding it gone forgets it): every use of it holds this (linux-tsan found the race, 2026-11-11).

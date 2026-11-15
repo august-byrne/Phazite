@@ -31,8 +31,8 @@ replaced, with the full text of every finished step, is kept in the
 ## Where we are
 
 Phazite is pre-alpha. Its first plan (phases 0 to 4, the architecture track and source control) is built except for the
-steps named here. A whole-project audit then found about 300 problems; its 16 worst are fixed, and the eight stages
-below are the plan for the rest.
+steps named here. A whole-project audit then found about 300 problems; the bugs that lose work or sound are fixed, the tests that
+would have found them are built, and the eight stages below are the plan for the rest.
 
 | Phase or track | State |
 |---|---|
@@ -43,7 +43,7 @@ below are the plan for the rest.
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stage 1 in progress (the audit's 16 priorities are fixed). Stage 2 built on Windows, but for the allocation guard on Linux and S2.13; what it added to CI and the nightly workflow waits for a push and has never run. Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
+| The plan below | Stages 1 and 2 built on Windows (2026-11-14); what they added for Linux, Clang and the sanitizers runs for the first time with the push that ends stage 2 (S2.15). Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -52,41 +52,32 @@ stage 8: from it on, a project opens in every later version.
 
 ### Stage 1. Safe: the bugs that lose work or sound
 
-The numbered bugs in [known-bugs.md](known-bugs.md) belong here too. Every step is done when each bug it names has a
-test that failed before its fix, unless its row says more.
+Built on Windows (2026-11-14): every step, S1.1 to S1.17, each in the [changelog](changelog.md), each bug with a test
+that failed before its fix, and each part's changes read by a reviewer whose findings are fixed too. What the steps
+left is in [known-bugs.md](known-bugs.md), with why:
 
-| Step | Size | What | Done when |
-|---|---|---|---|
-| S1.1 | M | Playback: the click and the count-in compensated for latency; a clip moved under the playhead; a full transport queue; flush-to-zero on the worker threads; a device with one output channel plays both sides; plans freed after a timeout; notes and the transport ignored during a render | Each has its test |
-| S1.2 | S | Fades at Stop, at the loop's end and at a jump | A sine stopped, looped or jumped in mid-cycle renders without a step in its samples |
-| S1.3 | M | Plug-ins: a floor under the block deadline; plug-ins told that a render is offline; mono plug-ins; the program set before the state; a late or crashed effect faded to silence; sizes left by a crashed helper clamped | Each has its test with the tests' stand-in plug-ins |
-| S1.4 | L | Plug-ins open, close and save off the message thread, with progress | A project with a slow stand-in plug-in opens and saves while the window still answers |
-| S1.5 | S | Plug-in editors sized right at any Interface Size | An editor's window fits its plug-in at 75 % and at 200 % |
-| S1.6 | S | No helper process or shared memory left behind after a crash | A test ends Phazite's side by force and finds neither afterwards |
-| S1.7 | S | A damaged autosave no longer blocks the project file; a save that fails never traps the user | A project with an unreadable autosave opens from its file; with a save that fails, the user can still save elsewhere or close |
-| S1.8 | S | Selected automation points held by ID; a setting for the undo history's depth | A selection survives a point added before it; the setting is in `Settings` |
-| S1.9 | M | The first save copies the project's folders off the message thread | A first save of a project with a large Audio folder shows progress |
-| S1.10 | S | A clip render that fails stops and says so; a note dragged past its clip's end and back | The clip shows the failure in place of waiting; the note is where it began |
-| S1.11 | M | The audit's small bugs in the arrangement, the timeline and the shell | Each is fixed with a test, or moved to known-bugs.md with its reason |
-| S1.12 | M | References (sidechains, modulation, pad tracks, automation) follow the change that moves their target | A device moved or grouped keeps what points at it |
-| S1.13 | M | Escape abandons any drag; no command runs in the middle of one | Each timeline tool's drag, ended by Escape, leaves no undo step |
-| S1.14 | M | The wheel reads how far it turned; pinch zoom | A precision touchpad scrolls and zooms by its own distance |
-| S1.15 | S | The window remembers its place and size | Phazite reopens where it was closed, on a screen that still exists |
-| S1.16 | M | A project double-clicked while a dialog is open; the library's indexer and folder loops; presets without the user's name in a path; Clean Up counts backups; DAWproject import keeps one copy of each file and reports what it left out | Each has its test, the import with files written by other DAWs |
-| S1.17 | S | The folder beside the app rebuilt, not added to; line endings; CI builds `windows-profile`; time limits on CI's jobs; the version from the tag | CI builds all three Windows presets, and a stale file beside the app is gone after a build |
+- S1.4: closing a plug-in's window still waits two seconds, and a commit, a copied track or a preset saved still
+  waits for plug-ins whose settings changed (known bugs 165 and 166).
+- S1.11: the shortcuts editor takes away keys that commands share on purpose, which needs an editor of Phazite's
+  own (known bug 110).
+- S1.13: Escape doesn't take back a drag in the devices' graphs or on a knob's modulation ring (known bug 140),
+  which stage 6's step S6.9 takes up with one grammar for every graph.
+
+The numbered bugs still in [known-bugs.md](known-bugs.md) belong to the later steps that name their areas (the
+versions' to stage 4, recording's and the slow paths' to stage 5, the devices' and the editors' to stage 6), or wait
+for the owner's answer.
 
 ### Stage 2. Caught: the tests that would have found those bugs, and the docs
 
-Built on Windows (2026-11-14), each in the [changelog](changelog.md): S2.1 to S2.4, S2.6 to S2.12 and S2.14 whole,
-and S2.5 on Windows. What only a push runs has never run: the Linux builds with their sanitizers, what the steps added
-to CI (UBSan's reports, the helper's sanitizer reports, the real VST3s' targets, `windows-profile`, the app started by
-ctest) and the nightly workflow (`.github/workflows/nightly.yml`). The nets these steps built are listed in
+Built on Windows (2026-11-14), each in the [changelog](changelog.md): S2.1 to S2.14, with the gaps the nets had left.
+S2.5's Linux half, and S2.13's Clang build and AddressSanitizer on Windows, are written and have never run: no
+Linux, no Clang and no x64 ASan component were at hand. What only a push runs has never run: the Linux builds with
+their sanitizers, what the steps added to CI (UBSan's reports, the helper's sanitizer reports, the real VST3s'
+targets, `windows-profile`, the app started by ctest) and the nightly workflow (`.github/workflows/nightly.yml`). The nets these steps built are listed in
 [tests/README.md](../tests/README.md), "The nets"; the smaller test gaps left are in the [backlog](backlog.md), "Tests".
 
 | Step | Size | What | Done when |
 |---|---|---|---|
-| S2.5 (rest) | M | The allocation guard on Linux too, and with the engine on more than one thread | The real-time audit's guarded scenarios run in CI on both systems |
-| S2.13 | M | Precompiled headers for JUCE; a Clang build with static analysis; ASan on Windows | CI runs them |
 | S2.15 | S | A push: CI and the nightly workflow run for the first time, and what they find is fixed | CI is green on every preset, and a nightly run passes |
 
 ### Stage 3. Checked: a person tries what only tests have tried
@@ -125,12 +116,12 @@ what they found is fixed or in known-bugs.md.
 | S5.3 | L | Controllers recorded, played and edited in lanes beside the velocity lane | A sustain pedal recorded with a part shows in a lane, plays and can be deleted |
 | S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
 | S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
-| S5.6 | M | Arming never reopens the audio device; held live notes end when the track changes; automation written where it is heard | Arming a track during playback makes no gap in the sound |
+| S5.6 | M | Arming never reopens the audio device; automation written where it is heard (held live notes end when the track changes: built in S1.1) | Arming a track during playback makes no gap in the sound |
 | S5.7 | M | The plan rebuilt only for what changed; notes and clips found by an index | An edit in a 100-track song costs the same as in a small one ([performance.md](performance.md)) |
 | S5.8 | M | MIDI import of every track of a file; MIDI export; range and loop export; project templates | A clip exported as a MIDI file and imported again holds the same notes |
 | S5.9 | M | Devices moved, copied, duplicated and deleted between tracks, by commands and by dragging | A device dragged to another strip keeps its automation and modulation |
 | S5.10 | M | The strip: trim, polarity, mono, pan law, track delay | Each is a parameter with a control, automation and a test |
-| S5.11 | M | Presets carry their own samples | A drum kit preset loads on another PC |
+| S5.11 | S | Presets carry their own samples: built in S1.16 (a folder of sounds beside the preset); left: that folder swept of what the preset no longer names, and a preset and its sounds moved as one file | A drum kit preset loads on another PC |
 | S5.12 | L | The audio clip editor zooms and scrolls; snapping to edges and markers | A hit in a four-minute file can be placed to the millisecond |
 | S5.13 | L | The mixer: undo for the wheel, a decimal comma, several strips edited at once, menus from the keyboard, keyboards other than US | Each has a test through `TestWindow` |
 | S5.14 | L | Secondary windows that do not block; one Settings window; browser search on a large library | Search answers within a frame's time on 100,000 sounds |

@@ -83,9 +83,11 @@ public:
             addToDesktop (0, reinterpret_cast<void*> ((juce::pointer_sized_int) window));
         }
 
-        // Its place in its own units, which its window counts in the screen's pixels.
+        // Its place in its own units, which its window counts in the screen's pixels; as large as Phazite's area where the
+        // editor can be resized, else as large as the editor, which Phazite's area is within a pixel's rounding of.
         const auto scale = getPeer() != nullptr ? getPeer()->getPlatformScaleFactor() : 1.0;
-        setBounds ((area.toDouble() / scale).toNearestInt());
+        const auto placed = (area.toDouble() / scale).toNearestInt();
+        setBounds (isResizable() ? placed : placed.withSize (editor->getWidth(), editor->getHeight()));
         setVisible (true);
     }
 

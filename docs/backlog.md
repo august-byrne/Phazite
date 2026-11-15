@@ -80,6 +80,7 @@ and nothing is listed in both.
 | A merge of two edits inside one plug-in, offered and never done by itself | `src/model/versions/SongMerge.cpp` | — | — | format audit |
 | The knob values of a plug-in that wasn't playing as a version was saved | `src/model/plugins/PluginInstances.cpp` | — | — | format audit |
 | The files a plug-in loads by itself kept with the project. Not planned: nothing outside the plug-in knows them | `src/model/plugins/PluginInstances.cpp` | — | — | format audit |
+| "Loading N plug-ins" in the status bar while a project's plug-ins load (`getPluginsLoading()`); the Project view lists them now | `src/ui/shell/StatusBar.cpp` | S | — | plan |
 | A plug-in's two-step parameters shown as switches: the helper says which they are, and `ParameterHandle::getInfo()` gives nothing for plug-ins | `src/model/devices/ParameterHandle.cpp` | S | — | plan |
 
 ## Song model

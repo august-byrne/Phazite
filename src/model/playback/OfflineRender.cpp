@@ -56,9 +56,16 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    // The project's engine plays none of its plug-ins while this has them.
+    // The project's engine plays none of its plug-ins while this has them. One still loading, as the project opened, would
+    // play nothing: nothing is rendered without it.
     if (setup.session != nullptr)
+    {
+        if (const auto loading = setup.session->getPlugins().getLoading(); ! loading.isEmpty())
+            whyNot = loading.joinIntoString (", ") + (loading.size() == 1 ? " is" : " are")
+                     + " still loading. Render again once the project's plug-ins have loaded.";
+
         setup.session->lendToRender (true);
+    }
 
     for (const auto& job : toRender)
     {
@@ -114,7 +121,7 @@ void OfflineRender::setProgress (int job, double ofJob) noexcept
 
 void OfflineRender::run()
 {
-    auto result = juce::Result::ok();
+    auto result = whyNot.isEmpty() ? juce::Result::ok() : juce::Result::fail (whyNot);
 
     for (size_t i = 0; i < jobs.size() && result.wasOk() && ! threadShouldExit(); ++i)
         result = play (jobs[i], (int) i);

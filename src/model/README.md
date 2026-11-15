@@ -227,7 +227,7 @@ Plug-ins hosted in helper processes, the only way Phazite hosts them.
 
 | File | What it holds |
 |---|---|
-| `internal/PluginHost.h` | The host that starts one helper for each plug-in file and makes its instances, which the engine context owns: the plug-ins scanning found, the reload of one that crashed, the plug-ins kept off that crashed as they loaded, and none loaded after a crash of Phazite's until the user says (`setLoadsPlugins()`). |
-| `internal/PluginInstances.h` | A song's plug-ins, each an instance by its device's ID, made from the song and kept in step with it, which its playback session owns and which stores their states into the song. |
+| `internal/PluginHost.h` | The host that starts one helper for each plug-in file and makes its instances, which the engine context owns, opening them in the background beside each other as a project opens and ending each helper that goes on a thread of its own: the plug-ins scanning found, the reload of one that crashed, the plug-ins kept off that crashed as they loaded, and none loaded after a crash of Phazite's until the user says (`setLoadsPlugins()`). |
+| `internal/PluginInstances.h` | A song's plug-ins, each an instance by its device's ID, made from the song and kept in step with it, which its playback session owns and which stores their states into the song: loaded in the background as the song opens, and asked for their states at once, without the message thread waiting, as it saves. |
 | `internal/SandboxedInstance.h` | Each instance as a plug-in instance of JUCE's. |
 | `internal/SandboxedProcessor.h` | What Phazite's engine plays of it: a block whole through its channel, with a deadline. |

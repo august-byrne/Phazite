@@ -166,6 +166,27 @@ public:
     void setStateInformation (const void*, int) override;
     bool takeState (juce::MemoryBlock&);
 
+    // Its state asked for without waiting (message thread), so that a save asks every plug-in at once and the message thread
+    // waits for none (known bugs 69 and 89): of one whose state may have changed since it last gave it or was given one (a
+    // value or a program set, by Phazite or by the plug-in, or its settings said to have changed), or of any with always;
+    // not again while an answer is still to come, nor of one whose helper has gone. takeAskedState() takes the answer in
+    // once it has come (the state it last had from then on), waiting for it until a time
+    // (juce::Time::getMillisecondCounterHiRes(); none for 0), and gives it up once the state's time limit has passed since
+    // it was asked (the state it had before stays): true once no answer is still to come.
+    void askState (bool always);
+    bool takeAskedState (double waitUntil = 0.0);
+    bool isAskingState() const noexcept { return stateAsked != nullptr; }
+    bool mayHaveChangedState() const noexcept;
+    bool isStateOlder() const noexcept; // than the plug-in's: it may have changed since it last gave its state, unasked or unanswered
+
+    // What it was set to as it opened (the values the song sets by hand, which it sets again at each opening) counted as no
+    // change of its state, which is the one it opened from, if it opened from one.
+    void keepStateAsOpened() noexcept;
+
+    // How long a state may take to come or go, for a plug-in that never answers (shorter in the tests).
+    static void setStateMilliseconds (int) noexcept;
+    static int getStateMilliseconds() noexcept;
+
 private:
     class Parameter;
 
@@ -178,6 +199,13 @@ private:
     std::atomic<bool> crashed { false }, held { false };
     std::atomic<bool> anyPending { false }; // a value set while a block played, for the next
     juce::MemoryBlock lastState;            // as it opened from, or was last taken or given: what one whose helper has gone keeps
+
+    // On the message thread: the changes that may have changed its state, counted; the count lastState was taken or given at
+    // (-1 for none: it opened from nothing), and the last it was asked at and didn't answer; and the answer still to come,
+    // asked at a count, since a time.
+    int stateChanges = 0, stateTakenAt = -1, stateMissedAt = -1, stateAskedAt = 0;
+    std::shared_ptr<sandbox::Helper::Reply> stateAsked;
+    double stateAskedSince = 0.0;
     std::vector<Parameter*> parameters;
     std::unordered_map<juce::String, int> places; // each parameter's, by its own ID
     std::vector<int> movedByEngine;

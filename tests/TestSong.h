@@ -45,9 +45,9 @@ public:
     Project& getProject() const;
     juce::File getSoundsFolder() const; // for the test's sound files, outside the project
 
-    // Saves the project, closes it and opens it again from its file in the same context, as the app opens one. And closes it
-    // and opens another song, written into its file in its place.
-    void reopen();
+    // Saves the project, closes it and opens it again from its file in the same context, as the app opens one, waiting for
+    // its plug-ins to load unless asked not to. And closes it and opens another song, written into its file in its place.
+    void reopen (bool waitForPlugins = true);
     void openSong (const juce::ValueTree& song);
 
     // The project saved as the app's save saves one that has its file, calling back with whether it saved: what Save Version

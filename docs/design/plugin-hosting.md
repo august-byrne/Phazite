@@ -20,6 +20,8 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 | A plug-in's state kept as its `.vstpreset` | Built | Not yet tried by a person with a preset going to another DAW and back |
 | Notes ended on Stop, whatever the plug-in takes | Built | |
 | A plug-in that fails during an export, freeze or bounce fails it | Built | |
+| Plug-ins opened, saved and closed without the window waiting for them | Built | |
+| A plug-in's window as large as the plug-in at any Interface Size | Built | |
 | A choice of how plug-ins share helpers | Declined | One helper for each plug-in file measured cheap enough |
 | Containing a hostile plug-in | Declined | The sandbox is for crashes and hangs |
 | Audio Units on macOS | Planned | After v1, item 11 |
@@ -50,7 +52,9 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 
 - The helper program is `PhaziteHost`, next to the app.
 - **One helper for each plug-in file.** Every instance of a plug-in is in that plug-in's helper, each with an audio
-  thread of its own. The helper starts as the plug-in's first instance opens and quits as its last goes.
+  thread of its own. The helper starts as the plug-in's first instance opens and quits as its last goes; nothing waits
+  for it to quit: it is asked to, on a thread of Phazite's beside the others that go, and ended a second later if it
+  hasn't.
 - Phazite starts a helper with the name of a pipe of its own, and checks that the helper speaks the same version of
   their protocol. Each request to it is answered within a time limit or not at all.
 - **A block is one round trip through shared memory.** Phazite's engine hands the helper the block: its audio, its
@@ -96,6 +100,23 @@ helper with it, and Phazite, the song and the other plug-ins go on.
   project's plug-ins stay as they were saved, unloaded and silent; opening the project again turns them on.
 - Autosave and Auto Save keep the song itself ([projects-saving-export.md](projects-saving-export.md)).
 
+## Opening, saving and closing
+
+Phazite's window never waits for a plug-in as a project opens, saves or closes, as most DAWs' windows do.
+
+- **Opening:** the plug-ins of a project that opens load in the background, each in its helper, beside each other. The
+  song is there at once, and plays and edits without them meanwhile; each plug-in comes in, and plays, as it is ready.
+  The Project view lists each as "loading" until it has. A plug-in the song gets back meanwhile (an undo) loads in the
+  background too; one added later opens at once, as a plug-in added always has.
+- **Renders:** an export, a freeze or a bounce started while plug-ins still load fails at its start, naming them ("*name*
+  is still loading. Render again once the project's plug-ins have loaded.").
+- **Saving:** a save asks every plug-in for its state at once, and writes once all have answered, or once a plug-in has
+  taken 10 seconds; one that hasn't answered keeps the state it last gave, and a notice names it. The save is never lost
+  over one plug-in. Auto Save and the autosave ask only the plug-ins whose state may have changed since they last gave it:
+  a value or a program set, by Phazite or in the plug-in's window, or its settings said to have changed (a VST3's
+  `setDirty()`).
+- **Closing:** a project's plug-ins are let go of at once; each helper quits on its own, without anything waiting for it.
+
 ## Stop ends every note
 
 The helper keeps which notes it gave a plug-in that have not ended. Where every note is to end (as playback stops or
@@ -137,7 +158,8 @@ one (an older commit's bounce) gets plug-in instances of its own.
 ## Plug-in windows
 
 A plug-in's editor is a window of its helper's, shown inside a window of Phazite's, which the helper places over it
-again as it moves or is resized. Phazite never calls into the helper's window, so a helper that hangs can't hang
+again as it moves or is resized. It is as large on the screen as the plug-in makes it, whatever the Interface Size, and
+fitted again as that changes. Phazite never calls into the helper's window, so a helper that hangs can't hang
 Phazite's window. The keys Phazite takes over a plug-in window (play, stop, the computer keyboard) are handed back
 by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
 ([commands-keys-help.md](commands-keys-help.md)).

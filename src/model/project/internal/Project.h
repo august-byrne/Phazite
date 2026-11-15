@@ -293,6 +293,12 @@ public:
     bool isAutoSaving() const noexcept { return autoSave; }
     static constexpr int autoSaveDelayMs = 1000, playingSaveSeconds = 10;
 
+    // Before either writes, the plug-ins whose states may have changed are asked for them at once, and the write waits for
+    // their answers without keeping the message thread (model/plugins/internal/PluginInstances.h; known bug 89). Called after
+    // a write that holds an older state of some plug-ins than theirs (one that didn't answer in time, or whose helper went),
+    // with their names, once for each change of that list.
+    std::function<void (const juce::StringArray& plugins)> onOlderPluginStates;
+
 private:
     Project& project;
     const int intervalSeconds, firstDelaySeconds;
@@ -303,7 +309,11 @@ private:
     bool autoSave = false;
     juce::int64 lastChangeCount = 0;
     juce::uint32 lastChangeAt = 0, savedAt = 0; // the millisecond counter
+    bool saveDue = false;                       // Auto Save's, waiting for the plug-ins' states
+    juce::StringArray toldOlder;                // the plug-ins onOlderPluginStates last named
 
     void timerCallback() override;
+    bool havePluginStates(); // the plug-ins that may have changed asked, and answered
+    void tellOlderPluginStates();
 };
 } // namespace phazite

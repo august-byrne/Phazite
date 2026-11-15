@@ -30,10 +30,19 @@ struct TestPlugins
                         // block it played started (TestPlugins::Playhead); its Watch ("50") does nothing, but moved by a
                         // modulator it cuts the helper's blocks into pieces
         synthWithInput, // the synth with an input bus besides, as an instrument that takes sound in has (a vocoder)
+        mono,           // an effect in mono alone, in and out, that plays its sound at half
+        slow,           // an effect that passes its sound at its Level ("60"), and waits while a slow gate is shut
+        slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own
     };
 
-    static constexpr Kind kinds[] = { Kind::effect,    Kind::synth,        Kind::crash,    Kind::hang,          Kind::latency,
-                                      Kind::sidechain, Kind::crashLoading, Kind::playhead, Kind::synthWithInput };
+    static constexpr Kind kinds[] = { Kind::effect,       Kind::synth,    Kind::crash,          Kind::hang, Kind::latency, Kind::sidechain,
+                                      Kind::crashLoading, Kind::playhead, Kind::synthWithInput, Kind::mono, Kind::slow,    Kind::slowToo };
+
+    // While this file is there, the slow stand-ins wait, in their helpers: as one is made and as its state is taken, or (the
+    // closing gate's) as it goes. In the temporary folder, which the helpers share with the tests' process. And the file each
+    // slow one leaves as it begins to wait as it is made, so that a test sees it has begun.
+    static juce::File getSlowGate (bool closing = false);
+    static juce::File getSlowWaiting (Kind);
 
     // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time
     // signature, whether the song played, and where the bar it is in starts, in quarter notes, and which bar that is; each

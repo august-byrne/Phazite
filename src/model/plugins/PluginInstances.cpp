@@ -8,6 +8,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "sandbox/core/Vst3State.h"
 
+#include <algorithm>
 #include <set>
 
 namespace phazite
@@ -15,7 +16,15 @@ namespace phazite
 namespace
 {
     constexpr double defaultSampleRate = 44100.0;
-    constexpr int openBlockSize = 512; // what a new instance is opened for, before the engine prepares it
+    constexpr int openBlockSize = 512;   // what a new instance is opened for, before the engine prepares it
+    constexpr int lookMilliseconds = 10; // how often what opens in the background, and the states asked for, are looked at
+
+    // The program the song keeps a plug-in on, or -1 for none.
+    int readPluginProgram (const juce::ValueTree& device)
+    {
+        const auto* program = device.getPropertyPointer (schema::pluginProgram);
+        return program != nullptr ? std::max (0, (int) *program) : -1;
+    }
 
     // Sets a property as ValueTree::setProperty() does with an undo manager, which leaves a value that is the same as JUCE
     // compares values alone (a number read from a file is text), but without one. JUCE workaround W8
@@ -77,6 +86,15 @@ namespace
     }
 } // namespace
 
+// A plug-in opening in the background: what its job made, once done, which the message thread makes an instance of; and the
+// state and program the song had for it as it began.
+struct PluginInstances::Opening
+{
+    PluginHost::Opened opened;
+    int program = -1;
+    std::atomic<bool> done { false };
+};
+
 PluginInstances::PluginInstances (Song& s, PluginHost& h, double rate)
     : song (s),
       host (h),
@@ -94,11 +112,12 @@ PluginInstances::PluginInstances (Song& s, PluginHost& h, double rate)
 
     state.addListener (this);
     host.addChangeListener (this);
-    sync();
 }
 
 PluginInstances::~PluginInstances()
 {
+    // What still opens goes on in the background, and is let go of there once it has opened: nothing waits for it.
+    stopTimer();
     host.removeChangeListener (this);
     state.removeListener (this);
     song.setDeviceStateStore ({});
@@ -132,14 +151,21 @@ std::shared_ptr<SandboxedInstance> PluginInstances::find (DeviceID id)
     if (! isPluginState (device))
         return nullptr;
 
-    auto* entry = open (id, device);
+    // While the song's plug-ins load in the background, one the song gets back loads there too (sync()).
+    auto* entry = open (id, device, isLoading());
     return entry != nullptr ? entry->instance : nullptr;
 }
 
-PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTree& device)
+bool PluginInstances::isLoading() const
+{
+    return std::any_of (entries.begin(), entries.end(), [] (const auto& entry) { return entry.second.opening != nullptr; });
+}
+
+PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTree& device, bool inBackground)
 {
     auto& entry = entries[id];
     entry.instance = nullptr;
+    entry.opening = nullptr;
     entry.error = {};
     const auto known = findKnownPlugin (host, getPluginIdentity (device));
     entry.wasKnown = known.has_value();
@@ -160,9 +186,29 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
 
     // From the state the song keeps of it; where that left another program than the song's, the song's program, then the
     // state again, so that the settings are never overridden by a program set after them (a plug-in's state needn't say
-    // which program it is on); then the values the song sets by hand under its automation.
+    // which program it is on: PluginHost::open()); then the values the song sets by hand under its automation.
     const auto stored = readPluginState (device);
-    std::unique_ptr<SandboxedInstance> made = host.createInstance (*known, stored, sampleRate, openBlockSize, entry.error);
+    const auto program = readPluginProgram (device);
+
+    if (inBackground)
+    {
+        // In its helper, on a thread of the host's, beside the others: the song plays meanwhile without it.
+        auto opening = std::make_shared<Opening>();
+        opening->program = program;
+        entry.opening = opening;
+        entry.unloaded = Status::loading;
+        host.runInBackground (
+            [opening, &plugins = host, description = *known, stored, program, rate = sampleRate]
+            {
+                opening->opened = plugins.open (description, stored, program, rate, openBlockSize);
+                opening->done.store (true, std::memory_order_release);
+            });
+
+        startTimer (lookMilliseconds);
+        return &entry;
+    }
+
+    std::unique_ptr<SandboxedInstance> made = host.createInstance (*known, stored, program, sampleRate, openBlockSize, entry.error);
 
     if (made == nullptr)
     {
@@ -170,25 +216,147 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
         return &entry;
     }
 
-    if (const auto* program = device.getPropertyPointer (schema::pluginProgram); program != nullptr && made->getNumPrograms() > 1)
-    {
-        if (const auto wanted = (int) *program; wanted != made->getCurrentProgram())
-        {
-            made->setCurrentProgram (wanted);
-
-            if (! stored.isEmpty())
-                made->setStateInformation (stored.getData(), (int) stored.getSize());
-        }
-    }
-
-    for (const auto& child : device)
-        if (child.hasType (schema::VALUE))
-            if (const auto index = made->findParameter (child[schema::valueParameter].toString()); index >= 0)
-                made->setParameterValue (index, (float) child[schema::valueSetByHand]);
-
+    setUp (*made, device, stored, program);
     entry.instance = std::move (made);
     listen (id, *entry.instance);
     return &entry;
+}
+
+void PluginInstances::setUp (SandboxedInstance& made, const juce::ValueTree& device, const juce::MemoryBlock& openedFrom, int openedProgram)
+{
+    // What the song changed of it while it opened (an undo, a preset loaded): its program, then its settings, as the song has
+    // them now.
+    const auto stored = readPluginState (device);
+
+    if (const auto program = readPluginProgram (device); stored != openedFrom || program != openedProgram)
+    {
+        if (program >= 0 && program != made.getCurrentProgram())
+            made.setCurrentProgram (program);
+
+        if (! stored.isEmpty())
+            made.setStateInformation (stored.getData(), (int) stored.getSize());
+    }
+
+    // The values the song sets by hand under its automation, as it has them now.
+    for (const auto& child : device)
+        if (child.hasType (schema::VALUE))
+            if (const auto index = made.findParameter (child[schema::valueParameter].toString()); index >= 0)
+                made.setParameterValue (index, (float) child[schema::valueSetByHand]);
+
+    made.keepStateAsOpened();
+}
+
+void PluginInstances::finishOpening (DeviceID id, Entry& entry)
+{
+    const auto opening = std::exchange (entry.opening, nullptr);
+    auto made = host.makeInstance (opening->opened);
+
+    if (made == nullptr)
+    {
+        entry.error = opening->opened.error;
+        entry.unloaded = host.hasCrashedWhileLoading (opening->opened.description) ? Status::crashedWhileLoading : Status::missing;
+        return;
+    }
+
+    setUp (*made, findDeviceState (song, id), opening->opened.state, opening->program);
+    entry.instance = std::move (made);
+    listen (id, *entry.instance);
+}
+
+juce::StringArray PluginInstances::getLoading() const
+{
+    juce::StringArray names;
+
+    for (const auto& [id, entry] : entries)
+        if (entry.opening != nullptr)
+            names.add (getPluginIdentity (findDeviceState (song, id)).name);
+
+    return names;
+}
+
+void PluginInstances::timerCallback()
+{
+    // Those opened in the background, each coming in as it is ready: what plays the song makes its plan again, and the
+    // views hear of it as of a plug-in reloaded.
+    auto anyOpening = false, anyOpened = false;
+
+    for (auto& [id, entry] : entries)
+    {
+        if (entry.opening == nullptr)
+            continue;
+
+        if (entry.opening->done.load (std::memory_order_acquire))
+        {
+            finishOpening (id, entry);
+            anyOpened = true;
+        }
+        else
+        {
+            anyOpening = true;
+        }
+    }
+
+    auto statesIn = true;
+
+    if (! waitingForStates.empty())
+        for (auto& [id, entry] : entries)
+            if (entry.instance != nullptr && ! entry.instance->takeAskedState())
+                statesIn = false;
+
+    if (! anyOpening && (waitingForStates.empty() || statesIn))
+        stopTimer();
+
+    if (anyOpened)
+    {
+        if (listener != nullptr)
+            listener->pluginLatencyChanged();
+
+        host.sendChangeMessage();
+    }
+
+    // Last: what it calls may let go of this (a project that closes once it is saved).
+    if (! waitingForStates.empty() && statesIn)
+        for (const auto& then : std::exchange (waitingForStates, {}))
+            then();
+}
+
+bool PluginInstances::askStates (bool all)
+{
+    auto statesIn = true;
+
+    for (auto& [id, entry] : entries)
+    {
+        if (entry.instance != nullptr)
+        {
+            entry.instance->askState (all);
+            statesIn = entry.instance->takeAskedState() && statesIn;
+        }
+    }
+
+    return statesIn;
+}
+
+void PluginInstances::whenStatesIn (bool all, std::function<void()> then)
+{
+    if (askStates (all) && waitingForStates.empty())
+    {
+        then();
+        return;
+    }
+
+    waitingForStates.push_back (std::move (then));
+    startTimer (lookMilliseconds);
+}
+
+juce::StringArray PluginInstances::getOlderStates() const
+{
+    juce::StringArray names;
+
+    for (const auto& [id, entry] : entries)
+        if (entry.instance != nullptr && entry.instance->isStateOlder())
+            names.addIfNotAlreadyThere (getPluginIdentity (findDeviceState (song, id)).name);
+
+    return names;
 }
 
 void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
@@ -251,9 +419,13 @@ void PluginInstances::sync()
 
     std::erase_if (entries, [&held] (const auto& entry) { return ! held.contains (entry.first); });
 
+    // As the song opens, in the background, beside each other (known bug 69), and so while any of those still loads (one
+    // taken away and back by undo meanwhile); later, at once, as a plug-in added opens.
+    const auto inBackground = ! std::exchange (synced, true) || isLoading();
+
     for (const auto& device : findPlugins (song))
         if (const auto id = getDeviceID (device); ! entries.contains (id))
-            open (id, device);
+            open (id, device, inBackground);
 }
 
 std::optional<PluginInstances::Status> PluginInstances::getStatus (DeviceID id)
@@ -312,6 +484,39 @@ int PluginInstances::getGeneration (DeviceID id) const
 
 void PluginInstances::store (DeviceID id)
 {
+    store (std::vector { id });
+}
+
+void PluginInstances::store (const std::vector<DeviceID>& ids)
+{
+    // Those whose states may have changed asked at once, and waited for together, within one limit (known bug 69: each was
+    // asked in turn, each with a limit of its own). One whose answer to an earlier ask (a save's) is still to come isn't
+    // waited for: it keeps the state it last gave, until that answer comes.
+    std::vector<SandboxedInstance*> asked;
+
+    for (const auto id : ids)
+    {
+        if (const auto found = entries.find (id); found != entries.end() && found->second.instance != nullptr)
+        {
+            if (auto& instance = *found->second.instance; ! instance.isAskingState())
+            {
+                instance.askState (false);
+                asked.push_back (&instance);
+            }
+        }
+    }
+
+    const auto until = juce::Time::getMillisecondCounterHiRes() + SandboxedInstance::getStateMilliseconds();
+
+    for (auto* instance : asked)
+        instance->takeAskedState (until);
+
+    for (const auto id : ids)
+        write (id);
+}
+
+void PluginInstances::write (DeviceID id)
+{
     const auto found = entries.find (id);
     auto device = findDeviceState (song, id);
 
@@ -321,10 +526,10 @@ void PluginInstances::store (DeviceID id)
     const juce::ScopedValueSetter<bool> writing (storing, true);
     auto& instance = *found->second.instance;
 
-    // Its settings, as it gives them now, or as it last had them, if its helper went or didn't give them in time: then the
+    // Its settings, as it last gave them, or as it last had them, if its helper went or didn't give them in time: then the
     // song keeps what it holds rather than nothing. And its program.
-    juce::MemoryBlock block;
-    const auto isNow = instance.takeState (block);
+    const auto& block = instance.getLastState();
+    const auto isNow = ! instance.isStateOlder();
 
     if (block.getSize() > 0)
         storeProperty (device, schema::pluginState, writeBytes (block));
@@ -377,6 +582,7 @@ void PluginInstances::storeTrack (TrackID track)
 {
     auto tracks = getTracksInFolder (song, track);
     tracks.insert (tracks.begin(), track);
+    std::vector<DeviceID> ids;
 
     for (const auto id : tracks)
     {
@@ -384,14 +590,20 @@ void PluginInstances::storeTrack (TrackID track)
         findPlugins (findTrackState (song, id), found);
 
         for (const auto& device : found)
-            store (getDeviceID (device));
+            ids.push_back (getDeviceID (device));
     }
+
+    store (ids);
 }
 
 void PluginInstances::storeAll()
 {
+    std::vector<DeviceID> ids;
+
     for (const auto& device : findPlugins (song))
-        store (getDeviceID (device));
+        ids.push_back (getDeviceID (device));
+
+    store (ids);
 }
 
 //==============================================================================
@@ -486,6 +698,32 @@ std::optional<PluginInstances::Status> getPluginStatus (const Song& song, Device
 {
     auto* session = findSession (song);
     return session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
+}
+
+void whenPluginStatesIn (const Song& song, bool all, std::function<void()> then)
+{
+    if (auto* session = findSession (song))
+        session->getPlugins().whenStatesIn (all, std::move (then));
+    else
+        then();
+}
+
+bool askPluginStates (const Song& song, bool all)
+{
+    auto* session = findSession (song);
+    return session == nullptr || session->getPlugins().askStates (all);
+}
+
+juce::StringArray getPluginsWithOlderStates (const Song& song)
+{
+    auto* session = findSession (song);
+    return session != nullptr ? session->getPlugins().getOlderStates() : juce::StringArray();
+}
+
+juce::StringArray getPluginsLoading (const Song& song)
+{
+    auto* session = findSession (song);
+    return session != nullptr ? session->getPlugins().getLoading() : juce::StringArray();
 }
 
 bool reloadPlugin (Song& song, DeviceID id, juce::String& error)

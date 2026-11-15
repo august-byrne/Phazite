@@ -198,6 +198,11 @@ private:
     // a copy where the user chooses, which the project closes after.
     void askWhetherToSave (const juce::String& saveFailed, std::function<void (bool closed)>);
     void saveCopyThenClose (std::function<void (bool closed)>);
+
+    // What closing does once every plug-in has given its state (closeThen()); and the notice that a save holds an older
+    // state of some plug-ins than theirs, by name (none for none).
+    void closeWithPluginStates (std::function<void (bool closed)>);
+    void tellOlderPluginStates (const juce::StringArray& plugins);
     void showError (const juce::String& title, const juce::String& message);
     void showNotice (const juce::String& title, const juce::String& message);
 

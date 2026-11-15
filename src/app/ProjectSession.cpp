@@ -4,6 +4,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/UnusedAudio.h"
 #include "model/project/internal/DawProject.h"
@@ -489,15 +490,35 @@ void ProjectSession::saveThen (std::function<void (bool saved)> callback)
         return;
     }
 
-    const auto result = project->save();
+    // Every plug-in asked for its state at once, the message thread waiting for none (known bug 69); the save once they have
+    // answered, or their time is up (the file keeps the state a plug-in gave before, and a notice says so).
+    whenPluginStatesIn (project->getSong(), true,
+                        [this, callback]
+                        {
+                            const auto result = project->save();
 
-    if (result.failed())
-        showError ("Phazite couldn't save the project", result.getErrorMessage());
+                            if (result.failed())
+                                showError ("Phazite couldn't save the project", result.getErrorMessage());
+                            else
+                                tellOlderPluginStates (getPluginsWithOlderStates (project->getSong()));
 
-    if (onProjectChanged != nullptr)
-        onProjectChanged();
+                            if (onProjectChanged != nullptr)
+                                onProjectChanged();
 
-    callback (result.wasOk());
+                            callback (result.wasOk());
+                        });
+}
+
+void ProjectSession::tellOlderPluginStates (const juce::StringArray& plugins)
+{
+    if (plugins.isEmpty())
+        return;
+
+    const auto one = plugins.size() == 1;
+    showError ("Plug-in settings not saved", "Phazite saved the project, but " + plugins.joinIntoString (", ") + " didn't give "
+                                                 + (one ? "its" : "their")
+                                                 + " settings in time, or crashed: the project keeps the settings " + (one ? "it" : "they")
+                                                 + " gave before. Save again to try once more.");
 }
 
 void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<void (bool saved)> callback)
@@ -597,7 +618,20 @@ void ProjectSession::updateAutoSave()
 
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
-    // Its plug-ins asked for their settings, rather than trusted to say they changed (Project::checkUnsavedChanges()).
+    if (project == nullptr)
+    {
+        callback (true);
+        return;
+    }
+
+    // Every plug-in asked for its settings at once, rather than trusted to say they changed, the message thread waiting for
+    // none (known bug 69); then what closing does with them.
+    whenPluginStatesIn (project->getSong(), true, [this, callback] { closeWithPluginStates (callback); });
+}
+
+void ProjectSession::closeWithPluginStates (std::function<void (bool)> callback)
+{
+    // Its plug-ins' settings as they gave them, compared with the file's (Project::checkUnsavedChanges()).
     if (project == nullptr || ! project->checkUnsavedChanges())
     {
         callback (true);
@@ -878,6 +912,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
                        "Phazite couldn't save your changes automatically, " + juce::String (AutosaveTimer::failuresToReport)
                            + " times in a row. Save the project to keep them, and check that its folder can be written to.");
         };
+        autosaveTimer->onOlderPluginStates = [this] (const juce::StringArray& plugins) { tellOlderPluginStates (plugins); };
 
         if (! isUntitled()) // it is in Open Recent once it is saved
             recent.add (project->getFile());

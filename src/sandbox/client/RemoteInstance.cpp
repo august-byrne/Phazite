@@ -63,6 +63,7 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce
     }
 
     instance->info = readPluginInfo (reader);
+    instance->channelRate = sampleRate;
     instance->latency = instance->info.latencySamples;
     instance->program = instance->info.program;
     return instance;
@@ -70,12 +71,14 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce
 
 RemoteInstance::~RemoteInstance()
 {
-    // The helper's instance goes before the channel it plays.
+    // The helper's instance closed, without waiting for the helper (known bug 69: closing a project waited for each plug-in
+    // in turn): the helper keeps the channel's memory it opened until it has closed the instance, whatever this side does
+    // with its own.
     if (helper.isRunning())
     {
         auto message = helper.makeRequest (MessageType::closeInstance);
         message.add (id);
-        helper.request (message, 2000);
+        helper.post (message);
     }
 }
 
@@ -102,19 +105,30 @@ bool RemoteInstance::prepare (double sampleRate, const BlockChannel::Limits& lim
         return false;
 
     channel = std::move (newChannel);
+    channelRate = sampleRate;
     return true;
 }
 
 std::optional<juce::MemoryBlock> RemoteInstance::getState (int timeoutMilliseconds)
 {
+    const auto reply = askState();
+    reply->wait (timeoutMilliseconds);
+    return readState (*reply);
+}
+
+std::shared_ptr<Helper::Reply> RemoteInstance::askState()
+{
     auto message = helper.makeRequest (MessageType::getState);
     message.add (id);
-    const auto answer = helper.request (message, timeoutMilliseconds);
+    return helper.send (message);
+}
 
-    if (! answer.has_value())
+std::optional<juce::MemoryBlock> RemoteInstance::readState (const Helper::Reply& reply)
+{
+    if (! reply.isDone() || reply.getReply().isEmpty())
         return {};
 
-    MessageReader reader (*answer);
+    MessageReader reader (reply.getReply());
     return reader.readBlock();
 }
 

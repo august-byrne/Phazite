@@ -68,18 +68,20 @@ namespace
                 return "not installed";
             case PluginState::off:
                 return "off";
+            case PluginState::loading:
+                return "loading";
             case PluginState::playing:
             default:
                 return {};
         }
     }
 
-    // What a header says is wrong, after its name: "2 missing"; "1 crashed, 1 not installed".
+    // What a header says is wrong, or still to come, after its name: "2 missing"; "1 crashed, 1 not installed"; "3 loading".
     juce::String describeProblems (const std::vector<ProjectPlugin>& plugins)
     {
         juce::StringArray problems;
 
-        for (const auto state : { PluginState::crashed, PluginState::missing, PluginState::off })
+        for (const auto state : { PluginState::crashed, PluginState::missing, PluginState::off, PluginState::loading })
             if (const auto count = std::count_if (plugins.begin(), plugins.end(), [state] (const auto& p) { return p.state == state; });
                 count > 0)
                 problems.add (juce::String ((int) count) + " " + describeState (state));
@@ -284,6 +286,8 @@ public:
                 return who
                        + ": off, as the project was opened after Phazite closed unexpectedly. Open it again to turn its "
                          "plug-ins on";
+            case PluginState::loading:
+                return who + ": loading, as the project opened. It plays once it has loaded";
             case PluginState::playing:
             default:
                 return who + ". Click to show it";

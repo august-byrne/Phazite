@@ -8,6 +8,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -78,7 +79,7 @@ juce::File TestSong::getSoundsFolder() const
     return folder.getChildFile ("Sounds");
 }
 
-void TestSong::reopen()
+void TestSong::reopen (bool waitForPlugins)
 {
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
@@ -89,6 +90,10 @@ void TestSong::reopen()
     project = Project::open (file, false, error);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
+
+    // Its plug-ins open in the background as it opens (model/plugins/internal/PluginInstances.h).
+    if (waitForPlugins)
+        REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }, 60000));
 }
 
 void TestSong::openSong (const juce::ValueTree& song)
@@ -104,6 +109,7 @@ void TestSong::openSong (const juce::ValueTree& song)
     project = Project::open (file, false, error);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
+    REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }, 60000));
 }
 
 void TestSong::run (const juce::String& commandID)
