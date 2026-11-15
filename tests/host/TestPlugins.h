@@ -32,11 +32,14 @@ struct TestPlugins
         synthWithInput, // the synth with an input bus besides, as an instrument that takes sound in has (a vocoder)
         mono,           // an effect in mono alone, in and out, that plays its sound at half
         slow,           // an effect that passes its sound at its Level ("60"), and waits while a slow gate is shut
-        slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own
+        slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own,
+        slowSibling,    // the third in the first's file (one helper for both, as a file of several plug-ins has). Each crashes as
+                        // it is made from a state whose Level is below 0
     };
 
-    static constexpr Kind kinds[] = { Kind::effect,       Kind::synth,    Kind::crash,          Kind::hang, Kind::latency, Kind::sidechain,
-                                      Kind::crashLoading, Kind::playhead, Kind::synthWithInput, Kind::mono, Kind::slow,    Kind::slowToo };
+    static constexpr Kind kinds[] = { Kind::effect,    Kind::synth,        Kind::crash,      Kind::hang,           Kind::latency,
+                                      Kind::sidechain, Kind::crashLoading, Kind::playhead,   Kind::synthWithInput, Kind::mono,
+                                      Kind::slow,      Kind::slowToo,      Kind::slowSibling };
 
     // While this file is there, the slow stand-ins wait, in their helpers: as one is made and as its state is taken, or (the
     // closing gate's) as it goes. In the temporary folder, which the helpers share with the tests' process. And the file each

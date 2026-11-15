@@ -3,6 +3,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/FreezeModel.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ExampleSongs.h"
@@ -33,6 +34,42 @@ namespace
 
     // What other DAWs export (model/project/internal/DawProject.h), which Phazite imports.
     constexpr const char* dawProjectExtension = ".dawproject";
+
+    constexpr int waitShownMilliseconds = 1000; // how long a save or a close waits for plug-ins before the window says so
+
+    // A wait for the plug-ins' states: whether it is over, and whether the progress window (the renders' host) shows it,
+    // with what title.
+    struct StatesWait
+    {
+        bool over = false, shown = false;
+        juce::String title;
+    };
+
+    // The wait as the progress window shows it: what it names, and its Cancel (the window going while the wait isn't over),
+    // which goes on without the plug-ins still to answer (the states they gave last are kept, as for a time-out).
+    struct WaitForStates final : TrackRender::Impl
+    {
+        WaitForStates (Song& s, std::shared_ptr<StatesWait> shownWait)
+            : song (&s),
+              wait (std::move (shownWait))
+        {
+            wait->shown = true;
+        }
+
+        ~WaitForStates() override
+        {
+            wait->shown = false;
+
+            if (auto* waiting = song.get(); waiting != nullptr && ! wait->over)
+                giveUpPluginStates (*waiting);
+        }
+
+        float getProgress() const override { return -1.0f; } // no end known: JUCE's bar shows it busy
+        juce::String getTitle() const override { return wait->title; }
+
+        juce::WeakReference<Song> song;
+        std::shared_ptr<StatesWait> wait;
+    };
 } // namespace
 
 ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
@@ -492,21 +529,86 @@ void ProjectSession::saveThen (std::function<void (bool saved)> callback)
 
     // Every plug-in asked for its state at once, the message thread waiting for none (known bug 69); the save once they have
     // answered, or their time is up (the file keeps the state a plug-in gave before, and a notice says so).
+    // A project other than the one asked for meanwhile (closed by a quit that went first) isn't saved.
+    withPluginStates (
+        [this, callback] (bool sameProject)
+        {
+            if (! sameProject)
+            {
+                callback (false);
+                return;
+            }
+
+            const auto result = project->save();
+
+            if (result.failed())
+                showError ("Phazite couldn't save the project", result.getErrorMessage());
+            else
+                tellOlderPluginStates (getPluginsWithOlderStates (project->getSong()));
+
+            if (onProjectChanged != nullptr)
+                onProjectChanged();
+
+            callback (result.wasOk());
+        });
+}
+
+void ProjectSession::withPluginStates (std::function<void (bool sameProject)> then)
+{
+    // Its plug-ins asked for their states at once; then what comes next: at once if they are in already, else a message after
+    // they are (or once the wait is given up), never as the song's plug-ins go, and only while this session lives, told
+    // whether the project asked for is still the one open. A wait of more than a second shows in the progress window, whose
+    // Cancel goes on without the plug-ins still to answer.
+    const auto number = context.getProjectNumber();
+    const auto wait = std::make_shared<StatesWait>();
+    const auto calledAt = std::make_shared<bool> (true); // while whenPluginStatesIn() hasn't returned
+    const std::weak_ptr<bool> session = alive;
+
+    const auto next = [this, number, wait, then]
+    {
+        wait->over = true;
+
+        if (wait->shown && renders != nullptr)
+            renders->renderFinished (wait->title, juce::Result::ok()); // which deletes the window
+
+        then (project != nullptr && context.getProjectNumber() == number);
+    };
+
     whenPluginStatesIn (project->getSong(), true,
-                        [this, callback]
+                        [session, calledAt, next] (bool)
                         {
-                            const auto result = project->save();
-
-                            if (result.failed())
-                                showError ("Phazite couldn't save the project", result.getErrorMessage());
+                            if (*calledAt)
+                                next();
                             else
-                                tellOlderPluginStates (getPluginsWithOlderStates (project->getSong()));
-
-                            if (onProjectChanged != nullptr)
-                                onProjectChanged();
-
-                            callback (result.wasOk());
+                                juce::MessageManager::callAsync (
+                                    [session, next]
+                                    {
+                                        if (! session.expired())
+                                            next();
+                                    });
                         });
+
+    *calledAt = false;
+
+    if (wait->over || renders == nullptr)
+        return;
+
+    juce::Timer::callAfterDelay (waitShownMilliseconds,
+                                 [this, session, number, wait]
+                                 {
+                                     if (session.expired() || wait->over || project == nullptr || context.getProjectNumber() != number)
+                                         return;
+
+                                     // One window at a time: another wait shown already waits for the same answers.
+                                     if (const auto other = std::static_pointer_cast<StatesWait> (shownWait.lock());
+                                         other != nullptr && other->shown)
+                                         return;
+
+                                     shownWait = wait;
+                                     auto& song = project->getSong();
+                                     wait->title = "Waiting for the settings of " + getPluginsAnswering (song).joinIntoString (", ");
+                                     renders->runRender (std::make_unique<TrackRender> (std::make_unique<WaitForStates> (song, wait)));
+                                 });
 }
 
 void ProjectSession::tellOlderPluginStates (const juce::StringArray& plugins)
@@ -625,8 +727,16 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
     }
 
     // Every plug-in asked for its settings at once, rather than trusted to say they changed, the message thread waiting for
-    // none (known bug 69); then what closing does with them.
-    whenPluginStatesIn (project->getSong(), true, [this, callback] { closeWithPluginStates (callback); });
+    // none (known bug 69); then what closing does with them, a close always going on: if another project is open by then
+    // (a quit or an open that went first), closing that one.
+    withPluginStates (
+        [this, callback] (bool sameProject)
+        {
+            if (sameProject)
+                closeWithPluginStates (callback);
+            else
+                closeThen (callback);
+        });
 }
 
 void ProjectSession::closeWithPluginStates (std::function<void (bool)> callback)

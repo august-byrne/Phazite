@@ -10,9 +10,8 @@ namespace phazite
 namespace
 {
     constexpr int startMilliseconds = 20000; // how long a helper may take to start and answer
-    constexpr int loadMilliseconds = 60000;  // and a plug-in to load in it (a sample library can take long)
     constexpr int smallestChannel = 4096;    // the longest block a channel takes at least
-    constexpr int openingThreads = 8;        // the plug-ins opened in the background at once, each in its own helper
+    constexpr int openingThreads = 8;        // the helpers plug-ins are opened in, in the background, at once
     constexpr int endingThreads = 8;         // and the helpers ended at once
 
     juce::File getDefaultHelperProgram()
@@ -40,6 +39,8 @@ struct PluginHost::Running
     std::map<std::int64_t, SandboxedInstance*> instances;
     std::atomic<bool> lost { false };
     std::unique_ptr<sandbox::Helper> helper;
+    std::atomic<int> loading { 0 };             // the plug-ins being opened in it now
+    std::atomic<bool> crashedLoading { false }; // a plug-in crashed it as it loaded: others it took with it aren't to blame
 
     std::mutex startLock;
     bool startTried = false, started = false;
@@ -61,6 +62,8 @@ PluginHost::PluginHost()
     : program (getDefaultHelperProgram()),
       messageHangMilliseconds (sandbox::Helper::messageHangMilliseconds),
       audioHangMilliseconds (sandbox::Helper::audioHangMilliseconds),
+      loadMilliseconds (defaultLoadMilliseconds),
+      quitMilliseconds (sandbox::Helper::quitMilliseconds),
       endings (std::make_shared<BackgroundJobs> ("Phazite helper ending", endingThreads, juce::Thread::Priority::low)),
       openings (std::make_unique<BackgroundJobs> ("Phazite plug-in opening", openingThreads, juce::Thread::Priority::normal))
 {
@@ -73,9 +76,12 @@ PluginHost::~PluginHost()
     knownPlugins.removeChangeListener (this);
 
     // Instances that outlive it tell it nothing more; and a plug-in still opening in the background (its project closed
-    // first) isn't waited for: its helper is ended, which answers what waits for it.
+    // first) isn't waited for: its helper is ended, which answers what waits for it, and one that hasn't started doesn't
+    // (Helper::kill(); no other starts once it goes).
     {
         const std::lock_guard held (lock);
+        stopping = true;
+        waitingJobs.clear();
 
         for (const auto& [key, weak] : helpers)
         {
@@ -113,6 +119,18 @@ void PluginHost::setHangLimits (int messageThreadMilliseconds, int audioThreadMi
     const std::lock_guard held (lock);
     messageHangMilliseconds = messageThreadMilliseconds;
     audioHangMilliseconds = audioThreadMilliseconds;
+}
+
+void PluginHost::setLoadMilliseconds (int milliseconds) noexcept
+{
+    const std::lock_guard held (lock);
+    loadMilliseconds = milliseconds;
+}
+
+void PluginHost::setQuitMilliseconds (int milliseconds) noexcept
+{
+    const std::lock_guard held (lock);
+    quitMilliseconds = milliseconds;
 }
 
 juce::String PluginHost::getHelperKey (const juce::PluginDescription& description)
@@ -173,27 +191,32 @@ void PluginHost::forgetCrashWhileLoading (const juce::PluginDescription& descrip
     sendChangeMessage();
 }
 
-std::shared_ptr<PluginHost::Running> PluginHost::getHelper (const juce::String& key, juce::String& error)
+std::shared_ptr<PluginHost::Running> PluginHost::getHelper (const juce::String& key, juce::String& error, bool again)
 {
     // The plug-in's helper, if it runs or starts; one started for it otherwise (or again, after one that went). It ends, as
     // its last instance lets go of it, on a thread of the host's, without anything waiting for it.
     std::shared_ptr<Running> running;
     juce::File helperProgram;
-    int messageLimit = 0, audioLimit = 0;
 
     {
         const std::lock_guard held (lock);
-        running = helpers[key].lock();
         helperProgram = program;
-        messageLimit = messageHangMilliseconds;
-        audioLimit = audioHangMilliseconds;
+
+        if (stopping)
+        {
+            error = "Phazite is closing.";
+            return nullptr;
+        }
+
+        running = helpers[key].lock();
 
         if (running == nullptr || running->lost.load())
         {
             running = std::shared_ptr<Running> (new Running(), [ends = endings] (Running* gone)
                                                 { ends->add ([gone] (const BackgroundJobs::ShouldStop&) { delete gone; }); });
             running->helper = std::make_unique<sandbox::Helper> (helperProgram);
-            running->helper->setHangLimits (messageLimit, audioLimit);
+            running->helper->setHangLimits (messageHangMilliseconds, audioHangMilliseconds);
+            running->helper->setQuitMilliseconds (quitMilliseconds);
             auto* raw = running.get();
 
             running->helper->onNotice = [raw] (sandbox::MessageReader& notice)
@@ -238,6 +261,18 @@ std::shared_ptr<PluginHost::Running> PluginHost::getHelper (const juce::String& 
         return nullptr;
     }
 
+    // Gone already, before its loss was told (a crash a moment ago): another, once.
+    if (! running->helper->isRunning())
+    {
+        running->lost = true;
+
+        if (! again)
+            return getHelper (key, error, true);
+
+        error = "Phazite's plug-in host stopped as it started.";
+        return nullptr;
+    }
+
     return running;
 }
 
@@ -245,21 +280,37 @@ std::unique_ptr<sandbox::RemoteInstance> PluginHost::open (Running& running, con
                                                            const juce::MemoryBlock& state, double sampleRate,
                                                            const sandbox::BlockChannel::Limits& limits, juce::String& error)
 {
-    auto remote = sandbox::RemoteInstance::open (*running.helper, toXml (description), state, sampleRate, limits, error, loadMilliseconds);
+    int limit = 0;
 
-    // Its helper gone as it loaded: a crash of its own, which keeps it off from now on.
-    if (remote == nullptr && ! running.helper->isRunning())
     {
-        {
-            const std::lock_guard held (lock);
-            crashedWhileLoading.addIfNotAlreadyThere (description.createIdentifierString());
-        }
-
-        error = "It crashed as it loaded, and stays off until it is reloaded.";
-        sendChangeMessage();
+        const std::lock_guard held (lock);
+        limit = loadMilliseconds;
     }
 
+    ++running.loading;
+    auto remote = sandbox::RemoteInstance::open (*running.helper, toXml (description), state, sampleRate, limits, error, limit);
+    --running.loading;
     return remote;
+}
+
+void PluginHost::keepOffAfterCrash (const juce::PluginDescription& description, juce::String& error)
+{
+    // Its helper gone as it loaded: a crash of its own, which keeps it off from now on.
+    {
+        const std::lock_guard held (lock);
+        crashedWhileLoading.addIfNotAlreadyThere (description.createIdentifierString());
+    }
+
+    error = "It crashed as it loaded, and stays off until it is reloaded.";
+    sendChangeMessage();
+}
+
+int PluginHost::getNumLoading (const juce::PluginDescription& description)
+{
+    const std::lock_guard held (lock);
+    const auto found = helpers.find (getHelperKey (description));
+    const auto running = found != helpers.end() ? found->second.lock() : nullptr;
+    return running != nullptr ? running->loading.load() : 0;
 }
 
 void PluginHost::track (Running& running, std::int64_t id, SandboxedInstance& instance)
@@ -273,9 +324,19 @@ void PluginHost::track (Running& running, std::int64_t id, SandboxedInstance& in
 }
 
 PluginHost::Opened PluginHost::open (const juce::PluginDescription& description, const juce::MemoryBlock& state, int programWanted,
-                                     double sampleRate, int blockSize)
+                                     double sampleRate, int blockSize, const std::function<bool()>& abandoned)
 {
     Opened opened { description, state, nullptr, nullptr, {} };
+    const auto isAbandoned = [&abandoned, &opened]
+    {
+        if (abandoned == nullptr || ! abandoned())
+            return false;
+
+        opened.remote = nullptr; // closed in its helper, if it opened
+        opened.running = nullptr;
+        opened.error = "It wasn't wanted any more.";
+        return true;
+    };
 
     if (hasCrashedWhileLoading (description))
     {
@@ -283,17 +344,46 @@ PluginHost::Opened PluginHost::open (const juce::PluginDescription& description,
         return opened;
     }
 
-    auto running = getHelper (getHelperKey (description), opened.error);
-
-    if (running == nullptr)
-        return opened;
-
     sandbox::BlockChannel::Limits limits;
     limits.maxSamples = std::max (smallestChannel, blockSize);
     limits.maxChanges = engine::DeviceRunner::maximumChanges; // what Phazite's engine moves in a block
-    opened.remote = open (*running, description, state, sampleRate > 0.0 ? sampleRate : 44100.0, limits, opened.error);
+    std::shared_ptr<Running> running;
 
-    if (opened.remote == nullptr)
+    for (auto tries = 0;; ++tries)
+    {
+        if (isAbandoned())
+            return opened;
+
+        running = getHelper (getHelperKey (description), opened.error);
+
+        if (running == nullptr)
+            return opened;
+
+        // Whether another instance was in the helper, or loading in it, as this was sent: one that takes the helper down
+        // meanwhile would take this one's load with it.
+        auto shared = running->loading.load() > 0;
+
+        {
+            const std::lock_guard instancesHeld (running->lock);
+            shared = shared || ! running->instances.empty();
+        }
+
+        opened.remote = open (*running, description, state, sampleRate > 0.0 ? sampleRate : 44100.0, limits, opened.error);
+
+        if (opened.remote != nullptr || running->helper->isRunning())
+            break;
+
+        // Its helper went as it loaded: its own crash, unless another may have taken it down (one in it, or one that crashed
+        // it as it loaded); then once more, in a fresh helper.
+        if ((! shared && ! running->crashedLoading.load()) || tries > 0)
+        {
+            running->crashedLoading = true;
+            keepOffAfterCrash (description, opened.error);
+            return opened;
+        }
+    }
+
+    if (opened.remote == nullptr || isAbandoned())
         return opened;
 
     // Where its state left another program: that program, then the state again, so that the settings are never overridden
@@ -310,6 +400,7 @@ PluginHost::Opened PluginHost::open (const juce::PluginDescription& description,
     }
 
     opened.running = std::move (running);
+    isAbandoned();
     return opened;
 }
 
@@ -326,9 +417,54 @@ std::unique_ptr<SandboxedInstance> PluginHost::makeInstance (Opened& opened)
     return instance;
 }
 
-void PluginHost::runInBackground (std::function<void()> job)
+void PluginHost::runInBackground (const juce::String& helperKey, std::function<void (const BackgroundJobs::ShouldStop&)> job)
 {
-    openings->add ([run = std::move (job)] (const BackgroundJobs::ShouldStop&) { run(); });
+    const std::lock_guard held (lock);
+
+    if (stopping)
+        return;
+
+    // Behind the jobs for the same helper, if any wait: they run one after another on one thread.
+    auto& waiting = waitingJobs[helperKey];
+    waiting.push_back (std::move (job));
+
+    if (waiting.size() == 1)
+        openings->add ([this, helperKey] (const BackgroundJobs::ShouldStop& shouldStop) { runJobs (helperKey, shouldStop); });
+}
+
+void PluginHost::runJobs (const juce::String& helperKey, const BackgroundJobs::ShouldStop& shouldStop)
+{
+    for (;;)
+    {
+        std::function<void (const BackgroundJobs::ShouldStop&)> job;
+
+        {
+            const std::lock_guard held (lock);
+            const auto found = waitingJobs.find (helperKey);
+
+            if (found == waitingJobs.end() || found->second.empty())
+                return;
+
+            job = found->second.front(); // stays at the front while it runs, so that the next joins this thread
+        }
+
+        if (! shouldStop())
+            job (shouldStop);
+
+        const std::lock_guard held (lock);
+        const auto found = waitingJobs.find (helperKey);
+
+        if (found == waitingJobs.end())
+            return;
+
+        found->second.pop_front();
+
+        if (found->second.empty())
+        {
+            waitingJobs.erase (found);
+            return;
+        }
+    }
 }
 
 std::unique_ptr<SandboxedInstance> PluginHost::createInstance (const juce::PluginDescription& description, const juce::MemoryBlock& state,
@@ -359,7 +495,12 @@ bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
     auto remote = open (*running, description, state, rate, limits, error);
 
     if (remote == nullptr)
+    {
+        if (! running->helper->isRunning())
+            keepOffAfterCrash (description, error);
+
         return false;
+    }
 
     if (! remote->getInfo().programs.empty() && remote->getProgram() != programNow)
     {

@@ -74,8 +74,14 @@ public:
     // A message that wants no answer.
     bool post (MessageWriter&);
 
-    // Ends the helper at once, as a hang asks. Not on the pipe's thread.
+    // Ends the helper at once, as a hang asks, and keeps it from starting if start() hasn't started it yet (from any thread
+    // but the pipe's: one that quits may end it while another starts it).
     void kill();
+
+    // How long a helper asked to quit, as this goes, has before it is ended (a second; longer in a test that holds a
+    // helper's ending).
+    static constexpr int quitMilliseconds = 1000;
+    void setQuitMilliseconds (int milliseconds) noexcept { quitLimit = milliseconds; }
 
     // How long its message thread may go without answering the heartbeat, and an audio thread of its keep a block,
     // before it is taken for hung and ended (shorter in the tests); and a block kept that long, told from any thread, the
@@ -104,6 +110,8 @@ private:
     std::unique_ptr<Pipe> pipe;
     std::unique_ptr<Watch> watch; // stopped before the process and the pipe go
     std::atomic<bool> running { false }, lost { false }, hung { false }, endedForHanging { false };
+    bool stopped = false; // kill() called: it doesn't start (processLock held)
+    std::atomic<int> quitLimit { quitMilliseconds };
     std::atomic<std::int64_t> nextRequest { 1 };
     std::atomic<int> messageLimit { messageHangMilliseconds }, audioLimit { audioHangMilliseconds };
     std::atomic<std::int64_t> heartbeat { 0 }; // the heartbeat's request not answered yet, or 0

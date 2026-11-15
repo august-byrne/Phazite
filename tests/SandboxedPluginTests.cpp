@@ -8,13 +8,18 @@
 #include "EnginePlayback.h"
 #include "SandboxedPlugins.h"
 #include "TestSong.h"
+#include "app/ProjectSession.h"
 #include "app/SandboxedEditor.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
+#include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/PluginScanner.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixHandle.h"
 #include "model/mixer/MixerModel.h"
@@ -26,9 +31,12 @@
 #include "model/plugins/internal/SandboxedInstance.h"
 #include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/presets/PresetModel.h"
+#include "model/project/NewProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
+#include "services/RecentProjects.h"
+#include "services/Settings.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/Keymap.h"
@@ -1432,6 +1440,10 @@ namespace
 using Kind = phazite::test::TestPlugins::Kind;
 using Status = phazite::PluginInstances::Status;
 
+// How long a test waits for what it waits for, at most: long, as the tests' waits are, for a loaded machine; it waits for
+// conditions, never for time.
+constexpr int longWait = 120000;
+
 // A slow stand-ins' gate (host/TestPlugins.h), for being made and giving a state or for closing: shut while this lives,
 // unless opened, and open again as it goes; the files they leave as they begin to wait cleared first.
 struct SlowGate
@@ -1439,7 +1451,7 @@ struct SlowGate
     explicit SlowGate (bool forClosing = false)
         : closing (forClosing)
     {
-        for (const auto kind : { Kind::slow, Kind::slowToo })
+        for (const auto kind : { Kind::slow, Kind::slowToo, Kind::slowSibling })
             phazite::test::TestPlugins::getSlowWaiting (kind).deleteFile();
 
         shut();
@@ -1458,7 +1470,17 @@ struct SlowGate
 bool turnMessageLoop (int turns)
 {
     auto turned = 0;
-    return phazite::test::dispatchMessagesUntil ([&turned, turns] { return ++turned >= turns; }, 60000);
+    return phazite::test::dispatchMessagesUntil ([&turned, turns] { return ++turned >= turns; }, longWait);
+}
+
+// A slow stand-in at the end of a track's effects, as a device list adds one, by its description (the slow one and its
+// sibling share a "file", which TestSong::addEffect() finds devices by).
+phazite::DeviceID addSlow (TestSong& song, phazite::TrackID track, Kind kind = Kind::slow)
+{
+    phazite::addEffect (song.context, track, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (kind)));
+    const auto effects = phazite::getEffects (song.context, track);
+    REQUIRE (! effects.empty());
+    return effects.back().id;
 }
 } // namespace
 
@@ -1470,7 +1492,7 @@ TEST_CASE (
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
-    const auto slow = song.addEffect (track, "PhaziteTestSlow");
+    const auto slow = addSlow (song, track);
     const auto slowToo = song.addEffect (track, "PhaziteTestSlowToo");
     song.setParameter (slow, "60", 0.5f); // its Level
     REQUIRE (song.getProject().save().wasOk());
@@ -1490,7 +1512,7 @@ TEST_CASE (
             return phazite::test::TestPlugins::getSlowWaiting (Kind::slow).existsAsFile()
                    && phazite::test::TestPlugins::getSlowWaiting (Kind::slowToo).existsAsFile();
         },
-        20000));
+        longWait));
 
     // The message loop turns on while they load, and the song is used: a change undone and made again; one of them taken
     // away and back by undo, which loads it again in the background.
@@ -1505,17 +1527,21 @@ TEST_CASE (
     CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
     CHECK (phazite::getPluginsLoading (opened).size() == 2);
 
+    // A plug-in added meanwhile opens at once, as a plug-in added does: its window or a preset has it straight away.
+    const auto added = song.addEffect (track, "PhaziteTestEffect");
+    CHECK (phazite::findPluginInstance (opened, added) != nullptr);
+
     // A render started meanwhile says why it can't, rather than render without them.
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);
     phazite::toggleFreeze (song.context, host);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, longWait));
     CHECK (host.finished[0].contains ("still loading"));
     CHECK_FALSE (phazite::isFrozen (song.context, track));
 
     // Opened: each comes in, with what the song set it to, and plays (6 dB down, its track's volume as the redo left it).
     gate.open();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, longWait));
     CHECK (phazite::getPluginStatus (opened, slow) == Status::playing);
     CHECK (phazite::getPluginStatus (opened, slowToo) == Status::playing);
     auto& instance = getSandboxed (song, slow);
@@ -1532,9 +1558,10 @@ TEST_CASE ("A save asks slow plug-ins for their states at once while the message
     // Known bugs 69 and 89: a save asked every plug-in for its state in turn, on the message thread, and Auto Save did so a
     // second after each change, whether a plug-in had changed or not.
     SandboxedPlugins sandboxed;
+    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto track = song.firstTrack;
-    const auto slow = song.addEffect (track, "PhaziteTestSlow");
+    const auto slow = addSlow (song, track);
     const auto slowToo = song.addEffect (track, "PhaziteTestSlowToo");
     REQUIRE (song.getProject().save().wasOk());
     auto& opened = getSong (song);
@@ -1544,13 +1571,13 @@ TEST_CASE ("A save asks slow plug-ins for their states at once while the message
     song.setParameter (slowToo, "60", 0.25f);
     SlowGate gate;
     auto saved = false;
-    phazite::whenPluginStatesIn (opened, true, [&song, &saved] { saved = song.getProject().save().wasOk(); });
+    phazite::whenPluginStatesIn (opened, true, [&song, &saved] (bool) { saved = song.getProject().save().wasOk(); });
     CHECK_FALSE (saved);
     CHECK (turnMessageLoop (100));
     CHECK_FALSE (saved);
 
     gate.open();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, longWait));
     CHECK (phazite::getPluginsWithOlderStates (opened).isEmpty());
     CHECK_FALSE (song.getProject().hasUnsavedChanges());
 
@@ -1559,14 +1586,18 @@ TEST_CASE ("A save asks slow plug-ins for their states at once while the message
     phazite::AutosaveTimer timer (song.getProject());
     timer.setAutoSave (true);
     song.setVolume (track, -6.0f);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, longWait));
 
-    // One that changed is asked, and waited for while the message loop turns: the save comes with its answer.
+    // One that changed is asked, once Auto Save is due, and waited for while the message loop turns: the save comes with
+    // its answer.
     song.setParameter (slow, "60", 0.75f);
-    CHECK (turnMessageLoop (400)); // past Auto Save's second of quiet
+    auto& slowInstance = getSandboxed (song, slow);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&slowInstance] { return slowInstance.isAskingState(); }, longWait));
+    CHECK (turnMessageLoop (100));
+    CHECK (slowInstance.isAskingState());
     CHECK (song.getProject().hasUnsavedChanges());
     gate.open();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, longWait));
 
     // One that never answers is given up on once its time has passed: the project is saved, with the state it gave before,
     // and the save says which; one that didn't change and didn't answer either keeps a state that is its own.
@@ -1580,14 +1611,22 @@ TEST_CASE ("A save asks slow plug-ins for their states at once while the message
     timer.onOlderPluginStates = [&told] (const juce::StringArray& plugins) { told = plugins; };
     gate.shut();
     song.setParameter (slow, "60", 0.1f);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, longWait));
     CHECK (told == juce::StringArray ("Test Slow"));
     CHECK (phazite::getPluginsWithOlderStates (opened) == juce::StringArray ("Test Slow"));
 
     saved = false;
-    phazite::whenPluginStatesIn (opened, true, [&song, &saved] { saved = song.getProject().save().wasOk(); });
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, 20000));
+    phazite::whenPluginStatesIn (opened, true, [&song, &saved] (bool) { saved = song.getProject().save().wasOk(); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved; }, longWait));
     CHECK (phazite::getPluginsWithOlderStates (opened) == juce::StringArray ("Test Slow"));
+
+    // Answering again, it is asked again by the next Auto Save, which a change elsewhere brings: its state is no longer
+    // older. (Its helper isn't ended for not answering meanwhile: this test's hang limit is long.)
+    gate.open();
+    REQUIRE_FALSE (slowInstance.hasCrashed());
+    song.setVolume (track, -3.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! song.getProject().hasUnsavedChanges() && phazite::getPluginsWithOlderStates (opened).isEmpty(); }, longWait));
 }
 
 TEST_CASE ("Closing a project lets go of its slow plug-ins' helpers at once: they end on their own, beside each other")
@@ -1595,16 +1634,24 @@ TEST_CASE ("Closing a project lets go of its slow plug-ins' helpers at once: the
     // Known bug 69: closing waited for each plug-in to close in its helper, and for each helper to quit, in turn.
     SandboxedPlugins sandboxed;
     SandboxedPlugins::getHost().waitForHelpersEnded();
+
+    // Their helpers have as long as this test to quit before they are ended: their ending lasts until the gate opens.
+    struct QuitLimit
+    {
+        QuitLimit() { SandboxedPlugins::getHost().setQuitMilliseconds (longWait); }
+        ~QuitLimit() { SandboxedPlugins::getHost().setQuitMilliseconds (phazite::sandbox::Helper::quitMilliseconds); }
+    } quitLimit;
+
     auto song = std::make_unique<TestSong>();
-    song->addEffect (song->firstTrack, "PhaziteTestSlow");
+    addSlow (*song, song->firstTrack);
     song->addEffect (song->firstTrack, "PhaziteTestSlowToo");
     REQUIRE (SandboxedPlugins::getHost().getNumHelpers() == 2);
 
-    // Shut, neither can close: the project closes, and their helpers end meanwhile, nothing waiting for them (each is asked
-    // to quit, and ended a second after if it hasn't).
+    // Shut, neither can close: the project closes, and their helpers end meanwhile, nothing waiting for them.
     SlowGate gate (true);
     song = nullptr;
-    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 0; }, 10000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 0; }, longWait));
+    CHECK (turnMessageLoop (100));
     CHECK (SandboxedPlugins::getHost().getNumHelpersEnding() == 2);
 
     gate.open();
@@ -1643,7 +1690,8 @@ TEST_CASE ("A plug-in whose program would override its settings opens again on i
     told.writeFloat (0.5f); // its tone
     told.writeFloat (1.0f); // as its own window would set them, telling the host
     REQUIRE (instance->getRemote().setState (told.getMemoryBlock(), 10000));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance->getParameterValue (gain), 0.8f); }, 20000));
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance->getParameterValue (gain), 0.8f); }, longWait));
 
     song.reopen();
     instance = &getSandboxed (song, effect);
@@ -1728,9 +1776,261 @@ TEST_CASE ("A plug-in's editor fits its plug-in at any Interface Size: as large 
                 return child != nullptr && GetClientRect (child, &client) && std::abs (client.right - area.getWidth()) <= 1
                        && std::abs (client.bottom - area.getHeight()) <= 1;
             },
-            20000));
+            longWait));
 
         editor = nullptr;
     }
 }
+
+TEST_CASE ("Auto Save asks a plug-in whose window was open for its state, though it said nothing changed")
+{
+    // A plug-in needn't tell what its window changes (a sample loaded in it): Auto Save asks it all the same.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    REQUIRE (song.getProject().save().wasOk());
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    auto& instance = getSandboxed (song, effect);
+
+    // Its window shown and closed; its gain changed in it without a word to Phazite.
+    REQUIRE (phazite::createSandboxedEditor (session->getPlugins().find (effect)) != nullptr);
+    juce::MemoryOutputStream unsaid;
+    unsaid.writeFloat (0.3f); // its gain
+    unsaid.writeFloat (0.5f); // its tone
+    REQUIRE (instance.getRemote().setState (unsaid.getMemoryBlock(), longWait));
+
+    // A change elsewhere: Auto Save stores its state as it is now.
+    phazite::AutosaveTimer timer (song.getProject());
+    timer.setAutoSave (true);
+    song.setVolume (song.firstTrack, -6.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.getProject().hasUnsavedChanges(); }, longWait));
+    const auto stored = phazite::readBytes (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString());
+    REQUIRE (stored.has_value());
+    CHECK (juce::MemoryInputStream (*stored, false).readFloat() == doctest::Approx (0.3f));
+}
 #endif
+
+TEST_CASE ("An answer that comes after the song gave a plug-in a state is older than it, and isn't stored over it")
+{
+    // A save asks a slow plug-in for its state; meanwhile the song gives it another (a preset loaded, an undo); the answer
+    // to the save's question comes after: what the song gave stays, and the next store writes it.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    REQUIRE (song.getProject().save().wasOk());
+    auto& instance = getSandboxed (song, slow);
+    song.setParameter (slow, "60", 0.5f);
+
+    struct StateLimit
+    {
+        StateLimit() { phazite::SandboxedInstance::setStateMilliseconds (300); } // the state given goes without its answer
+        ~StateLimit() { phazite::SandboxedInstance::setStateMilliseconds (0); }
+    } limit;
+
+    SlowGate gate;
+    instance.askState (phazite::SandboxedInstance::Ask::all);
+    juce::MemoryOutputStream given;
+    given.writeFloat (0.25f); // its Level
+    instance.setStateInformation (given.getData(), (int) given.getDataSize());
+
+    // The answer to the question asked before comes (the helper answers in turn: a question after it has its answer after).
+    gate.open();
+    REQUIRE (instance.getRemote().getState (longWait).has_value());
+    instance.takeAskedState();
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    session->getPlugins().store (slow);
+    const auto stored = phazite::readBytes (phazite::findDeviceState (getSong (song), slow)[phazite::schema::pluginState].toString());
+    REQUIRE (stored.has_value());
+    CHECK (*stored == given.getMemoryBlock());
+}
+
+TEST_CASE ("A song's plug-ins in one helper open one at a time; one taken away first never opens; another's crash isn't theirs")
+{
+    // One helper does one thing at a time: plug-ins sent to it at once each waited for those before them within their own
+    // time limit, and a crash of one took the others' loads with it.
+    SandboxedPlugins sandboxed;
+    const auto slowDescription = phazite::test::TestPlugins::getDescription (Kind::slow);
+
+    {
+        TestSong song;
+        const auto first = addSlow (song, song.firstTrack);
+        const auto sibling = addSlow (song, song.firstTrack, Kind::slowSibling);
+        const auto third = addSlow (song, song.firstTrack);
+        REQUIRE (song.getProject().save().wasOk());
+
+        SlowGate gate;
+        song.reopen (false);
+        auto& opened = getSong (song);
+        REQUIRE (phazite::test::dispatchMessagesUntil (
+            [] { return phazite::test::TestPlugins::getSlowWaiting (Kind::slow).existsAsFile(); }, longWait));
+        CHECK (turnMessageLoop (100));
+        CHECK (SandboxedPlugins::getHost().getNumLoading (slowDescription) == 1);
+
+        // The second taken away while it waits its turn: its job finds it gone, and opens nothing.
+        phazite::removeDevice (song.context, sibling);
+        gate.open();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, longWait));
+        CHECK (phazite::getPluginStatus (opened, first) == Status::playing);
+        CHECK (phazite::getPluginStatus (opened, third) == Status::playing);
+        CHECK_FALSE (phazite::test::TestPlugins::getSlowWaiting (Kind::slowSibling).existsAsFile());
+    }
+
+    // One that crashes its helper as it loads is kept off; the other in its file opens in a fresh helper.
+    TestSong song;
+    const auto crashing = addSlow (song, song.firstTrack);
+    const auto sibling = addSlow (song, song.firstTrack, Kind::slowSibling);
+    REQUIRE (phazite::findPluginInstance (getSong (song), sibling) != nullptr);
+    juce::MemoryOutputStream crashes;
+    crashes.writeFloat (-1.0f); // a Level below 0, which it crashes from as it next opens
+    getSandboxed (song, crashing).setStateInformation (crashes.getData(), (int) crashes.getDataSize());
+    REQUIRE (song.getProject().save().wasOk());
+
+    song.reopen();
+    CHECK (phazite::getPluginStatus (getSong (song), crashing) == Status::crashedWhileLoading);
+    CHECK (phazite::getPluginStatus (getSong (song), sibling) == Status::playing);
+}
+
+TEST_CASE ("A plug-in still loading is silent in its place, an effect too, and its sound fades in as it comes in")
+{
+    // An effect that can't play is silent, never dry (a limiter on the master passed dry is worse than a gap).
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    const auto slow = addSlow (song, track);
+    REQUIRE (song.getProject().save().wasOk());
+
+    SlowGate gate;
+    song.reopen (false);
+    auto& opened = getSong (song);
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    auto audio = playback.play (0.3);
+    CHECK (audio.getMagnitude (0, 0, audio.getNumSamples()) == 0.0f);
+
+    // It comes in: no step larger than the tone's own, as its sound fades in over 5 ms.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, longWait));
+    CHECK (turnMessageLoop (10)); // the plan made again with it
+    audio = playback.play (0.6);
+    CHECK (getLargestStep (audio, 0, 0) < 0.02f);
+    CHECK (levelOf (audio, 0, 0.3, 0.55) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("What waits for a song's plug-ins' states is told once, with not all of them, if the song's plug-ins go first")
+{
+    // A version switched to, or the project closed some other way, while a close waited: the close goes on.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    addSlow (song, song.firstTrack);
+    auto& project = song.getProject();
+    SlowGate gate;
+    auto calls = 0;
+    auto allIn = true;
+    phazite::whenPluginStatesIn (getSong (song), true,
+                                 [&calls, &allIn] (bool in)
+                                 {
+                                     ++calls;
+                                     allIn = in;
+                                 });
+    CHECK (turnMessageLoop (10));
+    CHECK (calls == 0);
+
+    phazite::setSong (song.context, nullptr);
+    CHECK (calls == 1);
+    CHECK_FALSE (allIn);
+    gate.open();
+    phazite::setSong (song.context, &project.getSong());
+    CHECK (turnMessageLoop (10));
+    CHECK (calls == 1);
+}
+
+TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for the project they were for")
+{
+    // A quit (a close) and then Ctrl+S, while a plug-in answers: the close opens another project, and the save, which was
+    // for the one closed, saves nothing else.
+    SandboxedPlugins sandboxed;
+    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
+    phazite::test::TemporaryFolder temp;
+    juce::File file;
+    phazite::DeviceID slow;
+
+    {
+        juce::String error;
+        auto made = phazite::Project::create (temp.folder, "Slow", error);
+        REQUIRE (made != nullptr);
+        auto& song = made->getSong();
+        slow = phazite::insertDeviceState (
+            song, phazite::getTrackIDs (song).front(),
+            phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+        REQUIRE (made->save().wasOk());
+        file = made->getFile();
+    }
+
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (phazite::test::getEngineContext(), recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String& title, const juce::String&) { errors.add (title); };
+    session.onNotice = [] (const juce::String&, const juce::String&) {};
+    session.setAutoSave (false);
+    phazite::test::RenderHost host;
+    phazite::CommandRegistry registry;
+    session.addCommands (registry, host);
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getPluginsLoading (session.getProject()->getSong()).isEmpty(); },
+                                                   longWait));
+
+    // A save by hand that waits more than a second shows in the progress window; its Cancel goes on without the plug-in,
+    // whose state is then older than its own, as the notice says.
+    auto* instance = phazite::findPluginInstance (session.getProject()->getSong(), slow);
+    REQUIRE (instance != nullptr);
+    instance->setParameterValue (instance->findParameter ("60"), 0.5f);
+
+    {
+        SlowGate gate;
+        session.saveProject();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return host.render != nullptr; }, longWait));
+        CHECK (host.render->getTitle() == "Waiting for the settings of Test Slow");
+        host.render = nullptr; // Cancel
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&errors] { return errors.contains ("Plug-in settings not saved"); }, longWait));
+    }
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance->isAskingState(); }, longWait));
+    SlowGate gate;
+    auto closes = 0, changes = 0;
+    session.closeThen (
+        [&] (bool closed)
+        {
+            ++closes;
+
+            if (closed)
+            {
+                REQUIRE (session.createProject ({}).wasOk());
+                session.onProjectChanged = [&changes] { ++changes; };
+            }
+        });
+
+    session.saveProject();
+    CHECK (turnMessageLoop (100));
+    CHECK (closes == 0);
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&closes] { return closes > 0; }, longWait));
+    CHECK (turnMessageLoop (100));
+    CHECK (closes == 1);
+    CHECK (changes == 0); // the save was for the project closed: it saved no other
+    CHECK (session.getProject()->getFile() != file);
+}
+
+TEST_CASE ("A helper ended before it starts never starts: Phazite quitting while plug-ins open waits for none of them")
+{
+    phazite::sandbox::Helper helper (SandboxedPlugins::getHost().getHelperProgram());
+    helper.kill();
+    CHECK_FALSE (helper.start (longWait));
+    CHECK_FALSE (helper.isRunning());
+}

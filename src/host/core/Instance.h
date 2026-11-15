@@ -84,6 +84,11 @@ private:
     std::vector<std::pair<int, bool>> gestures;
     std::atomic<bool> latencyChanged { false }, stateChanged { false }, parametersChanged { false };
 
+    // Whether it said its program may have changed (with what else it said: a program change by MIDI or in its window, or a
+    // VST3's restart), and the program Phazite was last told it is on, or set it to (message thread).
+    std::atomic<bool> programMayHaveChanged { false };
+    int toldProgram = 0;
+
     // Whether the blocks Phazite hands it now are a render's (the audio thread's to say), and whether the plug-in has been
     // told that it plays offline (the message thread's to tell it: setOffline()).
     std::atomic<bool> offlineWanted { false }, offline { false };

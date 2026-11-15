@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -68,16 +69,22 @@ public:
         off
     };
 
-    // Whether any plug-in is still loading, and which, by the names the song gives them.
+    // Whether any plug-in is still loading, or one; and which, by the names the song gives them.
     bool isLoading() const;
+    bool isLoading (DeviceID) const;
     juce::StringArray getLoading() const;
 
     // The plug-ins' states asked for at once, without waiting: every plug-in's (a save by hand, closing), or those whose state
-    // may have changed since they last gave or were given it (Auto Save). Then called back on the message thread once every
-    // answer is in, or given up on as its time passed (nothing after this goes). And the plug-ins whose states the song
-    // holds are older than theirs: they didn't answer since they may have changed, or their helper went.
-    void whenStatesIn (bool all, std::function<void()>);
+    // may have changed since they last gave or were given it (Auto Save). Then called back once on the message thread, with
+    // true once every answer is in or given up on as its time passed, or with false at once if this goes first (a version
+    // switched to, the project closed) or the wait is given up by hand (giveUpStates(): the states the plug-ins gave last
+    // are kept, as for a time-out). What it calls must not take this down then and there: it posts what does. And the
+    // plug-ins whose states the song holds are older than theirs: they didn't answer since they may have changed, or their
+    // helper went.
+    void whenStatesIn (bool all, std::function<void (bool allIn)>);
+    void giveUpStates();
     juce::StringArray getOlderStates() const;
+    juce::StringArray getAsked() const; // those whose answers are still to come, by name
 
     // The same asked for, again as they change (none asked twice while its answer is to come), without a call: whether every
     // answer is in, or given up on, now.
@@ -133,7 +140,11 @@ private:
     std::map<DeviceID, Entry> entries;
     bool storing = false; // while it writes into the song, which it doesn't take back from it
     bool synced = false;  // the first sync() done
-    std::vector<std::function<void()>> waitingForStates;
+    std::vector<std::function<void (bool)>> waitingForStates;
+    std::set<DeviceID> broughtBack; // plug-ins an undo or a redo gave the song back, not opened yet
+
+    bool opensInBackground (DeviceID) const; // besides the first sync()'s: one an undo or redo brings back while others load
+    void callWaiting (bool allIn);           // what waits for the states, each once
 
     Entry* open (DeviceID, const juce::ValueTree& deviceState, bool inBackground = false);
     void finishOpening (DeviceID, Entry&);
@@ -165,10 +176,12 @@ bool reloadPlugin (Song&, DeviceID, juce::String& error);
 std::optional<PluginInstances::Status> getPluginStatus (const Song&, DeviceID);
 
 // Through the song's session (none: nothing to wait for): its plug-ins' states asked for at once, and a call once they are
-// in (PluginInstances::whenStatesIn()); the plug-ins whose states the song holds are older than theirs, and those still
-// loading, by name.
-void whenPluginStatesIn (const Song&, bool all, std::function<void()>);
+// in (PluginInstances::whenStatesIn(): with true at once without a session); the wait given up, and the plug-ins still
+// answering, by name; the plug-ins whose states the song holds are older than theirs, and those still loading, by name.
+void whenPluginStatesIn (const Song&, bool all, std::function<void (bool allIn)>);
 bool askPluginStates (const Song&, bool all);
+void giveUpPluginStates (const Song&);
+juce::StringArray getPluginsAnswering (const Song&);
 juce::StringArray getPluginsWithOlderStates (const Song&);
 juce::StringArray getPluginsLoading (const Song&);
 } // namespace phazite

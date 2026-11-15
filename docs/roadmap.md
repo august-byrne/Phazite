@@ -57,7 +57,8 @@ that failed before its fix, and each part's changes read by a reviewer whose fin
 left is in [known-bugs.md](known-bugs.md), with why:
 
 - S1.4: closing a plug-in's window still waits two seconds, and a commit, a copied track or a preset saved still
-  waits for plug-ins whose settings changed (known bugs 165 and 166).
+  waits for plug-ins whose settings changed (known bugs 165 and 166); a plug-in with latency that joins as a project
+  loads moves the other tracks' timing in one step (167).
 - S1.11: the shortcuts editor takes away keys that commands share on purpose, which needs an editor of Phazite's
   own (known bug 110).
 - S1.13: Escape doesn't take back a drag in the devices' graphs or on a knob's modulation ring (known bug 140),

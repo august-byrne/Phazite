@@ -37,6 +37,7 @@ SandboxedEditor::SandboxedEditor (std::shared_ptr<SandboxedInstance> sandboxed, 
     };
 
     instance->onEditorKey = [this] (bool isDown, int keyCode, int modifiers) { runKey (isDown, keyCode, modifiers); };
+    instance->editorOpened(); // what its window changes, the plug-in needn't tell
     startTimerHz (keyChecksPerSecond);
 }
 
@@ -68,6 +69,7 @@ SandboxedEditor::~SandboxedEditor()
 {
     instance->onEditorResized = nullptr;
     instance->onEditorKey = nullptr;
+    instance->editorClosed();
 
     if (! instance->hasCrashed())
         instance->getRemote().closeEditor (closeMilliseconds);

@@ -109,6 +109,9 @@ SandboxedProcessor::SandboxedProcessor (std::shared_ptr<SandboxedInstance> sandb
 
     info.parameters = parameters;
     waiting.reserve (maximumWaiting);
+
+    // One that loaded while the engine played silence in its place (LoadingPlugin) fades in as it first plays.
+    startsSilent = instance.takeJoinLate();
 }
 
 int SandboxedProcessor::findParameter (const juce::String& ownID) const
@@ -122,7 +125,8 @@ void SandboxedProcessor::prepare (double sampleRate, int maximumBlockSize)
     maximumBlock = std::max (1, maximumBlockSize);
     instance.prepareToPlay (sampleRate, maximumBlockSize);
     fadeStep = 1.0f / (float) std::max (1, juce::roundToInt (fadeSeconds * sampleRate));
-    heard = instance.hasCrashed() ? 0.0f : 1.0f; // nothing to fade out of one that plays nothing from the start
+    // Nothing to fade out of one that plays nothing from the start, nor of one that comes in after silence.
+    heard = instance.hasCrashed() || std::exchange (startsSilent, false) ? 0.0f : 1.0f;
 
     // An effect's input, for as long as it delays its sound and a block more, to fade out from.
     if (info.kind == devices::DeviceKind::effect)
@@ -514,5 +518,19 @@ int SandboxedProcessor::getLatencySamples() const
 double SandboxedProcessor::getTailSeconds() const
 {
     return instance.getTailLengthSeconds();
+}
+
+//==============================================================================
+LoadingPlugin::LoadingPlugin (bool isInstrument)
+{
+    info.typeID = "pluginLoading";
+    info.name = "Loading";
+    info.kind = isInstrument ? devices::DeviceKind::instrument : devices::DeviceKind::effect;
+}
+
+void LoadingPlugin::process (const devices::ProcessContext& context)
+{
+    for (int channel = 0; channel < context.numChannels; ++channel)
+        juce::FloatVectorOperations::clear (context.channels[channel], context.numSamples);
 }
 } // namespace phazite

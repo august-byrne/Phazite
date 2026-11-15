@@ -106,6 +106,7 @@ Instance::Instance (std::int64_t instanceID, std::unique_ptr<juce::AudioPluginIn
     if (const auto* vst3 = plugin->getVST3Client())
         vst3ClassID = sandbox::readVst3ClassID (vst3->getPreset());
 
+    toldProgram = plugin->getCurrentProgram(); // as Phazite is told it opened (describe())
     plugin->addListener (this);
     plugin->setPlayHead (playHead.get());
     start (std::move (blockChannel), sampleRate);
@@ -276,6 +277,7 @@ void Instance::setProgram (int index)
 
     const juce::ScopedLock held (plugin->getCallbackLock());
     plugin->setCurrentProgram (index);
+    toldProgram = plugin->getCurrentProgram(); // Phazite's own choice, which it knows of
 }
 
 void Instance::setParameter (int index, float value)
@@ -340,6 +342,10 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
 
     tellOffline();
 
+    // Another program than Phazite knows of, however it was said (a restart's echo of the same program changes nothing).
+    if (programMayHaveChanged.exchange (false) && plugin->getCurrentProgram() != toldProgram)
+        stateChanged = true;
+
     if (latencyChanged.exchange (false))
     {
         MessageWriter message (MessageType::latencyChanged, 0);
@@ -349,8 +355,9 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
 
     if (stateChanged.exchange (false))
     {
+        toldProgram = plugin->getCurrentProgram();
         MessageWriter message (MessageType::stateChanged, 0);
-        message.add (id).add ((std::int32_t) plugin->getCurrentProgram());
+        message.add (id).add ((std::int32_t) toldProgram);
         send (message);
     }
 
@@ -557,6 +564,11 @@ void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails
     // it made an idle project's plug-ins an unsaved change. JUCE workaround W3 (docs/juce-workarounds.md).
     if (details.nonParameterStateChanged || (details.programChanged && ! details.parameterInfoChanged))
         stateChanged = true;
+
+    // A restart that does change the program (a MIDI program change, as JUCE's VST3 host tells it) is one, which the
+    // message thread tells by the program's number (takeNotices()).
+    if (details.programChanged)
+        programMayHaveChanged = true;
 }
 
 void Instance::parameterValueChanged (int index, float value)

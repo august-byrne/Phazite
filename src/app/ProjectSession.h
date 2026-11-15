@@ -203,6 +203,12 @@ private:
     // state of some plug-ins than theirs, by name (none for none).
     void closeWithPluginStates (std::function<void (bool closed)>);
     void tellOlderPluginStates (const juce::StringArray& plugins);
+
+    // The open project's plug-ins asked for their states, and then what comes next (ProjectSession.cpp); and this session's
+    // life, which what comes a message later checks.
+    void withPluginStates (std::function<void (bool sameProject)>);
+    std::weak_ptr<void> shownWait; // the wait the progress window shows, if it does
+    std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     void showError (const juce::String& title, const juce::String& message);
     void showNotice (const juce::String& title, const juce::String& message);
 

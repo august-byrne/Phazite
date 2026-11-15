@@ -564,14 +564,27 @@ namespace
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (level->getValue()); }
 
+        void prepareToPlay (double, int) override { prepared = true; }
+
         void getStateInformation (juce::MemoryBlock& data) override
         {
             waitAtSlowGate();
             StandIn::getStateInformation (data);
         }
 
+        // A Level below 0 in the state it opens from crashes it, as a plug-in that crashes as it loads does (set later, it
+        // is only kept).
+        void setStateInformation (const void* data, int size) override
+        {
+            StandIn::setStateInformation (data, size);
+
+            if (! prepared && level->getValue() < 0.0f)
+                crashNow();
+        }
+
     private:
         StandInParameter* level = nullptr;
+        bool prepared = false;
     };
 
     // Each kind's name, its "file" in the format, and its number.
@@ -611,6 +624,8 @@ namespace
                 return { "Test Slow", "PhaziteTestSlow", 0x7e5761, false };
             case Kind::slowToo:
                 return { "Test Slow Too", "PhaziteTestSlowToo", 0x7e5762, false };
+            case Kind::slowSibling:
+                return { "Test Slow Sibling", "PhaziteTestSlow", 0x7e5763, false };
         }
 
         return { "Test Effect", "PhaziteTestEffect", 0x7e57e5, false };
@@ -658,8 +673,9 @@ namespace
     protected:
         void createPluginInstance (const juce::PluginDescription& description, double, int, PluginCreationCallback callback) override
         {
+            // By its file and its number: a file may hold several (the slow one and its sibling).
             for (const auto kind : TestPlugins::kinds)
-                if (description.fileOrIdentifier == describe (kind).file)
+                if (description.fileOrIdentifier == describe (kind).file && description.uniqueId == describe (kind).uniqueId)
                     return callback (TestPlugins::create (kind, TestPlugins::getVersion (description)), {});
 
             callback (nullptr, "No such test plug-in.");
@@ -716,6 +732,7 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
             return std::make_unique<TestMono>();
         case Kind::slow:
         case Kind::slowToo:
+        case Kind::slowSibling:
             return std::make_unique<TestSlow> (kind);
     }
 
@@ -730,7 +747,7 @@ juce::File TestPlugins::getSlowGate (bool closing)
 
 juce::File TestPlugins::getSlowWaiting (Kind kind)
 {
-    return getSlowGate().getSiblingFile (juce::String ("PhaziteTestSlowWaiting-") + describe (kind).file);
+    return getSlowGate().getSiblingFile (juce::String ("PhaziteTestSlowWaiting-") + juce::String (describe (kind).uniqueId));
 }
 
 TestPlugins::Playhead TestPlugins::Playhead::read (const juce::MemoryBlock& state)

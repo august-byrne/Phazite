@@ -488,11 +488,30 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
     // One that is loaded (not one missing on this computer), in its helper, kept by its ID while the song's instances keep
     // the same instance: through its channel, with its mix as the engine's.
     const auto sandboxed = plugins != nullptr ? plugins->find (getDeviceID (deviceState)) : nullptr;
+    const auto id = getID (deviceState, schema::deviceID);
 
     if (sandboxed == nullptr)
-        return nullptr;
+    {
+        // One still loading as its project opened: silence in its place (an effect that can't play is silent, never dry),
+        // until it has, then its sound fades in (model/plugins/internal/SandboxedProcessor.h: LoadingPlugin).
+        if (plugins == nullptr || ! plugins->isLoading (getDeviceID (deviceState)))
+            return nullptr;
 
-    const auto id = getID (deviceState, schema::deviceID);
+        auto& loading = devices[id];
+
+        if (loading == nullptr || dynamic_cast<const LoadingPlugin*> (&loading->getRunner().getProcessor()) == nullptr)
+        {
+            auto processor = std::make_unique<LoadingPlugin> (getPluginIdentity (deviceState).isInstrument);
+            const auto& info = processor->getInfo();
+            loading = std::make_shared<engine::DeviceNode> (info, std::move (processor));
+            loading->getRunner().prepare (preparedRate, preparedBlockSize);
+        }
+
+        loading->setOn (! (bool) deviceState[schema::deviceOff]);
+        used.insert (id);
+        return loading;
+    }
+
     auto& node = devices[id];
     const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 

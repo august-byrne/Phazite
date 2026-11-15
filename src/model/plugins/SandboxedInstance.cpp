@@ -605,6 +605,7 @@ bool SandboxedInstance::takeState (juce::MemoryBlock& state)
         {
             lastState = std::move (*taken);
             stateTakenAt = stateChanges;
+            editorSinceTaken = editorsOpen > 0;
             isNow = true;
         }
         else
@@ -619,8 +620,12 @@ bool SandboxedInstance::takeState (juce::MemoryBlock& state)
 
 void SandboxedInstance::setStateInformation (const void* data, int size)
 {
+    // The state it has now: an answer still to come from before is older, and is given up; taken in, it would replace this
+    // one, and the next store would write it over what the song gave the plug-in (a preset, an undo).
     lastState.replaceAll (data, (size_t) std::max (0, size));
-    stateTakenAt = stateChanges; // the state it has now
+    stateAsked = nullptr;
+    stateTakenAt = stateChanges;
+    editorSinceTaken = editorsOpen > 0;
 
     if (! hasCrashed())
         remote->setState (lastState, stateMilliseconds);
@@ -634,7 +639,7 @@ void SandboxedInstance::keepStateAsOpened() noexcept
 
 bool SandboxedInstance::mayHaveChangedState() const noexcept
 {
-    return stateTakenAt != stateChanges && stateMissedAt != stateChanges;
+    return stateTakenAt != stateChanges || editorsOpen > 0 || editorSinceTaken;
 }
 
 bool SandboxedInstance::isStateOlder() const noexcept
@@ -642,17 +647,37 @@ bool SandboxedInstance::isStateOlder() const noexcept
     return stateTakenAt != stateChanges;
 }
 
-void SandboxedInstance::askState (bool always)
+void SandboxedInstance::editorOpened() noexcept
 {
-    if (stateAsked != nullptr || hasCrashed() || ! (always || mayHaveChangedState()))
+    ++editorsOpen;
+    ++editorMoves;
+    editorSinceTaken = true;
+}
+
+void SandboxedInstance::editorClosed() noexcept
+{
+    editorsOpen = std::max (0, editorsOpen - 1);
+    ++editorMoves;
+}
+
+void SandboxedInstance::askState (Ask which)
+{
+    // A store that waits asks what said it changed and answers, so that it doesn't wait again for one that didn't, nor ask
+    // again what a save just took (a close's save after its gathering); Auto Save asks what may have changed, as its window
+    // was open too, and asks again one that didn't answer before.
+    const auto wanted = which == Ask::all || (which == Ask::changed && mayHaveChangedState())
+                        || (which == Ask::changedAndAnswering && stateTakenAt != stateChanges && stateMissedAt != stateChanges);
+
+    if (stateAsked != nullptr || hasCrashed() || ! wanted)
         return;
 
     stateAsked = remote->askState();
     stateAskedAt = stateChanges;
+    editorMovesAtAsk = editorMoves;
     stateAskedSince = juce::Time::getMillisecondCounterHiRes();
 }
 
-bool SandboxedInstance::takeAskedState (double waitUntil)
+bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
 {
     if (stateAsked == nullptr)
         return true;
@@ -662,11 +687,13 @@ bool SandboxedInstance::takeAskedState (double waitUntil)
 
     if (stateAsked->isDone())
     {
-        // As it was when it was asked: changed since, it is asked again at the next save.
+        // As it was when it was asked: changed since, it is asked again at the next save; and so is one whose window is open,
+        // or was shown or closed meanwhile.
         if (auto taken = sandbox::RemoteInstance::readState (*stateAsked))
         {
             lastState = std::move (*taken);
             stateTakenAt = stateAskedAt;
+            editorSinceTaken = editorsOpen > 0 || editorMoves != editorMovesAtAsk;
         }
         else
         {
@@ -677,7 +704,7 @@ bool SandboxedInstance::takeAskedState (double waitUntil)
         return true;
     }
 
-    if (juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())
+    if (giveUp || juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())
     {
         stateMissedAt = stateAskedAt; // given up on: the helper is taken for hung if it still doesn't answer
         stateAsked = nullptr;

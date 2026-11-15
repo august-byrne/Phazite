@@ -116,8 +116,10 @@ PluginInstances::PluginInstances (Song& s, PluginHost& h, double rate)
 
 PluginInstances::~PluginInstances()
 {
-    // What still opens goes on in the background, and is let go of there once it has opened: nothing waits for it.
+    // What still opens is abandoned (its jobs see their openings gone) and closed in the background: nothing waits for it.
+    // What waits for the states is told that not all came, so that a close goes on.
     stopTimer();
+    callWaiting (false);
     host.removeChangeListener (this);
     state.removeListener (this);
     song.setDeviceStateStore ({});
@@ -151,8 +153,9 @@ std::shared_ptr<SandboxedInstance> PluginInstances::find (DeviceID id)
     if (! isPluginState (device))
         return nullptr;
 
-    // While the song's plug-ins load in the background, one the song gets back loads there too (sync()).
-    auto* entry = open (id, device, isLoading());
+    // At once, as a plug-in added has its instance at once; one an undo brings back while the song's plug-ins load in the
+    // background loads there too (sync()).
+    auto* entry = open (id, device, opensInBackground (id));
     return entry != nullptr ? entry->instance : nullptr;
 }
 
@@ -161,12 +164,25 @@ bool PluginInstances::isLoading() const
     return std::any_of (entries.begin(), entries.end(), [] (const auto& entry) { return entry.second.opening != nullptr; });
 }
 
+bool PluginInstances::isLoading (DeviceID id) const
+{
+    const auto found = entries.find (id);
+    return found != entries.end() && found->second.opening != nullptr;
+}
+
+bool PluginInstances::opensInBackground (DeviceID id) const
+{
+    // Only what sync() opens: a render's own instances, which find() alone opens, all open at once.
+    return broughtBack.contains (id) && isLoading();
+}
+
 PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTree& device, bool inBackground)
 {
     auto& entry = entries[id];
     entry.instance = nullptr;
     entry.opening = nullptr;
     entry.error = {};
+    broughtBack.erase (id);
     const auto known = findKnownPlugin (host, getPluginIdentity (device));
     entry.wasKnown = known.has_value();
 
@@ -192,17 +208,31 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
 
     if (inBackground)
     {
-        // In its helper, on a thread of the host's, beside the others: the song plays meanwhile without it.
+        // In its helper, on a thread of the host's, after those before it in the same helper and beside the other helpers:
+        // the song plays meanwhile without it (silent in its place: SongPlayer). Abandoned if this lets go of it first (the
+        // project closed, the device taken away), before it opens or between its steps; what it opened for nothing is
+        // closed there and then.
         auto opening = std::make_shared<Opening>();
         opening->program = program;
         entry.opening = opening;
         entry.unloaded = Status::loading;
-        host.runInBackground (
-            [opening, &plugins = host, description = *known, stored, program, rate = sampleRate]
-            {
-                opening->opened = plugins.open (description, stored, program, rate, openBlockSize);
-                opening->done.store (true, std::memory_order_release);
-            });
+        host.runInBackground (PluginHost::getHelperKey (*known),
+                              [wanted = std::weak_ptr<Opening> (opening), &plugins = host, description = *known, stored, program,
+                               rate = sampleRate] (const BackgroundJobs::ShouldStop& shouldStop)
+                              {
+                                  const auto abandoned = [&wanted, &shouldStop] { return wanted.expired() || shouldStop(); };
+
+                                  if (abandoned())
+                                      return;
+
+                                  auto opened = plugins.open (description, stored, program, rate, openBlockSize, abandoned);
+
+                                  if (const auto kept = wanted.lock())
+                                  {
+                                      kept->opened = std::move (opened);
+                                      kept->done.store (true, std::memory_order_release);
+                                  }
+                              });
 
         startTimer (lookMilliseconds);
         return &entry;
@@ -259,6 +289,7 @@ void PluginInstances::finishOpening (DeviceID id, Entry& entry)
     }
 
     setUp (*made, findDeviceState (song, id), opening->opened.state, opening->program);
+    made->joinLate(); // the engine played silence in its place: its sound fades in
     entry.instance = std::move (made);
     listen (id, *entry.instance);
 }
@@ -314,10 +345,16 @@ void PluginInstances::timerCallback()
         host.sendChangeMessage();
     }
 
-    // Last: what it calls may let go of this (a project that closes once it is saved).
+    // Last.
     if (! waitingForStates.empty() && statesIn)
-        for (const auto& then : std::exchange (waitingForStates, {}))
-            then();
+        callWaiting (true);
+}
+
+void PluginInstances::callWaiting (bool allIn)
+{
+    // Each once, taken out first; and nothing of this touched after them, which one may let go of all the same.
+    for (const auto& then : std::exchange (waitingForStates, {}))
+        then (allIn);
 }
 
 bool PluginInstances::askStates (bool all)
@@ -328,7 +365,8 @@ bool PluginInstances::askStates (bool all)
     {
         if (entry.instance != nullptr)
         {
-            entry.instance->askState (all);
+            // Auto Save asks again one that didn't answer before, which a store that waits doesn't (store()).
+            entry.instance->askState (all ? SandboxedInstance::Ask::all : SandboxedInstance::Ask::changed);
             statesIn = entry.instance->takeAskedState() && statesIn;
         }
     }
@@ -336,16 +374,37 @@ bool PluginInstances::askStates (bool all)
     return statesIn;
 }
 
-void PluginInstances::whenStatesIn (bool all, std::function<void()> then)
+void PluginInstances::whenStatesIn (bool all, std::function<void (bool)> then)
 {
     if (askStates (all) && waitingForStates.empty())
     {
-        then();
+        then (true);
         return;
     }
 
     waitingForStates.push_back (std::move (then));
     startTimer (lookMilliseconds);
+}
+
+void PluginInstances::giveUpStates()
+{
+    // As for a time-out: the states the plug-ins gave last stay.
+    for (auto& [id, entry] : entries)
+        if (entry.instance != nullptr)
+            entry.instance->takeAskedState (0.0, true);
+
+    callWaiting (false);
+}
+
+juce::StringArray PluginInstances::getAsked() const
+{
+    juce::StringArray names;
+
+    for (const auto& [id, entry] : entries)
+        if (entry.instance != nullptr && entry.instance->isAskingState())
+            names.addIfNotAlreadyThere (getPluginIdentity (findDeviceState (song, id)).name);
+
+    return names;
 }
 
 juce::StringArray PluginInstances::getOlderStates() const
@@ -419,13 +478,13 @@ void PluginInstances::sync()
 
     std::erase_if (entries, [&held] (const auto& entry) { return ! held.contains (entry.first); });
 
-    // As the song opens, in the background, beside each other (known bug 69), and so while any of those still loads (one
-    // taken away and back by undo meanwhile); later, at once, as a plug-in added opens.
-    const auto inBackground = ! std::exchange (synced, true) || isLoading();
-
+    // As the song opens, in the background, beside each other (known bug 69), and so one an undo or redo brings back while
+    // any of those still loads; any other at once, as a plug-in added opens (find()).
     for (const auto& device : findPlugins (song))
         if (const auto id = getDeviceID (device); ! entries.contains (id))
-            open (id, device, inBackground);
+            open (id, device, ! synced || opensInBackground (id));
+
+    synced = true;
 }
 
 std::optional<PluginInstances::Status> PluginInstances::getStatus (DeviceID id)
@@ -500,7 +559,7 @@ void PluginInstances::store (const std::vector<DeviceID>& ids)
         {
             if (auto& instance = *found->second.instance; ! instance.isAskingState())
             {
-                instance.askState (false);
+                instance.askState (SandboxedInstance::Ask::changedAndAnswering);
                 asked.push_back (&instance);
             }
         }
@@ -675,6 +734,21 @@ void PluginInstances::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& ch
 {
     if (! storing && child.hasType (schema::VALUE) && findPluginOf (child).isValid())
         takeValueFromSong (child);
+
+    // The plug-ins an undo or a redo gives back (a device, or a track or container with its devices), which open in the
+    // background while the song's plug-ins load (opensInBackground()).
+    if (song.getUndoManager().isPerformingUndoRedo())
+    {
+        std::vector<juce::ValueTree> found;
+
+        if (child.hasType (schema::DEVICE) && isPluginState (child))
+            found.push_back (child);
+
+        findPlugins (child, found);
+
+        for (const auto& device : found)
+            broughtBack.insert (getDeviceID (device));
+    }
 }
 
 void PluginInstances::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
@@ -700,12 +774,24 @@ std::optional<PluginInstances::Status> getPluginStatus (const Song& song, Device
     return session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
 }
 
-void whenPluginStatesIn (const Song& song, bool all, std::function<void()> then)
+void whenPluginStatesIn (const Song& song, bool all, std::function<void (bool)> then)
 {
     if (auto* session = findSession (song))
         session->getPlugins().whenStatesIn (all, std::move (then));
     else
-        then();
+        then (true);
+}
+
+void giveUpPluginStates (const Song& song)
+{
+    if (auto* session = findSession (song))
+        session->getPlugins().giveUpStates();
+}
+
+juce::StringArray getPluginsAnswering (const Song& song)
+{
+    auto* session = findSession (song);
+    return session != nullptr ? session->getPlugins().getAsked() : juce::StringArray();
 }
 
 bool askPluginStates (const Song& song, bool all)

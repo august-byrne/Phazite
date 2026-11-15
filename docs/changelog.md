@@ -27,7 +27,8 @@ the reviews found is fixed too. The numbers in brackets are those the bugs had i
   naming a plug-in that had crashed, and never waits on a cancel; a crashed plug-in reloads at the engine's rate;
   only the channels handed over are read back; a VST3's switch is described as a switch (27 to 31, 64, 66, 141, 152).
 - **S1.4 Plug-ins off the message thread:** as a project opens its plug-ins load in the background, beside each
-  other, and the song plays and can be edited meanwhile, each plug-in sounding as it arrives; a save asks every
+  other, and the song plays and can be edited meanwhile, each plug-in silent in its place until it arrives and then
+  fading in; a save asks every
   plug-in for its settings at once and never keeps the window waiting, and names a plug-in that didn't answer; Auto
   Save asks only the plug-ins that changed; closing waits for no helper (69, 89). Closing a plug-in's window, and a
   commit or a preset saved after a plug-in changed, can still wait (165, 166).

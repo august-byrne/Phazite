@@ -18,6 +18,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -51,6 +52,13 @@ public:
     // tests' are shorter): for the helpers started from now on.
     void setHangLimits (int messageThreadMilliseconds, int audioThreadMilliseconds);
 
+    // How long a plug-in may take to load in its helper (a minute: a sample library can take long), from as its request
+    // is sent; and how long a helper that goes has to quit before it is ended (a second), for the helpers started from now
+    // on. The tests' are other.
+    static constexpr int defaultLoadMilliseconds = 60000;
+    void setLoadMilliseconds (int) noexcept;
+    void setQuitMilliseconds (int) noexcept;
+
     // A plug-in opened in its helper with a state (none for its own defaults) and, where that leaves it on another, a program
     // (-1 for the one the state leaves), then the state again (so that the program never overrides the settings), or nullptr
     // with why.
@@ -59,19 +67,30 @@ public:
 
     // The same in two halves, so that plug-ins open in the background, beside each other (known bug 69): opened in its helper,
     // which is started for it if it doesn't run (on any thread, which waits for as long as that takes: a job of the host's,
-    // runInBackground()); then made an instance of, on the message thread (nullptr, with why, for one that didn't open).
+    // runInBackground()), unless abandoned says it isn't wanted any more (asked before each step: one opened for nothing is
+    // closed at once); then made an instance of, on the message thread (nullptr, with why, for one that didn't open). Its
+    // helper is kept before its instance, which goes first and calls into it as it goes. An instance whose helper went as it
+    // loaded, while the helper held other instances or loads, may have been taken down by one of them: it is tried once
+    // more in a fresh helper before it counts as one that crashes as it loads.
     struct Opened
     {
         juce::PluginDescription description;
         juce::MemoryBlock state;
-        std::unique_ptr<sandbox::RemoteInstance> remote;
         std::shared_ptr<void> running; // its helper's
+        std::unique_ptr<sandbox::RemoteInstance> remote;
         juce::String error;
     };
 
-    Opened open (const juce::PluginDescription&, const juce::MemoryBlock& state, int program, double sampleRate, int blockSize);
+    Opened open (const juce::PluginDescription&, const juce::MemoryBlock& state, int program, double sampleRate, int blockSize,
+                 const std::function<bool()>& abandoned = {});
     std::unique_ptr<SandboxedInstance> makeInstance (Opened&);
-    void runInBackground (std::function<void()>);
+
+    // Runs a job on the host's opening threads, one at a time for each helper (a helper does one thing at a time, and a
+    // plug-in's load limit starts as its request is sent), the helpers beside each other; given what says the host goes.
+    void runInBackground (const juce::String& helperKey, std::function<void (const BackgroundJobs::ShouldStop&)>);
+
+    // How many plug-ins are being opened in a plug-in's helper now, for the tests.
+    int getNumLoading (const juce::PluginDescription&);
 
     // An instance whose helper went, opened again in a new one from the state it last had; false, with why, if it
     // didn't open.
@@ -109,19 +128,24 @@ private:
     juce::AudioPluginFormatManager formats;
     std::function<void()> scanCanceller;
     juce::File program;
-    int messageHangMilliseconds, audioHangMilliseconds;
+    int messageHangMilliseconds, audioHangMilliseconds, loadMilliseconds, quitMilliseconds;
     bool loads = true;
 
     // What the opening threads share with the message thread: the helpers, each kept alive by the instances in it (and
-    // what is being opened in it), and the plug-ins kept off.
+    // what is being opened in it), the plug-ins kept off, the jobs waiting for each helper, and whether the host goes (no
+    // helper starts then).
     mutable std::mutex lock;
     std::map<juce::String, std::weak_ptr<Running>> helpers;
     juce::StringArray crashedWhileLoading;
+    std::map<juce::String, std::deque<std::function<void (const BackgroundJobs::ShouldStop&)>>> waitingJobs;
+    bool stopping = false;
 
     std::shared_ptr<BackgroundJobs> endings;  // the helpers that go, each ended there (shared with the helpers)
     std::unique_ptr<BackgroundJobs> openings; // the plug-ins opened in the background, beside each other
 
-    std::shared_ptr<Running> getHelper (const juce::String& key, juce::String& error);
+    std::shared_ptr<Running> getHelper (const juce::String& key, juce::String& error, bool again = false);
+    void runJobs (const juce::String& helperKey, const BackgroundJobs::ShouldStop&); // a helper's, as they come
+    void keepOffAfterCrash (const juce::PluginDescription&, juce::String& error);    // a plug-in that crashed as it loaded
     std::unique_ptr<sandbox::RemoteInstance> open (Running&, const juce::PluginDescription&, const juce::MemoryBlock& state,
                                                    double sampleRate, const sandbox::BlockChannel::Limits&, juce::String& error);
     void track (Running&, std::int64_t id, SandboxedInstance&); // told of the helper's notices and its loss

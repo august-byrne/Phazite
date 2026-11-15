@@ -33,10 +33,8 @@ namespace phazite::sandbox
 namespace
 {
     // The pipe's reads and writes wait for as long as it takes: JUCE takes a read that times out for the pipe's loss, and
-    // the pipe is quiet while a song plays. How long a helper asked to quit has before it is ended, and how often the
-    // watching thread looks at the process.
+    // the pipe is quiet while a song plays. How often the watching thread looks at the process.
     constexpr int pipeTimeoutMilliseconds = -1;
-    constexpr int quitMilliseconds = 1000;
     constexpr int watchMilliseconds = 200;
     constexpr double heartbeatMilliseconds = 1000.0; // how often the message thread is asked whether it answers
 
@@ -226,7 +224,7 @@ Helper::~Helper()
     {
         const juce::ScopedLock held (processLock);
 
-        if (process.isRunning() && ! process.waitForProcessToFinish (quitMilliseconds))
+        if (process.isRunning() && ! process.waitForProcessToFinish (quitLimit.load()))
             process.kill();
     }
 
@@ -251,26 +249,30 @@ bool Helper::start (int timeoutMilliseconds)
     if (! program.existsAsFile())
         return false;
 
-    // A pipe of a name no other has, which the helper connects to.
+    // A pipe of a name no other has, which the helper connects to; the process started, and its watch; none of them once
+    // kill() has been called (by one that quits meanwhile: then nothing is left to end).
     const auto pipeName = "phazite-" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64());
-    pipe = std::make_unique<Pipe> (*this);
-
-    if (! pipe->createPipe (pipeName, pipeTimeoutMilliseconds, true))
-        return false;
 
     {
         const juce::ScopedLock held (processLock);
 
-        if (! process.start (getArguments (program, pipeName), 0))
+        if (stopped)
             return false;
+
+        pipe = std::make_unique<Pipe> (*this);
+
+        if (! pipe->createPipe (pipeName, pipeTimeoutMilliseconds, true) || ! process.start (getArguments (program, pipeName), 0))
+            return false;
+
+        // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a
+        // helper that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for
+        // ever.
+        running = true;
+        lost = true;
+        startDeadline = juce::Time::getMillisecondCounterHiRes() + timeoutMilliseconds;
+        watch = std::make_unique<Watch> (*this);
     }
 
-    // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a helper
-    // that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for ever.
-    running = true;
-    lost = true;
-    startDeadline = juce::Time::getMillisecondCounterHiRes() + timeoutMilliseconds;
-    watch = std::make_unique<Watch> (*this);
     auto hello = makeRequest (MessageType::hello);
     hello.add (protocolVersion);
     const auto answer = request (hello, timeoutMilliseconds);
@@ -295,7 +297,7 @@ bool Helper::start (int timeoutMilliseconds)
     lost = true;
     killProcess();
     closePipe();
-    watch = nullptr;
+    watch = nullptr; // not under the process's lock, which its thread may wait for (kill())
     return false;
 }
 
@@ -363,7 +365,12 @@ bool Helper::post (MessageWriter& message)
 
 void Helper::kill()
 {
-    // The process, whose end the watching thread then tells of.
+    // The process, whose end the watching thread then tells of; or none, if it hasn't started yet.
+    {
+        const juce::ScopedLock held (processLock);
+        stopped = true;
+    }
+
     running = false;
     killProcess();
     stopWaiting();

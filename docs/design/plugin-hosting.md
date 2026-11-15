@@ -104,17 +104,28 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 
 Phazite's window never waits for a plug-in as a project opens, saves or closes, as most DAWs' windows do.
 
-- **Opening:** the plug-ins of a project that opens load in the background, each in its helper, beside each other. The
-  song is there at once, and plays and edits without them meanwhile; each plug-in comes in, and plays, as it is ready.
-  The Project view lists each as "loading" until it has. A plug-in the song gets back meanwhile (an undo) loads in the
-  background too; one added later opens at once, as a plug-in added always has.
+- **Opening:** the plug-ins of a project that opens load in the background, one at a time in each helper and the
+  helpers beside each other, each plug-in's time limit counted from when its own load begins. The song is there at once,
+  and plays and edits meanwhile; each plug-in comes in as it is ready, its sound fading in over 5 milliseconds. The
+  Project view lists each as "loading" until it has. A plug-in the song gets back meanwhile (an undo) loads in the
+  background too; one added opens at once, as a plug-in added always has. One that a closed project or an undo no
+  longer holds is abandoned before it opens, or closed as soon as it has.
+- **What is heard while a project loads:** a plug-in still loading is silent in its place, as a late or crashed one is:
+  an instrument plays nothing, and an effect silences what passes through it (an effect that can't play is silent, never
+  dry), so the strip it is on is silent until it has loaded (on the master, the whole song: right for a limiter). A
+  plug-in that isn't installed on this computer is left out, as it always is.
+- **A helper that crashes as a plug-in loads** marks that plug-in as one that crashes as it loads; another plug-in that
+  was in the same helper, or loading in it, is tried once more in a fresh helper first.
 - **Renders:** an export, a freeze or a bounce started while plug-ins still load fails at its start, naming them ("*name*
   is still loading. Render again once the project's plug-ins have loaded.").
 - **Saving:** a save asks every plug-in for its state at once, and writes once all have answered, or once a plug-in has
   taken 10 seconds; one that hasn't answered keeps the state it last gave, and a notice names it. The save is never lost
-  over one plug-in. Auto Save and the autosave ask only the plug-ins whose state may have changed since they last gave it:
-  a value or a program set, by Phazite or in the plug-in's window, or its settings said to have changed (a VST3's
-  `setDirty()`).
+  over one plug-in. A save or a close that waits more than a second shows the progress window, "Waiting for the
+  settings of *name*", whose Cancel goes on without the plug-ins still to answer, as if their time were up; a close's save
+  takes the states its wait gathered rather than asking again. Auto Save and the autosave ask only the plug-ins whose
+  state may have changed since they last gave it: a value or a program set, by Phazite, in the plug-in's window or by
+  MIDI, its settings said to have changed (a VST3's `setDirty()`), or its window open since (a plug-in needn't say what
+  its window changes, a sample loaded say); and they ask again one that didn't answer the last time.
 - **Closing:** a project's plug-ins are let go of at once; each helper quits on its own, without anything waiting for it.
 
 ## Stop ends every note

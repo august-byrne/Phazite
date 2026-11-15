@@ -97,6 +97,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`src/model/plugins/PluginInstances.cpp`). Fix: the same asks without waiting (`SandboxedInstance::askState()`,
   `PluginInstances::whenStatesIn()`), and prepare and open in the background, the engine skipping the plug-in
   meanwhile.
+- **167. A plug-in with latency that joins a playing song moves the other tracks' delay compensation in one step.** As
+  a project's plug-ins load in the background, each comes in with a new plan and fades in over 5 ms, but the delays
+  that keep the other tracks in time with it change at once (`src/model/playback/SongPlayer.cpp`,
+  `src/engine/core/Engine.cpp`): a click or a skip on tracks that play meanwhile. Fix: fade the mix out and in across
+  a plan whose compensation changed, as a jump does. Left by S1.4; not measured.
+- **168. Windows shutting down while a close waits for a plug-in's settings never shows the save question.** The
+  close gathers the plug-ins' states first, with a window after a second whose Cancel goes on without them
+  (`ProjectSession::withPluginStates()`, `src/app/ProjectSession.cpp`); a session that ends during that wait ends
+  Phazite before the question. The autosave holds the changes. Fix: answer the session's end by going on without the
+  states at once. Left by S1.4.
 
 ## Devices and playback
 

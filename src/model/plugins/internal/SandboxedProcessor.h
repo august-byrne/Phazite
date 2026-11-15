@@ -88,6 +88,7 @@ private:
     // are).
     float heard = 1.0f;
     float fadeStep = 1.0f;
+    bool startsSilent = false; // until it is first prepared: it loaded while silence played in its place
     int latency = 0, historyAt = 0;
     juce::AudioBuffer<float> history;
 
@@ -109,5 +110,25 @@ private:
     void remember (const devices::ProcessContext&) noexcept; // an effect's input, before it is handed over
     void silence (const devices::ProcessContext&) noexcept;  // what it plays in place of a block it didn't play
     void fadeIn (const devices::ProcessContext&) noexcept;   // a block it played, after one it didn't
+};
+
+// What the engine plays in a plug-in's place while it still loads, as its project opened (PluginInstances.h): silence, an
+// effect's included, as for a late or crashed plug-in (an effect that can't play is silent, never dry: a limiter passed dry
+// is worse than a gap), so that the strip it is on is silent until it has loaded; then the plug-in's own processor fades
+// its sound in (SandboxedInstance::joinLate()). An instrument or an effect, as its description says.
+class LoadingPlugin final : public devices::Processor
+{
+public:
+    explicit LoadingPlugin (bool isInstrument);
+
+    const devices::DeviceInfo& getInfo() const noexcept { return info; }
+
+    void prepare (double, int) override {}
+    void reset() override {}
+    void process (const devices::ProcessContext&) override;
+    bool sleepsOnSilence() const noexcept override { return false; }
+
+private:
+    devices::DeviceInfo info;
 };
 } // namespace phazite
