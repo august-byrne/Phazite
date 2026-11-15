@@ -1431,6 +1431,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsGoingBackTests.cpp
         tests/VersionsHearingTests.cpp
         tests/VersionsMergeTests.cpp
+        tests/VersionsMergeWaitingTests.cpp
         tests/VersionsTests.cpp
         tests/VinylTests.cpp
         tests/VocoderTests.cpp

@@ -807,6 +807,7 @@ juce::StringArray getHolders (const juce::String& declared)
         { "value", { "VALUE" } },
         { "container", { "CONTAINER" } },
         { "chain", { "CHAIN" } },
+        { "merging", { "MERGING" } },
         { "send", { "SEND" } },
         { "modulator", { "MODULATOR" } },
         { "macro", { "MACRO" } },
@@ -849,6 +850,15 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
         { "MASTER@drumMode", "as MASTER@height" },
         { "MASTER@drumOrder", "as MASTER@height" },
         { "MASTER@drumHidden", "as MASTER@height" },
+        { "MERGING", "a merge waiting for its commit names commits and a piece of the project's Versions folder, which the "
+                     "representative project hasn't: tests/VersionsMergeWaitingTests.cpp saves and opens songs that hold one" },
+        { "MERGING@version", "as MERGING" },
+        { "MERGING@head", "as MERGING" },
+        { "MERGING@before", "as MERGING" },
+        { "MERGING@lines", "as MERGING" },
+        { "MERGING@chosen", "as MERGING" },
+        { "MERGING@renumbered", "as MERGING" },
+        { "MERGING@translated", "as MERGING" },
     };
     return names;
 }

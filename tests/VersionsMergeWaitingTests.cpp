@@ -1,0 +1,813 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// A merge taken into the song that waits for its commit (docs/design/versions.md: Merging; git's MERGE_HEAD): kept in the song
+// (Schema.h: MERGING), so that whichever file of the song opens (the project file saved or not, its autosave after a crash)
+// holds the merge state its song was in; waiting on top of a branch that moved on, and no more where the branch holds the
+// merged commit already; never two at once; and restores from a damaged commit that can't tell where a line was.
+#include "SongIDs.h"
+#include "TestSong.h"
+#include "UiTestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
+#include "model/commands/CommandRegistry.h"
+#include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/PieceStore.h"
+#include "model/versions/internal/SongPieces.h"
+#include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
+
+#include <algorithm>
+
+namespace
+{
+using namespace phazite::test;
+namespace schema = phazite::schema;
+
+juce::String keepVersion (phazite::ProjectContext& context, const juce::String& name = {})
+{
+    REQUIRE (waitForVersionHistory (context));
+    phazite::setVersionDraft (context, name, {});
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
+    REQUIRE (result->wasOk());
+    REQUIRE (waitForVersionHistory (context));
+    return phazite::getLastVersion (context)->id;
+}
+
+std::vector<phazite::RenumberedID> sorted (std::vector<phazite::RenumberedID> ids)
+{
+    std::sort (ids.begin(), ids.end(),
+               [] (const auto& a, const auto& b) { return a.clip != b.clip ? a.clip.compare (b.clip) < 0 : a.from < b.from; });
+    return ids;
+}
+
+juce::String findBranch (const phazite::ProjectContext& context, const juce::String& name)
+{
+    for (const auto& branch : phazite::getBranches (context))
+        if (branch.name == name)
+            return branch.id;
+
+    return {};
+}
+
+// A song with Bass and Drums committed on main; idea-2 turned Bass down to -12 dB and added Pad, main to -6 dB and added Lead,
+// each counting its IDs on from the same place (as two computers would), so that the merge gives Pad a new ID: a conflict,
+// an ID given anew, and main's song, saved, before the merge.
+struct WaitingMerge
+{
+    TestSong s;
+    phazite::TrackID bass = s.addTrack ("Bass"), drums = s.addTrack ("Drums");
+    juce::String first = keepVersion (s.context, "First"), theirs, ours;
+    phazite::TrackID pad, lead;
+
+    WaitingMerge()
+    {
+        auto& song = *phazite::findSong (s.context);
+        const auto count = song.getState()[schema::nextID];
+        REQUIRE (phazite::newBranch (s.context, {}, s.save));
+        s.setVolume (bass, -12.0f);
+        pad = s.addTrack ("Pad");
+        theirs = keepVersion (s.context, "Much quieter");
+
+        REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save));
+        song.getState().setProperty (schema::nextID, count, nullptr);
+        s.setVolume (bass, -6.0f);
+        lead = s.addTrack ("Lead");
+        REQUIRE (lead == pad);
+        ours = keepVersion (s.context, "Quieter");
+        REQUIRE (s.getProject().save().wasOk());
+    }
+
+    phazite::Song& song() { return *phazite::findSong (s.context); }
+    float volume (phazite::TrackID track) { return phazite::getChannelVolume (song(), track); }
+
+    // The merge taken, and the IDs it gave anew (Pad's, and its fader's), which its commit must record.
+    std::vector<phazite::RenumberedID> given;
+
+    void merge()
+    {
+        REQUIRE (phazite::startMerge (s.context, theirs));
+        phazite::finishTickedMerge (s.context);
+        REQUIRE (phazite::isMerging (s.context));
+        REQUIRE (phazite::getClashes (s.context).size() == 1);
+        given = phazite::getVersionHistory (s.context)->getMerging()->renumbered;
+        REQUIRE_FALSE (given.empty());
+    }
+
+    std::vector<phazite::TrackID> named (const juce::String& name)
+    {
+        std::vector<phazite::TrackID> found;
+
+        for (const auto track : phazite::getTrackIDs (song()))
+            if (phazite::getTrackName (song(), track) == name)
+                found.push_back (track);
+
+        return found;
+    }
+
+    const phazite::VersionRecord& lastCommit()
+    {
+        const auto* last = phazite::getVersionHistory (s.context)->findLastVersion();
+        REQUIRE (last != nullptr);
+        return *last;
+    }
+
+    void reopenAs (TestSong::Reopening how)
+    {
+        REQUIRE (waitForVersionHistory (s.context));
+        REQUIRE (s.reopenAs (how));
+        REQUIRE (waitForVersionHistory (s.context));
+    }
+};
+
+// A commit another computer made on a branch, on top of one, with its song and its parents, and that computer's record
+// of the branch at it: as a synced Versions folder brings them.
+juce::String commitElsewhere (WaitingMerge& m, const juce::String& branchID, juce::StringArray parents,
+                              std::vector<phazite::RenumberedID> renumbered = {})
+{
+    const auto folder = phazite::getVersionsFolder (m.song());
+    phazite::VersionStore store (folder, "elsewhere");
+    phazite::VersionRecord record;
+    record.name = "From elsewhere";
+    record.parents = parents;
+    record.renumbered = std::move (renumbered);
+    record.branch = branchID;
+    record.saved = juce::Time::currentTimeMillis();
+    const auto song = phazite::getVersionHistory (m.s.context)->readSong (parents[0]);
+    REQUIRE (song.isValid());
+    const auto id = store.writeVersion (record, phazite::splitSong (song));
+    REQUIRE (id.isNotEmpty());
+
+    phazite::BranchRecord branch;
+
+    for (const auto& b : phazite::getVersionHistory (m.s.context)->getBranches())
+        if (b.id == branchID)
+            branch = b;
+
+    branch.head = id;
+    branch.computer = "elsewhere";
+    branch.working = {};
+    REQUIRE (store.writeBranch (branch));
+    store.getPieces().closeFiles();
+    return id;
+}
+} // namespace
+
+TEST_CASE ("A merge taken after the last save goes with the song closed without saving; one saved with the song waits as it opens")
+{
+    // Closed with Don't Save: the song as saved, from before the merge, and no merge waits; the next commit follows this line
+    // alone, and the other line can be merged again, its work arriving.
+    {
+        WaitingMerge m;
+        m.merge();
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (m.volume (m.bass) == doctest::Approx (-6.0f));
+        CHECK (m.named ("Pad").empty());
+        CHECK_FALSE (phazite::hasSomethingToCommit (m.s.context));
+
+        m.s.setVolume (m.drums, -3.0f);
+        keepVersion (m.s.context, "Drums a little down");
+        CHECK (m.lastCommit().parents.size() == 1);
+        REQUIRE (phazite::mergeBranch (m.s.context, findBranch (m.s.context, "idea-2")));
+        phazite::finishTickedMerge (m.s.context);
+        CHECK (m.named ("Pad").size() == 1);
+    }
+
+    // Merged, saved, Undone, closed with Don't Save: the saved song holds the merge, and so it waits, its commit following
+    // both lines with the ID it gave Pad recorded; a later merge of that line finds Pad again rather than adding it twice.
+    {
+        WaitingMerge m;
+        m.merge();
+        const auto padHere = m.named ("Pad");
+        REQUIRE (padHere.size() == 1);
+        REQUIRE (m.s.getProject().save().wasOk());
+        phazite::undo (m.song());
+        REQUIRE_FALSE (phazite::isMerging (m.s.context));
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        REQUIRE (phazite::isMerging (m.s.context));
+        CHECK (m.named ("Pad") == padHere);
+        CHECK (phazite::getClashes (m.s.context).size() == 1);
+
+        keepVersion (m.s.context);
+        CHECK (m.lastCommit().parents == juce::StringArray (m.ours, m.theirs));
+        CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
+        CHECK (std::find (m.given.begin(), m.given.end(), phazite::RenumberedID { {}, m.pad.getRaw(), padHere[0].getRaw() })
+               != m.given.end());
+
+        REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "idea-2"), m.s.save));
+        m.s.rename (m.pad, "Pad 2");
+        const auto again = keepVersion (m.s.context, "Pad 2");
+        REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "main"), m.s.save));
+        const auto numTracks = phazite::getTrackIDs (m.song()).size();
+        REQUIRE (phazite::startMerge (m.s.context, again));
+        phazite::finishTickedMerge (m.s.context);
+        checkIDs (m.song());
+        CHECK (m.named ("Pad 2") == padHere);
+        CHECK (phazite::getTrackIDs (m.song()).size() == numTracks);
+    }
+}
+
+TEST_CASE ("After a crash, the autosave restored holds the merge that waited, and the last saved version opened holds none")
+{
+    {
+        WaitingMerge m;
+        m.merge();
+        REQUIRE (phazite::chooseClash (m.s.context, 0, 2));
+        m.reopenAs (TestSong::Reopening::afterCrashRestoring);
+        REQUIRE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getClashes (m.s.context)[0].chosen == 2);
+        CHECK (m.volume (m.bass) == doctest::Approx (-12.0f));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+    }
+
+    {
+        WaitingMerge m;
+        m.merge();
+        m.reopenAs (TestSong::Reopening::afterCrashFromFile);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (m.named ("Pad").empty());
+    }
+}
+
+TEST_CASE ("A merge taken counts as an unsaved change, even one that took no line")
+{
+    WaitingMerge m;
+    REQUIRE_FALSE (m.s.getProject().hasUnsavedChanges());
+    REQUIRE (phazite::startMerge (m.s.context, m.theirs));
+
+    for (int line = 0; line < (int) phazite::getMergeLines (m.s.context).size(); ++line)
+        phazite::tickMergeLine (m.s.context, line, false);
+
+    phazite::finishTickedMerge (m.s.context);
+    REQUIRE (phazite::isMerging (m.s.context));
+    CHECK (m.s.getProject().hasUnsavedChanges());
+    CHECK (phazite::getChangesSinceLastVersion (m.s.context).empty()); // the merge itself is no line of the changes
+}
+
+TEST_CASE ("A merge redone after its Undo and a commit waits on top of that commit, and its commit follows it and the merged one")
+{
+    WaitingMerge m;
+    m.s.setVolume (m.drums, -3.0f); // a change of this line's, to commit after the Undo
+    m.merge();
+    phazite::undo (m.song());
+    REQUIRE_FALSE (phazite::isMerging (m.s.context));
+    const auto between = keepVersion (m.s.context, "Drums a little down");
+    REQUIRE (m.lastCommit().parents.size() == 1);
+
+    phazite::redo (m.song());
+    REQUIRE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getMergeProblem (m.s.context).contains ("moved on"));
+    CHECK (m.named ("Pad").size() == 1);
+    keepVersion (m.s.context);
+    CHECK (m.lastCommit().parents == juce::StringArray (between, m.theirs));
+    CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+}
+
+TEST_CASE ("A merge waiting while another computer commits on the branch waits on top of that commit; one it merged there waits no more")
+{
+    // Another computer's commit on main, on top of the one the merge was taken at: the merge waits on top of it, and says so.
+    {
+        WaitingMerge m;
+        m.merge();
+        REQUIRE (m.s.getProject().save().wasOk());
+        const auto elsewhere = commitElsewhere (m, findBranch (m.s.context, "main"), { m.ours });
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        REQUIRE (m.lastCommit().id == elsewhere);
+        REQUIRE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).contains ("moved on"));
+        keepVersion (m.s.context);
+        CHECK (m.lastCommit().parents == juce::StringArray (elsewhere, m.theirs));
+        CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
+    }
+
+    // Another computer merged the same commit on main, giving the same IDs: that merge is as good as this one's, and none
+    // waits here, without a word.
+    {
+        WaitingMerge m;
+        m.merge();
+        REQUIRE (m.s.getProject().save().wasOk());
+        commitElsewhere (m, findBranch (m.s.context, "main"), { m.ours, m.theirs }, m.given);
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+    }
+
+    // The branch holds the commit merged in by no merge of it (the other line taken in whole, then this one): none waits,
+    // and the view says why, and that Abort Merge takes the element out.
+    {
+        WaitingMerge m;
+        m.merge();
+        REQUIRE (m.s.getProject().save().wasOk());
+        commitElsewhere (m, findBranch (m.s.context, "main"), { m.theirs, m.ours });
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).contains ("already"));
+        CHECK (phazite::getMergeProblem (m.s.context).contains ("Abort Merge"));
+        REQUIRE (phazite::canCancelMerge (m.s.context));
+        phazite::cancelMerge (m.s.context);
+        CHECK_FALSE (m.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+    }
+}
+
+TEST_CASE ("Another computer's merge of the same commit with other IDs leaves this one waiting, and later merges of that line "
+           "find this song's items")
+{
+    // Computer A (this one) merged idea-2's Pad as one ID; computer B merged it too, as another, and committed. A commits on
+    // top of B's merge, recording its own IDs; then idea-2 goes on, Pad renamed, or deleted, and A merges it again: Pad
+    // once, renamed, or gone.
+    for (const auto deletes : { false, true })
+    {
+        INFO ((deletes ? "deleted" : "renamed"));
+        WaitingMerge m;
+        m.merge();
+        const auto padHere = m.named ("Pad");
+        REQUIRE (padHere.size() == 1);
+        REQUIRE (m.s.getProject().save().wasOk());
+
+        const auto byB = commitElsewhere (m, findBranch (m.s.context, "main"), { m.ours, m.theirs },
+                                          { { {}, m.pad.getRaw(), padHere[0].getRaw() + 1000 } });
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        REQUIRE (m.lastCommit().id == byB);
+        REQUIRE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).contains ("already"));
+        keepVersion (m.s.context);
+        CHECK (m.lastCommit().parents == juce::StringArray (byB, m.theirs));
+        CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+
+        REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "idea-2"), m.s.save));
+
+        if (deletes)
+        {
+            const phazite::UndoStep step (m.song(), "Delete Track");
+            phazite::deleteTracks (m.song(), { m.pad }, nullptr);
+        }
+        else
+        {
+            m.s.rename (m.pad, "Pad 2");
+        }
+
+        const auto later = keepVersion (m.s.context, "Pad again");
+        REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "main"), m.s.save));
+        REQUIRE (waitForVersionHistory (m.s.context));
+        const auto numTracks = phazite::getTrackIDs (m.song()).size();
+        REQUIRE (phazite::startMerge (m.s.context, later));
+        phazite::finishTickedMerge (m.s.context);
+        checkIDs (m.song());
+        CHECK (m.named ("Pad").empty());
+
+        if (deletes)
+        {
+            CHECK (m.named ("Pad 2").empty());
+            CHECK (phazite::getTrackIDs (m.song()).size() == numTracks - 1);
+        }
+        else
+        {
+            CHECK (m.named ("Pad 2") == padHere);
+            CHECK (phazite::getTrackIDs (m.song()).size() == numTracks);
+        }
+    }
+}
+
+TEST_CASE ("A merge waiting on a branch left for another waits there still after the project opens again")
+{
+    WaitingMerge m;
+    m.merge();
+    REQUIRE (phazite::chooseClash (m.s.context, 0, 2));
+
+    // Off to idea-3, made from the first commit: main keeps the merge in the song left there, and the branch whose commit
+    // it merges can't be deleted meanwhile.
+    REQUIRE (phazite::newBranch (m.s.context, m.first, m.s.save));
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK_FALSE (phazite::canDeleteBranch (m.s.context, findBranch (m.s.context, "idea-2")));
+
+    m.reopenAs (TestSong::Reopening::withoutSaving);
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK_FALSE (phazite::canDeleteBranch (m.s.context, findBranch (m.s.context, "idea-2")));
+
+    REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "main"), m.s.save));
+    REQUIRE (phazite::isMerging (m.s.context)); // being read, as the song left there holds it
+    REQUIRE (waitForVersionHistory (m.s.context));
+    REQUIRE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getClashes (m.s.context)[0].chosen == 2);
+    CHECK (m.volume (m.bass) == doctest::Approx (-12.0f));
+}
+
+TEST_CASE ("No merge starts while one waits for its commit, as git refuses one: commit it or abort it first")
+{
+    WaitingMerge m;
+    phazite::CommandRegistry commands;
+    phazite::addVersionCommands (commands, m.s.context, m.s.save, m.s.renders);
+    m.merge();
+
+    phazite::selectVersion (m.s.context, m.theirs);
+    CHECK_FALSE (phazite::canMerge (m.s.context));
+    CHECK_FALSE (commands.find ("version.merge")->isEnabled());
+    CHECK_FALSE (phazite::canMergeBranch (m.s.context, findBranch (m.s.context, "idea-2")));
+    CHECK_FALSE (phazite::canMergeAnyBranch (m.s.context));
+    CHECK_FALSE (phazite::startMerge (m.s.context, m.theirs));
+    CHECK (phazite::isMerging (m.s.context));
+
+    phazite::cancelMerge (m.s.context);
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    phazite::selectVersion (m.s.context, m.theirs);
+    CHECK (phazite::canMerge (m.s.context));
+}
+
+TEST_CASE ("A merge's element that isn't one (a song from anyone) waits for nothing, and Abort Merge never takes a track for the song")
+{
+    WaitingMerge m;
+    m.merge();
+    auto element = m.song().getState().getChildWithName (schema::MERGING);
+    REQUIRE (element.isValid());
+
+    // Its song before it a track's piece: still waiting (the commit it merged is known), but Abort Merge makes the song the
+    // branch's last commit, not a track.
+    juce::String trackPiece;
+
+    for (const auto& [name, piece] : phazite::splitSong (m.song().getState()).pieces)
+        if (piece.toString().startsWith ("<" + schema::TRACK.toString()))
+            trackPiece = name;
+
+    REQUIRE (trackPiece.isNotEmpty());
+    element.setProperty (schema::mergingBefore, trackPiece, nullptr);
+    REQUIRE (m.s.getProject().save().wasOk());
+    m.reopenAs (TestSong::Reopening::withoutSaving);
+    REQUIRE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getMergeProblem (m.s.context).contains ("can't read"));
+    phazite::cancelMerge (m.s.context);
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getTrackIDs (m.song()).size() >= 3);
+    CHECK (m.named ("Pad").empty());
+
+    // IDs given anew that aren't one to one, or a commit that isn't one: no merge waits, and the view says so.
+    for (const auto& [property, value] : { std::pair { schema::mergingRenumbered, juce::String ("10>12,11>12") },
+                                           std::pair { schema::mergingTranslated, juce::String ("0>4") },
+                                           std::pair { schema::mergingVersion, juce::String ("not a commit") } })
+    {
+        WaitingMerge n;
+        n.merge();
+        n.song().getState().getChildWithName (schema::MERGING).setProperty (property, value, nullptr);
+        REQUIRE (n.s.getProject().save().wasOk());
+        n.reopenAs (TestSong::Reopening::withoutSaving);
+        CHECK_FALSE (phazite::isMerging (n.s.context));
+        CHECK (phazite::getMergeProblem (n.s.context).contains ("can't be read"));
+        checkIDs (n.song());
+
+        // Abort Merge takes the element out, alone, as an undo step of its own.
+        const auto numTracks = phazite::getTrackIDs (n.song()).size();
+        REQUIRE (phazite::canCancelMerge (n.s.context));
+        phazite::cancelMerge (n.s.context);
+        CHECK_FALSE (n.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK (phazite::getTrackIDs (n.song()).size() == numTracks);
+        CHECK (n.named ("Pad").size() == 1); // what the merge brought stays, as the rest of the song
+        CHECK (phazite::getMergeProblem (n.s.context).isEmpty());
+        CHECK_FALSE (phazite::canCancelMerge (n.s.context));
+        phazite::undo (n.song());
+        CHECK (n.song().getState().getChildWithName (schema::MERGING).isValid());
+    }
+}
+
+TEST_CASE ("A merge commit made after a save leaves the project saved, and no word of it as it opens again or as Local History "
+           "brings back the song it waited in")
+{
+    // Closed with Don't Save after the merge's commit (which saves the project first, as Commit does).
+    {
+        WaitingMerge m;
+        m.merge();
+        REQUIRE (m.s.getProject().save().wasOk());
+        keepVersion (m.s.context);
+        REQUIRE (m.lastCommit().parents.size() == 2);
+        CHECK_FALSE (m.s.getProject().hasUnsavedChanges());
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+        CHECK_FALSE (phazite::canCancelMerge (m.s.context));
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+    }
+
+    // A snapshot taken while the merge waited, brought back once it is committed: it holds the merge's element, which its
+    // commit finished.
+    {
+        WaitingMerge m;
+        m.merge();
+        phazite::getVersionHistory (m.s.context)->takeSnapshot ("auto");
+        REQUIRE (waitForVersionHistory (m.s.context));
+        const auto snapshots = phazite::getSnapshots (m.s.context);
+        REQUIRE_FALSE (snapshots.empty());
+        keepVersion (m.s.context);
+        REQUIRE (phazite::restoreSnapshot (m.s.context, snapshots.front().time));
+        REQUIRE (m.song().getState().getChildWithName (schema::MERGING).isValid());
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+    }
+}
+
+TEST_CASE ("A project file opened without its Versions folder holds a merge of another history, which Abort Merge takes out")
+{
+    // Kept as it was, rather than taken out as the project opens: the folder may still be on its way (a sync), and the
+    // notice says what the element is.
+    WaitingMerge m;
+    m.merge();
+    REQUIRE (m.s.getProject().save().wasOk());
+    REQUIRE (waitForVersionHistory (m.s.context));
+
+    TemporaryFolder elsewhere;
+    const auto copy = elsewhere.folder.getChildFile (m.s.getProject().getFile().getFileName());
+    REQUIRE (m.s.getProject().getFile().copyFileTo (copy));
+    juce::String error;
+    phazite::setSong (m.s.context, nullptr);
+    auto project = phazite::Project::open (copy, false, error);
+    REQUIRE (project != nullptr);
+    phazite::setSong (m.s.context, &project->getSong());
+    REQUIRE (waitForVersionHistory (m.s.context));
+    auto& song = project->getSong();
+
+    REQUIRE (song.getState().getChildWithName (schema::MERGING).isValid());
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK (phazite::getMergeProblem (m.s.context).contains ("Abort Merge"));
+    const auto numTracks = phazite::getTrackIDs (song).size();
+    REQUIRE (phazite::canCancelMerge (m.s.context));
+    phazite::cancelMerge (m.s.context);
+    CHECK_FALSE (song.getState().getChildWithName (schema::MERGING).isValid());
+    CHECK (phazite::getTrackIDs (song).size() == numTracks);
+    CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+
+    // Its first commit, as a new history makes it, holds none either.
+    const phazite::VersionStore store (phazite::getVersionsFolder (song), "reader");
+    REQUIRE (phazite::getLastVersion (m.s.context).has_value());
+    const auto* first = phazite::getVersionHistory (m.s.context)->findLastVersion();
+    REQUIRE (first != nullptr);
+    CHECK_FALSE (store.readSong (first->song).getChildWithName (schema::MERGING).isValid());
+    store.getPieces().closeFiles();
+    phazite::setSong (m.s.context, nullptr);
+}
+
+TEST_CASE ("No commit's song holds a merge's element: not with Stage All, nor after a merge's own commit")
+{
+    WaitingMerge m;
+    m.merge();
+    keepVersion (m.s.context); // the merge's own commit, the element finished in the song
+
+    // An element that waits for nothing, and a change, staged whole.
+    m.song().getState().getChildWithName (schema::MERGING).setProperty (schema::mergingVersion, "not a commit", nullptr);
+    m.s.setVolume (m.drums, -3.0f);
+    phazite::stageAllChanges (m.s.context);
+    keepVersion (m.s.context, "Staged");
+
+    const phazite::VersionStore store (phazite::getVersionsFolder (m.song()), "reader");
+
+    for (const auto* version : phazite::getVersionHistory (m.s.context)->getVersions())
+    {
+        INFO (phazite::getDisplayName (*version).toStdString());
+        CHECK_FALSE (store.readSong (version->song).getChildWithName (schema::MERGING).isValid());
+    }
+
+    store.getPieces().closeFiles();
+}
+
+TEST_CASE ("Abort Merge keeps the song in Local History first, and makes it the song before the merge wherever that can be read")
+{
+    // Kept in Local History.
+    {
+        WaitingMerge m;
+        m.merge();
+        phazite::cancelMerge (m.s.context);
+        REQUIRE (waitForVersionHistory (m.s.context));
+        const auto snapshots = phazite::getSnapshots (m.s.context);
+        CHECK (std::any_of (snapshots.begin(), snapshots.end(),
+                            [] (const phazite::SnapshotInfo& snapshot) { return snapshot.reason == "Before Abort Merge"; }));
+    }
+
+    // The commit it was taken at gone from the history (another computer's Undo Last Commit): its conflicts can't be found,
+    // but Abort Merge makes the song what it was before it, the change made before the merge with it.
+    {
+        WaitingMerge m;
+        m.s.setVolume (m.drums, -3.0f);
+        m.merge();
+        m.song()
+            .getState()
+            .getChildWithName (schema::MERGING)
+            .setProperty (schema::mergingHead, juce::String::repeatedString ("ab", 32), nullptr);
+        REQUIRE (m.s.getProject().save().wasOk());
+        m.reopenAs (TestSong::Reopening::withoutSaving);
+        REQUIRE (phazite::isMerging (m.s.context));
+        CHECK (phazite::getClashes (m.s.context).empty());
+        CHECK (phazite::getMergeProblem (m.s.context).contains ("what it was before it"));
+        REQUIRE (phazite::canCancelMerge (m.s.context));
+        phazite::cancelMerge (m.s.context);
+        CHECK_FALSE (phazite::isMerging (m.s.context));
+        CHECK (m.named ("Pad").empty());
+        CHECK (m.volume (m.drums) == doctest::Approx (-3.0f));
+        CHECK (m.volume (m.bass) == doctest::Approx (-6.0f));
+    }
+}
+
+namespace
+{
+// The pack the store would write a song's pieces it hasn't yet into, made a folder (with a file in it, so that it can't
+// be replaced either): the next write of those pieces fails, as a full or locked drive makes it.
+juce::File blockPackFor (const juce::ValueTree& song, const juce::File& versionsFolder, const juce::File& scratch)
+{
+    const phazite::PieceStore store (versionsFolder.getChildFile ("pieces"));
+    std::map<juce::String, juce::MemoryBlock> fresh;
+
+    for (const auto& [name, piece] : phazite::splitSong (song).pieces)
+        if (! store.read (name).has_value())
+            fresh.emplace (name, piece);
+
+    store.closeFiles();
+    REQUIRE_FALSE (fresh.empty());
+    phazite::PieceStore other (scratch);
+    REQUIRE (other.write (fresh));
+    other.closeFiles();
+    const auto packs = scratch.findChildFiles (juce::File::findFiles, false, "*.pack");
+    REQUIRE (packs.size() == 1);
+    const auto blocked = versionsFolder.getChildFile ("pieces").getChildFile (packs[0].getFileName());
+    REQUIRE (blocked.createDirectory());
+    REQUIRE (blocked.getChildFile ("held").replaceWithText ("held"));
+    return blocked;
+}
+} // namespace
+
+TEST_CASE ("A merge the store can't keep the song before takes nothing, its list stays, and the view says why")
+{
+    WaitingMerge m;
+    m.s.setVolume (m.drums, -3.0f); // so that the song before the merge has a piece the store hasn't
+    REQUIRE (phazite::startMerge (m.s.context, m.theirs));
+    REQUIRE (waitForVersionHistory (m.s.context));
+    TemporaryFolder scratch;
+    const auto blocked = blockPackFor (m.song().getState(), phazite::getVersionsFolder (m.song()), scratch.folder);
+
+    phazite::finishTickedMerge (m.s.context);
+    CHECK_FALSE (phazite::isMerging (m.s.context));
+    CHECK_FALSE (phazite::getMergeLines (m.s.context).empty());
+    CHECK (phazite::getMergeProblem (m.s.context).contains ("Nothing was merged"));
+    CHECK (m.named ("Pad").empty());
+
+    REQUIRE (blocked.deleteRecursively());
+    phazite::finishTickedMerge (m.s.context);
+    CHECK (phazite::isMerging (m.s.context));
+    CHECK (phazite::getMergeLines (m.s.context).empty());
+    CHECK_FALSE (phazite::getMergeProblem (m.s.context).contains ("Nothing was merged"));
+}
+
+TEST_CASE ("A branch whose line alone holds the commit a merge waiting took in can't be deleted, though it moved on since")
+{
+    WaitingMerge m;
+    REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "idea-2"), m.s.save));
+    m.s.setVolume (m.drums, -9.0f);
+    keepVersion (m.s.context, "Moved on");
+    REQUIRE (phazite::switchBranch (m.s.context, findBranch (m.s.context, "main"), m.s.save));
+
+    REQUIRE (phazite::startMerge (m.s.context, m.theirs)); // idea-2's older commit
+    phazite::finishTickedMerge (m.s.context);
+    REQUIRE (phazite::isMerging (m.s.context));
+    const auto idea = findBranch (m.s.context, "idea-2");
+    CHECK_FALSE (phazite::canDeleteBranch (m.s.context, idea));
+    CHECK_FALSE (phazite::deleteBranch (m.s.context, idea));
+
+    keepVersion (m.s.context); // committed: main's line holds it now
+    CHECK (phazite::canDeleteBranch (m.s.context, idea));
+}
+
+namespace
+{
+// A commit of a song written into the history by another computer, with what it holds of it lost (the pieces of the
+// elements given), and made a branch of, as Recover Lost Commits makes one: its id.
+juce::String commitDamaged (TestSong& s, const juce::ValueTree& song, const std::function<bool (const juce::ValueTree&)>& lost)
+{
+    auto pieces = phazite::splitSong (song);
+
+    for (auto it = pieces.pieces.begin(); it != pieces.pieces.end();)
+        it = lost (phazite::readElement (it->second)) ? pieces.pieces.erase (it) : std::next (it);
+
+    juce::String id;
+
+    {
+        phazite::VersionStore store (phazite::getVersionsFolder (*phazite::findSong (s.context)), "elsewhere");
+        phazite::VersionRecord record;
+        record.name = "Damaged";
+        record.parents.add (phazite::getLastVersion (s.context)->id);
+        record.branch = phazite::getCurrentBranch (s.context)->id;
+        record.saved = juce::Time::currentTimeMillis();
+        id = store.writeVersion (record, pieces);
+        store.getPieces().closeFiles();
+    }
+
+    REQUIRE (id.isNotEmpty());
+    REQUIRE (phazite::verifyHistory (s.context));
+    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, versionHistoryTimeout));
+    REQUIRE (phazite::recoverLostVersions (s.context) == 1);
+    REQUIRE (phazite::getVersionHistory (s.context)->findVersion (id) != nullptr);
+    return id;
+}
+} // namespace
+
+TEST_CASE ("Restoring a line from a damaged commit takes what it can, and nothing where the line's place in it can't be read")
+{
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    const auto bass = s.addTrack ("Bass"), keys = s.addTrack ("Keys");
+    phazite::TrackID folder;
+
+    {
+        const phazite::UndoStep step (song, "Group");
+        folder = phazite::groupIntoFolder (song, { bass }, nullptr);
+        phazite::setTrackName (song, folder, "Low end");
+    }
+
+    keepVersion (s.context, "Grouped");
+
+    // A commit whose folder's piece is lost (a name of its own, so that no commit before has its piece): Bass, inside it,
+    // is in the commit nowhere that reads, so its line restores nothing, saying why, and Bass stays.
+    {
+        auto then = song.getState().createCopy();
+
+        for (auto track : phazite::getTrackElements (then))
+            if (phazite::readID (track[schema::trackID]) == folder.getRaw())
+                track.setProperty (schema::trackName, "Low end, damaged", nullptr);
+
+        const auto damaged =
+            commitDamaged (s, then, [&folder] (const juce::ValueTree& element)
+                           { return element.hasType (schema::TRACK) && phazite::readID (element[schema::trackID]) == folder.getRaw(); });
+        phazite::VersionChange line;
+        line.name = "Bass";
+        line.track = bass;
+        CHECK_FALSE (phazite::restoreFromVersion (s.context, damaged, line));
+        CHECK (phazite::findTrackState (song, bass).isValid());
+        CHECK (phazite::getRestoreProblem (s.context).contains ("Low end"));
+        CHECK (phazite::getRestoreProblem (s.context).contains ("can't be read"));
+
+        // Keys, which the commit holds whole, restores.
+        s.setVolume (keys, -9.0f);
+        line.name = "Keys";
+        line.track = keys;
+        CHECK (phazite::restoreFromVersion (s.context, damaged, line));
+        CHECK (phazite::getChannelVolume (song, keys) == doctest::Approx (0.0f));
+    }
+
+    // A commit whose piece of a plain track is lost besides the folder's (Keys, which can't hold another track): Bass's
+    // line is still refused, naming the folder that holds it; a track added since, outside the folder, the commit hasn't,
+    // and its line takes it away as added since.
+    {
+        auto then = song.getState().createCopy();
+
+        for (auto track : phazite::getTrackElements (then))
+            if (const auto id = phazite::readID (track[schema::trackID]); id == keys.getRaw() || id == folder.getRaw())
+                track.setProperty (schema::trackName, track[schema::trackName].toString() + ", damaged again", nullptr);
+
+        const auto extra = s.addTrack ("Extra");
+        const auto damaged = commitDamaged (s, then,
+                                            [&] (const juce::ValueTree& element)
+                                            {
+                                                const auto id = phazite::readID (element[schema::trackID]);
+                                                return element.hasType (schema::TRACK) && (id == keys.getRaw() || id == folder.getRaw());
+                                            });
+        phazite::VersionChange line;
+        line.name = "Bass";
+        line.track = bass;
+        CHECK_FALSE (phazite::restoreFromVersion (s.context, damaged, line));
+        CHECK (phazite::getRestoreProblem (s.context).contains ("\"Low end\""));
+
+        // Only Keys lost: Extra's line restores, taking Extra away.
+        auto thenAgain = then.createCopy();
+        const auto keysOnly =
+            commitDamaged (s, thenAgain, [&] (const juce::ValueTree& element)
+                           { return element.hasType (schema::TRACK) && phazite::readID (element[schema::trackID]) == keys.getRaw(); });
+        line.name = "Extra";
+        line.track = extra;
+        CHECK (phazite::restoreFromVersion (s.context, keysOnly, line));
+        CHECK_FALSE (phazite::findTrackState (song, extra).isValid());
+        CHECK_FALSE (phazite::getRestoreProblem (s.context).contains ("Couldn't restore"));
+    }
+
+    // A commit whose tempo map stands in for itself (only a piece that isn't Phazite's makes one): the song's own line
+    // leaves the tempo map as it is, and no stand-in reaches the song.
+    {
+        auto then = song.getState().createCopy();
+        auto tempoMap = then.getChildWithName (schema::TEMPOMAP);
+        REQUIRE (tempoMap.isValid());
+        tempoMap.removeAllChildren (nullptr);
+        tempoMap.setProperty (schema::versions::missing, true, nullptr);
+        const auto damaged = commitDamaged (s, then, [] (const juce::ValueTree&) { return false; });
+        const auto mapBefore = song.getState().getChildWithName (schema::TEMPOMAP).createCopy();
+        phazite::VersionChange line;
+        line.name = "Song";
+        line.isSong = true;
+        phazite::restoreFromVersion (s.context, damaged, line);
+        CHECK (song.getState().getChildWithName (schema::TEMPOMAP).isEquivalentTo (mapBefore));
+        CHECK_FALSE (song.getState().toXmlString().contains (schema::versions::missing.toString()));
+    }
+}

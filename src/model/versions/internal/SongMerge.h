@@ -60,6 +60,29 @@ struct MergeResult
 // once, so that one ID given anew never meets another.
 void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>&);
 
+// What the parting's song (base) and the other side's (theirs) are translated through before a merge of a line merged
+// before (translateIDs()), from what this line's earlier merges of it recorded, oldest first (VersionHistory.h:
+// findRenumbering()): the IDs of the items the parting holds, and of the notes in its clips, each the later merge's word over
+// an earlier's; and, for any other ID of either song that one of those is translated to (an item the other line made after
+// a merge gave its ID to one of theirs, on another computer whose count never went past it), a new one from makeID, so that
+// no two items share an ID. Those given anew are in all too, and in givenAnew, which the merge's commit records with its own
+// (MergeResult::renumbered), so that a later merge of that line translates them alike. What of the records isn't one to
+// one (an ID 0, or one ID given to two: a damaged record, or one another history wrote) is left out.
+struct Translation
+{
+    std::vector<RenumberedID> all, givenAnew;
+};
+
+Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree& theirs, const std::vector<RenumberedID>& recorded,
+                             const std::function<std::uint64_t()>& makeID);
+
+// Whether IDs given anew are one to one, as a merge gives them: none 0, and within each group (the items', each clip's
+// notes) no two with the same from, nor two with the same to. What isn't came from a damaged or a hand-made record.
+bool areOneToOne (const std::vector<RenumberedID>&);
+
+// The other side's plug-ins' knobs (SongPieces.h), by their devices' IDs as translateIDs() numbers them: all at once.
+PluginParameterValues translateKnobs (PluginParameterValues, const std::vector<RenumberedID>&);
+
 // What a merge takes, of the lines the other side changed since the two parted (findChanges (base, theirs)): tracks by their
 // IDs (the other side's), the master by its ID, and the song's own.
 struct MergeLines

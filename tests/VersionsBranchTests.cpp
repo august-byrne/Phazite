@@ -6,6 +6,8 @@
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
+#include "devices/dynamics/Compressor.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -14,6 +16,7 @@
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
@@ -578,4 +581,249 @@ TEST_CASE ("A merge leaves out a send the other side added to a return this side
     CHECK_FALSE (phazite::findTrackState (merged, reverb).isValid());
     CHECK (phazite::getSends (merged, b.drums).empty());
     checkIDs (merged.getState());
+}
+
+TEST_CASE ("A merge lets go of a sidechain that the two lines' changes made into a loop, as the edit that makes one does")
+{
+    // main: Bass's compressor listens to the reverb; idea-2: Bass sends to the reverb. Each alone is no loop; merged, the
+    // compressor would hear its own track's sound, which Phazite's engine can't play, while its picker named the reverb.
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context);
+    const auto reverb = b.s.addReturn (b.drums, "phaziteReverb");
+    const auto compressor = b.s.addEffect (b.bass, phazite::devices::Compressor::typeID);
+    keepVersion (b.s.context, "Reverb");
+
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    b.s.addSend (b.bass, reverb, -12.0f);
+    const auto theirs = keepVersion (b.s.context, "Bass to the reverb");
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    phazite::setSidechainSource (song, compressor, reverb);
+    REQUIRE (phazite::getSidechainSource (song, compressor) == reverb);
+    keepVersion (b.s.context, "Ducked under the reverb");
+
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    UndoCheck undoCheck (b.s.context);
+    undoCheck.check ("Merge", [&b] { phazite::finishTickedMerge (b.s.context); });
+    REQUIRE (phazite::isMerging (b.s.context));
+    CHECK (phazite::getSends (song, b.bass).size() == 1);
+    CHECK_FALSE (phazite::getSidechainSource (song, compressor).isValid());
+    checkIDs (song);
+
+    // One undo step with the merge: undone, the sidechain is back, as it was.
+    phazite::undo (song);
+    CHECK (phazite::getSidechainSource (song, compressor) == reverb);
+    CHECK (phazite::getSends (song, b.bass).empty());
+}
+
+TEST_CASE ("A merge's conflict answered for the other side leaves out what that side's value names and this side deleted")
+{
+    // Both lines pointed Bass's compressor at another track; main deleted the one idea-2 chose. Accept Incoming Change
+    // names a track the song hasn't, which the next opening would leave out: it goes, in the choice's step.
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context);
+    const auto kick = b.s.addTrack ("Kick"), snare = b.s.addTrack ("Snare");
+    const auto compressor = b.s.addEffect (b.bass, phazite::devices::Compressor::typeID);
+    keepVersion (b.s.context, "Drums");
+
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    phazite::setSidechainSource (song, compressor, snare);
+    REQUIRE (phazite::getSidechainSource (song, compressor) == snare);
+    const auto theirs = keepVersion (b.s.context, "Under the snare");
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    phazite::setSidechainSource (song, compressor, kick);
+
+    {
+        const phazite::UndoStep step (song, "Delete Track");
+        phazite::deleteTracks (song, { snare }, nullptr);
+    }
+
+    keepVersion (b.s.context, "Under the kick, no snare");
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    CHECK (phazite::getSidechainSource (song, compressor) == kick); // this side's, to start with
+
+    const auto clashes = phazite::getClashes (b.s.context);
+    REQUIRE (clashes.size() == 1);
+    UndoCheck undoCheck (b.s.context);
+    undoCheck.check ("Accept Incoming Change", [&b] { REQUIRE (phazite::chooseClash (b.s.context, 0, 2)); });
+    CHECK_FALSE (phazite::findTrackState (song, snare).isValid());
+    CHECK_FALSE (song.getState().toXmlString().contains ("sidechain=\"" + juce::String ((juce::uint64) snare.getRaw()) + "\""));
+    CHECK_FALSE (phazite::getSidechainSource (song, compressor).isValid());
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 2);
+
+    // Undone: the kick again, and the conflict as it was.
+    phazite::undo (song);
+    CHECK (phazite::getSidechainSource (song, compressor) == kick);
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 1);
+}
+
+TEST_CASE ("Undo after a merge takes the merge back with the song, Redo brings it back, and a merge waits still as the project opens again")
+{
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context);
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    b.s.setVolume (b.bass, -12.0f);
+    const auto theirs = keepVersion (b.s.context, "Much quieter");
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    b.s.setVolume (b.bass, -6.0f);
+    const auto quieter = keepVersion (b.s.context, "Quieter");
+
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    REQUIRE (phazite::isMerging (b.s.context));
+    REQUIRE (phazite::getClashes (b.s.context).size() == 1);
+
+    // Undone: no merge waits, as git has none after a reset; redone, it waits again, as it was.
+    phazite::undo (song);
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    CHECK_FALSE (phazite::hasSomethingToCommit (b.s.context));
+    phazite::redo (song);
+    CHECK (phazite::isMerging (b.s.context));
+    REQUIRE (phazite::getClashes (b.s.context).size() == 1);
+
+    // A conflict's choice, undone with its value.
+    REQUIRE (phazite::chooseClash (b.s.context, 0, 2));
+    CHECK (b.volume (b.bass) == doctest::Approx (-12.0f));
+    phazite::undo (song);
+    CHECK (b.volume (b.bass) == doctest::Approx (-6.0f));
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 1);
+    phazite::redo (song);
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 2);
+
+    // Abort Merge, undone: the merge waits again, its choice as it was.
+    phazite::cancelMerge (b.s.context);
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    CHECK (b.volume (b.bass) == doctest::Approx (-6.0f));
+    phazite::undo (song);
+    REQUIRE (phazite::isMerging (b.s.context));
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 2);
+    CHECK (b.volume (b.bass) == doctest::Approx (-12.0f));
+
+    // Closed and opened again: it waits still, its conflict as chosen, to switch as before.
+    REQUIRE (waitForVersionHistory (b.s.context));
+    b.s.reopen();
+    REQUIRE (waitForVersionHistory (b.s.context));
+    auto& reopened = *phazite::findSong (b.s.context);
+    REQUIRE (phazite::isMerging (b.s.context));
+    CHECK (phazite::describeMerge (b.s.context) == "Much quieter");
+    REQUIRE (phazite::getClashes (b.s.context).size() == 1);
+    CHECK (phazite::getClashes (b.s.context)[0].chosen == 2);
+    CHECK (phazite::getClashes (b.s.context)[0].otherBranch == "idea-2");
+    CHECK (b.volume (b.bass) == doctest::Approx (-12.0f));
+    REQUIRE (phazite::chooseClash (b.s.context, 0, 0));
+    CHECK (b.volume (b.bass) == doctest::Approx (0.0f));
+
+    // Its commit follows both lines; then nothing waits, here or as the project opens again.
+    keepVersion (b.s.context);
+    CHECK (phazite::getLastVersion (b.s.context)->parents == juce::StringArray (quieter, theirs));
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    b.s.reopen();
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    juce::ignoreUnused (reopened);
+}
+
+TEST_CASE ("A merge undone leaves the next commit on this line alone, and an undo after the merge's commit changes the song alone")
+{
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context);
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    b.s.setVolume (b.drums, -9.0f);
+    const auto theirs = keepVersion (b.s.context, "Quiet drums");
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+
+    // Merged, undone, and something else committed: one parent.
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    phazite::undo (song);
+    b.s.setVolume (b.bass, -3.0f);
+    keepVersion (b.s.context, "Bass a little down");
+    CHECK (phazite::getLastVersion (b.s.context)->parents.size() == 1);
+
+    // Merged and committed; then undone and redone: no merge waits again.
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    keepVersion (b.s.context);
+    CHECK (phazite::getLastVersion (b.s.context)->parents.size() == 2);
+    phazite::undo (song);
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    phazite::redo (song);
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+}
+
+TEST_CASE ("A line merged again after it made an item with an ID a merge gave to another of its own merges each onto its own, each ID once")
+{
+    // Two computers on one history, played on one: the other line's count stays its own, as its computer never saw this
+    // line's (a switch here would count both on past either).
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context);
+    const auto count = song.getState()[phazite::schema::nextID];
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    const auto pad = b.s.addTrack ("Pad");
+    const auto t1 = keepVersion (b.s.context, "Pad");
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    song.getState().setProperty (phazite::schema::nextID, count, nullptr);
+    const auto lead = b.s.addTrack ("Lead");
+    REQUIRE (lead == pad); // counted on from the same place
+    keepVersion (b.s.context, "Lead");
+
+    const auto findNamed = [&song] (const juce::String& name)
+    {
+        std::vector<phazite::TrackID> found;
+
+        for (const auto track : phazite::getTrackIDs (song))
+            if (phazite::getTrackName (song, track) == name)
+                found.push_back (track);
+
+        return found;
+    };
+
+    // The first merge gives idea-2's Pad a new ID here.
+    REQUIRE (phazite::startMerge (b.s.context, t1));
+    phazite::finishTickedMerge (b.s.context);
+    keepVersion (b.s.context);
+    REQUIRE (findNamed ("Pad").size() == 1);
+    const auto padHere = findNamed ("Pad").front();
+    REQUIRE (padHere != pad);
+    const auto numTracks = phazite::getTrackIDs (song).size();
+
+    // idea-2, as the other computer has it: its next track gets the ID the merge gave its Pad here; and its Pad renamed.
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    song.getState().setProperty (phazite::schema::nextID, (juce::int64) padHere.getRaw(), nullptr);
+    const auto strings = b.s.addTrack ("Strings");
+    REQUIRE (strings == padHere);
+    b.s.rename (pad, "Pad 2");
+    const auto t2 = keepVersion (b.s.context, "Strings");
+
+    // Merged again: Pad 2 onto the Pad here, Strings beside it with an ID of its own.
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::startMerge (b.s.context, t2));
+    phazite::finishTickedMerge (b.s.context);
+    checkIDs (song);
+    CHECK (phazite::getClashes (b.s.context).empty());
+    CHECK (findNamed ("Pad").empty());
+    CHECK (findNamed ("Pad 2") == std::vector { padHere });
+    CHECK (findNamed ("Lead") == std::vector { lead });
+    REQUIRE (findNamed ("Strings").size() == 1);
+    const auto stringsHere = findNamed ("Strings").front();
+    CHECK (stringsHere != padHere);
+    CHECK (phazite::getTrackIDs (song).size() == numTracks + 1);
+    keepVersion (b.s.context);
+
+    // And once more, through both merges' records: idea-2's Strings renamed lands on the Strings here.
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    b.s.rename (strings, "Strings 2");
+    const auto t3 = keepVersion (b.s.context, "Strings 2");
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::startMerge (b.s.context, t3));
+    phazite::finishTickedMerge (b.s.context);
+    checkIDs (song);
+    CHECK (findNamed ("Strings").empty());
+    CHECK (findNamed ("Strings 2") == std::vector { stringsHere });
+    CHECK (findNamed ("Pad 2") == std::vector { padHere });
+    CHECK (phazite::getTrackIDs (song).size() == numTracks + 1);
 }

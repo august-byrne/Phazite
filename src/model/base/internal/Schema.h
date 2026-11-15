@@ -601,7 +601,8 @@ namespace versions
     // version, model/engine/AppInfo.h). With a FILE for each audio file its song plays: its path (as clipFile holds it),
     // its size in bytes, and the SHA-256 of what it holds (sha256). And, for a merge that gave new IDs to what the other line
     // added (model/versions/internal/SongMerge.h), a RENUMBERED for each: the ID as the other line has it (from) and as the
-    // merge gave it (to), and for a note the key of its clip ("CLIP:66"), so that a later merge of that line knows them.
+    // merge gave it (to), and for a note its clip's group (clip: "link <alias group>" or "clip <id>"), so that a later merge
+    // of that line knows them.
     inline const juce::Identifier VERSION { "VERSION" };
     inline const juce::Identifier versionSong { "song" }, versionParents { "parents" }, versionName { "name" }, versionNote { "note" },
         versionSummary { "summary" }, versionSaved { "saved" }, versionBranch { "branch" }, versionPhazite { "phazite" };
@@ -643,6 +644,41 @@ namespace versions
     inline const juce::Identifier FILES { "FILES" };
     inline const juce::Identifier fileModified { "modified" };
 } // namespace versions
+
+//==============================================================================
+// A merge taken into the song that waits for its commit (docs/design/versions.md: Merging; git's MERGE_HEAD), kept in the
+// song so that it goes wherever the song goes: into its project file, its autosave, the song left on a branch and Local
+// History, and out of it again with the Undo of the merge. Not part of a commit's song (VersionHistory::saveVersion() leaves
+// it out), nor of the differences, which list only what the song holds; but a change to the project like any other. All its
+// values are text, read by the versions as untrusted (model/versions/internal/VersionHistory.h: readMergeState()), which
+// leave out a merge that doesn't hold together. song
+
+// Child of PHAZITE, while a merge waits: what it merged and where, and which value of each of its conflicts the song has.
+inline const juce::Identifier MERGING { "MERGING" };
+
+// On MERGING: the commit merged in (version), and the current branch's last commit as the merge was taken (head), each a
+// commit's id (64 lowercase hexadecimal digits). The merge waits until a commit of the branch's line finishes it (its
+// commit: one with the one merged in as its second parent, its first following head, recording the IDs it gave), and
+// while the branch's line doesn't hold the one merged in otherwise; its commit follows the branch's last commit then and
+// the one merged in. Nothing is written into it after it is taken.
+inline const juce::Identifier mergingVersion { "version" }, mergingHead { "head" };
+
+// On MERGING: the song as it was before the merge was taken (before: a song piece in the project's Versions folder, view
+// state included), which Abort Merge makes the song again.
+inline const juce::Identifier mergingBefore { "before" };
+
+// On MERGING: the lines the merge took, separated by spaces: "song" for the song's own, and the other line's track IDs.
+inline const juce::Identifier mergingLines { "lines" };
+
+// On MERGING: which value of each of the merge's conflicts the song has, a digit each in their order: 0 the parting's, 1
+// this branch's, 2 the other line's. None: each this branch's.
+inline const juce::Identifier mergingChosen { "chosen" };
+
+// On MERGING: the IDs the merge gave anew, which its commit records (renumbered), and those the parting's and the other
+// line's songs were translated through before it (translated; model/versions/internal/SongMerge.h: findTranslation()),
+// separated by commas, each "from>to", or for a note "<its clip's group>/from>to" ("clip 66/3>7"), as a commit's RENUMBERED.
+// No ID 0, and no two of one group with the same from, or the same to.
+inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTranslated { "translated" };
 
 //==============================================================================
 // The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the

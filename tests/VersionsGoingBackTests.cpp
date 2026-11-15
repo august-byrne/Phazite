@@ -4,6 +4,7 @@
 #include "GoldenFiles.h"
 #include "RenderHarness.h"
 #include "SongIDs.h"
+#include "TestClips.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -24,7 +25,9 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/SongDiff.h"
+#include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 
 namespace
@@ -609,4 +612,87 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
 
         phazite::setSong (context, nullptr);
     }
+}
+
+TEST_CASE ("A track brought back from a commit whose clip can't be read comes back without that clip, and no stand-in reaches the song")
+{
+    // Bass, with a clip, as a commit holds it; then the clip's piece lost, and the song joined as much as can be read, as
+    // Restore from This Commit reads a damaged commit (SongPieces.h: joinSong()).
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    phazite::setTrackName (*song, tracks[0], "Bass");
+    const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+    addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
+
+    auto pieces = phazite::splitSong (song->getState());
+    juce::String lost;
+
+    for (const auto& [name, block] : pieces.pieces)
+        if (block.toString().startsWith ("<" + schema::CLIP.toString()))
+            lost = name;
+
+    REQUIRE (lost.isNotEmpty());
+    pieces.pieces.erase (lost);
+    std::vector<phazite::MissingPiece> missing;
+    const auto then = phazite::joinSong (
+        pieces.song,
+        [&pieces] (const juce::String& name)
+        {
+            const auto found = pieces.pieces.find (name);
+            return found != pieces.pieces.end() ? std::optional<juce::MemoryBlock> (found->second) : std::nullopt;
+        },
+        nullptr, &missing);
+
+    REQUIRE (then.isValid());
+    REQUIRE (missing.size() == 1);
+
+    const std::function<bool (const juce::ValueTree&)> holdsStandIn = [&holdsStandIn] (const juce::ValueTree& tree)
+    {
+        if (tree.hasProperty (schema::versions::missing))
+            return true;
+
+        for (const auto& child : tree)
+            if (holdsStandIn (child))
+                return true;
+
+        return false;
+    };
+
+    REQUIRE (holdsStandIn (then));
+
+    // Bass deleted since.
+    {
+        const phazite::UndoStep step (*song, "Delete Track");
+        phazite::deleteTracks (*song, { tracks[0] }, nullptr);
+    }
+
+    const auto check = [&]
+    {
+        const auto bass = phazite::findTrackState (*song, tracks[0]);
+        REQUIRE (bass.isValid());
+        CHECK (bass[schema::trackName].toString() == "Bass");
+        CHECK (phazite::getClipStates (bass).empty()); // what the clip held stays as it is now: not there
+        CHECK_FALSE (holdsStandIn (song->getState()));
+        checkIDs (*song);
+    };
+
+    // The whole song brought back.
+    {
+        const phazite::UndoStep step (*song, "Restore");
+        phazite::makeSongLike (*song, then);
+        phazite::removeBrokenReferences (*song);
+    }
+
+    check();
+    phazite::undo (*song);
+    REQUIRE_FALSE (phazite::findTrackState (*song, tracks[0]).isValid());
+
+    // Its line alone.
+    {
+        const phazite::UndoStep step (*song, "Restore Bass");
+        REQUIRE (phazite::makeTrackLike (*song, tracks[0], then));
+        phazite::removeBrokenReferences (*song);
+    }
+
+    check();
 }

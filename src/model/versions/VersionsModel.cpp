@@ -18,7 +18,9 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <map>
 #include <set>
 
@@ -31,51 +33,6 @@ namespace
         return { version.id,      getDisplayName (version),  version.note,
                  version.summary, version.name.isNotEmpty(), juce::Time (version.saved),
                  version.branch,  version.parents,           history.hasBounce (version.id) };
-    }
-
-    // A plug-in's clash, named by the knobs whose values differ between this side and the other ("Serum settings: Cutoff,
-    // Mix"), and by the versions of the plug-in that made each side's state, where they differ.
-    void nameKnobs (std::vector<MergeClash>& clashes, const juce::ValueTree& ours, const juce::ValueTree& theirs,
-                    const PluginParameterValues& ourValues, const PluginParameterValues& theirValues)
-    {
-        for (auto& clash : clashes)
-        {
-            if (clash.property != schema::pluginState)
-                continue;
-
-            const auto ourDevice = findByPath (ours, clash.path), theirDevice = findByPath (theirs, clash.path);
-            const auto id = readID ((ourDevice.isValid() ? ourDevice : theirDevice)[schema::deviceID]);
-            juce::StringArray details;
-
-            if (const auto mine = ourValues.find (id), other = theirValues.find (id); mine != ourValues.end() && other != theirValues.end())
-            {
-                std::map<juce::String, float> there;
-
-                for (const auto& parameter : other->second)
-                    there.emplace (parameter.id, parameter.value);
-
-                juce::StringArray knobs;
-
-                for (const auto& parameter : mine->second)
-                    if (const auto found = there.find (parameter.id);
-                        found != there.end() && std::abs (found->second - parameter.value) > 0.0005f)
-                        knobs.add (parameter.name);
-
-                if (knobs.size() > 3)
-                    details.add (knobs[0] + ", " + knobs[1] + " and " + juce::String (knobs.size() - 2) + " more");
-                else if (! knobs.isEmpty())
-                    details.add (knobs.joinIntoString (", "));
-            }
-
-            const auto ourVersion = ourDevice[schema::pluginVersion].toString();
-            const auto theirVersion = theirDevice[schema::pluginVersion].toString();
-
-            if (ourVersion.isNotEmpty() && theirVersion.isNotEmpty() && ourVersion != theirVersion)
-                details.add ("version " + ourVersion + " here, " + theirVersion + " there");
-
-            if (! details.isEmpty())
-                clash.what += ": " + details.joinIntoString ("; ");
-        }
     }
 
     BranchInfo toInfo (const BranchRecord& branch)
@@ -396,7 +353,7 @@ bool hasSomethingToCommit (const ProjectContext& context)
 {
     auto* history = findHistory (context);
     return history != nullptr && ! history->isReading() && ! history->isDetached()
-           && (history->merging.has_value() || history->hasChanges());
+           && (history->getMerging().has_value() || history->hasChanges());
 }
 
 juce::String describeNextCommit (const ProjectContext& context)
@@ -481,6 +438,7 @@ bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
     std::vector<MissingPiece> missing;
     const auto then = history->readSong (versionID, nullptr, &missing);
     history->restoreMissing = missing;
+    history->restoreRefused.clear();
     history->tellNow();
 
     if (! then.isValid())
@@ -493,6 +451,7 @@ bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
     const UndoStep step (*song, "Restore from \"" + getDisplayName (*version) + "\"");
     song->storeDeviceStates();
     makeSongLike (*song, then);
+    removeBrokenReferences (*song); // what the song kept where a damaged piece was can name what the commit hadn't
     return true;
 }
 
@@ -556,10 +515,87 @@ bool restoreFromVersion (ProjectContext& context, const juce::String& versionID,
     if (song == nullptr || version == nullptr)
         return false;
 
-    const auto then = history->readSong (versionID);
+    // As much of it as can be read, as the whole song's restore takes it: what a damaged piece held stays as it is now, and
+    // what of the line's that is, is told (getRestoreProblem()).
+    std::vector<MissingPiece> missing;
+    const auto then = history->readSong (versionID, nullptr, &missing);
+    const auto onLine = [&line] (const MissingPiece& piece)
+    {
+        if (piece.path.size() < 2)
+            return true; // the whole song, or its own element
+
+        if (line.isSong)
+        {
+            for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+                if (piece.path[1].startsWith (type->toString() + ":"))
+                    return true;
+
+            return false;
+        }
+
+        for (const auto& step : piece.path)
+            if (step == schema::TRACK.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw())
+                || step == schema::MASTER.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw()))
+                return true;
+
+        return false;
+    };
+
+    history->restoreMissing.clear();
+    history->restoreRefused.clear();
+    std::copy_if (missing.begin(), missing.end(), std::back_inserter (history->restoreMissing), onLine);
+    history->tellNow();
 
     if (! then.isValid())
         return false;
+
+    // A track the commit holds nowhere it can read, where the piece of a track that could hold it can't be read: whether it
+    // was there then can't be told, so nothing is taken, rather than the track taken away as added since. One could hold it
+    // that is a folder it is in now (the nearest named), a folder now, or a track the song hasn't now, whose kind is unknown.
+    if (! line.isSong)
+    {
+        juce::ValueTree there;
+        std::vector<juce::ValueTree> unreadable;
+
+        for (const auto& track : getTrackElements (then))
+        {
+            if (readID (track[schema::trackID]) == line.track.getRaw())
+                there = track;
+            else if (track.hasProperty (schema::versions::missing))
+                unreadable.push_back (track);
+        }
+
+        std::vector<std::uint64_t> folders; // the line's track's, nearest first
+        for (auto folder = getParentFolder (*song, line.track); folder.isValid(); folder = getParentFolder (*song, folder))
+            folders.push_back (folder.getRaw());
+
+        juce::ValueTree holder;
+
+        for (const auto& track : unreadable)
+        {
+            const auto id = readID (track[schema::trackID]);
+            const auto place = std::find (folders.begin(), folders.end(), id);
+            const auto couldHold = place != folders.end() || ! findTrackState (*song, TrackID::fromRaw (id)).isValid()
+                                   || isFolder (*song, TrackID::fromRaw (id));
+
+            if (couldHold && (! holder.isValid() || place < std::find (folders.begin(), folders.end(), readID (holder[schema::trackID]))))
+                holder = track;
+        }
+
+        const auto isMasterThere = readID (then.getChildWithName (schema::MASTER)[schema::trackID]) == line.track.getRaw();
+
+        if (! there.isValid() && ! isMasterThere && holder.isValid())
+        {
+            const auto id = TrackID::fromRaw (readID (holder[schema::trackID]));
+            const auto name =
+                findTrackState (*song, id).isValid() ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
+            history->restoreMissing.clear();
+            history->restoreRefused = "Couldn't restore " + line.name + " from \"" + getDisplayName (*version)
+                                      + "\": the commit's piece of " + name + ", which may hold it, can't be read.";
+            history->tellNow();
+            return false;
+        }
+    }
 
     // A change of its own, one undo step, as git restore --source <commit> <file> makes one file a commit's.
     const UndoStep step (*song, "Restore " + line.name + " from \"" + getDisplayName (*version) + "\"");
@@ -863,13 +899,9 @@ bool canDeleteBranch (const ProjectContext& context, const juce::String& branchI
     if (found == branches.end() || (current.has_value() && current->id == branchID) || branchID == history->getDetachedFrom())
         return false;
 
-    // Not while a merge of its line is under way, here or waiting on another branch.
-    const auto mergesIt = [&found] (const std::optional<VersionHistory::Merge>& merge)
-    { return merge.has_value() && merge->version == found->head; };
-
-    return ! mergesIt (history->preview) && ! mergesIt (history->merging)
-           && std::none_of (history->mergesWaiting.begin(), history->mergesWaiting.end(),
-                            [&found] (const auto& waiting) { return waiting.second.version == found->head; });
+    // Not while a merge of its line shows, nor while a merge waiting (here, or on another branch) took in a commit that only
+    // its line holds, which would leave the graph with it.
+    return ! (history->preview.has_value() && history->preview->version == found->head) && ! history->holdsCommitMergeWaits (*found);
 }
 
 bool canDeleteAnyBranch (const ProjectContext& context)
@@ -983,13 +1015,29 @@ namespace
     {
         return line.where == SongChange::Where::song ? clash.trackID == 0 : clash.trackID == line.trackID;
     }
+
+    // The song's element of a merge waiting set anew (Schema.h: MERGING), in the caller's undo step, so that Undo and Redo
+    // take it out and back with what the step changed in the song, and every file the song is saved into holds it as the
+    // song is: none for none.
+    void setMergingElement (Song& song, const juce::ValueTree& element)
+    {
+        auto state = song.getState();
+        auto* undo = &song.getUndoManager();
+
+        if (const auto old = state.getChildWithName (schema::MERGING); old.isValid())
+            state.removeChild (old, undo);
+
+        if (element.isValid())
+            state.appendChild (element, undo);
+    }
 } // namespace
 
 bool canMerge (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
 
-    if (history == nullptr || history->isReading() || history->isSaving() || history->isDetached())
+    // Not while a merge waits for its commit, as git refuses one: commit it or abort it first.
+    if (history == nullptr || history->isReading() || history->isSaving() || history->isDetached() || history->getMerging().has_value())
         return false;
 
     const auto* last = history->findLastVersion();
@@ -1012,37 +1060,41 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
-    if (song == nullptr || last == nullptr || version == nullptr)
+    // Not while another waits for its commit, which it would take the place of (canMerge()).
+    if (song == nullptr || last == nullptr || version == nullptr || history->getMerging().has_value())
         return false;
 
     // From the newest version both lines have, or from nothing for two of no common line.
     VersionHistory::Merge preview;
     preview.version = versionID;
+    history->mergeFailure.clear();
     const auto parted = history->findCommonVersion (last->id, versionID);
     preview.base = parted.isNotEmpty() ? history->readSong (parted) : juce::ValueTree (schema::PHAZITE);
     preview.theirs = history->readSong (versionID, &preview.theirParameters);
 
-    // Numbered as this line, where earlier merges of that line gave what it added IDs anew, its plug-ins' knobs too.
-    const auto renumbering = history->findRenumbering (last->id, versionID, parted);
-    translateIDs (preview.base, renumbering);
-    translateIDs (preview.theirs, renumbering);
+    if (! preview.base.isValid() || ! preview.theirs.isValid())
+        return false;
 
-    for (const auto& id : renumbering)
-    {
-        if (const auto knobs = preview.theirParameters.find (id.from); id.clip.isEmpty() && knobs != preview.theirParameters.end())
-        {
-            auto values = std::move (knobs->second);
-            preview.theirParameters.erase (knobs);
-            preview.theirParameters[id.to] = std::move (values);
-        }
-    }
+    // Numbered as this line, where earlier merges of that line gave what it added IDs anew, its plug-ins' knobs too; an item
+    // that line made since with an ID such a merge gave to another of theirs gets one of the song's (its count moved past it,
+    // so that nothing made meanwhile has it), which the merge's commit records.
+    const auto floor = juce::jmax (findNextID (preview.base), findNextID (preview.theirs));
+    const auto translation = findTranslation (preview.base, preview.theirs, history->findRenumbering (last->id, versionID, parted),
+                                              [song, floor]
+                                              {
+                                                  const auto next = juce::jmax (findNextID (song->getState()), floor);
+                                                  song->getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
+                                                  return song->makeID();
+                                              });
+    translateIDs (preview.base, translation.all);
+    translateIDs (preview.theirs, translation.all);
+    preview.theirParameters = translateKnobs (std::move (preview.theirParameters), translation.all);
+    preview.translation = translation.all;
+    preview.renumbered = translation.givenAnew;
 
     for (const auto& branch : history->getBranches())
         if (branch.id == version->branch)
             preview.otherBranch = branch.name;
-
-    if (! preview.base.isValid() || ! preview.theirs.isValid())
-        return false;
 
     // What it changed, by line, and what of it clashes with what the song changed: a merge of every line, tried on copies.
     preview.lines = findChanges (preview.base, preview.theirs);
@@ -1090,7 +1142,7 @@ juce::String describeMerge (const ProjectContext& context)
     if (history == nullptr)
         return {};
 
-    const auto& merge = history->preview.has_value() ? history->preview : history->merging;
+    const auto& merge = history->preview.has_value() ? history->preview : history->getMerging();
     const auto* version = merge.has_value() ? history->findVersion (merge->version) : nullptr;
     return version != nullptr ? getDisplayName (*version) : juce::String();
 }
@@ -1098,7 +1150,13 @@ juce::String describeMerge (const ProjectContext& context)
 juce::StringArray getMergeNotes (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->merging.has_value() ? history->merging->notes : juce::StringArray();
+    return history != nullptr && history->getMerging().has_value() ? history->getMerging()->notes : juce::StringArray();
+}
+
+juce::String getMergeProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->getMergeProblem() : juce::String();
 }
 
 void cancelMerge (ProjectContext& context)
@@ -1113,33 +1171,56 @@ void cancelMerge (ProjectContext& context)
     if (history->preview.has_value())
     {
         history->preview.reset();
+        history->mergeFailure.clear();
         history->tellNow();
         return;
     }
 
+    if (! canCancelMerge (context))
+        return;
+
     // Taken, waiting for its commit: the song made what it was before it, a change of its own, one undo step (git merge
-    // --abort), so that no commit says the other line is merged while the song doesn't have it.
-    if (history->merging.has_value())
+    // --abort), so that no commit says the other line is merged while the song doesn't have it; Undo makes it wait again.
+    // Where the song before it can't be read, the branch's last commit's, as git's abort resets to HEAD. The song as it is
+    // kept in Local History first, as before Discard All Changes.
+    if (const auto& merging = history->getMerging(); merging.has_value())
     {
-        const auto before = history->merging->before;
-        history->merging.reset();
+        const auto before = merging->before.isValid() ? merging->before : history->getLastVersionSong();
+        keepSongBefore (*history, "abort");
+        const UndoStep step (*song, "Abort Merge");
+        song->storeDeviceStates();
 
         if (before.isValid())
-        {
-            const UndoStep step (*song, "Abort Merge");
-            song->storeDeviceStates();
-            makeSongLike (*song, before);
-            removeBrokenReferences (*song);
-        }
+            makeSongLike (*song, before); // its MERGING too, which the song before it hadn't
+        else
+            setMergingElement (*song, {});
 
+        removeBrokenReferences (*song);
         history->tellNow();
+        return;
     }
+
+    // An element that waits for nothing (one that can't be read, of a history the project's Versions folder isn't, or held
+    // by the branch already): taken out alone, one undo step, the rest of the song as it is.
+    const UndoStep step (*song, "Abort Merge");
+    setMergingElement (*song, {});
+    history->tellNow();
 }
 
 bool canCancelMerge (const ProjectContext& context)
 {
+    // Not while the merge waiting is being read, whose song before it isn't known yet.
     const auto* history = findHistory (context);
-    return history != nullptr && (history->preview.has_value() || history->merging.has_value());
+
+    if (history == nullptr)
+        return false;
+
+    if (history->preview.has_value())
+        return true;
+
+    // An element that waits for nothing, while the view says so (one its own commit finished, silent, stays: harmless).
+    const auto& merging = history->getMerging();
+    return merging.has_value() ? ! merging->reading : history->holdsMergeElement() && history->getMergeProblem().isNotEmpty();
 }
 
 bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lines)
@@ -1147,36 +1228,57 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    if (song == nullptr || history == nullptr || ! history->preview.has_value())
+    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+
+    if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
         return false;
 
-    auto merge = std::move (*history->preview);
-    history->preview.reset();
-    // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
-    // of its lines makes, its IDs counted on past them; and the song as it was, for Abort Merge, kept in Local History too.
-    keepSongBefore (*history, "merge");
+    // The song as it was, for Abort Merge: kept in the store first (where the song's element of the merge names it), and in
+    // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why.
+    auto merge = *history->preview;
     song->storeDeviceStates();
     merge.before = song->getState().createCopy();
-    auto result = mergeSongs (merge.base, song->getState(), merge.theirs, toMergeLines (lines), [song] { return song->makeID(); });
+    merge.head = last->id;
+    merge.taken = toMergeLines (lines);
+    auto result = mergeSongs (merge.base, merge.before, merge.theirs, merge.taken, [song] { return song->makeID(); });
+
+    merge.clashes = std::move (result.clashes);
+    merge.renumbered.insert (merge.renumbered.end(), result.renumbered.begin(),
+                             result.renumbered.end()); // after those of findTranslation()
+    nameKnobs (merge.clashes, merge.before, merge.theirs, history->readPluginParameters(), merge.theirParameters);
+    merge.notes = result.notes;
+    const auto element = history->keepMerge (merge, std::vector<int> (merge.clashes.size(), 1));
+
+    if (! element.isValid())
+    {
+        history->mergeFailure = "Nothing was merged: Phazite couldn't write the song as it is into the project's Versions folder, "
+                                "which Abort Merge would need. Make room on the drive, or check that the folder can be written to, "
+                                "then Merge again.";
+        history->tellNow();
+        return false;
+    }
+
+    history->preview.reset();
+    history->mergeFailure.clear();
+    keepSongBefore (*history, "merge");
+
+    // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
+    // of its lines makes, its IDs counted on past them, with the merge waiting for its commit in it (Schema.h: MERGING), so
+    // that Undo takes the merge back whole, and every file the song is saved into holds it as the song does.
     const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
+    result.song.removeChild (result.song.getChildWithName (schema::MERGING), nullptr); // one finished before, as the song had it
     makeSongLike (*song, result.song);
     removeBrokenReferences (*song); // what one side names that the other took away: a send to a return it deleted
     countIDs (*song);
-
-    merge.clashes = std::move (result.clashes);
-    merge.renumbered = std::move (result.renumbered);
-    nameKnobs (merge.clashes, song->getState(), merge.theirs, history->readPluginParameters(), merge.theirParameters);
-    merge.chosen.assign (merge.clashes.size(), 1);
-    merge.notes = result.notes;
-    history->merging = std::move (merge);
-    history->tellNow();
+    setMergingElement (*song, element);
+    history->tellNow(); // the view shows the merge's conflicts at once
     return true;
 }
 
 bool isMerging (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->merging.has_value();
+    return history != nullptr && history->getMerging().has_value();
 }
 
 std::vector<ClashInfo> getClashes (const ProjectContext& context)
@@ -1184,10 +1286,10 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
     std::vector<ClashInfo> infos;
     const auto* history = findHistory (context);
 
-    if (history == nullptr || ! history->merging.has_value())
+    if (history == nullptr || ! history->getMerging().has_value())
         return infos;
 
-    const auto& merging = *history->merging;
+    const auto& merging = *history->getMerging();
 
     for (size_t i = 0; i < merging.clashes.size(); ++i)
     {
@@ -1223,11 +1325,11 @@ bool chooseClash (ProjectContext& context, int index, int value)
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    if (song == nullptr || history == nullptr || ! history->merging.has_value() || ! juce::isPositiveAndBelow (value, 3)
-        || ! juce::isPositiveAndBelow (index, (int) history->merging->clashes.size()))
+    if (song == nullptr || history == nullptr || ! history->getMerging().has_value() || ! juce::isPositiveAndBelow (value, 3)
+        || ! juce::isPositiveAndBelow (index, (int) history->getMerging()->clashes.size()))
         return false;
 
-    auto& merging = *history->merging;
+    const auto merging = *history->getMerging();
     const auto& clash = merging.clashes[(size_t) index];
     auto* undo = &song->getUndoManager();
 
@@ -1268,7 +1370,17 @@ bool chooseClash (ProjectContext& context, int index, int value)
             parent.addChild (elements[value]->createCopy(), place, undo);
     }
 
-    merging.chosen[(size_t) index] = value;
+    // What the value chosen names that the song took away since (a send to a return deleted here, a sidechain from a track
+    // gone), as the merge itself did; and which value it has, which Undo puts back with the song's.
+    removeBrokenReferences (*song);
+    auto chosen = merging.chosen;
+    chosen[(size_t) index] = value;
+    juce::String digits;
+
+    for (const auto each : chosen)
+        digits << each;
+
+    song->getState().getChildWithName (schema::MERGING).setProperty (schema::mergingChosen, digits, undo);
     history->tellNow();
     return true;
 }
@@ -1312,7 +1424,8 @@ bool canMergeBranch (const ProjectContext& context, const juce::String& branchID
     const auto current = getCurrentBranch (context);
 
     return history != nullptr && ! history->isReading() && ! history->isSaving() && current.has_value() && current->id != branchID
-           && ! current->detached && ! history->preview.has_value() && countCommitsToMerge (context, branchID) > 0;
+           && ! current->detached && ! history->preview.has_value() && ! history->getMerging().has_value()
+           && countCommitsToMerge (context, branchID) > 0;
 }
 
 bool canMergeAnyBranch (const ProjectContext& context)
@@ -1673,6 +1786,7 @@ namespace
                : reason == "discard"  ? "Before Discard All Changes"
                : reason == "merge"    ? "Before Merge"
                : reason == "history"  ? "Before Restoring Local History"
+               : reason == "abort"    ? "Before Abort Merge"
                : reason == "checkout" ? "Before Leaving a Checkout"
                                       : reason;
     }
@@ -1847,7 +1961,13 @@ juce::String getRestoreProblem (const ProjectContext& context)
     const auto* history = findHistory (context);
     const auto* song = findSong (context);
 
-    if (history == nullptr || song == nullptr || history->restoreMissing.empty())
+    if (history == nullptr || song == nullptr)
+        return {};
+
+    if (history->restoreRefused.isNotEmpty())
+        return history->restoreRefused;
+
+    if (history->restoreMissing.empty())
         return {};
 
     const auto& missing = history->restoreMissing;

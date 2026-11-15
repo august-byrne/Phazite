@@ -55,7 +55,11 @@ its tags). An element it does know, where `Schema.h` doesn't put it, it leaves o
 - `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips, its devices, its sends and its
   channel; and `MASTER`, the master's channel and devices;
 - `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID;
-- `SECTIONS`, `CHORDLANE`: the song's parts and its chords.
+- `SECTIONS`, `CHORDLANE`: the song's parts and its chords;
+- `MERGING`, while a merge taken into the song waits for its commit: what it merged, where, and the song before it
+  (a piece in the project's Versions folder), as [versions-format.md](versions-format.md) says (section 8). It goes in
+  and out of the song with the merge's undo step, is no part of a commit's song, and is read as untrusted: one that
+  doesn't hold together waits for nothing.
 
 **Time** is in beats from the song's start, as doubles, a beat being a quarter note whatever the time signature, as
 MIDI files and DAWproject count it, so that the song keeps its notes on their beats when its tempo changes. A tempo

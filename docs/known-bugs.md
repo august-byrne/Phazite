@@ -33,33 +33,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Versions
 
-- **22. A track restored from a commit with an unreadable piece inside it** puts the stand-in element, with its `missing`
-  property, into the song (`src/model/versions/ApplySong.cpp`, the "gone since" branch). Fix: refuse the restore, and say
-  which piece is missing.
-- **23. A merge skips the cleanup every other apply runs** (`removeBrokenReferences()`, `forgetSidechainLoops()`;
-  `finishMerge()` in `src/model/versions/VersionsModel.cpp`), so it can leave modulation and sidechains that point at
-  nothing.
-- **24. A clip moved on the other branch and deleted on this one comes back from a merge without a note in the window.**
 - **25. A project opened from a file equal to its last commit may still take an "As opened" Local History snapshot,**
   which suggests the history sees a change that isn't there (seen in a test's reopen; not traced).
-- **26. `getTracksInFolder()` doesn't count an empty folder inside the folder,** though its comment reads as if it did.
-- **58. A second merge of a branch that went on working after a merge gave its items new IDs can give two items one
-  ID.** The first merge renumbers their clip 10 to 12; their branch then makes a clip 12 of its own; the second merge
-  turns 10 into 12 beside it. It needs two computers working on one history. Why: `translateIDs()`
-  (`src/model/versions/SongMerge.cpp`) translates every ID, not only those the parting song holds. Fix: translate
-  those alone, and renumber any other ID of theirs that equals a translation's target. Confirmed by a second reading
-  (model-versions 4).
 - **59. A branch whose last commit can't be read gets a new "Initial commit" on top without a word,** and the older
   commits leave the graph until Verify History and Recover Lost Commits bring them back. Why: the history opens from
   the heads and commits when it read none (`src/model/versions/VersionHistory.cpp`); `readBranchLog()`
   (`src/model/versions/VersionStore.cpp`), which knows the head before, has no caller. Fix: say that the head can't be
   read and offer the newest commit of the branch's log that reads; commit by itself only where the Versions folder has
   no branch. Not yet checked (model-versions 5).
-- **60. Undo after a merge leaves the merge waiting, and a waiting merge is forgotten as the project closes.** After
-  the undo the next commit still gets both parents; after a close and reopen, neither the merge nor the IDs it gave
-  anew are recorded. Why: `finishMerge()` (`src/model/versions/VersionsModel.cpp`) makes an undo step that nothing ties
-  to the merge the history holds, which lives in memory only. Fix: drop the waiting merge with its undo and bring it
-  back with its redo, and keep it in the computer's record. Not yet checked (model-versions 6).
 - **61. Clean Up Unused Audio offers audio that Local History and commits that can be recovered still play.** Why:
   `findVersionsAudioPaths()` (`src/model/versions/VersionHistory.cpp`) lists the files of commits on branches and of
   songs left on branches only (`src/model/project/UnusedAudio.cpp`). Fix: count the snapshots' songs and the commits
@@ -70,11 +51,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`src/model/versions/VersionHistory.cpp`) isn't refused while a commit saves, and both write the branch's record. Fix:
   on a read that fails, try the other packs and forget the bad entry; refuse the rename meanwhile. Not yet checked
   (model-versions 13).
-- **161. A merge's clash answered for the other side can bring back a send to a return this side deleted.** A merge
-  runs the sweep of what names the gone as it finishes (`removeBrokenReferences()`, `src/model/versions/ApplySong.cpp`),
-  but a clash chosen afterwards (`chooseClash()`) puts the other side's item back without it, so the song can be saved
-  with a send that the next opening leaves out. Fix: run the sweep after each choice, in its step. Seen while known bug
-  100 was fixed; not reproduced by a test.
+- **172. A commit, a Local History snapshot or another write still queued on the history's thread as the project closes
+  is dropped without a word.** `~VersionHistory()` (`src/model/versions/VersionHistory.cpp`) calls
+  `thread.removeAll (false)`, which throws away the jobs that haven't started: commit and close at once, and the
+  commit may never be written. Fix: let the writes that are queued finish before the history goes (the close waits
+  for them as Save As does, `waitForVersionsWritten()`), on a thread of their own if the wait could be long. Seen
+  while known bug 60 was fixed; not reproduced by a test.
 
 ## Plug-ins
 

@@ -193,7 +193,7 @@ commit checked out on its own), separated by spaces. A last line without its lin
 
 `local/<computer>/history` is this computer's Local History, a line for each snapshot of the song, oldest first: when it
 was taken (milliseconds since 1970), the id of the branch the song was on, the song's piece (written as a branch's song
-left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `history`, `checkout`), separated by
+left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `abort`, `history`, `checkout`), separated by
 spaces. Phazite writes the file whole, thinned: every snapshot of the last two hours, the newest of each hour for a day,
 the newest of each day for 30 days. A last line without its line end was cut off and is left out.
 
@@ -222,7 +222,41 @@ and there are several, the newest, then the greater id). For each element by its
 **IDs given anew.** What the other line added gets a new ID where this side has something else with that ID, and what
 names it is changed to match; the merge's commit records each (`RENUMBERED`). Before a later merge of the same line,
 the other side's song and where they parted are translated through the records of this line's merge commits since the
-parting whose merged-in commit the other line follows, all at once, so that the same thing is matched by the same ID.
+parting whose merged-in commit the other line follows, all at once, so that the same thing is matched by the same ID:
+- only the IDs that the song where they parted holds (for a note, in that clip) are translated, the later record's word
+  over an earlier's;
+- any other ID of either song that one of them is translated to (an item the other line made after a merge gave its ID
+  to one of theirs, on a computer whose count never reached this line's) gets a new ID of this side's too, in both songs,
+  and the merge's commit records it with the others (`RENUMBERED`), so that a later merge translates it alike.
+
+A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, or one another history wrote) is left out.
+
+**A merge waiting for its commit** (git's `MERGE_HEAD`) is part of the song, so that every file the song is written into
+(the project file, its autosave, a song left on a branch, Local History) holds the merge state that song is in: a
+`MERGING` element of `PHAZITE`, all its values text. `version` is the commit merged in and `head` the branch's last commit
+as the merge was taken, each a commit's id; `before` is the song as it was before the merge, a song piece (view state
+included) that Abort Merge brings back; `lines` are the lines it took, separated by spaces (`song` for the song's own,
+and the other line's track IDs); `chosen` has a digit for each conflict, in the merge's order of them (`0` the
+parting's value, `1` this branch's, `2` the other line's); `renumbered` are the IDs it gave anew, as its commit will
+record them, and `translated` those the two songs were translated through before it, each `from>to`, or for a note
+`<its clip's group>/from>to`, separated by commas. Nothing is written into it after it is taken.
+
+It waits until its own commit finishes it: a commit of the branch's line whose second parent is `version`, whose first
+parent follows `head`, and whose `RENUMBERED` holds every one of `renumbered`. Its commit follows the branch's last commit
+(which may have moved on since `head`) and the one merged in. Where the branch's line holds `version` otherwise:
+- through another computer's merge of it (a commit with `version` as its second parent) that recorded other IDs, it still
+  waits, and its commit records `renumbered` and, for each `from` that merge recorded and this one didn't, `from>from`
+  (the item as this song holds it); a later merge of that line translates through both records, the later one by the
+  graph winning for each ID;
+- without any such merge, it waits no more, and Abort Merge takes the element out.
+
+A commit's song never holds `MERGING`, whichever song it was made from, and a reader of one leaves it out. A reader takes
+the element as untrusted: one whose ids aren't ids, whose commit merged in the history hasn't (a project opened without
+its Versions folder), or whose IDs aren't one to one merges nothing, and Abort Merge takes it out of the song, alone. The
+song before it is read on its own: where it reads as a whole song, Abort Merge makes the song it, even where the
+parting's or the other line's song can't be read (the merge then waits without its conflicts); where it doesn't (a
+`before` naming a track's piece), Abort Merge makes the song the branch's last commit. Its conflicts are found again by
+merging the same three songs.
 
 ## 9. Test vectors
 

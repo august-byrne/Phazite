@@ -4,6 +4,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 
 #include <functional>
 #include <map>
@@ -75,6 +76,28 @@ namespace
     {
         static const StandIns none;
         return none;
+    }
+
+    // A copy of an element of the other song, to be added to the song, without what in it the other's version couldn't read:
+    // the stand-ins, and the elements that stand in for themselves (a clip a run of whose notes was lost). The song hasn't
+    // them, so what they held stays as it is now: not there. A stand-in is never part of a song (Schema.h:
+    // schema::versions::missing).
+    juce::ValueTree copyWithoutStandIns (const juce::ValueTree& element)
+    {
+        auto copy = element.createCopy();
+        const std::function<void (juce::ValueTree)> strip = [&] (juce::ValueTree tree)
+        {
+            for (int i = tree.getNumChildren(); --i >= 0;)
+            {
+                if (auto child = tree.getChild (i); isStandIn (child))
+                    tree.removeChild (i, nullptr);
+                else
+                    strip (child);
+            }
+        };
+
+        strip (copy);
+        return copy;
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -161,7 +184,7 @@ namespace
             }
             else if (! isStandIn (child.tree))
             {
-                live.addChild (child.tree.createCopy(), place, undo);
+                live.addChild (copyWithoutStandIns (child.tree), place, undo);
             }
             else
             {
@@ -415,7 +438,7 @@ namespace
 
         for (const auto& [key, curve] : wanted)
             if (! isStandIn (curve))
-                automation.appendChild (curve.createCopy(), undo);
+                automation.appendChild (copyWithoutStandIns (curve), undo);
     }
 
     // The tracks a song holds by their IDs, each with its parent's ID (0 for the track list) and its place there.
@@ -512,11 +535,12 @@ namespace
         else
         {
             // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere
-            // now, and what they held that is elsewhere now back from there.
+            // now, and what they held that is elsewhere now back from there; without what the other's version couldn't read
+            // (a clip of it), which isn't in the song now either.
             auto parent = findTrackParent (state, then.getParent());
-            auto copy = then.createCopy();
+            auto copy = copyWithoutStandIns (then);
             removeTracksHeld (copy, state);
-            removeMovedItems (state, findPlaces (copy), undo, findStandIns (copy));
+            removeMovedItems (state, findPlaces (copy), undo);
 
             int index = 0;
 
@@ -554,12 +578,17 @@ namespace
             auto live = state.getChildWithName (*type);
             const auto then = other.getChildWithName (*type);
 
+            // One the other's version couldn't read (a stand-in, which only a piece that isn't Phazite's can make of these)
+            // stays as it is.
+            if (then.isValid() && isStandIn (then))
+                continue;
+
             if (live.isValid() && then.isValid())
-                makeLike (live, then, undo);
+                makeLike (live, then, undo, true, Taken::counted, findStandIns (then));
             else if (live.isValid())
                 state.removeChild (live, undo);
             else if (then.isValid())
-                state.appendChild (then.createCopy(), undo);
+                state.appendChild (copyWithoutStandIns (then), undo);
         }
 
         // The tracks both have, in the other's order: in its folders, and in its order there.
@@ -675,25 +704,33 @@ int removeBrokenReferences (Song& song)
 
     // And what an edit takes away with what it names (model/mixer/internal/Mixer.h): a send to a return that is gone, with
     // what modulated it, and a pad's track whose drum sampler is gone; so that the song is as makeConsistent() leaves it.
-    const auto countSends = [&state]
+    // Then a sidechain that would hear the device's own sound round a loop, which two lines' changes can make together (one
+    // a sidechain, the other a send), as an edit that makes one lets it go (Sidechain.h: forgetSidechainLoops()).
+    const auto count = [&state] (const std::function<bool (const juce::ValueTree&)>& counts)
     {
-        auto count = 0;
+        auto found = 0;
         const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
         {
             for (const auto& child : element)
             {
-                count += child.hasType (schema::SEND) ? 1 : 0;
+                found += counts (child) ? 1 : 0;
                 visit (child);
             }
         };
 
         visit (state);
-        return count;
+        return found;
     };
 
-    const auto sendsBefore = countSends();
-    forgetWhatNamesTheGone (song);
+    const auto isSend = [] (const juce::ValueTree& element) { return element.hasType (schema::SEND); };
+    const auto hasSidechain = [] (const juce::ValueTree& element)
+    { return element.hasType (schema::DEVICE) && element.hasProperty (schema::deviceSidechain); };
 
-    return (int) (modulations.size() + sidechains.size()) + sendsBefore - countSends();
+    const auto sendsBefore = count (isSend);
+    forgetWhatNamesTheGone (song);
+    const auto sidechainsBefore = count (hasSidechain);
+    forgetSidechainLoops (song);
+
+    return (int) (modulations.size() + sidechains.size()) + sendsBefore - count (isSend) + sidechainsBefore - count (hasSidechain);
 }
 } // namespace phazite

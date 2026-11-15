@@ -96,6 +96,34 @@ void TestSong::reopen (bool waitForPlugins)
         REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }, 60000));
 }
 
+bool TestSong::reopenAs (Reopening how)
+{
+    const auto file = project->getFile();
+    const auto autosaveFile = Project::getAutosaveFile (file);
+    juce::MemoryBlock autosave;
+
+    if (how != Reopening::withoutSaving)
+    {
+        REQUIRE (project->autosave().wasOk());
+        REQUIRE (autosaveFile.loadFileAsData (autosave));
+    }
+
+    setSong (context, nullptr);
+    project = nullptr; // which deletes the autosave, as a close does; a crash leaves it
+
+    if (how != Reopening::withoutSaving)
+        REQUIRE (autosaveFile.replaceWithData (autosave.getData(), autosave.getSize()));
+
+    juce::String error;
+    project = Project::open (file, how == Reopening::afterCrashRestoring, error);
+
+    if (project == nullptr)
+        return false;
+
+    setSong (context, &project->getSong());
+    return true;
+}
+
 void TestSong::openSong (const juce::ValueTree& song)
 {
     const auto file = project->getFile();

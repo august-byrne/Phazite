@@ -1565,13 +1565,13 @@ void VersionsView::refresh()
     if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
         setBounceWithVersion (context, bounces);
 
-    // What needs saying first: a bounce or a restore that failed in part, what Verify History found, a line that went its
-    // own way on another computer; else the room the history takes.
+    // What needs saying first: a bounce or a restore that failed in part, a merge that waits otherwise than it was taken,
+    // what Verify History found, a line that went its own way on another computer; else the room the history takes.
     const auto room = getVersionsRoom (context);
     juce::String notice;
 
-    for (const auto& text :
-         { getBounceProblem (context), getRestoreProblem (context), describeHistoryCheck (context), describeDivergence (context) })
+    for (const auto& text : { getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
+                              describeHistoryCheck (context), describeDivergence (context) })
         if (notice.isEmpty())
             notice = text;
 

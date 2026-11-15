@@ -46,7 +46,9 @@ void makeSongOwnLike (juce::ValueTree song, const juce::ValueTree& other);
 
 // What a part of the song names that isn't there any more, taken away: a sidechain from a track that is gone, a modulation
 // of a device that is gone, a send to a return that is gone, and a pad's track whose drum sampler is gone, as an edit takes
-// them away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()). In the caller's step; how many it took away (of
-// the pads' tracks, none).
+// them away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()); and a sidechain that would hear its own track's sound
+// round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()), which a line taken from one song and another
+// from another can make together. Every apply of a version, a line, a merge or a merge's clash runs it, in its step; how
+// many it took away (of the pads' tracks, none).
 int removeBrokenReferences (Song&);
 } // namespace phazite

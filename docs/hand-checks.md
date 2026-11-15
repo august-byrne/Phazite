@@ -166,6 +166,8 @@ the [changelog](changelog.md).
 | G140d | Click a pad on the drum sampler, click its waveform, press Up | The pads move a row: the waveform took no keys | |
 | G118 | Turn the wheel over an EQ dot, then away from the dots | Over a dot the Q changes, as one undo step; away from them the dock scrolls | |
 | G120 | Play a sine panned hard left, then one out of phase between the channels, through the EQ | The analyzer shows each as loud as when it is in the middle | |
+| G60 | Merge a branch with a conflict, save, quit, reopen. Then merge again, close with Don't Save, reopen. Then press Ctrl+Z right after a merge | First the merge and its conflict are still there, and Commit makes a merge commit; then no merge waits; then the conflict list goes and Commit is greyed | |
+| G60b | Merge, Commit, then close with Don't Save and reopen | No notice about a merge, and Abort Merge is greyed | |
 
 ## Known bugs that need an ear or a real plug-in
 

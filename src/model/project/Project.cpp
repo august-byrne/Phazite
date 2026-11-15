@@ -408,7 +408,7 @@ namespace
         const std::map<juce::String, juce::StringArray>& getPlaces()
         {
             static const std::map<juce::String, juce::StringArray> places {
-                { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE" } },
+                { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE", "MERGING" } },
                 { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
                 { "TRACKS", { "TRACK" } },
                 { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },

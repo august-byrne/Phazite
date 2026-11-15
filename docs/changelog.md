@@ -31,6 +31,23 @@ too. A line names the bug's number in that list.
 - **130 Curves worked out at every repaint:** the EQ's curves and the reverb's tail are worked out once for each
   change (a repaint of the EQ 0.92 to 0.55 ms, of the reverb 1.41 to 0.41 ms); the sampler's picture already kept
   its peaks and stays as it was.
+- **22 A damaged commit restored:** a commit with an unreadable piece restores what can be read and puts no stand-in
+  into the song; restoring one line takes nothing where its place in the commit can't be read, and says which piece.
+- **23, 161 What a merge leaves behind:** restores, discards and merges let go of a sidechain that the result made
+  into a loop, and a conflict answered for the other branch leaves out what that answer names and this branch deleted.
+- **24 Moved here, deleted there:** a clip moved on one branch and deleted on the other stays where it was moved,
+  with a note in the merge's list.
+- **58 IDs across merges:** a branch merged again after it made an item with an ID an earlier merge gave one of its
+  own keeps both items, each with its own ID; and where two computers merged the same commit with other IDs, the
+  later merge's record wins by the graph, so later merges find each item once.
+- **60 A merge waiting for its commit** is part of the song (a `MERGING` element, in
+  [project-format.md](project-format.md) and [versions-format.md](versions-format.md)): Undo takes it back, Redo
+  brings it back, it waits still in the saved project or its restored autosave, and none waits in a project closed
+  without saving. No merge starts while another waits; Abort Merge keeps the song in Local History first, and takes
+  out a merge record that waits for nothing; a merge the Versions folder can't write takes nothing and says why;
+  Delete Branch is refused while a waiting merge took in a commit only that branch holds.
+- **26 `getTracksInFolder()`** did count an empty folder inside a folder, as its callers need: only its comment read
+  otherwise, and says so now.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

@@ -23,6 +23,7 @@
 namespace phazite
 {
 class TrackRender;
+struct MergeState;
 
 class VersionHistory : private juce::ValueTree::Listener,
                        private juce::Timer
@@ -89,8 +90,10 @@ public:
                               std::vector<MissingPiece>* missing = nullptr) const;
 
     // What the last Restore from This Commit couldn't take, as the commit's pieces that couldn't be read left it: none
-    // while it took everything. Told until the next one.
+    // while it took everything; or why it took nothing (a line whose place in the commit can't be read). Told until the
+    // next one.
     std::vector<MissingPiece> restoreMissing;
+    juce::String restoreRefused;
 
     // Verify History (git's fsck): every piece of every pack read and checked against its name, every commit's song walked
     // piece by piece, and the commits found in the packs that no branch's line holds. On the history's thread; done is told
@@ -252,17 +255,59 @@ public:
         juce::String version, otherBranch;
         juce::ValueTree base, theirs;
         PluginParameterValues theirParameters; // the other's plug-ins' knobs, which name a plug-in's clash
+        std::vector<RenumberedID> translation; // what base and theirs were translated through (SongMerge.h: findTranslation())
         std::vector<RenumberedID> renumbered;  // what it gave anew, which its commit keeps
         std::vector<SongChange> lines;
         std::vector<MergeClash> clashes;
         std::vector<int> chosen;
         juce::StringArray notes;
         juce::ValueTree before; // the song as it was before the merge was taken, which Abort Merge makes it again
+        juce::String beforePiece;
+        juce::String head; // the current branch's last version as the merge was taken
+        MergeLines taken;  // the lines the merge took
+
+        // Whether its three songs were read whole, so that its clashes are known (none while they are being read on the
+        // history's thread, or where one can't be).
+        bool readWhole = false, reading = false;
     };
 
-    std::optional<Merge> preview, merging;
-    std::vector<bool> ticked;                    // the merge window's lines that Merge takes
-    std::map<juce::String, Merge> mergesWaiting; // by branch: a merge made there, waiting for its version while another is on
+    // The merge window's merge, while it shows; and the lines of it Merge takes.
+    std::optional<Merge> preview;
+    std::vector<bool> ticked;
+
+    // The merge taken into the song that waits for its commit: the one the song's MERGING element says (Schema.h), until
+    // a commit of this branch's line finishes it (one that merged its commit, on top of where it was taken, and recorded the
+    // IDs it gave: findOwnCommit()), and while the branch's line doesn't hold its commit otherwise. Where the branch holds
+    // it through another computer's merge of it that gave other IDs, it waits still, so that its commit records this
+    // song's IDs beside that merge's (the IDs that merge gave and this one didn't, as they are here). Its clashes and notes
+    // are found again from the same three songs on the history's thread where the history hasn't them already (a merge
+    // taken here, undone and redone, or read as the project opened, has them): it waits meanwhile, being read. None when
+    // there is none, or when it can't be read. The element goes with the song: into its file and autosave, onto the branch
+    // it is left on, and in and out with Undo and Redo of the merge. Never reads a song on the message thread.
+    const std::optional<Merge>& getMerging() const;
+
+    // Why the merge the song holds doesn't wait as it was taken, for the Source Control view: it couldn't be taken (the
+    // store couldn't keep the song before it); the branch moved on since, so that its commit follows the newest commit; the
+    // branch holds the merged commit already, merged on another computer (so that it waits no more, or with that merge's
+    // other IDs, still); it is being read; or it can't be read, so that Abort Merge takes it out. None while it waits as
+    // taken.
+    const juce::String& getMergeProblem() const;
+    juce::String mergeFailure; // why the last Merge took nothing, until the next one, or Abort Merge
+
+    // Whether the song holds a merge's element (Schema.h: MERGING), waiting or not.
+    bool holdsMergeElement() const;
+
+    // Whether deleting a branch would take from the graph the commit a merge waiting (here, or in a song left on another
+    // branch) merged in: its line holds that commit, and no other branch's does.
+    bool holdsCommitMergeWaits (const BranchRecord&) const;
+
+    // The merge's element for a song (Schema.h: MERGING), with the song before it kept as a piece in the store first, as
+    // a merge is taken: the history keeps the merge, so that the element added in the merge's step finds it. Invalid if the
+    // store couldn't keep that song.
+    juce::ValueTree keepMerge (const Merge&, std::vector<int> chosen);
+
+    // Of another branch's song left on it (its working piece): the commit a merge it holds merged in; none for none.
+    juce::String findMergeLeftOn (const BranchRecord&) const;
 
     // Tells onChange at once: what was read or written, a branch made, a merge begun.
     void tellNow();
@@ -343,7 +388,24 @@ private:
 
     void open(); // the store beside the song's file, read on the history's thread
     void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,
-                 const juce::ValueTree& head, PluginParameterValues, std::map<juce::String, MessageEdit>, std::vector<Snapshot>);
+                 const juce::ValueTree& head, PluginParameterValues, std::map<juce::String, MessageEdit>, std::vector<Snapshot>,
+                 std::optional<std::pair<juce::String, Merge>> mergeRead);
+
+    // The merge the song's element says, found again (getMerging()): whether it must be, and those found, by the element
+    // each was found from (its text but for the choices), a few, with why it doesn't wait as taken; those being read on the
+    // history's thread, and one read there taken in.
+    mutable bool mergeDirty = true;
+    mutable std::optional<Merge> merging;
+    mutable juce::String mergeProblem;
+    mutable std::map<juce::String, Merge> mergesFound;
+    mutable std::set<juce::String> mergesBeingRead;
+    void findMerging() const;
+    void keepFound (const juce::String& key, Merge) const;
+    void mergeReadAgain (int generation, const juce::String& key, std::optional<Merge>);
+
+    // This branch's own commit of a merge, on the branch's line (VersionHistory.h: getMerging()): none while there is none.
+    const VersionRecord* findOwnCommit (const MergeState&) const;
+    mutable std::map<juce::String, juce::String> mergesLeft; // findMergeLeftOn()'s, by the song's piece
     void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues,
                 ReportCounts committed);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
@@ -412,6 +474,31 @@ std::vector<BranchRecord> joinBranchRecords (const std::vector<BranchRecord>& re
 
 // What a version is called: the name it was given, or the summary of its changes.
 juce::String getDisplayName (const VersionRecord&);
+
+// A merge waiting, as the song's MERGING element holds it (Schema.h), read as what anyone may have written: none for an
+// element whose values don't hold together (a commit's or a piece's id that isn't one, a line or a choice that isn't one,
+// IDs given anew that are 0 or not one to one: SongMerge.h, areOneToOne()). And the element of one.
+struct MergeState
+{
+    juce::String version, head, before;
+    MergeLines taken;
+    std::vector<int> chosen;
+    std::vector<RenumberedID> renumbered, translation;
+};
+
+std::optional<MergeState> readMergeState (const juce::ValueTree& element);
+juce::ValueTree writeMergeState (const MergeState&);
+
+// A merge waiting found again from what its element says, in a store with these commits: the song before it, read on its
+// own (Abort Merge needs nothing else), each read as a whole song (PHAZITE); and, where they can be, the parting's and the
+// other line's songs translated as they were, with the clashes and notes merging the three gives (Merge::readWhole). For
+// any thread.
+VersionHistory::Merge findMergeAgain (const VersionStore&, const std::map<juce::String, VersionRecord>&, const MergeState&);
+
+// A merge's clashes on plug-ins named by the knobs whose values differ between this side and the other ("Serum settings:
+// Cutoff, Mix"), and by the versions of the plug-in that made each side's state, where they differ.
+void nameKnobs (std::vector<MergeClash>&, const juce::ValueTree& ours, const juce::ValueTree& theirs,
+                const PluginParameterValues& ourValues, const PluginParameterValues& theirValues);
 
 // A local history thinned as it grows, as of a time (docs/design/versions.md: Local History): every snapshot of the last two hours,
 // then the newest of each hour for a day, then the newest of each day for 30 days, and none older; oldest first, as given.

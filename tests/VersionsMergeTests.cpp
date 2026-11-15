@@ -422,6 +422,60 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     checkIDs (second.song);
 }
 
+TEST_CASE ("A note the other line made with the ID a merge gave one of its notes in that clip gets one of its own, and a record "
+           "that isn't one to one is left out")
+{
+    // The parting's clip holds the other line's note n; a merge here gave it the ID t; their line then made a note of its
+    // own, with t, in the same clip.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 1);
+    const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+    addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
+    const auto base = song->getState().createCopy();
+    auto theirs = base.createCopy();
+    REQUIRE (findItems (theirs, schema::CLIP, clip.getRaw()).size() == 1);
+    auto theirClip = findItems (theirs, schema::CLIP, clip.getRaw()).front();
+    const auto note = theirClip.getChildWithName (schema::NOTE);
+    REQUIRE (note.isValid());
+    const auto n = phazite::readID (note[schema::noteID]);
+    const std::uint64_t t = n + 100;
+    auto own = note.createCopy();
+    own.setProperty (schema::noteID, (juce::int64) t, nullptr);
+    own.setProperty (schema::notePitch, 40, nullptr);
+    theirClip.appendChild (own, nullptr);
+
+    const auto group = "clip " + juce::String ((juce::uint64) clip.getRaw());
+    std::uint64_t next = 5000;
+    const auto translation = phazite::findTranslation (base, theirs, { { group, n, t } }, [&next] { return next++; });
+    REQUIRE (translation.givenAnew.size() == 1);
+    CHECK (translation.givenAnew[0] == phazite::RenumberedID { group, t, 5000 });
+
+    auto translatedBase = base.createCopy(), translatedTheirs = theirs.createCopy();
+    phazite::translateIDs (translatedBase, translation.all);
+    phazite::translateIDs (translatedTheirs, translation.all);
+    std::set<std::uint64_t> ids;
+
+    const auto translatedClip = findItems (translatedTheirs, schema::CLIP, clip.getRaw()).front();
+
+    for (const auto& each : translatedClip)
+        if (each.hasType (schema::NOTE))
+            CHECK (ids.insert (phazite::readID (each[schema::noteID])).second);
+
+    CHECK (ids == std::set<std::uint64_t> { t, 5000 });
+    CHECK (phazite::readID (findItems (translatedBase, schema::CLIP, clip.getRaw()).front().getChildWithName (schema::NOTE)[schema::noteID])
+           == t);
+
+    // Two IDs given one, or an ID 0, as no merge records: none of them translates anything.
+    const auto bass = tracks[0].getRaw();
+    const auto broken = phazite::findTranslation (base, base, { { {}, bass, bass + 50 }, { {}, clip.getRaw(), bass + 50 }, { {}, 0, 7 } },
+                                                  [&next] { return next++; });
+    CHECK (broken.all.empty());
+    CHECK (broken.givenAnew.empty());
+    CHECK (phazite::areOneToOne ({ { {}, 1, 2 }, { group, 1, 2 } }));
+    CHECK_FALSE (phazite::areOneToOne ({ { {}, 1, 2 }, { {}, 3, 2 } }));
+    CHECK_FALSE (phazite::areOneToOne ({ { {}, 0, 2 } }));
+}
+
 TEST_CASE ("The renumberings that apply are those of this line's merges since the parting that merged in the other line")
 {
     std::map<juce::String, phazite::VersionRecord> versions;
@@ -682,6 +736,65 @@ TEST_CASE ("A clip moved onto another track on one side and changed on the other
         CHECK (clipOf (merged.song, "Drums").isValid());
         CHECK (findTrack (merged.song, "Keys").isValid());
         CHECK (merged.notes.joinIntoString ("\n").contains ("moved on both sides: this side's place kept"));
+    }
+}
+
+TEST_CASE ("A clip moved on one side and deleted on the other stays where it was moved, with a note, as a change and a removal do")
+{
+    const auto clipOf = [] (const juce::ValueTree& song, const juce::String& track)
+    { return findTrack (song, track).getChildWithName (schema::CLIP); };
+
+    // Moved there, deleted here: back where the other side moved it, and the note says so.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.theirs, sides.clip, at (4.0), sides.tracks[1]);
+        phazite::deleteClips (*sides.ours, { sides.clip }, false);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        INFO (merged.notes.joinIntoString ("\n").toStdString());
+        CHECK (merged.notes.joinIntoString ("\n").contains ("Drums: clip \"Riff\" taken away here and moved there: kept"));
+    }
+
+    // Moved there onto a track it added, deleted here: on that track, with the note.
+    {
+        Sides sides;
+        const auto keys = phazite::insertTrack (*sides.theirs, sides.tracks[1], nullptr);
+        phazite::setTrackName (*sides.theirs, keys, "Keys");
+        phazite::moveClip (*sides.theirs, sides.clip, at (0.0), keys);
+        phazite::deleteClips (*sides.ours, { sides.clip }, false);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Keys").isValid());
+        INFO (merged.notes.joinIntoString ("\n").toStdString());
+        CHECK (merged.notes.joinIntoString ("\n").contains ("clip \"Riff\" taken away here and moved there: kept"));
+    }
+
+    // Moved here, deleted there: it stays where this side moved it, and the note says so.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.ours, sides.clip, at (4.0), sides.tracks[1]);
+        phazite::deleteClips (*sides.theirs, { sides.clip }, false);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        INFO (merged.notes.joinIntoString ("\n").toStdString());
+        CHECK (merged.notes.joinIntoString ("\n").contains ("Bass: clip \"Riff\" moved here and taken away there: kept"));
+    }
+
+    // Moved on one side, left as it was on the other: no note.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.theirs, sides.clip, at (4.0), sides.tracks[1]);
+        const auto merged = sides.merge();
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        CHECK (merged.notes.isEmpty());
     }
 }
 

@@ -50,7 +50,8 @@ bool isMaster (const Song&, TrackID);
 // A track's name as the song shows it: its own, or for a track or a return without one, its number among them, "Track 3".
 juce::String getTrackName (const Song&, TrackID);
 
-// The folder a track is in, or none; and the tracks a folder holds, directly or in its folders, top to bottom.
+// The folder a track is in, or none; and the tracks a folder holds, directly or in its folders, top to bottom: those folders
+// among them, empty ones too, as a folder is a track (its effects are part of the folder's sound).
 TrackID getParentFolder (const Song&, TrackID);
 std::vector<TrackID> getTracksInFolder (const Song&, TrackID folder);
 

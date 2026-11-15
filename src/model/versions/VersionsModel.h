@@ -137,7 +137,9 @@ juce::int64 getVersionsSize (const ProjectContext&);
 // Going back (docs/design/versions.md: Going back): each a named undo step, which what plays follows as it follows an undo. What
 // isn't counted (view state, how the song plays) stays as it is now, and the history keeps every version.
 
-// Bring Back This Version: the song made what it was then ("Bring Back "Verse 2""). False for a version it can't read.
+// Bring Back This Version: the song made what it was then ("Bring Back "Verse 2""), as much of it as its pieces hold whole:
+// what a damaged piece held stays as it is now (not there, for what the song hasn't now), and getRestoreProblem() says what.
+// False for a version it can't read at all.
 bool bringBackVersion (ProjectContext&, const juce::String& versionID);
 
 // What the Versions view lists against the song: the changes since the last version, or, while Take from This Version...
@@ -152,7 +154,9 @@ bool takeBack (ProjectContext&, const VersionChange&);
 // What a commit changed, from the commit it follows (nothing, for the first), by line, as the graph lists them under it
 // (git show --stat); none for a commit that can't be read. And one of them restored from that commit (git restore --source):
 // the line made what it was then, its track there again or taken away as it was or wasn't then, one undo step ("Restore
-// Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone.
+// Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone. As
+// much of the line as the commit's pieces hold whole, as Bring Back takes it: what a damaged piece held stays as it is now,
+// and getRestoreProblem() says what.
 std::vector<VersionChange> getVersionChanges (const ProjectContext&, const juce::String& versionID);
 bool restoreFromVersion (ProjectContext&, const juce::String& versionID, const VersionChange&);
 
@@ -278,6 +282,9 @@ void selectBranch (ProjectContext&, const juce::String& branchID);
 // hold) into the song: its window lists what it changed since the newest version both have, by line, each with whether it
 // clashes with what the song changed; Merge takes the lines ticked as one undo step ("Merge "Half-time""). Then, until the
 // next version is saved (which follows both lines), each clash switches between its three values, each switch an undo step.
+// The merge waiting is part of those steps (and of Abort Merge's): Undo of the merge leaves none waiting, Redo brings it
+// back. It is part of the song (Schema.h: MERGING), so it waits still in whichever file of the song opens: the project file, its
+// autosave, the song left on a branch.
 struct MergeLine
 {
     VersionChange change;
@@ -291,6 +298,10 @@ bool startMerge (ProjectContext&, const juce::String& versionID);
 std::vector<MergeLine> getMergeLines (const ProjectContext&); // the merge window's, while it shows
 juce::String describeMerge (const ProjectContext&);           // "Half-time" (the version's name), while it shows or is merging
 juce::StringArray getMergeNotes (const ProjectContext&);      // what the merge couldn't decide, once it is made
+
+// Why the merge the song holds doesn't wait as it was taken (VersionHistory.h: getMergeProblem()), as the Source Control view
+// says it: the branch moved on since, or holds the merged commit already, or the merge can't be read. None while it does.
+juce::String getMergeProblem (const ProjectContext&);
 
 // Abort Merge (version.cancelMerge; git merge --abort): the merge's list closed, taking nothing; or, once it was taken and
 // waits for its commit, the song made what it was before it, one undo step ("Abort Merge"), so that no commit says the other

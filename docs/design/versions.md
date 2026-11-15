@@ -110,7 +110,8 @@ master, and the song's own (its tempo, sections, chord lane and track order).
 - **Rename Branch...** (`version.renameBranch`) names the current branch anew. Names are as git takes them: spaces
   become dashes, and no two branches share a name.
 - **Delete Branch...** (`version.deleteBranch`) lists the other branches. When the branch has commits no other
-  branch has, or changes left on it uncommitted, it asks first, saying so. Its commits stay in the store.
+  branch has, or changes left on it uncommitted, it asks first, saying so. Its commits stay in the store. Not while a
+  merge waiting (here, or in the song left on another branch) took in a commit only its line holds.
 
 ## Merging
 
@@ -125,19 +126,51 @@ master, and the song's own (its tempo, sections, chord lane and track order).
 - **Conflicts.** A property both sides changed to different values is a conflict. It takes this branch's value to
   start with, so a merge never stops on a question, and it keeps all three values until the merge is committed:
   **Accept Current Change**, **Accept Incoming Change**, **Accept Base**. Each switch is one undo step, heard at
-  once. Automation curves, the chord lane and a plug-in's state merge whole.
+  once; what the value chosen names that this branch took away (a track deleted here) goes with it, as after any
+  edit. Automation curves, the chord lane and a plug-in's state merge whole.
 - **Moves.** An item moved between tracks, or into a folder or a container, is treated as a move, not as a removal
   and an addition: it goes where that side put it, with the other side's changes, and stays where this branch put
-  it if both moved it.
+  it if both moved it. Moved on one side and deleted on the other, it stays where it was moved, and a note says so,
+  as for any change against a removal.
+- **What names the gone goes.** A merge, as every restore and discard, leaves out what names something the song
+  hasn't (a send to a return this branch deleted, a modulation of a device gone), and lets go of a sidechain that
+  the two lines' changes made into a loop (one side's sidechain, the other's send), as the edit that makes one does.
 - **A folder removed leaves its tracks.** A folder taken away by a merge or a discard goes without the tracks in
   it, which stay where it was; each track follows its own line.
 - **IDs never collide.** Two branches both count their IDs on from where they parted, so a merge gives new IDs to
-  what the other branch added wherever this branch has something else with them. No ID is in the song twice after a
-  merge, a restore or a discard, and every one of them leaves the song's count of IDs past every ID it holds.
+  what the other branch added wherever this branch has something else with them, and a later merge of that branch
+  knows them again by its commit's record, even where the other branch, on another computer, gave one of those IDs to
+  something it made since. No ID is in the song twice after a merge, a restore or a discard, and every one of them
+  leaves the song's count of IDs past every ID it holds.
 - **The commit that finishes it** has both lines as its parents, and is named as git names one ("Merge branch
   'idea-2'") unless a message is typed.
 - **Abort Merge** (`version.cancelMerge`) closes the list, taking nothing; once the merge is taken and waits for its
-  commit, it makes the song what it was before, as one undo step.
+  commit, it makes the song what it was before, as one undo step, the song as it is kept in Local History first (the
+  branch's last commit, where the song before it can't be read, as git's abort resets to `HEAD`). A merge's record
+  in the song that waits for nothing (one that can't be read, one of another history, as in a project file opened
+  without its Versions folder, or one the branch holds already) it takes out alone, the rest of the song as it is.
+- **A merge the Versions folder can't keep** (the song before it can't be written, a full or locked drive) takes
+  nothing: its list stays, and the view says why.
+- **One merge at a time.** While a merge waits for its commit, no other starts, as git refuses one: Merge Branch...
+  and Merge into Current Branch... are greyed until it is committed or aborted.
+- **A merge waiting is part of the song,** as git keeps `MERGE_HEAD` beside the files it merged: it goes with the song
+  into its file, its autosave and the song left on a branch, so that whichever of them opens holds the merge state its
+  song is in. A song closed without saving after a merge holds none; the autosave restored after a crash holds the one
+  it was saved with. It goes in and out with the merge's undo step: Undo of the merge leaves none waiting, so the next
+  commit follows this line alone, and Redo brings it back; Undo of Abort Merge makes it wait again, its conflicts as
+  they were chosen. It counts as an unsaved change, but is no line of the changes, nor part of a commit.
+- **The branch moved on underneath it.** Where the branch's last commit is no longer the one the merge was taken at
+  (another computer committed on it, or a commit was made after the merge's Undo and before its Redo), the merge still
+  waits, so that its commit follows the newest commit and the merged one and records the IDs it gave, rather than the
+  merged work coming into the branch as new items that a later merge would bring again; the view says so. Its own
+  commit finishes it, known by the graph (a commit of the line that merged the same commit, on top of where it was
+  taken, recording the IDs it gave), so that nothing is written into the song after a commit. Where the branch holds the
+  merged commit through another computer's merge of it that gave what it added other IDs, it waits still, its commit
+  recording this song's IDs beside that merge's, so that later merges of that line find this song's items; where the
+  branch holds it otherwise, it waits no more, and the view says so.
+- **Read in the background.** A merge's conflicts are found again from its three songs on the history's thread (as
+  the project opens, or a branch is switched to whose song holds one); meanwhile it waits, "being read", and Abort
+  Merge waits for it.
 - View state and how the song plays are always this branch's.
 
 ## Hearing a commit
@@ -160,7 +193,7 @@ Local History keeps the song as it was at times while it differed from its last 
 
 - **When:** as the project opens with changes since its last commit ("As opened"); every 10 minutes while the song
   changes ("Auto-saved"), never while it records; and before what makes the song another: a restore, Discard All
-  Changes, a merge taken, a snapshot restored.
+  Changes, a merge taken, Abort Merge, a snapshot restored.
 - **What it costs:** a snapshot is taken only when the song differs from the one before it, and is stored as
   commits are, so it costs what changed.
 - **How long:** every snapshot of the last two hours, then the newest of each hour for a day, then the newest of
@@ -178,7 +211,15 @@ Local History keeps the song as it was at times while it differed from its last 
   song, and finds the commits no branch holds.
 - **Recover Lost Commits** (`version.recover`) makes a branch of each line of those commits, named after the branch
   they were made on ("main-recovered").
-- A commit with a damaged piece is restored in part, and the view says what it couldn't take.
+- A commit with a damaged piece is restored in part, and the view says what it couldn't take, which stays as it is
+  now. **Restore from This Commit** on the commit (the whole song) takes every element it can read, and a track the
+  song hasn't now comes back without what of it can't be read (a clip). On one of its lines, it takes that line where
+  the commit holds it whole, leaves what of it can't be read as it is, and takes nothing where the line's place in the
+  commit can't be read: it isn't in the commit where it reads, and a track whose piece is damaged could have held it (a
+  folder it is in now, the nearest named; a folder now; or a track gone since, whose kind is unknown), saying
+  which piece. In the window, only the first is reached: the graph lists no lines under a commit it can't read whole,
+  nor does Compare with Working Tree list any, so a damaged commit's lines show nowhere to restore one by one. Verify
+  History names such commits. A commit whose own piece can't be read restores nothing.
 - A project file that can't be read offers its branch's last commit
   ([projects-saving-export.md](projects-saving-export.md)).
 

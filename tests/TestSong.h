@@ -50,6 +50,18 @@ public:
     void reopen (bool waitForPlugins = true);
     void openSong (const juce::ValueTree& song);
 
+    // Closes the project without saving it, as Don't Save closes one, and opens it again from its file; or, as after a crash,
+    // with its autosave written first and left behind (closing deletes it), opened again from the autosave ("Restore") or
+    // from its file ("Open the last saved version"). False if it can't be opened.
+    enum class Reopening
+    {
+        withoutSaving,
+        afterCrashRestoring,
+        afterCrashFromFile
+    };
+
+    bool reopenAs (Reopening);
+
     // The project saved as the app's save saves one that has its file, calling back with whether it saved: what Save Version
     // and a switch to another branch take (model/versions/VersionsModel.h: SaveProjectThen).
     std::function<void (std::function<void (bool saved)>)> save;

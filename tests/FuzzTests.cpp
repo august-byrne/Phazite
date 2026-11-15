@@ -9,6 +9,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -20,6 +21,7 @@
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/VersionsModel.h"
 #include "model/versions/internal/PieceStore.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionStore.h"
@@ -38,6 +40,7 @@ namespace
 {
 using namespace phazite::test;
 namespace fuzz = phazite::test::fuzz;
+namespace schema = phazite::schema;
 
 juce::MemoryBlock readBytes (const juce::File& file)
 {
@@ -267,6 +270,92 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
                          file.replaceWithData (original.getData(), original.getSize());
                          return {};
                      });
+}
+
+TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, and the song holds together through Abort Merge")
+{
+    // A real merge waiting, its element (Schema.h: MERGING) as Phazite writes it, and one whose song before it names a
+    // track's piece; each damaged, put into the song's file, and the project opened again, as one from anyone would be.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto commit = [&s]
+    {
+        REQUIRE (waitForVersionHistory (s.context));
+        std::optional<juce::Result> result;
+        REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+        REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
+        REQUIRE (result->wasOk());
+        REQUIRE (waitForVersionHistory (s.context));
+        return phazite::getLastVersion (s.context)->id;
+    };
+
+    commit();
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    REQUIRE (phazite::newBranch (s.context, {}, s.save));
+    s.setVolume (bass, -12.0f);
+    s.addTrack ("Keys");
+    const auto theirs = commit();
+    REQUIRE (phazite::switchBranch (s.context, main, s.save));
+    s.setVolume (bass, -6.0f);
+    commit();
+    REQUIRE (phazite::startMerge (s.context, theirs));
+    phazite::finishTickedMerge (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+
+    const auto state = phazite::findSong (s.context)->getState().createCopy();
+    const auto element = state.getChildWithName (schema::MERGING);
+    REQUIRE (element.isValid());
+    auto pointingAtATrack = element.createCopy();
+
+    for (const auto& [name, piece] : phazite::splitSong (state).pieces)
+        if (piece.toString().startsWith ("<" + schema::TRACK.toString()))
+            pointingAtATrack.setProperty (schema::mergingBefore, name, nullptr);
+
+    std::vector<juce::MemoryBlock> seeds;
+
+    for (const auto& seed : { element, pointingAtATrack })
+    {
+        const auto text = seed.toXmlString();
+        seeds.emplace_back (text.toRawUTF8(), text.getNumBytesAsUTF8());
+    }
+
+    fuzz::run ("merges waiting", seeds, fuzz::Shape::xml, 40,
+               [&] (const juce::MemoryBlock& input) -> std::string
+               {
+                   auto song = state.createCopy();
+                   song.removeChild (song.getChildWithName (schema::MERGING), nullptr);
+
+                   // Its attributes, as a file's reader takes them: the element's type and names checked, never fromXml().
+                   if (const auto xml = juce::parseXML (input.toString());
+                       xml != nullptr && xml->getTagName() == schema::MERGING.toString())
+                   {
+                       juce::ValueTree merging (schema::MERGING);
+
+                       for (const auto& attribute : xml->getAttributeIterator())
+                           merging.setProperty (attribute.name, attribute.value, nullptr);
+
+                       song.appendChild (merging, nullptr);
+                   }
+
+                   s.openSong (song);
+
+                   if (! waitForVersionHistory (s.context))
+                       return "the history didn't open";
+
+                   auto& opened = *phazite::findSong (s.context);
+                   juce::ignoreUnused (phazite::getClashes (s.context), phazite::getMergeProblem (s.context),
+                                       phazite::describeNextCommit (s.context));
+
+                   for (int clash = 0; clash < (int) phazite::getClashes (s.context).size(); ++clash)
+                       phazite::chooseClash (s.context, clash, 2);
+
+                   phazite::cancelMerge (s.context);
+
+                   if (phazite::getTrackIDs (opened).empty())
+                       return "Abort Merge emptied the song";
+
+                   return fuzz::joinProblems (findSongProblems (opened));
+               });
 }
 
 TEST_CASE ("Fuzz: presets of every kind load into a song that holds together, or not at all")

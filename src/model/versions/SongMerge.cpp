@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <map>
+#include <set>
 
 namespace phazite
 {
@@ -474,6 +475,11 @@ namespace
 
                 if (! mine.isValid())
                 {
+                    // Moved there into what this copy is, and taken away here: back, where the other side moved it.
+                    if (const auto was = canMove (child) ? findItem (baseItems, keyOf (child)) : juce::ValueTree();
+                        was.isValid() && keyOf (copy) != keyOf (was.getParent()) && ! findItem (ourItems, keyOf (child)).isValid())
+                        note (describeClash (child, {}) + " taken away here and moved there: kept");
+
                     takeOurs (child);
                     continue;
                 }
@@ -754,6 +760,11 @@ namespace
                     else if (theirs.isValid())
                     {
                         keyed[name] = addTheirs (r, theirs, keyed); // theirs, added
+
+                        // Or moved here there from where the base has it, and taken away here: back, as a removal on one
+                        // side and a change on the other always is, with a note.
+                        if (was.isValid() && ! findItem (ourItems, name).isValid())
+                            note (describeClash (theirs, {}) + " taken away here and moved there: kept");
                     }
 
                     continue;
@@ -799,6 +810,11 @@ namespace
                     // Taken away here, changed there: back, as it changed.
                     keyed[name] = addTheirs (r, theirs, keyed);
                     note (describeClash (theirs, {}) + " taken away here and changed there: kept");
+                }
+                else if (! theirs.isValid() && canMove (inBase) && findOurs (inBase).isValid() && ! findItem (theirItems, name).isValid())
+                {
+                    // Moved somewhere else here, and taken away there: it stays where this side moved it, with a note.
+                    note (describeClash (inBase, {}) + " moved here and taken away there: kept");
                 }
             }
 
@@ -1243,6 +1259,165 @@ void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>& renumb
 
     translateItems (song);
     translateNotes (song);
+}
+
+namespace
+{
+    // An ID given anew as findTranslation() keys it: an item's by itself, a note's by its clip's group and itself.
+    juce::String getGroup (std::uint64_t)
+    {
+        return {};
+    }
+    juce::String getGroup (const std::pair<juce::String, std::uint64_t>& note)
+    {
+        return note.first;
+    }
+    std::uint64_t getID (std::uint64_t id)
+    {
+        return id;
+    }
+    std::uint64_t getID (const std::pair<juce::String, std::uint64_t>& note)
+    {
+        return note.second;
+    }
+} // namespace
+
+bool areOneToOne (const std::vector<RenumberedID>& ids)
+{
+    std::set<std::pair<juce::String, std::uint64_t>> froms, tos;
+
+    for (const auto& id : ids)
+        if (id.from == 0 || id.to == 0 || ! froms.insert ({ id.clip, id.from }).second || ! tos.insert ({ id.clip, id.to }).second)
+            return false;
+
+    return true;
+}
+
+PluginParameterValues translateKnobs (PluginParameterValues knobs, const std::vector<RenumberedID>& renumbered)
+{
+    CopiedIDs items;
+
+    for (const auto& id : renumbered)
+        if (id.clip.isEmpty())
+            items[id.from] = id.to;
+
+    PluginParameterValues translated;
+
+    for (auto& [device, values] : knobs)
+    {
+        const auto to = items.find (device);
+        translated[to != items.end() ? to->second : device] = std::move (values);
+    }
+
+    return translated;
+}
+
+Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree& theirs, const std::vector<RenumberedID>& recorded,
+                             const std::function<std::uint64_t()>& makeID)
+{
+    // What was recorded, the later merge's word for an ID over an earlier's.
+    CopiedIDs items;
+    std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> notes;
+
+    for (const auto& id : recorded)
+    {
+        if (id.clip.isEmpty())
+            items[id.from] = id.to;
+        else
+            notes[{ id.clip, id.from }] = id.to;
+    }
+
+    // What isn't one to one (a record of a history another wrote, damaged), left out: an ID 0, and every ID two IDs were
+    // given, which would make two items one.
+    const auto keepOneToOne = [] (auto& map)
+    {
+        std::map<std::pair<juce::String, std::uint64_t>, int> targets;
+
+        for (const auto& [from, to] : map)
+            ++targets[{ getGroup (from), to }];
+
+        std::erase_if (map, [&targets] (const auto& entry)
+                       { return getID (entry.first) == 0 || entry.second == 0 || targets[{ getGroup (entry.first), entry.second }] > 1; });
+    };
+
+    keepOneToOne (items);
+    keepOneToOne (notes);
+
+    // The items' IDs the parting holds, alone: what the other line made since is no item a merge numbered.
+    std::set<std::uint64_t> held, inEither;
+    collectIDs (base, held);
+    collectIDs (base, inEither);
+    collectIDs (theirs, inEither);
+    std::erase_if (items, [&held] (const auto& entry) { return held.count (entry.first) == 0; });
+
+    Translation result;
+    std::set<std::uint64_t> targets;
+
+    for (const auto& [from, to] : items)
+        targets.insert (to);
+
+    for (const auto id : inEither)
+        if (targets.count (id) > 0 && items.count (id) == 0)
+            result.givenAnew.push_back ({ {}, id, makeID() });
+
+    for (const auto& id : result.givenAnew)
+        items[id.from] = id.to;
+
+    // The notes, by their clips' groups as the songs are numbered once their items are translated (getNoteGroup()).
+    using NoteKey = std::pair<juce::String, std::uint64_t>;
+
+    const auto collectNotes = [&items] (const juce::ValueTree& song, std::set<NoteKey>& found)
+    {
+        const auto translated = [&items] (const juce::var& value)
+        {
+            const auto id = readID (value);
+            const auto to = items.find (id);
+            return juce::String ((juce::uint64) (to != items.end() ? to->second : id));
+        };
+
+        std::map<std::uint64_t, juce::ValueTree> clips;
+        collectClips (song, clips);
+
+        for (const auto& [id, clip] : clips)
+        {
+            const auto group = clip.hasProperty (schema::clipLink) ? "link " + translated (clip[schema::clipLink])
+                                                                   : "clip " + translated (clip[schema::clipID]);
+
+            for (const auto& note : clip)
+                if (note.hasType (schema::NOTE))
+                    found.insert ({ group, readID (note[schema::noteID]) });
+        }
+    };
+
+    std::set<NoteKey> heldNotes, notesInEither;
+    collectNotes (base, heldNotes);
+    collectNotes (base, notesInEither);
+    collectNotes (theirs, notesInEither);
+    std::erase_if (notes, [&heldNotes] (const auto& entry) { return heldNotes.count (entry.first) == 0; });
+
+    std::set<NoteKey> noteTargets;
+
+    for (const auto& [note, to] : notes)
+        noteTargets.insert ({ note.first, to });
+
+    std::vector<RenumberedID> notesGivenAnew;
+
+    for (const auto& note : notesInEither)
+        if (noteTargets.count (note) > 0 && notes.count (note) == 0)
+            notesGivenAnew.push_back ({ note.first, note.second, makeID() });
+
+    for (const auto& id : notesGivenAnew)
+        notes[{ id.clip, id.from }] = id.to;
+
+    result.givenAnew.insert (result.givenAnew.end(), notesGivenAnew.begin(), notesGivenAnew.end());
+
+    for (const auto& [from, to] : items)
+        result.all.push_back ({ {}, from, to });
+
+    for (const auto& [note, to] : notes)
+        result.all.push_back ({ note.first, note.second, to });
+
+    return result;
 }
 
 juce::ValueTree findByPath (const juce::ValueTree& song, const juce::StringArray& path)

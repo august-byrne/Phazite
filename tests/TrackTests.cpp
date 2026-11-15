@@ -389,6 +389,21 @@ TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and u
     CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
 }
 
+TEST_CASE ("A folder's tracks are those in it and in the folders in it, top to bottom, those folders among them, empty ones too")
+{
+    // What its callers ask of a folder: every track whose sound or devices are inside it (a sidechain listening to it, its
+    // plug-ins' settings stored, a stem of it), a folder's own effects too, which an empty bus can have.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto outer = phazite::groupIntoFolder (*song, { tracks[0] }, nullptr);
+    const auto inner = phazite::insertFolder (*song, tracks[1], nullptr);
+    phazite::moveTrackIntoFolder (*song, inner, outer);
+    REQUIRE (phazite::getParentFolder (*song, inner) == outer);
+    REQUIRE (phazite::isFolder (*song, inner));
+    CHECK (phazite::getTracksInFolder (*song, inner).empty());
+    CHECK (phazite::getTracksInFolder (*song, outer) == std::vector { tracks[0], inner });
+}
+
 TEST_CASE ("Pinning a track is kept in the project, but isn't an undo step")
 {
     Tracks tracks (2);
