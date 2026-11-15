@@ -150,7 +150,7 @@ Each has its test; these rows are what a test can't hear, see on a real screen o
 | F22 | Open a project with several heavy VST3 plug-ins | The window answers at once; the Project view lists each plug-in as loading; each sounds as it arrives | |
 | F23 | Press Ctrl+S while a plug-in is busy (a sampler loading a large library) | The window keeps answering, and the save finishes when the plug-in answers | |
 | F24 | Open plug-in windows at 75 % and at 200 % Interface Size, a resizable one several times | Each window is its plug-in's own size, with nothing cropped and no black border | |
-| F21 | After the first push: read CI's `linux-clang` job, the nightly `windows-asan` job and the real-time audit on Linux | Each ran, and what it found is fixed or in known-bugs.md | |
+| F21 | After the first push: read CI's `linux-clang` job, the nightly `windows-asan` job and the real-time audit on Linux | Each ran, and what it found is fixed or in known-bugs.md | Claude, 2026-11-15 (CI run 43709371891 and nightly run 43709371062, on dab254bd) |
 
 ## Known bugs that need an ear or a real plug-in
 

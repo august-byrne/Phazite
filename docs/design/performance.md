@@ -23,7 +23,7 @@ them. What has been measured, and how, is in [../performance.md](../performance.
 | CPU load in the status bar and on each mixer strip | Built | |
 | Freeze Track and Bounce in Place for heavy tracks | Built | [projects-saving-export.md](projects-saving-export.md) |
 | Benchmarks of the devices, the engine (a song of 100 tracks among them), saving and the UI | Built | Run by hand; not part of `ctest` |
-| Gates that fail a change that makes Phazite slower | Built | Counts of work in every `ctest` run; the benchmark gates and an hour's long run nightly, which hasn't run yet |
+| Gates that fail a change that makes Phazite slower | Built | Counts of work in every `ctest` run; the benchmark gates and an hour's long run nightly |
 | The targets below, measured on a mid-range laptop | Partly built | Measured on the development PC only |
 | Tracks that aren't being edited pre-rendered in the background | Planned | After v1; no roadmap step |
 

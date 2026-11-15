@@ -371,7 +371,12 @@ reason; that the song's IDs stay whole; and that the song saved and opened again
 Measured on 2026-11-14 from `windows-profile`, on the PC above: an hour of music in 674 seconds, with 1,919 edits and
 31 saves; the process's memory went from 85 to 103 MB. In a Debug build an hour of music takes about an hour.
 
-ctest skips it; the nightly workflow runs it under `linux-asan` and `linux-tsan`. Run it from any build:
+ctest skips it; the nightly workflow runs it under `linux-asan` and `linux-tsan`. On GitHub's machines (2026-11-15)
+the `linux-tsan` job took about 80 minutes with its build, and the `linux-asan` job about four hours: an hour of music
+in about two and a half, then the file readers' fuzzer with 20,000 rounds.
+Started by hand, the workflow runs one job alone, which doesn't wait behind a whole run
+(`gh workflow run nightly.yml -f only=long-run`, or `benchmark-gates`, or `windows-asan`). Run the long run from any
+build:
 
 ```
 build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=long-run --no-skip

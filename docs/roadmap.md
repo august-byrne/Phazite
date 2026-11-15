@@ -43,7 +43,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stages 1 and 2 built on Windows (2026-11-14); what they added for Linux, Clang and the sanitizers runs for the first time with the push that ends stage 2 (S2.15). Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
+| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -70,16 +70,15 @@ for the owner's answer.
 
 ### Stage 2. Caught: the tests that would have found those bugs, and the docs
 
-Built on Windows (2026-11-14), each in the [changelog](changelog.md): S2.1 to S2.14, with the gaps the nets had left.
-S2.5's Linux half, and S2.13's Clang build and AddressSanitizer on Windows, are written and have never run: no
-Linux, no Clang and no x64 ASan component were at hand. What only a push runs has never run: the Linux builds with
-their sanitizers, what the steps added to CI (UBSan's reports, the helper's sanitizer reports, the real VST3s'
-targets, `windows-profile`, the app started by ctest) and the nightly workflow (`.github/workflows/nightly.yml`). The nets these steps built are listed in
+Built (2026-11-15), each in the [changelog](changelog.md): S2.1 to S2.15, with the gaps the nets had left. The last
+step, S2.15, was the first push: the Linux builds with their sanitizers, the Clang build, AddressSanitizer on
+Windows, what the steps added to CI (UBSan's reports, the helper's sanitizer reports, the real VST3s' targets,
+`windows-profile`, the app started by ctest) and the nightly workflow (`.github/workflows/nightly.yml`) ran for the
+first time, and what they found is fixed: CI is green on every preset, and a whole nightly run passed on the same
+commit. The owner's PC still has no Linux, no Clang and no x64 ASan component (the setup script installs the last),
+so what those find is reproduced in CI: the nightly workflow started by hand runs one job alone
+([performance.md](performance.md#the-long-run)). The nets these steps built are listed in
 [tests/README.md](../tests/README.md), "The nets"; the smaller test gaps left are in the [backlog](backlog.md), "Tests".
-
-| Step | Size | What | Done when |
-|---|---|---|---|
-| S2.15 | S | A push: CI and the nightly workflow run for the first time, and what they find is fixed | CI is green on every preset, and a nightly run passes |
 
 ### Stage 3. Checked: a person tries what only tests have tried
 

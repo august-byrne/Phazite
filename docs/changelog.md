@@ -8,6 +8,23 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 2, the last step: the first push (2026-11-15)
+
+- **S2.15 CI and the nightly workflow run for the first time:** the Linux builds (GCC, Clang, AddressSanitizer with
+  UBSan, ThreadSanitizer), AddressSanitizer on Windows, the hour-long run and the fuzzer's 20,000 rounds each ran for
+  the first time, and what they found is fixed. CI is green on every preset, and a whole nightly run passed on the
+  same commit (dab254bd). In Phazite itself they found: copied automation that was empty in a GCC build, so Paste put
+  none back; a stray "id" in a damaged project that was counted as the song's largest ID; a path with no drive from
+  another computer's project that made JUCE assert on Windows (W37); a pack's empty piece that left every piece after
+  it unread; a DAWproject's notes and audio a hair past a song's ranges; a number too long for JUCE's JSON parser to
+  count, in a preset, a keymap or a download (every JSON text is now read through `parseJson()`, W38); and the status
+  bar going through every device of the song four times a second, in silence too. The rest were the tests' own:
+  what GCC and Clang refuse that MSVC takes, stand-in plug-ins the sanitizers reported, and tests that raced on a busy
+  machine. For the next such finding: a test case that takes too long says where it is
+  (`PHAZITE_TEST_STALL_SECONDS`), and the nightly workflow started by hand can run one job alone. Left: known bugs
+  169 (a first save that, seldom, can't copy a file of the Versions folder) and 170 (an exponent of ten digits in a
+  project file's number).
+
 ## Stage 1. Safe: the bugs that lose work or sound (2026-11-14)
 
 Built on Windows. Each bug has a test that failed before its fix; a reviewer then read each part's changes, and what
@@ -83,7 +100,7 @@ the reviews found is fixed too. The numbers in brackets are those the bugs had i
   (`PHAZITE_PRECOMPILED_HEADERS`), which took a full Debug build on the owner's PC from about 28 minutes to about 6;
   CI builds without them, so every push also shows that each file includes what it uses. A `windows-asan` preset for
   the nightly run, and a `linux-clang` preset and CI job with clang-tidy; neither could be run where they were
-  written.
+  written, and both ran first with S2.15.
 - **S2.5 The allocation guard:** counts what the engine's worker threads allocate too, and has a Linux half.
 - **The nets' gaps closed:** the event queue, the handover, the playhead's stamps and the transport raced on real
   threads; saves that fail and first saves that fail part way; Cut, Copy and Paste of linked clips, audio, ranges and
@@ -93,7 +110,7 @@ the reviews found is fixed too. The numbers in brackets are those the bugs had i
 
 ## Stage 2. Caught: the tests that would have found the audit's bugs, and the docs (2026-11-14)
 
-Built on Windows; the Linux builds, CI's new jobs and the nightly workflow had not run yet. Each net was shown to hold
+Built on Windows; the Linux builds, CI's new jobs and the nightly workflow first ran with S2.15, above. Each net was shown to hold
 by breaking the code it guards and seeing its test fail.
 
 - **S2.14 The docs as pages that say what is** (commit f997722): the design as a page for each area and each device,
