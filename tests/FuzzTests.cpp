@@ -80,7 +80,11 @@ std::vector<juce::MemoryBlock> getPresetSeeds (TestSong& s, const juce::File& fo
 {
     std::vector<juce::MemoryBlock> seeds;
 
-    for (const auto& device : getFactoryPresetsFolder().findChildFiles (juce::File::findDirectories, false))
+    // In the order of their names: a folder lists its files in an order of its own, which on Linux is another on each machine.
+    auto devices = getFactoryPresetsFolder().findChildFiles (juce::File::findDirectories, false);
+    devices.sort();
+
+    for (const auto& device : devices)
     {
         auto presets = device.findChildFiles (juce::File::findFiles, true, juce::String ("*") + phazite::presetExtension);
         presets.sort();
@@ -598,7 +602,12 @@ TEST_CASE ("Fuzz: a keymap is read or refused")
 {
     std::vector<juce::MemoryBlock> seeds;
 
-    for (const auto& file : getRepository().getChildFile ("resources/keymaps").findChildFiles (juce::File::findFiles, false, "*.json"))
+    // In the order of their names, so that a round feeds the same on every machine (CI's linux-debug met a round no other
+    // run had, 2026-11-15: a folder's own order).
+    auto keymaps = getRepository().getChildFile ("resources/keymaps").findChildFiles (juce::File::findFiles, false, "*.json");
+    keymaps.sort();
+
+    for (const auto& file : keymaps)
         seeds.push_back (readBytes (file));
 
     REQUIRE (seeds.size() >= 3);

@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace phazite::test::fuzz
 {
@@ -459,6 +460,14 @@ Totals run (const juce::String& name, const std::vector<juce::MemoryBlock>& seed
         INFO ("fuzz case \"" << name << "\": seed input " << (int) i << " as it is: " << problem);
         CHECK (problem.empty());
     }
+
+    // JSON whose object has a member with no name is JSON still, and JUCE asserts as its parser makes an Identifier of the
+    // empty name (in Debug builds): what a reader makes of such a file is what the case checks (open question Q7,
+    // docs/juce-workarounds.md).
+    std::optional<ExpectedAssertion> emptyName;
+
+    if (shape == Shape::json)
+        emptyName.emplace ("juce_Identifier.cpp:61");
 
     return runRounds (name, ownRounds,
                       [&] (Mutator& mutator, juce::MemoryBlock& fed)
