@@ -163,10 +163,23 @@ double Engine::getPlayheadBeatAt (double milliseconds) const noexcept
     return playheadStamps.getBeatAt (milliseconds).value_or (requestedBeat.load());
 }
 
-void Engine::publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds) noexcept
+PlayheadStamps::Place Engine::getPlayheadPlaceBefore (double milliseconds) const noexcept
 {
-    playheadStamps.publish (
-        { beat, startMilliseconds, beatsPerSecond / 1000.0, lengthMilliseconds, locatesTaken.load (std::memory_order_relaxed) });
+    if (getLocatesAsked() != locatesTaken.load())
+        return { requestedBeat.load(), playheadStamps.getLatestRound() };
+
+    // A block that went round the loop in the middle is stamped from where it started (publishPlayhead()).
+    const auto* plan = plans.get();
+    const auto looped = plan != nullptr && plan->loop.has_value();
+    return playheadStamps.getPlaceBefore (getMilliseconds(), milliseconds, looped ? plan->loop->start : 0.0, looped ? plan->loop->end : 0.0)
+        .value_or (PlayheadStamps::Place { requestedBeat.load(), playheadStamps.getLatestRound() });
+}
+
+void Engine::publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds, std::uint32_t round,
+                              bool wentRound) noexcept
+{
+    playheadStamps.publish ({ beat, startMilliseconds, beatsPerSecond / 1000.0, lengthMilliseconds,
+                              locatesTaken.load (std::memory_order_relaxed), round, wentRound });
 }
 
 //==============================================================================
@@ -594,6 +607,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             takeLiveEvents (*plan, length, clock + done);
             expectAudio (*plan);
             auto startBeat = transport.beat;
+            auto startRound = loopRounds; // the times round the loop as it started (or after a jump taken in it)
             auto counted = 0, jumpedAt = 0;
 
             // A take ends as playback stops or jumps.
@@ -640,6 +654,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                             if (transport.sample >= loopEnd)
                             {
                                 transport.sample = loopStart;
+                                ++loopRounds;
                                 transport.notesOff = true;
                                 transport.chase = true;
                             }
@@ -669,6 +684,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                     {
                         transport.sample = loopStart;
                         transport.chase = true;
+                        ++loopRounds;
                     }
 
                     // The jump, its fade out done; the take ends with it. The live notes taken in the next part, from
@@ -683,6 +699,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         brokeTake = false;
                         jumpedAt = offset;
                         startBeat = transport.beat;
+                        startRound = loopRounds;
                         lastPart.sample = transport.sample - offset;
                     }
                 }
@@ -695,7 +712,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             const auto beatsPerSecond =
                 transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerQuarterNote (startBeat) : 0.0;
             publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + (done + jumpedAt) * 1000.0 / sampleRate,
-                             (length - jumpedAt) * 1000.0 / sampleRate);
+                             (length - jumpedAt) * 1000.0 / sampleRate, startRound, loopRounds != startRound);
         }
         else
         {

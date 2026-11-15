@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The top bar (src/ui/shell/TopBar.h), driven with the mouse: its tempo field and time signature show the open
 // project's, and change them.
+#include "EnginePlayback.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -9,11 +10,14 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/engine/internal/LiveInput.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
@@ -285,6 +289,63 @@ TEST_CASE ("The top bar shows where the playhead is, in bars and in time, and a 
     CHECK_FALSE (time->isVisible());
     screen.topBar.setSize (900, screen.topBar.getHeight());
     CHECK_FALSE (bars->isVisible());
+}
+
+TEST_CASE ("While recording, a drag of the playhead's place takes the playhead only where it is let go, and Escape leaves it")
+{
+    // Known bug 38: each step of the drag took the playhead there, which ended the take and started another, a take at every
+    // step; the ruler's drag takes the playhead no further than its press while recording.
+    TopBarScreen screen;
+    phazite::test::EnginePlayback playback;
+    auto& song = *screen.song;
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    const auto countIn = phazite::isCountInOn (audio);
+    phazite::setCountInOn (audio, false);
+    const juce::ScopeGuard countInBack { [&audio, countIn] { phazite::setCountInOn (audio, countIn); } }; // the app's setting
+    REQUIRE (
+        phazite::setInstrument (song, phazite::getTrackIDs (song).front(), phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::routeLiveMidiInput (song);
+    playback.play (0.01);
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (0.25); // to half a beat
+
+    for (const auto* title : { "Playhead position", "Playhead time" })
+    {
+        CAPTURE (title);
+        const auto before = phazite::getPlayheadBeat (song).inBeats();
+        auto* field = dynamic_cast<phazite::ui::NumberField*> (phazite::test::findComponentWithTitle (screen.topBar, title));
+        REQUIRE (field != nullptr);
+        const auto centre = field->getLocalBounds().getCentre();
+        phazite::test::Mouse mouse (*field);
+
+        // Escape: the playhead never moved, and recording goes on.
+        mouse.press (centre);
+        mouse.dragTo (centre.translated (0, -10));
+        mouse.dragTo (centre.translated (0, -20));
+        CHECK (std::abs (phazite::getPlayheadBeat (song).inBeats() - before) < 0.05); // within the block played last
+        screen.window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+        mouse.release();
+        mouse.pause();
+        CHECK (std::abs (phazite::getPlayheadBeat (song).inBeats() - before) < 0.05); // within the block played last
+        CHECK (phazite::isRecording (song));
+
+        // Let go: the playhead where the drag took it, once; recording goes on from there. At 120 BPM, two beats a second.
+        mouse.press (centre);
+        const auto pressed = field->getValue();
+        mouse.dragTo (centre.translated (0, -10));
+        mouse.dragTo (centre.translated (0, -20));
+        CHECK (field->getValue() > pressed);
+        CHECK (std::abs (phazite::getPlayheadBeat (song).inBeats() - before) < 0.05); // within the block played last
+        mouse.release();
+        mouse.pause();
+        const auto shown = juce::String (title) == "Playhead position" ? field->getValue() : field->getValue() * 2.0;
+        CHECK (phazite::getPlayheadBeat (song).inBeats() == doctest::Approx (shown));
+        CHECK (phazite::isRecording (song));
+        playback.play (0.1);
+    }
+
+    phazite::stopRecording (song);
 }
 
 TEST_CASE ("Record and the metronome have their options on an arrow joined to each, as a split button")

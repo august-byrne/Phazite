@@ -1853,6 +1853,96 @@ TEST_CASE ("A file at another rate played from inside, or after a jump, fades in
     }
 }
 
+TEST_CASE ("A take that goes on after a jump starts where the playhead lands, handed on by the take before while a block plays that one")
+{
+    // Known bug 38: the take after a jump started when the message thread gave it to the engine, after it had finished the
+    // one before, and what played meanwhile from where the playhead landed wasn't recorded. Here the next take is made as the
+    // jump is asked for, and given to the engine only later: the take before, which the engine still plays, hands it on.
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (makeClickPlan());
+    juce::AudioBuffer<float> out (2, blockSize);
+    const auto playBlocks = [&player, &out] (int count)
+    {
+        for (int i = 0; i < count; ++i)
+            player.process (out.getArrayOfWritePointers(), 2, blockSize);
+    };
+
+    auto first = std::make_unique<engine::Recording> (std::vector<std::unique_ptr<engine::Recording::Input>>());
+    auto* firstTake = first.get();
+    player.setRecording (std::move (first));
+    player.play();
+    playBlocks (10);
+    CHECK (firstTake->getStartSample() == 0);
+    CHECK (firstTake->getLength() == 10 * blockSize);
+
+    // A jump to beat 8, which fades out over 144 samples first; the next take waits for it.
+    player.locate (8.0);
+    auto next = std::make_unique<engine::Recording> (std::vector<std::unique_ptr<engine::Recording::Input>>());
+    next->startAfterLocate (player.getLocatesTaken(), player.getLocatesAsked());
+    firstTake->continueInto (*next);
+    playBlocks (10);
+    CHECK (firstTake->getLength() == 10 * blockSize); // nothing while the jump faded out, nor after it
+    REQUIRE (next->hasStarted());
+    CHECK (next->getStartSample() == 8 * 24000);
+    CHECK (next->getLength() == 10 * blockSize - 144);
+
+    // Given to the engine, it goes on without a break; a stop ends it.
+    auto* nextTake = next.get();
+    player.setRecording (std::move (next));
+    playBlocks (2);
+    CHECK (nextTake->getLength() == 12 * blockSize - 144);
+    player.stop();
+    playBlocks (1);
+    CHECK (nextTake->hasEnded());
+    CHECK (nextTake->getLength() == 12 * blockSize - 144);
+
+    // Given before the jump is taken, it records nothing until it is.
+    player.play();
+    auto waiting = std::make_unique<engine::Recording> (std::vector<std::unique_ptr<engine::Recording::Input>>());
+    auto* waitingTake = waiting.get();
+    waiting->startAfterLocate (player.getLocatesTaken(), player.getLocatesAsked() + 1);
+    player.setRecording (std::move (waiting));
+    playBlocks (2);
+    CHECK_FALSE (waitingTake->hasStarted());
+    player.locate (4.0);
+    playBlocks (2);
+    REQUIRE (waitingTake->hasStarted());
+    CHECK (waitingTake->getStartSample() == 4 * 24000);
+    player.setRecording (nullptr);
+}
+
+TEST_CASE ("The playhead heard a while ago is folded into a loop shorter than a block, and counts the times round")
+{
+    // A reviewer, of known bug 103's fix: the place heard took the loop's length off once, so with a loop shorter than a block
+    // it could still be past the loop's end. Blocks of 10 ms at a beat a second (0.001 beats a millisecond), a loop of 0.004.
+    // The engine counts its times round where it goes round (Engine::process()), and stamps each block with them.
+    engine::PlayheadStamps stamps;
+    stamps.publish ({ 1.0, 1000.0, 0.001, 10.0, 7, 0, false });  // beats 1 to 1.01
+    stamps.publish ({ 1.01, 1010.0, 0.001, 10.0, 7, 0, false }); // on: the same round
+    stamps.publish ({ 0.5, 1020.0, 0.001, 10.0, 7, 1, false });  // the loop went round as it started
+    stamps.publish ({ 2.0, 1030.0, 0.001, 10.0, 8, 1, true });   // a locate; and round the loop in it
+
+    CHECK (stamps.getPlaceBefore (1035.0, 0.0)->round == 1);
+    CHECK (stamps.getPlaceBefore (1015.0 + 20.0, 20.0)->beat == doctest::Approx (2.0)); // not back across the locate
+
+    // Folded: 2.009 into the loop from 2.0 to 2.004 is 0.001 into it, a round on.
+    const auto folded = stamps.getPlaceBefore (1039.0, 0.0, 2.0, 2.004);
+    REQUIRE (folded.has_value());
+    CHECK (folded->beat >= 2.0);
+    CHECK (folded->beat < 2.004);
+    CHECK (folded->beat == doctest::Approx (2.001));
+    CHECK (folded->round == 2);
+
+    // A block that didn't go round, its starting speed running past the loop's end (the tempo slowing): at the end, the same
+    // round (a reviewer, 2026-11-15: a round was counted there).
+    stamps.publish ({ 3.0, 1040.0, 0.001, 10.0, 8, 1, false });
+    const auto ahead = stamps.getPlaceBefore (1049.0, 0.0, 2.0, 3.005);
+    REQUIRE (ahead.has_value());
+    CHECK (ahead->beat == doctest::Approx (3.005));
+    CHECK (ahead->round == 1);
+}
+
 TEST_CASE ("A recorded input whose reader falls a whole buffer behind gives silence for what it lost, and what came after it in its place")
 {
     // Known bug 12 until 2026-11-10: what came in after the frames lost was read straight after what came before them, so

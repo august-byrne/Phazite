@@ -78,6 +78,7 @@ void PlaybackHost::setLowLatency (bool on)
 
 void PlaybackHost::prepareEngines (double sampleRate, int maximumBlockSize)
 {
+    deviceStarts.fetch_add (1);
     engine.prepare (sampleRate, maximumBlockSize);
     previews.prepare (sampleRate, maximumBlockSize);
     previewBlock.setSize (2, std::max (1, maximumBlockSize));
@@ -153,22 +154,23 @@ PlaybackSession* PlaybackHost::getPlayingSession() const noexcept
     return sessions.empty() ? nullptr : sessions.back();
 }
 
-void PlaybackHost::prepare (double sampleRate, int maximumBlockSize, int deviceInputs, int deviceInputLatency)
+void PlaybackHost::prepare (double sampleRate, int maximumBlockSize, int deviceInputs, int deviceInputLatency, int deviceOutputLatency)
 {
     running = false; // the tests call the engine from the message thread
     prepareEngines (sampleRate, maximumBlockSize);
     numInputs = deviceInputs;
     inputLatency = deviceInputLatency;
-    outputLatency = 0;
+    outputLatency = deviceOutputLatency;
 
     if (auto* session = getPlayingSession())
-        session->update();
+        session->deviceStarted();
 }
 
 void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     // The device is stopped meanwhile, so the engine plays nothing. The song is given again for the new rate once the
-    // message loop turns: until then a plan for another rate plays silence.
+    // message loop turns: until then a plan for another rate plays silence, and records nothing (a take recorded at another
+    // rate ends then: PlaybackSession::deviceStarted()).
     prepareEngines (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
 
     // Its inputs: the channel of each open one, in the order it hands them.
@@ -189,7 +191,7 @@ void PlaybackHost::audioDeviceAboutToStart (juce::AudioIODevice* device)
         {
             if (host != nullptr)
                 if (auto* session = host->getPlayingSession())
-                    session->update();
+                    session->deviceStarted();
         });
 }
 

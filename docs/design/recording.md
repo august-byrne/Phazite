@@ -88,6 +88,22 @@ what feeds the channel.
   clips there.
 - **Quantize Recordings** moves recorded notes to sixteenths as they go in. It is off by default.
 - A note played live is placed where it was heard: earlier by the output's delay and the song's delay compensation.
+- **A note played a moment early,** up to a tenth of a second before the take's start (a downbeat played just before
+  the count-in ends), starts on the take's first beat, as Ableton Live, Logic Pro and Cubase keep it.
+- **Controllers:** the sustain pedal, the mod wheel, every other controller and the pitch bend played from a MIDI
+  keyboard go into the take's clips beside its notes, where they were heard, as a MIDI file's import keeps them. Only
+  what is played during the take (notes, or controllers moved) makes a clip, as Ableton Live records controllers
+  alone; a pedal held from before, with nothing played, leaves the track's clips as they were. Only notes take the
+  place of the clips there without Overdub: controllers moved without notes go into the clips there, and make a clip of
+  their own only where the track has none across the take. The pedal held down and the bend away from its middle as
+  the take starts are written at its start (as they were when it started, however long the take), and a pedal still
+  down or a bend still away from the middle at its end is let go of just before the end of a clip the take made, so
+  that the next clip's notes aren't held; in a clip that was there and goes on, the take's end gets the value that clip
+  had there, so that what follows plays as it did. Nothing is let go of between the parts of one performance (the part
+  before a looped range and the range's). A value that repeats the one before it is left out, and each controller
+  keeps at most one value a millisecond. A controller recorded into a clip that was there takes the place of its
+  earlier values there from its first move in the take to its last. Capture keeps them too. The computer keyboard plays
+  notes alone. A take after a jump keeps no notes from before its start: the take before kept them.
 
 ### Audio
 
@@ -153,8 +169,14 @@ step of its own, and recording goes on from the new place as another take
 (`PlaybackSession::locateWhileRecording()`). The new take records the inputs of the tracks the first one recorded; a
 track armed since then is not recorded until recording has stopped and started again.
 
+The new take is made whole, its files open, and handed to the engine before the jump is asked for; it waits for that
+jump and starts where the playhead lands, to the sample, however soon the audio thread takes the jump and however long
+finishing the first take takes: the engine's take hands what it records on to the next one once the jump is taken
+(`src/engine/core/Recording.h`). A new take that can't make an input's file says so.
+
 A press in the ruler moves the playhead once. A drag in the ruler takes it no further than its press while a take
-records, because every move would end one take and start another.
+records, because every move would end one take and start another. A drag of the top bar's place or time takes the
+playhead only where it is let go, and Escape leaves it where it was.
 
 ## A drive that stalls
 
@@ -168,6 +190,26 @@ Each input has a buffer of 8 seconds between the audio thread and the thread tha
 - Stop waits for the writing thread to finish what it is writing, however long the drive takes, and so does the
   autosave that a recording's end starts. A thread ended in the middle of a write can leave the file broken.
 
+## A drive that fills up, and a device that changes its rate
+
+- **A write that fails** (a full drive, one unplugged) ends the files there, whole: their headers say what was
+  written. Recording and playback stop, the take is kept as Stop keeps it, its clips covering what the files hold, and
+  the error "Recording stopped" says where the recording ends. Pro Tools and Logic Pro stop recording on a full drive
+  too. The files are written straight to the drive, unbuffered, so that a failed write is known as it fails.
+- **Before recording,** where the drive has room for less than ten minutes of the armed inputs, "Little room left to
+  record" says how long a recording fits; recording starts anyway. An input whose file can't be made is said too.
+- **An audio device that starts again** during a take, at another rate (an interface unplugged, another program
+  changing the rate) or at the same with another buffer or delays (Low Latency switched), ends the take there, kept as
+  Stop keeps it, at the rate it was recorded at, and "Recording stopped" says why. Meanwhile the engine records nothing
+  at a new rate, and no take starts until the song is given for it.
+- **A take stopped during a drag** (Stop's key while the mouse is down, or a stop by itself) makes its clips as a
+  "Record" step of its own once the drag has ended, so that the drag's Escape doesn't take the take back.
+- **Closing the project or quitting while recording**, Save As, and an untitled project's first save stop recording
+  first, as Stop does, keeping the take (and placing one still waiting for a drag), which the save then holds.
+  Switching to a commit or a branch can't run while recording.
+- **A take's audio and notes** are placed in beats by the tempo the take was recorded at, both of them, whatever the
+  song's tempo is by the time they are placed (a tempo dragged as the take stopped).
+
 ## Capture
 
 Phazite keeps the last 30 seconds of what MIDI keyboards and the computer keyboard played, recording or not.
@@ -180,6 +222,8 @@ step, "Capture", and selects it.
 - In a song without clips, Capture first sets the song's tempo from what was played, when it can tell: a whole
   number of beats a minute between 80 and 160, from at least four notes over at least a second.
 - The clip runs whole bars, and its notes are quantized to sixteenths when Quantize Recordings is on.
+- The sustain pedal, the other controllers and the pitch bend played with the notes go into the clip, where they were
+  played; the pedal held down as the first note was played, at the clip's start.
 
 ## Metronome and count-in
 
@@ -218,6 +262,10 @@ Consolidate in [playlist.md](playlist.md), warp markers and Quantize Audio in [p
   a clip of its own. Nothing played is thrown away.
 - Sound lost to a slow drive becomes silence in place, and recording goes on. Stopping the recording with an alert
   would lose the rest of the performance.
+- A drive that fills up stops recording, keeping what was written: nothing more could be kept, and playing on would
+  only seem to record.
+- Any start of the audio device during a take ends the take, rather than going on with delays that may have changed:
+  nothing recorded is misplaced (the owner, 2026-11-15).
 - Recording goes on after the playhead is moved, keeping the take so far.
 - Next Take and Previous Take have no key in the Phazite keymap: T is the Mute tool.
 - The count-in, Overdub and Quantize Recordings belong to the app, not to a project.

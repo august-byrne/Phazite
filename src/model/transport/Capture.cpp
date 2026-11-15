@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace phazite
 {
@@ -84,10 +85,23 @@ namespace
         double start = 0.0, end = 0.0; // seconds: in the song while it plays, or as they were played
     };
 
+    // A controller moved, or the pitch bend, in MIDI's terms (Take.h's PlayedControl), and when, as a note's start.
+    struct CapturedControl
+    {
+        bool bend = false;
+        int number = 0, value = 0;
+        double at = 0.0;
+        bool held = false; // from before the first note: written where the clip starts
+    };
+
+    constexpr int sustainPedal = 64, bendMiddle = 8192;
+
     // The notes played live into Phazite's engine in its last 30 seconds (PlaybackHost.h): while the song plays, those
     // played since it started, where they were heard in it (by the output's delay and the song's delay compensation, as a
-    // take places them: Take.h); otherwise as they were played. One still held ends now.
-    std::vector<CapturedNote> takePlayedNotes (PlaybackSession& session, bool playing)
+    // take places them: Take.h); otherwise as they were played. One still held ends now. The controllers and the bend
+    // played among them go with them, from the first note on: the pedal held down and the bend away from its middle as it
+    // was played, there.
+    std::vector<CapturedNote> takePlayedNotes (PlaybackSession& session, bool playing, std::vector<CapturedControl>& controls)
     {
         auto& engine = session.getEngine();
         const auto rate = engine.getSampleRate();
@@ -97,6 +111,8 @@ namespace
         std::vector<std::int64_t> startClocks; // each note's
         std::array<int, 128> sounding;
         sounding.fill (-1);
+        std::array<int, 129> lastValue; // each controller's, and the bend's (128), as played last
+        lastValue.fill (-1);
 
         const auto endNote = [&notes, &sounding] (int pitch, double at)
         {
@@ -132,6 +148,17 @@ namespace
                 for (int p = 0; p < 128; ++p)
                     endNote (p, at);
             }
+            else if (played.event.type == Type::controller || played.event.type == Type::pitchBend)
+            {
+                // A value that repeats the one before it changes nothing.
+                const auto bend = played.event.type == Type::pitchBend;
+                const auto number = bend ? 0 : juce::jlimit (0, 127, played.event.number);
+                const auto value = bend ? juce::jlimit (0, 16383, juce::roundToInt (played.event.value * (float) bendMiddle) + bendMiddle)
+                                        : juce::jlimit (0, 127, juce::roundToInt (played.event.value * 127.0f));
+
+                if (std::exchange (lastValue[bend ? 128 : (size_t) number], value) != value)
+                    controls.push_back ({ bend, number, value, at });
+            }
         }
 
         // Those still held: as long as they have been.
@@ -140,6 +167,27 @@ namespace
                 notes[(size_t) index].end += (double) (engine.getClock() - startClocks[(size_t) index]) / rate;
 
         std::sort (notes.begin(), notes.end(), [] (const CapturedNote& a, const CapturedNote& b) { return a.start < b.start; });
+
+        // The controls from the first note on; before it, the pedal held down and the bend away from its middle, at it.
+        if (! notes.empty())
+        {
+            const auto first = notes.front().start;
+            std::vector<CapturedControl> kept;
+            std::array<bool, 129> found {};
+
+            for (auto control = controls.rbegin(); control != controls.rend(); ++control)
+                if (control->at < first && ! std::exchange (found[control->bend ? 128 : (size_t) control->number], true)
+                    && ((control->bend && control->value != bendMiddle)
+                        || (! control->bend && control->number == sustainPedal && control->value >= 64)))
+                    kept.push_back ({ control->bend, control->number, control->value, first, true });
+
+            for (const auto& control : controls)
+                if (control.at >= first)
+                    kept.push_back (control);
+
+            controls = std::move (kept);
+        }
+
         return notes;
     }
 
@@ -199,7 +247,8 @@ ClipID capture (Song& song, Selection* selection)
     const UndoStep step (song, "Capture");
     const bool playing = isSongPlaying (song);
     const bool songWasEmpty = getSongEnd (song) <= BeatPosition();
-    const auto notes = takePlayedNotes (*session, playing);
+    std::vector<CapturedControl> controls;
+    const auto notes = takePlayedNotes (*session, playing, controls);
 
     if (notes.empty())
         return {};
@@ -207,11 +256,15 @@ ClipID capture (Song& song, Selection* selection)
     // In beats: where they were played in the song, or from the first note, at the song's tempo (set from the notes
     // in a song without clips).
     std::vector<std::pair<double, double>> beats; // start and end
+    std::vector<double> controlBeats;
 
     if (playing)
     {
         for (const auto& n : notes)
             beats.emplace_back (toBeats (song, n.start).inBeats(), toBeats (song, n.end).inBeats());
+
+        for (const auto& control : controls)
+            controlBeats.push_back (toBeats (song, control.at).inBeats());
     }
     else
     {
@@ -230,6 +283,9 @@ ClipID capture (Song& song, Selection* selection)
 
         for (const auto& n : notes)
             beats.emplace_back ((n.start - notes.front().start) * beatsPerSecond, (n.end - notes.front().start) * beatsPerSecond);
+
+        for (const auto& control : controls)
+            controlBeats.push_back ((control.at - notes.front().start) * beatsPerSecond);
     }
 
     // Whole bars, from the bar the first note is in to the bar the last one ends in.
@@ -254,6 +310,9 @@ ClipID capture (Song& song, Selection* selection)
             start += bar;
             end += bar;
         }
+
+        for (auto& beat : controlBeats)
+            beat += bar;
 
         clipStart = bar;
     }
@@ -281,6 +340,38 @@ ClipID capture (Song& song, Selection* selection)
                  BeatDuration::fromBeats (std::max (end - start, getMinimumNoteLength().inBeats())), notes[i].velocity);
     }
 
+    // The controls where they were played, as a take keeps them (Take.h), not quantized; those held from before the first
+    // note where the clip starts, before any note quantizing could move.
+    // A pedal still down or a bend still away from its middle at the clip's end is let go of just before it (a control at
+    // the end isn't played, and the song plays its clips' controls as one stream, so a pedal left down would hold the next
+    // clip's notes).
+    auto pedal = 0, bend = bendMiddle;
+    std::vector<ControlValue> values;
+
+    for (size_t i = 0; i < controls.size(); ++i)
+    {
+        if (controlBeats[i] >= clipStart + length)
+            continue;
+
+        values.push_back ({ BeatPosition::fromBeats (controls[i].held ? clipStart : controlBeats[i]), controls[i].bend, controls[i].number,
+                            controls[i].value });
+
+        if (controls[i].bend)
+            bend = controls[i].value;
+        else if (controls[i].number == sustainPedal)
+            pedal = controls[i].value;
+    }
+
+    constexpr auto releaseBeforeEnd = 1.0 / 960.0; // in beats: a tick, at 960 to the quarter note
+    const auto end = BeatPosition::fromBeats (clipStart + length - releaseBeforeEnd);
+
+    if (pedal >= 64)
+        values.push_back ({ end, false, sustainPedal, 0 });
+
+    if (bend != bendMiddle)
+        values.push_back ({ end, true, 0, bendMiddle });
+
+    addControls (song, clip, values); // at once: the clip Capture made, filled in one change
     return clip;
 }
 

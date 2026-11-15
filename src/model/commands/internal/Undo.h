@@ -68,6 +68,13 @@ public:
     // Whether a gesture is in progress for a song, which a change that starts meanwhile can join.
     static bool isInProgress (Song&);
 
+    // Runs a change once the song's gesture in progress has ended, committed or rolled back, after it, so that it is a step
+    // of its own which the gesture's Escape doesn't take back (what recording keeps as playback stops during a drag); at
+    // once if none is in progress. The owner given forgets every change it left waiting (forget()), as it goes. A change
+    // that begins another gesture leaves those after it waiting for that one.
+    static void whenEnded (Song&, const void* owner, std::function<void()> change);
+    static void forget (const void* owner);
+
 private:
     Song& song;
     bool open = false;

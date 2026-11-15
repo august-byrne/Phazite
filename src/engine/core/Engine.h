@@ -72,6 +72,18 @@ public:
     // blocks come. Before the first block after a locate, where it was asked to be.
     double getPlayheadBeatAt (double milliseconds) const noexcept;
 
+    // Where the playhead was as much sound before where it is now as plays in so many milliseconds (message thread): what is
+    // heard now through an output that delays the engine's sound by that much. Counted back through the blocks the audio
+    // thread played, each by its length, not by when it came, so that it is the same however the blocks come (played faster
+    // than real time too); round the loop as it went round, and no further back than where the last locate landed. With
+    // the round of the loop it was on (PlayheadStamps::Place), which moves on each time the playhead goes round.
+    PlayheadStamps::Place getPlayheadPlaceBefore (double milliseconds) const noexcept;
+
+    // How many locates the message thread has asked for, and how many the audio thread has taken (any thread): a take that
+    // goes on after a jump waits for that jump's (Recording::startAfterLocate()).
+    std::uint32_t getLocatesAsked() const noexcept { return (locateCount.load() + 1) / 2; }
+    const std::atomic<std::uint32_t>& getLocatesTaken() const noexcept { return locatesTaken; }
+
     // A note or controller played live into a track's instrument (the computer keyboard, a MIDI input, the piano roll's
     // guide notes), from any thread: it plays in the audio thread's next block, as far into it as it came after the last
     // block started, so that live notes keep their timing (at a block's delay). Dropped if 1024 wait already. What is
@@ -186,7 +198,6 @@ private:
     std::atomic<double> requestedBeat { 0.0 };
     std::atomic<std::uint32_t> locateCount { 0 }, locatesTaken { 0 };
     static_assert (std::atomic<double>::is_always_lock_free);
-    std::uint32_t getLocatesAsked() const noexcept { return (locateCount.load() + 1) / 2; }
 
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
@@ -395,7 +406,9 @@ private:
     // with when the block started, on its blocks' smoothed clock, and how long it lasts (milliseconds).
     BlockClock blockClock;
     PlayheadStamps playheadStamps;
-    void publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds) noexcept;
+    void publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds, std::uint32_t round,
+                          bool wentRound) noexcept;
+    std::uint32_t loopRounds = 0; // the audio thread's: the times the playhead went round the loop, where it did
 
     Engine (const Engine&) = delete;
     Engine& operator= (const Engine&) = delete;

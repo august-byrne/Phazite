@@ -200,11 +200,13 @@ void stopPlaying (Song& song)
     auto take = session->releaseTake();
     session->stop();
 
-    // A take recorded through Phazite's engine (Take.h).
+    // A take recorded through Phazite's engine (Take.h), ended at once; its clips are a Record step of their own, after the
+    // drag under way if there is one (a stop by a key during a drag, or by itself: a write that failed, the audio device
+    // starting again), which its Escape would otherwise take back.
     if (take != nullptr)
     {
-        const UndoStep step (song, "Record");
-        take->finish();
+        take->end();
+        session->placeTake (std::move (take));
     }
 }
 

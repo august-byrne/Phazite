@@ -7,7 +7,9 @@
 // - While it is stopped, the clip goes at the bar the play start is in, or after the clips already there, with the
 //   first note on the bar's first beat. In a song without clips, Capture first sets the song's tempo from what was
 //   played, when it can tell (detectTempo()).
-// The clip runs whole bars, and its notes are quantized to sixteenths when recordings are (Recording.h).
+// The clip runs whole bars, and its notes are quantized to sixteenths when recordings are (Recording.h). The sustain pedal,
+// the other controllers and the pitch bend played among the notes go into it too, where they were played, as a take keeps
+// them (Take.h).
 #pragma once
 
 #include "model/base/IDs.h"

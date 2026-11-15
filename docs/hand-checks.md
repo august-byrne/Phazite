@@ -168,6 +168,12 @@ the [changelog](changelog.md).
 | G120 | Play a sine panned hard left, then one out of phase between the channels, through the EQ | The analyzer shows each as loud as when it is in the middle | |
 | G60 | Merge a branch with a conflict, save, quit, reopen. Then merge again, close with Don't Save, reopen. Then press Ctrl+Z right after a merge | First the merge and its conflict are still there, and Commit makes a merge commit; then no merge waits; then the conflict list goes and Commit is greyed | |
 | G60b | Merge, Commit, then close with Don't Save and reopen | No notice about a merge, and Abort Merge is greyed | |
+| G93 | Arm a synth track and record from a MIDI keyboard: hold the sustain pedal over a short note, move the mod wheel and the pitch bend, stop with the foot still down; play the clip, then a later clip | The note rings until the pedal comes up, the vibrato and the bend sound as played, and the later clip's notes don't ring on | |
+| G94 | Record onto a nearly full USB stick, or unplug the project's drive while recording | Recording stops with "Recording stopped" and where it ends; the clip plays to there. With little space, Record warns first | |
+| G95 | Record audio through an interface, and change its sample rate, then its buffer size, in its control panel during a take | Recording stops with a notice each time, and the clip plays at the right speed | |
+| G103 | On a Bluetooth or other late output, in Touch, move a fader on a drum hit while playing; play it back | The automation's change lands on the hit | |
+| G38 | While recording, drag the top bar's position field, then click in the ruler | One jump where the field is let go, no stray short takes; after the click the sound from the first instant is in the new take | |
+| G163 | Hold a fader while recording and press Stop, then Escape. And: loop on, a track in Write, count-in on, press Record and stop after two beats | The take's clip stays, and Undo removes it alone. The lane after where playback stopped is as it was | |
 
 ## Known bugs that need an ear or a real plug-in
 

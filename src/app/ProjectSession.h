@@ -194,6 +194,10 @@ private:
     void chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)>);
     void moveUntitledTo (const juce::File& chosen, std::function<void (bool saved)>);
 
+    // Recording stopped as Stop stops it, the take kept, and the takes waiting for a drag placed: before the project is
+    // saved elsewhere, moved (an untitled project's first save) or closed, which would lose them.
+    void keepRecording();
+
     // What closing asks when there are unsaved changes, after a save that failed if saveFailed says why; and Save As there,
     // a copy where the user chooses, which the project closes after.
     void askWhetherToSave (const juce::String& saveFailed, std::function<void (bool closed)>);

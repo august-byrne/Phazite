@@ -107,9 +107,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 - **35. Sampler and drum sampler sounds read from float files aren't checked for values that aren't numbers.**
 - **36. A jump while playing into a part of a long audio file that isn't read yet is silent until it is read** (it fades
   in then). Play from a stop and the loop's start are read ahead; a jump needs pre-roll.
-- **38. The playhead moved while recording:** the new take starts when the engine first sees it, so the tens of
-  milliseconds after the jump aren't recorded; and dragging the top bar's place or time field while recording makes a
-  take at every step (only the ruler takes its press alone).
 - **39. A/B's bounce file isn't read ahead at the loop's start or a new place,** and its own meters aren't guarded
   against values that aren't numbers.
 - **70. The synths have one place to fade a stolen voice in, so a second steal within 3 ms cuts the first dead.** A
@@ -170,6 +167,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
+- **173. Aftertouch and channel pressure are neither heard live nor played back.** `engine::toNoteEvent()`
+  (`src/engine/nodes/DeviceRunner.cpp`) drops them, `devices::NoteEvent` has no type for them, and `SongPlayer`
+  ignores the CONTROL kinds `channelPressure` and `aftertouch` that a MIDI file's import already stores; so a take
+  doesn't keep them either. Fix: the event types in the engine, handed to devices and plug-ins, then recorded as the
+  other controllers are. Seen while known bug 93 was fixed.
 - **171. A device asleep on silence shows no modulation.** With nothing playing into it (an EQ on a silent track), a
   knob's ring dot and a graph's handles stay at the value set by hand while an LFO runs, and move again only when
   sound comes in. The sound is right: it is silent. Why: `DeviceRunner::begin()` (`src/engine/nodes/DeviceRunner.cpp`)
@@ -181,11 +183,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   fade begins at the old place, as it should, and the jump is then taken at once, without the rest of its own fade
   (`src/engine/core/Engine.cpp`, `stopTransport()`). Fix: let the jump's fade run out before the stop is applied.
   Left by the fix of the fades (S1.2); not measured.
-- **163. A control's drag taken back by Escape, in Write, while the loop wrapped during the drag,** takes back the
-  points the writer wrote at the wrap too, which were in the drag's step; and a control grabbed before playback
-  started has no record of the pass as it was, so its Escape uses an earlier grab's record if one is left
-  (`AutomationWriter::rememberGrab()`, `src/model/playback/AutomationWriter.cpp`). Fix: keep the wrap's points in a
-  step of their own, and clear the grabs as playback starts. Seen while Escape was built; neither has a test.
 
 ## Saving
 
@@ -207,34 +204,20 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   of leftover copies doesn't look into the copy being made, and the AppTests case prints the save's errors. Fix: read
   the reason the next time it happens.
 
-## Recording
-
-- **92. A note played just before a take's first sample is thrown away,** so a downbeat played a few milliseconds
-  early after a count-in is lost, as is any key in the first samples that the output's latency covers. Why: the take
-  keeps a note-on only at or after its start (`src/model/transport/Take.cpp`). Fix: keep note-ons from a short time
-  before the start, moved to it. Confirmed by a second reading (model-playback 1).
-- **93. MIDI recording and Capture keep notes only.** The sustain pedal, pitch bend, the mod wheel and aftertouch are
-  heard live and gone from what was recorded. Why: a take keeps note-ons, note-offs and all-notes-off of what was
-  played (`src/model/transport/Take.cpp`, `src/model/transport/Capture.cpp`); only a MIDI file's import makes the
-  song's controller elements. Fix: write them from the take's events, with a test that records a held pedal.
-  Confirmed by a second reading (product-gaps 0, model-playback 2).
-- **94. A full disk or a write that fails during a take is neither noticed nor told.** The file is short, the clip
-  made for it covers frames it doesn't have, and the user hears silence there later. Why: the take's writer ignores
-  what its writes return and counts the frames as written (`src/model/transport/Take.cpp`). Fix: note a write that
-  fails, stop counting, tell the user, and warn before recording where little space is left. Not yet checked
-  (model-playback 7).
-- **95. An audio device that restarts at another sample rate during a take** (an interface unplugged, another program
-  changing the rate) leaves the take writing into a file opened at the old rate, so the rest plays at the wrong speed
-  (`src/model/playback/PlaybackHost.cpp`, `src/model/transport/Take.cpp`). Fix: end the take as the device starts at
-  another rate. Not yet checked (model-playback 14).
-
 ## Mixer and automation
 
-- **103. Automation is written at the engine's playhead, not where it is heard,** so what is written lands late by
-  the output's latency and the song's delay compensation; and a jump back while writing with the loop on is taken for
-  the loop's wrap, which writes the held value through to the loop's end. Why: `AutomationWriter`
-  (`src/model/playback/AutomationWriter.cpp`) stamps points with the session's playhead. Fix: stamp them with the heard
-  playhead, and end the pass at a jump. Not yet checked (model-playback 13).
+- **174. In Write, a control held while Play is pressed:** the punch-in sets the value to the lane's within the held
+  control's drag step, so Escape puts the value set by hand back to where it was before the drag while the pass goes
+  on writing the lane's value (`src/model/playback/AutomationWriter.cpp`). Minor; seen while known bug 163 was fixed.
+- **175. A take after a jump that lands exactly where the take before ended lets go of a held pedal for one tick at
+  the seam.** The take before is placed before the next exists, so it writes its pedal-up at its end; between the
+  parts of one take (a loop's wrap) nothing is let go of. Rare. Fix: place the takes of one recording together.
+  Left while known bug 93 was fixed.
+- **176. A take that ends while a control is held (Stop pressed, or a write that fails, in the middle of a drag)
+  vanishes from the playlist until the mouse goes up,** when its clip is placed: the clip shown while recording needs
+  the engine's recording, which the take lets go of as it ends (`getInProgress()`,
+  `src/model/playback/PlaybackSession.cpp`). Cosmetic. Left while known bug 163 was fixed.
+
 - **164. A project that already holds a device on a drum sampler's track listening to one of its own pads' tracks**
   isn't put right as it opens: the model refuses the choice now (`isFedBy()`, `src/model/mixer/Sidechain.cpp`), but
   `makeConsistent()` doesn't clear one a file brings. Fix: clear a sidechain that the model would refuse, with the

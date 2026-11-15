@@ -567,6 +567,87 @@ NoteRef addNote (Song& song, ClipID clip, int pitch, BeatPosition start, BeatDur
     return addNoteTo (song, clip, {}, pitch, start, length, velocity, {});
 }
 
+namespace
+{
+    juce::ValueTree makeControlState (const ControlValue& each, BeatPosition contentStart)
+    {
+        juce::ValueTree control (schema::CONTROL);
+        control.setProperty (schema::controlKind, each.pitchBend ? schema::controlIsPitchWheel : schema::controlIsController, nullptr);
+
+        if (! each.pitchBend)
+            control.setProperty (schema::controlNumber, juce::jlimit (0, 127, each.number), nullptr);
+
+        control.setProperty (schema::controlBeat, std::max (0.0, (each.beat - contentStart).inBeats()), nullptr);
+        control.setProperty (schema::controlValue, juce::jlimit (0, each.pitchBend ? 16383 : 127, each.value), nullptr);
+        return control;
+    }
+} // namespace
+
+void addControl (Song& song, ClipID clip, BeatPosition beat, bool pitchBend, int number, int value)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    for (auto alias : getAliasStates (clipState))
+        alias.appendChild (makeControlState ({ beat, pitchBend, number, value }, getContentStart (clipState)), &song.getUndoManager());
+}
+
+void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& values)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid() || values.empty())
+        return;
+
+    const auto contentStart = getContentStart (clipState);
+    auto* undo = &song.getUndoManager();
+
+    // Each alias filled as a copy, without the history, and put in its place, the same clip by its ID, in one removal and one
+    // insertion: what listens to the song hears a recording's thousands of values (a bend's sweep) as one change, and Undo
+    // takes them back with it. The original is never filled: the removal's undo brings it back as it was.
+    for (auto alias : getAliasStates (clipState))
+    {
+        auto filled = alias.createCopy();
+
+        for (const auto& each : values)
+            filled.appendChild (makeControlState (each, contentStart), nullptr);
+
+        auto parent = alias.getParent();
+        const auto index = parent.indexOf (alias);
+        parent.removeChild (index, undo);
+        parent.addChild (filled, index, undo);
+    }
+}
+
+void removeControls (Song& song, ClipID clip, bool pitchBend, int number, BeatPosition from, BeatPosition to)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    constexpr auto near = 1.0e-9; // in beats
+    const auto first = toClipBeat (clipState, from).inBeats() - near, last = toClipBeat (clipState, to).inBeats() + near;
+
+    for (auto alias : getAliasStates (clipState))
+    {
+        for (auto i = alias.getNumChildren(); --i >= 0;)
+        {
+            const auto child = alias.getChild (i);
+
+            if (! child.hasType (schema::CONTROL)
+                || child[schema::controlKind].toString() != (pitchBend ? schema::controlIsPitchWheel : schema::controlIsController)
+                || (! pitchBend && (int) child[schema::controlNumber] != number))
+                continue;
+
+            if (const auto beat = (double) child[schema::controlBeat]; beat >= first && beat <= last)
+                alias.removeChild (i, &song.getUndoManager());
+        }
+    }
+}
+
 void moveNote (Song& song, const NoteRef& ref, BeatPosition start, int pitch)
 {
     const auto clipState = findMidiClipState (song, ref.clip);

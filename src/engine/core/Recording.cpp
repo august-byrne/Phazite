@@ -72,10 +72,40 @@ Recording::Recording (std::vector<std::unique_ptr<Input>> recorded)
 {
 }
 
+void Recording::startAfterLocate (const std::atomic<std::uint32_t>& taken, std::uint32_t locate) noexcept
+{
+    locatesTaken = &taken;
+    startLocate = locate;
+}
+
+bool Recording::isWaiting() const noexcept
+{
+    // Counted round, as the engine's counts are.
+    return locatesTaken != nullptr && (std::int32_t) (locatesTaken->load (std::memory_order_acquire) - startLocate) < 0;
+}
+
+Recording* Recording::getFollowing() const noexcept
+{
+    auto* next = following.load (std::memory_order_acquire);
+    return next != nullptr && ! next->isWaiting() ? next : nullptr;
+}
+
 void Recording::record (const float* const* deviceInputs, int numInputs, int offset, int numSamples, std::int64_t songSample,
                         std::int64_t clock) noexcept
 {
-    if (ended.load (std::memory_order_relaxed) || numSamples <= 0)
+    // To the last take that goes on from this one whose jump is taken: as many as were made since a block took this one.
+    auto* to = this;
+
+    while (auto* next = to->getFollowing())
+        to = next;
+
+    to->recordHere (deviceInputs, numInputs, offset, numSamples, songSample, clock);
+}
+
+void Recording::recordHere (const float* const* deviceInputs, int numInputs, int offset, int numSamples, std::int64_t songSample,
+                            std::int64_t clock) noexcept
+{
+    if (ended.load (std::memory_order_relaxed) || numSamples <= 0 || isWaiting())
         return;
 
     for (const auto& input : inputs)
@@ -93,7 +123,10 @@ void Recording::record (const float* const* deviceInputs, int numInputs, int off
 
 void Recording::end() noexcept
 {
-    if (startSample.load (std::memory_order_relaxed) >= 0)
-        ended.store (true, std::memory_order_release);
+    // This one, and those that go on from it whose jumps are taken: the jump that started one of them ends this one, and a
+    // stop after it ends that one. One not started yet isn't ended (a stop just before a take was given, taken as it starts).
+    for (auto* each = this; each != nullptr; each = each->getFollowing())
+        if (each->startSample.load (std::memory_order_relaxed) >= 0)
+            each->ended.store (true, std::memory_order_release);
 }
 } // namespace phazite::engine

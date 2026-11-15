@@ -56,6 +56,28 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // playing, as outside a trimmed clip. Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
 
+// Adds a controller's value at a song beat, as a recording takes it in with the notes (schema::CONTROL): a MIDI controller's
+// (its number, the sustain pedal 64, the mod wheel 1; its value 0 to 127), or the pitch bend's (0 to 16383, its middle
+// 8192). The clip doesn't grow for it: one past the clip's end or before its start plays nothing. Nothing for a clip that
+// isn't a MIDI clip of the song's.
+void addControl (Song&, ClipID, BeatPosition, bool pitchBend, int number, int value);
+
+// The same for many at once, into one clip, each as addControl() says: what a take recorded (a bend sweep holds thousands).
+// The clip and each of its aliases is filled as a copy and put in its place (one removal and one insertion, the same clip by
+// its ID), so that what listens to the song hears one change, and Undo takes it all back.
+struct ControlValue
+{
+    BeatPosition beat;
+    bool pitchBend = false;
+    int number = 0, value = 0;
+};
+
+void addControls (Song&, ClipID, const std::vector<ControlValue>&);
+
+// Removes a controller's values (by its number), or the pitch bend's, from a clip and its aliases, from one song beat to
+// another, both included: what a recording made with Overdub takes the place of.
+void removeControls (Song&, ClipID, bool pitchBend, int number, BeatPosition from, BeatPosition to);
+
 // Moves a note to a song beat and a pitch. It can't go to before its clip's start (one that starts before it already,
 // which a split or a trim cut, goes no earlier than it is); the clip grows to hold it, as addNote() says, and where the
 // clip can't grow it goes no later than getLatestNoteStart() (nor than it is, if it is later already): a move never

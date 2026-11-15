@@ -81,16 +81,36 @@ public:
     std::unique_ptr<Take> releaseTake();
     Take* getTake() noexcept { return take.get(); } // while it records, or nullptr
 
+    // A take released and ended (Take::end()), whose clips it makes as a "Record" step of its own: at once, or once the drag
+    // under way has ended (committed or taken back by Escape), so that the drag's step doesn't hold it. One still waiting as
+    // the session goes is placed then, without a word (onProblem): ProjectSession places them before it closes the project
+    // (placeTakesNow()), whose save then holds them.
+    void placeTake (std::unique_ptr<Take>);
+    void placeTakesNow();
+
     // The playhead put elsewhere while it records, as locate() puts it: recording goes on from there, as Ableton Live's does
-    // after a jump. The take ends where the song is (the engine ends what it records at a jump: Engine.h), finished by the
-    // function given, which keeps it as a stop would, in an undo step of its own; and another starts where the playhead
-    // lands, if anything would still record. The engine loops what the take looped all the while.
+    // after a jump. Another take starts where the playhead lands, to the sample, if anything would still record: given to
+    // the engine before the take ends, so that nothing after the jump is missed while the message thread finishes it
+    // (Take::start()). The take ends where the song is (the engine ends what it records at a jump: Engine.h), finished by
+    // the function given, which keeps it as a stop would, in an undo step of its own. The engine loops what the take looped
+    // all the while.
     void locateWhileRecording (BeatPosition, const std::function<void (Take&)>& finish);
 
+    // For tests: called as locateWhileRecording() has asked the engine for the jump, before anything after it, as the audio
+    // thread may take the jump then (a test plays blocks).
+    std::function<void()> onJumpAsked;
+
     // What tells the user of a problem with what it recorded that the model can't show itself, a title and a message (a take
-    // kept in time with silence where its sound was lost: Take::finish()). The project context that makes the session sets
-    // it (model/project/internal/ProjectContext.h: setProblemReporter()); unset, nothing is said.
+    // kept in time with silence where its sound was lost: Take::finish(); a drive with little room as recording starts; a
+    // take stopped by a write that failed or by the audio device's new rate). The project context that makes the session
+    // sets it (model/project/internal/ProjectContext.h: setProblemReporter()); unset, nothing is said.
     std::function<void (const juce::String& title, const juce::String& message)> onProblem;
+
+    // The audio device started (again), the engine prepared for it (PlaybackHost.h): the song for its rate, in a new plan.
+    // A take recorded while it started again (at another rate, or at the same with other delays) ends there, kept as Stop
+    // keeps it, and onProblem says why. A take whose write failed ends too, as the session's timer sees it
+    // (Take::hasFailedWriting()).
+    void deviceStarted();
 
     // The audio device's inputs and their delays, as the host has them (PlaybackHost.h); and the notes played live in the
     // last 30 seconds, and from a clock on while a take records.
@@ -143,6 +163,8 @@ private:
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
 
     std::unique_ptr<Take> take;
+    std::vector<std::unique_ptr<Take>> takesToPlace; // ended during a drag (placeTake())
+    void tellDeviceStarted (double recordedAt);      // that recording stopped as the device started again
     std::int64_t playStartClock = 0;
 
     BeatPosition songEnd;                     // where the song's loop ends, which playing on past stops at

@@ -6,7 +6,8 @@
 // (a drive that stalls), what comes in is lost, and the buffer notes where and how much, so that the reader puts silence
 // there and what comes after keeps its place. The notes played live meanwhile come out of the engine with the clock they
 // came in at (Engine::takePlayed()). Made and freed on the message thread, handed to the engine whole
-// (Engine::setRecording()); the audio thread writes into it, real-time safe.
+// (Engine::setRecording()); the audio thread writes into it, real-time safe. One that goes on from another after a jump
+// starts where the playhead lands, to the sample, however late the message thread hands it over (startAfterLocate()).
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -85,16 +86,39 @@ public:
     bool hasEnded() const noexcept { return ended.load (std::memory_order_acquire); }
 
     // The audio thread: a stretch the song plays, from a sample of the song at a clock, with the device's inputs; and the
-    // take's end, as playback stops or jumps, after which it records nothing more.
+    // take's end, as playback stops or jumps, after which it records nothing more. Each goes to the take that goes on from
+    // this one once its jump is taken (continueInto()), and on to the one that goes on from that.
     void record (const float* const* inputs, int numInputs, int offset, int numSamples, std::int64_t songSample,
                  std::int64_t clock) noexcept;
     void end() noexcept;
+
+    // A take that goes on from another after a jump (the model's PlaybackSession::locateWhileRecording()), made before the
+    // message thread finishes the one before: message thread, before it is handed over. It records nothing until the
+    // engine has taken the locate numbered so (Engine::getLocatesAsked() just after the jump was asked for), as the
+    // engine counts those it has taken (Engine::getLocatesTaken()); from there on it records, starting where the playhead
+    // landed. Given to the engine at once, it starts there itself; and the take before hands it what it is given while a
+    // block still plays that one (continueInto()).
+    void startAfterLocate (const std::atomic<std::uint32_t>& locatesTaken, std::uint32_t locate) noexcept;
+
+    // Message thread, just before the take that goes on from this one is given to the engine: once that one's jump is
+    // taken, what this one is given goes to it. The engine frees this one before that one (Handover.h: it was replaced
+    // first), so a block that still plays this one never reaches a take already freed.
+    void continueInto (Recording& next) noexcept { following.store (&next, std::memory_order_release); }
 
 private:
     const std::vector<std::unique_ptr<Input>> inputs;
     std::atomic<std::int64_t> startSample { -1 }, startClock { 0 }, length { 0 };
     std::atomic<bool> ended { false };
     static_assert (std::atomic<std::int64_t>::is_always_lock_free);
+
+    const std::atomic<std::uint32_t>* locatesTaken = nullptr; // the engine's, for one that starts after a jump
+    std::uint32_t startLocate = 0;
+    std::atomic<Recording*> following { nullptr };
+
+    bool isWaiting() const noexcept;          // for its jump
+    Recording* getFollowing() const noexcept; // the take that goes on from this one, once its jump is taken
+    void recordHere (const float* const* inputs, int numInputs, int offset, int numSamples, std::int64_t songSample,
+                     std::int64_t clock) noexcept;
 
     Recording (const Recording&) = delete;
     Recording& operator= (const Recording&) = delete;

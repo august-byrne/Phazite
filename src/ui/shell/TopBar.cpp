@@ -135,28 +135,43 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     { return formatBarPosition (projectContext, BeatPosition::fromBeats (beat)); };
     positionField.valueFromTextFunction = [this] (const juce::String& text)
     { return parseBarPosition (projectContext, text).value_or (BeatPosition::fromBeats (positionField.getValue())).inBeats(); };
-    positionField.onValueChange = [this] { movePlayhead (projectContext, BeatPosition::fromBeats (positionField.getValue())); };
+    positionField.onValueChange = [this]
+    {
+        if (! draggedWhileRecording)
+            movePlayhead (projectContext, BeatPosition::fromBeats (positionField.getValue()));
+    };
     positionField.setTooltip ("Where the playhead is, in bars, beats and sixteenths: drag it, scroll, or click it and type a bar and a "
                               "beat (17.3) to go there");
     timeField.textFromValueFunction = [] (double seconds) { return formatSongTime (seconds); };
     timeField.valueFromTextFunction = [this] (const juce::String& text) { return parseSongTime (text).value_or (timeField.getValue()); };
-    timeField.onValueChange = [this] { movePlayhead (projectContext, getBeatAtSeconds (projectContext, timeField.getValue())); };
+    timeField.onValueChange = [this]
+    {
+        if (! draggedWhileRecording)
+            movePlayhead (projectContext, getBeatAtSeconds (projectContext, timeField.getValue()));
+    };
     timeField.setTooltip ("Where the playhead is, in minutes and seconds from the song's start: drag it, scroll, or click it and "
                           "type a time (1:23.5) to go there");
 
     for (auto* field : { &positionField, &timeField })
     {
-        field->onDragStart = [this]
+        // While a take records, a drag takes the playhead only where it is let go: each move would end the take where it
+        // is and start another (phazite::movePlayhead()), as a drag along the ruler would, which its press alone moves.
+        field->onDragStart = [this, field]
         {
             playheadAtDrag = getPlayheadBeat (projectContext);
             playStartAtDrag = getPlayStart (projectContext);
+            draggedWhileRecording = isRecording (projectContext);
+            fieldValueAtDrag = field->getValue();
             pausedForPositionDrag = pausePlayback (projectContext);
         };
 
         // Escape during the drag: the playhead where it was, playing on from there if it played, and Stop going back where
-        // it went before (no undo step is involved).
+        // it went before (no undo step is involved). While a take records, the drag hasn't moved it.
         field->onDragCancelled = [this]
         {
+            if (std::exchange (draggedWhileRecording, false))
+                return;
+
             movePlayhead (projectContext, playheadAtDrag);
 
             if (std::exchange (pausedForPositionDrag, false))
@@ -165,8 +180,13 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
             setPlayStart (projectContext, playStartAtDrag);
         };
 
-        field->onDragEnd = [this]
+        field->onDragEnd = [this, field]
         {
+            if (std::exchange (draggedWhileRecording, false) && isRecording (projectContext)
+                && ! juce::exactlyEqual (field->getValue(), fieldValueAtDrag))
+                movePlayhead (projectContext, field == &positionField ? BeatPosition::fromBeats (positionField.getValue())
+                                                                      : getBeatAtSeconds (projectContext, timeField.getValue()));
+
             if (std::exchange (pausedForPositionDrag, false))
                 resumePlayback (projectContext);
         };

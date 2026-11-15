@@ -16,8 +16,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
@@ -246,6 +248,277 @@ TEST_CASE ("The playhead moved while recording audio: what came in before is kep
         CAPTURE (i);
         CHECK (clicks[i] == clickOn (i < 3 ? (double) i : (double) i + 6.0));
     }
+}
+
+TEST_CASE ("The playhead moved while recording: the next take starts where it lands, however long finishing the one before takes")
+{
+    // Known bug 38: the next take was given to the engine only once the one before was finished (its clips placed, a new plan
+    // compiled), so what the audio thread played meanwhile, from where the playhead landed, wasn't recorded. Here a tenth of a
+    // second plays while the take before is finished, as the audio thread plays on while the message thread works.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.2); // to beat 2.4
+
+    auto* session = phazite::getSession (context);
+    REQUIRE (session != nullptr);
+    session->locateWhileRecording (phazite::BeatPosition::fromBeats (8.5),
+                                   [&studio] (phazite::Take& take)
+                                   {
+                                       studio.playback.play (0.1);
+                                       const phazite::UndoStep step (*phazite::findSong (studio.song.context), "Record");
+                                       take.finish();
+                                   });
+    CHECK (studio.isRecording());
+    studio.playback.play (1.1); // to beat 10.9
+    studio.song.run ("transport.record");
+
+    // The second clip from where the playhead landed, all that played after it: 2.4 beats, less the jump's fade out and the
+    // block its sound came in late.
+    const auto clips = phazite::getClips (context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (2.4 - 256.0 / 24000.0));
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (8.5));
+    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (2.4 - (256.0 + 144.0) / 24000.0));
+
+    // The clicks of beats 9 and 10 where they played, the first within the tenth of a second the take before took.
+    const auto clicks = studio.renderClicks (5.6);
+    REQUIRE (clicks.size() == 5);
+    CHECK (clicks[3] == clickOn (9.0));
+    CHECK (clicks[4] == clickOn (10.0));
+}
+
+TEST_CASE ("The playhead moved while recording: the next take starts where it lands though the engine takes the jump at once")
+{
+    // A reviewer, of known bug 38's fix: the next take, made after the jump was asked for, came too late for an audio thread
+    // that took the jump at once (within a block and the fade), and started wherever the playhead was by then. Here a tenth of
+    // a second plays as soon as the jump is asked for, before anything else is done.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.2); // to beat 2.4
+
+    auto* session = phazite::getSession (context);
+    REQUIRE (session != nullptr);
+    session->onJumpAsked = [&studio] { studio.playback.play (0.1); };
+    phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (8.5));
+    session->onJumpAsked = nullptr;
+    CHECK (studio.isRecording());
+    studio.playback.play (1.1); // to beat 10.9
+    studio.song.run ("transport.record");
+
+    const auto clips = phazite::getClips (context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (8.5));
+    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (2.4 - (256.0 + 144.0) / 24000.0));
+}
+
+TEST_CASE ("A take after a jump that can't make its files says so")
+{
+    // A reviewer, of known bug 94's fix: the notice was held back after a jump, and with nothing else to record, recording
+    // just ended. Here the project's Audio folder is a file, where nothing can be made.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    auto& song = *phazite::findSong (context);
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+
+    phazite::test::TemporaryFolder elsewhere;
+    REQUIRE (elsewhere.folder.getChildFile ("Audio").replaceWithText ("in the way"));
+    const auto file = song.getFile();
+    song.setFile (elsewhere.folder.getChildFile ("Elsewhere.phazite"));
+    phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (8.0));
+    song.setFile (file);
+
+    CHECK_FALSE (studio.isRecording()); // nothing else records
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].startsWith ("Phazite can't record an input: "));
+    CHECK (problems[0].contains ("isn't recorded from where the playhead was moved"));
+}
+
+TEST_CASE ("A take starts only once the song is given for the audio device's rate")
+{
+    // A reviewer, of known bug 95's fix: a take started between the device starting at a new rate and the song given for it
+    // (the message loop's next turn) took the rate from the engine and the tempo from the plan for the old rate, and placed
+    // what it recorded wrongly; and it wasn't stopped, having started on the new device. Record gives the song first
+    // (PlaybackSession::startTake()), so it is the take after a jump that could.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.getEngine().prepare (44100.0, EnginePlayback::blockSize); // the plan is still the 48 kHz one
+    phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (8.0));
+    CHECK_FALSE (studio.isRecording());
+
+    // What was recorded before, kept as it was recorded.
+    const auto clips = phazite::getClips (context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (2.0 - 256.0 / 24000.0));
+    host.prepare (EnginePlayback::sampleRate, EnginePlayback::blockSize, 2, EnginePlayback::blockSize);
+}
+
+TEST_CASE ("An audio device that starts again at the same rate during a take ends the take there too")
+{
+    // The device started again with another buffer, and other delays: what came after would be placed by the delays the
+    // take started with (the owner's decision, 2026-11-15: any restart ends the take, with a notice).
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.prepare (EnginePlayback::sampleRate, 512, 2, 512);
+    CHECK_FALSE (studio.isRecording());
+    CHECK (phazite::getClips (context, studio.song.firstTrack).size() == 1);
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].startsWith ("Recording stopped: The audio device started again (its buffer or its delays may have changed)"));
+    host.prepare (EnginePlayback::sampleRate, EnginePlayback::blockSize, 2, EnginePlayback::blockSize);
+}
+
+TEST_CASE ("A write that fails while a control is held keeps the take, a Record step of its own, through the drag's Escape")
+{
+    // A reviewer, of known bug 94's fix: the stop that came by itself finished the take inside the control's drag, whose
+    // Escape took the take's clip back with the drag, nothing to redo, its file left behind.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+    auto* take = phazite::getSession (context)->getTake();
+    REQUIRE (take != nullptr);
+    const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (1.0), phazite::BeatPosition::fromBeats (1.25));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f; }));
+
+    auto volume = phazite::getVolume (context, track);
+    const auto before = volume.getValue();
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    take->fillDrive();
+    studio.playback.play (1.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&studio] { return ! studio.isRecording(); }));
+
+    volume.cancelGesture();
+    CHECK (volume.getValue() == doctest::Approx (before));
+    auto& song = *phazite::findSong (context);
+    const auto clips = phazite::getClips (context, track);
+    REQUIRE (clips.size() == 1);
+    const auto file = phazite::getClipFile (song, phazite::findClipState (song, clips[0].id));
+    CHECK (file.existsAsFile());
+    CHECK (context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
+
+    // Undo takes back the take alone.
+    phazite::undo (song);
+    CHECK (phazite::getClips (context, track).empty());
+    CHECK (volume.getValue() == doctest::Approx (before));
+}
+
+TEST_CASE ("A write that fails during a take, as on a full drive, stops recording and keeps what was written, and Phazite says so")
+{
+    // Known bug 94: the take's writer ignored what its writes returned and counted the frames as written, so the clip made for
+    // the file covered frames it didn't have, heard as silence, and nobody was told. Pro Tools and Logic Pro stop recording with
+    // an alert when the drive is full.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0); // to beat 2
+    auto* take = phazite::getSession (context)->getTake();
+    REQUIRE (take != nullptr);
+
+    // Written as far as beat 1's click, then the drive is full.
+    const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (1.0), phazite::BeatPosition::fromBeats (1.25));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f; }));
+    take->fillDrive();
+    studio.playback.play (1.0);
+
+    // The session sees the write fail, and stops: the take kept as Stop keeps it, in a Record step, and the user told.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&studio] { return ! studio.isRecording(); }));
+    CHECK_FALSE (phazite::isPlaying (context));
+    CHECK (context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].startsWith ("Recording stopped: Phazite couldn't write the recording to the drive"));
+
+    // The clip plays what the file holds, no more: the file whole, as long as its header says, beat 1's click in it.
+    auto& song = *phazite::findSong (context);
+    const auto clips = phazite::getClips (context, track);
+    REQUIRE (clips.size() == 1);
+    const auto clipState = phazite::findClipState (song, clips[0].id);
+    const std::unique_ptr<juce::AudioFormatReader> reader (
+        phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, clipState)));
+    REQUIRE (reader != nullptr);
+    const auto fileSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+    CHECK (fileSeconds > 0.5);
+    CHECK (fileSeconds < 2.0);
+    CHECK (phazite::getFilePart (clipState).end <= fileSeconds + 1.0 / reader->sampleRate);
+    CHECK (clips[0].range.getEnd().inBeats() <= 2.0 * fileSeconds + 1.0e-6);
+}
+
+TEST_CASE ("Little room on the drive is said before recording, with how long a recording fits")
+{
+    // Known bug 94: nothing warned before recording onto a drive about to fill up. 48 kHz, 24 bits, a stereo input: 288,000
+    // bytes a second.
+    constexpr auto stereo = 48000.0 * 3.0 * 2.0;
+    CHECK_FALSE (phazite::describeLittleSpace ((std::int64_t) (stereo * 3600.0), stereo).has_value());
+    CHECK_FALSE (phazite::describeLittleSpace ((std::int64_t) (stereo * phazite::littleSpaceSeconds), stereo).has_value());
+
+    const auto said = phazite::describeLittleSpace ((std::int64_t) (stereo * 4.5 * 60.0), stereo);
+    REQUIRE (said.has_value());
+    CHECK (said->startsWith ("The drive the project records onto has room for about 4 minutes of recording."));
+    CHECK (phazite::describeLittleSpace ((std::int64_t) (stereo * 70.0), stereo)->contains ("about a minute"));
+    CHECK (phazite::describeLittleSpace (0, stereo)->contains ("less than a minute"));
+}
+
+TEST_CASE ("An audio device that starts again at another rate during a take ends the take there, kept as Stop keeps it")
+{
+    // Known bug 95: the take went on writing into its file at the old rate what came in at the new one, so the rest played at
+    // the wrong speed, and its clips were placed by the new rate.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0); // to beat 2
+
+    // The device starts again at 44.1 kHz (an interface unplugged, another program changing the rate).
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.prepare (44100.0, EnginePlayback::blockSize, 2, EnginePlayback::blockSize);
+    CHECK_FALSE (studio.isRecording());
+    CHECK_FALSE (phazite::isPlaying (context));
+    CHECK (context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].startsWith ("Recording stopped: The audio device started again at 44.1 kHz, not at the 48 kHz"));
+
+    // What it recorded, where it was played, at the rate it was recorded at.
+    const auto clips = phazite::getClips (context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (2.0 - 256.0 / 24000.0));
+    host.prepare (EnginePlayback::sampleRate, EnginePlayback::blockSize, 2, EnginePlayback::blockSize);
 }
 
 TEST_CASE ("A track armed while recording waits for Stop, after the playhead is moved too: nothing is recorded onto it")
@@ -845,4 +1118,61 @@ TEST_CASE ("The audio settings' correction moves what an input records earlier")
     REQUIRE (clicks.size() >= 2);
     CHECK (clicks[clicks.size() - 2] == clickOn (1.0) - 256);
     CHECK (clicks.back() == clickOn (2.0) - 256);
+}
+
+TEST_CASE ("A session that goes with a take still waiting for a drag places it, without a word")
+{
+    // A reviewer, 2026-11-15: no test reached it. The session's destructor places what still waits, its problem report
+    // let go of first (what owns it may be going too).
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    phazite::Song::Ptr song (phazite::findSong (context));
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String&) { problems.add (title); });
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+    auto* take = phazite::getSession (context)->getTake();
+    REQUIRE (take != nullptr);
+    take->fillDrive(); // it would say "Recording stopped" as it is placed
+    {
+        auto volume = phazite::getVolume (context, track);
+        volume.beginGesture();
+        volume.setValue (0.3f);
+        studio.playback.play (0.5);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&studio] { return ! studio.isRecording(); }));
+        CHECK (phazite::getClipStates (phazite::findTrackState (*song, track)).empty()); // waiting for the drag
+
+        setSong (context, nullptr); // the session goes
+        CHECK (phazite::getClipStates (phazite::findTrackState (*song, track)).size() == 1);
+        CHECK (problems.isEmpty());
+        volume.cancelGesture();
+    }
+
+    setSong (context, song.get());
+}
+
+TEST_CASE ("A take that ends during a tempo's drag places its audio by its own tempo, as its notes are")
+{
+    // A reviewer, 2026-11-15: the take's notes went in by the tempo it was recorded at, its audio by seconds through the
+    // song's new tempo, so one take's audio and notes landed at different beats. Here from beat 2 at 120 BPM, the tempo
+    // dragged to 60 as the take stops.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (2.0));
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0);
+
+    auto tempo = phazite::getTempoHandle (context);
+    tempo.beginGesture();
+    tempo.setValue (60.0);
+    studio.song.run ("transport.record");
+    tempo.endGesture();
+
+    const auto clips = phazite::getClips (context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (2.0));
 }

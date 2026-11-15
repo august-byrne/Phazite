@@ -13,7 +13,7 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 | `Plan.h` | What the engine plays, built on the message thread from the song and never changed once built. What sounds on from one plan to the next (a device's voices, a reverb's tail, a channel's fader) is pointed at, kept by the song's IDs. |
 | `Handover.h` | How the audio thread is handed what it plays, whole, and frees nothing: what it replaces is freed on the message thread. |
 | `Workers.h` | The threads that help the engine play a block, each strip a task. |
-| `Recording.h` | What the engine records of a take: the armed inputs, and where the take started, known to the sample. |
+| `Recording.h` | What the engine records of a take: the armed inputs, and where the take started, known to the sample; the take after a jump, started where the playhead lands. |
 | `PlayheadClock.h` | Where the playhead was as each of the last blocks started, on a clock smoothed over them, which the window reads at its frames' own times. |
 | `TempoMap.h` | The song's tempo map in samples, a beat a quarter note whatever the time signature, its ramps played exactly and bent ones in straight pieces, with its bars and the time signature's beats that the count-in and the metronome click on. |
 | `EventQueue.h` | Live notes from any thread into the engine: a lock-free queue for several threads into one. |

@@ -48,6 +48,8 @@ public:
         double beatsPerMillisecond = 0.0; // how fast the playhead moves through it: 0 while stopped or counting in
         double length = 0.0;              // how long it lasts, in milliseconds
         std::uint32_t run = 0;            // moved on by each locate: a look-up doesn't reach back across a locate
+        std::uint32_t round = 0;          // the times the engine went round the loop before the block started (Engine.h)
+        bool wentRound = false;           // it went round the loop in the block, once or more
     };
 
     void publish (const Stamp&) noexcept;
@@ -57,6 +59,24 @@ public:
     // to its end at most (the latest block's by half a block more, for a next block that comes a little late); before the
     // first block it keeps since the last locate, that block's beat. Nothing before a first block.
     std::optional<double> getBeatAt (double milliseconds) const noexcept;
+
+    // Where the playhead was as much sound before where it is at a moment as plays in so many milliseconds: from where it
+    // is then (as getBeatAt() has it in the latest block), back through the blocks by their lengths, whatever their times;
+    // before the first block it keeps since the last locate, that block's beat. In a loop (its start and end, in beats; none
+    // if the end isn't after the start), past its end in a block that went round it (stamped from where it started), folded
+    // into it, a round later, however many times a loop shorter than the block went round in it; past its end in a block
+    // that didn't (the speed the block started at overshooting, as the tempo slows), at its end. With the round it was on
+    // (Stamp::round), which tells a loop gone round from the playhead heard a little behind. Nothing before a first block.
+    struct Place
+    {
+        double beat = 0.0;
+        std::uint32_t round = 0;
+    };
+
+    std::optional<Place> getPlaceBefore (double now, double milliseconds, double loopStart = 0.0, double loopEnd = 0.0) const noexcept;
+
+    // The round of the latest stamp (0 before a first block).
+    std::uint32_t getLatestRound() const noexcept;
 
     // How many blocks it keeps: 2.7 s of 10 ms blocks, 0.7 s of 128-sample blocks at 48 kHz, more than any output's delay
     // to look back over.
@@ -69,7 +89,8 @@ private:
     {
         std::atomic<std::uint64_t> sequence { 0 };
         std::atomic<double> beat { 0.0 }, milliseconds { 0.0 }, beatsPerMillisecond { 0.0 }, length { 0.0 };
-        std::atomic<std::uint32_t> run { 0 };
+        std::atomic<std::uint32_t> run { 0 }, round { 0 };
+        std::atomic<bool> wentRound { false };
     };
 
     static_assert (std::atomic<double>::is_always_lock_free && std::atomic<std::uint64_t>::is_always_lock_free);

@@ -262,11 +262,16 @@ TEST_CASE ("The handover raced: the audio thread's blocks never hold what was fr
 TEST_CASE (
     "The playhead's stamps raced: a reader gets each stamp whole, never one older than it got before, and the beat at a moment from its own block")
 {
-    // Stamp n: at beat n, n * 8 ms, an eighth of a beat each millisecond, 8 ms long, its run moved on each thousand; so
+    // Stamp n: at beat n, n * 8 ms, an eighth of a beat each millisecond, 8 ms long, its run moved on each thousand, its round
+    // each seventh, going round in each third; so
     // that 4 ms into it, the playhead is at n + 0.5, exactly.
     static constexpr std::uint64_t stamps = 200000;
     const auto makeStamp = [] (std::uint64_t n)
-    { return engine::PlayheadStamps::Stamp { (double) n, 8.0 * (double) n, 0.125, 8.0, (std::uint32_t) (n / 1000) }; };
+    {
+        return engine::PlayheadStamps::Stamp { (double) n, 8.0 * (double) n,           0.125,
+                                               8.0,        (std::uint32_t) (n / 1000), (std::uint32_t) (n / 7),
+                                               n % 3 == 0 };
+    };
 
     engine::PlayheadStamps playhead;
     std::atomic<bool> allPublished { false };
@@ -304,7 +309,8 @@ TEST_CASE (
 
         if (! juce::exactlyEqual (stamp->beat, expected.beat) || ! juce::exactlyEqual (stamp->milliseconds, expected.milliseconds)
             || ! juce::exactlyEqual (stamp->beatsPerMillisecond, expected.beatsPerMillisecond)
-            || ! juce::exactlyEqual (stamp->length, expected.length) || stamp->run != expected.run)
+            || ! juce::exactlyEqual (stamp->length, expected.length) || stamp->run != expected.run || stamp->round != expected.round
+            || stamp->wentRound != expected.wentRound)
             ++torn;
 
         if (stamp->beat < latest)

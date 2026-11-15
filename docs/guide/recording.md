@@ -16,7 +16,8 @@ press Record. **Help > Lessons > Record Audio** walks you through a first record
   the least delay through its ASIO® driver.
 - **MIDI Settings** turns MIDI inputs on or off. A MIDI keyboard plays as soon as it is plugged in.
 - **Low latency**, on the transport bar, takes away the delay you hear while you play: devices that look ahead are
-  bypassed, delay compensation is off and the buffer shrinks. Turn it off again to mix.
+  bypassed, delay compensation is off and the buffer shrinks. Turn it off again to mix. Switch it before you record:
+  where the buffer changes, the audio device starts again, which stops a recording.
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 
@@ -65,7 +66,14 @@ in. Audio is written as a WAV file into the project's Audio folder, named after 
 lands in the song where you played it. If the audio device's driver reports its delays wrongly, **Correction**, under
 **Recording** in the audio settings, moves recordings earlier or later by a number of milliseconds.
 
+What you play on a MIDI keyboard is recorded with its sustain pedal, mod wheel, other controllers and pitch bend, and a
+note played a moment before the count-in ends starts on the first beat. If the drive fills up while recording, Phazite
+stops recording, keeps what it wrote and says so; it warns before recording when little room is left. If the audio
+device starts again (another sample rate or buffer size), Phazite stops recording and keeps what it had recorded, and
+closing the project or quitting while recording stops recording first and keeps the take.
+
 If you move the playhead while recording, recording goes on from the new place, and what was recorded so far is kept.
+Dragging the place or time in the top bar while recording takes the playhead where you let go.
 
 ## The metronome and the count-in
 

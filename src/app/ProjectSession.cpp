@@ -4,6 +4,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ExampleSongs.h"
@@ -13,6 +14,7 @@
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "services/Library.h"
@@ -466,6 +468,9 @@ void ProjectSession::saveProjectAs()
     if (project == nullptr)
         return;
 
+    // The copy goes on with the take, and the project it leaves as it was saved last.
+    keepRecording();
+
     if (isUntitled())
     {
         saveThen ([] (bool) {}); // its first save asks where it goes anyway
@@ -631,6 +636,9 @@ void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<voi
         return;
     }
 
+    // Its folder moves, with the files a take writes.
+    keepRecording();
+
     // Its versions move with it, whole: the initial commit is written on the history's thread as a new project opens.
     waitForVersionsWritten (context);
 
@@ -718,6 +726,22 @@ void ProjectSession::updateAutoSave()
         autosaveTimer->setAutoSave (autoSave && project != nullptr && ! isUntitled());
 }
 
+void ProjectSession::keepRecording()
+{
+    // Recording stops, as Stop stops it, keeping the take; and a take still waiting for a drag to end is placed: what a save
+    // and the question to save then hold. A session that goes with a take still recording keeps nothing of it.
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
+    if (isRecording (*song))
+        stopRecording (*song);
+
+    if (auto* session = getSession (context))
+        session->placeTakesNow();
+}
+
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
     if (project == nullptr)
@@ -725,6 +749,8 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
         callback (true);
         return;
     }
+
+    keepRecording();
 
     // Every plug-in asked for its settings at once, rather than trusted to say they changed, the message thread waiting for
     // none (known bug 69); then what closing does with them, a close always going on: if another project is open by then
@@ -985,6 +1011,10 @@ void ProjectSession::askWhichCopyToOpen (const juce::String& error, const juce::
 
 void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)
 {
+    // A fall-back for a path that didn't keep it first (closeThen(), saveProjectAs()), before anything is dropped.
+    if (project != nullptr)
+        keepRecording();
+
     autosaveTimer = nullptr;
     firstSave = nullptr; // a first save's copy of the project closing stops, and goes (it would move that project)
 

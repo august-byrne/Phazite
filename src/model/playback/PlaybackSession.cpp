@@ -2,6 +2,7 @@
 #include "internal/PlaybackSession.h"
 #include "internal/PlaybackHost.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Playback.h"
@@ -51,6 +52,9 @@ PlaybackSession::~PlaybackSession()
 {
     stopTimer();
     take = nullptr; // a take not finished keeps nothing
+    Gesture::forget (this);
+    onProblem = nullptr; // what owns the reporter may be going too
+    placeTakesNow();     // ended, and kept (a fall-back: ProjectSession places them before it closes the project)
     cancelPendingUpdate();
     songState.removeListener (this);
     song->removeParameterListener (this);
@@ -144,29 +148,63 @@ std::unique_ptr<Take> PlaybackSession::releaseTake()
     return released;
 }
 
-void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::function<void (Take&)>& finish)
+void PlaybackSession::placeTake (std::unique_ptr<Take> ended)
 {
-    // The jump first: the engine ends what it records as it takes it, and what it is given to record after starts where
-    // the playhead lands, in the same block or a later one.
-    locate (beat);
-
-    if (take == nullptr)
+    if (ended == nullptr)
         return;
 
-    // The take's clips, and the song with them, which the engine loops as the take looped it still (the song's own loop
-    // would take a playhead past the song's end back to its start). Then the take goes, finished or else dropped, before
-    // the next is given to the engine, whose loop the engine plays from then. The next records the inputs that one did: the
-    // audio device's inputs stay as they are while a take records (AudioRecorder::update()), so a track armed meanwhile has
-    // none open, and waits for Stop as it did before the jump.
+    takesToPlace.push_back (std::move (ended));
+    Gesture::whenEnded (*song, this, [this] { placeTakesNow(); });
+}
+
+void PlaybackSession::placeTakesNow()
+{
+    for (auto& ended : std::exchange (takesToPlace, {}))
+    {
+        const UndoStep step (*song, "Record");
+        ended->place();
+    }
+}
+
+void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::function<void (Take&)>& finish)
+{
+    if (take == nullptr)
+    {
+        locate (beat);
+        return;
+    }
+
+    // The next take first, whole (its files, its buffers), given to the engine before the jump is asked for, which it waits
+    // for: the audio thread may take the jump within a block of being asked, and the take starts where the playhead lands,
+    // to the sample, however long the message thread takes meanwhile, this one handing it what the engine records from the
+    // jump on (Take.h). It records the inputs this one did: the audio device's inputs stay as they are while a take records
+    // (AudioRecorder::update()), so a track armed meanwhile has none open, and waits for Stop as it did before the jump.
+    auto next = Take::start (*this, take.get());
+
+    // The jump: the engine ends what this one records as it takes it.
+    locate (beat);
+
+    if (onJumpAsked != nullptr)
+        onJumpAsked();
+
+    // This one's clips, and the song with them, which the engine loops as the take looped it still (the song's own loop
+    // would take a playhead past the song's end back to its start); then it goes, finished or else dropped.
+    const auto restarted = take->getDeviceStarts() != host.getDeviceStarts();
+    const auto was = take->getSampleRate();
     finish (*take);
-    update();
-    const auto inputTracks = take->getInputTracks();
-    take.reset();
-    take = Take::start (*this, &inputTracks);
+    take = std::move (next);
     update();
 
-    // Nothing records any more: the inputs as the tracks need them now, which the take that ended left to the next.
-    if (take == nullptr)
+    // None goes on, the audio device having started again meanwhile at another rate (Take::start() starts none until the
+    // song is given for it): recording stopped, as deviceStarted() would have said.
+    if (take == nullptr && restarted)
+        tellDeviceStarted (was);
+
+    // The next keeps the notes played, once this one has taken those it needed; or nothing records any more: the inputs as
+    // the tracks need them now, which the take that ended left to the next.
+    if (take != nullptr)
+        take->keepPlayed();
+    else
         recorder->update();
 }
 
@@ -203,6 +241,7 @@ void PlaybackSession::stop()
 
 void PlaybackSession::locate (BeatPosition beat)
 {
+    writer.playheadJumped (beat); // while the playhead heard is still where the song was
     host.getEngine().locate (beat.inBeats());
     lastPlayhead.reset();
 }
@@ -224,8 +263,49 @@ BeatPosition PlaybackSession::getHeardPlayhead (double milliseconds) const
     return BeatPosition::fromBeats (host.getEngine().getPlayheadBeatAt (milliseconds - getHeardDelay()));
 }
 
+void PlaybackSession::deviceStarted()
+{
+    // A take goes on only on the device as it started: at another rate its sound would play at the wrong speed, and what it
+    // has recorded would be placed by the wrong clock; at the same, its buffer and delays may have changed, which would place
+    // what comes after wrongly. Ended as Stop ends it, where the device stopped. A start the take began after (one asked for
+    // just before Record) leaves it.
+    if (take != nullptr && take->getDeviceStarts() != host.getDeviceStarts())
+    {
+        const auto was = take->getSampleRate();
+        stopPlaying (*song);
+        tellDeviceStarted (was);
+    }
+
+    update();
+}
+
+void PlaybackSession::tellDeviceStarted (double recordedAt)
+{
+    if (onProblem == nullptr)
+        return;
+
+    const auto kilohertz = [] (double rate)
+    { return juce::String (rate / 1000.0, 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") + " kHz"; };
+    const auto now = getEngine().getSampleRate();
+
+    onProblem ("Recording stopped",
+               juce::exactlyEqual (recordedAt, now)
+                   ? juce::String ("The audio device started again (its buffer or its delays may have changed), so Phazite stopped "
+                                   "recording and kept what it had recorded until then.")
+                   : "The audio device started again at " + kilohertz (now) + ", not at the " + kilohertz (recordedAt)
+                         + " the recording was made at, so Phazite stopped recording and kept what it had recorded until then.");
+}
+
 void PlaybackSession::timerCallback()
 {
+    // A take whose files can't be written any more (a full drive, one that went away) stops, keeping what was written, and
+    // says so (Take.h); playback stops with it, where it is.
+    if (take != nullptr && take->hasFailedWriting())
+    {
+        stopPlaying (*song);
+        return;
+    }
+
     // Playing on with nothing looped, and nothing recorded: it stops as the playhead crosses the song's end, and goes back
     // to where playback starts. Playback started past the end plays on, there being nothing to cut short.
     if (! isPlayingProject() || ! isPlaying() || isLoopOn (*song) || take != nullptr)

@@ -107,7 +107,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `RecordingModel.h` | Audio recording, which Phazite does itself: inputs, arming (audio and MIDI), punch-in and takes by IDs, what Record records onto, a track for an input, and what is being recorded as it comes in. |
 | `RecordingValues.h` | The plain values of `RecordingModel.h`. |
 | `internal/AudioRecorder.h` | The arming, and the device's inputs the tracks need. |
-| `internal/Take.h` | A take recorded through Phazite's engine: its inputs into files and the notes played into clips. |
+| `internal/Take.h` | A take recorded through Phazite's engine: its inputs into files, and the notes, controllers and bends played into clips. |
 | `TransportModel.h` | The transport as the top bar reaches it. |
 
 ## arrangement/

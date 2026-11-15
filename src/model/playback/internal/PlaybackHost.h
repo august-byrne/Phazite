@@ -65,12 +65,17 @@ public:
     bool isWaitingForAudioThread() const noexcept { return waitingForAudioThread.load(); }
 
     // Prepares the engine as a device would (the tests' devices, which aren't JUCE's, with so many inputs, whose sound comes in
-    // so late), and gives it the playing session's song for that rate.
-    void prepare (double sampleRate, int maximumBlockSize, int deviceInputs = 0, int deviceInputLatency = 0);
+    // so late, and an output that plays so late), and gives it the playing session's song for that rate, as a device that
+    // starts does (PlaybackSession::deviceStarted()).
+    void prepare (double sampleRate, int maximumBlockSize, int deviceInputs = 0, int deviceInputLatency = 0, int deviceOutputLatency = 0);
 
     // The audio device's inputs, as many as it has (open or not), and how late what comes in through them is, and what
     // goes out to be heard, in samples, as its driver reports them.
     int getNumInputs() const noexcept { return numInputs.load(); }
+
+    // How many times the engines were prepared for the audio device as it started, at any rate (any thread): a take recorded
+    // while the device starts again ends (PlaybackSession::deviceStarted()).
+    int getDeviceStarts() const noexcept { return deviceStarts.load(); }
     int getInputLatency() const noexcept { return inputLatency.load(); }
     int getOutputLatency() const noexcept { return outputLatency.load(); }
 
@@ -106,7 +111,7 @@ private:
     bool letGoOfPlans (bool waitAsLongAsItTakes = false);
     void forgetPlayed();
 
-    std::atomic<int> numInputs { 0 }, inputLatency { 0 }, outputLatency { 0 };
+    std::atomic<int> numInputs { 0 }, inputLatency { 0 }, outputLatency { 0 }, deviceStarts { 0 };
     std::vector<int> openInputs;                                       // each open input's channel, as the device hands them
     std::array<const float*, engine::Engine::maximumInputs> inputs {}; // the audio thread's: by their channels
     std::deque<engine::Engine::PlayedEvent> played;

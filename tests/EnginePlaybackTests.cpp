@@ -21,6 +21,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
@@ -29,8 +30,10 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TempoValues.h"
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <cmath>
 #include <cstring>
@@ -582,6 +585,323 @@ TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: t
     }
 }
 
+TEST_CASE ("A control's moves are written where they were heard: earlier by the output's latency and the song's delay compensation")
+{
+    // Known bug 103: automation was written at the engine's playhead, ahead of what was heard by as much as the sound takes to
+    // reach the speakers, so a move made to the music played back late. Here an output a tenth of a second late, 0.2 beats.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getVolumeParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (16.0), 0.5f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::touch);
+    EnginePlayback playback;
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.prepare (EnginePlayback::sampleRate, EnginePlayback::blockSize, 0, 0, 4800);
+    auto volume = phazite::getVolume (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (1.0);
+    const auto grabbedAt = phazite::getPlayheadBeat (song.context).inBeats(); // the engine's, about beat 2
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    playback.play (0.5);
+    const auto letGoAt = phazite::getPlayheadBeat (song.context).inBeats();
+    volume.endGesture();
+    song.run ("transport.playStop");
+
+    // The pass from where the grab was heard, to where the control was let go, heard.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    REQUIRE (points.size() >= 4);
+    CHECK (points[1].beat.inBeats() == doctest::Approx (grabbedAt - 0.2).epsilon (0.001));
+    CHECK (points[1].value == doctest::Approx (0.5f));
+    CHECK (std::any_of (points.begin(), points.end(), [&] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - (letGoAt - 0.2)) < 0.002 && std::abs (p.value - 0.3f) < 0.001f; }));
+}
+
+TEST_CASE ("A jump back while writing with the loop on ends the pass where the song was, and writes on from where it lands")
+{
+    // Known bug 103: the jump was taken for the loop going round, which wrote the value held through to the loop's end, and
+    // on from the loop's start to where the playhead landed. Beats 0 to 8 are looped; latch writes from beat 4.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+    phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (8.0) });
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (2.0); // to beat 4
+    pan.setValue (-0.5f);
+    playback.play (1.0); // to beat 6
+    phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (2.0));
+    playback.play (0.5); // to beat 3
+    song.run ("transport.playStop");
+
+    // From beat 4 to 6, then from 2 to 3: nothing written at the loop's end, nor from its start.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    REQUIRE (points.size() >= 2);
+    CHECK (points.front().beat.inBeats() == doctest::Approx (2.0).epsilon (0.01));
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return p.beat.inBeats() > 6.05; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 6.0) < 0.05 && std::abs (p.value + 0.5f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 3.0) < 0.05 && std::abs (p.value + 0.5f) < 0.001f; }));
+}
+
+TEST_CASE ("Escape in Write takes back the drag alone: what the pass wrote at the loop's end during it stays, up to the grab")
+{
+    // Known bug 163: the points the writer wrote as the loop went round during the drag joined the drag's step, and Escape took
+    // them back with it, leaving the lane as it was before playback started. Write mode writes the lane's value where playback
+    // starts, -1, over a ramp up to 1; beats 0 to 2 are looped.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition(), -1.0f }, { phazite::BeatPosition::fromBeats (2.0), 1.0f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+    phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) });
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (0.5); // to beat 1
+    pan.beginGesture();
+    pan.setValue (0.25f);
+    playback.play (0.75); // round the loop, to beat 0.5
+    pan.setValue (0.75f);
+    playback.play (0.1);
+    pan.cancelGesture();
+    playback.play (0.2);
+    song.run ("transport.playStop");
+
+    // Written from playback's start to the loop's end at -1, then on again from the loop's start; none of the drag's values.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.25f) < 0.001f; }));
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.001 && std::abs (p.value + 1.0f) < 0.001f; }));
+    CHECK (std::none_of (points.begin(), points.end(),
+                         [] (const auto& p) { return p.beat.inBeats() > 0.9 && p.beat.inBeats() < 1.99 && p.value > -0.99f; }));
+}
+
+TEST_CASE ("A control grabbed before playback starts, in Write, is taken back by Escape to the pass as playback started")
+{
+    // Known bug 163: the grab was noted with no pass (none wrote while stopped), so Escape took away the whole pass that write
+    // mode began as playback started, as if the control had been grabbed in touch.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition(), -1.0f }, { phazite::BeatPosition::fromBeats (16.0), 1.0f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    pan.beginGesture(); // stopped
+    song.run ("transport.playStop");
+    playback.play (0.5);
+    pan.setValue (0.75f);
+    playback.play (0.25);
+    pan.cancelGesture();
+    playback.play (0.25); // to beat 2
+    song.run ("transport.playStop");
+
+    // Written from playback's start at the lane's value there, -1, as far as where playback stopped; without the drag's value.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value + 1.0f) < 0.001f; }));
+}
+
+namespace
+{
+bool hasPoint (const std::vector<phazite::AutomationPoint>& points, double beat, float value, double near = 0.05)
+{
+    return std::any_of (points.begin(), points.end(),
+                        [=] (const auto& p) { return std::abs (p.beat.inBeats() - beat) < near && std::abs (p.value - value) < 0.001f; });
+}
+} // namespace
+
+TEST_CASE ("Stop during a control's drag, then Escape: what was written as playback stopped stays, a step of its own; the drag alone goes")
+{
+    // A reviewer, of known bug 163's fix: Stop works while the mouse is down, and what the writer wrote as playback stopped
+    // joined the drag's step, which Escape took back, latched pass and all. Latch writes the pan from beat 1.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (0.5);
+    pan.setValue (-0.5f); // latched from here
+    playback.play (0.5);
+    pan.beginGesture();
+    pan.setValue (0.8f);
+    playback.play (0.5);             // to beat 3
+    song.run ("transport.playStop"); // the key, with the mouse down
+    pan.cancelGesture();
+    pan.endGesture(); // the mouse goes up
+
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (hasPoint (points, 1.0, -0.5f));
+    CHECK (hasPoint (points, 3.0, -0.5f));
+    CHECK_FALSE (hasPoint (points, 2.0, 0.8f, 2.0));
+    CHECK (song.context.getUndoManager()->getUndoDescription() == juce::String ("Record Automation"));
+    phazite::undo (*phazite::findSong (song.context));
+    CHECK (phazite::getAutomationPoints (song.context, lane).empty());
+}
+
+TEST_CASE ("A plug-in's parameter let go during a control's drag writes its pass in a step of its own, which the drag's Escape keeps")
+{
+    // A reviewer, of known bug 163's fix: a plug-in's gesture that ended during a control's drag wrote into the drag's step,
+    // and Escape took it back. Here the pan plays the plug-in's part, written as its own window's gesture.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto volumeLane = song.getVolumeParameter (track);
+    const auto panLane = song.getPanParameter (track);
+    song.addAutomation (volumeLane, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (16.0), 0.5f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::touch);
+    EnginePlayback playback;
+    auto volume = phazite::getVolume (song.context, track);
+    auto pan = phazite::getPan (song.context, track);
+    auto& writer = phazite::getSession (song.context)->getWriter();
+
+    song.run ("transport.playStop");
+    playback.play (0.5);
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    writer.pluginGestureChanged (panLane, true);
+    pan.setValue (-0.5f);
+    playback.play (0.5);
+    writer.pluginGestureChanged (panLane, false);
+    playback.play (0.25);
+    volume.cancelGesture();
+    song.run ("transport.playStop");
+
+    const auto points = phazite::getAutomationPoints (song.context, panLane);
+    CHECK (hasPoint (points, 1.0, -0.5f));
+    CHECK (hasPoint (points, 2.0, -0.5f));
+    CHECK (phazite::getAutomationPoints (song.context, volumeLane).size() == 2); // the drag's own pass gone
+}
+
+TEST_CASE ("A jump after the loop went round without a move writes the pass to the loop's end and from its start first")
+{
+    // A reviewer, of known bug 103's fix: the jump ended the pass where it was heard, missing that the loop had gone round
+    // since its last move. Beats 0 to 8 are looped; latch writes from beat 7; the loop goes round; Home at beat 1.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+    phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (8.0) });
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (3.5); // to beat 7
+    pan.setValue (-0.5f);
+    playback.play (1.0); // round, to beat 1
+    phazite::movePlayhead (song.context, phazite::BeatPosition());
+    playback.play (0.25);
+    song.run ("transport.playStop");
+
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (hasPoint (points, 7.0, -0.5f));
+    CHECK (hasPoint (points, 8.0, -0.5f));
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return p.beat.inBeats() > 1.05 && p.beat.inBeats() < 6.95; }));
+}
+
+TEST_CASE ("The loop going round between two moves is known from the engine's rounds, however little the playhead went back")
+{
+    // A reviewer, of known bug 103's fix: a wrap was guessed from the playhead going back by more than a block, so a move
+    // nearly a whole loop after the last was taken for none. Beats 0 to 2 are looped, a second; the second move comes half a
+    // block short of a whole loop after the first.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+    phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) });
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (0.25);
+    pan.setValue (-0.5f);
+    playback.playSamples (48000 - 128);
+    pan.setValue (0.5f);
+    playback.play (0.1);
+    song.run ("transport.playStop");
+
+    // The first move held to the loop's end, and the second from its start.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (hasPoint (points, 2.0, -0.5f, 0.001));
+    CHECK (hasPoint (points, 0.0, -0.5f, 0.001));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.5f) < 0.001f; }));
+}
+
+TEST_CASE ("The loop's rounds are counted where the engine goes round: not at a count-in's end inside a block, nor as the tempo slows")
+{
+    // A reviewer, 2026-11-15: rounds were inferred from a block starting before where the one before ended, by the speed it
+    // started at; so the count-in's last block (moving for the whole block though the song started in its middle) and every
+    // block of a slowing ramp counted one, and the writer then wrote the pass's value on to the loop's end, where playback
+    // never was. Beats 0 to 8 are looped; Write holds the pan's lane value from playback's start over a ramp up to 1.
+    const auto writesNoFurtherThanPlayback = [] (bool countIn, bool slowing)
+    {
+        TestSong song;
+        song.setTempo (120.0);
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        song.addMidiClip (track, 0.0, 16.0);
+        const auto lane = song.getPanParameter (track);
+        song.addAutomation (lane, { { phazite::BeatPosition(), -1.0f }, { phazite::BeatPosition::fromBeats (16.0), 1.0f } });
+        auto& state = *phazite::findSong (song.context);
+
+        if (slowing) // 120 to 60 BPM over 16 beats
+        {
+            phazite::addTempoChange (state, phazite::BeatPosition::fromBeats (16.0), 60.0);
+            phazite::setTempoCurve (state, 0, phazite::tempoRamp);
+        }
+
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+        phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (8.0) });
+        song.setSwitch ("transport.countIn", countIn);
+        const juce::ScopeGuard countInOff { [&song] { song.setSwitch ("transport.countIn", false); } }; // the app's setting
+        phazite::routeLiveMidiInput (state);
+        EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::realTime, EnginePlayback::sampleRate,
+                                 countIn ? 448 : 512); // a bar of count-in, 96,000 samples, ends inside a 448-sample block
+
+        song.run ("transport.record");
+        playback.play (countIn ? 2.0 : 0.0);
+        playback.play (1.0); // to about beat 2
+        const auto stoppedAt = phazite::getPlayheadBeat (song.context).inBeats();
+        song.run ("transport.record");
+
+        // The lane past where playback was is as it was: no point between there and the ramp's end.
+        CAPTURE (stoppedAt);
+        const auto points = phazite::getAutomationPoints (song.context, lane);
+        return std::none_of (points.begin(), points.end(),
+                             [stoppedAt] (const auto& p) { return p.beat.inBeats() > stoppedAt + 0.1 && p.beat.inBeats() < 15.9; });
+    };
+
+    CHECK (writesNoFurtherThanPlayback (true, false));
+    CHECK (writesNoFurtherThanPlayback (false, true));
+}
 TEST_CASE ("Phazite's engine plays a track's LFO on its volume, which the LFO's editor and the fader's ring show, and a macro")
 {
     TestSong song;

@@ -440,17 +440,19 @@ void ParameterHandle::cancelGesture()
     if (! isInGesture())
         return;
 
+    // Automation being written by hand goes on as it was before the grab, without what the drag recorded: ended as the drag
+    // ends, a latch pass kept it, to write as playback stopped, and a write pass wrote all it had into the rolled-back step.
+    // Told before the rollback, while the parameter is as the drag found it: what the writer keeps of the drag's time (a
+    // part written as the loop went round, or as playback stopped) waits for the rollback, and is a step of its own after it.
+    if (auto* song = impl->song.get())
+        if (auto* session = findPlayingSession (*song))
+            session->getWriter().gestureCancelled (impl->findRef());
+
     if (impl->gesture != nullptr)
     {
         impl->gesture->rollBack();
         impl->gesture.reset();
     }
-
-    // And automation being written by hand goes on as it was before the grab, without what the drag recorded: ended as the
-    // drag ends, a latch pass kept it, to write as playback stopped, and a write pass wrote all it had into the rolled-back step.
-    if (auto* song = impl->song.get())
-        if (auto* session = findPlayingSession (*song))
-            session->getWriter().gestureCancelled (impl->findRef());
 
     impl->joined = false;
 }

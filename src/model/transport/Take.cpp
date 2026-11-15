@@ -10,6 +10,7 @@
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 #include <algorithm>
@@ -18,7 +19,11 @@
 #include <cmath>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <limits>
+#include <map>
 #include <mutex>
+#include <set>
+#include <tuple>
+#include <utility>
 
 namespace phazite
 {
@@ -68,7 +73,59 @@ namespace
 
         return parts.joinIntoString (", ", 0, parts.size() - 1) + " and " + parts[parts.size() - 1];
     }
+
+    // MIDI's controller numbers, and the pitch bend's middle.
+    constexpr int sustainPedal = 64, bendMiddle = 8192;
 } // namespace
+
+std::optional<juce::String> describeLittleSpace (std::int64_t bytesFree, double bytesPerSecond)
+{
+    if (bytesPerSecond <= 0.0 || (double) bytesFree >= littleSpaceSeconds * bytesPerSecond)
+        return std::nullopt;
+
+    const auto seconds = std::max (0.0, (double) bytesFree / bytesPerSecond);
+    const auto minutes = (int) std::floor (seconds / 60.0);
+    const auto room = minutes >= 2   ? "about " + juce::String (minutes) + " minutes"
+                      : minutes == 1 ? juce::String ("about a minute")
+                                     : "less than a minute";
+
+    return "The drive the project records onto has room for " + room
+           + " of recording. Phazite stops recording, keeping what it wrote, if the drive fills up.";
+}
+
+// The file an input is written into, written straight through to the drive (not buffered), so that a write that fails is
+// known as it fails; and, for the tests, a drive that fills up (Take::fillDrive()): a write that would make the file longer
+// fails, one over what it holds already doesn't.
+class Take::FileStream final : public juce::OutputStream
+{
+public:
+    FileStream (const juce::File& file, const std::atomic<bool>& full)
+        : stream (file, 0),
+          driveFull (full)
+    {
+    }
+
+    bool openedOk() const { return stream.openedOk(); }
+
+    void flush() override { stream.flush(); }
+    bool setPosition (juce::int64 position) override { return stream.setPosition (position); }
+    juce::int64 getPosition() override { return stream.getPosition(); }
+
+    bool write (const void* data, size_t numBytes) override
+    {
+        if (driveFull.load() && stream.getPosition() + (juce::int64) numBytes > longest)
+            return false;
+
+        const auto written = stream.write (data, numBytes);
+        longest = std::max (longest, stream.getPosition());
+        return written;
+    }
+
+private:
+    juce::FileOutputStream stream;
+    const std::atomic<bool>& driveFull;
+    juce::int64 longest = 0; // how long the file is
+};
 
 // An armed track's input: the engine's buffer of it, and the file it goes into.
 struct Take::AudioTake
@@ -77,6 +134,9 @@ struct Take::AudioTake
     juce::File file;
     std::unique_ptr<juce::AudioFormatWriter> writer;
     engine::Recording::Input* input = nullptr; // the engine's recording's
+
+    // The take's: once a write of any of its files fails, nothing more is written into any (the drive is full, or gone).
+    std::atomic<bool>* failed = nullptr;
 
     // The frames in the file: first a lead of silence (Take::getLead()), once the take has started, then the take's, those
     // that came in and silence for those lost.
@@ -104,6 +164,26 @@ struct Take::AudioTake
     float peak = 0.0f;
     int peakCount = 0;
 
+    // Whether its file is open and written on: not once a write of the take's has failed.
+    bool canWrite() const { return writer != nullptr && ! failed->load(); }
+
+    // A write into the file: one that fails is noted for the take, and writes nothing more (the file's frames are those
+    // written before it, which its header says as it is closed).
+    bool writeFrames (const float* const* channels, int numChannels, int count)
+    {
+        if (! canWrite())
+            return false;
+
+        if (! writer->writeFromFloatArrays (channels, numChannels, count))
+        {
+            failed->store (true);
+            return false;
+        }
+
+        written += count;
+        return true;
+    }
+
     // The writing thread, then the message thread at the end, once the take has started: the lead of silence the file starts
     // with, once; then what has come in, as far as so many frames of the take in all, with silence where some were lost
     // (engine::Recording::Input::read()), so that what came after them stays where it was played.
@@ -117,15 +197,14 @@ struct Take::AudioTake
             writeZeros (lead, found);
         }
 
-        while (written - lead < upTo && writer != nullptr)
+        while (written - lead < upTo && canWrite())
         {
             const auto frames = input->read (
                 std::min<std::int64_t> (upTo - (written - lead), 1 << 16),
                 [this, &found] (const float* const* channels, int numChannels, int count)
                 {
-                    writer->writeFromFloatArrays (channels, numChannels, count);
-                    written += count;
-                    addPeaks (channels, numChannels, count, found);
+                    if (writeFrames (channels, numChannels, count))
+                        addPeaks (channels, numChannels, count, found);
                 },
                 [this, &found] (std::int64_t count) { writeLost (count, found); });
 
@@ -142,7 +221,7 @@ struct Take::AudioTake
     {
         write (leadFrames, length);
 
-        if (writer != nullptr && written - lead < length)
+        if (canWrite() && written - lead < length)
         {
             std::vector<float> found;
             writeLost (length - (written - lead), found);
@@ -152,6 +231,9 @@ struct Take::AudioTake
 
     void writeLost (std::int64_t count, std::vector<float>& found)
     {
+        if (! canWrite())
+            return;
+
         if (! lost.empty() && lost.back().start + lost.back().length == written)
             lost.back().length += count;
         else
@@ -169,9 +251,11 @@ struct Take::AudioTake
         for (auto left = count; left > 0;)
         {
             const auto part = (int) std::min<std::int64_t> (left, silenceFrames);
-            writer->writeFromFloatArrays (channels, numChannels, part);
+
+            if (! writeFrames (channels, numChannels, part))
+                return;
+
             addPeaks (channels, numChannels, part, found);
-            written += part;
             left -= part;
         }
     }
@@ -265,18 +349,24 @@ Take::~Take()
     close (false);
 }
 
-std::unique_ptr<Take> Take::start (PlaybackSession& session, const std::vector<TrackID>* inputsOf)
+std::unique_ptr<Take> Take::start (PlaybackSession& session, Take* goesOnFrom)
 {
     auto& song = session.getSong();
     auto& engine = session.getEngine();
     const auto rate = engine.getSampleRate();
     const auto* plan = engine.getPlan();
 
-    if (plan == nullptr)
+    // The rate and the tempo map from one source: a plan for another rate (the device started again, and the song isn't
+    // given for its new rate yet) would place what is recorded by the wrong clock.
+    if (plan == nullptr || ! juce::exactlyEqual (plan->tempo.getSampleRate(), rate))
         return nullptr;
 
     std::unique_ptr<Take> take (new Take (session));
+    take->rate = rate;
     take->tempo = plan->tempo;
+    take->afterJump = goesOnFrom != nullptr;
+    take->deviceStarts = session.getHost().getDeviceStarts();
+    const auto inputsOf = goesOnFrom != nullptr ? std::optional (goesOnFrom->getInputTracks()) : std::nullopt;
 
     // A punched take doesn't loop; the song's own loop doesn't loop a take.
     if (isPunching (song))
@@ -291,13 +381,36 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, const std::vector<T
 
     take->midiTrack = session.recordsLiveTrack() ? getLiveMidiTrack (song) : TrackID();
 
+    // The controllers and the bend as they are now on live MIDI's track: the take before's state (after a jump), then what
+    // was played since that is still kept.
+    if (goesOnFrom != nullptr)
+        take->heldAtStart = goesOnFrom->heldAtStart;
+    else
+        take->heldAtStart.fill (-1);
+
+    for (const auto& event : session.getPlayedEvents())
+    {
+        using Type = devices::NoteEvent::Type;
+
+        if (event.track != (std::int64_t) take->midiTrack.getRaw())
+            continue;
+
+        if (event.event.type == Type::controller)
+            take->heldAtStart[(size_t) juce::jlimit (0, 127, event.event.number)] =
+                juce::jlimit (0, 127, juce::roundToInt (event.event.value * 127.0f));
+        else if (event.event.type == Type::pitchBend)
+            take->heldAtStart[128] = juce::jlimit (0, 16383, juce::roundToInt (event.event.value * (float) bendMiddle) + bendMiddle);
+    }
+
     // Each armed track's input the audio device has, into a file of its own.
     std::vector<std::unique_ptr<engine::Recording::Input>> inputs;
     auto& recorder = session.getRecorder();
+    juce::StringArray notMade;      // the tracks whose files couldn't be made
+    std::int64_t bytesPerFrame = 0; // of all the files: 24 bits a channel
 
     for (const auto track : recorder.getArmedTracks())
     {
-        if (inputsOf != nullptr && std::find (inputsOf->begin(), inputsOf->end(), track) == inputsOf->end())
+        if (inputsOf.has_value() && std::find (inputsOf->begin(), inputsOf->end(), track) == inputsOf->end())
             continue; // armed since the take before started: its input isn't open yet
 
         auto channels = getInputChannels (findTrackState (song, track)[schema::trackInput].toString());
@@ -307,26 +420,50 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, const std::vector<T
 
         auto audio = std::make_unique<AudioTake>();
         audio->track = track;
+        audio->failed = &take->writeFailed;
         audio->file = recorder.getTakeFile (track);
         audio->file.getParentDirectory().createDirectory();
-        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (audio->file);
+        auto stream = std::make_unique<FileStream> (audio->file, take->driveFull);
 
-        if (! static_cast<juce::FileOutputStream&> (*stream).openedOk())
+        if (! stream->openedOk())
+        {
+            notMade.add (getTrackName (song, track));
             continue;
+        }
 
+        std::unique_ptr<juce::OutputStream> output = std::move (stream);
         audio->writer = juce::WavAudioFormat().createWriterFor (
-            stream, juce::AudioFormatWriterOptions {}.withSampleRate (rate).withNumChannels ((int) channels.size()).withBitsPerSample (24));
+            output, juce::AudioFormatWriterOptions {}.withSampleRate (rate).withNumChannels ((int) channels.size()).withBitsPerSample (24));
 
         if (audio->writer == nullptr)
         {
+            notMade.add (getTrackName (song, track));
             audio->file.deleteFile();
             continue;
         }
 
+        bytesPerFrame += 3 * (std::int64_t) channels.size();
         auto input = std::make_unique<engine::Recording::Input> (std::move (channels), (int) (bufferSeconds * rate));
         audio->input = input.get();
         inputs.push_back (std::move (input));
         take->audio.push_back (std::move (audio));
+    }
+
+    // What the user should know: an input that won't be recorded (from where the playhead was put, for a take that goes on
+    // after a jump), and before playing, a drive with little room left.
+    if (session.onProblem != nullptr)
+    {
+        if (! notMade.isEmpty())
+            session.onProblem ("Phazite can't record an input",
+                               "Phazite couldn't make a file in the project's Audio folder for " + joinAsWords (notMade)
+                                   + (goesOnFrom != nullptr ? ", so it isn't recorded from where the playhead was moved, and what was "
+                                                              "recorded before is kept."
+                                                            : ", so it isn't recorded.")
+                                   + " Check that the drive is there and has room.");
+
+        if (goesOnFrom == nullptr && ! take->audio.empty())
+            if (const auto little = describeLittleSpace (take->audio.front()->file.getBytesFreeOnVolume(), (double) bytesPerFrame * rate))
+                session.onProblem ("Little room left to record", *little);
     }
 
     if (! take->midiTrack.isValid() && take->audio.empty())
@@ -339,15 +476,35 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, const std::vector<T
     take->midiShift = session.getOutputLatency() + compensation;
     take->audioShift = session.getInputLatency() + take->midiShift + std::llround (correction * rate / 1000.0);
 
+    // Given to the engine at once. One that goes on after a jump starts where the playhead lands, the jump the message
+    // thread asks for next, once this is given (only it asks for locates); a block that still plays the take before hands
+    // it on to it. It keeps the notes played once the one before is finished, which needs those played since it started.
     auto recording = std::make_unique<engine::Recording> (std::move (inputs));
     take->recording = recording.get();
+    take->keepFrom = engine.getClock() - (goesOnFrom != nullptr ? 0 : (std::int64_t) std::llround (earlyNoteSeconds * rate));
+
+    if (goesOnFrom != nullptr)
+    {
+        recording->startAfterLocate (engine.getLocatesTaken(), engine.getLocatesAsked() + 1);
+
+        if (goesOnFrom->recording != nullptr)
+            goesOnFrom->recording->continueInto (*recording);
+    }
+
     engine.setRecording (std::move (recording));
-    session.keepPlayedFrom (engine.getClock());
+
+    if (goesOnFrom == nullptr)
+        take->keepPlayed();
 
     if (! take->audio.empty())
         take->writer = std::make_unique<Writer> (*take);
 
     return take;
+}
+
+void Take::keepPlayed()
+{
+    session.keepPlayedFrom (keepFrom);
 }
 
 void Take::write (std::int64_t upTo)
@@ -389,8 +546,15 @@ void Take::close (bool keep)
             take->file.deleteFile();
     }
 
-    session.getEngine().setRecording (nullptr);
+    // The engine records nothing more, and the notes played go after 30 seconds again; unless a take that goes on from this
+    // one after a jump has the engine already (start()), which keeps them.
+    const auto stillRecorded = session.getEngine().getRecording() == recording;
     recording = nullptr;
+
+    if (! stillRecorded)
+        return;
+
+    session.getEngine().setRecording (nullptr);
     session.keepPlayedFrom ({});
 
     // What was armed or set to be heard meanwhile.
@@ -398,6 +562,12 @@ void Take::close (bool keep)
 }
 
 void Take::finish()
+{
+    end();
+    place();
+}
+
+void Take::end()
 {
     if (finished || recording == nullptr)
         return;
@@ -413,8 +583,17 @@ void Take::finish()
     }
 
     // The notes, before the engine's notes played are let go of.
-    placeNotes (startSample, startClock, length);
+    ended = Ended { startSample, length, collectNotes (startSample, startClock, length) };
     close (true);
+}
+
+void Take::place()
+{
+    if (! ended.has_value() || std::exchange (clipsPlaced, true))
+        return;
+
+    const auto startSample = ended->startSample, length = ended->length;
+    placeNotes (ended->parts);
 
     for (auto& take : audio)
     {
@@ -422,13 +601,14 @@ void Take::finish()
         // silence.
         const auto lead = std::max<std::int64_t> (0, take->lead);
         TakePlace place;
-        place.sampleRate = session.getEngine().getSampleRate();
+        place.sampleRate = rate;
         place.frames = std::min<std::int64_t> (take->written, lead + length);
         place.lead = lead;
         place.firstFrame = startSample - audioShift - lead;
         place.start = startSample;
         place.stop = startSample + length;
         place.loop = looped;
+        place.tempo = tempo; // the map its notes are placed by too
 
         if (punch.has_value())
             place.punch = juce::Range (toSample (punch->getStart()), toSample (punch->getEnd()));
@@ -438,13 +618,39 @@ void Take::finish()
 
     if (const auto lost = describeLost (startSample); lost.isNotEmpty() && session.onProblem != nullptr)
         session.onProblem ("Part of the recording was lost", lost);
+
+    if (const auto failed = describeFailedWrite (startSample); failed.isNotEmpty() && session.onProblem != nullptr)
+        session.onProblem ("Recording stopped", failed);
+}
+
+juce::String Take::describeFailedWrite (std::int64_t startSample) const
+{
+    if (! writeFailed.load())
+        return {};
+
+    // Where the shortest file ends, in the song, as if nothing looped: the take's audio stops there (what came in first was
+    // played audioShift before it came in).
+    auto shortest = std::numeric_limits<std::int64_t>::max();
+
+    for (const auto& take : audio)
+        shortest = std::min (shortest, std::max<std::int64_t> (0, take->written - std::max<std::int64_t> (0, take->lead)));
+
+    const auto end = shortest == std::numeric_limits<std::int64_t>::max() ? startSample : startSample - audioShift + shortest;
+    return "Phazite couldn't write the recording to the drive (it may be full, or gone), so it stopped recording and kept what "
+           "it wrote, to "
+           + describeSample (looped.has_value() ? looped->fold (end) : end) + ". Make room on the drive, or save the project "
+           + "elsewhere, before recording again.";
+}
+
+juce::String Take::describeSample (std::int64_t sample) const
+{
+    return describePlace (getBars (session.getSong()), BeatPosition::fromBeats (tempo->toBeats ((double) sample)));
 }
 
 juce::String Take::describeLost (std::int64_t startSample) const
 {
     const auto& song = session.getSong();
     const auto bars = getBars (song);
-    const auto rate = session.getEngine().getSampleRate();
     const auto toBeat = [this] (std::int64_t sample) { return BeatPosition::fromBeats (tempo->toBeats ((double) sample)); };
     juce::StringArray tracks;
 
@@ -505,10 +711,19 @@ int Take::getRoundHeard (std::int64_t heard) const
 std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std::int64_t startClock, std::int64_t length)
 {
     std::vector<Played> notes;
+    std::vector<PlayedControl> controls;               // every one played, before the take's start too
     const auto end = startSample + length - midiShift; // what was heard last, as if nothing looped
+    const auto early = afterJump ? (std::int64_t) 0 : (std::int64_t) std::llround (earlyNoteSeconds * rate);
+    std::array<int, 129> lastValue; // each controller's, and the bend's (128), as played last
+    lastValue.fill (-1);
+    std::array<std::ptrdiff_t, 129> lastIndex; // and where its last one kept is in controls
+    lastIndex.fill (-1);
+    const auto millisecond = (std::int64_t) std::llround (rate / 1000.0);
 
     // Each note played into the track, from where it was heard to where it ended, as if nothing looped; one still held
-    // ends where the take does.
+    // ends where the take does. One played a moment before the take started (a downbeat played early after the count-in,
+    // or in the first samples the output's latency covers) starts where it did, as Ableton Live, Logic Pro and Cubase keep
+    // a note played just before the count-in ends.
     std::array<int, 128> sounding;
     sounding.fill (-1);
 
@@ -536,10 +751,10 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
         {
             endNote (pitch, at);
 
-            if (at >= startSample)
+            if (at >= startSample - early)
             {
                 sounding[(size_t) pitch] = (int) notes.size();
-                notes.push_back ({ pitch, juce::jlimit (1, 127, juce::roundToInt (note.value * 127.0f)), at, end });
+                notes.push_back ({ pitch, juce::jlimit (1, 127, juce::roundToInt (note.value * 127.0f)), std::max (at, startSample), end });
             }
         }
         else if (note.type == Type::noteOff)
@@ -551,7 +766,95 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
             for (int p = 0; p < 128; ++p)
                 endNote (p, at);
         }
+        else if (note.type == Type::controller || note.type == Type::pitchBend)
+        {
+            // A value that repeats the one before it changes nothing.
+            const auto bend = note.type == Type::pitchBend;
+            const PlayedControl control { bend, bend ? 0 : juce::jlimit (0, 127, note.number),
+                                          bend ? juce::jlimit (0, 16383, juce::roundToInt (note.value * (float) bendMiddle) + bendMiddle)
+                                               : juce::jlimit (0, 127, juce::roundToInt (note.value * 127.0f)),
+                                          at };
+
+            const auto key = bend ? (size_t) 128 : (size_t) control.number;
+
+            if (std::exchange (lastValue[key], control.value) == control.value)
+                continue;
+
+            // At most one a millisecond for each controller (a wheel can send many more): the latest value at the time of
+            // the first.
+            if (const auto last = lastIndex[key]; last >= 0 && control.at - controls[(size_t) last].at < millisecond)
+            {
+                controls[(size_t) last].value = control.value;
+                continue;
+            }
+
+            lastIndex[key] = (std::ptrdiff_t) controls.size();
+            controls.push_back (control);
+        }
     }
+
+    // The controls from one sample to another: those moved in it, as they were played, folded into the looped range if
+    // asked; those whose values hold as it starts (carried in: the pedal held down, the bend away from its middle, and any
+    // controller moved a moment before, as the notes played then are kept); and the pedal and the bend let go of at its end,
+    // where they are still down or away from the middle then.
+    const auto controlsIn = [this, &controls, early] (std::int64_t from, std::int64_t to, const TakeLoop* fold, PlayedNotes& part)
+    {
+        std::array<bool, 129> found {}; // each controller's last value before the part, and the bend's (128)
+
+        for (auto control = controls.rbegin(); control != controls.rend(); ++control)
+        {
+            if (control->at >= from || std::exchange (found[control->bend ? 128 : (size_t) control->number], true))
+                continue;
+
+            if ((control->bend && control->value != bendMiddle)
+                || (! control->bend && control->number == sustainPedal && control->value >= 64) || control->at >= from - early)
+                part.carried.push_back ({ control->bend, control->number, control->value, from });
+        }
+
+        // The pedal and the bend as the take started, where nothing played since is kept to say (what was played before it
+        // goes after 30 seconds: PlaybackHost::getPlayedEvents()).
+        if (! found[sustainPedal] && heldAtStart[sustainPedal] >= 64)
+            part.carried.push_back ({ false, sustainPedal, heldAtStart[sustainPedal], from });
+
+        if (! found[128] && heldAtStart[128] >= 0 && heldAtStart[128] != bendMiddle)
+            part.carried.push_back ({ true, 0, heldAtStart[128], from });
+
+        for (auto control : controls)
+        {
+            if (control.at < from || control.at >= to)
+                continue;
+
+            if (fold != nullptr)
+                control.at = fold->fold (control.at);
+
+            part.controls.push_back (control);
+        }
+
+        std::stable_sort (part.controls.begin(), part.controls.end(),
+                          [] (const PlayedControl& a, const PlayedControl& b) { return a.at < b.at; });
+
+        auto pedal = 0, bend = bendMiddle;
+
+        for (const auto* list : { &part.carried, &part.controls })
+        {
+            for (const auto& control : *list)
+            {
+                if (control.bend)
+                    bend = control.value;
+                else if (control.number == sustainPedal)
+                    pedal = control.value;
+            }
+        }
+
+        part.endPedal = pedal;
+        part.endBend = bend;
+
+        if (pedal >= 64)
+            part.released.push_back ({ false, sustainPedal, 0, part.to });
+
+        if (bend != bendMiddle)
+            part.released.push_back ({ true, 0, bendMiddle, part.to });
+    };
 
     // Where each goes in the song, in the parts a clip of them goes over (collectNotes() in Take.h says which).
     const auto byStart = [] (const Played& a, const Played& b) { return a.start < b.start; };
@@ -562,16 +865,22 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
     {
         const auto from = std::max (startSample, toSample (punch->getStart()));
         const auto to = std::min (end, toSample (punch->getEnd()));
-        std::erase_if (notes, [from, to] (const Played& note) { return note.start < from || note.start >= to; });
+        std::erase_if (notes, [from, to, early] (const Played& note) { return note.start < from - early || note.start >= to; });
 
         for (auto& note : notes)
-            note.end = std::min (note.end, to);
+        {
+            note.start = std::max (note.start, from);
+            note.end = std::min (std::max (note.end, note.start), to);
+        }
 
         parts.push_back ({ std::move (notes), from, to, false });
+        controlsIn (from, to, nullptr, parts.back());
     }
     else if (getRoundHeard (end) > 0)
     {
         PlayedNotes before { {}, startSample, looped->start, false }, inRange { {}, looped->start, looped->end, true };
+        controlsIn (startSample, looped->start, nullptr, before);
+        controlsIn (looped->start, end, &*looped, inRange);
 
         for (auto note : notes)
         {
@@ -598,19 +907,41 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
     else
     {
         parts.push_back ({ std::move (notes), startSample, end, false });
+        controlsIn (startSample, end, nullptr, parts.back());
+    }
+
+    // One performance cut into parts (the part before a looped range, and the range's): where the next begins at this one's
+    // end and carries on the pedal held or the bend as it is, nothing lets go of it between them, which would release
+    // what it held for a tick.
+    for (size_t p = 0; p + 1 < parts.size(); ++p)
+    {
+        if (parts[p].to != parts[p + 1].from)
+            continue;
+
+        const auto& next = parts[p + 1].carried;
+        const auto carriesOn = [&next, &part = parts[p]] (const PlayedControl& release)
+        {
+            return std::any_of (next.begin(), next.end(),
+                                [&] (const PlayedControl& carried)
+                                {
+                                    return carried.bend == release.bend && carried.number == release.number
+                                           && (release.bend ? carried.value == part.endBend : carried.value >= 64);
+                                });
+        };
+
+        std::erase_if (parts[p].released, carriesOn);
     }
 
     return parts;
 }
 
-void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::int64_t length)
+void Take::placeNotes (const std::vector<PlayedNotes>& parts)
 {
     auto& song = session.getSong();
 
     if (const auto state = findTrackState (song, midiTrack); ! state.hasType (schema::TRACK) || isFolderState (state))
         return;
 
-    const auto parts = collectNotes (startSample, startClock, length);
     const auto toBeat = [this] (std::int64_t sample) { return BeatPosition::fromBeats (tempo->toBeats ((double) sample)); };
     std::vector<BeatRange> ranges;
 
@@ -657,27 +988,40 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
         }
     }
 
-    // The clip each goes in: with Overdub, the MIDI clip it starts in, or one made for the gap it falls in, between the clips
-    // around it within its part (all in the one that holds the first, the rest went outside it and never played); otherwise
-    // a new one over each part that has notes, in place of what was there.
+    // What was played in a part, which alone makes a clip for it: notes, or controls moved within it (Ableton Live records
+    // controllers alone too). What a part carries in, or lets go of at its end, makes none. Only notes clear what was there
+    // without Overdub: controllers moved without notes go into the clips there, as Overdub puts them (a bend wheel bumped
+    // while a vocal records leaves the instrument's clips as they were), and into a clip of their own only where the track
+    // has none across the part.
+    const auto hasNotes = [&] (size_t p)
+    { return std::any_of (placed.begin(), placed.end(), [p] (const Placed& note) { return note.part == p; }); };
+
+    const auto wasPlayedIn = [&] (size_t p) { return ! ranges[p].isEmpty() && (! parts[p].controls.empty() || hasNotes (p)); };
+
     const auto overdub = isOverdubOn (session.getAudioIO());
     std::vector<ClipID> recorded (parts.size());
+    std::set<std::uint64_t> made; // the clips the take made, whose ends it may let go of the pedal at
 
     if (! overdub)
     {
         for (size_t p = 0; p < parts.size(); ++p)
         {
-            if (std::none_of (placed.begin(), placed.end(), [p] (const Placed& note) { return note.part == p; }))
+            if (ranges[p].isEmpty() || ! hasNotes (p))
                 continue;
 
             clearClipsIn (song, midiTrack, ranges[p]);
             recorded[p] = insertMidiClip (song, midiTrack, ranges[p], nullptr);
+            made.insert (recorded[p].getRaw());
         }
     }
 
-    const auto clipFor = [&] (size_t part, BeatPosition beat) -> ClipID
+    // The clip each goes in: without Overdub, the part's own; with it, or for controllers alone, the MIDI clip it falls in,
+    // or for a note one made for the gap it falls in, between the clips around it within its part (all in the one that holds
+    // the first, the rest went outside it and never played); for a controller alone, one over the part where the track has
+    // no clip across it, and none otherwise.
+    const auto clipFor = [&] (size_t part, BeatPosition beat, bool note) -> ClipID
     {
-        if (! overdub)
+        if (recorded[part].isValid())
             return recorded[part];
 
         const auto clips = getClipStates (findTrackState (song, midiTrack));
@@ -687,6 +1031,18 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
                 return getClipID (clipState);
 
         const auto& range = ranges[part];
+
+        if (! note)
+        {
+            if (std::any_of (clips.begin(), clips.end(),
+                             [&range] (const auto& clipState) { return getClipRange (clipState).overlaps (range); }))
+                return {};
+
+            recorded[part] = insertMidiClip (song, midiTrack, range, nullptr);
+            made.insert (recorded[part].getRaw());
+            return recorded[part];
+        }
+
         auto from = std::min (range.getStart(), beat), to = range.getEnd(); // quantized, a note can start before what was recorded
 
         for (const auto& clipState : clips)
@@ -697,13 +1053,152 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
                 to = std::min (to, around.getStart());
         }
 
-        return to > from ? insertMidiClip (song, midiTrack, { from, to }, nullptr) : ClipID();
+        if (to <= from)
+            return {};
+
+        const auto gap = insertMidiClip (song, midiTrack, { from, to }, nullptr);
+        made.insert (gap.getRaw());
+        return gap;
     };
 
+    // Each part's first and last of what was played, and the clips they went into.
+    struct Reach
+    {
+        std::optional<std::pair<BeatPosition, ClipID>> first, last;
+
+        void add (BeatPosition beat, ClipID clip)
+        {
+            if (! first.has_value() || beat < first->first)
+                first = std::pair (beat, clip);
+
+            if (! last.has_value() || beat >= last->first)
+                last = std::pair (beat, clip);
+        }
+    };
+
+    std::vector<Reach> reach (parts.size());
+
     for (const auto& note : placed)
-        if (const auto clip = clipFor (note.part, BeatPosition::fromBeats (note.start)); clip.isValid())
-            addNote (song, clip, note.pitch, BeatPosition::fromBeats (note.start),
-                     BeatDuration::fromBeats (std::max (note.length, getMinimumNoteLength().inBeats())), note.velocity);
+    {
+        const auto beat = BeatPosition::fromBeats (note.start);
+
+        if (const auto clip = clipFor (note.part, beat, true); clip.isValid())
+        {
+            addNote (song, clip, note.pitch, beat, BeatDuration::fromBeats (std::max (note.length, getMinimumNoteLength().inBeats())),
+                     note.velocity);
+            reach[note.part].add (beat, clip);
+        }
+    }
+
+    // A clip's own value of a controller (or the bend) at a beat, as it was before the take: its last one there, or none.
+    const auto valueBefore = [&song] (ClipID clip, const PlayedControl& control, BeatPosition beat) -> std::optional<int>
+    {
+        const auto clipState = findClipState (song, clip);
+        const auto contentStart = getContentStart (clipState);
+        std::optional<std::pair<double, int>> last;
+
+        for (const auto& child : clipState)
+        {
+            if (! child.hasType (schema::CONTROL)
+                || child[schema::controlKind].toString() != (control.bend ? schema::controlIsPitchWheel : schema::controlIsController)
+                || (! control.bend && (int) child[schema::controlNumber] != control.number))
+                continue;
+
+            const auto at = contentStart.inBeats() + (double) child[schema::controlBeat];
+
+            if (at <= beat.inBeats() + 1.0e-9 && (! last.has_value() || at >= last->first))
+                last = std::pair (at, (int) child[schema::controlValue]);
+        }
+
+        return last.has_value() ? std::optional (last->second) : std::nullopt;
+    };
+
+    // The controls beside them, where they were heard, not quantized: those moved in a part in the clip each falls in, as a
+    // note would be; then what the part carried in at the start of the clip that holds what was played first in it (before
+    // that, and not before the part); and what it lets go of just before the end of what holds what was played last (not
+    // after the part), so that a control at the clip's end, which isn't played, never leaves a pedal down: in a clip the take
+    // made; in one that was there and goes on, the value that clip had there before, so that what follows in it plays as it
+    // did.
+    struct Write
+    {
+        ClipID clip;
+        BeatPosition beat;
+        PlayedControl control;
+        bool moved = false; // moved in the take: what Overdub takes the place of, from the first to the last
+    };
+
+    std::vector<Write> writes;
+    constexpr auto releaseBeforeEnd = 1.0 / 960.0; // in beats: a tick, at 960 to the quarter note
+
+    for (size_t p = 0; p < parts.size(); ++p)
+    {
+        if (! wasPlayedIn (p))
+            continue;
+
+        for (const auto& control : parts[p].controls)
+        {
+            if (const auto clip = clipFor (p, toBeat (control.at), false); clip.isValid())
+            {
+                writes.push_back ({ clip, toBeat (control.at), control, true });
+                reach[p].add (toBeat (control.at), clip);
+            }
+        }
+
+        if (const auto& first = reach[p].first; first.has_value())
+        {
+            const auto clipStart = getClipRange (findClipState (song, first->second)).getStart();
+            const auto beat = std::min (first->first, std::max (ranges[p].getStart(), clipStart));
+
+            for (const auto& control : parts[p].carried)
+                writes.push_back ({ first->second, beat, control });
+        }
+
+        if (const auto& last = reach[p].last; last.has_value())
+        {
+            const auto clipEnd = getClipRange (findClipState (song, last->second)).getEnd();
+            const auto beat =
+                std::max (last->first, BeatPosition::fromBeats (std::min (ranges[p].getEnd(), clipEnd).inBeats() - releaseBeforeEnd));
+
+            for (auto control : parts[p].released)
+            {
+                if (! made.contains (last->second.getRaw()))
+                    control.value = valueBefore (last->second, control, beat).value_or (control.value);
+
+                writes.push_back ({ last->second, beat, control });
+            }
+        }
+    }
+
+    // A controller recorded into a clip that was there takes the place of its earlier values in it, from its first move in
+    // the take to its last, as Ableton Live overdubs a clip's envelope; the clip's other controllers and its notes stay.
+    {
+        std::map<std::tuple<std::uint64_t, bool, int>, std::pair<BeatPosition, BeatPosition>> spans;
+
+        for (const auto& write : writes)
+        {
+            if (! write.moved || made.contains (write.clip.getRaw()))
+                continue;
+
+            const auto key = std::tuple (write.clip.getRaw(), write.control.bend, write.control.number);
+
+            if (auto found = spans.find (key); found == spans.end())
+                spans.emplace (key, std::pair (write.beat, write.beat));
+            else
+                found->second = { std::min (found->second.first, write.beat), std::max (found->second.second, write.beat) };
+        }
+
+        for (const auto& [key, span] : spans)
+            removeControls (song, ClipID::fromRaw (std::get<0> (key)), std::get<1> (key), std::get<2> (key), span.first, span.second);
+    }
+
+    // Each clip's at once, in order (a bend sweep holds thousands).
+    std::map<std::uint64_t, std::vector<ControlValue>> byClip;
+
+    for (const auto& write : writes)
+        byClip[write.clip.getRaw()].push_back ({ write.beat, write.control.bend, write.control.number, write.control.value });
+
+    for (const auto& [clip, values] : byClip)
+        addControls (song, ClipID::fromRaw (clip), values);
 }
 
 //==============================================================================

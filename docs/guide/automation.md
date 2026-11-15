@@ -104,7 +104,8 @@ search) set it for the selected tracks. A mode that writes shows in red.
 | Latch | A control writes from your first move until playback stops |
 | Write | Every automated control of the track is overwritten from when playback starts until you let go of it; then the track is in Latch |
 
-Moving a parameter in a plug-in's own window writes the same way. Changing the mode is not an undo step.
+Moving a parameter in a plug-in's own window writes the same way. Changing the mode is not an undo step. What you write
+lands where you heard it, allowing for the audio output's delay. **Escape** during a drag takes back only that drag.
 
 ## Modulators and macros
 

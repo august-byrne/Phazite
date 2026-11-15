@@ -6,6 +6,8 @@
 // recorded where it was played. Message thread only.
 #pragma once
 
+#include "engine/core/TempoMap.h"
+
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 
@@ -100,6 +102,10 @@ struct TakePlace
     std::int64_t firstFrame = 0, start = 0, stop = 0;
     std::optional<juce::Range<std::int64_t>> punch;
     std::optional<TakeLoop> loop;
+
+    // The take's own tempo map, as it started, which places its samples in beats, as its notes are (the song's may have
+    // changed since: a tempo dragged while the take ended); the song's if none.
+    std::optional<engine::TempoMap> tempo;
 };
 
 // Makes the clips of a track's take, in the caller's undo step: what was played where it was played; punched in, only

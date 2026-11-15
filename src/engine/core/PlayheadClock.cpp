@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace phazite::engine
 {
@@ -50,6 +51,8 @@ void PlayheadStamps::publish (const Stamp& stamp) noexcept
     slot.beatsPerMillisecond.store (stamp.beatsPerMillisecond, std::memory_order_relaxed);
     slot.length.store (stamp.length, std::memory_order_relaxed);
     slot.run.store (stamp.run, std::memory_order_relaxed);
+    slot.round.store (stamp.round, std::memory_order_relaxed);
+    slot.wentRound.store (stamp.wentRound, std::memory_order_relaxed);
     slot.sequence.store (2 * number + 2, std::memory_order_release); // written
     written.store (number + 1, std::memory_order_release);
 }
@@ -67,6 +70,8 @@ bool PlayheadStamps::read (std::uint64_t number, Stamp& stamp) const noexcept
     stamp.beatsPerMillisecond = slot.beatsPerMillisecond.load (std::memory_order_relaxed);
     stamp.length = slot.length.load (std::memory_order_relaxed);
     stamp.run = slot.run.load (std::memory_order_relaxed);
+    stamp.round = slot.round.load (std::memory_order_relaxed);
+    stamp.wentRound = slot.wentRound.load (std::memory_order_relaxed);
     std::atomic_thread_fence (std::memory_order_acquire);
     return slot.sequence.load (std::memory_order_relaxed) == whole;
 }
@@ -114,5 +119,63 @@ std::optional<double> PlayheadStamps::getBeatAt (double milliseconds) const noex
         return later->beat;
 
     return std::nullopt;
+}
+
+std::optional<PlayheadStamps::Place> PlayheadStamps::getPlaceBefore (double now, double milliseconds, double loopStart,
+                                                                     double loopEnd) const noexcept
+{
+    const auto count = written.load (std::memory_order_acquire);
+    std::optional<Stamp> later;
+    std::optional<Place> place;
+    auto wentRound = false; // in the block the place is in
+    auto left = std::max (0.0, milliseconds);
+
+    for (std::uint64_t back = 0; back < std::min (count, size - 1) && ! place.has_value(); ++back)
+    {
+        Stamp stamp;
+
+        if (! read (count - 1 - back, stamp) || (later.has_value() && stamp.run != later->run))
+            break;
+
+        // How much of it has played: of the latest, as far as the time since it started (as getBeatAt() reaches); of
+        // each before it, all of it.
+        const auto played = back == 0 ? std::clamp (now - stamp.milliseconds, 0.0, 1.5 * stamp.length) : stamp.length;
+
+        if (left <= played)
+        {
+            place = Place { stamp.beat + (played - left) * stamp.beatsPerMillisecond, stamp.round };
+            wentRound = stamp.wentRound;
+        }
+
+        left -= played;
+        later = stamp;
+    }
+
+    if (! place.has_value() && later.has_value())
+        place = Place { later->beat, later->round };
+
+    // Past the loop's end in a block that went round it: as far into the loop as it went, the round after (the next stamp's,
+    // however many times a loop shorter than a block went round in it). In one that didn't, the speed it started at ran
+    // ahead of the playhead (the tempo slowing): at the end, the same round.
+    if (place.has_value() && loopEnd > loopStart && place->beat >= loopEnd)
+    {
+        if (wentRound)
+        {
+            place->beat = loopStart + std::fmod (place->beat - loopStart, loopEnd - loopStart);
+            ++place->round;
+        }
+        else
+        {
+            place->beat = loopEnd;
+        }
+    }
+
+    return place;
+}
+
+std::uint32_t PlayheadStamps::getLatestRound() const noexcept
+{
+    const auto latest = getLatest();
+    return latest.has_value() ? latest->round : 0;
 }
 } // namespace phazite::engine

@@ -240,7 +240,11 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
     }
 
     const auto name = getTrackName (song, track);
-    const auto beatsOf = [&song] (double time) { return toBeats (song, time); };
+    // In beats by the take's own tempo map, as its notes are; and whether a stretch of it held one tempo.
+    const auto beatsOf = [&song, &take] (double time)
+    { return take.tempo.has_value() ? BeatPosition::fromBeats (take.tempo->toBeats (time * take.sampleRate)) : toBeats (song, time); };
+    const auto isSteady = [&song, &take] (BeatPosition from, BeatPosition to)
+    { return (take.tempo.has_value() ? *take.tempo : getTempoMap (song)).isSteadyBetween (from.inBeats(), to.inBeats()); };
 
     // A clip of the song's playing the file from a time in it, as it was recorded: following the song's tempo from the tempo it
     // was played at, as Ableton Live warps a recording, while the tempo holds steady over it, so that it keeps to its beats
@@ -251,7 +255,7 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
         const auto clipState = makeAudioClipState (song, name, file, beatsOf (clipStart), { partStart, partStart + (clipEnd - clipStart) });
         const auto clip = placeClipState (song, clipState, track);
 
-        if (clip.isValid() && getTempoMap (song).isSteadyBetween (beatsOf (clipStart).inBeats(), beatsOf (clipEnd).inBeats()))
+        if (clip.isValid() && isSteady (beatsOf (clipStart), beatsOf (clipEnd)))
             setClipFollowsTempo (song, clip, true);
 
         return clip;
@@ -284,12 +288,13 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
             if (! isAudioState (clipState))
                 continue;
 
-            const auto position = getPlayedPosition (song, clipState);
+            // Cut where the new clip's fades meet it, in beats, as both were placed.
+            const auto range = getClipRange (clipState);
 
-            if (std::abs (position.end - (clipStart + crossfadeSeconds)) < 1.0e-6)
+            if (std::abs ((range.getEnd() - beatsOf (clipStart + crossfadeSeconds)).inBeats()) < 1.0e-6)
                 setClipFade (song, getClipID (clipState), false, crossfadeSeconds);
 
-            if (std::abs (position.start - (clipEnd - crossfadeSeconds)) < 1.0e-6)
+            if (std::abs ((range.getStart() - beatsOf (clipEnd - crossfadeSeconds)).inBeats()) < 1.0e-6)
                 setClipFade (song, getClipID (clipState), true, crossfadeSeconds);
         }
 

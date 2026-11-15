@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The app's own code (src/app, the phazite_app library) without a window: the session that opens, makes and saves
 // projects. Nothing here may reach a dialog (an AlertWindow, a FileChooser or a menu): Linux CI has no display.
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "HeldFile.h"
 #include "TestHelpers.h"
@@ -18,7 +19,9 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -28,6 +31,7 @@
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -1499,4 +1503,97 @@ TEST_CASE ("A first save that fails part way leaves no folder where it was going
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK (file.getSiblingFile ("Audio").getChildFile ("Take 1.wav").loadFileAsString() == "a take");
     CHECK (file.loadFileAsString().contains ("pop"));
+}
+
+TEST_CASE ("Closing a project while it records stops recording first, as Stop does, and keeps the take, which the save question holds")
+{
+    // A reviewer, 2026-11-15: the session went with its take still recording, which deleted the take's files and kept nothing
+    // of what was played. Every close goes through closeThen(): a quit, another project opened, a new one.
+    using Answer = phazite::ProjectSession::UnsavedChanges;
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    auto asked = 0;
+    session.askToSave = [&asked] (const juce::File&, const juce::String&, std::function<void (Answer)> callback)
+    {
+        ++asked;
+        callback (Answer::save);
+    };
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+
+    auto& song = session.getProject()->getSong();
+    const auto track = phazite::getTrackIDs (song).front();
+    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::routeLiveMidiInput (song);
+    auto& audio = phazite::getAudioIO (engine);
+    const auto countIn = audio.isCountInOn();
+    audio.setCountInOn (false);
+    const juce::ScopeGuard countInBack { [&audio, countIn] { audio.setCountInOn (countIn); } }; // the app's setting
+    phazite::test::EnginePlayback playback;
+    playback.play (0.01);
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    playback.play (0.25);
+
+    auto closed = false;
+    session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    CHECK (closed);
+    CHECK_FALSE (phazite::isRecording (song));
+    CHECK (asked <= 1); // asked, or saved by Auto Save
+
+    // Its note in a clip of the track, in the file saved.
+    const auto clips = phazite::getClipStates (phazite::findTrackState (song, track));
+    REQUIRE (clips.size() == 1);
+    CHECK (file.loadFileAsString().contains ("<NOTE"));
+}
+TEST_CASE ("Save As while recording stops recording first and keeps the take, which the copy holds")
+{
+    // A reviewer, 2026-11-15: Save As went on in the copy, closing the project it left with its take still recording, whose
+    // files went with nothing of it kept. (Switching to a commit or a branch can't run while recording: canSwitchBranch().)
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    const auto copyFolder = temp.folder.getChildFile ("Copies");
+    session.chooseSaveFile = [&copyFolder] (const juce::File&, std::function<void (const juce::File&)> callback)
+    { callback (copyFolder.getChildFile ("Song copy")); };
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+
+    auto& song = session.getProject()->getSong();
+    const auto track = phazite::getTrackIDs (song).front();
+    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, "phaziteSynth")).isValid());
+    phazite::routeLiveMidiInput (song);
+    auto& audio = phazite::getAudioIO (engine);
+    const auto countIn = audio.isCountInOn();
+    audio.setCountInOn (false);
+    const juce::ScopeGuard countInBack { [&audio, countIn] { audio.setCountInOn (countIn); } }; // the app's setting
+    phazite::test::EnginePlayback playback;
+    playback.play (0.01);
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    playback.play (0.25);
+
+    session.saveProjectAs();
+    REQUIRE (session.getProject() != nullptr);
+    const auto copy = session.getProject()->getFile();
+    CHECK (copy.isAChildOf (copyFolder));
+    CHECK (copy.loadFileAsString().contains ("<NOTE"));
+    auto& copied = session.getProject()->getSong();
+    CHECK_FALSE (phazite::isRecording (copied));
+    CHECK (phazite::getClipStates (phazite::findTrackState (copied, track)).size() == 1);
 }

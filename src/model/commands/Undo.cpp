@@ -3,6 +3,7 @@
 #include "model/base/internal/Schema.h"
 
 #include <algorithm>
+#include <functional>
 #include <vector>
 
 namespace phazite
@@ -20,6 +21,21 @@ namespace
     {
         const auto& open = getOpenGestures();
         return std::find (open.begin(), open.end(), &undoManager) != open.end();
+    }
+
+    // The changes waiting for a song's gesture to end (Gesture::whenEnded()), each with its history and its owner, in order
+    // (message thread only).
+    struct WaitingChange
+    {
+        juce::UndoManager* undoManager = nullptr;
+        const void* owner = nullptr;
+        std::function<void()> change;
+    };
+
+    std::vector<WaitingChange>& getWaitingChanges()
+    {
+        static std::vector<WaitingChange> waiting;
+        return waiting;
     }
 
     // The trials open, each for its song's history (message thread only).
@@ -154,13 +170,44 @@ void Gesture::commit()
         return;
 
     auto& gestures = getOpenGestures();
-    gestures.erase (std::remove (gestures.begin(), gestures.end(), &song.getUndoManager()), gestures.end());
+    auto* undoManager = &song.getUndoManager();
+    gestures.erase (std::remove (gestures.begin(), gestures.end(), undoManager), gestures.end());
     open = false;
+
+    // What waited for it, now, in order: each takes it out before it runs, so that one it adds meanwhile waits on.
+    for (auto& waiting = getWaitingChanges(); ! isInGesture (*undoManager);) // until a change begins another gesture
+    {
+        const auto next =
+            std::find_if (waiting.begin(), waiting.end(), [undoManager] (const auto& each) { return each.undoManager == undoManager; });
+
+        if (next == waiting.end())
+            break;
+
+        const auto change = std::move (next->change);
+        waiting.erase (next);
+        change();
+    }
 }
 
 bool Gesture::isInProgress (Song& song)
 {
     return isInGesture (song.getUndoManager());
+}
+
+void Gesture::whenEnded (Song& song, const void* owner, std::function<void()> change)
+{
+    if (! isInProgress (song))
+    {
+        change();
+        return;
+    }
+
+    getWaitingChanges().push_back ({ &song.getUndoManager(), owner, std::move (change) });
+}
+
+void Gesture::forget (const void* owner)
+{
+    std::erase_if (getWaitingChanges(), [owner] (const auto& each) { return each.owner == owner; });
 }
 
 void Gesture::rollBack()

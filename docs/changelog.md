@@ -48,6 +48,29 @@ too. A line names the bug's number in that list.
   Delete Branch is refused while a waiting merge took in a commit only that branch holds.
 - **26 `getTracksInFolder()`** did count an empty folder inside a folder, as its callers need: only its comment read
   otherwise, and says so now.
+- **38 The playhead moved while recording:** the take after a jump is made, its files open, before the jump is asked
+  for, and starts where the playhead lands, to the sample; a drag of the top bar's place or time while recording
+  moves the playhead once, where it is let go.
+- **92 A note played early:** a note played up to a tenth of a second before a take starts, such as a downbeat played
+  early after the count-in, starts on the take's first beat.
+- **93 Controllers recorded:** MIDI recording and Capture keep the sustain pedal, the mod wheel, the other controllers
+  and the pitch bend beside the notes, as a MIDI file's import does. Only notes clear what a take records over;
+  controllers moved without notes go into the clips there, or a clip of their own where there are none; with Overdub
+  a controller recorded replaces that controller's earlier values across its moves; a pedal still down at a clip's end
+  is let go of there, but never between a looped take's parts; a take keeps the pedal held as it started however
+  long it runs. A ten-second pitch bend finishes its take in a hundredth of a second.
+- **94 A write that fails while recording** (a full drive) stops recording, keeps what was written and says so, and
+  Record warns when the drive has room for less than ten minutes.
+- **95 The audio device restarting during a take** (another rate, or another buffer) ends the take there, kept at the
+  rate it was recorded at, with a notice.
+- **103 Automation written where it was heard:** points land where the song was heard, allowing for the output's
+  latency and the delay compensation; a jump while writing ends the pass there; the loop's times round are counted
+  by the engine where it goes round.
+- **163 Escape in Write** takes back the drag alone: what the pass wrote as the loop went round, as playback stopped,
+  or as a take ended by itself, is a step of its own made once the drag has ended (`Gesture::whenEnded()`); a
+  control grabbed before playback starts writes from where playback starts.
+- **Recording kept when a project goes:** closing a project, quitting, Save As and an untitled project's first save
+  stop recording first, as Stop does, and keep the take; a take's audio and notes are placed by the take's own tempo.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

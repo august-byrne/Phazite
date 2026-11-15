@@ -7,6 +7,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Clips.h"
@@ -19,6 +20,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
@@ -637,6 +640,499 @@ TEST_CASE ("The playhead moved while recording: what was played before is kept, 
     CHECK (phazite::getClips (take.song.context, take.song.firstTrack).size() == 1);
 }
 
+TEST_CASE ("A note played a moment before a take starts, as its count-in ends, starts the take")
+{
+    // Known bug 92: a take kept a note-on only at or after its first sample, so a downbeat played a few milliseconds early
+    // after the count-in was lost. Ableton Live, Logic Pro and Cubase keep it, on the take's first beat.
+    EngineTake take;
+    take.song.setSwitch ("transport.countIn", true);
+    take.song.setSwitch ("transport.metronome", false);
+    const juce::ScopeGuard countInOff { [&take] { take.song.setSwitch ("transport.countIn", false); } }; // the app's setting
+
+    take.song.run ("transport.record");
+    take.playNote (60, 1.97, 0.25); // 30 ms before the bar of count-in ends
+    take.playNote (62, 0.25, 0.25); // and one in the take
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    auto notes = take.getNotes();
+    REQUIRE (notes.size() == 2);
+    CHECK (notes[0].pitch == 60);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (0.0));
+    CHECK (notes[0].length.inBeats() == doctest::Approx (0.44).epsilon (withinABlock)); // to where it was let go
+    CHECK (notes[1].pitch == 62);
+    CHECK (notes[1].start.inBeats() == doctest::Approx (0.94).epsilon (withinABlock));
+
+    // Played half a second before, it was the count-in's, not the take's.
+    take.song.run ("transport.record");
+    take.playNote (64, 1.5, 0.1);
+    take.playback.play (1.0);
+    take.song.run ("transport.record");
+    notes = take.getNotes();
+    CHECK (std::none_of (notes.begin(), notes.end(), [] (const auto& note) { return note.pitch == 64; }));
+}
+
+namespace
+{
+// The controller elements of a MIDI clip, as a MIDI file's import makes them: their kind, number, value and beat in the song.
+struct RecordedControl
+{
+    juce::String kind;
+    int number = 0, value = 0;
+    double beat = 0.0;
+};
+
+// A controller or a bend played into live MIDI's track as a MIDI input's driver plays it (AudioIO.h), into the engine: the
+// computer keyboard plays notes alone.
+void playFromMidiInput (const juce::MidiMessage& message)
+{
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    const auto* session = host.getPlayingSession();
+    const auto event = phazite::engine::toNoteEvent (message, 0);
+    REQUIRE (session != nullptr);
+    REQUIRE (event.has_value());
+    host.getEngine().playLive ((std::int64_t) session->getLiveTrack().getRaw(), *event);
+}
+
+std::vector<RecordedControl> getControls (const phazite::Song& song, phazite::ClipID clip)
+{
+    const auto clipState = phazite::findClipState (song, clip);
+    std::vector<RecordedControl> controls;
+
+    for (const auto& child : clipState)
+        if (child.hasType (phazite::schema::CONTROL))
+            controls.push_back ({ child[phazite::schema::controlKind].toString(), (int) child[phazite::schema::controlNumber],
+                                  (int) child[phazite::schema::controlValue],
+                                  phazite::getContentStart (clipState).inBeats() + (double) child[phazite::schema::controlBeat] });
+
+    return controls;
+}
+} // namespace
+
+TEST_CASE ("The sustain pedal, the mod wheel and the pitch bend played while recording go into the take, and play back")
+{
+    // Known bug 93: a take kept notes only, so a part played with the pedal held lost its sustain once recorded. Here the
+    // pedal goes down at a quarter of a second (half a beat), a note sounds from beat 1 to 1.5, the mod wheel and the bend
+    // move at beat 2, and the pedal comes up at beat 3.
+    EngineTake take;
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.25, 0.25);
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 100));
+    playFromMidiInput (juce::MidiMessage::pitchWheel (1, 12288));
+    take.playback.play (0.5);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.5);
+    take.song.run ("transport.record");
+
+    auto& song = *phazite::findSong (take.song.context);
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE (controls.size() == 5);
+    CHECK (controls[0].kind == juce::String (phazite::schema::controlIsController));
+    CHECK (controls[0].number == 64);
+    CHECK (controls[0].value == 127);
+    CHECK (controls[0].beat == doctest::Approx (0.5).epsilon (withinABlock));
+    CHECK (controls[1].number == 1);
+    CHECK (controls[1].value == 100);
+    CHECK (controls[1].beat == doctest::Approx (2.0).epsilon (withinABlock));
+    CHECK (controls[2].kind == juce::String (phazite::schema::controlIsPitchWheel));
+    CHECK (controls[2].value == 12288);
+    CHECK (controls[3].number == 64);
+    CHECK (controls[3].value == 0);
+    CHECK (controls[3].beat == doctest::Approx (3.0).epsilon (withinABlock));
+
+    // The bend, still away from its middle as the take stopped, back to it just before the clip's end.
+    CHECK (controls[4].kind == juce::String (phazite::schema::controlIsPitchWheel));
+    CHECK (controls[4].value == 8192);
+    CHECK (controls[4].beat == doctest::Approx (4.0 - 1.0 / 960.0).epsilon (withinABlock));
+
+    // Played back, the pedal holds the note on after its key came up (the synth lets go of it within 0.2 s), until it does.
+    const auto played = phazite::renderWithOwnEngine (song, 96000, EnginePlayback::sampleRate, EnginePlayback::blockSize);
+    const auto levelBetween = [&played] (double from, double to)
+    { return played.getMagnitude (0, (int) (from * 48000.0), (int) ((to - from) * 48000.0)); };
+    const auto held = levelBetween (1.1, 1.45);
+    CHECK (held > 0.01f);
+    CHECK (levelBetween (1.85, 2.0) < held * 0.01f);
+
+    // Undone with the take, they go too.
+    phazite::undo (song);
+    CHECK (phazite::getClips (take.song.context, take.song.firstTrack).empty());
+}
+
+TEST_CASE ("A take started with the pedal held down starts with it down, and Capture keeps the pedal with the notes")
+{
+    // Known bug 93, as Capture had it too.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+
+    SUBCASE ("A take")
+    {
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127)); // well before recording starts
+        take.playback.play (0.5);
+        take.song.run ("transport.record");
+        take.playNote (60, 0.25, 0.25);
+        take.playback.play (0.25);
+        take.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        const auto controls = getControls (song, clips[0].id);
+        REQUIRE (controls.size() == 2);
+        CHECK (controls[0].number == 64);
+        CHECK (controls[0].value == 127);
+        CHECK (controls[0].beat == doctest::Approx (0.0)); // where the take starts
+
+        // Still held as it stopped: let go of just before the clip's end, where the take stopped.
+        CHECK (controls[1].number == 64);
+        CHECK (controls[1].value == 0);
+        CHECK (controls[1].beat == doctest::Approx (1.5 - 1.0 / 960.0).epsilon (withinABlock));
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+        take.playback.play (0.05); // played, not left in the engine's queue for the next test
+    }
+
+    SUBCASE ("Capture, stopped: the pedal down from the clip's start, and up where it came up")
+    {
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+        take.playback.play (0.1);
+
+        for (const auto pitch : { 60, 64, 67, 72 })
+            take.playNote (pitch, 0.25, 0.25); // quarter notes at 120 BPM
+
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+        take.playback.play (0.1);
+        take.song.run ("transport.capture");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        const auto notes = take.getNotes();
+        REQUIRE (notes.size() == 4);
+        const auto controls = getControls (song, clips[0].id);
+        REQUIRE (controls.size() == 2);
+        CHECK (controls[0].value == 127);
+        CHECK (controls[0].beat == doctest::Approx (clips[0].range.getStart().inBeats()));
+        CHECK (notes.front().start.inBeats() == doctest::Approx (clips[0].range.getStart().inBeats()));
+        CHECK (controls[1].value == 0);
+        CHECK (controls[1].beat > notes.back().start.inBeats());
+    }
+}
+
+TEST_CASE ("Only what is played in a take makes its clip: a pedal held from before alone leaves the track's clips as they were")
+{
+    // A reviewer, of known bug 93's fix: the pedal held from before the take (a foot resting on it while a vocal is recorded)
+    // made a clip of its own on live MIDI's track, in place of the clips there without Overdub. Ableton Live records controllers
+    // alone, so a mod wheel moved in the take makes its clip.
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    const juce::ScopeGuard overdubOn { [&audio] { phazite::setOverdubOn (audio, true); } };
+
+    for (const auto overdub : { true, false })
+    {
+        CAPTURE (overdub);
+        EngineTake take;
+        auto& song = *phazite::findSong (take.song.context);
+        phazite::setOverdubOn (audio, overdub);
+        const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 8.0);
+        take.song.addNote (there, 48, 1.0, 1.0);
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+        take.playback.play (0.25);
+        take.song.run ("transport.record");
+        take.playback.play (1.0);
+        take.song.run ("transport.record");
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+        take.playback.play (0.05);
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].id == there);
+        CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (8.0));
+        CHECK (getControls (song, there).empty());
+        CHECK (take.getNotes().size() == 1);
+    }
+
+    // The mod wheel alone, a value repeated once (which changes nothing): a clip of it.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 64));
+    take.playback.play (0.1);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 64));
+    take.playback.play (0.1);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 1, 70));
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE (controls.size() == 2);
+    CHECK (controls[0].number == 1);
+    CHECK (controls[0].value == 64);
+    CHECK (controls[1].value == 70);
+}
+
+TEST_CASE ("A note played just before the playhead is moved while recording is kept by the take before the jump alone")
+{
+    // A reviewer, of known bug 92's fix: the take after the jump kept note-ons from a moment before its start, moved to it,
+    // so a note played in the last tenth of a second before the jump was in both takes.
+    EngineTake take;
+    take.song.run ("transport.record");
+    take.playback.play (0.5);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    take.playback.play (0.05);
+    phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (8.0));
+    take.playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 1);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+}
+
+TEST_CASE ("A pedal still down as a take stops is let go of at its clip's end: the next clip's note isn't held")
+{
+    // A reviewer, of known bug 93's fix: the song plays its clips' controllers as one stream, and resets none at a clip's end,
+    // so a pedal held down as the take stopped held the notes of every clip after it. The synth lets go of a note within 0.2 s
+    // of its key coming up.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    take.song.run ("transport.record");
+    take.playback.play (0.1);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.15, 0.25); // beats 0.5 to 1
+    take.playback.play (0.5);       // to beat 2, still held
+    take.song.run ("transport.record");
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+
+    // A clip after it, with a short note at beat 4 (two seconds in).
+    const auto after = take.song.addMidiClip (take.song.firstTrack, 4.0, 4.0);
+    take.song.addNote (after, 64, 4.0, 0.25);
+    const auto played = phazite::renderWithOwnEngine (song, 4 * 48000, EnginePlayback::sampleRate, EnginePlayback::blockSize);
+    const auto levelBetween = [&played] (double from, double to)
+    { return played.getMagnitude (0, (int) (from * 48000.0), (int) ((to - from) * 48000.0)); };
+    CHECK (levelBetween (0.6, 0.95) > 0.01f);                          // held by the pedal in the take's clip
+    CHECK (levelBetween (2.6, 3.0) < levelBetween (2.0, 2.1) * 0.01f); // the note after it let go of
+}
+
+TEST_CASE ("With Overdub, a controller recorded into a clip takes the place of its earlier values there, from its first to its last")
+{
+    // A reviewer, of known bug 93's fix: an earlier take's pedal-ups stayed among the new pedal-downs. Ableton Live's overdub
+    // of a clip's envelope takes the place of what was there; the clip's other controllers and its notes stay.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 8.0);
+    take.song.addNote (there, 48, 0.0, 1.0);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (0.5), false, 64, 127);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), false, 64, 0);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), false, 1, 90);
+
+    take.song.run ("transport.record");
+    take.playback.play (0.5); // to beat 1
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.1, 0.1);
+    take.playback.play (0.3); // to beat 2
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.1);
+    take.song.run ("transport.record");
+
+    std::vector<std::pair<double, int>> pedal;
+    auto modWheel = 0;
+
+    for (const auto& control : getControls (song, there))
+    {
+        if (control.number == 64)
+            pedal.emplace_back (control.beat, control.value);
+        else if (control.number == 1)
+            ++modWheel;
+    }
+
+    std::sort (pedal.begin(), pedal.end());
+    REQUIRE (pedal.size() == 3);
+    CHECK (pedal[0].first == doctest::Approx (0.5));
+    CHECK (pedal[0].second == 127);
+    CHECK (pedal[1].first == doctest::Approx (1.0).epsilon (withinABlock));
+    CHECK (pedal[1].second == 127);
+    CHECK (pedal[2].first == doctest::Approx (2.0).epsilon (withinABlock));
+    CHECK (pedal[2].second == 0);
+    CHECK (modWheel == 1);
+    CHECK (take.getNotes().size() == 2);
+}
+
+TEST_CASE ("A take longer than the notes played are kept for still starts with the pedal held as it started")
+{
+    // A reviewer, 2026-11-15: what was played before the take goes after 30 seconds (PlaybackHost::getPlayedEvents()), so a
+    // take longer than that, recorded with the pedal down from before it, played back dry. The engine's clock is driven, a
+    // block at a time.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playback.play (0.5);
+    take.song.run ("transport.record");
+    take.playback.play (31.0);
+    take.playNote (60, 0.25, 0.25);
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE_FALSE (controls.empty());
+    CHECK (controls.front().number == 64);
+    CHECK (controls.front().value == 127);
+    CHECK (controls.front().beat == doctest::Approx (0.0));
+}
+
+TEST_CASE (
+    "With Overdub, a pedal held at the take's end leaves the clip there holding what it held, and what was held from before replaces nothing")
+{
+    // A reviewer, 2026-11-15: the pedal-up written at the take's end went into the clip that was there and goes on, so its
+    // notes after the take lost their sustain; and the pedal held from before the take made the replaced span reach from
+    // the take's start to its end, taking away the clip's own pedalling between.
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    phazite::setOverdubOn (audio, true);
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 16.0);
+    take.song.addNote (there, 48, 0.0, 16.0);
+
+    const auto pedalOf = [&song, there]
+    {
+        std::vector<std::pair<double, int>> pedal;
+
+        for (const auto& control : getControls (song, there))
+            if (control.number == 64)
+                pedal.emplace_back (control.beat, control.value);
+
+        std::sort (pedal.begin(), pedal.end());
+        return pedal;
+    };
+
+    SUBCASE ("Pressed in the take and held as it stopped, in a clip that holds it down to beat 8: still down there")
+    {
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), false, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), false, 64, 0);
+        phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (2.0));
+        take.song.run ("transport.record");
+        take.playback.play (0.25); // beat 2.5
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+        take.playNote (60, 0.1, 0.1);
+        take.playback.play (0.55); // to beat 4, held
+        take.song.run ("transport.record");
+
+        const auto pedal = pedalOf();
+        REQUIRE (pedal.size() == 4);
+        CHECK (pedal[0] == std::pair (1.0, 127));
+        CHECK (pedal[1].first == doctest::Approx (2.5).epsilon (withinABlock));
+        CHECK (pedal[1].second == 127);
+        CHECK (pedal[2].first == doctest::Approx (4.0).epsilon (withinABlock));
+        CHECK (pedal[2].second == 127); // what the clip held there
+        CHECK (pedal[3] == std::pair (8.0, 0));
+    }
+
+    SUBCASE ("Held from before the take, notes overdubbed: the clip's own pedalling between stays")
+    {
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), false, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.0), false, 64, 0);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.5), false, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), false, 64, 0);
+        playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+        take.playback.play (0.1);
+        phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (2.0));
+        take.song.run ("transport.record");
+        take.playNote (60, 0.25, 0.1);
+        take.playback.play (1.0); // to about beat 4.7
+        take.song.run ("transport.record");
+
+        const auto pedal = pedalOf();
+        for (const auto beat : { 1.0, 3.0, 3.5, 8.0 })
+            CHECK (std::any_of (pedal.begin(), pedal.end(), [beat] (const auto& each) { return std::abs (each.first - beat) < 1.0e-9; }));
+    }
+
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+}
+
+TEST_CASE ("Round a looped range, a pedal held from before the range on into it is never let go of between the two clips")
+{
+    // A reviewer, 2026-11-15: the part before the range got a pedal-up a tick before the range's start, where the range's
+    // clip puts it down again: what only the pedal held let go in that tick. Beats 4 to 8 are looped, recording from the
+    // song's start.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    phazite::loopBeatRange (song, 4.0, 8.0);
+    take.song.run ("transport.record");
+    take.playback.play (1.0); // beat 2
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.5, 0.25);  // at beat 3
+    take.playNote (62, 2.75, 0.25); // at 4.5 seconds: beat 9, beat 5 the second time round
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    const auto before = getControls (song, clips[0].id);
+    CHECK (std::none_of (before.begin(), before.end(), [] (const auto& control) { return control.number == 64 && control.value == 0; }));
+    const auto inRange = getControls (song, clips[1].id);
+    CHECK (std::any_of (inRange.begin(), inRange.end(), [] (const auto& control)
+                        { return control.number == 64 && control.value == 127 && std::abs (control.beat - 4.0) < 1.0e-6; }));
+}
+
+TEST_CASE ("Controllers moved without notes clear nothing: they go into the clips there, or a clip of their own where there are none")
+{
+    // A reviewer, 2026-11-15 (the owner's decision): a bend wheel bumped while a vocal recorded replaced the instrument
+    // track's clips there with a clip of the one value, without Overdub. Notes still take the clips' place without it.
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    phazite::setOverdubOn (audio, false);
+    const juce::ScopeGuard overdubOn { [&audio] { phazite::setOverdubOn (audio, true); } };
+
+    const auto bump = [] (EngineTake& take)
+    {
+        take.song.run ("transport.record");
+        take.playback.play (0.5); // beat 1
+        playFromMidiInput (juce::MidiMessage::pitchWheel (1, 12288));
+        take.playback.play (0.1);
+        playFromMidiInput (juce::MidiMessage::pitchWheel (1, 8192));
+        take.playback.play (0.4);
+        take.song.run ("transport.record");
+    };
+
+    SUBCASE ("A clip there: kept, the bend in it")
+    {
+        EngineTake take;
+        auto& song = *phazite::findSong (take.song.context);
+        const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 8.0);
+        take.song.addNote (there, 48, 0.0, 1.0);
+        bump (take);
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].id == there);
+        CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (8.0));
+        CHECK (take.getNotes().size() == 1);
+        const auto controls = getControls (song, there);
+        REQUIRE (controls.size() == 2);
+        CHECK (controls[0].kind == juce::String (phazite::schema::controlIsPitchWheel));
+        CHECK (controls[0].value == 12288);
+    }
+
+    SUBCASE ("No clip there: one of its own")
+    {
+        EngineTake take;
+        bump (take);
+        CHECK (phazite::getClips (take.song.context, take.song.firstTrack).size() == 1);
+    }
+}
 TEST_CASE ("Capture while stopped sets the tempo from the notes and puts them at bar 1")
 {
     EngineTake take;

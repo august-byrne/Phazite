@@ -20,6 +20,8 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <optional>
+
 namespace
 {
 phazite::Song::Ptr newSong()
@@ -718,4 +720,88 @@ TEST_CASE ("Two trials of a song's history never share a step: a wheel's burst a
     }
 
     undo.walkBackAndForth();
+}
+
+TEST_CASE ("What waits for a gesture's end runs after it: committed, rolled back or destroyed, each once and in order, unless forgotten")
+{
+    // A reviewer, 2026-11-15: Gesture::whenEnded() had no test of its own. What a take or the automation writer keeps while a
+    // drag is under way waits for it (model/transport/internal/Playback.h, stopPlaying()).
+    auto song = newSong();
+    std::vector<juce::String> ran;
+    const auto note = [&ran] (const char* what) { return [&ran, what] { ran.push_back (what); }; };
+    int owner = 0, other = 0;
+
+    SUBCASE ("No gesture: at once")
+    {
+        phazite::Gesture::whenEnded (*song, &owner, note ("now"));
+        CHECK (ran == std::vector<juce::String> { "now" });
+    }
+
+    SUBCASE ("Committed: after it, in order, outside its step")
+    {
+        {
+            phazite::Gesture gesture (*song, "Drag");
+            phazite::Gesture::whenEnded (*song, &owner, note ("first"));
+            phazite::Gesture::whenEnded (*song, &other, note ("second"));
+            CHECK (ran.empty());
+            gesture.commit();
+            CHECK (ran == std::vector<juce::String> { "first", "second" });
+        }
+
+        CHECK (ran.size() == 2); // once
+    }
+
+    SUBCASE ("Rolled back: after the rollback, its change a step of its own that the rollback kept")
+    {
+        phazite::Gesture gesture (*song, "Drag");
+        song->getState().setProperty ("dragged", 1, &song->getUndoManager());
+        phazite::Gesture::whenEnded (*song, &owner,
+                                     [&song]
+                                     {
+                                         const phazite::UndoStep step (*song, "Kept");
+                                         song->getState().setProperty ("kept", 1, &song->getUndoManager());
+                                     });
+        gesture.rollBack();
+        CHECK_FALSE (song->getState().hasProperty ("dragged"));
+        CHECK (song->getState().hasProperty ("kept"));
+        CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Kept"));
+    }
+
+    SUBCASE ("Destroyed: as it commits")
+    {
+        {
+            phazite::Gesture gesture (*song, "Drag");
+            phazite::Gesture::whenEnded (*song, &owner, note ("after"));
+        }
+
+        CHECK (ran == std::vector<juce::String> { "after" });
+    }
+
+    SUBCASE ("Forgotten by its owner: never; another owner's still")
+    {
+        phazite::Gesture gesture (*song, "Drag");
+        phazite::Gesture::whenEnded (*song, &owner, note ("forgotten"));
+        phazite::Gesture::whenEnded (*song, &other, note ("kept"));
+        phazite::Gesture::forget (&owner);
+        gesture.commit();
+        CHECK (ran == std::vector<juce::String> { "kept" });
+    }
+
+    SUBCASE ("A change that asks again: at once once the gesture has ended, or after the next one begun meanwhile")
+    {
+        std::optional<phazite::Gesture> next;
+        phazite::Gesture gesture (*song, "Drag");
+        phazite::Gesture::whenEnded (*song, &owner,
+                                     [&]
+                                     {
+                                         ran.push_back ("first");
+                                         phazite::Gesture::whenEnded (*song, &owner, note ("at once"));
+                                         next.emplace (*song, "Next");
+                                         phazite::Gesture::whenEnded (*song, &owner, note ("after the next"));
+                                     });
+        gesture.commit();
+        CHECK (ran == std::vector<juce::String> { "first", "at once" });
+        next->commit();
+        CHECK (ran == std::vector<juce::String> { "first", "at once", "after the next" });
+    }
 }

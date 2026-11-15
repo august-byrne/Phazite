@@ -166,9 +166,20 @@ Automation set the selected tracks' mode.
 | Write | Every automated parameter of the track is overwritten from the moment playback starts until its control is let go; then the track is in Latch |
 
 A pass writes the value where it started, each move after, and where it ended, in place of the points in between,
-thinned to the moves that change the line. Around a loop, a pass ends at the loop's end and another starts at its
-start. What a control's pass writes joins its drag's undo step; what is still being written when playback stops is
-one step, "Record Automation". A parameter moved in a plug-in's own window writes the same way.
+thinned to the moves that change the line. Each move is written where it was heard as it was made: earlier than the
+engine's playhead by the output's latency and the song's delay compensation, so that it plays back where the music
+was. Around a loop, a pass ends at the loop's end and another starts at its start; at a jump of the playhead, a pass
+ends where the song was heard and another starts where the playhead lands. What a control's pass writes joins its
+drag's undo step; what is still being written when playback stops, or at a jump, is one step, "Record Automation". A
+parameter moved in a plug-in's own window writes the same way.
+
+Escape during a control's drag takes back only what the drag did: Touch as if the control was never grabbed, Latch
+and Write going on from the value before the grab. What a pass wrote as the loop went round, or at a jump, during
+the drag waits for the drag's end: kept, up to the grab, in a step of its own; so does what is written as playback
+stops during a drag (Stop works while the mouse is down), and what another parameter wrote meanwhile (a plug-in's own
+window let go of). A control grabbed before playback starts writes from where it starts, as one grabbed then would.
+The loop going round is known from the engine's count of its times round, counted where it goes round, not guessed
+from the playhead going back (nor from a count-in's end or a tempo that slows).
 
 ## Automation goes with the music
 
