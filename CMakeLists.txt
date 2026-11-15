@@ -1287,6 +1287,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/GoldenModulationTests.cpp
         tests/GoldenProjectTests.cpp
         tests/GoldenRenderTests.cpp
+        tests/GraphDragTests.cpp
         tests/GraphEditingTests.cpp
         tests/HeldFile.cpp
         tests/HeldFile.h

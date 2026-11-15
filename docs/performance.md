@@ -119,6 +119,22 @@ editor shows it.
 | 48 kHz | 0.77 | 20 |
 | 96 kHz | 1.11 | 20 |
 
+The benchmark times one channel's spectrum. Since 2026-11-15 an analyzer's trace (`SpectrumTrace`) analyzes each
+channel apart and shows the louder (known bug 120), so a trace costs twice this. Measured on 2026-11-15 on the same PC,
+the one channel took 1.13 % of a core at 48 kHz and 1.58 % at 96 kHz (another day's load; compare within one run).
+
+### Benchmark: a device's graph repainted, its curve kept or worked out again
+
+Each graph painted 200 times into a software image, its values as they were ("Kept") and with a value changed before
+each paint ("Worked out again", the analyzer refreshed with it). Measured on 2026-11-15 on the PC above, in the
+`windows-profile` build, before and after known bug 130's fix (before: the editors' code as it was, in the same build).
+
+| Graph, a repaint | Before | After |
+|---|---|---|
+| EQ, its values as they were | 0.92 ms | 0.55 ms |
+| Reverb, its values as they were | 1.41 ms | 0.41 ms |
+| Sampler's sound, its values as they were | 0.12 ms | 0.12 ms (unchanged: its peaks were already kept for each width; drawing its columns as filled paths took 1.05 ms, so it draws them as lines, as before) |
+
 ### Benchmark: a live note's way through Phazite's engine
 
 How soon a note played live is heard.

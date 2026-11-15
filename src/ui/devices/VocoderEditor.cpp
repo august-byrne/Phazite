@@ -52,6 +52,12 @@ public:
         }
 
         readValues();
+
+        drag.onCancelled = [this]
+        {
+            readValues();
+            repaint();
+        };
     }
 
     float getShownLevel (int band) const { return shown[(size_t) band]; }
@@ -76,7 +82,7 @@ public:
     }
 
     // Under the pointer, or dragged: the lines from the marks to the columns, which a drag leans, light up.
-    bool isLit() const { return hovered || formant.isInGesture(); }
+    bool isLit() const { return hovered || drag.isTaken(); }
 
     bool needsTrack() const
     {
@@ -175,24 +181,28 @@ public:
     // A drag sideways moves the carrier's bands by as far as the pointer goes, in semitones, as one undo step.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        formant.beginGesture();
-        startFormant = formant.getValue();
+        if (e.mods.isPopupMenu())
+            return;
+
+        drag.take ({ &formant }); // from its value set by hand (graph::HandleDrag)
         startHertz = getFrequencies().frequencyAt (e.position.x);
         repaint();
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (! drag.isTaken())
+            return;
+
         const auto semitones = 12.0 * std::log2 (getFrequencies().frequencyAt (e.position.x) / startHertz);
-        const auto range = formant.getRange();
-        formant.setValue (juce::jlimit (range.start, range.end, startFormant + (float) semitones));
+        drag.set (0, drag.getStart (0) + (float) semitones);
         readValues();
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        formant.endGesture();
+        drag.end();
         setHovered (getLocalBounds().contains (e.getPosition()));
         repaint();
     }
@@ -205,7 +215,7 @@ private:
     std::array<float, Vocoder::maxBands> shown {};
     float consonant = 0.0f, carrierLevel = 0.0f;
     DrawnNumbers drawn;
-    float startFormant = 0.0f;
+    graph::HandleDrag drag { *this }; // after the handle it moves
     double startHertz = 1000.0;
     bool hovered = false;
 

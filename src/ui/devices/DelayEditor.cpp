@@ -19,15 +19,15 @@ namespace
     constexpr int historyTicks = 4 * DisplayTicker::ticksPerSecond; // what came in, for the echoes' light
     constexpr int firstEcho = -1, nothing = -2;                     // what a press takes, besides the band's ends (by their parameters)
 
-    const juce::String about ("The sound coming in, then its echoes, fading as the feedback takes them down. Drag to put the first "
-                              "echo under the pointer: sideways for the time, up or down for the feedback. Under them, the band the "
+    const juce::String about ("The sound coming in, then its echoes, fading as the feedback takes them down. Drag anywhere on them "
+                              "to move the first echo: sideways for the time, up or down for the feedback. Under them, the band the "
                               "echoes keep: drag its ends.");
 
     // What the hint bar says of what a press takes.
     juce::String describe (int target)
     {
         if (target == firstEcho)
-            return "Press or drag to put the first echo under the pointer: sideways for the time, up or down for the feedback.";
+            return "Drag to move the first echo, from where it is: sideways for the time, up or down for the feedback.";
 
         if (target == Delay::lowCut)
             return "Drag sideways to move the band's low end, the low cut: the echoes keep nothing below it.";
@@ -76,6 +76,8 @@ public:
             (*attachment)->setParameter (device.getParameter (getInfo (index).id));
             addAndMakeVisible (**knob);
         }
+
+        drag.onCancelled = [this] { repaint(); };
     }
 
     ~Echoes() override
@@ -129,56 +131,48 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (e.mods.isPopupMenu())
+            return;
+
         const auto target = findTarget (e.position);
         draggingBand = target != firstEcho;
 
+        // A band's end, or the first echo (its time and its feedback, as one undo step named after the first), from where they
+        // are set by hand: the press changes nothing (graph::HandleDrag).
         if (draggingBand)
         {
             draggedCut = target;
-            parameters[(size_t) draggedCut].beginGesture();
+            drag.take ({ &parameters[(size_t) draggedCut] });
         }
         else
         {
-            // The time, and the feedback: one undo step, named after the first.
-            parameters[(size_t) timeParameter()].beginGesture();
-            parameters[Delay::feedback].beginGesture();
+            drag.take ({ &parameters[(size_t) timeParameter()], &parameters[Delay::feedback] });
+            startSeconds = Delay::getDelaySeconds (getBaseValues(), getTempo(), getBarLength());
         }
-
-        mouseDrag (e);
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (! drag.isTaken())
+            return;
+
         if (draggingBand)
-        {
-            auto& cut = parameters[(size_t) draggedCut];
-            const auto range = cut.getRange();
-            cut.setValue (juce::jlimit (range.start, range.end, (float) getBandAxis().frequencyAt (e.position.x)));
-        }
+            drag.moveAlong (
+                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getBandAxis().xFor (hertz); },
+                [this] (float x) { return (float) getBandAxis().frequencyAt (x); });
         else
-        {
-            setFirstEchoAt (e.position);
-        }
+            moveFirstEchoBy (e.getOffsetFromDragStart());
 
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (draggingBand)
-        {
-            parameters[(size_t) draggedCut].endGesture();
-        }
-        else
-        {
-            parameters[Delay::feedback].endGesture();
-            parameters[(size_t) timeParameter()].endGesture();
-        }
-
+        drag.end();
         hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : nothing);
     }
 
-    // Over the echoes, the crosshair, and the first echo lit, which a press puts under the pointer; over the band, the pointer
+    // Over the echoes, the grabbing hand, and the first echo lit, which a drag there moves; over the band, the pointer
     // that moves sideways, and its nearer end lit, which a press takes.
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (nothing); }
@@ -186,6 +180,7 @@ public:
 private:
     DeviceHandle device;
     std::vector<ParameterHandle> parameters; // every parameter, in the delay's order
+    graph::HandleDrag drag { *this };        // after the handles it moves
     std::unique_ptr<Knob> lowCutKnob, highCutKnob;
     std::unique_ptr<ParameterAttachment> lowCutAttachment, highCutAttachment;
     graph::LevelHistory history; // what came in, a peak a tick, as a gain
@@ -193,7 +188,8 @@ private:
     DrawnNumbers drawn;
     bool draggingBand = false;
     int draggedCut = Delay::lowCut;
-    int hovered = nothing; // what a press under the pointer takes, lit: the first echo or one of the band's ends
+    int hovered = nothing;     // what a press under the pointer takes, lit: the first echo or one of the band's ends
+    double startSeconds = 0.0; // the first echo's time, set by hand, as the press took it
 
     // In the band, its nearer end, by its parameter; elsewhere, the first echo.
     int findTarget (juce::Point<float> position) const
@@ -208,7 +204,7 @@ private:
 
     void hover (int target)
     {
-        setMouseCursor (target == firstEcho ? juce::MouseCursor::CrosshairCursor
+        setMouseCursor (target == firstEcho ? juce::MouseCursor::DraggingHandCursor
                         : target == nothing ? juce::MouseCursor::NormalCursor
                                             : juce::MouseCursor::LeftRightResizeCursor);
         setDescription (describe (target));
@@ -220,12 +216,18 @@ private:
         }
     }
 
-    std::vector<float> getValues() const
+    // Every parameter's value as it plays, and as it is set by hand.
+    std::vector<float> getValues() const { return readValues (false); }
+    std::vector<float> getBaseValues() const { return readValues (true); }
+
+    std::vector<float> readValues (bool setByHand) const
     {
         std::vector<float> values;
 
         for (size_t i = 0; i < parameters.size(); ++i)
-            values.push_back (parameters[i].isValid() ? parameters[i].getValue() : Delay::info.parameters[i].defaultValue);
+            values.push_back (! parameters[i].isValid() ? Delay::info.parameters[i].defaultValue
+                              : setByHand               ? parameters[i].getBaseValue()
+                                                        : parameters[i].getValue());
 
         return values;
     }
@@ -248,11 +250,25 @@ private:
 
     graph::FrequencyAxis getBandAxis() const { return { getBandArea().toFloat() }; }
 
-    // The first echo where the pointer is: its time from how far along, its feedback from how high.
-    void setFirstEchoAt (juce::Point<float> position)
+    // The first echo moved as far as the pointer from where it was set by hand as the press took it: its time in proportion to
+    // how far along from the sound coming in it is taken (echo 1 is drawn in one place, whatever its time), its feedback by how
+    // far up. Each move works from the press's values, not from what the last one wrote, and an axis the pointer hasn't moved
+    // along keeps its value exactly (known bug 116).
+    void moveFirstEchoBy (juce::Point<int> offset)
     {
+        const auto area = getEchoArea();
+        drag.set (1, offset.y == 0 ? drag.getStart (1)
+                                   : juce::jlimit (0.0f, 1.0f, drag.getStart (1) - (float) offset.y / std::max (1.0f, area.getHeight())));
+
+        if (offset.x == 0)
+        {
+            drag.set (0, drag.getStart (0));
+            return;
+        }
+
         const auto first = getEchoPosition (1).x, origin = getEchoPosition (0).x;
-        const auto seconds = std::max (0.001, getSeconds() * (double) ((position.x - origin) / std::max (1.0f, first - origin)));
+        const auto seconds =
+            std::max (0.001, startSeconds * (double) ((first + (float) offset.x - origin) / std::max (1.0f, first - origin)));
 
         if (isSynced())
         {
@@ -263,7 +279,7 @@ private:
 
             for (size_t i = 0; i < choices.size(); ++i)
             {
-                auto values = getValues();
+                auto values = getBaseValues();
                 values[Delay::time] = (float) i;
 
                 if (const auto distance = std::abs (std::log (Delay::getDelaySeconds (values, getTempo(), getBarLength()) / seconds));
@@ -274,18 +290,12 @@ private:
                 }
             }
 
-            parameters[Delay::time].setValue ((float) best);
+            drag.set (0, (float) best);
         }
         else
         {
-            const auto range = parameters[Delay::milliseconds].getRange();
-            parameters[Delay::milliseconds].setValue (juce::jlimit (range.start, range.end, (float) (seconds * 1000.0)));
+            drag.set (0, (float) (seconds * 1000.0));
         }
-
-        const auto area = getEchoArea();
-        const auto feedbackRange = parameters[Delay::feedback].getRange();
-        const auto height = juce::jlimit (0.0f, 1.0f, (area.getBottom() - position.y) / std::max (1.0f, area.getHeight()));
-        parameters[Delay::feedback].setValue (juce::jlimit (feedbackRange.start, feedbackRange.end, height));
     }
 
     void tick() override

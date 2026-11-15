@@ -8,6 +8,30 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## The known bugs (from 2026-11-15)
+
+The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed before the hand checks of stage 3. Each
+bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
+too. A line names the bug's number in that list.
+
+- **140 Escape in the devices' graphs:** Escape takes a drag back in every device's graph and on a knob's modulation
+  ring, leaving nothing to undo or redo. Every graph takes its handles the same way now (`graph::HandleDrag`): a
+  press grabs the parameter for Touch and Latch without changing it, a turn of the wheel just before a drag stays a
+  step of its own, and the graphs are no stops for the keyboard's focus.
+- **116 Handles that jumped to the pointer:** a handle in a device's graph moves as far as the pointer goes from
+  where it was, and a click on it changes nothing; a drag along one axis leaves the other's value as it was, to the
+  bit. The delay's first echo and the stereo expander's fan move from where they are set.
+- **117 Drags under modulation:** a drag in a device's graph moves the value set by hand by the drag alone, whatever
+  its modulation plays.
+- **118 The EQ's wheel:** the wheel over an EQ band's dot turns its Q as one undo step until it rests, and elsewhere
+  scrolls the view.
+- **120 Analyzers and their taps:** the analyzers show each channel at its level (the louder of the two at each
+  frequency), so a sound panned hard or out of phase reads as loud as one in the middle; the taps hold a quarter of
+  a second at 192 kHz.
+- **130 Curves worked out at every repaint:** the EQ's curves and the reverb's tail are worked out once for each
+  change (a repaint of the EQ 0.92 to 0.55 ms, of the reverb 1.41 to 0.41 ms); the sampler's picture already kept
+  its peaks and stays as it was.
+
 ## Stage 2, the last step: the first push (2026-11-15)
 
 - **S2.15 CI and the nightly workflow run for the first time:** the Linux builds (GCC, Clang, AddressSanitizer with

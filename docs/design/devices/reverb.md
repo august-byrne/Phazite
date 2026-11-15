@@ -73,9 +73,10 @@ Pre-Delay's gap, and shows nothing below the Low Cut or above the High Cut. It i
 formula. Hits coming in drift into the map and fade. The map's top names the mode, and for a plate what a short Decay
 holds back ("Plate  Diffusion 58%").
 
-The map's edges drag, each as one undo step: the wedge's end (or a press anywhere in the tail) for the Decay, the gap
-for the Pre-Delay, the slant's corner for the Damping, the floor for the Low Cut and the ceiling for the High Cut. The
-edge a press would take lights up, the pointer shows which way it moves, and the hint bar says what it does. Beside the
+The map's edges drag, each as one undo step: the wedge's end (or a drag anywhere in the tail) for the Decay, the gap
+for the Pre-Delay, the slant's corner for the Damping, the floor for the Low Cut and the ceiling for the High Cut, each
+as far as the pointer moves from where it is set (a press changes nothing; Escape takes a drag back). The edge a press
+would take lights up, the pointer shows which way it moves, and the hint bar says what it does. Beside the
 map are Decay and Size as large knobs, then Mode, Diffusion and Pre-Delay, then the Tone controls.
 
 ## Limits
@@ -88,7 +89,6 @@ map are Decay and Size as large knobs, then Mode, Diffusion and Pre-Delay, then 
   Pre-Delay doesn't follow the song's tempo.
 - The Plate takes both sides in as one, as the paper does, so a sound panned left reverberates the same as one panned
   right.
-- A press on the map moves the edge it takes to the pointer at once, and a right-click presses as a left-click does.
 - Its sound is checked by measurement (decay times, level between the modes), not by listening tests against other
   reverbs ([dsp-audit.md](../../archive/dsp-audit.md)).
 

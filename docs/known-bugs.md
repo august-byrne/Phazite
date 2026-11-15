@@ -19,6 +19,8 @@ The file holds two kinds of entries, under the same headings:
 - **Entries from 134 on** were found by the tests of the plan's stage 2, or seen while they were built; each says how.
 - **Entries from 160 on** were found while the rest of stage 1 was built, by its tests and by the reviews of its
   changes (2026-11-14).
+- **Entries from 171 on** were found while the known bugs were fixed (2026-11-15 on), by the fixes' tests and by the
+  reviews of their changes.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -186,18 +188,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
-- **140. Escape doesn't take a drag back in the devices' graphs, or on a knob's modulation ring.** It does in every part of
-  the time line's editors (`TimelineEditor::keyPressed()`) and on every slider whose owner can take its drag back
-  (`ValueSlider::onDragCancelled`): controls linked to a parameter (`ParameterHandle::cancelGesture()`), a device's Mix
-  knob (`MixHandle::cancelGesture()`), the top bar's tempo, position and time, the inspector's fields, a chain's key and
-  velocity ranges, the transform bar and the browser's preview volume; and no key runs a command that changes the song
-  while a mouse button is down, anywhere. Why: the graphs have no shared drag code, each editor in `src/ui/devices/`
-  begins its handles' gestures itself (`EqEditor.cpp`, `FilterEditor.cpp`, `DynamicsCurve.cpp`, `DelayEditor.cpp`,
-  `ReverbEditor.cpp`, `SamplerEditor.cpp`, `DrumSamplerEditor.cpp`, `ModulatorEditor.cpp`, `MultibandEditor.cpp`,
-  `LevelHistoryView.cpp` and the effects with one dot); the ring's `ModulationDrag` (`src/model/modulation/`) has no way
-  to take its step back. Fix: a `graph::HandleDrag` in `DeviceGraph.h` that holds the handles a drag moves, with
-  `keyPressed()` calling `ParameterHandle::cancelGesture()` on each, used by every graph; `cancelGesture()` on
-  `ModulationDrag`, called from `Knob`'s ring drag. Found by the stage-2 tests; narrowed on 2026-11-14.
+- **171. A device asleep on silence shows no modulation.** With nothing playing into it (an EQ on a silent track), a
+  knob's ring dot and a graph's handles stay at the value set by hand while an LFO runs, and move again only when
+  sound comes in. The sound is right: it is silent. Why: `DeviceRunner::begin()` (`src/engine/nodes/DeviceRunner.cpp`)
+  sets the values played to those set by hand before it returns for a sleeping device, and modulation is applied only
+  in the stretches a device processes, so `ParameterHandle::getValue()` equals `getBaseValue()`. Fix: on the sleeping
+  path, apply the modulators' values to the values kept as played, without processing the device. Found by the test
+  of drags under modulation (`tests/GraphDragTests.cpp`), which plays a synth into the EQ for that reason.
 - **162. A Stop that comes within the 3 ms in which a jump fades out makes one small step in the sound.** The stop's
   fade begins at the old place, as it should, and the jump is then taken at once, without the rest of its own fade
   (`src/engine/core/Engine.cpp`, `stopTransport()`). Fix: let the jump's fade run out before the stop is applied.
@@ -308,32 +305,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   and fails once one has a tooltip, so take each out of the list with its fix. Their wording waits for an answer
   ([open-questions.md](open-questions.md), row 56).
 
-## Device editors
-
-- **116. Several graphs' handles jump to the pointer as they are taken,** so a click, or a move of one pixel, changes a
-  value: an EQ's dot taken at its edge moves by up to 12 pixels, a Multiband's crossover by up to half as much again,
-  and a click near one of the reverb's cut lines moves it. Why: these drags set the value from where the pointer is,
-  though a handle is taken from up to 12 pixels away (`src/ui/devices/EqEditor.cpp`,
-  `src/ui/devices/MultibandEditor.cpp`, `src/ui/devices/ReverbEditor.cpp`, `src/ui/devices/DelayEditor.cpp`). Fix: keep
-  where the handle was taken and drag from there, as the dynamics curve does; apply nothing on a press. Not yet
-  checked (ui-device-editors 2).
-- **117. A drag in a graph starts from the modulated value and writes it as the value set by hand.** With an LFO on a
-  wavetable's Position, a press on the table at the LFO's peak writes the peak. Why: these drags read
-  `ParameterHandle::getValue()`, the value as it plays, where knobs read `getBaseValue()`
-  (`src/ui/devices/WavetableEditor.cpp`, `src/ui/devices/SynthParts.cpp`, `src/ui/devices/SaturatorEditor.cpp`,
-  `src/ui/devices/MultibandEditor.cpp`, `src/ui/devices/LevelHistoryView.cpp`). Traced in the code, not run. Fix: one
-  shared way for graphs to start a drag, from the value set by hand. Not yet checked (ui-device-editors 3).
-- **118. In the EQ each move of the wheel over Q is an undo step of its own, and the wheel turns the selected band's Q
-  anywhere on the graph.** Why: `mouseWheelMove()` (`src/ui/devices/EqEditor.cpp`) sets the value outside a gesture;
-  the other graphs turn through `graph::WheelGesture`. Fix: the same here, and only over a dot. Not yet checked
-  (ui-device-editors 4).
-- **120. The analyzers transform the two channels' average, and the stereo tap is too small at high sample rates.**
-  Sound that is out of phase between the channels shows nothing, and sound panned hard reads 6 dB low
-  (`src/ui/devices/DeviceGraph.cpp`); the tap holds 8,192 pairs, 43 ms at 192 kHz against a tick of 33 ms, so a tick
-  that comes a little late loses samples, which shows as a flash (`src/devices/core/SampleTap.h`). Fix: analyze each
-  channel and draw the louder; size the taps for a quarter of a second at the device's rate. Not yet checked
-  (ui-device-editors 8).
-
 ## Slow on the message thread
 
 Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
@@ -377,10 +348,6 @@ its fix.
   after each edit,** to find the audio nothing plays (`src/ui/project/ProjectView.cpp`,
   `src/model/project/UnusedAudio.cpp`). Fix: find it as a background job, and keep each branch's files until the
   versions change. Not yet checked (ui-shell-browser 7).
-- **130. Editors work their curves out from nothing at every repaint.** The EQ makes every band's coefficients again
-  for each column of its curve, 30 times a second while its analyzer moves (`src/ui/devices/EqEditor.cpp`); the
-  reverb's and the sampler's pictures do alike (`src/ui/devices/ReverbEditor.cpp`, `src/ui/devices/SamplerEditor.cpp`).
-  Fix: keep the curve until a value changes. Not yet checked (ui-device-editors 13).
 - **144. A note added repaints the playlist's whole lane area and makes every clip component again,** and the playlist
   makes seven components for every track's header, in view or not. Why: `Playlist::songChanged()`
   (`src/ui/playlist/Playlist.cpp`) treats any change in the clips' group of changes, a note's included, as a change of

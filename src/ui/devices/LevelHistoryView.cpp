@@ -25,6 +25,12 @@ LevelHistoryView::LevelHistoryView (const juce::String& title, float lowestLevel
 {
     setTitle (title);
     describe();
+
+    drag.onCancelled = [this]
+    {
+        dragging = false;
+        repaint();
+    };
 }
 
 void LevelHistoryView::describe()
@@ -140,15 +146,15 @@ std::vector<LevelHistoryView::Line> LevelHistoryView::getLines() const
 
 void LevelHistoryView::setLine (ParameterHandle* handle, const juce::String& name)
 {
-    if (handle == nullptr)
+    // Taken away (or another given) mid-drag: the drag's step ends as it is.
+    if (handle != line)
     {
-        // Taken away mid-drag: the drag's step ends as it is.
-        if (dragging && line != nullptr)
-            line->endGesture();
-
+        drag.end();
         dragging = false;
-        setLineLit (false);
     }
+
+    if (handle == nullptr)
+        setLineLit (false);
 
     line = handle;
     lineName = name;
@@ -352,29 +358,26 @@ void LevelHistoryView::mouseDown (const juce::MouseEvent& e)
         return;
 
     dragging = true;
-    line->beginGesture();
-    startValue = line->getValue();
+    drag.take ({ line }); // from its value set by hand (graph::HandleDrag)
     repaint();
 }
 
 void LevelHistoryView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (! dragging)
+    if (! dragging || ! drag.isTaken())
         return;
 
     const auto levels = getLevels();
     const auto perPixel = (levels.high - levels.low) / std::max (1.0f, levels.area.getHeight());
     const auto range = line->getRange();
-    line->setValue (
-        range.snapToLegalValue (juce::jlimit (range.start, range.end, startValue - (float) e.getDistanceFromDragStartY() * perPixel)));
+    drag.set (0, range.snapToLegalValue (
+                     juce::jlimit (range.start, range.end, drag.getStart (0) - (float) e.getDistanceFromDragStartY() * perPixel)));
     repaint();
 }
 
 void LevelHistoryView::mouseUp (const juce::MouseEvent& e)
 {
-    if (dragging && line != nullptr)
-        line->endGesture();
-
+    drag.end();
     dragging = false;
     setLineLit (getLocalBounds().contains (e.getPosition()) && isNearLine (e.position.y));
     repaint();

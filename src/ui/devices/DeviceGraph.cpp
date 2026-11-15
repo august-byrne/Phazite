@@ -2,6 +2,7 @@
 #include "DeviceGraph.h"
 #include "ui/components/DisplayTicker.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace phazite::ui::graph
@@ -157,7 +158,14 @@ SpectrumTrace::SpectrumTrace()
 
 void SpectrumTrace::setSampleRate (double rate)
 {
-    spectrum.setSampleRate (rate);
+    left.setSampleRate (rate);
+    right.setSampleRate (rate);
+}
+
+void SpectrumTrace::add (int numPulled)
+{
+    left.add (lefts.data(), numPulled);
+    right.add (rights.data(), numPulled);
 }
 
 void SpectrumTrace::pull (devices::StereoTap& tap)
@@ -165,35 +173,33 @@ void SpectrumTrace::pull (devices::StereoTap& tap)
     tap.setListening (true);
 
     for (int n; (n = tap.pull (lefts.data(), rights.data(), (int) lefts.size())) > 0;)
-    {
-        for (int i = 0; i < n; ++i)
-            lefts[(size_t) i] = 0.5f * (lefts[(size_t) i] + rights[(size_t) i]);
-
-        spectrum.add (lefts.data(), n);
-    }
+        add (n);
 }
 
 void SpectrumTrace::pull (devices::SampleTap& tap)
 {
     tap.setListening (true);
 
-    for (int n; (n = tap.pull (lefts.data(), (int) lefts.size())) > 0;)
-        spectrum.add (lefts.data(), n);
+    for (int n; (n = tap.pull (lefts.data(), rights.data(), (int) lefts.size())) > 0;)
+        add (n);
 }
 
 bool SpectrumTrace::update()
 {
-    return spectrum.update (fallPerSecond / (float) DisplayTicker::ticksPerSecond);
+    const auto fall = fallPerSecond / (float) DisplayTicker::ticksPerSecond;
+    const auto leftMoved = left.update (fall);
+    return right.update (fall) || leftMoved;
 }
 
 float SpectrumTrace::getLevelAt (double frequency) const
 {
-    return spectrum.getLevelAt (frequency) + tiltPerOctave * (float) std::log2 (frequency / 1000.0);
+    return std::max (left.getLevelAt (frequency), right.getLevelAt (frequency)) + tiltPerOctave * (float) std::log2 (frequency / 1000.0);
 }
 
 float SpectrumTrace::getLevelOver (double from, double to) const
 {
-    return spectrum.getLevelOver (from, to) + tiltPerOctave * (float) std::log2 (std::sqrt (from * to) / 1000.0);
+    return std::max (left.getLevelOver (from, to), right.getLevelOver (from, to))
+           + tiltPerOctave * (float) std::log2 (std::sqrt (from * to) / 1000.0);
 }
 
 void SpectrumTrace::paint (juce::Graphics& g, const FrequencyAxis& frequencies, const LevelAxis& levels, juce::Colour fill,
@@ -268,13 +274,145 @@ juce::Path LevelHistory::makeArea (juce::Rectangle<float> area, const std::funct
 }
 
 //==============================================================================
+HandleDrag::HandleDrag (juce::Component& g)
+    : graph (g)
+{
+    // A click on the graph leaves the keys where they were: else JUCE gives them to the first control beside it that takes
+    // them (Component::grabKeyboardFocus() from a click on a component that doesn't), a knob or a button, which took them
+    // from the drum sampler's pads, say.
+    graph.setMouseClickGrabsKeyboardFocus (false);
+}
+
+HandleDrag::~HandleDrag()
+{
+    // A drag in progress is the handles' to end: each ends its gesture as it goes, keeping it. The graph's wheels go first
+    // (they are declared after it).
+    listen (false);
+}
+
+void HandleDrag::listen (bool shouldListen)
+{
+    if (window != nullptr)
+        window->removeKeyListener (this);
+
+    window = shouldListen ? graph.getTopLevelComponent() : nullptr;
+
+    // Added last, it hears a key before the window's other listeners: its shortcuts, which use up every key while a mouse
+    // button is down (KeyDispatcher), and the computer keyboard. It takes Escape alone.
+    if (window != nullptr)
+        window->addKeyListener (this);
+}
+
+void HandleDrag::take (std::vector<ParameterHandle*> taking)
+{
+    end(); // a drag that never let go (a press while another was held) keeps what it did
+
+    // A turn of the graph's wheel still open is a step of its own, which the drag doesn't join.
+    for (auto* wheel : wheels)
+        wheel->end();
+
+    handles = std::move (taking);
+    starts.clear();
+
+    for (auto* handle : handles)
+        starts.push_back (handle != nullptr ? handle->getBaseValue() : 0.0f);
+
+    // Its step begins now, as a knob's does as it is pressed, named after the first handle, whose gesture holds it and which
+    // the others join; without a change it leaves nothing.
+    for (auto* handle : handles)
+        if (handle != nullptr)
+            handle->beginGesture();
+
+    taken = true;
+    listen (true);
+}
+
+float HandleDrag::getStart (size_t handle) const
+{
+    return handle < starts.size() ? starts[handle] : 0.0f;
+}
+
+void HandleDrag::set (size_t handle, float value)
+{
+    if (! taken || handle >= handles.size() || handles[handle] == nullptr)
+        return;
+
+    const auto range = handles[handle]->getRange();
+    const auto kept = juce::jlimit (range.start, range.end, value);
+
+    if (! juce::exactlyEqual (kept, handles[handle]->getBaseValue()))
+        handles[handle]->setValue (kept);
+}
+
+void HandleDrag::moveAlong (size_t handle, float moved, const std::function<float (float)>& placeOf,
+                            const std::function<float (float)>& valueAt)
+{
+    // Not moved along this axis: as it was, exactly, as a round trip through the axis's pixels may not give it back.
+    set (handle, juce::exactlyEqual (moved, 0.0f) ? getStart (handle) : valueAt (placeOf (getStart (handle)) + moved));
+}
+
+void HandleDrag::letGo()
+{
+    handles.clear();
+    taken = false;
+    listen (false);
+}
+
+void HandleDrag::end()
+{
+    if (! taken)
+        return;
+
+    // The others' first, the first's last: its gesture holds the step.
+    for (auto each = handles.rbegin(); each != handles.rend(); ++each)
+        if (*each != nullptr)
+            (*each)->endGesture();
+
+    letGo();
+}
+
+bool HandleDrag::cancel()
+{
+    if (! taken)
+        return false;
+
+    // The others' first, which joined the step; then the first's, which takes the whole step back.
+    for (auto each = handles.rbegin(); each != handles.rend(); ++each)
+        if (*each != nullptr)
+            (*each)->cancelGesture();
+
+    letGo();
+
+    if (onCancelled != nullptr)
+        onCancelled();
+
+    return true;
+}
+
+bool HandleDrag::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    return key == juce::KeyPress::escapeKey && cancel();
+}
+
+//==============================================================================
+WheelGesture::WheelGesture (HandleDrag& graphsDrag)
+    : drag (graphsDrag)
+{
+    drag.wheels.push_back (this);
+}
+
 WheelGesture::~WheelGesture()
 {
     end();
+    drag.wheels.erase (std::remove (drag.wheels.begin(), drag.wheels.end(), this), drag.wheels.end());
 }
 
 void WheelGesture::turn (ParameterHandle& handle, float newValue)
 {
+    // While the graph's drag is taken, the wheel would land in its step, which Escape takes back.
+    if (drag.isTaken())
+        return;
+
     if (turning != &handle)
         end();
 

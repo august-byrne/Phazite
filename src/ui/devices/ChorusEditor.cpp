@@ -48,6 +48,16 @@ public:
         setDescription ("The comb its copies make with the sound now, over the spectrum of what it plays, and under it how far each "
                         "copy lags, in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or "
                         "down for the depth. The wheel turns the rate.");
+
+        // A drag moves the dot, as one undo step.
+        dot.setDrag ({ &delay, [this] (float milliseconds) { return getFrequencies().xFor (1000.0 / (double) milliseconds); },
+                       [this] (float x) { return delayAt (x); } },
+                     { &depth, [this] (float value) { return yForDepth (value); }, [this] (float y) { return depthAt (y); } },
+                     [this]
+                     {
+                         readValues();
+                         repaint();
+                     });
     }
 
     int getNumVoices() const override { return Chorus::getNumVoices (values); }
@@ -70,23 +80,6 @@ public:
         return { getFrequencies().xFor (1000.0 / (double) values[Chorus::delay]), yForDepth (values[Chorus::depth]) };
     }
 
-    // A drag moves the dot: the delay with it sideways (its frequency under the pointer) and the depth up and down, as one
-    // undo step.
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        delay.beginGesture();
-        depth.beginGesture();
-        dragTo (e.position);
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position); }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        depth.endGesture();
-        delay.endGesture();
-    }
-
     // The wheel turns the rate faster or slower, or in time with the song steps through the note values.
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
@@ -95,12 +88,12 @@ public:
         if (sync.getValue() > 0.5f)
         {
             const auto range = division.getRange();
-            wheelGesture.turn (division, juce::jlimit (range.start, range.end, division.getValue() + (faster ? -1.0f : 1.0f)));
+            wheelGesture.turn (division, juce::jlimit (range.start, range.end, division.getBaseValue() + (faster ? -1.0f : 1.0f)));
         }
         else
         {
             const auto range = rate.getRange();
-            const auto along = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (rate.getValue()) + (faster ? rateStep : -rateStep));
+            const auto along = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (rate.getBaseValue()) + (faster ? rateStep : -rateStep));
             wheelGesture.turn (rate, range.convertFrom0to1 (along));
         }
 
@@ -158,7 +151,7 @@ protected:
 
 private:
     ParameterHandle delay, depth, sync, division, rate;
-    graph::WheelGesture wheelGesture; // after the handles it turns
+    graph::WheelGesture wheelGesture { dot.getDrag() }; // after the handles it turns, and the dot (in the base) that drags them
 
     juce::Rectangle<float> getDepthArea() const { return getResponseArea().reduced (0.0f, GraphTint::dotRadius); }
 
@@ -244,18 +237,14 @@ private:
         graph::paintReadout (g, p, strip, formatMilliseconds (getDelay (0, 0)), juce::Justification::centredRight);
     }
 
-    void dragTo (juce::Point<float> position)
-    {
-        const auto delayRange = delay.getRange();
-        const auto frequency = std::max (1.0, getFrequencies().frequencyAt (position.x));
-        delay.setValue (juce::jlimit (delayRange.start, delayRange.end, (float) (1000.0 / frequency)));
+    // What the dot moves, for a drag: the delay with it sideways (its frequency under the pointer) and the depth up and down.
+    float delayAt (float x) const { return (float) (1000.0 / std::max (1.0, getFrequencies().frequencyAt (x))); }
 
+    float depthAt (float y) const
+    {
         const auto area = getDepthArea();
-        const auto depthRange = depth.getRange();
-        const auto y = juce::jlimit (area.getY(), area.getBottom(), position.y);
-        depth.setValue (juce::jmap (y, area.getBottom(), area.getY(), depthRange.start, depthRange.end));
-        readValues();
-        repaint();
+        const auto range = depth.getRange();
+        return juce::jmap (juce::jlimit (area.getY(), area.getBottom(), y), area.getBottom(), area.getY(), range.start, range.end);
     }
 };
 

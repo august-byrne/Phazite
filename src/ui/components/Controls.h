@@ -106,10 +106,12 @@ public:
     const std::optional<ModulationRange>& getModulation() const noexcept { return modulation; }
 
     // Dragging the ring: whether a modulation can be dragged as the drag starts, then the change of its amount (a part of
-    // the range: up is more, a fifth as much with Shift), and its end.
+    // the range: up is more, a fifth as much with Shift), and its end; or, with Escape in the middle, its being taken back
+    // (the drag then does nothing more until the mouse goes up, and doesn't end).
     std::function<bool()> onModulationDragStart;
     std::function<void (float change)> onModulationDrag;
     std::function<void()> onModulationDragEnd;
+    std::function<void()> onModulationDragCancelled;
 
     // A modulator dropped on it (ModulatorDrag.h), if it can modulate it.
     std::function<bool (ModulatorID)> canAcceptModulator;
@@ -123,6 +125,7 @@ public:
     bool isModulatorTarget() const noexcept { return target; }
 
     void paint (juce::Graphics&) override;
+    bool keyPressed (const juce::KeyPress&) override; // Escape during the ring's drag takes it back
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -134,7 +137,7 @@ public:
 
 private:
     std::optional<ModulationRange> modulation;
-    bool draggingRing = false, dropping = false;
+    bool draggingRing = false, ringCancelled = false, dropping = false;
     bool target = false; // a modulator dragged now could modulate it
 
     bool isOnRing (juce::Point<float>) const; // the outer edge, where the ring is

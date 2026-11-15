@@ -58,7 +58,8 @@ two sides out of step lying flat, over the faint dots of what comes in, with the
 within, and a fan opened as wide as the Width. Under it is a bar of how alike the two sides are, from -1 to +1, red
 below 0, where the mono sum loses sound, with a mark for what comes in.
 
-A drag across the disc opens the fan to the pointer's angle, as one undo step, and the wheel opens or closes it a
+A drag across the disc turns the fan's edge as far as the pointer turns around the disc's centre, from the Width set
+by hand (a press changes nothing, and Escape takes the drag back), as one undo step, and the wheel opens or closes it a
 step at a time. Beside the picture are Width and Spread as large knobs, then Bass Mono, Frequency, Gain, Flip Left and
 Flip Right.
 

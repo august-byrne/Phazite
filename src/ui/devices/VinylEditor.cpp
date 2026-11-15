@@ -106,6 +106,12 @@ public:
 
         readValues();
 
+        drag.onCancelled = [this]
+        {
+            readValues();
+            repaint();
+        };
+
         // What came before the editor opened isn't shown.
         if (auto* vinyl = device.getProcessor<Vinyl>())
         {
@@ -178,44 +184,36 @@ public:
     // On the record or its pitch, a drag up or down is the wow, as one undo step; on the band, it moves the nearer of its ends.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        wheelGesture.end(); // a step of its own, not the wheel's
-
         if (e.mods.isPopupMenu())
             return;
 
+        // Each from its value set by hand, the press changing nothing (graph::HandleDrag).
         const auto target = findTarget (e.position);
         draggingBand = target != wowTarget;
 
         if (draggingBand)
-        {
             draggedCut = target;
-            parameters[(size_t) draggedCut].beginGesture();
-            mouseDrag (e);
-            return;
-        }
 
-        wow.beginGesture();
-        wowAtStart = wow.getValue();
+        drag.take ({ draggingBand ? &parameters[(size_t) draggedCut] : &wow });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (! drag.isTaken())
+            return;
+
         if (draggingBand)
         {
-            auto& cut = parameters[(size_t) draggedCut];
-
-            if (cut.isInGesture())
-            {
-                const auto range = cut.getRange();
-                cut.setValue (juce::jlimit (range.start, range.end, (float) getBandAxis().frequencyAt (e.position.x)));
-            }
+            drag.moveAlong (
+                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getBandAxis().xFor (hertz); },
+                [this] (float x) { return (float) getBandAxis().frequencyAt (x); });
         }
-        else if (wow.isInGesture())
+        else
         {
             const auto range = wow.getRange();
             const auto moved =
                 -(float) e.getDistanceFromDragStartY() / std::max (1.0f, getUpperArea().getHeight()) * (range.end - range.start);
-            wow.setValue (juce::jlimit (range.start, range.end, wowAtStart + moved));
+            drag.set (0, drag.getStart (0) + moved);
         }
 
         readValues();
@@ -224,12 +222,7 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (draggingBand && parameters[(size_t) draggedCut].isInGesture())
-            parameters[(size_t) draggedCut].endGesture();
-
-        if (wow.isInGesture())
-            wow.endGesture();
-
+        drag.end();
         draggingBand = false;
         hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : nothing);
     }
@@ -246,7 +239,7 @@ public:
             return;
 
         const auto range = rate.getRange();
-        const auto along = range.convertTo0to1 (rate.getValue()) + (details.deltaY > 0.0f ? wheelStep : -wheelStep);
+        const auto along = range.convertTo0to1 (rate.getBaseValue()) + (details.deltaY > 0.0f ? wheelStep : -wheelStep);
         wheelGesture.turn (rate, range.convertFrom0to1 (juce::jlimit (0.0f, 1.0f, along)));
         readValues();
         repaint();
@@ -267,12 +260,13 @@ private:
     ParameterHandle wow, rate;
     std::unique_ptr<Knob> lowCutKnob, highCutKnob;
     std::unique_ptr<ParameterAttachment> lowCutAttachment, highCutAttachment;
-    graph::WheelGesture wheelGesture; // after the handles it turns
-    graph::LevelHistory history;      // the pitch's readings, in cents, oldest first
+    graph::HandleDrag drag { *this };          // after the handles it moves
+    graph::WheelGesture wheelGesture { drag }; // and turns
+    graph::LevelHistory history;               // the pitch's readings, in cents, oldest first
     std::vector<float> pulled;
     std::vector<Speck> specks;
     int readingsTaken = 0, specksMade = 0;
-    float shownTurn = 0.0f, shownPitch = 0.0f, lit = 0.0f, wowAtStart = 0.0f;
+    float shownTurn = 0.0f, shownPitch = 0.0f, lit = 0.0f;
     bool draggingBand = false;
     int draggedCut = Vinyl::lowCut;
     int hovered = nothing; // what a press under the pointer takes, lit: the wow or one of the band's ends

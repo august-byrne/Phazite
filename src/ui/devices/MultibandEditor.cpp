@@ -418,6 +418,15 @@ public:
         const auto& post = getInfo (Multiband::getBandParameter (Multiband::low, Multiband::post));
         lowestLevel = post.minimum;
         highestLevel = post.maximum;
+
+        // Escape: as it was, and a click no more (it shows no band as the mouse goes up).
+        drag.onCancelled = [this]
+        {
+            dragged.reset();
+            moved = false;
+            editor.refresh();
+            repaint();
+        };
     }
 
     graph::SpectrumTrace spectrum;
@@ -560,7 +569,7 @@ public:
         if (dragged.has_value())
         {
             handle = editor.device.getParameter (idOf (getParameter (*dragged)));
-            startValue = handle.getValue();
+            drag.take ({ &handle }); // from its value set by hand
             repaint();
         }
     }
@@ -568,26 +577,24 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override
     {
         // A press becomes a drag once it moves a little, so that a click shows its band and changes nothing.
-        if (! dragged.has_value() || ! e.mouseWasDraggedSinceMouseDown())
+        if (! dragged.has_value() || ! drag.isTaken() || ! e.mouseWasDraggedSinceMouseDown())
             return;
 
-        if (! moved)
-        {
-            moved = true;
-            handle.beginGesture();
-        }
-
+        moved = true;
         const auto& info = getInfo (getParameter (*dragged));
 
         if (dragged->kind == Target::Kind::level)
         {
             // Up or down from where it was, as far as the pointer moved.
             const auto perPixel = (highestLevel - lowestLevel) / std::max (1.0f, getArea().getHeight());
-            handle.setValue (devices::constrain (info, startValue - (float) e.getDistanceFromDragStartY() * perPixel));
+            drag.set (0, devices::constrain (info, drag.getStart (0) - (float) e.getDistanceFromDragStartY() * perPixel));
         }
         else
         {
-            handle.setValue (devices::constrain (info, (float) getFrequencies().frequencyAt (e.position.x)));
+            // Sideways from where it was, as far as the pointer moved: an edge taken a little off it doesn't jump to the pointer.
+            drag.moveAlong (
+                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getFrequencies().xFor (hertz); },
+                [this, &info] (float x) { return devices::constrain (info, (float) getFrequencies().frequencyAt (x)); });
         }
 
         editor.refresh();
@@ -596,10 +603,7 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         const auto target = dragged;
-
-        if (handle.isInGesture())
-            handle.endGesture();
-
+        drag.end();
         dragged.reset();
 
         // A click on a band shows its curve and controls.
@@ -643,9 +647,9 @@ private:
     ChoiceButtons &lowSlope, &highSlope;
     float lowestLevel = -24.0f, highestLevel = 24.0f;
     std::optional<Target> hovered, dragged;
-    ParameterHandle handle; // what a drag moves
-    float startValue = 0.0f;
-    bool moved = false; // the press has become a drag
+    ParameterHandle handle;           // what a drag moves
+    graph::HandleDrag drag { *this }; // after it
+    bool moved = false;               // the press has become a drag
 
     float valueOf (int index) const { return editor.values[(size_t) index]; }
 

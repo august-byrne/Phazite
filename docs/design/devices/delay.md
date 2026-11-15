@@ -41,9 +41,11 @@ The sound coming in as a bar, then each echo a bar after it on the song's beats 
 the last by the Feedback, above and below the middle line in turn while they ping-pong, in the manner of FabFilter's
 Timeless. What plays lights the first bar, then each echo in its turn.
 
-A press or a drag over the echoes puts the first echo under the pointer: across for the time (the nearest note value
-while Sync is on) and up or down for the Feedback, as one undo step. Under the echoes is the band they keep, between
-the Low Cut and the High Cut; its ends drag sideways, the nearer one lit, and the two cuts' knobs sit at its ends.
+A drag over the echoes moves the first echo from where its values are set by hand, as far as the pointer moves:
+across for the time, in proportion to how far along from the sound coming in it is taken (the nearest note value while
+Sync is on), and up or down for the Feedback, as one undo step; a press changes nothing, and Escape takes the drag back.
+Under the echoes is the band they keep, between the Low Cut and the High Cut; its ends drag sideways from where they
+are, the nearer one lit, and the two cuts' knobs sit at its ends.
 Beside the picture are Sync, Note, Time and Ping-Pong, and the Feedback as a large knob.
 
 ## Limits

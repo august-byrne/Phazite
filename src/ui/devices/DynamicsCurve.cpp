@@ -66,6 +66,12 @@ DynamicsCurve::DynamicsCurve (const DeviceHandle& handle, const std::vector<floa
                     "now. Drag a point (Shift keeps it level, Ctrl keeps it where it is across); drag a hollow handle up or down "
                     "to bend the line before it (Ctrl in fine steps) and right-click it to straighten it; right-click a point for "
                     "its line's shape or to delete it (Alt+click deletes it too); right-click elsewhere to add a point.");
+
+    drag.onCancelled = [this]
+    {
+        dragged.reset();
+        edited();
+    };
 }
 
 void DynamicsCurve::setCurve (int firstParameter, std::optional<juce::Colour> newColour)
@@ -443,26 +449,24 @@ void DynamicsCurve::mouseDown (const juce::MouseEvent& e)
 
     dragged = target;
 
+    // Each from its value set by hand, the press changing nothing (graph::HandleDrag): a point's place across, whose gesture
+    // holds the step, and up; or its line's tension.
     if (target->point)
     {
-        startAcross = getValue (target->index, curves::pointX);
-        startUp = getValue (target->index, curves::pointY);
         firstDragged = device.getParameter (getID (target->index, curves::pointX), "Move Point");
         secondDragged = device.getParameter (getID (target->index, curves::pointY));
-        firstDragged.beginGesture(); // its gesture holds the step, which the other's joins
-        secondDragged.beginGesture();
+        drag.take ({ &firstDragged, &secondDragged });
     }
     else
     {
-        startUp = getValue (target->index, curves::pointTension);
         firstDragged = device.getParameter (getID (target->index, curves::pointTension), "Bend Line");
-        firstDragged.beginGesture();
+        drag.take ({ &firstDragged });
     }
 }
 
 void DynamicsCurve::mouseDrag (const juce::MouseEvent& e)
 {
-    if (! dragged.has_value())
+    if (! dragged.has_value() || ! drag.isTaken())
         return;
 
     const auto area = getArea();
@@ -473,10 +477,12 @@ void DynamicsCurve::mouseDrag (const juce::MouseEvent& e)
     {
         // Up bends the line up; Ctrl in fine steps.
         const auto fine = e.mods.isCtrlDown() ? fineTension : 1.0f;
-        firstDragged.setValue (juce::jlimit (-1.0f, 1.0f, startUp + tensionDrag * up * fine));
+        drag.set (0, juce::jlimit (-1.0f, 1.0f, drag.getStart (0) + tensionDrag * up * fine));
         edited();
         return;
     }
+
+    const auto startAcross = drag.getStart (0), startUp = drag.getStart (1);
 
     // Shift keeps it level, Ctrl keeps it where it is across; the first and last points stay at the curve's ends.
     const auto along = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth());
@@ -492,24 +498,20 @@ void DynamicsCurve::mouseDrag (const juce::MouseEvent& e)
 
     const auto earliest = i > 0 ? getValue (i - 1, curves::pointX) : 0.0f;
     const auto latest = i < getCount() - 1 ? getValue (i + 1, curves::pointX) : 1.0f;
-    firstDragged.setValue (isEnd ? startAcross : juce::jlimit (earliest, std::max (earliest, latest), across));
-    secondDragged.setValue (juce::jlimit (0.0f, 1.0f, height));
+    drag.set (0, isEnd ? startAcross : juce::jlimit (earliest, std::max (earliest, latest), across));
+    drag.set (1, juce::jlimit (0.0f, 1.0f, height));
     edited();
 }
 
 void DynamicsCurve::mouseUp (const juce::MouseEvent&)
 {
-    if (! dragged.has_value())
-        return;
+    drag.end();
 
-    if (secondDragged.isInGesture())
-        secondDragged.endGesture();
-
-    if (firstDragged.isInGesture())
-        firstDragged.endGesture(); // its gesture holds the step: last
-
-    dragged.reset();
-    repaint();
+    if (dragged.has_value())
+    {
+        dragged.reset();
+        repaint();
+    }
 }
 
 void DynamicsCurve::showPointMenu (int point)

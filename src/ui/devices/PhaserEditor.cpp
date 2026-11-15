@@ -33,6 +33,16 @@ public:
         setDescription ("Where its notches are now, over the spectrum of what it plays, and how far the sweep reaches. Drag the "
                         "dot, or press anywhere to put it there: sideways for the frequency, up or down for the feedback. The "
                         "wheel turns the depth.");
+
+        // A drag moves the dot, the frequency with it sideways and the feedback up and down, as one undo step.
+        dot.setDrag ({ &frequency, [this] (float hertz) { return getFrequencies().xFor (hertz); },
+                       [this] (float x) { return (float) getFrequencies().frequencyAt (x); } },
+                     { &feedback, [this] (float value) { return yForFeedback (value); }, [this] (float y) { return feedbackAt (y); } },
+                     [this]
+                     {
+                         readValues();
+                         repaint();
+                     });
     }
 
     double getCentre (int channel) const { return Phaser::getSweptCentre (values, getLfoValue (channel), getSampleRate()); }
@@ -42,26 +52,11 @@ public:
         return { getFrequencies().xFor (values[Phaser::frequency]), yForFeedback (values[Phaser::feedback]) };
     }
 
-    // A drag moves the dot, the frequency with it sideways and the feedback up and down, as one undo step.
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        frequency.beginGesture();
-        feedback.beginGesture();
-        dragTo (e.position);
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position); }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        feedback.endGesture();
-        frequency.endGesture();
-    }
-
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = depth.getRange();
-        wheelGesture.turn (depth, juce::jlimit (range.start, range.end, depth.getValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
+        wheelGesture.turn (depth,
+                           juce::jlimit (range.start, range.end, depth.getBaseValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
         readValues();
         repaint();
     }
@@ -130,7 +125,7 @@ protected:
 
 private:
     ParameterHandle frequency, feedback, depth;
-    graph::WheelGesture wheelGesture; // after the handles it turns
+    graph::WheelGesture wheelGesture { dot.getDrag() }; // after the handles it turns, and the dot (in the base) that drags them
 
     // The feedback's range up the response: its most at the top, its least at the bottom, none in the middle.
     juce::Rectangle<float> getFeedbackArea() const { return getResponseArea().reduced (0.0f, GraphTint::dotRadius); }
@@ -142,17 +137,11 @@ private:
         return juce::jmap (value, range.start, range.end, area.getBottom(), area.getY());
     }
 
-    void dragTo (juce::Point<float> position)
+    float feedbackAt (float y) const
     {
-        const auto frequencyRange = frequency.getRange();
-        frequency.setValue (juce::jlimit (frequencyRange.start, frequencyRange.end, (float) getFrequencies().frequencyAt (position.x)));
-
         const auto area = getFeedbackArea();
-        const auto feedbackRange = feedback.getRange();
-        const auto y = juce::jlimit (area.getY(), area.getBottom(), position.y);
-        feedback.setValue (juce::jmap (y, area.getBottom(), area.getY(), feedbackRange.start, feedbackRange.end));
-        readValues();
-        repaint();
+        const auto range = feedback.getRange();
+        return juce::jmap (juce::jlimit (area.getY(), area.getBottom(), y), area.getBottom(), area.getY(), range.start, range.end);
     }
 };
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "WavetableEditor.h"
+#include "DeviceGraph.h"
 #include "DeviceTint.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -48,6 +49,7 @@ public:
         setTitle (getOscillatorName (osc) + " Wavetable");
         setTooltip ("Drag right or up to move through the table, left or down to go back; drop a sound on it to make that the table");
         setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        drag.onCancelled = [this] { repaint(); };
     }
 
     void setTable (std::shared_ptr<const devices::Wavetable> newTable, const juce::String& name)
@@ -106,7 +108,7 @@ public:
             const auto wave = makeWave (table->getFrameForDrawing (first), table->getFrameForDrawing (second), place - (float) first,
                                         getFrameBox (std::clamp (played, 0.0f, 1.0f)));
 
-            if (hovered || position.isInGesture())
+            if (hovered || drag.isTaken())
             {
                 g.setColour (palette.text.withAlpha (alpha));
                 g.strokePath (wave, juce::PathStrokeType (WavetableTint::playedWidth + 2.0f * GraphTint::litGap,
@@ -121,19 +123,27 @@ public:
     void resized() override { rebuild(); }
 
     // A drag across it moves the oscillator's position: the width of the drawing, right or up, is the whole table.
-    void mouseDown (const juce::MouseEvent&) override
+    // From the position set by hand, not where its modulation plays it now (graph::HandleDrag).
+    void mouseDown (const juce::MouseEvent& e) override
     {
-        position.beginGesture();
-        dragStart = position.getValue();
+        if (! e.mods.isPopupMenu())
+            drag.take ({ &position });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (! drag.isTaken())
+            return;
+
         const auto moved = (float) (e.getDistanceFromDragStartX() - e.getDistanceFromDragStartY()) / (float) std::max (1, getWidth());
-        position.setValue (std::clamp (dragStart + moved, 0.0f, 1.0f));
+        drag.set (0, std::clamp (drag.getStart (0) + moved, 0.0f, 1.0f));
     }
 
-    void mouseUp (const juce::MouseEvent&) override { position.endGesture(); }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        drag.end();
+        repaint();
+    }
 
     // Under the pointer, what a drag moves lights up: the frame it plays.
     void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
@@ -168,9 +178,10 @@ private:
     WavetableEditor& editor;
     const int osc;
     ParameterHandle position;
+    graph::HandleDrag drag { *this }; // after the handle it moves
     std::shared_ptr<const devices::Wavetable> table;
     std::vector<juce::Path> frames; // those drawn, from the front
-    float played = 0.0f, dragStart = 0.0f;
+    float played = 0.0f;
     bool on = true, dropping = false, hovered = false;
 
     void setDropping (bool now)

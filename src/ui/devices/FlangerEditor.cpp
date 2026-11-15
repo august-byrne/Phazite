@@ -43,6 +43,16 @@ public:
         setDescription ("Its comb of notches now, over the spectrum of what it plays, and under it how far the copy lags each side, "
                         "in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or down for "
                         "the feedback. The wheel turns the depth.");
+
+        // A drag moves the dot, as one undo step.
+        dot.setDrag ({ &delay, [this] (float milliseconds) { return getFrequencies().xFor (1000.0 / (double) milliseconds); },
+                       [this] (float x) { return delayAt (x); } },
+                     { &feedback, [this] (float value) { return yForFeedback (value); }, [this] (float y) { return feedbackAt (y); } },
+                     [this]
+                     {
+                         readValues();
+                         repaint();
+                     });
     }
 
     double getDelay (int channel) const { return Flanger::getSweptDelay (values, getLfoValue (channel)); }
@@ -52,27 +62,11 @@ public:
         return { getFrequencies().xFor (1000.0 / (double) values[Flanger::delay]), yForFeedback (values[Flanger::feedback]) };
     }
 
-    // A drag moves the dot: the delay with it sideways (its frequency under the pointer) and the feedback up and down, as
-    // one undo step.
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        delay.beginGesture();
-        feedback.beginGesture();
-        dragTo (e.position);
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position); }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        feedback.endGesture();
-        delay.endGesture();
-    }
-
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = depth.getRange();
-        wheelGesture.turn (depth, juce::jlimit (range.start, range.end, depth.getValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
+        wheelGesture.turn (depth,
+                           juce::jlimit (range.start, range.end, depth.getBaseValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
         readValues();
         repaint();
     }
@@ -139,7 +133,7 @@ protected:
 
 private:
     ParameterHandle delay, feedback, depth;
-    graph::WheelGesture wheelGesture; // after the handles it turns
+    graph::WheelGesture wheelGesture { dot.getDrag() }; // after the handles it turns, and the dot (in the base) that drags them
 
     juce::Rectangle<float> getFeedbackArea() const { return getResponseArea().reduced (0.0f, GraphTint::dotRadius); }
 
@@ -189,18 +183,15 @@ private:
         graph::paintReadout (g, p, strip, formatMilliseconds (getDelay (0)), juce::Justification::centredRight);
     }
 
-    void dragTo (juce::Point<float> position)
-    {
-        const auto delayRange = delay.getRange();
-        const auto firstTooth = std::max (1.0, getFrequencies().frequencyAt (position.x));
-        delay.setValue (juce::jlimit (delayRange.start, delayRange.end, (float) (1000.0 / firstTooth)));
+    // What the dot moves, for a drag: the delay with it sideways (its first tooth's frequency under the pointer) and the
+    // feedback up and down.
+    float delayAt (float x) const { return (float) (1000.0 / std::max (1.0, getFrequencies().frequencyAt (x))); }
 
+    float feedbackAt (float y) const
+    {
         const auto area = getFeedbackArea();
-        const auto feedbackRange = feedback.getRange();
-        const auto y = juce::jlimit (area.getY(), area.getBottom(), position.y);
-        feedback.setValue (juce::jmap (y, area.getBottom(), area.getY(), feedbackRange.start, feedbackRange.end));
-        readValues();
-        repaint();
+        const auto range = feedback.getRange();
+        return juce::jmap (juce::jlimit (area.getY(), area.getBottom(), y), area.getBottom(), area.getY(), range.start, range.end);
     }
 };
 

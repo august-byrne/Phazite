@@ -72,12 +72,12 @@ private:
 
     ParameterHandle attack, decay, sustain, release;
     ParameterHandle attackCurve, decayCurve, releaseCurve; // empty until given
+    graph::HandleDrag drag { *this };                      // after the handles it moves
     std::function<float()> level;
     float shownLevel = 0.0f;
     DrawnNumbers drawn;
     std::optional<Target> hovered, dragged;
     float dragTotal = 0.0f, dragHold = 0.0f; // the picture's time across, and its held sustain's, while a point is dragged
-    float startTime = 0.0f, startSustain = 0.0f, startCurve = 0.0f;
 
     // The stages across the picture: the attack, the decay, a held sustain and the release, each at least a little wide.
     struct Layout
@@ -126,8 +126,9 @@ private:
     std::function<float (float)> shapeAt;
     std::function<float()> phase;
     ParameterHandle depth, rate, sync, division;
-    graph::WheelGesture wheel; // after the handles it turns
-    float shownPhase = -1.0f, startDepth = 0.0f;
+    graph::HandleDrag drag { *this };   // after the handles it moves
+    graph::WheelGesture wheel { drag }; // and turns
+    float shownPhase = -1.0f;
     DrawnNumbers drawn;
 
     float getDrawnDepth() const; // how tall the wave is drawn, from 0 to 1
@@ -153,9 +154,6 @@ public:
     juce::Point<float> getDotPosition() const;
 
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
 
 private:
     ParameterHandle cutoff, resonance;
@@ -164,10 +162,9 @@ private:
     std::function<float()> playing;
     float shownPlaying = 0.0f;
     DrawnNumbers drawn;
-    GraphDot dot { *this, [this] { return getDotPosition(); } };
+    GraphDot dot { *this, [this] { return getDotPosition(); } }; // which drags the cutoff and the resonance
 
     graph::FrequencyAxis getFrequencies() const;
-    void dragTo (juce::Point<float>);
     void tick() override;
 };
 } // namespace phazite::ui

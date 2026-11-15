@@ -420,7 +420,13 @@ float ModulationDrag::getStartAmount() const noexcept
 
 void ModulationDrag::setAmount (float amount)
 {
-    setModulation (*impl->song, impl->modulator, impl->parameter, amount);
+    if (impl->gesture.isOpen())
+        setModulation (*impl->song, impl->modulator, impl->parameter, amount);
+}
+
+void ModulationDrag::cancel()
+{
+    impl->gesture.rollBack();
 }
 
 std::unique_ptr<ModulationDrag> beginModulationDrag (const ParameterHandle& handle, ModulatorID id)

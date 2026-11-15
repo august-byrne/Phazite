@@ -232,7 +232,7 @@ TEST_CASE ("Over the chorus's, the flanger's and the phaser's dots the pointer g
     }
 }
 
-TEST_CASE ("Over the delay's echoes the pointer is the crosshair and the first echo lights up; over its band, the nearer end")
+TEST_CASE ("Over the delay's echoes the pointer grabs the first echo and it lights up; over its band, the nearer end")
 {
     phazite::test::TestSong song;
     phazite::ui::DelayEditor editor (addDevice (song, phazite::devices::Delay::typeID));
@@ -241,13 +241,13 @@ TEST_CASE ("Over the delay's echoes the pointer is the crosshair and the first e
     phazite::test::Mouse mouse (echoes);
     const auto before = snapshot (echoes);
 
-    // Over the third echo: a press there would put the first echo under the pointer, so the first lights up.
+    // Over the third echo: a drag there would move the first echo, so the first lights up.
     mouse.moveTo ((editor.getEchoPosition (3) - juce::Point<float> (0.0f, 10.0f)).roundToInt());
-    CHECK (echoes.getMouseCursor() == Cursor (Cursor::CrosshairCursor));
+    CHECK (echoes.getMouseCursor() == Cursor (Cursor::DraggingHandCursor));
     const auto first = getChangedArea (before, snapshot (echoes));
     REQUIRE_FALSE (first.isEmpty());
     CHECK (std::abs (first.getCentreX() - juce::roundToInt (editor.getEchoPosition (1).x)) <= 2);
-    CHECK (echoes.getDescription().startsWith ("Press or drag to put the first echo under the pointer"));
+    CHECK (echoes.getDescription().startsWith ("Drag to move the first echo, from where it is"));
 
     // Over the band, nearer its high end: the pointer moves sideways, and only that end lights up.
     const auto band = editor.getBandArea();

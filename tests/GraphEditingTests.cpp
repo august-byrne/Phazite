@@ -239,17 +239,20 @@ TEST_CASE ("The stereo expander's fan follows a drag across its disc, and the wh
     const auto centre = editor.getDiscCentre();
     const auto from = [centre] (float x, float y) { return (centre + juce::Point<float> (x, y)).roundToInt(); };
 
-    // Straight up from the centre: mono; an eighth of a turn: as wide as it comes in; flat: twice as wide. One step.
-    mouse.press (from (0.0f, -40.0f));
+    // The fan's edge, an eighth of a turn at the width it comes in at, turned as far as the pointer turns: straight up, mono;
+    // flat, twice as wide. A press changes nothing (known bug 116). One step.
+    CHECK (valueOf (song, device, "width") == doctest::Approx (1.0f));
+    mouse.press (from (40.0f, -40.0f));
+    CHECK (valueOf (song, device, "width") == doctest::Approx (1.0f));
+    mouse.dragTo (from (0.0f, -40.0f));
     CHECK (valueOf (song, device, "width") < 0.01f);
-    mouse.dragTo (from (40.0f, -40.0f));
-    CHECK (valueOf (song, device, "width") == doctest::Approx (1.0f).epsilon (0.02));
     mouse.dragTo (from (-40.0f, 0.0f));
     CHECK (valueOf (song, device, "width") == doctest::Approx (2.0f));
     mouse.release();
     CHECK (describeUndo (song) == juce::String ("Undo Change Width"));
 
     // A notch of the wheel down: five points narrower.
+    mouse.pause();
     mouse.wheel (from (0.0f, -40.0f), -notchUp);
     CHECK (valueOf (song, device, "width") == doctest::Approx (1.95f));
 }

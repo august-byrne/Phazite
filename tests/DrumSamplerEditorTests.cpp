@@ -240,6 +240,11 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its start and 
     phazite::test::Mouse mouse (waveform);
     const auto y = waveform.getHeight() / 2;
     CHECK (editor.getHandleX (Field::hold) > (float) waveform.getWidth() - 4.0f);
+    mouse.press ({ juce::roundToInt (editor.getHandleX (Field::hold)) - 3, 4 }); // pressed beside it: nothing (known bug 116)
+    mouse.release();
+    mouse.pause();
+    CHECK (valueOf ("pad36Hold") == DrumSampler::wholeSound);
+    CHECK_FALSE (s.getUndoManager().canUndo());
     mouse.press ({ juce::roundToInt (editor.getHandleX (Field::hold)) - 1, 4 });
     mouse.dragTo ({ waveform.getWidth() / 2, 4 });
     mouse.release();
@@ -274,6 +279,26 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its start and 
     mouse.release();
     CHECK (valueOf ("pad36Start") > 0.0f);
     CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 36 Start"));
+
+    // A press beside the start's line changes nothing (known bug 116); a drag of it, then Escape, puts it back, leaving
+    // nothing to redo (known bug 140).
+    mouse.pause();
+    const auto start = valueOf ("pad36Start");
+    const auto startAt = juce::roundToInt (editor.getHandleX (Field::start));
+    mouse.press ({ startAt + 3, y });
+    mouse.release();
+    mouse.pause();
+    CHECK (valueOf ("pad36Start") == start);
+    mouse.press ({ startAt + 3, y });
+    mouse.dragTo ({ startAt + 30, y });
+    CHECK (valueOf ("pad36Start") > start);
+    window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    mouse.dragTo ({ startAt + 40, y });
+    mouse.release();
+    mouse.pause();
+    CHECK (valueOf ("pad36Start") == start);
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 36 Start"));
+    CHECK_FALSE (s.getUndoManager().canRedo());
 
     // As it plays, its playhead moves along it.
     sampler->audition (36, 1.0f);

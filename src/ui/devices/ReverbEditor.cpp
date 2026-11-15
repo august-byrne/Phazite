@@ -6,6 +6,7 @@
 #include "devices/reverb/Reverb.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <array>
 #include <cmath>
 
 namespace phazite::ui
@@ -29,8 +30,8 @@ namespace
         switch (handle)
         {
             case Reverb::decay:
-                return "Drag sideways for the decay: how long the tail takes to fade away. A press anywhere in the tail puts its "
-                       "end there.";
+                return "Drag sideways for the decay: how long the tail takes to fade away. A drag anywhere in the tail moves its "
+                       "end.";
             case Reverb::predelay:
                 return "Drag sideways for the pre-delay: the gap before the tail starts.";
             case Reverb::damping:
@@ -64,6 +65,13 @@ public:
         }
 
         readValues();
+
+        drag.onCancelled = [this]
+        {
+            dragged = -1;
+            readValues();
+            repaint();
+        };
     }
 
     ~Graph() override
@@ -72,12 +80,35 @@ public:
             scope->setListening (false);
     }
 
+    // The values as they play, and the tail's shape worked out from them again only when they change (known bug 130): not at
+    // each repaint, which hits drifting in make 30 times a second.
     void readValues()
     {
         for (size_t i = 0; i < parameters.size(); ++i)
             if (parameters[i].isValid())
                 values[i] = parameters[i].getValue();
+
+        auto now = values;
+        now.push_back ((float) getSampleRate());
+
+        if (now == shapeFor)
+            return;
+
+        shapeFor = std::move (now);
+        ++shapesWorkedOut;
+        auto slowest = 0.0;
+
+        for (int row = 0; row < rows; ++row)
+        {
+            rowDecays[(size_t) row] = Reverb::getDecayAt (values, getPitch ((float) row + 0.5f), getSampleRate());
+            slowest = std::max (slowest, rowDecays[(size_t) row]);
+        }
+
+        shownSeconds = (getPredelaySeconds() + slowest) * 1.15;
+        middleDecay = Reverb::getDecayAt (values, 500.0, getSampleRate());
     }
+
+    int getShapesWorkedOut() const noexcept { return shapesWorkedOut; }
 
     double getSampleRate() const
     {
@@ -87,15 +118,7 @@ public:
 
     double getPredelaySeconds() const { return values[Reverb::predelay] * 0.001; }
 
-    double getShownSeconds() const
-    {
-        auto slowest = 0.0;
-
-        for (int row = 0; row < rows; ++row)
-            slowest = std::max (slowest, Reverb::getDecayAt (values, getPitch ((float) row + 0.5f), getSampleRate()));
-
-        return (getPredelaySeconds() + slowest) * 1.15;
-    }
+    double getShownSeconds() const { return shownSeconds; }
 
     juce::Rectangle<float> getMapArea() const
     {
@@ -164,7 +187,7 @@ public:
             if (pitch < values[Reverb::lowCut] || pitch > values[Reverb::highCut])
                 continue;
 
-            const auto end = xFor (getPredelaySeconds() + Reverb::getDecayAt (values, pitch, getSampleRate()));
+            const auto end = xFor (getPredelaySeconds() + rowDecays[(size_t) row]);
             const auto band = juce::Rectangle<float>::leftTopRightBottom (start, area.getBottom() - (float) (row + 1) * rowHeight, end,
                                                                           area.getBottom() - (float) row * rowHeight);
             g.setGradientFill (
@@ -177,7 +200,7 @@ public:
         {
             const auto age = (double) (hits.size() - 1 - i) / DisplayTicker::ticksPerSecond;
             const auto level = hits.get (i);
-            const auto decay = Reverb::getDecayAt (values, 500.0, getSampleRate());
+            const auto decay = middleDecay;
 
             if (level < 0.02f || age > decay)
                 continue;
@@ -282,46 +305,45 @@ public:
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (-1); }
 
+    // A press takes the handle and changes nothing; the drag moves it from its value set by hand as far as the pointer goes
+    // (graph::HandleDrag), so that a press near a line doesn't move it.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        dragged = findTarget (e.position);
+        dragged = e.mods.isPopupMenu() ? -1 : findTarget (e.position);
 
         if (dragged >= 0)
         {
-            parameters[(size_t) dragged].beginGesture();
+            drag.take ({ &parameters[(size_t) dragged] });
             dragStartSeconds = getShownSeconds(); // the scale stays as it was while dragging
-            mouseDrag (e);
         }
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (dragged < 0)
+        if (dragged < 0 || ! drag.isTaken())
             return;
 
-        auto& handle = parameters[(size_t) dragged];
-        const auto range = handle.getRange();
-        const auto area = getMapArea();
-        const auto seconds = (double) ((e.position.x - area.getX()) / std::max (1.0f, area.getWidth())) * dragStartSeconds;
-        auto value = handle.getValue();
+        // The decay and the pre-delay sideways, by the time the pointer moved across at the scale the drag began with; the
+        // pitches up and down.
+        const auto secondsMoved =
+            (double) ((float) e.getDistanceFromDragStartX() / std::max (1.0f, getMapArea().getWidth())) * dragStartSeconds;
 
         if (dragged == Reverb::decay)
-            value = (float) std::max (0.0, seconds - getPredelaySeconds());
+            drag.set (0, (float) std::max (0.0, drag.getStart (0) + secondsMoved));
         else if (dragged == Reverb::predelay)
-            value = (float) (seconds * 1000.0);
+            drag.set (0, (float) (drag.getStart (0) + secondsMoved * 1000.0));
         else
-            value = (float) pitchAt (e.position.y);
+            drag.moveAlong (
+                0, (float) e.getDistanceFromDragStartY(), [this] (float pitch) { return yFor (pitch); },
+                [this] (float y) { return (float) pitchAt (y); });
 
-        handle.setValue (juce::jlimit (range.start, range.end, value));
         readValues();
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (dragged >= 0)
-            parameters[(size_t) dragged].endGesture();
-
+        drag.end();
         dragged = -1;
         hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : -1);
     }
@@ -329,7 +351,12 @@ public:
 private:
     DeviceHandle device;
     std::vector<ParameterHandle> parameters; // every parameter, in the reverb's order, for the map
+    graph::HandleDrag drag { *this };        // after the handles it moves
     std::vector<float> values;
+    std::vector<float> shapeFor;           // the values and the rate the tail's shape was worked out for
+    std::array<double, rows> rowDecays {}; // each row's time to fade, in seconds
+    double shownSeconds = 1.0, middleDecay = 1.0;
+    int shapesWorkedOut = 0;
     graph::LevelHistory hits;       // what came in, a peak a tick, as a gain
     int dragged = -1, hovered = -1; // handles, by their parameters
     double dragStartSeconds = 1.0;
@@ -412,6 +439,11 @@ juce::Point<float> ReverbEditor::getDampingHandle() const
 juce::String ReverbEditor::getModeText() const
 {
     return graph->getModeText();
+}
+
+int ReverbEditor::getShapesWorkedOut() const noexcept
+{
+    return graph->getShapesWorkedOut();
 }
 
 void ReverbEditor::refresh()

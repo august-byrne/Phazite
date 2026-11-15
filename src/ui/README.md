@@ -67,10 +67,10 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `DeviceEditorBase.*`, `DeviceLayout.*` | The frame every editor is built on: columns of parts that stack, show under tabs or narrow, and pages of them where the dock is narrower, so that every editor fits the default dock without scrolling. `DeviceEditorBase::setModes()` gives an editor modes, a page of parts for each, as tabs along its top (a choice's tabs, `ChoiceTabs`). |
 | `DeviceWindowContent.*` | An editor in a window of its own, out of the Devices view (`src/app/PluginWindow.h`): as wide as the window, its parts wrapping into rows, scrolling when the window is shorter. |
 | `ParameterControls.*` | A parameter's controls; `ParameterControls::showParameters()` shows a set of them. |
-| `DeviceGraph.*` | Graphs' axes, spectra and histories. |
+| `DeviceGraph.*` | Graphs' axes, spectra and histories, and how every graph takes a handle (`HandleDrag`: from its value set by hand, as far as the pointer goes, Escape taking the drag back) and turns one with the wheel (`WheelGesture`). |
 | `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars. |
 | `SidechainMenus.*` | What a device's sidechain listens to, a track or a bus, picked inside the device under the word every DAW prints on its picker, Sidechain. |
-| `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a dot that a press anywhere puts under the pointer. |
+| `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a dot that a drag moves (through `HandleDrag`) and a press away from it puts under the pointer. |
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |
 | `SweepPicture.*` | The picture the phaser, the flanger and the chorus share, with their LFO. |
 | `DeviceTint.*` | Each device's colour. |

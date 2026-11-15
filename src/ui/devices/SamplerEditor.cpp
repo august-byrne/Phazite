@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SamplerEditor.h"
+#include "DeviceGraph.h"
 #include "DeviceTint.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/SampleAnalysis.h"
@@ -87,10 +88,20 @@ public:
                                  "the sound as it was, in time with the song");
         slicesToClip.onClick = [this] { editor.getDevice().writeSliceNotes(); };
         addChildComponent (slicesToClip);
+
+        // Escape: the markers or the slice as they were, and the drag does nothing more.
+        drag.onCancelled = [this]
+        {
+            target = {};
+            draggedTo = -1.0f;
+            refresh();
+        };
+
         refresh();
     }
 
-    float value (int parameter) const { return values[(size_t) parameter]; }
+    float value (int parameter) const { return values[(size_t) parameter]; }                     // as it plays, for the drawing
+    float setByHand (int parameter) const { return handles[(size_t) parameter].getBaseValue(); } // for a drag's limits
     int getMode() const { return juce::roundToInt (value (Sampler::mode)); }
 
     // The drawing's area, and where a part of the sound is across it.
@@ -220,7 +231,8 @@ public:
             g.fillRect (band.withLeft (band.getRight() - fadeWidth));
         }
 
-        // The sound, each column's lowest to highest, faint outside what plays.
+        // The sound, each column's lowest to highest, faint outside what plays, from its peaks, which are worked out once for
+        // each width (updatePeaks()).
         const auto centre = area.getCentreY(), half = area.getHeight() * 0.5f;
 
         for (int column = 0; column < (int) peaks.size(); ++column)
@@ -296,22 +308,23 @@ public:
             return;
 
         target = findTarget (e.position);
-        downX = e.position.x;
 
+        // A marker or the loop from where it is set by hand, the press changing nothing (graph::HandleDrag); a slice moves as
+        // the drag ends. Escape takes either back.
         switch (target.kind)
         {
             case Kind::marker:
-                startValue = value (target.parameter);
-                handles[(size_t) target.parameter].beginGesture();
+                drag.take ({ &handles[(size_t) target.parameter] });
+                startValue = drag.getStart (0);
                 return;
 
             case Kind::loopBand:
-                startValue = value (Sampler::loopStart);
-                handles[(size_t) Sampler::loopStart].beginGesture();
-                handles[(size_t) Sampler::loopEnd].beginGesture();
+                drag.take ({ &handles[(size_t) Sampler::loopStart], &handles[(size_t) Sampler::loopEnd] });
+                startValue = drag.getStart (0);
                 return;
 
             case Kind::slice:
+                drag.take ({});
                 startValue = draggedTo = sliceFraction (target.slice);
                 return;
 
@@ -335,39 +348,41 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (target.kind == Kind::none || sound == nullptr)
+        if (target.kind == Kind::none || sound == nullptr || ! drag.isTaken())
             return;
 
         // Where the pointer takes it: in fine steps with Shift, on the nearest zero crossing unless Alt places it anywhere.
         const auto area = getWaveArea();
-        const auto moved = (e.position.x - downX) / std::max (1.0f, area.getWidth());
+        const auto moved = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth()); // in whole pixels
         auto fraction = e.mods.isShiftDown() ? startValue + moved * GraphTint::fineDragFactor : startValue + moved;
-        fraction = snap (std::clamp (fraction, 0.0f, 1.0f), e.mods);
+
+        // Not moved: where it was, not the zero crossing nearest it.
+        fraction = juce::exactlyEqual (moved, 0.0f) ? startValue : snap (std::clamp (fraction, 0.0f, 1.0f), e.mods);
         const auto gap = (float) Sampler::samplesApart / (float) std::max (1, sound->audio.getNumSamples());
 
         switch (target.kind)
         {
             case Kind::marker:
             {
-                const auto low = target.parameter == Sampler::end         ? value (Sampler::start) + gap
-                                 : target.parameter == Sampler::loopEnd   ? value (Sampler::loopStart) + gap
-                                 : target.parameter == Sampler::loopStart ? value (Sampler::start)
+                const auto low = target.parameter == Sampler::end         ? setByHand (Sampler::start) + gap
+                                 : target.parameter == Sampler::loopEnd   ? setByHand (Sampler::loopStart) + gap
+                                 : target.parameter == Sampler::loopStart ? setByHand (Sampler::start)
                                                                           : 0.0f;
-                const auto high = target.parameter == Sampler::start       ? value (Sampler::end) - gap
-                                  : target.parameter == Sampler::loopStart ? value (Sampler::loopEnd) - gap
-                                  : target.parameter == Sampler::loopEnd   ? value (Sampler::end)
+                const auto high = target.parameter == Sampler::start       ? setByHand (Sampler::end) - gap
+                                  : target.parameter == Sampler::loopStart ? setByHand (Sampler::loopEnd) - gap
+                                  : target.parameter == Sampler::loopEnd   ? setByHand (Sampler::end)
                                                                            : 1.0f;
-                handles[(size_t) target.parameter].setValue (std::clamp (fraction, low, std::max (low, high)));
+                drag.set (0, std::clamp (fraction, low, std::max (low, high)));
                 break;
             }
 
             case Kind::loopBand:
             {
-                const auto length = value (Sampler::loopEnd) - value (Sampler::loopStart);
-                const auto at =
-                    std::clamp (fraction, value (Sampler::start), std::max (value (Sampler::start), value (Sampler::end) - length));
-                handles[(size_t) Sampler::loopStart].setValue (at);
-                handles[(size_t) Sampler::loopEnd].setValue (at + length);
+                const auto length = drag.getStart (1) - drag.getStart (0);
+                const auto at = std::clamp (fraction, setByHand (Sampler::start),
+                                            std::max (setByHand (Sampler::start), setByHand (Sampler::end) - length));
+                drag.set (0, at);
+                drag.set (1, at + length);
                 break;
             }
 
@@ -390,29 +405,11 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        switch (target.kind)
-        {
-            case Kind::marker:
-                handles[(size_t) target.parameter].endGesture();
-                break;
+        // A slice moves once, as the drag ends: one undo step.
+        if (target.kind == Kind::slice && drag.isTaken() && std::abs (draggedTo - startValue) > 1.0e-6f)
+            editor.getDevice().moveSlice (target.slice, draggedTo);
 
-            case Kind::loopBand:
-                handles[(size_t) Sampler::loopStart].endGesture();
-                handles[(size_t) Sampler::loopEnd].endGesture();
-                break;
-
-            case Kind::slice:
-                // A slice moves once, as the drag ends: one undo step.
-                if (std::abs (draggedTo - startValue) > 1.0e-6f)
-                    editor.getDevice().moveSlice (target.slice, draggedTo);
-
-                break;
-
-            case Kind::strip:
-            case Kind::none:
-                break;
-        }
-
+        drag.end();
         target = {};
         draggedTo = -1.0f;
 
@@ -489,6 +486,7 @@ private:
 
     SamplerEditor& editor;
     std::vector<ParameterHandle> handles; // every parameter, in the description's order
+    graph::HandleDrag drag { *this };     // after the handles it moves
     std::vector<float> values;
     std::shared_ptr<const Sampler::Sound> held; // what sound points at, kept while it shows
     const Sampler::Sound* sound = nullptr;
@@ -503,7 +501,7 @@ private:
     DrawnNumbers drawn;
     juce::TextButton slicesToClip;
     Target target;
-    float downX = 0.0f, startValue = 0.0f, draggedTo = -1.0f;
+    float startValue = 0.0f, draggedTo = -1.0f;
     int auditioned = -1;
     bool dropping = false;
 

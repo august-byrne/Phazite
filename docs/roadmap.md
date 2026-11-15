@@ -61,8 +61,6 @@ left is in [known-bugs.md](known-bugs.md), with why:
   loads moves the other tracks' timing in one step (167).
 - S1.11: the shortcuts editor takes away keys that commands share on purpose, which needs an editor of Phazite's
   own (known bug 110).
-- S1.13: Escape doesn't take back a drag in the devices' graphs or on a knob's modulation ring (known bug 140),
-  which stage 6's step S6.9 takes up with one grammar for every graph.
 
 The numbered bugs still in [known-bugs.md](known-bugs.md) belong to the later steps that name their areas (the
 versions' to stage 4, recording's and the slow paths' to stage 5, the devices' and the editors' to stage 6), or wait

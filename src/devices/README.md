@@ -16,7 +16,7 @@ model saves and automation and modulation move.
 | `Processor.h` | What a device does with a block: what plays it prepares it, then hands it each block's audio, notes and parameter values. |
 | `AudioThreads.h` | How Phazite's own threads that play audio (the engine's workers, the helpers' threads that play plug-ins) get the audio device's priority, never raising the whole process's. |
 | `DeviceScope.h` | What goes into a device and what comes out of it, for its editor's displays, at no cost until an editor listens. |
-| `SampleTap.h` | What a device just played, for a display on the message thread (an EQ's analyzer); lock-free, one writer and one reader. |
+| `SampleTap.h` | What a device just played, each channel apart, for a display on the message thread (an EQ's analyzer); lock-free, one writer and one reader, holding a quarter of a second at 192 kHz. |
 | `Spectrum.h` | The spectrum of what a device plays, for an analyzer. |
 | `LiveValue.h`, `MeterValue.h`, `FallingValue.h` | Values a device sets on the audio thread for its editor to show: the latest (`LiveValue`), the most since the editor last looked (`MeterValue`), or a peak that falls back at a steady rate, for several displays at once (`FallingValue`). |
 

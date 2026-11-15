@@ -152,6 +152,21 @@ Each has its test; these rows are what a test can't hear, see on a real screen o
 | F24 | Open plug-in windows at 75 % and at 200 % Interface Size, a resizable one several times | Each window is its plug-in's own size, with nothing cropped and no black border | |
 | F21 | After the first push: read CI's `linux-clang` job, the nightly `windows-asan` job and the real-time audit on Linux | Each ran, and what it found is fixed or in known-bugs.md | Claude, 2026-11-15 (CI run 43709371891 and nightly run 43709371062, on dab254bd) |
 
+## What the known-bugs round fixed (from 2026-11-15)
+
+Each has its test; these rows are what a test can't hear or see on a real screen. The number after G is the bug's in
+the [changelog](changelog.md).
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| G116 | Drag an EQ dot, a Multiband crossover and a reverb edge, each taken at the edge of its handle; click each once | No jump at the press; the handle follows the pointer's movement; a click changes nothing and adds nothing to Edit > Undo | |
+| G140 | Press Escape in the middle of a drag in a device's graph, and of a knob's modulation ring | The value goes back to where it was, and Edit > Undo has nothing new | |
+| G140b | On the Filter, turn the wheel, then at once drag the dot and press Escape | The dot goes back, and Edit > Undo shows "Change Drive" alone | |
+| G140c | Put a track in Touch with a ramp on a synth's resonance, play, and hold the filter's dot still | The resonance stays where it was grabbed until the dot is let go | |
+| G140d | Click a pad on the drum sampler, click its waveform, press Up | The pads move a row: the waveform took no keys | |
+| G118 | Turn the wheel over an EQ dot, then away from the dots | Over a dot the Q changes, as one undo step; away from them the dock scrolls | |
+| G120 | Play a sine panned hard left, then one out of phase between the channels, through the EQ | The analyzer shows each as loud as when it is in the middle | |
+
 ## Known bugs that need an ear or a real plug-in
 
 Numbers are those of [known-bugs.md](known-bugs.md).

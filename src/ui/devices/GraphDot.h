@@ -4,15 +4,19 @@
 // both ways), and the handle it takes lights up, ringed in the text colour (GraphTint::litGap, litWidth).
 //
 // GraphDot is the dot of a graph whose two values it moves, one across and one up (a filter's cutoff and resonance, a
-// chorus's delay and depth), which a press anywhere on the graph puts under the pointer: over the dot, the grabbing hand, and
-// the dot lit, as it stays while a press drags it; elsewhere, the crosshair, where a press would put it. It hears the graph's
-// mouse events after the graph itself, so that the graph's own handlers have moved the dot when it looks.
+// chorus's delay and depth): over the dot, the grabbing hand, and the dot lit, as it stays while a press drags it; elsewhere,
+// the crosshair, where a press would put it. Given its values (setDrag()), it drags them too, as every graph's handles drag
+// (graph::HandleDrag): a press on the dot takes it from where its values set by hand put it, changing nothing, and the drag
+// moves it as far as the pointer goes; a press elsewhere puts it under the pointer; both values move as one undo step, and
+// Escape takes the drag back. It hears the graph's mouse events after the graph itself.
 #pragma once
 
+#include "DeviceGraph.h"
 #include "ui/theme/DesignTokens.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <functional>
 
 namespace phazite::ui
@@ -24,6 +28,23 @@ public:
     GraphDot (juce::Component& graph, std::function<juce::Point<float>()> getCentre);
     ~GraphDot() override;
 
+    // One of the values the dot shows: its parameter's handle (the graph's, which must outlive the dot), where a value is
+    // along the graph (placeOf: an x for the value across, a y for the one up, in the graph's coordinates), and the value at a
+    // place there (valueAt).
+    struct Value
+    {
+        ParameterHandle* handle = nullptr;
+        std::function<float (float value)> placeOf;
+        std::function<float (float place)> valueAt;
+    };
+
+    // The values a drag moves, the one across first (the undo step is named after it); moved: after each change a drag makes,
+    // and after Escape takes one back, for the graph to show it.
+    void setDrag (Value across, Value up, std::function<void()> moved);
+
+    // The dot's drag, for the graph's wheels (graph::WheelGesture), which a press ends and which turn nothing during a drag.
+    graph::HandleDrag& getDrag() noexcept { return drag; }
+
     // Whether the dot is lit now, for a graph that draws a dot of its own (as the synths' filter views draw a smaller one).
     bool isLit() const noexcept { return lit; }
 
@@ -33,14 +54,21 @@ public:
 private:
     juce::Component& graph;
     const std::function<juce::Point<float>()> getCentre;
+    Value across, up;
+    std::function<void()> moved;
+    graph::HandleDrag drag { graph };
+    juce::Point<float> startPlace;       // where the drag moves the dot from: its values' place as the press took it
+    std::array<float, 2> startValues {}; // and its values there
     bool lit = false;
 
     bool isOnDot (juce::Point<float>) const;
     void show (bool shouldBeLit);
+    void moveBy (juce::Point<float> offset); // from the start, as far as the pointer moved
 
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 

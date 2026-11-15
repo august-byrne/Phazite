@@ -63,6 +63,17 @@ public:
 
         readValues();
 
+        // A drag moves the dot, the frequency with it sideways and the amount up and down, as one undo step.
+        dot.setDrag ({ &frequency, [this] (float hertz) { return getFrequencies().xFor (hertz); },
+                       [this] (float x) { return (float) getFrequencies().frequencyAt (x); } },
+                     { &amount, [this] (float value) { return getLifts().yFor (liftOf (value)); },
+                       [this] (float y) { return amountFor (getLifts().levelAt (y)); } },
+                     [this]
+                     {
+                         readValues();
+                         repaint();
+                     });
+
         // The meter's first reading would show what played before the editor opened.
         if (auto* exciter = device.getProcessor<Exciter>())
             exciter->getReach().take();
@@ -139,26 +150,11 @@ public:
         paintMeter (g, p, tint);
     }
 
-    // A drag moves the dot, the frequency with it sideways and the amount up and down, as one undo step.
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        frequency.beginGesture();
-        amount.beginGesture();
-        dragTo (e.position);
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position); }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        amount.endGesture();
-        frequency.endGesture();
-    }
-
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = drive.getRange();
-        wheelGesture.turn (drive, juce::jlimit (range.start, range.end, drive.getValue() + (wheel.deltaY > 0.0f ? driveStep : -driveStep)));
+        wheelGesture.turn (drive,
+                           juce::jlimit (range.start, range.end, drive.getBaseValue() + (wheel.deltaY > 0.0f ? driveStep : -driveStep)));
         readValues();
         repaint();
     }
@@ -169,10 +165,10 @@ private:
     std::vector<float> values;
     ParameterHandle frequency, amount, drive;
     graph::SpectrumTrace input, output, added;
-    graph::WheelGesture wheelGesture; // after the handles it turns
     float shownReach = lowestReach;
     DrawnNumbers drawn;
-    GraphDot dot { *this, [this] { return getDotPosition(); } };
+    GraphDot dot { *this, [this] { return getDotPosition(); } }; // after the handles it drags
+    graph::WheelGesture wheelGesture { dot.getDrag() };          // and the dot, whose press ends it
 
     double getSampleRate() const
     {
@@ -185,15 +181,6 @@ private:
         for (size_t i = 0; i < parameters.size(); ++i)
             if (parameters[i].isValid())
                 values[i] = parameters[i].getValue();
-    }
-
-    void dragTo (juce::Point<float> position)
-    {
-        const auto frequencyRange = frequency.getRange(), amountRange = amount.getRange();
-        frequency.setValue (juce::jlimit (frequencyRange.start, frequencyRange.end, (float) getFrequencies().frequencyAt (position.x)));
-        amount.setValue (juce::jlimit (amountRange.start, amountRange.end, amountFor (getLifts().levelAt (position.y))));
-        readValues();
-        repaint();
     }
 
     // How far the band reaches into the curve, from the bottom up, and a line where the curve bends.

@@ -372,9 +372,26 @@ void Knob::paint (juce::Graphics& g)
     }
 }
 
+bool Knob::keyPressed (const juce::KeyPress& key)
+{
+    // Escape during the ring's drag: the modulation's amount as it was, nothing to redo, as for the knob's own value.
+    if (key == juce::KeyPress::escapeKey && draggingRing && ! ringCancelled)
+    {
+        ringCancelled = true;
+
+        if (onModulationDragCancelled != nullptr)
+            onModulationDragCancelled();
+
+        return true;
+    }
+
+    return ValueSlider::keyPressed (key);
+}
+
 void Knob::mouseDown (const juce::MouseEvent& e)
 {
     // On the ring, a drag changes the modulation's amount; anywhere else, the knob's value.
+    ringCancelled = false;
     draggingRing = ! e.mods.isPopupMenu() && modulation.has_value() && isOnRing (e.position) && onModulationDragStart != nullptr
                    && onModulationDragStart();
 
@@ -389,6 +406,9 @@ void Knob::mouseDrag (const juce::MouseEvent& e)
         ValueSlider::mouseDrag (e);
         return;
     }
+
+    if (ringCancelled)
+        return;
 
     const auto change = (float) -e.getDistanceFromDragStartY() / (float) knobDragDistance * (e.mods.isShiftDown() ? fineDragFactor : 1.0f);
 
@@ -406,8 +426,10 @@ void Knob::mouseUp (const juce::MouseEvent& e)
 
     draggingRing = false;
 
-    if (onModulationDragEnd != nullptr)
+    if (! ringCancelled && onModulationDragEnd != nullptr)
         onModulationDragEnd();
+
+    ringCancelled = false;
 }
 
 void Knob::showModulatorTargets (std::optional<ModulatorID> modulator)
@@ -693,6 +715,16 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
         };
 
         knob->onModulationDragEnd = [this] { modulationDrag = nullptr; };
+
+        // Escape: the amount as it was, leaving nothing to redo.
+        knob->onModulationDragCancelled = [this]
+        {
+            if (modulationDrag != nullptr)
+                modulationDrag->cancel();
+
+            modulationDrag = nullptr;
+            update();
+        };
 
         knob->canAcceptModulator = [this] (ModulatorID id)
         {

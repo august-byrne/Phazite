@@ -169,9 +169,22 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   Filter); drive (the Saturator, the Exciter and the Vinyl); space (the Delay and the Reverb); motion (the Phaser, the
   Flanger and the Chorus); the Stereo Expander's; the Vocoder's. Instruments take the accent.
 - **Pictures are controls.** A handle on a picture is a second grip on a parameter that also has a knob, so that
-  everything also works from the keyboard and for screen readers. A drag is one undo step. Envelopes drag by their
-  points, and each stage bends by a handle in its middle. The wheel bends no line: over a picture it scrolls the view
-  the picture is in, except where a device's page says it turns something.
+  everything also works from the keyboard and for screen readers. A drag is one undo step. Every picture takes a
+  handle the same way (`graph::HandleDrag`, `src/ui/devices/DeviceGraph.h`), as Ableton Live's and FabFilter's do: a
+  press changes no value (it grabs the parameter, as a knob's press does, for Touch and Latch), the drag moves the
+  handle from its value set by hand (not from where its modulation plays it now) as far as the pointer goes, so that a
+  handle taken at its edge doesn't jump to the pointer; an axis the pointer hasn't moved along keeps its value exactly,
+  and a move under a pixel writes nothing. Escape takes the drag back, leaving nothing to redo; it reaches the drag
+  through the window's keys while the mouse is down, so that a picture is no stop for the keyboard's focus and a click
+  on one leaves the keys where they were. A picture with one dot (the Filter's, the motion effects', the Exciter's)
+  puts the dot under the pointer when pressed away from it. Envelopes drag by their points, and each stage bends by a
+  handle in its middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a
+  device's page says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and
+  one undo step until the wheel rests; a press on the picture ends that step, and the wheel turns nothing during a drag.
+- **Analyzers show both channels as one trace,** as Pro-Q's and Ableton's Spectrum's (L+R) do, but each channel
+  analyzed apart and each level the louder of the two, so that a sound in the middle reads as before, and one panned
+  hard or out of phase between the channels reads at its level (an average read it 6 dB low, or cancelled it). What
+  the device plays reaches them through taps that hold a quarter of a second at 192 kHz (`src/devices/core/SampleTap.h`).
 - **Mix and the switch are not in the editor:** they are the device's line's in the column, so that a window of its
   own shows the editor and the line keeps them.
 - **What a sidechain listens to is chosen in the editor** (below).

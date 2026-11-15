@@ -54,6 +54,7 @@ public:
         setDescription ("The curve the sound is driven into, lit as far as the sound reaches, and the wave coming in and going out. "
                         "Drag up or down anywhere on them to turn the drive.");
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        drag.onCancelled = [this] { repaint(); };
     }
 
     ~Display() override
@@ -80,22 +81,24 @@ public:
         paintWave (g, p, tint);
     }
 
-    // A drag up or down turns the drive, as one undo step.
-    void mouseDown (const juce::MouseEvent&) override
+    // A drag up or down turns the drive from where it is set by hand, as one undo step (graph::HandleDrag).
+    void mouseDown (const juce::MouseEvent& e) override
     {
-        drive.beginGesture();
-        startDrive = drive.getValue();
+        if (! e.mods.isPopupMenu())
+            drag.take ({ &drive });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        const auto range = drive.getRange();
+        if (! drag.isTaken())
+            return;
+
         const auto moved = -(float) e.getDistanceFromDragStartY() / std::max (1.0f, (float) getHeight()) * driveRange;
-        drive.setValue (juce::jlimit (range.start, range.end, startDrive + moved));
+        drag.set (0, drag.getStart (0) + moved);
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override { drive.endGesture(); }
+    void mouseUp (const juce::MouseEvent&) override { drag.end(); }
 
     // Under the pointer, what a drag bends lights up: the whole curve.
     void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
@@ -105,7 +108,8 @@ public:
 private:
     DeviceHandle device;
     ParameterHandle drive, shape;
-    float startDrive = 0.0f, reach = 0.0f;
+    graph::HandleDrag drag { *this }; // after the handle it moves
+    float reach = 0.0f;
     bool hovered = false;
     std::vector<float> inputs, outputs; // the newest samples, oldest first
     std::vector<float> lefts, rights;   // pulled from the taps

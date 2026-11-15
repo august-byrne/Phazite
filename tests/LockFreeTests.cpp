@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The engine's lock-free parts raced on real threads: the queue that live notes come through from any thread
-// (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h) and
-// the transport the message thread asks for (Engine.h). Each race runs a fixed count of operations, never for a time, and
-// waits only for what the other threads do, so that it says the same on one core as on many; ThreadSanitizer
-// (linux-tsan) sees each access the threads share. What a thread finds wrong it counts, and the test thread checks the
-// counts once the threads have ended (doctest's checks are the test thread's).
+// (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h),
+// the transport the message thread asks for (Engine.h), and a device's sample tap made as a display listens (SampleTap.h).
+// Each race runs a fixed count of operations, never for a time, and waits only for what the other threads do, so that it
+// says the same on one core as on many; ThreadSanitizer (linux-tsan) sees each access the threads share. What a thread
+// finds wrong it counts, and the test thread checks the counts once the threads have ended (doctest's checks are the test
+// thread's).
 #include "TestHelpers.h"
+#include "devices/core/SampleTap.h"
 #include "engine/core/Engine.h"
 #include "engine/core/EventQueue.h"
 #include "engine/core/Handover.h"
@@ -447,4 +449,77 @@ TEST_CASE (
     player.process (buffer.getArrayOfWritePointers(), 2, blockSize);
     CHECK_FALSE (player.isPlaying());
     CHECK (juce::exactlyEqual (player.getPlayheadBeat(), 7.0));
+}
+
+TEST_CASE ("A device's sample tap raced: made as a display first listens while the audio thread pushes, each pair whole and in order")
+{
+    // The audio thread pushes pairs, a count up the left and its negative on the right, in blocks, a fixed count of them; the
+    // message thread starts listening once it has pushed some (the tap made then, and published to the audio thread through its
+    // atomic pointer) and pulls until the audio thread has ended and nothing is left. What the audio thread pushed while
+    // nobody listened, and what didn't fit, are dropped; whatever is pulled is whole and in order.
+    constexpr int blocks = 20000, blockSize = 64;
+    phazite::devices::SampleTap tap (4096);
+    std::atomic<int> pushedBlocks { 0 };
+    std::atomic<bool> audioDone { false };
+
+    std::thread audio (
+        [&]
+        {
+            std::array<float, blockSize> lefts {}, rights {};
+            auto next = 0;
+
+            for (int block = 0; block < blocks; ++block)
+            {
+                for (int i = 0; i < blockSize; ++i, ++next)
+                {
+                    lefts[(size_t) i] = (float) next;
+                    rights[(size_t) i] = (float) -next;
+                }
+
+                tap.push (lefts.data(), rights.data(), blockSize);
+                pushedBlocks.store (block + 1, std::memory_order_release);
+            }
+
+            audioDone.store (true, std::memory_order_release);
+        });
+
+    // Listening only once the audio thread is pushing, as a display opens while the song plays.
+    while (pushedBlocks.load (std::memory_order_acquire) < 100 && ! audioDone.load (std::memory_order_acquire))
+        std::this_thread::yield();
+
+    tap.setListening (true);
+    std::vector<float> lefts (1024), rights (1024);
+    auto pulled = 0, torn = 0, outOfOrder = 0;
+    auto last = -1.0f;
+
+    for (;;)
+    {
+        const auto done = audioDone.load (std::memory_order_acquire);
+        const auto n = tap.pull (lefts.data(), rights.data(), (int) lefts.size());
+
+        for (int i = 0; i < n; ++i)
+        {
+            if (! juce::exactlyEqual (rights[(size_t) i], -lefts[(size_t) i]))
+                ++torn;
+
+            if (lefts[(size_t) i] <= last)
+                ++outOfOrder;
+
+            last = lefts[(size_t) i];
+        }
+
+        pulled += n;
+
+        if (done && n == 0)
+            break;
+
+        if (n == 0)
+            std::this_thread::yield();
+    }
+
+    audio.join();
+    CHECK (pulled > 0);
+    CHECK (torn == 0);
+    CHECK (outOfOrder == 0);
+    CHECK (last <= (float) (blocks * blockSize - 1));
 }

@@ -89,10 +89,14 @@ void removeModulation (const ParameterHandle&, ModulatorID);
 class ModulationDrag
 {
 public:
-    ~ModulationDrag(); // keeps what it changed
+    ~ModulationDrag(); // keeps what it changed, unless it was taken back
 
     float getStartAmount() const noexcept;
     void setAmount (float); // kept from -1 to 1
+
+    // Takes back all the drag changed, leaving nothing to redo (Escape during the drag, as for a knob's own value:
+    // ParameterHandle::cancelGesture()); it changes nothing more after.
+    void cancel();
 
     struct Impl;
     explicit ModulationDrag (std::unique_ptr<Impl>);

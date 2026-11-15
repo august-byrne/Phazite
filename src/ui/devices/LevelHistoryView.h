@@ -105,10 +105,10 @@ private:
     int pushes = 0;
     DrawnNumbers drawn;
     ParameterHandle* line = nullptr;
+    graph::HandleDrag drag { *this }; // what moves the line
     juce::String lineName, keyName;
     juce::Colour keyColour;
     bool lineLit = false, dragging = false;
-    float startValue = 0.0f;
 
     void describe(); // for screen readers: what it shows, and how its line moves
     graph::LevelAxis getLevels() const;

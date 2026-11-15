@@ -100,6 +100,16 @@ struct ModulatorEditor::Steps : public juce::Component
         setTitle ("Steps");
         setDescription ("Click a step to set it as high as the pointer, or drag across the steps to draw them.");
         setMouseCursor (juce::MouseCursor::CrosshairCursor);
+
+        // Escape: the steps as they were, nothing to redo.
+        drag.onCancelled = [this]
+        {
+            if (gesture != nullptr)
+                gesture->rollBack();
+
+            gesture = nullptr;
+            refresh();
+        };
     }
 
     void refresh()
@@ -183,17 +193,28 @@ struct ModulatorEditor::Steps : public juce::Component
     void mouseDown (const juce::MouseEvent& e) override
     {
         gesture = std::make_unique<SongGesture> (context, "Change Steps");
+        drag.take ({}); // for Escape, which takes the gesture back
         setAt (e.position);
     }
 
-    void mouseDrag (const juce::MouseEvent& e) override { setAt (e.position); }
-    void mouseUp (const juce::MouseEvent&) override { gesture = nullptr; }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag.isTaken())
+            setAt (e.position);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        drag.end();
+        gesture = nullptr;
+    }
 
     ProjectContext& context;
     const ModulatorID modulator;
     std::vector<float> values;
     std::unique_ptr<SongGesture> gesture; // a drag's one undo step
-    int hovered = -1;                     // the step under the pointer, lit
+    graph::HandleDrag drag { *this };
+    int hovered = -1; // the step under the pointer, lit
 };
 
 //==============================================================================
@@ -225,6 +246,13 @@ struct ModulatorEditor::Breakpoints : public juce::Component
                 curves[(size_t) i] = getModulatorParameter (context, modulator, stage + "Curve");
             }
         }
+
+        drag.onCancelled = [this]
+        {
+            dragged.reset();
+            refresh();
+            repaint();
+        };
 
         count = getModulatorParameter (context, modulator, "numActivePoints");
     }
@@ -400,24 +428,19 @@ struct ModulatorEditor::Breakpoints : public juce::Component
             return;
 
         dragged = target;
-        const auto i = target->index;
+        const auto i = (size_t) target->index;
 
+        // Each from its value set by hand (graph::HandleDrag); a point's level first, whose gesture holds the step, which the
+        // time's joins (the start has none).
         if (target->kind == Target::bend)
-        {
-            startCurve = getCurve (i);
-            curves[(size_t) i].beginGesture();
-            return;
-        }
-
-        startLevel = getLevel (i);
-        startTime = getTime (i);
-        levels[(size_t) i].beginGesture(); // its gesture holds the step, which the time's joins (the start has none)
-        times[(size_t) i].beginGesture();
+            drag.take ({ &curves[i] });
+        else
+            drag.take ({ &levels[i], &times[i] });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (! dragged.has_value())
+        if (! dragged.has_value() || ! drag.isTaken())
             return;
 
         const auto area = getArea();
@@ -427,18 +450,17 @@ struct ModulatorEditor::Breakpoints : public juce::Component
 
         if (dragged->kind == Target::bend)
         {
-            const auto range = curves[(size_t) i].getRange();
-            curves[(size_t) i].setValue (juce::jlimit (range.start, range.end, startCurve + getUpward (i) * up));
+            drag.set (0, drag.getStart (0) + getUpward (i) * up);
         }
         else
         {
-            levels[(size_t) i].setValue (juce::jlimit (0.0f, 1.0f, startLevel + up));
+            drag.set (0, juce::jlimit (0.0f, 1.0f, drag.getStart (0) + up));
 
             if (i > 0)
             {
                 const auto along = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth()) * fine;
                 const auto earliest = getTime (i - 1), latest = i < getCount() ? getTime (i + 1) : 1.0f;
-                times[(size_t) i].setValue (juce::jlimit (earliest, std::max (earliest, latest), startTime + along));
+                drag.set (1, juce::jlimit (earliest, std::max (earliest, latest), drag.getStart (1) + along));
             }
         }
 
@@ -447,16 +469,13 @@ struct ModulatorEditor::Breakpoints : public juce::Component
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        if (! dragged.has_value())
-            return;
+        drag.end();
 
-        const auto i = (size_t) dragged->index;
-
-        for (auto* handle : { &curves[i], &times[i], &levels[i] }) // the level's last: its gesture holds the step
-            handle->endGesture();
-
-        dragged.reset();
-        repaint();
+        if (dragged.has_value())
+        {
+            dragged.reset();
+            repaint();
+        }
     }
 
     // Straight again: the line under the pointer, or whose handle it is on. A double-click on a point itself does
@@ -479,9 +498,9 @@ struct ModulatorEditor::Breakpoints : public juce::Component
     const ModulatorID modulator;
     std::array<ParameterHandle, maxPoints + 1> levels, times, curves; // the start's time and curve stay empty: it has none
     ParameterHandle count;
+    graph::HandleDrag drag { *this }; // after the handles it moves
     std::vector<float> shown;
     std::optional<Target> hovered, dragged;
-    float startLevel = 0.0f, startTime = 0.0f, startCurve = 0.0f;
 };
 
 //==============================================================================

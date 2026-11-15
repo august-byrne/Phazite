@@ -149,7 +149,6 @@ for the session, not to the project. Each edit of a parameter is one undo step.
   delay and their saturators in one sample, without a fade: a few samples are skipped or repeated.
 - The curve is small in the dock and its axes crowd quiet levels together, so points far below 0 dB are hard to
   place; points cannot be typed or moved with the keyboard, and no threshold or ratio is shown.
-- A crossover or the low cut's edge jumps to the pointer when it is grabbed off its line.
 - The bands' graph draws the bands as blocks, not the crossovers' slopes, and shows no gain reduction on the spectrum.
 - Monitor takes one reading at each refresh of the display.
 - A drag of a band's level in the graph starts from the level as modulation plays it, and sets that as the value by

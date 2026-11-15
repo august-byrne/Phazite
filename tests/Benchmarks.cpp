@@ -42,6 +42,7 @@
 #include "host/ThreadCpu.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
@@ -50,6 +51,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PreviewLoop.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -59,6 +61,9 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "ui/components/Controls.h"
+#include "ui/devices/EqEditor.h"
+#include "ui/devices/ReverbEditor.h"
+#include "ui/devices/SamplerEditor.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -1648,4 +1653,76 @@ TEST_CASE ("Benchmark: starting up, and the window at rest" * doctest::test_suit
            << " |\n";
     MESSAGE (report);
     screen = nullptr;
+}
+
+TEST_CASE ("Benchmark: a device's graph repainted, its curve kept or worked out again" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // Known bug 130: the EQ worked its curves out at each repaint (30 a second while its analyzer moves), the reverb its tail's
+    // shape at each of its own. Each graph painted 200 times into a software image (paintTime()): with its values as they
+    // were, as it repaints now that it keeps its curve, and with a value changed before each paint, as every repaint worked
+    // it out before. And the sampler's sound drawn, a repaint as a voice plays makes it.
+    phazite::test::TestSong song;
+    constexpr int paints = 200;
+    juce::String report = "| Graph | Kept | Worked out again |\n|---|---|---|\n";
+
+    const auto measure = [&report] (const juce::String& name, juce::Component& graph, const std::function<void (int)>& change)
+    {
+        auto kept = 0.0, again = 0.0;
+
+        for (int i = 0; i < paints; ++i)
+        {
+            change (-1); // as it was
+            kept += paintTime (graph, graph.getLocalBounds());
+        }
+
+        for (int i = 0; i < paints; ++i)
+        {
+            change (i);
+            again += paintTime (graph, graph.getLocalBounds());
+        }
+
+        report << "| " << name << " | " << milliseconds (kept / paints, 3) << " | " << milliseconds (again / paints, 3) << " |\n";
+    };
+
+    {
+        const auto id = addDevice (*phazite::findSong (song.context), song.firstTrack, dev::Equalizer::typeID);
+        phazite::ui::EqEditor editor (phazite::getDeviceHandle (song.context, id));
+        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto gain = phazite::getParameter (song.context, { id, "band4Gain" });
+        measure ("EQ", editor.getGraph(),
+                 [&] (int i)
+                 {
+                     gain.setValue (i < 0 ? 0.0f : (i % 2 == 0 ? 1.0f : 2.0f));
+                     editor.refresh();
+                 });
+    }
+
+    {
+        const auto id = addDevice (*phazite::findSong (song.context), song.firstTrack, dev::Reverb::typeID);
+        phazite::ui::ReverbEditor editor (phazite::getDeviceHandle (song.context, id));
+        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto decay = phazite::getParameter (song.context, { id, "decay" });
+        measure ("Reverb", editor.getGraph(),
+                 [&] (int i)
+                 {
+                     decay.setValue (i < 0 ? 2.0f : (i % 2 == 0 ? 2.5f : 3.0f));
+                     editor.refresh();
+                 });
+    }
+
+    {
+        const auto id = song.setInstrument (song.firstTrack, dev::Sampler::typeID);
+        phazite::ui::SamplerEditor editor (phazite::getDeviceHandle (song.context, id));
+        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto start = phazite::getParameter (song.context, { id, "start" });
+        measure ("Sampler's sound", editor.getSampleView(),
+                 [&] (int i)
+                 {
+                     start.setValue (i < 0 ? 0.0f : (i % 2 == 0 ? 0.1f : 0.2f));
+                     editor.refresh();
+                 });
+    }
+
+    MESSAGE (report);
 }

@@ -43,6 +43,17 @@ public:
         }
 
         readValues();
+
+        // A drag moves the dot, the cutoff with it sideways and the resonance up and down, as one undo step.
+        dot.setDrag ({ &cutoff, [this] (float hertz) { return getFrequencies().xFor (hertz); },
+                       [this] (float x) { return (float) getFrequencies().frequencyAt (x); } },
+                     { &resonance, [this] (float amount) { return getCurveArea().getBottom() - amount * getCurveArea().getHeight(); },
+                       [this] (float y) { return (getCurveArea().getBottom() - y) / std::max (1.0f, getCurveArea().getHeight()); } },
+                     [this]
+                     {
+                         readValues();
+                         repaint();
+                     });
     }
 
     ~Graph() override
@@ -103,26 +114,11 @@ public:
                                                                   : juce::String());
     }
 
-    // A drag moves the dot, the cutoff with it sideways and the resonance up and down, as one undo step.
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        cutoff.beginGesture();
-        resonance.beginGesture();
-        dragTo (e.position);
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override { dragTo (e.position); }
-
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        resonance.endGesture();
-        cutoff.endGesture();
-    }
-
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = drive.getRange();
-        wheelGesture.turn (drive, juce::jlimit (range.start, range.end, drive.getValue() + (wheel.deltaY > 0.0f ? driveStep : -driveStep)));
+        wheelGesture.turn (drive,
+                           juce::jlimit (range.start, range.end, drive.getBaseValue() + (wheel.deltaY > 0.0f ? driveStep : -driveStep)));
         readValues();
         repaint();
     }
@@ -133,9 +129,9 @@ private:
     std::vector<float> values;
     ParameterHandle cutoff, resonance, drive;
     graph::SpectrumTrace input, output;
-    graph::WheelGesture wheelGesture; // after the handles it turns
     DrawnNumbers drawn;
-    GraphDot dot { *this, [this] { return getDotPosition(); } };
+    GraphDot dot { *this, [this] { return getDotPosition(); } }; // after the handles it drags
+    graph::WheelGesture wheelGesture { dot.getDrag() };          // and the dot, whose press ends it
 
     double getSampleRate() const
     {
@@ -148,16 +144,6 @@ private:
         for (size_t i = 0; i < parameters.size(); ++i)
             if (parameters[i].isValid())
                 values[i] = parameters[i].getValue();
-    }
-
-    void dragTo (juce::Point<float> position)
-    {
-        const auto area = getCurveArea();
-        const auto cutoffRange = cutoff.getRange();
-        cutoff.setValue (juce::jlimit (cutoffRange.start, cutoffRange.end, (float) getFrequencies().frequencyAt (position.x)));
-        resonance.setValue (juce::jlimit (0.0f, 1.0f, (area.getBottom() - position.y) / std::max (1.0f, area.getHeight())));
-        readValues();
-        repaint();
     }
 
     void tick() override

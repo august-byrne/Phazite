@@ -61,6 +61,11 @@ juce::String formatDecibels (float decibels);
 // level tilted up 4.5 dB an octave around 1 kHz, as analyzers show music, so that a mix looks about flat; each pixel the
 // loudest of the frequencies it spans, and each level falling 40 dB a second, as Pro-Q's and SPAN's do by default, so that
 // a clap flashes up and falls away within a beat or two.
+//
+// One trace for both channels, as Pro-Q's and Ableton's Spectrum's (L+R) are, but each channel analyzed apart and each level
+// the louder of the two (known bug 120): a sound in the middle reads as a sum's average does, at its level, and a sound panned
+// hard reads at its level too, where an average read it 6 dB low, and one out of phase between the channels shows, where an
+// average cancelled it to nothing.
 class SpectrumTrace
 {
 public:
@@ -68,8 +73,8 @@ public:
 
     void setSampleRate (double);
 
-    // Takes the newest samples (both channels, averaged), analyzing them as they come; call at each refresh, then update(),
-    // which shows them and returns whether the trace moved.
+    // Takes the newest samples (each channel apart), analyzing them as they come; call at each refresh, then update(), which
+    // shows them and returns whether the trace moved.
     void pull (devices::StereoTap&);
     void pull (devices::SampleTap&);
     bool update();
@@ -82,8 +87,10 @@ public:
     static constexpr float fallPerSecond = 40.0f; // decibels
 
 private:
-    devices::Spectrum spectrum;
+    devices::Spectrum left, right;
     std::vector<float> lefts, rights;
+
+    void add (int numPulled);
 };
 
 //==============================================================================
@@ -110,18 +117,88 @@ private:
 };
 
 //==============================================================================
+// A drag of a graph's handles, which every graph's drag goes through, so that each takes a handle the same way (known bugs
+// 116, 117 and 140):
+//   - A press takes the handles it moves (take()), each from its value set by hand (ParameterHandle::getBaseValue()), not from
+//     the value it plays with its modulation, which the graph draws. It begins their gesture, as a knob's press does, so that
+//     a handle held still while the song plays grabs its parameter in Touch and Latch; but it changes no value, and a gesture
+//     that changed nothing leaves no undo step and no unsaved change.
+//   - The drag moves each from there by as far as the pointer has gone since the press (moveAlong()), so that a handle taken
+//     at its edge doesn't jump to the pointer, as Ableton Live's and FabFilter's handles don't; an axis the pointer hasn't
+//     moved along keeps its value exactly, and a value is written only when it changes (a tremor under a pixel writes
+//     nothing). The drag is one undo step, named after the first handle taken, which the others join; the mouse going up
+//     keeps it (end()).
+//   - Escape in the middle takes back all it did, leaving nothing to redo, as in Ableton Live and most DAWs (and as
+//     ParameterHandle::cancelGesture() does for a knob), and the drag does nothing more until the mouse goes up. It hears
+//     Escape through a key listener on the graph's window, from the press until the mouse goes up, so that a graph is no
+//     stop for the keyboard's focus; and a click on one leaves the keys where they were (setMouseClickGrabsKeyboardFocus()).
+//   - The graph's wheels (WheelGesture) are its too: a press ends a turn of the wheel that is still one undo step, so that
+//     the drag is a step of its own, and the wheel turns nothing while a drag is taken.
+// The handles are the graph's, and must outlive the drag (make it a member declared after them).
+class WheelGesture;
+
+class HandleDrag : private juce::KeyListener
+{
+public:
+    explicit HandleDrag (juce::Component& graph);
+    ~HandleDrag() override;
+
+    // A press takes these handles (none, for a drag that changes the song only as it ends, which Escape still takes back).
+    void take (std::vector<ParameterHandle*>);
+    bool isTaken() const noexcept { return taken; } // from take() until end() or Escape
+    float getStart (size_t handle) const;           // its value set by hand as the press took it
+
+    // A value for a handle taken, kept to its range; nothing is written when it is the value the handle has.
+    void set (size_t handle, float value);
+
+    // A handle moved from its value set by hand at the press, along one of the graph's axes: from where that value is
+    // (placeOf, in the graph's pixels), as far as the pointer has moved along it, and back to a value (valueAt); moved by
+    // nothing, it keeps its value as the press took it, exactly.
+    void moveAlong (size_t handle, float moved, const std::function<float (float value)>& placeOf,
+                    const std::function<float (float place)>& valueAt);
+
+    void end();    // the mouse went up: keeps what the drag did
+    bool cancel(); // Escape: takes it back; whether there was a drag to take back
+
+    // After Escape took the drag back, for the graph to show the values from before (and forget what it was dragging).
+    std::function<void()> onCancelled;
+
+private:
+    friend class WheelGesture;
+
+    juce::Component& graph;
+    juce::Component::SafePointer<juce::Component> window; // whose keys it hears while a drag is taken
+    std::vector<ParameterHandle*> handles;
+    std::vector<float> starts;
+    std::vector<WheelGesture*> wheels;
+    bool taken = false;
+
+    void listen (bool shouldListen);
+    void letGo(); // forgets the handles, and stops listening
+    bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+
+    JUCE_DECLARE_NON_COPYABLE (HandleDrag)
+};
+
+//==============================================================================
 // The wheel turning a parameter, such as an EQ band's Q, as one undo step until it rests for a moment. The handle turned
-// is the caller's, and must outlive this (make it a member declared after the handles).
+// is the caller's, and must outlive this (make it a member declared after the handles). A turn starts from the value set by
+// hand (ParameterHandle::getBaseValue()), as a drag does. It is its graph's, whose drag (HandleDrag, declared before it) ends
+// it as a press takes a handle, and while a drag is taken it turns nothing.
 class WheelGesture : private juce::Timer
 {
 public:
+    explicit WheelGesture (HandleDrag& graphsDrag);
     ~WheelGesture() override;
 
     void turn (ParameterHandle&, float newValue);
     void end();
 
 private:
+    HandleDrag& drag;
     ParameterHandle* turning = nullptr;
     void timerCallback() override { end(); }
+
+    JUCE_DECLARE_NON_COPYABLE (WheelGesture)
 };
 } // namespace phazite::ui::graph

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The EQ's editor (roadmap step 1.6, devices/eq/Equalizer.h): its curve over an analyzer of what it plays (and, fainter, what
 // comes in; DeviceGraph.h's SpectrumTrace, which shows short sounds too), with a dot for each band to drag (frequency and
-// gain, as one undo step; the wheel changes Q; a double-click turns the band on or off; a right-click picks its shape),
-// which the pointer over it shows can be grabbed, and beside it the selected band's controls and the output's, which work
-// from the keyboard too. Its mix is its row's in the Devices view.
+// gain, as one undo step, from where it was taken, Escape taking it back: graph::HandleDrag; the wheel over a dot changes its
+// Q; a double-click turns the band on or off; a right-click picks its shape), which the pointer over it shows can be grabbed,
+// and beside it the selected band's controls and the output's, which work from the keyboard too. Its mix is its row's in the
+// Devices view.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -49,6 +50,9 @@ public:
 
     // Brings the curve, the controls and the analyzer up to date; the ticker does it 30 times a second.
     void refresh();
+
+    // How many times the graph has worked its curves out: once for each change of what they show, not at each repaint.
+    int getCurvesWorkedOut() const noexcept;
 
 private:
     class Graph;

@@ -15,11 +15,13 @@
 // Under the pointer, what a drag takes lights up, ringed in the text colour as the other graphs' handles are, the pointer
 // shows which way it moves (a hand for a point, up and down for an end point or a handle), and its tooltip, which the hint
 // bar shows, says what it does (the owner, 2026-11-10: "it should be obvious that you are able to do this gesture"). Each
-// change is one undo step. Its tools go under it
+// change is one undo step; a drag moves its handles from their values set by hand and Escape takes it back
+// (graph::HandleDrag). Its tools go under it
 // (DynamicsCurveTools): its menu (shapes to start from, copy and paste, from any device's curve to any other's, flip,
 // smooth, reset), Freeze (no editing) and Snap, the editor's for the session.
 #pragma once
 
+#include "DeviceGraph.h"
 #include "devices/dynamics/DynamicsCurve.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/theme/DesignTokens.h"
@@ -99,8 +101,8 @@ private:
     float heard = -120.0f;
     bool frozen = false;
     std::optional<Target> hovered, dragged;
-    ParameterHandle firstDragged, secondDragged; // what a drag moves
-    float startAcross = 0.0f, startUp = 0.0f;
+    ParameterHandle firstDragged, secondDragged; // what a drag moves,
+    graph::HandleDrag drag { *this };            // each from its value set by hand
 
     juce::Rectangle<float> getArea() const;
     float acrossAt (float x) const;

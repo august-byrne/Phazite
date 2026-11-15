@@ -50,8 +50,9 @@ to the other.
 A graph from 20 Hz to 20 kHz and from -24 to +24 dB shows the EQ's curve, the selected band's own curve filled in its
 colour, the spectrum of what the EQ plays and, fainter behind it, the spectrum of what comes in. Each band has a dot:
 
-- drag a dot to move the band's frequency and, for a bell or a shelf, its gain, as one undo step;
-- the wheel changes the Q of the band under the pointer, or of the selected band elsewhere on the graph;
+- drag a dot to move the band's frequency and, for a bell or a shelf, its gain, as one undo step: it moves as far as
+  the pointer, from where it is set (a click changes nothing), and Escape takes the drag back;
+- the wheel over a dot changes its band's Q, a turn of several notches one undo step; elsewhere it scrolls the view;
 - a double-click turns the band on or off;
 - a right-click offers the band's type, a cut's slope, and Turn On or Turn Off.
 
@@ -71,10 +72,9 @@ shrinks to fit the dock, and it never wraps or turns into pages.
 - Cuts are 12 to 48 dB per octave: no 6 or 96 dB slopes, and no tilt or band-pass shape.
 - No band solo (listening to one band alone) and no automatic gain.
 - Turning a band on or off, or changing its type or slope, takes effect at once, without a fade.
-- The analyzer has no settings (range, tilt, freeze), and shows the average of the two channels, so sound that is only
-  in the sides doesn't show.
-- A dot jumps to the pointer when it is grabbed off its centre, and has no fine drag.
-- Each step of the wheel on a band's Q is an undo step of its own.
+- The analyzer has no settings (range, tilt, freeze), and shows both channels as one trace, each level the louder
+  channel's: no left, right, mid or side traces of their own.
+- A dot has no fine drag.
 
 ## In the code
 

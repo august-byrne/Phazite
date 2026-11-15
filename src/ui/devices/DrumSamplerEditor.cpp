@@ -463,6 +463,13 @@ public:
     {
         setTitle ("Sound");
         setDescription (soundHint);
+
+        drag.onCancelled = [this]
+        {
+            dragged = -1;
+            show (shownPad);
+            repaint();
+        };
     }
 
     // The pad shown, its sound and its values: drawn again when one of them changes.
@@ -656,60 +663,47 @@ public:
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (-1); }
 
-    // The drag moves the handle the press takes.
+    // The press takes the nearest handle and changes nothing; the drag moves it from its value set by hand as far as the
+    // pointer goes (graph::HandleDrag).
     void mouseDown (const juce::MouseEvent& e) override
     {
-        dragged = findTarget (e.position);
+        dragged = e.mods.isPopupMenu() ? -1 : findTarget (e.position);
 
         if (dragged >= 0)
         {
-            handles[(size_t) dragged].beginGesture();
-            mouseDrag (e);
+            drag.take ({ &handles[(size_t) dragged] });
+            pressedX = getHandleX (handleFields[(size_t) dragged]);
         }
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (dragged < 0)
+        if (dragged < 0 || ! drag.isTaken())
             return;
 
         const auto area = getArea();
-        const auto at = secondsAt (e.position.x, area);
-        auto& handle = handles[(size_t) dragged];
-        const auto range = handle.getRange();
-        auto value = 0.0f;
-
         const auto field = handleFields[(size_t) dragged];
+        const auto x = pressedX + (float) e.getDistanceFromDragStartX();
+        auto value = drag.getStart (0) + valueAt (field, x) - valueAt (field, pressedX);
 
-        if (field == Field::start)
+        if (field == Field::hold)
         {
-            value = (float) (at / std::max (0.001, getLength()));
-        }
-        else if (field == Field::attack)
-        {
-            value = (float) ((at - getStartSeconds()) * 1000.0);
-        }
-        else if (field == Field::hold)
-        {
-            // Dragged to the end, it plays the whole sound.
-            value = e.position.x >= area.getRight() - 0.02f * area.getWidth() ? DrumSampler::wholeSound
-                                                                              : (float) ((at - getAttackEnd()) * 1000.0);
+            // Dragged to the end, it plays the whole sound; from there, from where the sound's end shows it.
+            if (x >= area.getRight() - 0.02f * area.getWidth())
+                value = DrumSampler::wholeSound;
+            else if (drag.getStart (0) >= DrumSampler::wholeSound)
+                value = valueAt (field, x);
+
             value = std::min (value, DrumSampler::wholeSound);
         }
-        else if (field == Field::decay)
-        {
-            value = (float) ((at - getHoldEnd()) * 1000.0);
-        }
 
-        handle.setValue (juce::jlimit (range.start, range.end, value));
+        drag.set (0, value);
         show (shownPad); // its handles where it is now, for the next press too
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (dragged >= 0)
-            handles[(size_t) dragged].endGesture();
-
+        drag.end();
         dragged = -1;
         hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : -1);
     }
@@ -724,8 +718,10 @@ private:
     float playhead = -1.0f;
     std::array<ParameterHandle, handleFields.size()> handles;
     std::array<ParameterHandle, DrumSampler::fieldsPerPad> others; // by field: reverse, tune and fine
+    graph::HandleDrag drag { *this };                              // after the handles it moves
     std::array<float, handleFields.size() + 2> drawn {};
     int dragged = -1, hovered = -1; // the handle dragged, and the one a press under the pointer takes, by their places in handleFields
+    float pressedX = 0.0f;          // where the handle dragged was as the press took it
 
     juce::Rectangle<float> getArea() const { return getLocalBounds().toFloat().reduced (2.0f); }
 
@@ -755,6 +751,26 @@ private:
     {
         const auto semitones = (double) drawn[handleFields.size()] + drawn[handleFields.size() + 1] / 100.0;
         return soundSeconds / std::exp2 (semitones / 12.0);
+    }
+
+    // A handle's value for a place across the sound, the others as they are.
+    float valueAt (Field field, float x) const
+    {
+        const auto at = secondsAt (x, getArea());
+
+        if (field == Field::start)
+            return (float) (at / std::max (0.001, getLength()));
+
+        if (field == Field::attack)
+            return (float) ((at - getStartSeconds()) * 1000.0);
+
+        if (field == Field::hold)
+            return (float) ((at - getAttackEnd()) * 1000.0);
+
+        if (field == Field::decay)
+            return (float) ((at - getHoldEnd()) * 1000.0);
+
+        return 0.0f;
     }
 
     bool isWhole() const { return getValue (Field::hold) >= DrumSampler::wholeSound; }

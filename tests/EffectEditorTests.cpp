@@ -126,22 +126,37 @@ TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves acros
     const auto frequencyAt = [area] (int x) { return 20.0 * std::pow (1000.0, ((double) x - area.getX()) / area.getWidth()); };
     const auto resonanceAt = [area] (int y) { return (area.getBottom() - (double) y) / area.getHeight(); };
 
-    // A drag to the pixel nearest 1 kHz at half the resonance, and one nearest 100 Hz near the top: each lands on the value
-    // at that pixel, and the dot is drawn under the pointer.
+    // A drag of the dot toward the pixel nearest 1 kHz at half the resonance, and one nearest 100 Hz near the top: each moves
+    // the dot as far as the pointer went (from where the dot was: known bug 116), and lands on the values where it is drawn.
+    // A press away from the dot puts it under the pointer.
     for (const auto& [hz, resonance] : { std::pair (1000.0, 0.5), std::pair (100.0, 0.9) })
     {
         CAPTURE (hz);
         const juce::Point<int> target (juce::roundToInt (area.getX() + std::log (hz / 20.0) / std::log (1000.0) * area.getWidth()),
                                        juce::roundToInt (area.getBottom() - resonance * area.getHeight()));
         phazite::test::Mouse mouse (graph);
-        mouse.press (editor.getDotPosition().roundToInt());
+        const auto dot = editor.getDotPosition();
+        const auto pressed = dot.roundToInt();
+        mouse.press (pressed);
         mouse.dragTo (target);
         mouse.release();
+        mouse.pause();
+        const auto landed = dot + (target - pressed).toFloat();
 
-        CHECK (song.valueOf ("cutoff") == doctest::Approx (frequencyAt (target.x)).epsilon (0.002));
+        CHECK (song.valueOf ("cutoff")
+               == doctest::Approx (20.0 * std::pow (1000.0, (landed.x - area.getX()) / area.getWidth())).epsilon (0.002));
         CHECK (song.valueOf ("cutoff") == doctest::Approx (hz).epsilon (0.03)); // a pixel is under 3 % of a frequency
-        CHECK (song.valueOf ("resonance") == doctest::Approx (resonanceAt (target.y)).epsilon (0.002));
-        CHECK (editor.getDotPosition().getDistanceFrom (target.toFloat()) < 0.5f);
+        CHECK (song.valueOf ("resonance") == doctest::Approx ((area.getBottom() - landed.y) / area.getHeight()).epsilon (0.002));
+        CHECK (editor.getDotPosition().getDistanceFrom (landed) < 0.05f);
+
+        // Pressed away from it, and let go: the dot under the pointer, at the values there.
+        const juce::Point<int> away (juce::roundToInt (area.getX() + area.getWidth() * 0.2f),
+                                     juce::roundToInt (area.getBottom() - area.getHeight() * 0.3f));
+        mouse.press (away);
+        mouse.release();
+        mouse.pause();
+        CHECK (song.valueOf ("cutoff") == doctest::Approx (frequencyAt (away.x)).epsilon (0.002));
+        CHECK (song.valueOf ("resonance") == doctest::Approx (resonanceAt (away.y)).epsilon (0.002));
     }
 }
 

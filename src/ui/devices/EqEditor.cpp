@@ -4,6 +4,7 @@
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <array>
 #include <cmath>
 #include <iterator>
 
@@ -80,8 +81,13 @@ public:
         : editor (e)
     {
         setTitle ("EQ curve");
-        setDescription ("Drag a band's dot to move its frequency and gain; the wheel changes its Q, a double-click turns it on or "
-                        "off, and a right-click picks its shape");
+        setDescription ("Drag a band's dot to move its frequency and gain; the wheel over it changes its Q, a double-click turns it "
+                        "on or off, and a right-click picks its shape");
+
+        for (int band = 0; band < Eq::numBands; ++band)
+            qs[(size_t) band] = editor.device.getParameter (getInfo (indexOf (band, Eq::q)).id);
+
+        drag.onCancelled = [this] { editor.refresh(); };
     }
 
     float xFor (double frequency) const
@@ -127,7 +133,6 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& palette = getPalette (*this);
-        const auto width = (float) getWidth();
         g.setColour (palette.background);
         g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
 
@@ -142,34 +147,19 @@ public:
         editor.output.paint (g, frequencies, levels, tint.withAlpha (GraphTint::spectrumFill * 1.5f),
                              tint.withAlpha (GraphTint::spectrumLine));
 
-        // The selected band's own curve, filled to 0 dB, and the curve of every band together.
-        const auto sampleRate = editor.getSampleRate();
-        const auto zero = yForGain (0.0);
-        juce::Path band, curve;
-        band.startNewSubPath (0.0f, zero);
-
-        for (auto x = 0.0f; x <= width; x += 1.5f)
-        {
-            const auto frequency = frequencyFor (x);
-            const auto own = toDecibels (Eq::getBandMagnitude (editor.values, editor.selectedBand, frequency, sampleRate));
-            const auto total = toDecibels (Eq::getMagnitude (editor.values, frequency, sampleRate));
-            band.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, own)));
-
-            if (x <= 0.0f)
-                curve.startNewSubPath (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
-            else
-                curve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
-        }
-
-        band.lineTo (width, zero);
-        band.closeSubPath();
+        // The selected band's own curve, filled to 0 dB, and the curve of every band together, worked out again only when
+        // they change (known bug 130): not at each of the analyzer's 30 repaints a second.
+        updateCurves();
         g.setColour (getBandColour (editor.selectedBand).withAlpha (GraphTint::partCurve));
-        g.fillPath (band);
+        g.fillPath (bandCurve);
         g.setColour (palette.text);
-        g.strokePath (curve, juce::PathStrokeType (GraphTint::curveWidth));
+        g.strokePath (wholeCurve, juce::PathStrokeType (GraphTint::curveWidth));
 
         paintDots (g, palette);
     }
+
+    // How many times its curves were worked out, for the tests.
+    int getCurvesWorkedOut() const noexcept { return curvesWorkedOut; }
 
     // Over a dot, the pointer shows it can be grabbed, and the dot lights up.
     void mouseMove (const juce::MouseEvent& e) override { hover (findBandAt (e.position)); }
@@ -190,33 +180,34 @@ public:
             return;
         }
 
-        // Its frequency and, for a shelf or a bell, its gain: one gesture, one undo step.
+        // Its frequency and, for a shelf or a bell, its gain, from where they are set by hand: one undo step.
         dragFrequency = editor.device.getParameter (getInfo (indexOf (band, Eq::frequency)).id, "Move Band " + juce::String (band + 1));
         dragGain = editor.device.getParameter (getInfo (indexOf (band, Eq::gain)).id);
-        dragFrequency.beginGesture();
-
-        if (hasGain (juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)])))
-            dragGain.beginGesture();
+        draggingGain = hasGain (juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)]));
+        drag.take (draggingGain ? std::vector<ParameterHandle*> { &dragFrequency, &dragGain }
+                                : std::vector<ParameterHandle*> { &dragFrequency });
     }
 
+    // The dot moves as far as the pointer: a dot taken at its edge doesn't jump to the pointer.
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (! dragFrequency.isInGesture())
+        if (! drag.isTaken())
             return;
 
-        dragFrequency.setValue ((float) juce::jlimit (lowestFrequency, highestFrequency, frequencyFor (e.position.x)));
+        const auto moved = e.getOffsetFromDragStart().toFloat();
+        drag.moveAlong (
+            0, moved.x, [this] (float hertz) { return xFor (hertz); },
+            [this] (float x) { return (float) juce::jlimit (lowestFrequency, highestFrequency, frequencyFor (x)); });
 
-        if (dragGain.isInGesture())
-            dragGain.setValue ((float) juce::jlimit (-gainRange, gainRange, gainFor (e.position.y)));
+        if (draggingGain)
+            drag.moveAlong (
+                1, moved.y, [this] (float decibels) { return yForGain (decibels); },
+                [this] (float y) { return (float) juce::jlimit (-gainRange, gainRange, gainFor (y)); });
 
         editor.refresh();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        dragGain.endGesture();
-        dragFrequency.endGesture();
-    }
+    void mouseUp (const juce::MouseEvent&) override { drag.end(); }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
@@ -228,16 +219,21 @@ public:
         }
     }
 
+    // Over a dot, the wheel narrows or widens its band, as one undo step until it rests (known bug 118); elsewhere it is the
+    // view's, to scroll it.
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
-        auto band = findBandAt (e.position);
+        const auto band = drag.isTaken() ? -1 : findBandAt (e.position);
 
         if (band < 0)
-            band = editor.selectedBand;
+        {
+            juce::Component::mouseWheelMove (e, wheel);
+            return;
+        }
 
         const auto& info = getInfo (indexOf (band, Eq::q));
-        auto q = editor.device.getParameter (info.id);
-        q.setValue (devices::constrain (info, q.getValue() * std::pow (2.0f, 2.0f * wheel.deltaY)));
+        auto& q = qs[(size_t) band];
+        qWheel.turn (q, devices::constrain (info, q.getBaseValue() * std::pow (2.0f, 2.0f * wheel.deltaY)));
         editor.refresh();
     }
 
@@ -246,7 +242,48 @@ public:
 private:
     EqEditor& editor;
     ParameterHandle dragFrequency, dragGain;
+    std::array<ParameterHandle, Eq::numBands> qs; // each band's, which the wheel turns
+    graph::HandleDrag drag { *this };             // after the handles it moves
+    graph::WheelGesture qWheel { drag };          // and turns
+    bool draggingGain = false;
     int hovered = -1; // the band whose dot the pointer is over
+    juce::Path bandCurve, wholeCurve;
+    std::vector<float> curvesFor; // what they were worked out for
+    int curvesWorkedOut = 0;
+
+    void updateCurves()
+    {
+        const auto sampleRate = editor.getSampleRate();
+        const auto width = (float) getWidth();
+        auto now = editor.values;
+        now.insert (now.end(), { (float) editor.selectedBand, (float) sampleRate, width, (float) getHeight() });
+
+        if (now == curvesFor)
+            return;
+
+        curvesFor = std::move (now);
+        ++curvesWorkedOut;
+        const auto zero = yForGain (0.0);
+        bandCurve.clear();
+        wholeCurve.clear();
+        bandCurve.startNewSubPath (0.0f, zero);
+
+        for (auto x = 0.0f; x <= width; x += 1.5f)
+        {
+            const auto frequency = frequencyFor (x);
+            const auto own = toDecibels (Eq::getBandMagnitude (editor.values, editor.selectedBand, frequency, sampleRate));
+            const auto total = toDecibels (Eq::getMagnitude (editor.values, frequency, sampleRate));
+            bandCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, own)));
+
+            if (x <= 0.0f)
+                wholeCurve.startNewSubPath (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
+            else
+                wholeCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
+        }
+
+        bandCurve.lineTo (width, zero);
+        bandCurve.closeSubPath();
+    }
 
     void hover (int band)
     {
@@ -455,6 +492,11 @@ juce::Component& EqEditor::getGraph()
 juce::Point<float> EqEditor::getDotPosition (int band) const
 {
     return graph->getDot (band);
+}
+
+int EqEditor::getCurvesWorkedOut() const noexcept
+{
+    return graph->getCurvesWorkedOut();
 }
 
 double EqEditor::getSampleRate() const

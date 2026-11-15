@@ -155,7 +155,8 @@ Swap tries sounds from the [browser](../browser.md) on the selected pad in place
 - Sounds read from floating-point files aren't checked for values that aren't numbers (known bug 35 in
   [known-bugs.md](../../known-bugs.md)).
 - In the editor a pad sounds when the mouse button is let go, not when it is pressed, and always at full velocity.
-- A press anywhere on the sound's drawing takes the nearest envelope handle and moves it to the pointer.
+- A press anywhere on the sound's drawing takes the nearest envelope handle, however far it is (a drag then moves it
+  from where it is, as far as the pointer goes).
 - Pads light as they play but have no level meters.
 
 ## In the code

@@ -36,6 +36,7 @@ public:
                         "wide as its width: drag across the disc to open or close it, or turn the wheel. Under it, how alike the "
                         "two sides are, from -1 to +1; below 0 the mono sum loses sound.");
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        drag.onCancelled = [this] { repaint(); };
     }
 
     ~Image() override
@@ -70,36 +71,36 @@ public:
         paintMeter (g, p, tint, meter);
     }
 
-    // The fan's edge follows the pointer, at its angle from straight up (as wide as the fan opens), as one undo step; the
-    // wheel opens or closes it a step at a time.
+    // The fan's edge turns as far as the pointer turns around the disc's centre (its angle from straight up is as wide as the
+    // fan opens), from the width set by hand, as one undo step; a press changes nothing (graph::HandleDrag). The wheel opens
+    // or closes it a step at a time.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        wheel.end(); // a step of its own, not the wheel's
-
         if (e.mods.isPopupMenu())
             return;
 
-        width.beginGesture();
-        mouseDrag (e);
+        drag.take ({ &width });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        if (! width.isInGesture())
+        if (! drag.isTaken())
             return;
 
-        const auto [centre, radius] = getDisc();
-        const auto angle = std::abs (std::atan2 (e.position.x - centre.x, std::max (0.0f, centre.y - e.position.y)));
-        const auto range = width.getRange();
-        width.setValue (juce::jlimit (range.start, range.end, angle / juce::MathConstants<float>::halfPi * 2.0f));
+        const auto turned = getAngle (e.position) - getAngle (e.mouseDownPosition);
+        drag.set (0, juce::exactlyEqual (turned, 0.0f) ? drag.getStart (0)
+                                                       : drag.getStart (0) + turned / juce::MathConstants<float>::halfPi * 2.0f);
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    // A place's angle from straight up over the disc's centre, either way: 0 straight up, a quarter of a turn flat.
+    float getAngle (juce::Point<float> at) const
     {
-        if (width.isInGesture())
-            width.endGesture();
+        const auto centre = getDisc().first;
+        return std::abs (std::atan2 (at.x - centre.x, std::max (0.0f, centre.y - at.y)));
     }
+
+    void mouseUp (const juce::MouseEvent&) override { drag.end(); }
 
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& details) override
     {
@@ -109,7 +110,7 @@ public:
             ! juce::approximatelyEqual (step, 0.0f))
         {
             const auto range = width.getRange();
-            wheel.turn (width, juce::jlimit (range.start, range.end, width.getValue() + step));
+            wheel.turn (width, juce::jlimit (range.start, range.end, width.getBaseValue() + step));
         }
     }
 
@@ -130,7 +131,8 @@ private:
 
     DeviceHandle device;
     ParameterHandle width;
-    graph::WheelGesture wheel; // after the handle it turns
+    graph::HandleDrag drag { *this };   // after the handle it moves
+    graph::WheelGesture wheel { drag }; // and turns
     std::vector<float> lefts, rights;
     std::vector<Dot> outputs, inputs;
     float correlation = StereoExpander::noReading, inputCorrelation = StereoExpander::noReading;

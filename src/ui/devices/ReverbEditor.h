@@ -2,9 +2,9 @@
 // The reverb's editor (devices/reverb/Reverb.h), as FabFilter's Pro-R shows its decay: a map of the tail, time across and
 // pitch up, each pitch lit until it has faded by 60 dB: long in the bass, shorter in the treble past the damping, after the
 // pre-delay's gap, and nothing below the low cut, so its slanted wedge says how the space sounds. Hits drift into it and fade
-// as they play. Its edges drag, each one undo step: the wedge's end for the decay, the gap for the pre-delay, the slant's
-// corner for the damping and the floor for the low cut; the one under the pointer lights up, and the pointer says which way
-// it moves. Its top names the mode, a room or a plate, and what a plate holds
+// as they play. Its edges drag, each one undo step, from where they were taken (graph::HandleDrag; Escape takes a drag back):
+// the wedge's end for the decay, the gap for the pre-delay, the slant's corner for the damping and the floor for the low cut;
+// the one under the pointer lights up, and the pointer says which way it moves. Its top names the mode, a room or a plate, and what a plate holds
 // back of its Diffusion and Size where the Decay is too short for them. Then its Decay and Size, large, its Mode with how
 // the sound goes in, and its tone.
 #pragma once
@@ -35,6 +35,9 @@ public:
 
     // Brings the map up to date; the ticker does it.
     void refresh();
+
+    // How many times the map has worked the tail's shape out: once for each change of the values it shows, not at each repaint.
+    int getShapesWorkedOut() const noexcept;
 
 private:
     class Graph;
