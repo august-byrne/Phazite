@@ -1868,8 +1868,11 @@ TEST_CASE ("A song's plug-ins in one helper open one at a time; one taken away f
         CHECK (turnMessageLoop (100));
         CHECK (SandboxedPlugins::getHost().getNumLoading (slowDescription) == 1);
 
-        // The second taken away while it waits its turn: its job finds it gone, and opens nothing.
+        // The second taken away while it waits its turn: its job finds it gone, and opens nothing. What plays the song lets
+        // go of it a turn of the message loop after the song changed, so the gate opens once it has: opened at once, the
+        // second's turn could come first on a busy machine, and it opened (CI's linux-clang, 2026-11-15).
         phazite::removeDevice (song.context, sibling);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).size() == 2; }, longWait));
         gate.open();
         REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, longWait));
         CHECK (phazite::getPluginStatus (opened, first) == Status::playing);
