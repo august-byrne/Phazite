@@ -208,19 +208,23 @@ namespace
     }
 
     // A file copied into a new one, a piece at a time, so that a copy can stop between pieces, with its time of change kept
-    // (a frozen track's file is known by it); counts what it copied. False if it stopped or anything couldn't be written.
-    bool copyFile (const juce::File& from, const juce::File& to, const std::function<bool()>& shouldStop, std::atomic<juce::int64>& copied)
+    // (a frozen track's file is known by it); counts what it copied. What kept it from being copied, if it stopped or
+    // anything couldn't be read or written.
+    juce::Result copyFile (const juce::File& from, const juce::File& to, const std::function<bool()>& shouldStop,
+                           std::atomic<juce::int64>& copied)
     {
         juce::FileInputStream in (from);
 
         if (! in.openedOk())
-            return false;
+            return juce::Result::fail ("it couldn't be read (" + in.getStatus().getErrorMessage().trim() + ")");
+
+        juce::int64 total = 0;
 
         {
             juce::FileOutputStream out (to);
 
             if (! out.openedOk())
-                return false;
+                return juce::Result::fail ("its copy couldn't be made (" + out.getStatus().getErrorMessage().trim() + ")");
 
             constexpr int pieceBytes = 1 << 20;
             juce::HeapBlock<char> piece (pieceBytes);
@@ -228,29 +232,41 @@ namespace
             for (;;)
             {
                 if (shouldStop())
-                    return false;
+                    return juce::Result::fail ("the copy was cancelled");
 
                 const auto read = in.read (piece, pieceBytes);
 
                 if (read < 0)
-                    return false;
+                    return juce::Result::fail ("it couldn't be read to its end (" + in.getStatus().getErrorMessage().trim() + ")");
 
                 if (read == 0)
                     break;
 
                 if (! out.write (piece, (size_t) read))
-                    return false;
+                    return juce::Result::fail ("its copy couldn't be written (" + out.getStatus().getErrorMessage().trim() + ")");
 
                 copied += read;
+                total += read;
             }
 
             out.flush();
 
             if (out.getStatus().failed())
-                return false;
+                return juce::Result::fail ("its copy couldn't be written (" + out.getStatus().getErrorMessage().trim() + ")");
         }
 
-        return to.getSize() == from.getSize() && to.setLastModificationTime (from.getLastModificationTime());
+        // What was read, whole; and the file as long as what was read still: one written again meanwhile is no copy of it.
+        if (to.getSize() != total)
+            return juce::Result::fail ("its copy holds " + juce::String (to.getSize()) + " bytes of " + juce::String (total));
+
+        if (const auto now = from.getSize(); now != total)
+            return juce::Result::fail ("it changed while it was copied (" + juce::String (total) + " bytes read, " + juce::String (now)
+                                       + " there now)");
+
+        if (const auto changed = from.getLastModificationTime(); changed != juce::Time() && ! to.setLastModificationTime (changed))
+            return juce::Result::fail ("its copy's time of change couldn't be set");
+
+        return juce::Result::ok();
     }
 
     // The folders listed copied into another project's folder, which holds every folder a project has once it is done
@@ -272,7 +288,9 @@ namespace
             const auto& file = listed.file;
             const auto target = to.getChildFile (file.getRelativePathFrom (from));
 
-            if (copyFile (file, target, shouldStop, copied))
+            const auto copiedFile = copyFile (file, target, shouldStop, copied);
+
+            if (copiedFile.wasOk())
                 continue;
 
             if (shouldStop())
@@ -286,7 +304,7 @@ namespace
             }
 
             return juce::Result::fail ("Phazite couldn't copy " + file.getRelativePathFrom (from).replaceCharacter ('\\', '/')
-                                       + " into the project's new folder.");
+                                       + " into the project's new folder: " + copiedFile.getErrorMessage() + ".");
         }
 
         for (const auto* name : { "Audio", "Generated", "Renders", "Cache", "Backups" })
@@ -316,15 +334,16 @@ namespace
     std::function<bool (const juce::File&)> leftoverCopyRemoval;
 
     // The leftover copies in a folder moved to the system's trash, where the user can still get one back, on a background
-    // thread: one can hold gigabytes of audio, on a network drive.
-    void removeLeftoverCopies (const juce::File& parentFolder, BackgroundJobs& jobs)
+    // thread: one can hold gigabytes of audio, on a network drive. But for the copy being made now, which it doesn't so
+    // much as look at: on Windows a folder looked into can't be given its name meanwhile.
+    void removeLeftoverCopies (const juce::File& parentFolder, const juce::File& beingMade, BackgroundJobs& jobs)
     {
         jobs.add (
-            [parentFolder, remove = leftoverCopyRemoval] (const BackgroundJobs::ShouldStop& shouldStop)
+            [parentFolder, beingMade, remove = leftoverCopyRemoval] (const BackgroundJobs::ShouldStop& shouldStop)
             {
                 for (const auto& folder : parentFolder.findChildFiles (juce::File::findDirectories, false, "* (saving)*"))
                 {
-                    if (shouldStop() || ! isLeftover (folder))
+                    if (shouldStop() || folder == beingMade || ! isLeftover (folder))
                         continue;
 
                     if (remove != nullptr)
@@ -339,8 +358,8 @@ namespace
     // says that it is Phazite's to remove if it is ever left behind (removeLeftoverCopies()).
     juce::File makeCopyFolder (const juce::File& folder, BackgroundJobs& removals, juce::String& error)
     {
-        removeLeftoverCopies (folder.getParentDirectory(), removals);
         const auto copy = folder.getParentDirectory().getNonexistentChildFile (folder.getFileName() + " (saving)", {}, true);
+        removeLeftoverCopies (folder.getParentDirectory(), copy, removals);
 
         if (const auto result = copy.createDirectory(); result.failed())
         {
@@ -1666,7 +1685,10 @@ void Project::backUpProjectFile()
     // One that can't be made is told, once until one is made again; the save goes on without it.
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
 
-    if (! file.copyFileTo (backups.getNonexistentChildFile (file.getFileNameWithoutExtension() + " " + stamp, fileExtension, false)))
+    // A file that can't be read is no copy either, said before JUCE tries: on Linux its copy reads from a stream it hasn't
+    // checked, and asserts. JUCE workaround 36 (docs/juce-workarounds.md).
+    if (! file.hasReadAccess()
+        || ! file.copyFileTo (backups.getNonexistentChildFile (file.getFileNameWithoutExtension() + " " + stamp, fileExtension, false)))
     {
         if (! std::exchange (backupFailed, true) && onBackupFailed != nullptr)
             onBackupFailed ("Phazite couldn't copy the project's last saved version into " + backups.getFullPathName()

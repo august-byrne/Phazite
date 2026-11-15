@@ -391,7 +391,7 @@ TEST_CASE ("Fuzz: a DAWproject is taken into a song that holds together, or refu
     {
         // A damaged archive names dates that are none, which JUCE asserts against as its ZipFile reads them (in Debug
         // builds): Phazite never uses an entry's date.
-        const ExpectedAssertion noDate ("time/juce_Time.cpp:175");
+        const ExpectedAssertion noDate ("juce_Time.cpp:170-175");
         const auto read = phazite::readDawProject (file);
 
         if (read.project == nullptr)

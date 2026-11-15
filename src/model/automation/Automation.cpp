@@ -176,7 +176,10 @@ namespace
             const auto& point = plan.points[i];
             const auto place = std::upper_bound (points.begin(), points.end(), point.beat,
                                                  [] (BeatPosition b, const AutomationPoint& each) { return b < each.beat; });
-            const auto added = (int) (points.insert (place, point) - points.begin());
+            // Its place counted before it goes in: the points may move as one is added, and which side of a subtraction
+            // is worked out first is the compiler's to choose (GCC took where they began before they moved).
+            const auto added = (int) (place - points.begin());
+            points.insert (place, point);
 
             if (i == plan.atBeat)
                 index = added;

@@ -292,11 +292,14 @@ TEST_CASE ("The song plays in real time while an old version renders in the back
                           << times.longestGap * 1000.0 << " ms, " << times.late << " late");
     CHECK ((done || phazite::getBounceProgress (s.context, old).has_value())); // rendering all the while, or done
 
+    // Blocks played meanwhile, by the device's count: the engine's longest block is the host's timer's to take too
+    // (PlaybackHost::timerCallback()), so it is none where the timer took it just before (CI's linux-release, 2026-11-14).
+    CHECK (playback.getBlocksPlayed() - start >= RealTimePlayback::blocksFor (0.25));
+
     // The render held no block up: each of the device's calls played its block, with whatever it waited on, in less than a
     // block's length. A call that came late was the machine's: CI's windows-debug, running four tests at once, kept the
     // device's thread from a core for 33 ms while no block took a millisecond (2026-11-12), counted as late blocks. That
     // bound is the wall clock's, so this file runs alone in ctest (RUN_SERIAL, CMakeLists.txt).
-    CHECK (times.longestBlock > 0.0); // blocks played meanwhile
     CHECK (longestCall < times.blockLength);
     phazite::stopAndReturn (*phazite::findSong (s.context));
     REQUIRE (phazite::deleteBounce (s.context, old)); // stops it

@@ -34,6 +34,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(__GNUG__)
+ #include <cxxabi.h>
+#endif
+
 namespace
 {
 using Screen = phazite::test::AppScreen;
@@ -95,6 +99,25 @@ struct Unexplained
     juce::StringArray nameless, silent;
 };
 
+// A component's class, as it is written: GCC and Clang give typeid's name mangled, MSVC as written.
+juce::String getClassName (const juce::Component& c)
+{
+    const char* name = typeid (c).name();
+
+#if defined(__GNUG__)
+    int status = 0;
+
+    if (char* written = abi::__cxa_demangle (name, nullptr, nullptr, &status); written != nullptr)
+    {
+        const juce::String result (written);
+        std::free (written);
+        return result;
+    }
+#endif
+
+    return name;
+}
+
 // Walks what shows of a component: each visible control (a button, slider, combo box or text field, whose own parts, a
 // slider's text box say, are its) and each component that takes the keyboard (which Narrator moves to). A list's scroll
 // bar is the list's.
@@ -103,7 +126,7 @@ void walkControls (juce::Component& c, const juce::String& path, Unexplained& fo
     if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
         return;
 
-    const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
+    const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : getClassName (c));
     const auto isControl = dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
                            || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr;
 

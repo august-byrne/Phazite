@@ -18,6 +18,8 @@
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeights.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 #include <optional>
@@ -171,7 +173,14 @@ TEST_CASE ("A point's menu types its value in a field over it, in the parameter'
 {
     // The owner, 2026-11-13: "dragging to exactly the right point can be hard"; as Ableton Live's Edit Value and FL Studio's
     // Type in value... on a point's right-click.
+    // The point's menu opens inside the window, as the app's menus do (Popups.h), on a display JUCE places it by, which
+    // the tests' machine may not have (Linux CI's, where a menu in a window of its own crashed, 2026-11-14).
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    const phazite::test::ScopedDisplay display;
     LaneScreen screen;
+    phazite::ui::setPopupsInside (screen.window);
 
     for (const auto& [beat, value] : { std::pair { 0.0, 0.5f }, std::pair { 4.0, 0.6f }, std::pair { 8.0, 0.7f } })
         phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (beat), value });

@@ -2207,18 +2207,16 @@ TEST_CASE (
     CHECK (editor.getShownState() == phazite::AudioState::failed);
 
     // While nothing changes, it looks again a few times a second and repaints nothing: it fitted its view and repainted its
-    // waveform at each look (a reviewer, 2026-11-14). Over a second of its looks, once the file's picture has loaded (in
-    // pieces, each repainting it).
-    REQUIRE (phazite::test::dispatchMessagesUntil (
+    // waveform at each look (a reviewer, 2026-11-14). Over a second of its looks goes by without a repaint, once the
+    // file's picture has loaded: in pieces, each repainting it, as far apart as the machine is busy (CI's windows-debug saw
+    // one after 400 ms without any, 2026-11-14), so the wait is for that second, however long the pieces take.
+    CHECK (phazite::test::dispatchMessagesUntil (
         [&editorWindow, &editor]
         {
             editorWindow.takeRepaintedArea();
-            phazite::test::dispatchMessagesUntil ([] { return false; }, 400);
+            phazite::test::dispatchMessagesUntil ([] { return false; }, 1100);
             return editorWindow.takeRepaintedArea().isEmpty() || editor.getShownState() != phazite::AudioState::failed;
-        },
-        8000));
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 1100);
-    CHECK (editorWindow.takeRepaintedArea().isEmpty());
+        }));
     CHECK (editor.getShownState() == phazite::AudioState::failed);
 
     // It isn't tried again while nothing changed: the check the renders make every two seconds while one has failed, made

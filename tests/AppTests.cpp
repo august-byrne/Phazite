@@ -1399,6 +1399,7 @@ TEST_CASE ("A first save removes the copies a crashed save left beside it, and o
     const juce::ScopeGuard asTheAppDoes { [] { phazite::setLeftoverCopyRemoval (nullptr); } };
     s.addRecording (1024);
     REQUIRE (s.registry.invoke ("project.save"));
+    INFO (s.errors.joinIntoString ("; ").toStdString());
     CHECK (s.errors.isEmpty());
     const juce::StringArray staying ("Beat", "Mine (saving)", "Named (saving)", "Running (saving)");
     CHECK (phazite::test::dispatchMessagesUntil ([&s, &staying] { return s.listProjects() == staying; }));

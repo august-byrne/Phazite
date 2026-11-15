@@ -38,9 +38,10 @@ inline constexpr int hangTimeout = 120000;
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.
 bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = hangTimeout);
 
-// While one lives, a JUCE assertion at this place (JUCE's file and line as its log names them,
-// "values/juce_ValueTree.cpp:569") doesn't fail the test it fires in (TestMain.cpp fails a test for any other): for a
-// test that makes, on purpose, the very fault JUCE asserts against. One at a time, on the test's own thread.
+// While one lives, a JUCE assertion at this place (JUCE's file and line, "juce_ValueTree.cpp:569"; for an assertion
+// written over several lines its first and last, "juce_Time.cpp:170-175", as compilers differ in which they give) doesn't
+// fail the test it fires in (TestMain.cpp fails a test for any other): for a test that makes, on purpose, the very fault
+// JUCE asserts against. One at a time, on the test's own thread.
 class ExpectedAssertion
 {
 public:

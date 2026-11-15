@@ -680,10 +680,12 @@ TEST_CASE ("A new branch the picker can't make leaves the branch the song is on 
     screen.saveVersion ("First");
     REQUIRE (phazite::getCurrentBranch (context)->name == "main");
 
-    // The record of the current branch can't be written: a folder where its file goes.
+    // The record of the current branch can't be written: a folder where its file goes (with a file in it: Linux puts a
+    // file in an empty folder's place).
     const auto current = phazite::getVersionsFolder (*phazite::findSong (context)).getChildFile ("current");
     REQUIRE (current.deleteFile());
     REQUIRE (current.createDirectory());
+    REQUIRE (current.getChildFile ("In the way").replaceWithText ("in the way"));
 
     {
         BranchPicker picker (screen.commands, context, BranchPicker::Mode::pick);

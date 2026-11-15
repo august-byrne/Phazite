@@ -68,7 +68,10 @@
 #endif
 
 #if PHAZITE_SANITIZER_HOOKS
- #include <sanitizer/allocator_interface.h>
+// The sanitizers' hooks for malloc and free, declared as their <sanitizer/allocator_interface.h> does: GCC's packages
+// have the function in the sanitizers' libraries, but leave that header out.
+extern "C" int __sanitizer_install_malloc_and_free_hooks (void (*mallocHook) (const volatile void*, size_t),
+                                                          void (*freeHook) (const volatile void*));
 #endif
 
 namespace phazite::test

@@ -218,6 +218,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   when the first save fails, as `saveCopyAs()` and `finishMoveTo()` do; test it with a write that fails (a seam in
   `writeWholeFile()`, or `tests/HeldFile.h` on a file the save writes, if one can be held before it is made).
 
+- **169. A first save, seldom, says it couldn't copy a file of the project's Versions folder.** CI met it twice on
+  loaded machines (2026-11-14): linux-debug in `tests/ProjectViewTests.cpp` ("couldn't copy
+  Versions/branches/.../....xml into the project's new folder") and windows-debug in `tests/AppTests.cpp` (a first save
+  with leftover copies beside it, whose message the test didn't keep). The first save waits for the history's thread
+  before it copies (`waitForVersionsWritten()`, `src/app/ProjectSession.cpp`), and nothing else is known to write there
+  meanwhile, so what gets in its way isn't known. Since then the message says why a file couldn't be copied
+  (`copyFile()`, `src/model/project/Project.cpp`: not read, not written, or changed while it was copied), the removal
+  of leftover copies doesn't look into the copy being made, and the AppTests case prints the save's errors. Fix: read
+  the reason the next time it happens.
+
 ## Recording
 
 - **92. A note played just before a take's first sample is thrown away,** so a downbeat played a few milliseconds

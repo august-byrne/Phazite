@@ -95,18 +95,49 @@ void keepTimerResolution()
  #error "Debug builds of the tests need JUCE_LOG_ASSERTIONS, which CMakeLists.txt sets for phazite_core and every target that uses it"
 #endif
 
-// The assertions that may fire, each because Phazite does on purpose what JUCE asserts against: the file and line JUCE
-// names, and why. A line here names JUCE's file and line exactly, so that it is looked at again when JUCE changes; each
-// also has its entry in docs/juce-workarounds.md.
+// The assertions that may fire, each because Phazite does on purpose what JUCE asserts against, or because the machine
+// the tests run on lacks what JUCE asserts it has: the file and line JUCE names (isPlace()), and why. A line here names
+// JUCE's line, so that it is looked at again when JUCE changes, but for a file all of whose assertions say one thing;
+// each also has its entry in docs/juce-workarounds.md.
 struct AllowedAssertion
 {
-    const char* place; // "juce_File.cpp:219", as logAssertion() names it
+    const char* place; // "juce_File.cpp:219", as logAssertion() names it; or a file, for every line of it
     const char* why;
 };
 
 constexpr AllowedAssertion allowedAssertions[] = {
-    { "", "" }, // the list's end
+    { "juce_Midi_linux.cpp:539",
+      "Linux without ALSA's sequencer (CI's machines have no /dev/snd/seq): JUCE asserts as it finds it can't list MIDI "
+      "devices, and goes on with none (T7)" },
+    { "juce_XWindowSystem_linux.cpp",
+      "Linux without a display (CI's machines): the tests' windows have no X11 window behind them, and JUCE asserts that "
+      "each call it makes for a window has one: a pointer's shape over a control, a menu or a window of its own (T7)" },
 };
+
+// Whether an assertion's place, as JUCE's log gives it, is the one named. The file by its name alone: the log gives it as
+// the compiler does, with the folder JUCE includes it from with MSVC ("values/juce_ValueTree.cpp") and without with GCC
+// and Clang. The line as named: one line, or "first-last" for an assertion written over several lines (MSVC gives its
+// last line, GCC and Clang its first), or any line where none is named.
+bool isPlace (const juce::String& place, const juce::String& named)
+{
+    const auto fileOf = [] (const juce::String& text)
+    {
+        const auto path = text.containsChar (':') ? text.upToLastOccurrenceOf (":", false, false) : text;
+        return path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false);
+    };
+
+    if (named.isEmpty() || fileOf (place) != fileOf (named))
+        return false;
+
+    if (! named.containsChar (':'))
+        return true;
+
+    const auto line = place.fromLastOccurrenceOf (":", false, false).getIntValue();
+    const auto lines = named.fromLastOccurrenceOf (":", false, false);
+    const auto first = lines.upToFirstOccurrenceOf ("-", false, false).getIntValue();
+    const auto last = lines.containsChar ('-') ? lines.fromFirstOccurrenceOf ("-", false, false).getIntValue() : first;
+    return line >= first && line <= last;
+}
 
 class AssertionNet final : public juce::Logger
 {
@@ -191,13 +222,13 @@ public:
         const auto place = message.fromFirstOccurrenceOf (prefix, false, false).trim();
 
         for (const auto& allowed : allowedAssertions)
-            if (place == allowed.place)
+            if (isPlace (place, allowed.place))
                 return;
 
         const std::lock_guard held (lock);
 
         // One a test makes on purpose (ExpectedAssertion, TestHelpers.h).
-        if (! expected.empty() && place.toStdString() == expected)
+        if (! expected.empty() && isPlace (place, juce::String (expected)))
         {
             ++numExpected;
             return;
