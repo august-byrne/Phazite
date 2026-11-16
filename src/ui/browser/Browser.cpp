@@ -1045,7 +1045,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
     };
 
     std::vector<Wanted> wanted;
-    wanted.reserve (contents.places.size() + contents.items.size() + contents.messages.size() + 1);
+    wanted.reserve (contents.places.size() + contents.items.size() + (size_t) contents.messages.size() + 1);
 
     if (contents.offersSoundPack)
         wanted.push_back ({ "soundPack", Kind::soundPack, 0 });

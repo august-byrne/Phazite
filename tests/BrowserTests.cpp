@@ -719,7 +719,7 @@ TEST_CASE ("Performance gate: the open folders looked at again make no row and r
     mouse.click (screen.getRow ("Many").getCentre());
     waitForFolders (screen);
 
-    std::function<void (juce::TreeViewItem*)> openAll = [&openAll] (juce::TreeViewItem* item)
+    const auto openAll = [] (juce::TreeViewItem* item)
     {
         for (int i = 0; i < item->getNumSubItems(); ++i)
             if (auto* sub = item->getSubItem (i); sub->mightContainSubItems() && sub->getUniqueName().contains ("Folder "))
