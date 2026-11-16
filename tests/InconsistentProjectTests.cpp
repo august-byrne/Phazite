@@ -14,6 +14,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/mixer/internal/Containers.h"
@@ -210,6 +211,31 @@ TEST_CASE ("A number where no item's ID is, too large to count on from, leaves t
     const auto made = project->getSong().makeID();
     CHECK (made > 0);
     CHECK (made < phazite::schema::maxID);
+}
+
+TEST_CASE ("The loader's checks alone leave the song's count of IDs past every ID it counts, a value on a note where an ID goes too")
+{
+    // The song counts "link", "fader" and "vca" on a note as IDs (Schema.h: findLargestID()), which another program's file
+    // may put there; makeConsistent() counted them otherwise, and left the count below one until its callers counted again.
+    auto made = phazite::createSong();
+    const auto track = phazite::ensureTracks (*made, 1).front();
+    const auto clip = addMidiClip (*made, track, { at (0.0), at (4.0) }, "Notes");
+    addMidiNote (*made, clip, 60, at (0.0), lasting (1.0), 100);
+
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, made->getState());
+    auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("nextID", "10");
+    auto* note = xml->getChildByName ("TRACKS")->getChildByName ("TRACK")->getChildByName ("CLIP")->getChildByName ("NOTE");
+    REQUIRE (note != nullptr);
+    note->setAttribute ("link", "900000");
+
+    phazite::Song song (juce::ValueTree::fromXml (*xml));
+    phazite::makeConsistent (song);
+    const auto counted = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
+    CHECK (phazite::findNextID (song.getState()) <= counted);
+    CHECK (counted > 900000);
 }
 
 TEST_CASE ("A device of a type Phazite hasn't is left out, with what names it")

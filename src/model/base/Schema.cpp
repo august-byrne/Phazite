@@ -6,27 +6,26 @@
 
 namespace phazite
 {
+std::uint64_t findLargestID (const juce::ValueTree& tree)
+{
+    std::uint64_t largest = 0;
+
+    // Where the element holds one, and one the song can count on from: a file from others may have "id" on an element
+    // that holds none, with any number in it.
+    for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink })
+        if (const auto* value = tree.getPropertyPointer (*property);
+            value != nullptr && (schema::holdsID (tree, *property) || tree.hasType (schema::NOTE)))
+            if (const auto id = (std::uint64_t) (juce::int64) *value; id < schema::maxID)
+                largest = std::max (largest, id);
+
+    for (const auto& child : tree)
+        largest = std::max (largest, findLargestID (child));
+
+    return largest;
+}
+
 namespace
 {
-    // The largest ID in a part of the song: its items' (each kind's is named "id": trackID, clipID, noteID, deviceID,
-    // chainID, sendID, modulatorID, sectionID), its channels' faders and VCAs, and its alias groups (clipLink).
-    std::uint64_t findLargestID (const juce::ValueTree& tree)
-    {
-        std::uint64_t largest = 0;
-
-        // Where the element holds one, and one the song can count on from: a file from others may have "id" on an element
-        // that holds none, with any number in it.
-        for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink })
-            if (tree.hasProperty (*property) && (schema::holdsID (tree, *property) || tree.hasType (schema::NOTE)))
-                if (const auto id = (std::uint64_t) (juce::int64) tree[*property]; id < schema::maxID)
-                    largest = std::max (largest, id);
-
-        for (const auto& child : tree)
-            largest = std::max (largest, findLargestID (child));
-
-        return largest;
-    }
-
     std::uint64_t readNextID (const juce::ValueTree& song)
     {
         return (std::uint64_t) (juce::int64) song.getProperty (schema::nextID, (juce::int64) 0);

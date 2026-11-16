@@ -64,6 +64,7 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -1178,6 +1179,99 @@ TEST_CASE (
     CHECK (pluginChanged > 0);
     CHECK (pluginChanged * 8 < wholeSong);
     CHECK (song.getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: the check for unsaved changes compares no element after a notification that changes nothing, and a "
+           "note's clip after a note added and taken back")
+{
+    // The title's star and Auto Save ask after every notification: a track's notification compared every track of the song,
+    // each value written as text (22 ms on 16,384 notes, 2026-11-16; Benchmarks.cpp, "the UI's work on a big song").
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 16, 64.0);
+    auto& song = getSong (s);
+    auto& project = s.getProject();
+    REQUIRE (project.save().wasOk());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE_FALSE (project.hasUnsavedChanges());
+
+    const std::function<int (const juce::ValueTree&)> countElements = [&countElements] (const juce::ValueTree& element)
+    {
+        auto count = 1;
+
+        for (const auto& child : element)
+            count += countElements (child);
+
+        return count;
+    };
+
+    // Told again and again, nothing changed: no element compared.
+    auto before = phazite::Project::countElementsCompared();
+
+    for (int i = 0; i < 20; ++i)
+    {
+        phazite::findTrackState (song, built.tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
+        CHECK_FALSE (project.hasUnsavedChanges());
+    }
+
+    CHECK (phazite::Project::countElementsCompared() == before);
+
+    // A note added and taken back (Undo): its clip compared, not the song.
+    {
+        const phazite::UndoStep step (song, "Add Note");
+        REQUIRE (phazite::test::addMidiNote (song, built.clips[3], 72, at (2.5), lasting (0.25), 100).isValid());
+    }
+
+    phazite::undo (song);
+    phazite::test::dispatchPendingMessages();
+    before = phazite::Project::countElementsCompared();
+    CHECK_FALSE (project.hasUnsavedChanges());
+    const auto noteAdded = phazite::Project::countElementsCompared() - before;
+    const auto clip = countElements (phazite::findClipState (song, built.clips[3]));
+    const auto wholeSong = countElements (song.getState());
+
+    INFO ("Elements compared after a note added and taken back: " << noteAdded << ", of its clip's " << clip << " and the song's "
+                                                                  << wholeSong);
+    CHECK (noteAdded > 0);
+    CHECK (noteAdded <= clip);
+    CHECK (noteAdded * 8 < wholeSong);
+}
+
+TEST_CASE ("Performance gate: the loader's checks of a song read from its text make no allocation for each note")
+{
+    // makeConsistent() goes through every element and number of a song as it opens (a project, a version's pieces joined):
+    // its checks made a list of each element's properties, a set's node for each note's ID and a text for each number it
+    // compared, several allocations a note (2026-11-16: a project of 40 tracks opened in 62 ms, 28 before). What is left is
+    // for each track, clip and device, which a song has far fewer of than notes.
+    auto made = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*made, 8);
+    auto notes = 0;
+
+    for (const auto track : tracks)
+    {
+        const auto clip = phazite::test::addMidiClip (*made, track, { at (0.0), at (128.0) }, "Notes");
+
+        for (int step = 0; step < 500; ++step, ++notes)
+            phazite::test::addMidiNote (*made, clip, 48 + step % 24, at (step * 0.25), lasting (0.2), 100);
+    }
+
+    // As a project file holds it: every value text.
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, made->getState());
+    const auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    phazite::Song song (juce::ValueTree::fromXml (*xml));
+    const auto allocations = phazite::test::countAllocations ([&song] { phazite::makeConsistent (song); });
+
+    if (! allocations.has_value())
+        return; // nothing counted on this build
+
+    INFO ("Allocations: " << *allocations << " for " << notes << " notes");
+    CHECK (*allocations * 10 < notes);
+
+    // And Phazite's own song is left as it was written.
+    juce::MemoryOutputStream after;
+    phazite::writeProjectText (after, song.getState());
+    CHECK (after.toString() == text.toString());
 }
 
 TEST_CASE ("Performance gate: an import, Normalize and Quantize Audio read none of the audio on the message thread")

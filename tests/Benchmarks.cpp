@@ -1914,14 +1914,42 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     if (auto* pianoRoll = find (screen.shell, [] (juce::Component& c) { return dynamic_cast<phazite::ui::PianoRoll*> (&c) != nullptr; }))
         report << "| ... of the piano roll | " << milliseconds (columnOf (*pianoRoll)) << " |\n";
 
-    // Saved, then a notification that changes nothing: the comparison with the saved copy goes through everything.
+    // Saved, then the check for unsaved changes (the title's star, Auto Save) after what changes nothing: a notification, a
+    // hundred times, the first and the mean; a note added and taken back (its clip compared); a track moved and moved back
+    // (every track compared, the most one edit asks).
     auto* project = screen.session.getProject();
     REQUIRE (project != nullptr);
     REQUIRE (project->save().wasOk());
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
-    phazite::findTrackState (song, tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
-    report << "| The check for unsaved changes after a notification that changes nothing | "
-           << milliseconds (millisecondsOf ([&] { project->hasUnsavedChanges(); })) << " |\n";
+    std::vector<double> checks;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        phazite::findTrackState (song, tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
+        checks.push_back (millisecondsOf ([&] { REQUIRE_FALSE (project->hasUnsavedChanges()); }));
+    }
+
+    report << "| The check for unsaved changes after a notification that changes nothing, the first / the mean of 100 | "
+           << milliseconds (checks.front()) << " / "
+           << milliseconds (std::accumulate (checks.begin(), checks.end(), 0.0) / (double) checks.size()) << " |\n";
+
+    // Each edit and its Undo one after the other, checked before the message loop goes on (where the title's star would
+    // check first).
+    {
+        const phazite::UndoStep step (song, "Add Note");
+        phazite::test::addMidiNote (song, firstClip, 90, phazite::BeatPosition::fromBeats (1.1), phazite::BeatDuration::fromBeats (0.2),
+                                    100);
+    }
+
+    phazite::undo (song);
+    report << "| ... after a note added and taken back | "
+           << milliseconds (millisecondsOf ([&] { REQUIRE_FALSE (project->hasUnsavedChanges()); })) << " |\n";
+
+    phazite::test::dispatchPendingMessages();
+    phazite::moveTracksAfter (song, { tracks[0] }, tracks[1]);
+    phazite::moveTracksAfter (song, { tracks[1] }, tracks[0]);
+    report << "| ... after a track moved and moved back: every track compared | "
+           << milliseconds (millisecondsOf ([&] { REQUIRE_FALSE (project->hasUnsavedChanges()); })) << " |\n";
     report << "| Save | " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << " |\n";
 
     // Autosave: what the UI thread does (the devices' states and a copy of the song), the rest on a background thread.
@@ -2375,7 +2403,7 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
             auto* session = phazite::findPlayingSession (*song);
             REQUIRE (session != nullptr);
             phazite::test::Mouse mouse (*playlist);
-            std::vector<double> work, paint, moves;
+            std::vector<double> work, paint, moves, windowPaints;
             auto missed = 0, shows = 0, over = 0;
             auto showing = false;
             auto beat = 64.0;
@@ -2404,16 +2432,21 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
                     }));
 
                 const auto repainted = screen.window.takeRepaintedArea();
+                // The window's paint, and with it what the image costs as its Graphics goes: JUCE copies a Direct2D image back
+                // from the graphics card then (its persistent backup), waiting for the card, which a window's frame doesn't.
+                auto windowPaint = 0.0;
+
                 paint.push_back (millisecondsOf (
                     [&]
                     {
                         juce::Graphics g (frameImage);
 
                         if (g.reduceClipRegion (repainted))
-                            screen.window.paintEntireComponent (g, false);
+                            windowPaint = millisecondsOf ([&] { screen.window.paintEntireComponent (g, false); });
                     }));
 
-                over += work.back() + paint.back() > 8.0 ? 1 : 0;
+                windowPaints.push_back (windowPaint);
+                over += work.back() + windowPaint > 8.0 ? 1 : 0;
                 shows += tips != nullptr && tips->isVisible() && ! showing ? 1 : 0;
                 showing = tips != nullptr && tips->isVisible();
 
@@ -2439,15 +2472,20 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
                 row ("", moves);
 
             row ("", work);
+            row ("", windowPaints);
             row ("", paint);
             report << " | " << over << " | " << missed << " | " << shows << " |\n";
         };
 
+        // The mouse still again after it moved: the image's copy back from the graphics card grows as a run goes on, the mouse
+        // moving or not (2026-11-16), so the window's paint is its own column.
         report << "\n| 1,200 frames at 60 Hz, House Groove scrolling continuously, the mouse moving over the playlist | A move of the "
-                  "mouse, mean / 95th percentile / most | A frame's work, with its moves | Its paint | Frames over 8 ms | Frames missed | "
-                  "Tooltips shown |\n|---|---|---|---|---|---|---|\n";
+                  "mouse, mean / 95th percentile / most | A frame's work, with its moves | The window's paint | Its paint with the "
+                  "image copied back from the graphics card | Frames whose work and the window's paint took over 8 ms | Frames "
+                  "missed | Tooltips shown |\n|---|---|---|---|---|---|---|---|\n";
         run ("The mouse still", false);
         run ("Without tooltips", true);
+        run ("The mouse still again", false);
         tips = std::make_unique<phazite::ui::Tooltips> (screen.window, true);
         run ("With the window's tooltips", true);
         tips = nullptr;
@@ -2515,8 +2553,21 @@ TEST_CASE ("Benchmark: starting up, and the window at rest" * doctest::test_suit
            << (repainted.isEmpty() ? juce::String ("nothing")
                                    : juce::String (repainted.getWidth()) + " x " + juce::String (repainted.getHeight()) + " px")
            << " |\n";
-    MESSAGE (report);
     screen = nullptr;
+
+    // The first start of the window above is the first in the process too (fonts, text shaping, icons), which swings by
+    // several milliseconds from run to run: the same made again ten times, the median.
+    std::vector<double> again;
+
+    for (int i = 0; i < 10; ++i)
+    {
+        again.push_back (millisecondsOf ([&] { screen = std::make_unique<phazite::test::AppScreen>(); }));
+        screen = nullptr;
+    }
+
+    std::sort (again.begin(), again.end());
+    report << "| The services, the commands and the window's content again, the median of 10 | " << milliseconds (again[5], 1) << " |\n";
+    MESSAGE (report);
 }
 
 TEST_CASE ("Benchmark: a device's graph repainted, its curve kept or worked out again" * doctest::test_suite ("benchmark")

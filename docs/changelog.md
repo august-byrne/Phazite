@@ -338,6 +338,16 @@ too. A line names the bug's number in that list.
   a device given nothing plays nothing while stopped and after a reset, which the rule leans on.
 - The live-note benchmark holds the engine's clock and checks its delays: 101 samples for each limiter the note goes
   through or is lined up with, none for one switched off (the 45 samples the quiet run showed were the wall clock's).
+- The check for unsaved changes after a notification compares only what notified, and values without writing them as
+  text: 0.01 ms instead of 22 ms on a song of 16,384 notes (the cost was older than the round: every track compared,
+  every value written as text, at each notification). Found on the way and fixed: a plug-in's state that Save a Copy
+  As, or an autosave after a failed one, stored into the song made the project unsaved only by chance, at the next
+  edit; it does now as it is stored.
+- A project opens with its checks done without the copies and lookups they made for every element and number: half
+  the time for the checks of a song of 100,000 notes. The loader counts IDs as the song does, one function for both.
+- Each icon is parsed from its SVG once and copied for every button that shows it.
+- The playlist-and-mouse benchmark reports the window's own paint apart from the image read back from the graphics
+  card, which the mouse never changed.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

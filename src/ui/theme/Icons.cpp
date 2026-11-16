@@ -4,6 +4,8 @@
 
 #include <PhaziteData.h>
 
+#include <map>
+#include <memory>
 #include <utility>
 
 namespace phazite::ui
@@ -165,18 +167,49 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    // Each icon read from its SVG once, and copied for each that shows it: reading one (parsing it and stroking its lines)
+    // is most of what a button with an icon costs as it is made, and the window makes dozens as it starts. Message thread;
+    // deleted as JUCE shuts down.
+    class ReadIcons final : private juce::DeletedAtShutdown
+    {
+    public:
+        ~ReadIcons() override { clearSingletonInstance(); }
+
+        const juce::Drawable* get (Icon icon, bool filled)
+        {
+            auto& read = icons[{ icon, filled }];
+
+            if (read == nullptr)
+            {
+                // Lucide draws in "currentColor", which JUCE reads as black: the colour that the icons' tints replace.
+                auto text = getResourceText (getFileName (icon));
+
+                if (text.isEmpty())
+                    return nullptr;
+
+                if (filled)
+                    text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
+
+                read = juce::Drawable::createFromSVGString (text);
+            }
+
+            return read.get();
+        }
+
+        JUCE_DECLARE_SINGLETON_INLINE (ReadIcons, false)
+
+    private:
+        std::map<std::pair<Icon, bool>, std::unique_ptr<juce::Drawable>> icons;
+    };
+} // namespace
+
 std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 {
-    // Lucide draws in "currentColor", which JUCE reads as black: the colour that the icons' tints replace.
-    auto text = getResourceText (getFileName (icon));
-
-    if (text.isEmpty())
-        return {};
-
-    if (filled)
-        text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
-
-    return juce::Drawable::createFromSVGString (text);
+    JUCE_ASSERT_MESSAGE_THREAD
+    const auto* read = ReadIcons::getInstance()->get (icon, filled);
+    return read != nullptr ? read->createCopy() : nullptr;
 }
 
 std::unique_ptr<juce::Drawable> createLogo()

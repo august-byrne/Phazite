@@ -7,6 +7,9 @@
 #include "model/base/internal/SongText.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/project/internal/Project.h"
+
+#include <cmath>
 
 namespace
 {
@@ -65,6 +68,193 @@ TEST_CASE ("Two values are the same if they write the same text, as a number rea
     CHECK_FALSE (isSameValue ("4.0", 4.0)); // text is text
     CHECK_FALSE (isSameValue (0.3f, 0.31f));
     CHECK_FALSE (isSameValue ("Bass", "bass"));
+
+    // Compared without making their texts, the same as their texts compare.
+    CHECK (isSameValue (4, (juce::int64) 4));
+    CHECK (isSameValue (4, 4.0));
+    CHECK (isSameValue (-0.0, 0.0));
+    CHECK (isSameValue (-0.0, "0"));
+    CHECK (isSameValue (8.000000000000004, 8.0));
+    CHECK (isSameValue (std::nan (""), "nan"));
+    CHECK (isSameValue (false, 0));
+    CHECK (isSameValue (juce::String ("a") + juce::String::charToString (1) + "b", "ab"));
+    CHECK (isSameValue (juce::String ("4") + juce::String::charToString (1), 4));
+    CHECK (isSameValue (juce::var(), ""));
+    CHECK_FALSE (isSameValue (4, 5.0));
+    CHECK_FALSE (isSameValue ("1", false));
+    CHECK_FALSE (isSameValue ("0.30", 0.3));
+
+    // Whatever the pair, as their texts compare.
+    const juce::Array<juce::var> values { 0,         1,
+                                          -1,        (juce::int64) 1 << 40,
+                                          0.5,       0.3f,
+                                          0.1 + 0.2, -0.0,
+                                          1.0e20,    std::nan (""),
+                                          true,      false,
+                                          "0",       "1",
+                                          "0.5",     "0.3",
+                                          "1e+20",   "nan",
+                                          "Bass",    juce::var() };
+
+    for (const auto& a : values)
+        for (const auto& b : values)
+            CHECK (isSameValue (a, b) == (phazite::writeValue (a) == phazite::writeValue (b)));
+}
+
+TEST_CASE ("A decimal of up to six significant digits from 0.001 up is written as it is, as the loader takes it to be")
+{
+    // What makeConsistent() leaves as it is without writing the number (Project.h: isNumberWrittenAsPhazite()): a whole number's
+    // digits, and a decimal from 0.001 up of up to six significant digits, without an exponent or a leading or trailing zero.
+    juce::Random random (20261116);
+
+    for (int i = 0; i < 200000; ++i)
+    {
+        const auto digits = 1 + random.nextInt (6);
+        auto mantissa = (juce::int64) 1 + random.nextInt64() % 999999;
+        mantissa = std::abs (mantissa) % (juce::int64) std::pow (10.0, digits);
+
+        if (mantissa == 0 || mantissa % 10 == 0)
+            continue;
+
+        const auto mantissaText = juce::String (mantissa);
+        const auto fraction = 1 + random.nextInt (mantissaText.length() + 2); // digits after the point
+        juce::String text;
+
+        if (fraction >= mantissaText.length())
+            text = "0." + juce::String::repeatedString ("0", fraction - mantissaText.length()) + mantissaText;
+        else
+            text = mantissaText.dropLastCharacters (fraction) + "." + mantissaText.getLastCharacters (fraction);
+
+        if (text.startsWith ("0.000"))
+            continue; // below 0.001
+
+        if (random.nextBool())
+            text = "-" + text;
+
+        INFO (text);
+        const auto number = text.getDoubleValue();
+        CHECK (phazite::writeValue (number) == text);
+        CHECK (phazite::writeValue ((double) (float) number) == text);
+    }
+}
+
+TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite writes that text for the number it reads as")
+{
+    // isNumberWrittenAsPhazite() is how makeConsistent() leaves a number as it is without writing it: every text it takes
+    // must be what writeValue() writes for the number the loader reads from it (readLoadedNumber()).
+    using phazite::isNumberWrittenAsPhazite;
+
+    const auto holds = [] (const juce::var& value)
+    {
+        if (! isNumberWrittenAsPhazite (value))
+            return true;
+
+        const auto number = phazite::readLoadedNumber (value);
+        return value.isString() && number.has_value() && phazite::writeValue (*number) == value.toString();
+    };
+
+    // What Phazite writes, taken.
+    for (const auto* text : { "0", "5", "-5", "60", "999999999999999", "0.25", "-0.5", "0.001", "-0.001", "12345.6", "0.123456" })
+    {
+        INFO (text);
+        CHECK (isNumberWrittenAsPhazite (juce::String (text)));
+        CHECK (holds (juce::String (text)));
+    }
+
+    // What it never writes, or writes otherwise, not taken; and what isn't text.
+    const auto digits = [] (int count) { return "1" + juce::String::repeatedString ("2", count - 1); };
+    const juce::StringArray others { "+5",
+                                     " 5",
+                                     "5 ",
+                                     "1e3",
+                                     "1E3",
+                                     "0x10",
+                                     "nan",
+                                     "inf",
+                                     "-inf",
+                                     "-0",
+                                     "-0.0",
+                                     "00.5",
+                                     ".5",
+                                     "5.",
+                                     "-",
+                                     "",
+                                     "1.50",
+                                     "01.5",
+                                     "1,5",
+                                     "0.0001",
+                                     "1234567.5",
+                                     "0.1234567",
+                                     digits (16),
+                                     digits (400),
+                                     juce::String::fromUTF8 ("\xd9\xa5"),     // ٥, an Arabic-Indic five
+                                     juce::String::fromUTF8 ("\xef\xbc\x95"), // ５, a full-width five
+                                     juce::String::fromUTF8 ("1\xd9\xa5"),
+                                     "5\n",
+                                     "5\t",
+                                     "5\r\n" };
+
+    for (const auto& text : others)
+    {
+        INFO ("\"" << text << "\"");
+        CHECK_FALSE (isNumberWrittenAsPhazite (text));
+    }
+
+    // JUCE's String ends at a NUL, so a text with one after its number is that number's text.
+    CHECK (holds (juce::String (juce::CharPointer_UTF8 ("5\0"))));
+
+    for (const auto& value : { juce::var (5), juce::var ((juce::int64) 5), juce::var (5.0), juce::var (true), juce::var(),
+                               juce::var (juce::Array<juce::var> { "5" }) })
+        CHECK_FALSE (isNumberWrittenAsPhazite (value));
+
+    // Texts of every form: whole numbers of any size and sign, decimals with and without leading and trailing zeros, numbers
+    // below 0.001 and past 10^15, floats' and doubles' own texts, and junk.
+    juce::Random random (20261117);
+    auto taken = 0;
+
+    const auto make = [&random]() -> juce::String
+    {
+        switch (random.nextInt (6))
+        {
+            case 0:
+                return juce::String (random.nextInt64() >> random.nextInt (64));
+            case 1:
+            {
+                auto text = juce::String (std::abs (random.nextInt64() % 10000000000LL));
+                const auto point = random.nextInt (text.length() + 3);
+                text = juce::String::repeatedString ("0", random.nextInt (3)) + text
+                       + juce::String::repeatedString ("0", random.nextInt (3) == 0 ? 1 : 0);
+                text = point >= text.length() ? text : text.substring (0, point) + "." + text.substring (point);
+                return random.nextBool() ? "-" + text : text;
+            }
+            case 2:
+                return phazite::writeValue ((double) (float) (random.nextDouble() * std::pow (10.0, random.nextInt (30) - 10)));
+            case 3:
+                return phazite::writeValue (random.nextDouble() * std::pow (10.0, random.nextInt (30) - 10));
+            case 4:
+                return phazite::writeValue (-random.nextDouble() * std::pow (10.0, random.nextInt (30) - 10));
+            default:
+            {
+                juce::String text;
+
+                for (int c = random.nextInt (9); --c >= 0;)
+                    text += juce::String::charToString ((juce::juce_wchar) juce::String ("0123456789.-+eE x,0")[random.nextInt (19)]);
+
+                return text;
+            }
+        }
+    };
+
+    for (int i = 0; i < 200000; ++i)
+    {
+        const auto text = make();
+        taken += isNumberWrittenAsPhazite (text) ? 1 : 0;
+
+        if (! holds (text))
+            FAIL_CHECK ("taken, but Phazite writes it otherwise: \"" << text << "\"");
+    }
+
+    CHECK (taken > 20000);
 }
 
 TEST_CASE ("Bytes are written in standard base 64, and text that isn't base 64 reads as nothing")

@@ -35,6 +35,9 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -522,25 +525,51 @@ namespace
         }
 
         // Whether Phazite knows an element's type. One it doesn't (a later build's, another tool's) stays where it is, as it is, with
-        // everything in it, and is written back (docs/project-format.md): nothing reads it.
+        // everything in it, and is written back (docs/project-format.md): nothing reads it. Told by its name's pooled text
+        // (juce::Identifier keeps one of each), without looking a text up: what every walk of the loader asks of every element.
         bool isKnown (const juce::ValueTree& element)
         {
             static const auto known = []
             {
-                std::set<juce::String> types { "PHAZITE" };
+                std::unordered_set<const void*> types { schema::PHAZITE.getCharPointer().getAddress() };
 
                 for (const auto& [parent, children] : getPlaces())
                 {
-                    types.insert (parent);
+                    types.insert (juce::Identifier (parent).getCharPointer().getAddress());
 
                     for (const auto& child : children)
-                        types.insert (child);
+                        types.insert (juce::Identifier (child).getCharPointer().getAddress());
                 }
 
                 return types;
             }();
 
-            return known.count (element.getType().toString()) > 0;
+            return known.count (element.getType().getCharPointer().getAddress()) > 0;
+        }
+
+        // Where each element goes, as getPlaces() has it, by the pooled texts of the types' names.
+        using TypeKey = const void*;
+
+        TypeKey keyOf (const juce::Identifier& type)
+        {
+            return type.getCharPointer().getAddress();
+        }
+
+        bool belongsIn (const juce::Identifier& parent, const juce::Identifier& child)
+        {
+            static const auto places = []
+            {
+                std::unordered_map<TypeKey, std::vector<TypeKey>> table;
+
+                for (const auto& [parentName, children] : getPlaces())
+                    for (const auto& childName : children)
+                        table[keyOf (juce::Identifier (parentName))].push_back (keyOf (juce::Identifier (childName)));
+
+                return table;
+            }();
+
+            const auto found = places.find (keyOf (parent));
+            return found != places.end() && std::find (found->second.begin(), found->second.end(), keyOf (child)) != found->second.end();
         }
 
         // The furthest place in beats a song holds anything at, and in seconds of a file.
@@ -668,17 +697,79 @@ namespace
             if (! value.isString())
                 return std::nullopt;
 
-            const auto text = value.toString().trim().toStdString();
-            double number = 0.0;
-            const auto read = std::from_chars (text.data(), text.data() + text.size(), number);
+            // Its own UTF-8 where trimming takes nothing off (it starts and ends with a visible ASCII character), as nearly
+            // every number does: no copy made for each of a song's numbers.
+            const auto read = [] (std::string_view text) -> std::optional<double>
+            {
+                double number = 0.0;
+                const auto result = std::from_chars (text.data(), text.data() + text.size(), number);
 
-            if (read.ec == std::errc::result_out_of_range)
-                return std::numeric_limits<double>::infinity();
+                if (result.ec == std::errc::result_out_of_range)
+                    return std::numeric_limits<double>::infinity();
 
-            if (text.empty() || read.ec != std::errc() || read.ptr != text.data() + text.size())
-                return std::nullopt;
+                if (text.empty() || result.ec != std::errc() || result.ptr != text.data() + text.size())
+                    return std::nullopt;
 
-            return number;
+                return number;
+            };
+
+            const auto string = value.toString();
+            const auto isVisible = [] (char c) { return c > ' ' && c < 127; };
+
+            if (const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
+                ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
+                return read (text);
+
+            return read (string.trim().toStdString());
+        }
+
+        // Whether a number's text is the one Phazite writes for the number it reads as (SongText.h: writeValue()), told from
+        // the text alone, without writing the number, for the forms nearly every number of a song has: a whole number's
+        // digits (up to 15, no leading zero, not "-0"); or a decimal from 0.001 up, of up to six significant digits, no
+        // exponent, no leading or trailing zero, which Phazite writes as it is, as a float's fewest digits or in 15 (a float
+        // holds about seven, so no other text of six or fewer reads as the same float, and none shorter). Anything else is
+        // left to isSameValue().
+        bool isPlainlyAsWritten (const juce::var& value)
+        {
+            if (! value.isString())
+                return false;
+
+            const auto string = value.toString();
+            const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
+            const auto isDigit = [] (char c) { return c >= '0' && c <= '9'; };
+            size_t i = text.starts_with ('-') ? 1 : 0;
+            const auto wholeStart = i;
+
+            while (i < text.size() && isDigit (text[i]))
+                ++i;
+
+            const auto wholeDigits = i - wholeStart;
+            const auto belowOne = wholeDigits == 1 && text[wholeStart] == '0';
+
+            if (wholeDigits == 0 || wholeDigits > 15 || (wholeDigits > 1 && text[wholeStart] == '0'))
+                return false;
+
+            if (i == text.size())
+                return ! (belowOne && wholeStart == 1); // "-0" is written "0"
+
+            if (text[i] != '.' || text.back() == '0')
+                return false;
+
+            const auto fractionStart = ++i;
+
+            while (i < text.size() && isDigit (text[i]))
+                ++i;
+
+            const auto fractionDigits = i - fractionStart;
+
+            if (i != text.size() || fractionDigits == 0)
+                return false;
+
+            if (! belowOne)
+                return wholeDigits + fractionDigits <= 6;
+
+            const auto zeros = text.find_first_not_of ('0', fractionStart) - fractionStart;
+            return zeros <= 2 && fractionDigits - zeros <= 6;
         }
 
         // A number within its range: brought in, made whole, or for what is no finite number, its fallback (or none); and
@@ -707,7 +798,8 @@ namespace
                 kept = std::exp2 (std::round (std::log2 (kept)));
 
             if (const auto value = whole ? juce::var ((juce::int64) kept) : juce::var (kept);
-                ! juce::exactlyEqual (kept, *number) || ! isSameValue (element[property], value))
+                ! juce::exactlyEqual (kept, *number)
+                || ! (isPlainlyAsWritten (element[property]) || isSameValue (element[property], value)))
                 element.setProperty (property, value, nullptr);
         }
 
@@ -726,28 +818,6 @@ namespace
             const auto& ranges = getRanges();
             return std::any_of (ranges.begin(), ranges.end(),
                                 [&] (const Range& range) { return element.hasType (*range.type) && property == *range.property; });
-        }
-
-        // Whether Phazite knows an element's type, by its name's pooled text (juce::Identifier keeps one of each): what isKnown()
-        // says, without looking a text up, for the walks that go through every element of a song as it opens.
-        bool isKnownType (const juce::Identifier& type)
-        {
-            static const auto known = []
-            {
-                std::unordered_set<const void*> types { schema::PHAZITE.getCharPointer().getAddress() };
-
-                for (const auto& [parent, children] : getPlaces())
-                {
-                    types.insert (juce::Identifier (parent).getCharPointer().getAddress());
-
-                    for (const auto& child : children)
-                        types.insert (juce::Identifier (child).getCharPointer().getAddress());
-                }
-
-                return types;
-            }();
-
-            return known.count (type.getCharPointer().getAddress()) > 0;
         }
 
         // The names of the properties that hold or name an ID of the song's (schema::holdsID(), namesID()), which their
@@ -825,8 +895,17 @@ namespace
                 const auto text = value.toString();
                 auto inList = false;
 
-                // An exponent needs its e: the cheap test first.
-                if (text.containsAnyOf ("eE") && holdsNumbers (element, property, inList))
+                // An exponent needs its e: the cheap test first, on its UTF-8 (no other character's bytes are an e's).
+                const auto hasE = [&text]
+                {
+                    for (auto* c = text.toRawUTF8(); *c != 0; ++c)
+                        if (*c == 'e' || *c == 'E')
+                            return true;
+
+                    return false;
+                };
+
+                if (hasE() && holdsNumbers (element, property, inList))
                 {
                     auto kept = text;
 
@@ -864,22 +943,35 @@ namespace
 
             if (! exponentsOnly)
             {
-                for (const auto& each : getSwitchProperties())
+                static const auto switchesByType = []
                 {
-                    if (type != *each.type || ! element.hasProperty (*each.property))
+                    std::unordered_map<TypeKey, std::vector<const SwitchProperty*>> table;
+
+                    for (const auto& each : getSwitchProperties())
+                        table[keyOf (*each.type)].push_back (&each);
+
+                    return table;
+                }();
+
+                static const std::vector<const SwitchProperty*> none;
+                const auto found = switchesByType.find (keyOf (type));
+
+                for (const auto* each : found != switchesByType.end() ? found->second : none)
+                {
+                    if (! element.hasProperty (*each->property))
                         continue;
 
-                    const auto& value = element[*each.property];
+                    const auto& value = element[*each->property];
 
                     if (value.isBool() || (value.isString() && (value.toString() == "1" || value.toString() == "0")))
                         continue;
 
                     if ((bool) value)
-                        element.setProperty (*each.property, true, nullptr);
-                    else if (each.offIsNone)
-                        element.removeProperty (*each.property, nullptr);
+                        element.setProperty (*each->property, true, nullptr);
+                    else if (each->offIsNone)
+                        element.removeProperty (*each->property, nullptr);
                     else
-                        element.setProperty (*each.property, false, nullptr);
+                        element.setProperty (*each->property, false, nullptr);
                 }
 
                 if (type == schema::MODULATOR)
@@ -891,7 +983,7 @@ namespace
             }
 
             for (auto child : element)
-                if (isKnownType (child.getType()))
+                if (isKnown (child))
                     keepTexts (child, exponentsOnly);
         }
         // A full path on any system: this one's, one from the root ("/home/...", "\..."), or a Windows drive's ("C:..."). A
@@ -920,13 +1012,9 @@ namespace
             // of a type it doesn't know stays as it is (isKnown()).
             void keepPlaces (juce::ValueTree parent)
             {
-                const auto& places = getPlaces();
-                const auto found = places.find (parent.getType().toString());
-
                 for (auto i = parent.getNumChildren(); --i >= 0;)
                 {
                     auto child = parent.getChild (i);
-                    const auto type = child.getType().toString();
 
                     if (! isKnown (child))
                         continue;
@@ -938,7 +1026,7 @@ namespace
                                            child.getChildWithName (schema::TRACK).isValid() ? schema::trackIsFolder : schema::trackIsTrack,
                                            nullptr);
 
-                    const auto belongs = found != places.end() && found->second.contains (type)
+                    const auto belongs = belongsIn (parent.getType(), child.getType())
                                          && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
                                                && parent[schema::trackKind].toString() != schema::trackIsFolder)
                                          && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() != schema::trackIsTrack)
@@ -1052,36 +1140,34 @@ namespace
             // Every number Schema.h gives a range within it, and every word one of its words.
             void keepNumbers (juce::ValueTree element)
             {
-                for (const auto& range : getRanges())
-                    if (element.hasType (*range.type) && element.hasProperty (*range.property))
-                        keepInRange (element, *range.property, range.low, range.high, range.whole, range.fallback);
+                // The tables' rows by their elements' types, looked up once for each element.
+                static const auto byType = []
+                {
+                    std::unordered_map<TypeKey, std::pair<std::vector<const Range*>, std::vector<const Words*>>> table;
 
-                for (const auto& words : getWords())
-                    if (element.hasType (*words.type) && element.hasProperty (*words.property)
-                        && ! words.words.contains (element[*words.property].toString()))
-                        element.removeProperty (*words.property, nullptr);
+                    for (const auto& range : getRanges())
+                        table[keyOf (*range.type)].first.push_back (&range);
+
+                    for (const auto& words : getWords())
+                        table[keyOf (*words.type)].second.push_back (&words);
+
+                    return table;
+                }();
+
+                if (const auto rows = byType.find (keyOf (element.getType())); rows != byType.end())
+                {
+                    for (const auto* range : rows->second.first)
+                        if (element.hasProperty (*range->property))
+                            keepInRange (element, *range->property, range->low, range->high, range->whole, range->fallback);
+
+                    for (const auto* words : rows->second.second)
+                        if (element.hasProperty (*words->property) && ! words->words.contains (element[*words->property].toString()))
+                            element.removeProperty (*words->property, nullptr);
+                }
 
                 for (auto child : element)
                     if (isKnown (child))
                         keepNumbers (child);
-            }
-
-            //==============================================================================
-            // The largest ID a song holds that it can count on from.
-            static std::uint64_t findLargestID (const juce::ValueTree& tree)
-            {
-                std::uint64_t largest = 0;
-
-                for (int i = 0; i < tree.getNumProperties(); ++i)
-                    if (const auto property = tree.getPropertyName (i);
-                        schema::holdsID (tree, property) || (tree.hasType (schema::NOTE) && property == schema::noteID))
-                        if (const auto id = readID (tree[property]); id < maxID)
-                            largest = std::max (largest, id);
-
-                for (const auto& child : tree)
-                    largest = std::max (largest, findLargestID (child));
-
-                return largest;
             }
 
             // Every item's ID its own, a note's in its clip; one that isn't, or none, given a new one. An alias group's too
@@ -1089,6 +1175,32 @@ namespace
             void keepIDs (juce::ValueTree tree, std::set<std::uint64_t>& seen)
             {
                 std::set<std::uint64_t> notes;
+
+                // Whether its notes' IDs are each their own already, as nearly every clip's are: found by sorting them, without
+                // a set's node for each note.
+                std::optional<bool> notesAreTheirOwn;
+
+                const auto areTheirOwn = [&tree]
+                {
+                    std::vector<std::uint64_t> ids;
+                    ids.reserve ((size_t) tree.getNumChildren());
+
+                    for (const auto& child : tree)
+                    {
+                        if (! child.hasType (schema::NOTE))
+                            continue;
+
+                        const auto id = readID (child[schema::noteID]);
+
+                        if (id == 0 || id >= maxID)
+                            return false;
+
+                        ids.push_back (id);
+                    }
+
+                    std::sort (ids.begin(), ids.end());
+                    return std::adjacent_find (ids.begin(), ids.end()) == ids.end();
+                };
 
                 for (auto child : tree)
                 {
@@ -1101,6 +1213,12 @@ namespace
 
                     if (child.hasType (schema::NOTE))
                     {
+                        if (! notesAreTheirOwn.has_value())
+                            notesAreTheirOwn = areTheirOwn();
+
+                        if (*notesAreTheirOwn)
+                            continue;
+
                         if (const auto id = readID (child[schema::noteID]); id == 0 || id >= maxID || ! notes.insert (id).second)
                         {
                             const auto made = song.makeID();
@@ -1164,22 +1282,39 @@ namespace
 
                     auto gone = false;
 
-                    std::vector<juce::Identifier> properties;
-
-                    for (int p = 0; p < child.getNumProperties(); ++p)
-                        properties.push_back (child.getPropertyName (p));
-
-                    for (const auto& property : properties)
+                    // Those that name an ID, listed first, as taking one away moves the others; no list for an element that
+                    // names none, as nearly all (a note) don't.
+                    const auto namesOne = [&child] (int p)
                     {
-                        if (! schema::namesID (child, property) || items.count (readID (child[property])) > 0 || readInPart)
-                            continue;
+                        const auto property = child.getPropertyName (p);
+                        return mayHoldID (property) && schema::namesID (child, property);
+                    };
 
-                        if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
-                            gone = true;
-                        else if (property == schema::trackPadDevice)
-                            child.removeProperty (schema::trackPad, nullptr);
+                    auto anyNamed = false;
 
-                        child.removeProperty (property, nullptr);
+                    for (int p = 0; p < child.getNumProperties() && ! anyNamed; ++p)
+                        anyNamed = namesOne (p);
+
+                    if (anyNamed)
+                    {
+                        std::vector<juce::Identifier> properties;
+
+                        for (int p = 0; p < child.getNumProperties(); ++p)
+                            if (namesOne (p))
+                                properties.push_back (child.getPropertyName (p));
+
+                        for (const auto& property : properties)
+                        {
+                            if (items.count (readID (child[property])) > 0 || readInPart)
+                                continue;
+
+                            if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
+                                gone = true;
+                            else if (property == schema::trackPadDevice)
+                                child.removeProperty (schema::trackPad, nullptr);
+
+                            child.removeProperty (property, nullptr);
+                        }
                     }
 
                     if (gone)
@@ -1193,6 +1328,9 @@ namespace
             // No two of a parent's elements with one key (items aside, whose IDs keepIDs() made their own): the first stays.
             void keepKeys (juce::ValueTree tree)
             {
+                if (tree.getNumChildren() == 0)
+                    return; // no set made for each note
+
                 std::set<juce::String> keys;
 
                 for (auto i = 0; i < tree.getNumChildren();)
@@ -1329,12 +1467,12 @@ namespace
                 keepDevices (state);
                 keepNumbers (state);
 
-                // The song's next ID past what it holds (not past an ID too large to count on from), then each its own.
+                // The song's next ID past what it holds (not past an ID too large to count on from), counted as the song
+                // counts them (findLargestID(), findNextID()), then each its own.
                 const auto saved = readID (state[schema::nextID]);
                 state.setProperty (schema::nextID, (juce::int64) std::max (findLargestID (state) + 1, saved < maxID ? saved : 0), nullptr);
                 std::set<std::uint64_t> items;
-                keepIDs (state, items);
-                countIDs (song);
+                keepIDs (state, items); // each new one from the song's next ID, which stays past every ID it holds
                 keepSends (state, items);
                 keepNames (state, items);
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
@@ -1359,6 +1497,16 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal)
 void makeExponentsReadable (juce::ValueTree song)
 {
     consistent::keepTexts (std::move (song), true);
+}
+
+std::optional<double> readLoadedNumber (const juce::var& value)
+{
+    return consistent::readNumber (value);
+}
+
+bool isNumberWrittenAsPhazite (const juce::var& value)
+{
+    return consistent::isPlainlyAsWritten (value);
 }
 
 const std::vector<SwitchProperty>& getSwitchProperties()
@@ -1675,8 +1823,7 @@ bool Project::checkUnsavedChanges()
     // The song is as saved after all.
     changedSinceSave = changedSinceAutosave = false;
     changesOutsideHistory = song->getChangesOutsideHistory();
-    mayHaveChanged = compareAll = false;
-    elementsToCompare.clearQuick();
+    clearToCompare();
     return false;
 }
 
@@ -1725,6 +1872,7 @@ juce::Result Project::autosave()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
+        compareStoredStates(); // which the project file doesn't hold
 
         if (const auto written = writeProjectFile (song->getState(), target); written.failed())
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ": "
@@ -1757,6 +1905,7 @@ void Project::autosaveInBackground()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
+        compareStoredStates(); // which the project file doesn't hold
         autosaveWriter->write (song->getState().createCopy(), target);
     }
 
@@ -1808,8 +1957,7 @@ bool Project::finishBackgroundSave()
 
     // What the file holds now: saved, unless the song changed since it was copied.
     savedState = written;
-    mayHaveChanged = compareAll = false;
-    elementsToCompare.clearQuick();
+    clearToCompare();
     changesOutsideHistory = outsideAtBackgroundSave;
 
     if (changeCount == changesAtBackgroundSave && song->getChangesOutsideHistory() == outsideAtBackgroundSave)
@@ -1853,6 +2001,7 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
 
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
     storeForSaving (*song);
+    compareStoredStates(); // which this project's file doesn't hold
 
     if (const auto written = writeProjectFile (song->getState(), newFile); written.failed())
     {
@@ -2129,11 +2278,16 @@ void Project::backUpProjectFile()
         versions.getReference (i).deleteFile();
 }
 
+void Project::clearToCompare()
+{
+    mayHaveChanged = comparingWhole = false;
+    toCompare.clear();
+}
+
 void Project::rememberSavedState()
 {
     savedState = song->getState().createCopy();
-    mayHaveChanged = compareAll = false;
-    elementsToCompare.clearQuick();
+    clearToCompare();
 }
 
 void Project::forgetSavedState()
@@ -2141,9 +2295,98 @@ void Project::forgetSavedState()
     // No song to compare with, so none is the same (holdTheSameProject()): unsaved, whatever closing compares, until a save
     // remembers what it wrote.
     savedState = {};
-    mayHaveChanged = compareAll = false;
-    elementsToCompare.clearQuick();
+    clearToCompare();
     changedSinceSave = changedSinceAutosave = true;
+}
+
+namespace
+{
+    std::atomic<juce::int64> elementsComparedWithSaved { 0 };
+
+    // An element's place among those of its parent's that count (what holdTheSameProject() compares), or -1.
+    int indexAmongCounted (const juce::ValueTree& parent, const juce::ValueTree& element)
+    {
+        auto index = 0;
+
+        for (const auto& child : parent)
+        {
+            if (child == element)
+                return index;
+
+            if (! schema::isUncountedElement (parent, child))
+                ++index;
+        }
+
+        return -1;
+    }
+
+    juce::ValueTree getCountedChild (const juce::ValueTree& parent, int index)
+    {
+        for (const auto& child : parent)
+            if (! schema::isUncountedElement (parent, child) && index-- == 0)
+                return child;
+
+        return {};
+    }
+} // namespace
+
+void Project::compareStoredStates()
+{
+    if (changedSinceSave)
+        return;
+
+    mayHaveChanged = true;
+    const auto state = song->getState();
+
+    for (const auto* type : { &schema::TRACKS, &schema::MASTER })
+        if (const auto element = state.getChildWithName (*type); element.isValid())
+            toCompare.push_back ({ element, {} });
+}
+
+juce::int64 Project::countElementsCompared()
+{
+    return elementsComparedWithSaved.load (std::memory_order_relaxed);
+}
+
+juce::ValueTree Project::findSavedCopy (const juce::ValueTree& element) const
+{
+    // Its places from the song down, among the elements that count: what a view state element added (a track's LANES) moves
+    // in the song moves nothing in the copy.
+    const auto state = song->getState();
+    std::vector<int> places;
+
+    for (auto e = element; e != state; e = e.getParent())
+        places.push_back (indexAmongCounted (e.getParent(), e));
+
+    auto copy = savedState;
+
+    for (auto place = places.rbegin(); place != places.rend() && copy.isValid(); ++place)
+        copy = getCountedChild (copy, *place);
+
+    return copy;
+}
+
+bool Project::isAsSaved (const ToCompare& entry) const
+{
+    // One no longer in the song: what it was taken out of notified, and is compared whole.
+    const auto state = song->getState();
+
+    if (! (entry.element == state || entry.element.isAChildOf (state)))
+        return true;
+
+    // At the same place in the copy: where an element was added, removed or moved, its parent notified, and is compared
+    // whole, which finds the difference; or there is none, and the places below are the same in both.
+    const auto copy = findSavedCopy (entry.element);
+
+    if (! copy.isValid() || copy.getType() != entry.element.getType())
+        return false;
+
+    if (entry.property.isNull())
+        return holdTheSameProject (entry.element, copy);
+
+    const auto* now = entry.element.getPropertyPointer (entry.property);
+    const auto* saved = copy.getPropertyPointer (entry.property);
+    return now == nullptr || saved == nullptr ? now == saved : isSameValue (*now, *saved);
 }
 
 void Project::compareWithSavedState()
@@ -2158,20 +2401,8 @@ void Project::compareWithSavedState()
     if (! mayHaveChanged)
         return;
 
-    // The elements that notified, each with its copy at the same place in savedState: the song's own elements keep their
-    // places unless one was added or removed, which notifies the song itself.
-    const auto state = song->getState();
-    const auto isSame = [this, &state] (const juce::ValueTree& element)
-    {
-        const auto index = state.indexOf (element);
-        return index >= 0 && index < savedState.getNumChildren() && holdTheSameProject (element, savedState.getChild (index));
-    };
-
-    const auto same =
-        compareAll ? holdTheSameProject (state, savedState) : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
-
-    mayHaveChanged = compareAll = false;
-    elementsToCompare.clearQuick();
+    const auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
+    clearToCompare();
 
     if (! same)
     {
@@ -2198,17 +2429,41 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
         return;
     }
 
-    // Perhaps nothing changed: compared with savedState when asked, the element of the song it is in.
+    // Perhaps nothing changed: compared with savedState when asked, what notified (a property, or an element whose elements
+    // changed) or, past mostToCompare of them, the track (or the song's element) each is in, whole.
     mayHaveChanged = true;
-    auto element = tree;
 
-    while (element.getParent().isValid() && element.getParent() != state)
-        element = element.getParent();
+    const auto wholeAround = [&state] (const juce::ValueTree& changed)
+    {
+        auto element = changed;
 
-    if (element == state || element.getParent() != state)
-        compareAll = true;
-    else
-        elementsToCompare.addIfNotAlreadyThere (element);
+        // Up to its track, or the song's element it is in.
+        for (auto parent = element.getParent(); parent.isValid() && parent != state && ! parent.hasType (schema::TRACKS);
+             parent = element.getParent())
+            element = parent;
+
+        return element;
+    };
+
+    // Looked for from the last: one edit's notifications come one after another, mostly from one element.
+    const auto add = [this] (const ToCompare& entry)
+    {
+        if (std::none_of (toCompare.rbegin(), toCompare.rend(),
+                          [&entry] (const ToCompare& each) { return each.element == entry.element && each.property == entry.property; }))
+            toCompare.push_back (entry);
+    };
+
+    if (! comparingWhole && toCompare.size() >= mostToCompare)
+    {
+        comparingWhole = true;
+
+        // Those taken out of the song since they notified are compared no more (isAsSaved()): let go of here.
+        for (const auto& each : std::exchange (toCompare, {}))
+            if (each.element == state || each.element.isAChildOf (state))
+                add ({ wholeAround (each.element), {} });
+    }
+
+    add (comparingWhole ? ToCompare { wholeAround (tree), {} } : ToCompare { tree, property });
 }
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -2219,6 +2474,8 @@ void Project::markChildChanged (const juce::ValueTree& parent, const juce::Value
 
 bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTree& b)
 {
+    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
+
     if (a.getType() != b.getType())
         return false;
 

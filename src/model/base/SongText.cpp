@@ -2,9 +2,13 @@
 #include "internal/SongText.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <optional>
+#include <string_view>
 
 namespace phazite
 {
@@ -35,23 +39,52 @@ namespace
         return text;
     }
 
-    juce::String writeNumber (double number)
+    bool holdsForbidden (const juce::String& text)
+    {
+        for (auto p = text.getCharPointer(); ! p.isEmpty();)
+            if (isForbiddenInXml (p.getAndAdvance()))
+                return true;
+
+        return false;
+    }
+
+    // A number's text, into a buffer of the caller's (no String made: isSameValue() compares many).
+    using NumberText = std::array<char, 48>;
+
+    std::string_view writeNumber (double number, NumberText& text)
     {
         if (! std::isfinite (number))
             return std::isnan (number) ? "nan" : (number > 0 ? "inf" : "-inf");
 
+        const auto begin = text.data(), end = text.data() + text.size();
+
         // A whole number in its digits (as far as a double holds whole numbers exactly).
         if (juce::exactlyEqual (number, std::trunc (number)) && std::abs (number) < 1.0e15)
-            return juce::String ((juce::int64) number);
+            return { begin, (size_t) (std::to_chars (begin, end, (juce::int64) number).ptr - begin) };
 
         // A float's value in the fewest digits that read back as that float; any other in 15 significant digits, as C's
         // "%.15g" writes it, so that what arithmetic leaves past them ("8.000000000000004") is no change.
-        char text[48];
         const auto isFloats =
             std::abs (number) <= (double) std::numeric_limits<float>::max() && juce::exactlyEqual ((double) (float) number, number);
-        const auto written = isFloats ? std::to_chars (text, text + sizeof (text), (float) number)
-                                      : std::to_chars (text, text + sizeof (text), number, std::chars_format::general, 15);
-        return juce::String (text, (size_t) (written.ptr - text));
+        const auto written =
+            isFloats ? std::to_chars (begin, end, (float) number) : std::to_chars (begin, end, number, std::chars_format::general, 15);
+        return { begin, (size_t) (written.ptr - begin) };
+    }
+
+    // The text writeValue() writes for a switch or a number, into a buffer of the caller's; nothing for any other value.
+    std::optional<std::string_view> writeNumberOrSwitch (const juce::var& value, NumberText& text)
+    {
+        if (value.isBool())
+            return (bool) value ? "1" : "0";
+
+        if (value.isInt() || value.isInt64())
+            return std::string_view { text.data(), (size_t) (std::to_chars (text.data(), text.data() + text.size(), (juce::int64) value).ptr
+                                                             - text.data()) };
+
+        if (value.isDouble())
+            return writeNumber ((double) value, text);
+
+        return std::nullopt;
     }
 
     void writeSpaces (juce::OutputStream& out, int count)
@@ -105,20 +138,45 @@ namespace
 
 juce::String writeValue (const juce::var& value)
 {
-    if (value.isBool())
-        return (bool) value ? "1" : "0";
+    NumberText text;
 
-    if (value.isInt() || value.isInt64())
-        return juce::String ((juce::int64) value);
-
-    if (value.isDouble())
-        return writeNumber ((double) value);
+    if (const auto written = writeNumberOrSwitch (value, text))
+        return juce::String (written->data(), written->size());
 
     return withoutForbidden (value.toString());
 }
 
 bool isSameValue (const juce::var& a, const juce::var& b)
 {
+    // What writeValue() writes, compared without making a String of either: the comparison with a project's saved copy and
+    // the loader's checks compare every number of a song (a String each made them 30 times slower).
+    if (a.isDouble() && b.isDouble() && juce::exactlyEqual ((double) a, (double) b))
+        return true; // the same number writes the same text (0 and -0 too); others may yet, past 15 digits
+
+    NumberText bufferA, bufferB;
+    const auto numberA = writeNumberOrSwitch (a, bufferA), numberB = writeNumberOrSwitch (b, bufferB);
+
+    if (numberA.has_value() && numberB.has_value())
+        return *numberA == *numberB;
+
+    if (numberA.has_value() || numberB.has_value())
+    {
+        // A number and text: the text as it is, unless it holds what writeValue() leaves out.
+        if (const auto text = (numberA.has_value() ? b : a).toString(); ! holdsForbidden (text))
+        {
+            const auto number = numberA.has_value() ? *numberA : *numberB;
+            return text.getNumBytesAsUTF8() == number.size() && std::memcmp (text.toRawUTF8(), number.data(), number.size()) == 0;
+        }
+    }
+    else if (const auto textA = a.toString(), textB = b.toString(); textA == textB)
+    {
+        return true;
+    }
+    else if (! holdsForbidden (textA) && ! holdsForbidden (textB))
+    {
+        return false;
+    }
+
     return writeValue (a) == writeValue (b);
 }
 

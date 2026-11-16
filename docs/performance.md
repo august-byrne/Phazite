@@ -38,7 +38,7 @@ the run of 2026-11-16.
 | A key to its sound in under 15 ms with a wired output | Not measured |
 | A stopped song of 20 tracks (a synth, an EQ, a compressor and a reverb each) costs under 2 % of a core | Yes, since 2026-11-16: 1.0 to 1.2 % on one thread, 0.6 to 0.8 % on four (7.5 % / 2.6 % before, its reverbs playing their tails from silence as it opened) |
 | A parameter's change takes under 0.5 ms of the message thread | Yes |
-| The check for unsaved changes takes under 1 ms | No, on 2026-11-16: 22 ms after a notification that changes nothing, in the song of "the UI's work on a big song" (0.78 ms when the audit measured it, section 7) |
+| The check for unsaved changes takes under 1 ms | Yes, since 2026-11-16: 0.01 ms after a notification that changes nothing and 0.04 ms after a note added and taken back, in the song of "the UI's work on a big song" (22 ms before that day's fix); 8 to 10 ms after a change of the tracks' list, which compares every track |
 | An autosave keeps the message thread under 15 ms | Yes |
 
 ## Running the benchmarks
@@ -370,6 +370,13 @@ Measured on 2026-11-16 on the PC above, from `windows-profile`, one run, on a qu
 | Save, after the song played and was edited, for a project file of 3,118 KB | 128.3 ms | |
 | Save again, nothing changed | 110.6 ms | |
 
+A save's parts, by temporary timers on the 40-track song of "saving and opening a big project" (2026-11-16, 1,353 KB):
+the song written as text 17 ms, the file written and flushed to the disk 33 ms (`writeWholeFile()`), the copy kept to
+compare with 2.5 to 4.8 ms, the backup 1.6 to 2.5 ms, the plug-ins' states stored 1.1 to 1.4 ms. The known-bugs round
+added to a save only a test's hook and a debug build's check (`isLetThrough()`, `holdFolder()`); the 128 ms above
+against 106 to 113 ms before is the disk's flush, which moves by as much from one save to the next (110.6 ms for the
+save after it, nothing changed).
+
 A plan compiles again only what changed (known bug 145, 2026-11-16). Measured from `windows-profile` with the build
 before the change and the build after it run one after the other, **while other builds and a ctest run loaded the
 machine** (so both are high; compare them with each other); "now" is the run of 2026-11-16 on a quiet machine:
@@ -522,7 +529,25 @@ changes each and ten keys' pressure: 0.037 % of a block of 128 at 48 kHz.
 | Autosave | 43.2 ms | 2026-11-16 |
 | Open | 62.6 ms | 2026-11-16 |
 
-Open took 28 ms when the audit measured it (section 12).
+Open took 28 ms when the audit measured it (section 12, 2026-11-04). Since then the project file holds each property
+on a line of its own (2026-11-09: 1,353 KB for this song), whose parse by JUCE (`juce::XmlDocument`) and the tree made
+of it take about 27 ms of the open alone, and the loader's checks (`makeConsistent()`) grew with the format audit
+(2026-11-09) and the known-bugs round (numbers held as Phazite writes them, switches and IDs, exponents; known bugs 170
+and 179). Those checks took 28 ms of the 62.6 ms; on 2026-11-16 their waste was taken out, every check kept: a type
+looked up by its name's text in every walk (now by its pooled pointer), a list of each element's properties copied to
+find the few that name an ID, a set's node for each note's ID and each element's keys, every row of the tables scanned
+for each element, a copy of each number's text to read it, and each number written as text to see whether its file
+wrote it as Phazite would (now told from the text itself, for the forms Phazite writes: `isPlainlyAsWritten()`), and a
+second count of the song's IDs. Before and after, the two builds run in turns three times on the busy machine:
+
+| | Before | After |
+|---|---|---|
+| Open, 40 tracks | 63.9 to 107.4 ms | 53.7 to 102.9 ms |
+| `makeConsistent()` of 100,000 notes, the median of 5 | 372.6 to 478.1 ms | 189.4 to 224.2 ms |
+| `joinSong()` of it, the median of 5 | 713.3 to 881.7 ms | 523.8 to 675.6 ms |
+
+What is left of an open is JUCE's parse and tree (about half), the checks' walks of every element (each a few
+properties looked up and read), and the song's first plan.
 
 ### Benchmark: what a branch switch and a merge spend on the message thread, by part
 
@@ -545,7 +570,9 @@ still runs on the message thread of a DAWproject import as a branch: the commit'
 (`takeDawProject()`): 22 ms for the song made (2026-11-16), plus the copy, which depends on the file.
 
 The same loader on a song of 100,000 notes (`Benchmark: a song of 100,000 notes made consistent as it opens`,
-2026-11-16, the median of 5): `makeConsistent()` 341.6 ms, `joinSong()` 698.7 ms.
+2026-11-16, the median of 5): `makeConsistent()` 341.6 ms, `joinSong()` 698.7 ms on the quiet machine; 189 to 224 ms and
+524 to 676 ms after that day's fix, on a busy one (where the build before it took 373 to 478 and 713 to 882 ms; "saving
+and opening a big project" above).
 
 ### Benchmark: rendering audio clips stretched and pitched
 
@@ -583,13 +610,29 @@ The message thread's work on a song of 16 tracks, 256 clips and 16,384 notes, in
 | The whole window painted, its second paint | 7.2 ms | 16 |
 | An 11-pixel column of the window, as a playhead repaints it | 0.79 ms | 2026-11-16 |
 | ... of the playlist / of the piano roll | 0.23 / 0.15 ms | 2026-11-16 |
-| The check for unsaved changes after a notification that changes nothing | 22.0 ms | 2026-11-16 |
+| The check for unsaved changes after a notification that changes nothing: the first / the mean of 100 | 0.01 / 0.00 ms | 2026-11-16, after the fix |
+| ... after a note added and taken back (its clip compared) | 0.04 ms | 2026-11-16, after the fix |
+| ... after a track moved and moved back (every track compared) | 8.1 to 9.9 ms | 2026-11-16, after the fix |
 | Save | 91.2 ms | 2026-11-16 |
 | Autosave, on the message thread | 7.8 ms | 2026-11-16 |
 | A note moved a step, with what follows | 2.92 ms | 2026-11-16 |
 
 The note's row moves by 2 ms from run to run of one build. Save, which took 103 ms in section 12 and 145 ms in section
-16 ([backlog.md](backlog.md) looks for why it grew), took 91.2 ms on 2026-11-16.
+16, took 91.2 ms on 2026-11-16.
+
+The check for unsaved changes (the title's star and Auto Save ask it after every notification) took 22 ms in the run
+of 2026-11-16, 0.78 ms in section 7. Two causes, both older than the known-bugs round: since the versions came
+(2026-11-04), the comparison with the saved copy writes every value of both as text to compare them (`isSameValue()`,
+`src/model/base/SongText.cpp`), a `juce::String` each; and any notification on a track compared every track, as the
+song's element it is in is the track list. Now the values are compared without making text (the same text is still
+what decides), and a property that notified is compared alone, an element whose elements changed whole, each at its
+place in the saved copy; past 64 notifications at once, the track each is in. Before and after, the two builds run in
+turns three times on the busy machine:
+
+| The check for unsaved changes | Before | After |
+|---|---|---|
+| After a notification that changes nothing: the first / the mean of 100 | 22.1 to 34.4 / 24.5 to 27.6 ms | 0.01 to 0.02 / 0.00 ms |
+| After a track moved and moved back, every track compared | 21.2 to 35.6 ms | 8.1 to 9.9 ms |
 
 ### Benchmark: frosted glass behind popups over a big song
 
@@ -602,7 +645,9 @@ paint of the glass after that.
 | A menu, 220 x 320 | 1.94 ms | 0.85 ms | 2026-11-16 |
 | The command search, 530 x 480 | 5.30 ms | 1.17 ms | 2026-11-16 |
 
-Section 14 of the audit had 0.33 / 1.13 ms, 1.73 / 0.69 ms and 4.71 / 1.08 ms.
+Section 14 of the audit had 0.33 / 1.13 ms, 1.73 / 0.69 ms and 4.71 / 1.08 ms. Nothing of the known-bugs round is in
+a popup's glass; the build before the round's last fixes and the build after them, run in turns on a busy machine
+(2026-11-16), both took 0.62 to 0.73 ms for the tooltip: the machine's load, not a change.
 
 ### Benchmark: scrolling and zooming a big song
 
@@ -620,8 +665,16 @@ The playlist with 100 tracks, 2,400 clips and 38,400 notes, in the whole window.
 | Clip components in the playlist | 12, those in view | 2026-11-16 |
 
 Section 12 of the audit had 0.27 ms for a wheel notch, 0.53 ms for a zoom, 8 clip components. The clip's move took 3.2
-to 3.3 ms in section 12 (0.8 ms of it the new plan and 1.5 ms the playlist's work) and 8.1 ms in section 16
-([backlog.md](backlog.md) looks for why it grew); 2.43 ms on 2026-11-16.
+to 3.3 ms in section 12 (0.8 ms of it the new plan and 1.5 ms the playlist's work) and 8.1 ms in section 16; 2.43 ms on
+2026-11-16, since a plan compiles again only what an edit changed.
+
+What a wheel notch costs (a sampling of the message thread over 300 notches, 2026-11-16): about half is the playlist
+placing its clips (`layOutClips()`, which works out the bounds of every clip of the song, 2,400 here, to find those in
+view), a quarter the mouse's move that follows the scroll (`getClipAt()`, which looks through every clip too), and a
+tenth the track headers made and deleted as their rows come into and leave the view, which the mixer and playlist's
+change of the known-bugs round brought (only what is in view is made, with one row more at either end, which the Tab
+key goes on to: the 12 clip components here, 8 before). That tenth is the price of the playlist of 200 tracks making 19
+headers rather than 200; the rest is older, and grows with the song's clips (in the backlog).
 
 ### Benchmark: the mixer of 200 tracks
 
@@ -644,6 +697,10 @@ only the changed channel's brought up to date). "Now" is the run of 2026-11-16 o
 | ... each event with what it left for the next turns of the message loop | | 9.7 ms; 18.4 ms under the heavier load | 5.00 ms |
 
 What is left of a tick, about 0.06 ms a strip, is the model's lookups of each strip's values by ID (known bug 122).
+
+A device added in view and a fader's step move from run to run more than "after" and "now" differ: the builds before
+and after the round's last fixes, run in turns on a busy machine (2026-11-16), took 0.21 to 0.99 ms for the device
+added in view and 0.37 to 0.94 ms for the fader's step, either build.
 
 The thumb's drag was measured after the review's round (2026-11-15), whose first version made every strip a jump brought
 into view, and deleted every one it took out, at once: 10.5 ms an event and 24 to 34 ms at the worst, over a frame. A jump
@@ -709,6 +766,27 @@ at once, 16 ms an event and up to 230 ms. What it leaves is mostly the clips' no
 
 Section 16 of the audit had a move's most at 1.0 ms, a frame's work at 0.56 / 1.60 / 2.2 ms, and no frame missed.
 
+The mouse adds nothing to a frame's paint (looked for on 2026-11-16, after the run above). The paint's column was the
+window's paint into the benchmark's Direct2D image and, as that image's `juce::Graphics` goes, JUCE copying the image
+back from the graphics card (its persistent backup), which waits for the card and which a window's frame doesn't do;
+that copy grows as a run goes on, the mouse moving or not. With the mouse still once more after it moved, and the
+window's paint timed on its own (the benchmark's columns since; "frames over 8 ms" now count the work and the window's
+paint), on a busy machine:
+
+| 1,200 frames, three runs | The window's paint, mean / 95th percentile | With the image copied back, mean | Frames whose work and the window's paint took over 8 ms | Frames missed |
+|---|---|---|---|---|
+| The mouse still | 1.81 to 2.12 / 2.30 to 2.68 ms | 7.06 to 7.75 ms | 1 to 2 | 2 to 3 |
+| The mouse moving, without tooltips | 1.74 to 1.96 / 2.19 to 2.51 ms | 9.27 to 9.74 ms | 0 to 2 | 0 to 2 |
+| The mouse still again | 1.76 to 1.98 / 2.21 to 3.01 ms | 9.32 to 9.79 ms | 0 to 1 | 1 to 2 |
+| The mouse moving, with the window's tooltips | 1.77 to 1.88 / 2.29 to 2.49 ms | 9.13 to 9.37 ms | 1 to 2 | 1 to 3 |
+
+The frames missed here are those during which the busy machine ran something else (a frame's work and its window's
+paint stay near 2.5 ms); on the quiet machine the run of 2026-11-16 missed 0 or 1.
+
+The areas each frame asks to repaint are the same with the mouse moving as with it still, but for a header's small
+part as the mouse goes over it. A sampling of the message thread found the window's paint about a fifth of the paint's
+column, and the copy back the rest.
+
 ### Benchmark: starting up, and the window at rest
 
 | What | Value | From |
@@ -720,7 +798,20 @@ Section 16 of the audit had a move's most at 1.0 ms, a frame's work at 0.56 / 1.
 | At rest: the process's CPU | 1.87 % of a core | 2026-11-16 |
 | At rest: the message thread's CPU | 0.94 % of a core | 2026-11-16 |
 
-The services, the commands and the window's content took 12.7 ms in section 14 of the audit.
+The services, the commands and the window's content took 12.7 ms in section 14 of the audit. That row is the first
+window made in the process, which is also the first text shaped and the first fonts read: the same made again 25 times
+in one process (2026-11-16, a busy machine) took 12.7 to 29.7 ms, so one run's row moves by more than its change since
+section 14. A sampling of those starts found no service or view of the known-bugs round dear (the library's listing
+threads start only as a folder is listed); the largest parts were text laid out and shaped for the first time (the
+Project view's lists, the tabs), every icon read from its SVG again for each button (about an eighth), and, here only,
+the piano roll asking Windows where the mouse is as it starts (`NoteGrid::cancelGesture()`, the same before the round),
+a call that is slow on this test machine's desktop. Each icon is now read once and copied for each button
+(`createIcon()`, `src/ui/theme/Icons.cpp`). The two builds in turns, three times each, on the busy machine:
+
+| | Before | After |
+|---|---|---|
+| The services, the commands and the window's content, the first | 23.1 to 132.8 ms | 21.8 to 31.2 ms |
+| ... again, the median of 10 | 21.4 to 23.4 ms | 18.5 to 21.6 ms |
 
 ### Benchmark: a clip of 5,000 notes edited in the piano roll, and what views read of a song of 4,800 clips
 
@@ -885,7 +976,11 @@ The edit and "now" are the run of 2026-11-16.
 
 A sound tried on a drum pad by Swap (`a sound tried on a drum pad by Swap`, 20 tries): median 0.07 ms before and after
 when it was first measured (a try copies nothing: the sound kept is copied in by its keep, in the background); on
-2026-11-16, median 0.41 ms, slowest 0.53 ms.
+2026-11-16, median 0.41 ms, slowest 0.53 ms. A sampling of 2,000 tries (2026-11-16) found nearly all of a try in the
+pad's sound read on the message thread as the song's player takes the sound (`loadPadSound()`, `src/model/devices/DrumKit.cpp`,
+as before the known-bugs round), most of that in the file system's calls (a file's size and attributes asked, its bytes
+read): the test's sounds are written just before they are tried, which the system's indexer and virus scanner look at
+first. So the change is the disk's, not Phazite's; a pad's sound read on the message thread is in the backlog.
 
 ## The gates
 
@@ -939,6 +1034,14 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   effect after a synth, and a reverb an LFO modulates): none in a second as the song opens, nothing played, and none in
   a second after Stop once each has rested (`DeviceRunner::getBlocksWorked()`; until 2026-11-16 a reverb that had heard
   nothing still played its two seconds of tail as a project opened, and the vinyl never rested).
+- the check for unsaved changes (the title's star, Auto Save) compares no element after a notification that changes
+  nothing, only the property that notified, and only its clip after a note added and taken back: 321 elements of the
+  3,713 the song of 16 tracks holds, measured 2026-11-16; before, every track, whose every value it wrote as text
+  (`Project::countElementsCompared()`).
+- the loader's checks (`makeConsistent()`) of a song read from its text make fewer allocations than a tenth of its
+  notes, and leave Phazite's own text as it is: 248 for 4,000 notes, measured 2026-11-16; about seven a note before
+  (a text for each number compared, a list of each element's properties, a set's node for each note's ID and for each
+  element's keys).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

@@ -163,7 +163,8 @@ and nothing is listed in both.
 | The audio clip editor zooms and scrolls | `src/ui/audioclip/AudioClipEditor.cpp` | L | 5 | ui-timeline-editors 4 |
 | Controller, pitch-bend and pressure lanes in the piano roll, for what clips hold and play unseen, with note chance and grooves after them | `src/ui/pianoroll/PianoRollLanes.cpp` | L | 5 | ui-timeline-editors 3, product-gaps 9, model-arrangement 11 |
 | Snapping to clips' edges and markers as well as the grid; trim and slice on several items at once | `src/ui/timeline/TimelineEditor.cpp` | M | 5 | ui-timeline-editors 10 |
-| Why a clip moved a beat in the big song costs 8.1 ms of the message thread where it cost 3.2 (the overview's marks, probably), and why Save grew from 103 to 145 ms | `src/ui/playlist/Playlist.cpp` | — | — | performance audit |
+| A wheel notch and a mouse move over the playlist look through every clip of the song (`layOutClips()`, `getClipAt()`: three quarters of a notch's cost in a song of 2,400 clips): the clips in view found by row | `src/ui/playlist/Playlist.cpp` | — | — | performance page, 2026-11-16 |
+| A drum pad's sound read in the background, as other audio is: it is read on the message thread when Swap tries a sound or a pad's sound changes (`loadPadSound()`, as the song's player takes the value) | `src/model/devices/DrumKit.cpp` | — | — | performance page, 2026-11-16 |
 | A waveform's picture kept while a long clip crosses the view's edge, and clips not repainted for a knob turned while playing | `src/app/ClipWaveforms.cpp` | — | — | performance audit |
 | The displays ticked at the display's frames, with the views' own timers folded into that tick and the playback session's stopped while nothing plays (about 1 % of a core at rest) | `src/ui/components/DisplayTicker.h` | — | — | performance audit |
 | Frames that JUCE shows a frame late reported to JUCE with the measurements, if they bother anyone | `src/ui/timeline/FrameLog.cpp` | — | — | performance audit |

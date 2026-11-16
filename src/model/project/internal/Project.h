@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -83,6 +84,15 @@ const std::vector<SwitchProperty>& getSwitchProperties();
 // numbers (those it gives ranges, values set by hand, points' values, steps and slices), nothing else, so that a name
 // stays as it is. What makeConsistent() does first; and what the versions' pieces get as they are joined into a song.
 void makeExponentsReadable (juce::ValueTree song);
+
+// The loader's reading of a number (makeConsistent()): a number's own value, or text that is a number and nothing else
+// (trimmed), infinity for text too large for one; none for anything else. And whether a text is the one Phazite writes for
+// the number it reads as (SongText.h: writeValue()), told from the text alone: a whole number's digits (up to 15, no
+// leading zero, not "-0"), or a decimal from 0.001 up of up to six significant digits, without an exponent or a leading or
+// trailing zero. False for anything else, which the loader compares by writing the number (isSameValue()). For the loader
+// and its tests.
+std::optional<double> readLoadedNumber (const juce::var&);
+bool isNumberWrittenAsPhazite (const juce::var&);
 
 // Whether an entry of a project's folders is a link that leads elsewhere, which a copy of the project leaves out with what
 // it leads to (a symbolic link or a junction: anywhere, or round to the project itself), given what its isSymbolicLink() and
@@ -288,14 +298,34 @@ private:
     // The song as it was when the project was opened, with Phazite's parts added, or last saved. JUCE notifies a value
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
     // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
-    // to it or change it. Only the elements of the song that notified are compared (the tracks, the tempo map...), unless
-    // the song itself did (docs/archive/performance-audit.md, U3). No song at all while the project file doesn't hold the song that
-    // was opened (a restored autosave, or a song from elsewhere: forgetSavedState()): then the song is unsaved, whatever it
-    // is compared with, until it is saved.
+    // to it or change it. Only what notified is compared (docs/archive/performance-audit.md, U3): a property that notified
+    // with its copy's, and an element whose elements were added, removed or moved whole, each found in the copy at the same
+    // place among the elements that count; after many notifications, the track (or the song's element) each was in, whole.
+    // No song at all while the project file doesn't hold the song that was opened (a restored autosave, or a song from
+    // elsewhere: forgetSavedState()): then the song is unsaved, whatever it is compared with, until it is saved.
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
-    juce::Array<juce::ValueTree> elementsToCompare;
-    bool compareAll = false;
+
+    struct ToCompare
+    {
+        juce::ValueTree element;
+        juce::Identifier property; // none: the element whole
+    };
+
+    // An element noted here and then taken out of the song stays alive with what it holds until the next comparison (the
+    // song's undo history keeps it anyway, for an undo to put back), and is no longer compared: where it was taken from
+    // notified, and is compared whole. Bounded: at most mostToCompare notes, and past them only what is still in the song,
+    // each track or song's element once.
+    std::vector<ToCompare> toCompare;
+    bool comparingWhole = false; // past mostToCompare: each one's track, or the song's element, whole
+    void clearToCompare();
+
+    // What a store of the plug-ins' states wrote into the song without notifying (storeForSaving() while isWriting) where
+    // the project file doesn't get it (Save a Copy As, an autosave): the tracks and the master compared whole at the next
+    // check, as a plug-in may have changed its state without saying so.
+    void compareStoredStates();
+    bool isAsSaved (const ToCompare&) const;
+    juce::ValueTree findSavedCopy (const juce::ValueTree& element) const;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
     // of its Versions if it keeps any, as moveTo() does, and returns the project file that goes in it. If the name is empty,
@@ -320,6 +350,20 @@ private:
     // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()).
     static bool holdTheSameProject (const juce::ValueTree&, const juce::ValueTree&);
 
+public:
+    // How many elements the comparisons with the saved copies looked at since the program started (each element compared
+    // whole counts, with each of its elements): what the performance tests count (tests/PerformanceGateTests.cpp). Message
+    // thread.
+    static juce::int64 countElementsCompared();
+
+    // How many notifications since the last comparison are compared one by one; past them, each one's track whole.
+    static constexpr size_t mostToCompare = 64;
+
+    // For tests: what the comparison of the whole song with the saved copy says, which hasUnsavedChanges() works out
+    // comparing only what notified since. Message thread.
+    bool isWholeAsSaved() const { return holdTheSameProject (song->getState(), savedState); }
+
+private:
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }

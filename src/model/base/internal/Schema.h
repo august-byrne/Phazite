@@ -1038,6 +1038,12 @@ namespace preset
 
 namespace phazite
 {
+// The largest ID in a part of the song that it can count on from (below schema::maxID): its items' (each kind's is named
+// "id": trackID, clipID, noteID, deviceID, chainID, sendID, modulatorID, sectionID), its channels' faders and VCAs, and its
+// alias groups (clipLink); on a note, any of those names. The one count of them: the song's (findNextID()) and the loader's
+// (makeConsistent()).
+std::uint64_t findLargestID (const juce::ValueTree&);
+
 // The ID a song gives next: past its count (nextID) and every ID it holds.
 std::uint64_t findNextID (const juce::ValueTree& song);
 
