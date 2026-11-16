@@ -32,6 +32,7 @@ Automation's menus list a pad's parameters under the pad, for the pads that play
 | Pad N Pan | Left to right | Center | The pad's place between left and right. |
 | Pad N Velocity | 0 to 100 % | 100 % | How much a softer hit turns the pad down: at 0 % not at all, at 100 % as the velocity says. |
 | Pad N Choke | Off, 1 to 8 | Off (1 for pads 42, 44 and 46) | Its choke group: a hit on a pad stops the other pads in its group. |
+| Pad N Cut Itself | Off, On | Off | A new hit stops what the pad still plays of its earlier hits, fading it over 10 ms, as an MPC pad set to Mono or FL Studio's Cut Itself does: for an 808's boom, whose hits shouldn't pile up. Off, they ring on under each other, as a ride or a crash should. |
 | Pad N Mute | Off, On | Off | A muted pad plays nothing, and fades out if it rings. |
 | Pad N Solo | Off, On | Off | While any pad is soloed, only the soloed pads play. |
 
@@ -83,7 +84,11 @@ are. Otherwise it reads between them with a Kaiser-windowed sinc of 16 zero cros
 fast it is read (`src/devices/dsp/SincReader.h`), so that the top octave keeps its level and a pad tuned up doesn't
 alias.
 
-**Voices.** There are 32. A hit when all are busy takes the oldest. A choked or muted voice fades out over 10 ms.
+**Voices.** There are 32. A sound swapped while a pad plays fades out over 5 ms: a block takes the sound given last as
+it begins, one given and replaced before a block took it is freed at once (so a sampler that plays nothing holds at most
+the sound each layer plays and the newest), and one a block took is freed once a block has ended with no hit on it. A hit when all are busy takes the quietest of those dying away (decaying, or fading as a choke
+or a cut stops them), or with none, the oldest, and what that voice played fades out over 5 ms from a copy of it, while
+the new hit starts at once, as the synths take theirs. A choked, cut or muted voice fades out over 10 ms.
 
 **Sounds.** Each pad has four layers. A layer plays a factory sound, kept in the project by its name, or a sound file,
 which the project copies into its Audio folder and of which the pad plays the first 30 seconds. A sound dropped on a
@@ -131,7 +136,7 @@ any other note its clips play (see [the piano roll](../piano-roll.md)).
 - **Sound:** the selected pad's name with Reverse, Swap and Reset; its sound drawn as it plays (reversed, from its
   end) with its envelope over it and a line where it is as it plays. Its start, and the ends of its attack, hold and
   decay, are handles dragged sideways, each drag one undo step. Under the drawing: Start, Attack, Hold, Decay and Mode.
-- **Pad** (Level, Pan, Velocity, Choke, Mute, Solo) and **Pitch** (Tune, Fine, Sweep, Sweep Time).
+- **Pad** (Level, Pan, Velocity, Choke, Cut Itself, Mute, Solo) and **Pitch** (Tune, Fine, Sweep, Sweep Time).
 - **Layers:** the layer mode, and for each layer its number and what it plays, or "Drop a sound", with its level and a
   Clear button. A sound dropped on a layer replaces what it plays.
 - **Filter** (Type, Cutoff, Resonance, Velocity).
@@ -141,10 +146,6 @@ Swap tries sounds from the [browser](../browser.md) on the selected pad in place
 
 ## Limits
 
-- A hit when all 32 voices are busy takes the oldest voice at once, without a fade, so a long sound cut that way can
-  click. Stack mode uses a voice for each layer, so rolls over long sounds get there.
-- A pad can't choke itself: its own earlier hits always ring on under a new one, and a choke group only stops the
-  other pads in it.
 - Velocity layers split the range evenly: a layer has no velocity range of its own and layers don't crossfade.
 - A pad's sound has a start but no end marker and no loop, and nothing stretches it to the song's tempo.
 - The pad's filter has three types at one slope and no envelope of its own.

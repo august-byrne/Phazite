@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The engine's lock-free parts raced on real threads: the queue that live notes come through from any thread
 // (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h),
-// the transport the message thread asks for (Engine.h), and a device's sample tap made as a display listens (SampleTap.h).
+// the transport the message thread asks for (Engine.h), a device's sample tap made as a display listens (SampleTap.h),
+// and the sounds the wavetable synth and the sampler let go of once the audio thread can't be reading them.
 // Each race runs a fixed count of operations, never for a time, and waits only for what the other threads do, so that it
 // says the same on one core as on many; ThreadSanitizer (linux-tsan) sees each access the threads share. What a thread
 // finds wrong it counts, and the test thread checks the counts once the threads have ended (doctest's checks are the test
 // thread's).
 #include "TestHelpers.h"
 #include "devices/core/SampleTap.h"
+#include "devices/sampler/Sampler.h"
+#include "devices/wavetable/WavetableSynth.h"
 #include "engine/core/Engine.h"
 #include "engine/core/EventQueue.h"
 #include "engine/core/Handover.h"
@@ -16,8 +19,11 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <complex>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -528,4 +534,171 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
     CHECK (torn == 0);
     CHECK (outOfOrder == 0);
     CHECK (last <= (float) (blocks * blockSize - 1));
+}
+
+namespace
+{
+// A device's sounds swapped by another thread as it plays in blocks of one sample, the shortest the runner makes: each
+// sound given once, in order, while notes play; and as soon as the device has let go of one, the giver fills it with what
+// isn't a number (it still holds it, so the memory is there), so that a read of it after the device let go comes out in what
+// it plays. The giver waits for a few blocks to a few hundred between its gives, so that the device takes many of them in the
+// middle of a control step, and lets go of some before the next comes. What it finds: how many samples the device played
+// that aren't numbers (none), and how many sounds it let go of while it played.
+struct Raced
+{
+    int notNumbers = 0, letGo = 0;
+};
+
+template <typename Device, typename SoundPointer, typename Give, typename Poison>
+Raced raceSoundSwaps (Device& device, std::vector<SoundPointer>& sounds, std::span<const float> values, Give give, Poison poison)
+{
+    std::atomic<std::uint64_t> blocksPlayed { 0 };
+    std::atomic<bool> allGiven { false };
+    std::atomic<int> letGo { 0 };
+
+    std::thread giver (
+        [&]
+        {
+            std::vector<bool> poisoned (sounds.size(), false);
+
+            for (size_t n = 0; n < sounds.size(); ++n)
+            {
+                const auto from = blocksPlayed.load();
+
+                while (blocksPlayed.load() < from + 3 + (n * 37) % 200)
+                    std::this_thread::yield();
+
+                give (sounds[n]);
+
+                for (size_t each = 0; each < n; ++each)
+                {
+                    if (! poisoned[each] && sounds[each].use_count() == 1)
+                    {
+                        poison (*sounds[each]);
+                        poisoned[each] = true;
+                        ++letGo;
+                    }
+                }
+            }
+
+            allGiven = true;
+        });
+
+    juce::AudioBuffer<float> buffer (2, 1);
+    Raced raced;
+
+    for (std::uint64_t played = 0; ! allGiven.load() || played == 0; ++played)
+    {
+        // A note every so often, so that notes start on each sound, and voices are taken for them once all sound.
+        const phazite::devices::NoteEvent note { phazite::devices::NoteEvent::Type::noteOn, 0, 48 + (int) (played / 64) % 24, 1.0f };
+
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        phazite::devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = 1;
+        block.parameters = values;
+        block.isPlaying = true;
+        block.events =
+            played % 64 == 0 ? std::span<const phazite::devices::NoteEvent> (&note, 1) : std::span<const phazite::devices::NoteEvent>();
+        device.process (block);
+        raced.notNumbers += std::isfinite (buffer.getSample (0, 0)) && std::isfinite (buffer.getSample (1, 0)) ? 0 : 1;
+        ++blocksPlayed;
+    }
+
+    giver.join();
+    raced.letGo = letGo.load();
+    return raced;
+}
+
+std::vector<float> getDefaultValues (const phazite::devices::DeviceInfo& info)
+{
+    std::vector<float> values;
+
+    for (const auto& parameter : info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    return values;
+}
+} // namespace
+
+TEST_CASE ("The wavetable synth's tables swapped as it plays raced: none is let go of while a control step still reads it")
+{
+    namespace devices = phazite::devices;
+    std::vector<std::shared_ptr<const devices::Wavetable>> tables;
+
+    for (int n = 0; n < 200; ++n)
+    {
+        devices::Wavetable::Harmonics saw;
+
+        for (int h = 1; h <= 64; ++h)
+            saw.push_back (std::polar (1.0f / (float) h, (float) n * 0.01f * (float) h));
+
+        tables.push_back (devices::Wavetable::fromHarmonics ("Saw", { saw }));
+    }
+
+    devices::WavetableSynth synth;
+    synth.prepare (48000.0, 1);
+    const auto values = getDefaultValues (devices::WavetableSynth::info);
+
+    const auto raced = raceSoundSwaps (
+        synth, tables, values, [&synth] (const auto& table) { synth.setTable (0, table); },
+        [] (const devices::Wavetable& table)
+        {
+            for (int frame = 0; frame < table.getNumFrames(); ++frame)
+            {
+                for (int level = 0; level < devices::Wavetable::numLevels; ++level)
+                {
+                    const auto read = table.getLevel (frame, level);
+                    auto* samples = const_cast<float*> (read.samples);
+
+                    for (int i = -1; i < read.length + 2; ++i)
+                        samples[i] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        });
+
+    CHECK (raced.notNumbers == 0);
+    CHECK (raced.letGo > 100); // most of them, while it played
+}
+
+TEST_CASE ("The sampler's sounds swapped as it plays raced: none is let go of while a voice still reads it")
+{
+    namespace devices = phazite::devices;
+    std::vector<std::shared_ptr<const devices::Sampler::Sound>> sounds;
+
+    for (int n = 0; n < 200; ++n)
+    {
+        auto sound = std::make_shared<devices::Sampler::Sound>();
+        sound->sampleRate = 48000.0;
+        sound->audio.setSize (1, 48000);
+
+        for (int i = 0; i < sound->audio.getNumSamples(); ++i)
+            sound->audio.setSample (0, i, 0.5f * (float) std::sin (0.03 * i + n));
+
+        devices::Sampler::makeOctaves (*sound);
+        sounds.push_back (std::move (sound));
+    }
+
+    devices::Sampler sampler;
+    sampler.prepare (48000.0, 1);
+    const auto values = getDefaultValues (devices::Sampler::info);
+
+    const auto raced = raceSoundSwaps (
+        sampler, sounds, values, [&sampler] (const auto& sound) { sampler.setSound (sound); },
+        [] (const devices::Sampler::Sound& sound)
+        {
+            auto& audio = const_cast<juce::AudioBuffer<float>&> (sound.audio);
+
+            for (int i = 0; i < audio.getNumSamples(); ++i)
+                audio.setSample (0, i, std::numeric_limits<float>::quiet_NaN());
+
+            for (auto& octave : const_cast<devices::Sampler::Sound&> (sound).octaves)
+                for (int i = 0; i < octave.getNumSamples(); ++i)
+                    octave.setSample (0, i, std::numeric_limits<float>::quiet_NaN());
+        });
+
+    CHECK (raced.notNumbers == 0);
+    CHECK (raced.letGo > 100); // most of them, while it played
 }

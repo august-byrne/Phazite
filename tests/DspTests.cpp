@@ -4,16 +4,21 @@
 #include "TestHelpers.h"
 #include "devices/dsp/AlignedShaper.h"
 #include "devices/dsp/CombFilter.h"
+#include "devices/dsp/DcBlocker.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/Math.h"
 #include "devices/dsp/MultimodeFilter.h"
+#include "devices/dsp/Noise.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
+#include "devices/dynamics/TruePeak.h"
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+#include <utility>
 #include <vector>
 
 namespace
@@ -405,6 +410,36 @@ TEST_CASE ("An ADSR's stages bend either way along their curves, and still take 
 
     CHECK (lowest >= 0.0f);
     CHECK_FALSE (adsr.isActive());
+}
+
+TEST_CASE ("An ADSR follows a new sustain level over the same time at any rate it runs at")
+{
+    // Sustaining at full, its sustain turned down to half: how long it takes to go 63 % of the way, at the rates a synth runs
+    // its envelopes at, a control rate among them. It moved a fixed part of the way each sample, so twice as fast at 96 kHz.
+    const auto secondsToFollow = [] (double rate)
+    {
+        dsp::Adsr adsr;
+        adsr.prepare (rate);
+        adsr.setParameters (0.0f, 0.0f, 1.0f, 0.1f);
+        adsr.noteOn();
+        adsr.next();
+        adsr.setParameters (0.0f, 0.0f, 0.5f, 0.1f);
+        auto samples = 0;
+
+        while (adsr.next() > 1.0f - 0.632f * 0.5f && samples < 1000000)
+            ++samples;
+
+        return (samples + 1) / rate;
+    };
+
+    const auto at44 = secondsToFollow (44100.0);
+    CHECK (at44 == doctest::Approx (0.0113).epsilon (0.02)); // as it always did at 44.1 kHz
+
+    for (const auto rate : { 48000.0, 96000.0, 192000.0, 44100.0 / 16.0 })
+    {
+        CAPTURE (rate);
+        CHECK (secondsToFollow (rate) == doctest::Approx (at44).epsilon (0.04)); // within a step of the control rate
+    }
 }
 
 TEST_CASE ("A level follower rises and falls with its time constants")
@@ -914,4 +949,192 @@ TEST_CASE ("A whole number of samples made up from any delay leaves the all-pass
 
     // The shaper's own: 5.137 samples, made up to 6.
     CHECK (dsp::AlignedShaper::getLatencySamples() == 6);
+}
+
+TEST_CASE ("The synths' noise is as it always was at 48 kHz, where the presets are leveled, and alike at the other rates")
+{
+    // The reviewer's finding 5 (2026-11-15), and the second review's finding 4 (2026-11-15): the reference is 48 kHz.
+    // At 48 kHz the random numbers themselves. At 44.1, 96 and 192 kHz: as loud in each part of the band below 10 kHz
+    // (from its spectrum), nothing above 30 kHz (where white noise at 96 kHz would hold more than half its power), as loud
+    // in all, and as high the peaks of what lies below 10 kHz (rebuilt between its samples, four to each, from its
+    // spectrum: as a converter rebuilds it, which the samples at 48 kHz show too little of, there so close to the band's
+    // top). White noise at the device's own rate, turned up for the band heard, fails the second.
+    dsp::Noise noise;
+    dsp::Random random (0x1234u);
+    noise.prepare (48000.0);
+    noise.setSeed (0x1234u);
+    auto same = true;
+
+    for (int i = 0; i < 10000; ++i)
+        same = same && juce::exactlyEqual (noise.next(), random.nextBipolar());
+
+    CHECK (same);
+
+    struct Measured
+    {
+        double total = 0.0, heard = 0.0, above = 0.0, heardPeak = 0.0;
+    };
+
+    const auto measure = [] (double rate)
+    {
+        dsp::Noise made;
+        made.prepare (rate);
+        made.setSeed (0x1234u);
+        const auto order = rate > 100000.0 ? 18 : (rate > 50000.0 ? 17 : 16); // about a second and a half
+        const auto size = 1 << order;
+        std::vector<juce::dsp::Complex<float>> samples ((size_t) size), spectrum ((size_t) size);
+        Measured measured;
+
+        for (auto& sample : samples)
+        {
+            sample = made.next();
+            measured.total += (double) sample.real() * sample.real();
+        }
+
+        measured.total /= size;
+        juce::dsp::FFT (order).perform (samples.data(), spectrum.data(), false);
+
+        // Below 10 kHz, alone, four times as many samples between, from its spectrum.
+        const auto rebuiltOrder = order + 2;
+        const auto rebuiltSize = 1 << rebuiltOrder;
+        std::vector<juce::dsp::Complex<float>> kept ((size_t) rebuiltSize), rebuilt ((size_t) rebuiltSize);
+
+        for (int bin = 1; bin < size / 2; ++bin)
+        {
+            const auto hertz = bin * rate / size;
+            const auto power = 2.0 * std::norm (spectrum[(size_t) bin]) / ((double) size * size);
+
+            if (hertz < 10000.0)
+            {
+                measured.heard += power;
+                kept[(size_t) bin] = spectrum[(size_t) bin];
+                kept[(size_t) (rebuiltSize - bin)] = std::conj (spectrum[(size_t) bin]);
+            }
+            else if (hertz > 30000.0)
+            {
+                measured.above += power;
+            }
+        }
+
+        juce::dsp::FFT (rebuiltOrder).perform (kept.data(), rebuilt.data(), true);
+        auto peak = 0.0, squares = 0.0;
+
+        for (const auto& sample : rebuilt)
+        {
+            peak = std::max (peak, (double) std::abs (sample.real()));
+            squares += (double) sample.real() * sample.real();
+        }
+
+        // As a part of its level, times its level from the spectrum: whatever the transforms scale by.
+        measured.heardPeak = peak / std::sqrt (squares / rebuiltSize) * std::sqrt (measured.heard);
+        return measured;
+    };
+
+    const auto at48 = measure (48000.0);
+
+    for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+    {
+        const auto at = measure (rate);
+        const auto heard = 10.0 * std::log10 (at.heard / at48.heard), total = 10.0 * std::log10 (at.total / at48.total);
+        const auto above = 10.0 * std::log10 (std::max (at.above, 1.0e-30) / at.total);
+        const auto peak = 20.0 * std::log10 (at.heardPeak / at48.heardPeak);
+        INFO (rate << " Hz: " << heard << " dB below 10 kHz, " << total << " dB in all, " << above << " dB above 30 kHz, peak " << peak
+                   << " dB, against 48 kHz");
+        CHECK (std::abs (heard) < 0.2);
+        CHECK (std::abs (total) < 0.5);
+        CHECK (std::abs (peak) < 1.0);
+
+        if (rate > 60000.0)
+            CHECK (above < -60.0);
+    }
+}
+
+TEST_CASE (
+    "An instrument's DC blocker takes an offset away, keeps 20 Hz, leaves nothing ringing after Stop, and comes and goes without a step")
+{
+    // devices/dsp/DcBlocker.h, on the synth's and the wavetable synth's sums. Stopping just after notes begin (PlaybackTests)
+    // left its ring, a third of a thousandth, sounding for a tenth of a second after the notes had faded out.
+    dsp::DcBlocker blocker;
+    blocker.prepare (testRate);
+
+    // A steady offset: gone after a second.
+    auto last = 0.0f;
+
+    for (int i = 0; i < (int) testRate; ++i)
+        last = blocker.process (0.5f);
+
+    CHECK (std::abs (last) < 1.0e-3f);
+
+    // 20 Hz: its level within 0.02 dB, once settled.
+    blocker.reset();
+    auto peak = 0.0f;
+
+    for (int i = 0; i < 4 * (int) testRate; ++i)
+    {
+        const auto y = blocker.process ((float) std::sin (twoPi * 20.0 * i / testRate));
+
+        if (i > 3 * (int) testRate)
+            peak = std::max (peak, std::abs (y));
+    }
+
+    CHECK (std::abs (toDecibels (peak)) < 0.02);
+
+    // A note with an offset under it, then silence: its ring, after 20 ms of the silence, played as it is and faded out.
+    const auto ringAfter = [] (bool quiet)
+    {
+        dsp::DcBlocker each;
+        each.prepare (testRate);
+        std::vector<float> samples ((size_t) testRate / 2);
+
+        for (size_t i = 0; i < samples.size(); ++i)
+            samples[i] = 0.1f + 0.5f * (float) std::sin (twoPi * 262.0 * (double) i / testRate);
+
+        each.process (samples.data(), (int) samples.size(), true, false);
+        std::vector<float> silence ((size_t) (0.04 * testRate));
+        each.process (silence.data(), (int) silence.size(), true, quiet);
+
+        auto left = 0.0f;
+
+        for (auto i = (size_t) (0.02 * testRate); i < silence.size(); ++i)
+            left = std::max (left, std::abs (silence[i]));
+
+        return left;
+    };
+
+    const auto ringing = ringAfter (false); // what it would ring with: the offset it took away, falling
+    CHECK (ringing > 0.01f);
+    CHECK (ringAfter (true) < 0.01f * ringing);
+
+    // The second review's finding 1 (2026-11-15): the instruments play it only where an offset can arise. Not wanted, it
+    // leaves the samples as they are, bit for bit. Taken on in the middle of a sound with an offset, it starts at rest and
+    // fades in, and let go, it fades out, so that neither steps: no sample moves from the one before by more than the sound
+    // itself does, and a little more for the offset coming back over the fade (the offset over its 240 samples, and the phase the filter turns). Faded out,
+    // the samples are as they were again, bit for bit.
+    dsp::DcBlocker switched;
+    switched.prepare (testRate);
+    const auto length = (int) testRate;
+    std::vector<float> sound ((size_t) length);
+
+    for (size_t i = 0; i < sound.size(); ++i)
+        sound[i] = 0.3f + 0.5f * (float) std::sin (twoPi * 200.0 * (double) i / testRate);
+
+    auto played = sound;
+    const auto takenOn = length / 4, letGo = length / 2, blockSize = 100;
+
+    for (int done = 0; done < length; done += blockSize)
+        switched.process (played.data() + done, std::min (blockSize, length - done), done >= takenOn && done < letGo, false);
+
+    CHECK (std::equal (played.begin(), played.begin() + takenOn, sound.begin()));
+    CHECK (std::equal (played.begin() + letGo + (int) (0.006 * testRate), played.end(), sound.begin() + letGo + (int) (0.006 * testRate)));
+    CHECK (std::abs (std::accumulate (played.begin() + letGo - 2400, played.begin() + letGo, 0.0) / 2400.0) < 0.01); // settled: gone
+
+    auto steepestSound = 0.0f, steepestPlayed = 0.0f;
+
+    for (size_t i = 1; i < sound.size(); ++i)
+    {
+        steepestSound = std::max (steepestSound, std::abs (sound[i] - sound[i - 1]));
+        steepestPlayed = std::max (steepestPlayed, std::abs (played[i] - played[i - 1]));
+    }
+
+    CHECK (steepestPlayed < steepestSound + 0.3f / 240.0f + 1.0e-3f);
 }

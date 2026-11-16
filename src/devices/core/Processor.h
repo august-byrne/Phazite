@@ -126,6 +126,11 @@ public:
     // Any thread, the audio thread too (its runner asks before it lets it sleep): no allocation, no lock.
     virtual double getTailSeconds() const { return 0.0; }
 
+    // Message thread, called regularly by what owns the device (its song's playback session, 30 times a second): what
+    // the device was given and the audio thread has since let go of (a sound swapped out, a wavetable) is freed here, so
+    // that it doesn't wait for the next thing given. Most devices hold nothing such.
+    virtual void releaseUnused() {}
+
     // Whether its runner may let it sleep once what comes in and what it plays have been silent a while: not a plug-in,
     // which may play with nothing coming in (an arpeggiator's own pattern, a drone).
     virtual bool sleepsOnSilence() const noexcept { return true; }

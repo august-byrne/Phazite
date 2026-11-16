@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioFiles.h"
+#include "devices/core/Processor.h"
 
 #include <cmath>
 #include <map>
@@ -487,6 +488,27 @@ juce::AudioFormatManager& getAudioFormats()
 
     static Formats formats;
     return formats.manager;
+}
+
+int clearWhatIsNotSound (juce::AudioBuffer<float>& audio) noexcept
+{
+    auto cleared = 0;
+
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+    {
+        auto* samples = audio.getWritePointer (channel);
+
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+        {
+            if (const auto sound = devices::soundOf (samples[i]); ! juce::exactlyEqual (sound, samples[i]))
+            {
+                samples[i] = sound;
+                ++cleared;
+            }
+        }
+    }
+
+    return cleared;
 }
 
 AudioFileInfo getAudioFileInfo (const juce::File& file)

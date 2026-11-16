@@ -20,8 +20,11 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
+#include "devices/dsp/DcBlocker.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
+#include "devices/dsp/Noise.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Oversampling.h"
 #include "devices/dsp/Random.h"
@@ -258,8 +261,8 @@ public:
     WavetableSynth(); // its oscillators on the first factory table
     ~WavetableSynth() override;
 
-    // Message thread: what an oscillator plays. A table the synth no longer plays is let go by a later call, once the
-    // audio thread can't be playing it any more.
+    // Message thread: what an oscillator plays, from the next control step on. A table the synth no longer plays is let go
+    // by a later call, once the audio thread can't be reading it any more.
     void setTable (int osc, std::shared_ptr<const Wavetable>);
     std::shared_ptr<const Wavetable> getTable (int osc) const;
 
@@ -290,10 +293,12 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     double getTailSeconds() const override;
+    void releaseUnused() override { freeRetired(); }
 
 private:
-    static constexpr int controlStep = 16; // samples between updates of pitch, position, modulation and filter
-    static constexpr int maxHeld = 16;     // keys mono mode remembers, to go back to
+    static constexpr int controlStep = 16;      // samples between updates of pitch, position, modulation and filter
+    static constexpr int maxHeld = 16;          // keys mono mode remembers, to go back to
+    static constexpr int numFading = maxVoices; // places to fade out voices taken for other notes: a chord's worth at once
 
     // An oscillator's unison voice: where it is in its cycle, and what it reads this control step.
     struct Reader
@@ -302,6 +307,7 @@ private:
         float last = 0.0f;               // its wave's last sample, for the other oscillator's FM
         Wavetable::Level from {}, to {}; // the frames each side of its position, at the level its pitch allows
         float morph = 0.0f;              // from `from` toward `to`
+        float offset = 0.0f;             // what its warp leaves off centre this control step, which it takes away
         float left = 1.0f, right = 1.0f;
     };
 
@@ -338,17 +344,21 @@ private:
         int unison = 1;
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
-        dsp::Random noise, phases;
-        dsp::Random drifting;                         // where its unison's drift wanders, the same every time
-        dsp::Adsr amp, envelope2, envelope3;          // the second and third at the control rate
-        std::array<dsp::Lfo, 2> lfos;                 // those that start again with each note, at the control rate
-        std::array<dsp::MultimodeFilter, 2> filters;  // each side
-        std::array<dsp::AntialiasedShaper, 2> drives; // the filter's drive, each side, at twice the rate
-        float driveBlend = 0.0f;                      // how far the sound goes through them: fades as the drive comes on or off
-        bool filtering = false;                       // the filter is on
-        bool stepPending = true;                      // it (re)started since the last control step: its values are due
-        float fade = 1.0f, fadeStep = 0.0f;           // fading out: taken for another note, or cut as playback stopped
-        int age = 0;                                  // the samples since its note began (up to a limit)
+        dsp::Noise noise;
+        dsp::Random phases;
+        dsp::Random drifting;                           // where its unison's drift wanders, the same every time
+        dsp::Adsr amp, envelope2, envelope3;            // the second and third at the control rate
+        std::array<dsp::Lfo, 2> lfos;                   // those that start again with each note, at the control rate
+        std::array<dsp::MultimodeFilter, 2> filters;    // each side
+        std::array<dsp::AntialiasedShaper, 2> drives;   // the filter's drive, each side, at twice the rate
+        float driveBlend = 0.0f;                        // how far the sound goes through them: fades as the drive comes on or off
+        bool filtering = false;                         // the filter is on
+        bool stepPending = true;                        // it (re)started since the last control step: its values are due
+        int controlAhead = 0;                           // how far its control-rate parts are ahead of the samples it played (movesOn())
+        float envelope2Now = 0.0f, envelope3Now = 0.0f; // their values as they last moved
+        std::array<float, 2> lfosNow {};
+        float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                        // the samples since its note began (up to a limit)
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
         float cutoffNow = 0.0f; // its filter's frequency, as it was last set
     };
@@ -356,7 +366,7 @@ private:
     struct Retired
     {
         std::shared_ptr<const Wavetable> table;
-        std::uint64_t safeAfter = 0; // blocks done after which the audio thread can't be reading it
+        std::uint64_t safeAfter = 0; // control steps begun from which the audio thread can't be reading it
     };
 
     double sampleRate = 44100.0;
@@ -371,24 +381,40 @@ private:
     // its place each step, for one at the middle pace.
     float driftWanderSteps = 1.0f, driftFollow = 1.0f;
 
-    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
-    std::array<Voice, maxVoices + 1> voices;
+    // Worked out from seconds as it is prepared, so that it keeps at any rate (Synth.h): how far the drive fades in a sample as
+    // it comes on or off.
+    float driveFadeStep = 1.0f / 32.0f;
+
+    // The first maxVoices play notes; the rest fade out what voices played when other notes took them (stealVoice()), each
+    // where it was copied, so that a chord that takes several at once fades each of them out.
+    std::array<Voice, maxVoices + numFading> voices;
     std::array<int, maxHeld> heldKeys {};
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
-    int samplesLeftInStep = 0; // of the control step under way, which goes on across blocks and the events that split them
+    dsp::ControlGrid grid { controlStep };    // the control steps, on the song's own grid while it plays
+    std::array<dsp::DcBlocker, 2> dcBlockers; // on each side of its sum: what ring modulation and FM leave off centre
     float lastNote = -1.0f;
     float bend = 0.0f, modWheel = 0.0f;
     bool pedalDown = false;
+    bool stoppedPlaying = false; // playback stopped since the last note: once nothing sounds, the DC blockers' ring fades
     int shownMode = -1;
     std::array<dsp::Lfo, 2> freeLfos; // those that run on regardless of notes, at the control rate
+    int freeLfosAhead = 0;            // how far they are ahead of the samples played (movesOn())
     std::array<float, 2> freeLfoValues {};
     dsp::Random noteRandom;
 
-    std::array<std::atomic<const Wavetable*>, numOscillators> tables;
-    std::array<std::shared_ptr<const Wavetable>, numOscillators> owned; // the message thread's
+    // The tables the oscillators play: the message thread's own (owned), the one it gave last until the audio thread takes it
+    // (pending), what the audio thread plays (stepTables), and what the message thread let go of until the audio thread
+    // can't be reading it. The audio thread takes what is pending as a control step begins, after it counts the step, and
+    // reads it until a later step takes another, which may be calls later: so a table it took is freed once the count has
+    // moved on past where it was when the next was given (setTable()), and one it never took is freed as the next is given.
+    // Sequentially consistent, so that the message thread's count after it gave a table can't be taken before it.
+    std::array<std::atomic<const Wavetable*>, numOscillators> pending {};
+    std::array<const Wavetable*, numOscillators> stepTables {}; // the audio thread's: what the control step under way reads
+    std::array<std::shared_ptr<const Wavetable>, numOscillators> owned;
     std::vector<Retired> retired;
-    std::atomic<std::uint64_t> blocksDone { 0 };
+    std::atomic<std::uint64_t> stepsBegun { 0 };
+    static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
 
     std::array<std::atomic<float>, numOscillators> playedPositions;
     std::atomic<float> tailSeconds { 0.2f };
@@ -402,11 +428,18 @@ private:
     void startVoice (Voice&);
     void startDrift (Voice&) noexcept;            // a note's drift, each unison voice from somewhere new
     void moveDrift (Voice&, int unison) noexcept; // a control step on
+
+    // Whether the control-rate parts move on at a step that starts now, each move a whole control step's, so that they keep
+    // up with the samples played where a step runs short (a note starting within one, the grid cutting one short as a loop
+    // goes round or the song jumps): they move unless they are already more than half a step ahead. `ahead` is how far
+    // ahead of the samples played they are, which a move puts a step further and each stretch played brings back by its
+    // length. A voice's parts move as it starts, whatever.
+    static bool movesOn (int& ahead, bool whatever = false) noexcept;
     void releaseVoice (Voice&);
     void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
     Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
-    void render (float* left, float* right, int numSamples, std::span<const float> parameters);
+    void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
     void freeRetired();
     static void renderStep (const OscillatorRun&, Reader&, float* out, int length) noexcept;
 };

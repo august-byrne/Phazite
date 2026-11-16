@@ -61,6 +61,32 @@ public:
 
     Level getLevel (int frame, int level) const noexcept;
 
+    // What a warp that reads only a part of a frame's cycle, or reads it unevenly, leaves off centre (the wavetable synth's
+    // Sync and Bend): every frame is centred over its whole cycle, but not over a part of it. Worked out as the table is
+    // made. Real-time safe.
+    //
+    // A frame's level's area from its cycle's start to a place in it (from 0 to 1): the integral of its wave, 0 over the
+    // whole cycle. Kept at areaPoints places across the cycle, each worked out exactly from the harmonics the level keeps,
+    // and read between them along a straight line.
+    float getArea (int frame, int level, float place) const noexcept;
+
+    // The mean of a frame's level read across its cycle with its places bent, place = t b / (1 + (b - 1) t) for t from 0 to
+    // 1: its start squeezed and its end stretched for a bend above 1, the other way below. Worked out exactly from the
+    // harmonics the level keeps, at bends from 1/8 to 8, bendsPerOctave to an octave, and read between them: where a bend
+    // falls among them (findBend()), the same for every frame and level, found once for all of them.
+    struct Bend
+    {
+        int index = 0;
+        float fraction = 0.0f;
+    };
+
+    static Bend findBend (float bend) noexcept;
+    float getBentMean (int frame, int level, Bend) const noexcept;
+
+    static constexpr int areaPoints = 128;   // the places across a cycle each level's area is kept at, and its end
+    static constexpr int bendsPerOctave = 8; // the bends each level's bent mean is kept at, from 1/8 to 8
+    static constexpr int numBends = 6 * bendsPerOctave + 1;
+
     // How many harmonics a level keeps: all of them at level 0, about 1/sqrt(2) as many at each level after.
     static int getHarmonics (int level) noexcept;
 
@@ -74,9 +100,13 @@ private:
     std::vector<float> samples;                 // each frame's levels, one frame after another
     std::array<int, numLevels> levelOffsets {}; // where each level's first sample is within a frame's block
     std::array<int, numLevels> levelLengths {};
-    int frameStride = 0; // the samples each frame takes
+    int frameStride = 0;          // the samples each frame takes
+    std::vector<float> areas;     // each frame's levels' areas at areaPoints + 1 places, one after another
+    std::vector<float> bentMeans; // each frame's levels' bent means at numBends bends, one after another
 
     Wavetable() = default;
+
+    void findAreasAndMeans (const std::vector<Harmonics>& frames, float scale); // once its frames are made, scaled as they were
 
     static std::shared_ptr<const Wavetable> make (const juce::String& name, const std::vector<Harmonics>& frames, bool peakAtOne,
                                                   int samplesPerCycle);

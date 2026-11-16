@@ -3289,6 +3289,14 @@
         "default": 0.0
       },
       {
+        "id": "pad0CutItself",
+        "name": "Pad 0 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad1Level",
         "name": "Pad 1 Level",
         "unit": "decibels",
@@ -3513,6 +3521,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad1CutItself",
+        "name": "Pad 1 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -3743,6 +3759,14 @@
         "default": 0.0
       },
       {
+        "id": "pad2CutItself",
+        "name": "Pad 2 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad3Level",
         "name": "Pad 3 Level",
         "unit": "decibels",
@@ -3967,6 +3991,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad3CutItself",
+        "name": "Pad 3 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -4197,6 +4229,14 @@
         "default": 0.0
       },
       {
+        "id": "pad4CutItself",
+        "name": "Pad 4 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad5Level",
         "name": "Pad 5 Level",
         "unit": "decibels",
@@ -4421,6 +4461,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad5CutItself",
+        "name": "Pad 5 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -4651,6 +4699,14 @@
         "default": 0.0
       },
       {
+        "id": "pad6CutItself",
+        "name": "Pad 6 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad7Level",
         "name": "Pad 7 Level",
         "unit": "decibels",
@@ -4875,6 +4931,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad7CutItself",
+        "name": "Pad 7 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -5105,6 +5169,14 @@
         "default": 0.0
       },
       {
+        "id": "pad8CutItself",
+        "name": "Pad 8 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad9Level",
         "name": "Pad 9 Level",
         "unit": "decibels",
@@ -5329,6 +5401,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad9CutItself",
+        "name": "Pad 9 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -5559,6 +5639,14 @@
         "default": 0.0
       },
       {
+        "id": "pad10CutItself",
+        "name": "Pad 10 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad11Level",
         "name": "Pad 11 Level",
         "unit": "decibels",
@@ -5783,6 +5871,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad11CutItself",
+        "name": "Pad 11 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -6013,6 +6109,14 @@
         "default": 0.0
       },
       {
+        "id": "pad12CutItself",
+        "name": "Pad 12 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad13Level",
         "name": "Pad 13 Level",
         "unit": "decibels",
@@ -6237,6 +6341,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad13CutItself",
+        "name": "Pad 13 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -6467,6 +6579,14 @@
         "default": 0.0
       },
       {
+        "id": "pad14CutItself",
+        "name": "Pad 14 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad15Level",
         "name": "Pad 15 Level",
         "unit": "decibels",
@@ -6691,6 +6811,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad15CutItself",
+        "name": "Pad 15 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -6921,6 +7049,14 @@
         "default": 0.0
       },
       {
+        "id": "pad16CutItself",
+        "name": "Pad 16 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad17Level",
         "name": "Pad 17 Level",
         "unit": "decibels",
@@ -7145,6 +7281,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad17CutItself",
+        "name": "Pad 17 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -7375,6 +7519,14 @@
         "default": 0.0
       },
       {
+        "id": "pad18CutItself",
+        "name": "Pad 18 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad19Level",
         "name": "Pad 19 Level",
         "unit": "decibels",
@@ -7599,6 +7751,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad19CutItself",
+        "name": "Pad 19 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -7829,6 +7989,14 @@
         "default": 0.0
       },
       {
+        "id": "pad20CutItself",
+        "name": "Pad 20 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad21Level",
         "name": "Pad 21 Level",
         "unit": "decibels",
@@ -8053,6 +8221,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad21CutItself",
+        "name": "Pad 21 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -8283,6 +8459,14 @@
         "default": 0.0
       },
       {
+        "id": "pad22CutItself",
+        "name": "Pad 22 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad23Level",
         "name": "Pad 23 Level",
         "unit": "decibels",
@@ -8507,6 +8691,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad23CutItself",
+        "name": "Pad 23 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -8737,6 +8929,14 @@
         "default": 0.0
       },
       {
+        "id": "pad24CutItself",
+        "name": "Pad 24 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad25Level",
         "name": "Pad 25 Level",
         "unit": "decibels",
@@ -8961,6 +9161,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad25CutItself",
+        "name": "Pad 25 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -9191,6 +9399,14 @@
         "default": 0.0
       },
       {
+        "id": "pad26CutItself",
+        "name": "Pad 26 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad27Level",
         "name": "Pad 27 Level",
         "unit": "decibels",
@@ -9415,6 +9631,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad27CutItself",
+        "name": "Pad 27 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -9645,6 +9869,14 @@
         "default": 0.0
       },
       {
+        "id": "pad28CutItself",
+        "name": "Pad 28 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad29Level",
         "name": "Pad 29 Level",
         "unit": "decibels",
@@ -9869,6 +10101,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad29CutItself",
+        "name": "Pad 29 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -10099,6 +10339,14 @@
         "default": 0.0
       },
       {
+        "id": "pad30CutItself",
+        "name": "Pad 30 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad31Level",
         "name": "Pad 31 Level",
         "unit": "decibels",
@@ -10323,6 +10571,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad31CutItself",
+        "name": "Pad 31 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -10553,6 +10809,14 @@
         "default": 0.0
       },
       {
+        "id": "pad32CutItself",
+        "name": "Pad 32 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad33Level",
         "name": "Pad 33 Level",
         "unit": "decibels",
@@ -10777,6 +11041,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad33CutItself",
+        "name": "Pad 33 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -11007,6 +11279,14 @@
         "default": 0.0
       },
       {
+        "id": "pad34CutItself",
+        "name": "Pad 34 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad35Level",
         "name": "Pad 35 Level",
         "unit": "decibels",
@@ -11231,6 +11511,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad35CutItself",
+        "name": "Pad 35 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -11461,6 +11749,14 @@
         "default": 0.0
       },
       {
+        "id": "pad36CutItself",
+        "name": "Pad 36 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad37Level",
         "name": "Pad 37 Level",
         "unit": "decibels",
@@ -11685,6 +11981,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad37CutItself",
+        "name": "Pad 37 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -11915,6 +12219,14 @@
         "default": 0.0
       },
       {
+        "id": "pad38CutItself",
+        "name": "Pad 38 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad39Level",
         "name": "Pad 39 Level",
         "unit": "decibels",
@@ -12139,6 +12451,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad39CutItself",
+        "name": "Pad 39 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -12369,6 +12689,14 @@
         "default": 0.0
       },
       {
+        "id": "pad40CutItself",
+        "name": "Pad 40 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad41Level",
         "name": "Pad 41 Level",
         "unit": "decibels",
@@ -12593,6 +12921,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad41CutItself",
+        "name": "Pad 41 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -12823,6 +13159,14 @@
         "default": 0.0
       },
       {
+        "id": "pad42CutItself",
+        "name": "Pad 42 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad43Level",
         "name": "Pad 43 Level",
         "unit": "decibels",
@@ -13047,6 +13391,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad43CutItself",
+        "name": "Pad 43 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -13277,6 +13629,14 @@
         "default": 0.0
       },
       {
+        "id": "pad44CutItself",
+        "name": "Pad 44 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad45Level",
         "name": "Pad 45 Level",
         "unit": "decibels",
@@ -13501,6 +13861,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad45CutItself",
+        "name": "Pad 45 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -13731,6 +14099,14 @@
         "default": 0.0
       },
       {
+        "id": "pad46CutItself",
+        "name": "Pad 46 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad47Level",
         "name": "Pad 47 Level",
         "unit": "decibels",
@@ -13955,6 +14331,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad47CutItself",
+        "name": "Pad 47 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -14185,6 +14569,14 @@
         "default": 0.0
       },
       {
+        "id": "pad48CutItself",
+        "name": "Pad 48 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad49Level",
         "name": "Pad 49 Level",
         "unit": "decibels",
@@ -14409,6 +14801,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad49CutItself",
+        "name": "Pad 49 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -14639,6 +15039,14 @@
         "default": 0.0
       },
       {
+        "id": "pad50CutItself",
+        "name": "Pad 50 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad51Level",
         "name": "Pad 51 Level",
         "unit": "decibels",
@@ -14863,6 +15271,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad51CutItself",
+        "name": "Pad 51 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -15093,6 +15509,14 @@
         "default": 0.0
       },
       {
+        "id": "pad52CutItself",
+        "name": "Pad 52 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad53Level",
         "name": "Pad 53 Level",
         "unit": "decibels",
@@ -15317,6 +15741,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad53CutItself",
+        "name": "Pad 53 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -15547,6 +15979,14 @@
         "default": 0.0
       },
       {
+        "id": "pad54CutItself",
+        "name": "Pad 54 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad55Level",
         "name": "Pad 55 Level",
         "unit": "decibels",
@@ -15771,6 +16211,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad55CutItself",
+        "name": "Pad 55 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -16001,6 +16449,14 @@
         "default": 0.0
       },
       {
+        "id": "pad56CutItself",
+        "name": "Pad 56 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad57Level",
         "name": "Pad 57 Level",
         "unit": "decibels",
@@ -16225,6 +16681,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad57CutItself",
+        "name": "Pad 57 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -16455,6 +16919,14 @@
         "default": 0.0
       },
       {
+        "id": "pad58CutItself",
+        "name": "Pad 58 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad59Level",
         "name": "Pad 59 Level",
         "unit": "decibels",
@@ -16679,6 +17151,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad59CutItself",
+        "name": "Pad 59 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -16909,6 +17389,14 @@
         "default": 0.0
       },
       {
+        "id": "pad60CutItself",
+        "name": "Pad 60 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad61Level",
         "name": "Pad 61 Level",
         "unit": "decibels",
@@ -17133,6 +17621,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad61CutItself",
+        "name": "Pad 61 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -17363,6 +17859,14 @@
         "default": 0.0
       },
       {
+        "id": "pad62CutItself",
+        "name": "Pad 62 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad63Level",
         "name": "Pad 63 Level",
         "unit": "decibels",
@@ -17587,6 +18091,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad63CutItself",
+        "name": "Pad 63 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -17817,6 +18329,14 @@
         "default": 0.0
       },
       {
+        "id": "pad64CutItself",
+        "name": "Pad 64 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad65Level",
         "name": "Pad 65 Level",
         "unit": "decibels",
@@ -18041,6 +18561,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad65CutItself",
+        "name": "Pad 65 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -18271,6 +18799,14 @@
         "default": 0.0
       },
       {
+        "id": "pad66CutItself",
+        "name": "Pad 66 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad67Level",
         "name": "Pad 67 Level",
         "unit": "decibels",
@@ -18495,6 +19031,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad67CutItself",
+        "name": "Pad 67 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -18725,6 +19269,14 @@
         "default": 0.0
       },
       {
+        "id": "pad68CutItself",
+        "name": "Pad 68 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad69Level",
         "name": "Pad 69 Level",
         "unit": "decibels",
@@ -18949,6 +19501,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad69CutItself",
+        "name": "Pad 69 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -19179,6 +19739,14 @@
         "default": 0.0
       },
       {
+        "id": "pad70CutItself",
+        "name": "Pad 70 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad71Level",
         "name": "Pad 71 Level",
         "unit": "decibels",
@@ -19403,6 +19971,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad71CutItself",
+        "name": "Pad 71 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -19633,6 +20209,14 @@
         "default": 0.0
       },
       {
+        "id": "pad72CutItself",
+        "name": "Pad 72 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad73Level",
         "name": "Pad 73 Level",
         "unit": "decibels",
@@ -19857,6 +20441,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad73CutItself",
+        "name": "Pad 73 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -20087,6 +20679,14 @@
         "default": 0.0
       },
       {
+        "id": "pad74CutItself",
+        "name": "Pad 74 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad75Level",
         "name": "Pad 75 Level",
         "unit": "decibels",
@@ -20311,6 +20911,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad75CutItself",
+        "name": "Pad 75 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -20541,6 +21149,14 @@
         "default": 0.0
       },
       {
+        "id": "pad76CutItself",
+        "name": "Pad 76 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad77Level",
         "name": "Pad 77 Level",
         "unit": "decibels",
@@ -20765,6 +21381,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad77CutItself",
+        "name": "Pad 77 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -20995,6 +21619,14 @@
         "default": 0.0
       },
       {
+        "id": "pad78CutItself",
+        "name": "Pad 78 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad79Level",
         "name": "Pad 79 Level",
         "unit": "decibels",
@@ -21219,6 +21851,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad79CutItself",
+        "name": "Pad 79 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -21449,6 +22089,14 @@
         "default": 0.0
       },
       {
+        "id": "pad80CutItself",
+        "name": "Pad 80 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad81Level",
         "name": "Pad 81 Level",
         "unit": "decibels",
@@ -21673,6 +22321,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad81CutItself",
+        "name": "Pad 81 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -21903,6 +22559,14 @@
         "default": 0.0
       },
       {
+        "id": "pad82CutItself",
+        "name": "Pad 82 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad83Level",
         "name": "Pad 83 Level",
         "unit": "decibels",
@@ -22127,6 +22791,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad83CutItself",
+        "name": "Pad 83 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -22357,6 +23029,14 @@
         "default": 0.0
       },
       {
+        "id": "pad84CutItself",
+        "name": "Pad 84 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad85Level",
         "name": "Pad 85 Level",
         "unit": "decibels",
@@ -22581,6 +23261,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad85CutItself",
+        "name": "Pad 85 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -22811,6 +23499,14 @@
         "default": 0.0
       },
       {
+        "id": "pad86CutItself",
+        "name": "Pad 86 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad87Level",
         "name": "Pad 87 Level",
         "unit": "decibels",
@@ -23035,6 +23731,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad87CutItself",
+        "name": "Pad 87 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -23265,6 +23969,14 @@
         "default": 0.0
       },
       {
+        "id": "pad88CutItself",
+        "name": "Pad 88 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad89Level",
         "name": "Pad 89 Level",
         "unit": "decibels",
@@ -23489,6 +24201,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad89CutItself",
+        "name": "Pad 89 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -23719,6 +24439,14 @@
         "default": 0.0
       },
       {
+        "id": "pad90CutItself",
+        "name": "Pad 90 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad91Level",
         "name": "Pad 91 Level",
         "unit": "decibels",
@@ -23943,6 +24671,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad91CutItself",
+        "name": "Pad 91 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -24173,6 +24909,14 @@
         "default": 0.0
       },
       {
+        "id": "pad92CutItself",
+        "name": "Pad 92 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad93Level",
         "name": "Pad 93 Level",
         "unit": "decibels",
@@ -24397,6 +25141,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad93CutItself",
+        "name": "Pad 93 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -24627,6 +25379,14 @@
         "default": 0.0
       },
       {
+        "id": "pad94CutItself",
+        "name": "Pad 94 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad95Level",
         "name": "Pad 95 Level",
         "unit": "decibels",
@@ -24851,6 +25611,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad95CutItself",
+        "name": "Pad 95 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -25081,6 +25849,14 @@
         "default": 0.0
       },
       {
+        "id": "pad96CutItself",
+        "name": "Pad 96 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad97Level",
         "name": "Pad 97 Level",
         "unit": "decibels",
@@ -25305,6 +26081,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad97CutItself",
+        "name": "Pad 97 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -25535,6 +26319,14 @@
         "default": 0.0
       },
       {
+        "id": "pad98CutItself",
+        "name": "Pad 98 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad99Level",
         "name": "Pad 99 Level",
         "unit": "decibels",
@@ -25759,6 +26551,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad99CutItself",
+        "name": "Pad 99 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -25989,6 +26789,14 @@
         "default": 0.0
       },
       {
+        "id": "pad100CutItself",
+        "name": "Pad 100 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad101Level",
         "name": "Pad 101 Level",
         "unit": "decibels",
@@ -26213,6 +27021,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad101CutItself",
+        "name": "Pad 101 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -26443,6 +27259,14 @@
         "default": 0.0
       },
       {
+        "id": "pad102CutItself",
+        "name": "Pad 102 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad103Level",
         "name": "Pad 103 Level",
         "unit": "decibels",
@@ -26667,6 +27491,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad103CutItself",
+        "name": "Pad 103 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -26897,6 +27729,14 @@
         "default": 0.0
       },
       {
+        "id": "pad104CutItself",
+        "name": "Pad 104 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad105Level",
         "name": "Pad 105 Level",
         "unit": "decibels",
@@ -27121,6 +27961,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad105CutItself",
+        "name": "Pad 105 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -27351,6 +28199,14 @@
         "default": 0.0
       },
       {
+        "id": "pad106CutItself",
+        "name": "Pad 106 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad107Level",
         "name": "Pad 107 Level",
         "unit": "decibels",
@@ -27575,6 +28431,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad107CutItself",
+        "name": "Pad 107 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -27805,6 +28669,14 @@
         "default": 0.0
       },
       {
+        "id": "pad108CutItself",
+        "name": "Pad 108 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad109Level",
         "name": "Pad 109 Level",
         "unit": "decibels",
@@ -28029,6 +28901,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad109CutItself",
+        "name": "Pad 109 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -28259,6 +29139,14 @@
         "default": 0.0
       },
       {
+        "id": "pad110CutItself",
+        "name": "Pad 110 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad111Level",
         "name": "Pad 111 Level",
         "unit": "decibels",
@@ -28483,6 +29371,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad111CutItself",
+        "name": "Pad 111 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -28713,6 +29609,14 @@
         "default": 0.0
       },
       {
+        "id": "pad112CutItself",
+        "name": "Pad 112 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad113Level",
         "name": "Pad 113 Level",
         "unit": "decibels",
@@ -28937,6 +29841,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad113CutItself",
+        "name": "Pad 113 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -29167,6 +30079,14 @@
         "default": 0.0
       },
       {
+        "id": "pad114CutItself",
+        "name": "Pad 114 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad115Level",
         "name": "Pad 115 Level",
         "unit": "decibels",
@@ -29391,6 +30311,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad115CutItself",
+        "name": "Pad 115 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -29621,6 +30549,14 @@
         "default": 0.0
       },
       {
+        "id": "pad116CutItself",
+        "name": "Pad 116 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad117Level",
         "name": "Pad 117 Level",
         "unit": "decibels",
@@ -29845,6 +30781,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad117CutItself",
+        "name": "Pad 117 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -30075,6 +31019,14 @@
         "default": 0.0
       },
       {
+        "id": "pad118CutItself",
+        "name": "Pad 118 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad119Level",
         "name": "Pad 119 Level",
         "unit": "decibels",
@@ -30299,6 +31251,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad119CutItself",
+        "name": "Pad 119 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -30529,6 +31489,14 @@
         "default": 0.0
       },
       {
+        "id": "pad120CutItself",
+        "name": "Pad 120 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad121Level",
         "name": "Pad 121 Level",
         "unit": "decibels",
@@ -30753,6 +31721,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad121CutItself",
+        "name": "Pad 121 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -30983,6 +31959,14 @@
         "default": 0.0
       },
       {
+        "id": "pad122CutItself",
+        "name": "Pad 122 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad123Level",
         "name": "Pad 123 Level",
         "unit": "decibels",
@@ -31207,6 +32191,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad123CutItself",
+        "name": "Pad 123 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -31437,6 +32429,14 @@
         "default": 0.0
       },
       {
+        "id": "pad124CutItself",
+        "name": "Pad 124 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad125Level",
         "name": "Pad 125 Level",
         "unit": "decibels",
@@ -31661,6 +32661,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad125CutItself",
+        "name": "Pad 125 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -31891,6 +32899,14 @@
         "default": 0.0
       },
       {
+        "id": "pad126CutItself",
+        "name": "Pad 126 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "pad127Level",
         "name": "Pad 127 Level",
         "unit": "decibels",
@@ -32115,6 +33131,14 @@
         "unit": "decibels",
         "minimum": -48.0,
         "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad127CutItself",
+        "name": "Pad 127 Cut Itself",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {

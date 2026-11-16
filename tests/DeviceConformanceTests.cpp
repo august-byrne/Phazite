@@ -35,10 +35,13 @@
 #include "model/devices/internal/Devices.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -143,31 +146,61 @@ constexpr Exception exceptions[] = {
       "turns the lows' phase: what the rule measures, 5.25 dB under what came in. At no mix, what came in through that all-pass "
       "as late as its latency, to 40 dB under, its level within a hundredth of a decibel to 5 kHz and 0.37 dB at 18 kHz (checked "
       "by tests of their own below)." },
-    { "phaziteFM", Rule::offset, 0.15,
-      "Frequency modulation at whole ratios leaves a part of each note at 0 Hz, which follows the note's envelope; its DC "
-      "blocker (5 Hz) takes away what is steady, not what moves with the envelope." },
+    { "phaziteFM", Rule::offset, 0.1,
+      "Frequency modulation puts sidebands at the carrier's frequency less whole multiples of the modulator's, which ratios a "
+      "little apart from a whole multiple (Fine, Detune) put a few hertz from 0 Hz: heard as nothing, and no blocker takes them "
+      "away without the lowest notes too. Its DC blocker (12 dB at 5 Hz) takes away what lies at 0 Hz and below a "
+      "few hertz, a new synth's electric piano's included (0.0085 now, 0.08 with the 6 dB blocker before)." },
 
-    // Not as they should be (this suite's report describes them, for docs/known-bugs.md): these devices work in control steps
-    // and glides counted from each call's start rather than from the song's control points, so what they play depends, a
-    // little, on where the blocks fall.
-    { "phaziteSynth", Rule::blocks, -30.0, "Its control steps (its LFO, envelopes and glides) start again with each block and each note." },
-    { "phaziteSynth", Rule::automatedBlocks, -30.0, "Its control steps start again with each call." },
 };
 
 // Parameters left at their defaults while an instrument's settings are drawn for the offset rule, each of which puts an
 // offset under the notes when it is turned: not as it should be (an instrument's output should have none; the suite's
 // report describes it). The rule is measured with each of them drawn too, and the test fails once that keeps the rule.
+// None now: the synth's Osc 2 Sync and the wavetable's Sync, Bend and Pulse Width warps, which were here, take away what
+// they leave off centre as they play (Synth.cpp's getSyncedMean(), Wavetable::getArea() and getBentMean()).
 struct LeftAtDefault
 {
     std::string_view typeID, parameterID, why;
 };
 
-constexpr LeftAtDefault leftAtDefault[] = {
-    { "phaziteSynth", "osc2Sync",
-      "Hard sync cuts oscillator 2's wave short each cycle of oscillator 1, and what is left of it isn't centred." },
-    { "phaziteWavetable", "osc1Warp",
-      "Sync, Bend and Pulse Width read a part of the wave or hold its start, and what they play isn't centred." },
-    { "phaziteWavetable", "osc2Warp", "As Osc 1 Warp." },
+constexpr std::array<LeftAtDefault, 0> leftAtDefault {};
+
+// Settings drawn on purpose for the offset rule, over drawn ones, where twelve draws seldom land: what is known to put an
+// offset under the notes, which an instrument takes away (an oscillator ring-modulated or FM-ed by another at its pitch or
+// an octave up, a synced wave driven hard).
+struct OnPurpose
+{
+    std::string_view typeID;
+    std::initializer_list<std::pair<std::string_view, float>> values;
+};
+
+const OnPurpose onPurpose[] = {
+    { "phaziteWavetable",
+      { { "osc1Warp", 7.0f },
+        { "osc1WarpAmount", 1.0f },
+        { "osc2On", 1.0f },
+        { "osc1Pitch", 0.0f },
+        { "osc2Pitch", 0.0f },
+        { "osc1Fine", 0.0f },
+        { "osc2Fine", 0.0f } } },
+    { "phaziteWavetable",
+      { { "osc1Warp", 6.0f },
+        { "osc1WarpAmount", 0.6f },
+        { "osc2On", 1.0f },
+        { "osc1Pitch", 0.0f },
+        { "osc2Pitch", 12.0f },
+        { "osc1Fine", 0.0f },
+        { "osc2Fine", 0.0f } } },
+    { "phaziteWavetable",
+      { { "osc2Warp", 7.0f },
+        { "osc2WarpAmount", 0.8f },
+        { "osc2On", 1.0f },
+        { "osc1Pitch", 0.0f },
+        { "osc2Pitch", 12.0f },
+        { "osc1Fine", 0.0f },
+        { "osc2Fine", 0.0f } } },
+    { "phaziteSynth", { { "osc2Sync", 1.0f }, { "osc2Pitch", 5.0f }, { "drive", 18.0f }, { "filterOn", 1.0f } } },
 };
 
 const Exception* findException (const devices::DeviceInfo& info, Rule rule)
@@ -752,6 +785,21 @@ std::vector<std::vector<float>> drawSettingsForOffset (const devices::DeviceInfo
             if (const auto index = devices::findParameter (info, left.parameterID);
                 left.typeID == info.typeID && left.parameterID != alsoDrawn && index >= 0)
                 settings.back()[(size_t) index] = info.parameters[(size_t) index].defaultValue;
+    }
+
+    // Then those on purpose, each over the next drawn setting.
+    for (size_t each = 0; each < std::size (onPurpose); ++each)
+    {
+        if (onPurpose[each].typeID != info.typeID)
+            continue;
+
+        auto values = drawSettings (info, random, 0.2f);
+
+        for (const auto& [id, value] : onPurpose[each].values)
+            if (const auto index = devices::findParameter (info, id); index >= 0)
+                values[(size_t) index] = value;
+
+        settings.push_back (std::move (values));
     }
 
     return settings;

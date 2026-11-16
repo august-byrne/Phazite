@@ -2106,4 +2106,49 @@ TEST_SUITE ("realtime-audit")
         CHECK (dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()).getDryRebuilds() >= 2);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
+
+    TEST_CASE ("Real-time audit: every synth taking all its voices at once for chords, the drum sampler taking its voices and cutting "
+               "a pad, and sounds and tables swapped while they play")
+    {
+        // Sixteen notes held on each synth, then chords of eight on one sample a beat, each taking eight voices that fade out
+        // in places of their own; thirty-two drum hits a sixteenth apart under a pad that cuts itself, then more, which take
+        // voices; and the sampler's sound, the wavetable's table and a pad's sound swapped while they play.
+        using namespace phazite::devices;
+        TestSong song;
+        auto& played = getSong (song);
+        std::vector<phazite::DeviceID> synths;
+
+        for (const auto* typeID : { Synth::typeID, WavetableSynth::typeID, FmSynth::typeID, Sampler::typeID })
+        {
+            const auto track = synths.empty() ? song.firstTrack : song.addTrack (typeID);
+            synths.push_back (song.setInstrument (track, typeID));
+            const auto clip = song.addMidiClip (track, 0.0, 8.0);
+
+            for (int i = 0; i < 16; ++i)
+                song.addNote (clip, 36 + i, 0.0, 8.0);
+
+            for (int beat = 1; beat < 8; ++beat)
+                song.addChord (clip, { 60, 62, 64, 65, 67, 69, 71, 72 }, beat, 0.9);
+        }
+
+        const auto drums = song.addTrack ("Drums");
+        const auto sampler = song.setInstrument (drums, DrumSampler::typeID);
+        phazite::setValueSetByHand (played, phazite::ParameterRef { sampler, "pad36CutItself" }, 1.0f);
+        const auto beat = song.addMidiClip (drums, 0.0, 8.0);
+
+        for (int i = 0; i < 128; ++i)
+            song.addNote (beat, i % 3 == 0 ? 36 : 49 + i % 3, i * 0.0625, 0.05);
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing { .edits = {
+                          { 30, "the sampler's sound swapped", [&] { phazite::setFactorySample (played, synths[3], 1); } },
+                          { 50, "the wavetable's table swapped", [&] { phazite::setFactoryWavetable (played, synths[1], 0, 3); } },
+                          { 70, "a drum pad's sound swapped",
+                            [&] { phazite::setDeviceSound (played, sampler, phazite::schema::getPadSound (49, 0), "909 Clap"); } },
+                      } });
+        report ("Every synth taking all its voices at once, the drum sampler taking voices and cutting a pad, sounds swapped", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
 }

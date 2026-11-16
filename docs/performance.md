@@ -109,6 +109,23 @@ What the sampler does with a sound as it loads, on the message thread.
 | Its octaves made | 90 ms | 17 |
 | Its hits found | 225 ms | 17 |
 
+### Benchmark: a wavetable of 256 frames made
+
+What the wavetable synth does with a table as it loads one, on the message thread: 256 frames of 2048 samples, each
+a saw of all 1024 harmonics, read back as a table of 21 levels a frame, with what its warps leave off centre (each
+level's area across its cycle at 128 places and its means bent at 49 bends, both exactly from the frame's harmonics,
+`src/devices/wavetable/Wavetable.cpp`). Measured on 2026-11-15 with other builds running on the machine, so each figure
+is the least of five runs, each the best of three; the same harness timed the table without the areas and the bent
+means, in turns with it. The machine was busier for the second pair than for the first.
+
+| A table of 256 frames | Time | From |
+|---|---|---|
+| Its levels alone, against its levels, the areas from its levels' samples and the bent means | 93 ms against 106 (13 ms more) | 2026-11-15 |
+| Its levels alone, against its levels and the areas and bent means from its harmonics | 120 ms against 141 (21 ms more, a sixth) | 2026-11-15 |
+| As first built for the bent means (each level's samples summed again, the means in doubles harmonic by harmonic) | 388 ms, against 83 ms for its levels alone (about 300 ms more) | 2026-11-15 |
+
+The first table made in a session also works out the bends' weights once, 49 transforms of 8192 points: about 15 ms.
+
 ### Benchmark: an analyzer's work on a second of sound, as an EQ's editor shows it
 
 The spectrum a device's editor shows, taken in at the display's 30 refreshes a second, on the message thread while an

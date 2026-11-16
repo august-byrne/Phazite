@@ -1349,3 +1349,73 @@ TEST_CASE ("Wide Saw plucked with Key Time, Filter Velocity and Start Random pla
         }
     }
 }
+
+TEST_CASE ("A sound swapped as the sampler plays in the shortest blocks fades out over its few milliseconds, and is let go after")
+{
+    // One sample a call, as the runner's stretches between control points can be: the old sound's note fades over 3 ms (144
+    // samples at 48 kHz) rather than in the one call after the swap, and the old sound is let go only once it has.
+    const auto first = makeSine (220.0, 1.0);
+    const auto second = makeSine (330.0, 1.0);
+    auto sampler = makeSampler (first);
+    const auto values = getPlainValues();
+    play (*sampler, values, 4096, { noteOn (0, 60) });
+    sampler->setSound (second);
+
+    juce::AudioBuffer<float> buffer (2, 1);
+    std::vector<float> played;
+    std::vector<long> heldBy;
+
+    for (int i = 0; i < 400; ++i)
+    {
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = 1;
+        block.parameters = values;
+        block.isPlaying = true;
+        sampler->process (block);
+        played.push_back (buffer.getSample (0, 0));
+        sampler->setSound (second); // the same: only lets go of what it can
+        heldBy.push_back (first.use_count());
+    }
+
+    CHECK (peakOf (played, 0, 20) > 0.3f);
+    CHECK (peakOf (played, 80, 120) > 0.05f); // still fading
+    CHECK (peakOf (played, 160, 400) < 1.0e-6f);
+    CHECK (largestStep (played, 0, 400) < 0.05f);
+    CHECK (heldBy[120] > 1); // the sampler holds it while its note fades
+    CHECK (heldBy.back() == 1);
+}
+
+TEST_CASE ("A sampler that plays nothing holds at most two of the sounds given it, and lets go of one it played by itself")
+{
+    // The reviewer's finding 3 (2026-11-15).
+    // A hundred sounds given while the sampler isn't processed (a muted track's): each but the newest goes as the next comes,
+    // since the audio thread never took it. Counted by what of them is still alive.
+    auto sampler = makeSampler (makeSine (220.0, 0.1));
+    std::vector<std::weak_ptr<const Sampler::Sound>> given;
+
+    for (int n = 0; n < 100; ++n)
+    {
+        auto sound = makeSine (220.0 + n, 0.1);
+        given.push_back (sound);
+        sampler->setSound (std::move (sound));
+    }
+
+    const auto alive = std::count_if (given.begin(), given.end(), [] (const auto& each) { return ! each.expired(); });
+    CHECK (alive <= 2);
+    CHECK (alive >= 1); // the newest, which it plays from its next block
+
+    // One it played, swapped for another: gone once its notes have faded and a clear block has passed, when its owner next
+    // asks (the playback session's timer), without another being given.
+    const auto values = getPlainValues();
+    play (*sampler, values, 512, { noteOn (0, 60) });
+    const std::weak_ptr<const Sampler::Sound> played = given.back();
+    sampler->setSound (makeSine (330.0, 1.0));
+    CHECK (! played.expired()); // its note fades out on it
+    play (*sampler, values, 2048, {});
+    sampler->releaseUnused();
+    CHECK (played.expired());
+}

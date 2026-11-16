@@ -306,6 +306,9 @@ void PlaybackSession::timerCallback()
         return;
     }
 
+    // What the song's devices let go of on the audio thread (a sound swapped out), freed without waiting for the next given.
+    player.releaseUnused();
+
     // Playing on with nothing looped, and nothing recorded: it stops as the playhead crosses the song's end, and goes back
     // to where playback starts. Playback started past the end plays on, there being nothing to cut short.
     if (! isPlayingProject() || ! isPlaying() || isLoopOn (*song) || take != nullptr)

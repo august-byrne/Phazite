@@ -4,10 +4,15 @@
 // bend, mono glide and sustain pedal, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
+#include "devices/dynamics/TruePeak.h"
 #include "devices/synth/Synth.h"
+
+#include <juce_dsp/juce_dsp.h>
 
 #include <array>
 #include <cmath>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1010,4 +1015,345 @@ TEST_CASE ("The synth's filter drive saturates what goes into the filter, adding
     Synth off;
     off.prepare (testRate, testBlockSize);
     CHECK (thirdOf (play (off, values, 24000, { noteOn (0, 57) })) < 0.001);
+}
+
+TEST_CASE ("Osc 2 synced to osc 1 leaves nothing off centre, whatever its wave and pitch")
+{
+    // Synced, osc 2 reads a whole number of its cycles in each of osc 1's and then a part of one, which isn't centred: it
+    // takes that away as it plays (getSyncedMean()). What lies under a held note as a part of how loud it is, through a Hann
+    // window (DspProbe.h's getOffsetShare()): under four ten-thousandths, near where it is (the device conformance suite
+    // asks for under a fiftieth). Unfiltered and undriven, nothing after the correction takes anything away (the DC blocker
+    // plays only with the drive on: the second review's finding 2, 2026-11-15).
+    const auto offsetShare = [] (const std::vector<float>& sound, size_t from, size_t to)
+    {
+        auto sum = 0.0, squares = 0.0, weights = 0.0;
+
+        for (auto i = from; i < to; ++i)
+        {
+            const auto weight = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (double) (i - from) / (double) (to - from));
+            sum += weight * sound[i];
+            squares += weight * sound[i] * sound[i];
+            weights += weight;
+        }
+
+        return std::abs (sum / weights) / std::sqrt (squares / weights);
+    };
+
+    auto worst = 0.0;
+
+    for (const auto wave : { 0.0f, 1.0f, 2.0f, 3.0f })
+    {
+        for (const auto pitch : { -7.0f, 1.0f, 5.0f, 7.0f, 13.0f, 19.0f })
+        {
+            for (const auto width : { 0.5f, 0.2f })
+            {
+                auto values = getSineValues();
+                values[Synth::osc2Wave] = wave;
+                values[Synth::osc2Pitch] = pitch;
+                values[Synth::osc2Sync] = 1.0f;
+                values[Synth::oscMix] = 1.0f; // osc 2 alone
+                values[Synth::pulseWidth] = width;
+                values[Synth::filterOn] = 0.0f;
+
+                for (const auto note : { 45, 81 }) // the higher with fewer harmonics, whose area differs
+                {
+                    Synth synth;
+                    synth.prepare (testRate, testBlockSize);
+                    const auto played = play (synth, values, 24000, { noteOn (0, note) });
+                    const auto share = offsetShare (played, 4800, 24000);
+                    INFO ("wave " << wave << ", " << pitch << " semitones, width " << width << ", note " << note << ": " << share);
+                    CHECK (share < 4.0e-4);
+                    worst = std::max (worst, share);
+                }
+            }
+        }
+    }
+
+    MESSAGE ("the most left off centre under a synced note: " << worst << " of its level");
+}
+
+TEST_CASE ("The synth's noise is as loud in the band that is heard at any sample rate, as high its peaks, driven or not")
+{
+    // The reviewer's finding 5 (2026-11-15).
+    // The noise: what a note plays with it, less what it plays without, at 44.1, 96 and 192 kHz, through the filter at
+    // 1 kHz, and driven hard before it. Its power below 20 kHz, from its spectrum, and its true peak (ITU-R BS.1770: as a
+    // converter rebuilds it between its samples, devices/dynamics/TruePeak.h), against 44.1 kHz's, where it is the noise it
+    // always was. White noise at the device's own rate would spread over the band up to half the rate (at 96 kHz less than
+    // half of it heard), so the noise is made at 44.1 or 48 kHz, as loud for each hertz as at 44.1 kHz, and raised to the
+    // rate (devices/dsp/Noise.h). The filter is low, where it is the same filter at every rate: open, its slope bends
+    // towards half the rate (by its design, not the noise's), and it lets 0.9 dB more of the noise through at 44.1 kHz than
+    // at 96. Driven, what the drive leaves below the cutoff grows with all the noise that goes in, and the drive works a
+    // little differently at each rate: the noise at 48 kHz (24 kHz of band, not 22) comes out 0.4 dB louder than at
+    // 44.1 kHz, so does the noise at 88.2 kHz (made at 44.1 kHz, the same band), and at 96 kHz 0.9 dB: within a decibel.
+    struct Heard
+    {
+        double power = 0.0, peak = 0.0;
+    };
+
+    const auto heardAt = [] (double rate, bool driven)
+    {
+        auto values = getSineValues();
+        values[Synth::noiseLevel] = 0.5f;
+        values[Synth::cutoff] = 1000.0f;
+        values[Synth::drive] = driven ? 18.0f : 0.0f;
+        Synth with, without;
+        with.prepare (rate, testBlockSize);
+        without.prepare (rate, testBlockSize);
+        const auto order = rate > 100000.0 ? 17 : (rate > 50000.0 ? 16 : 15);
+        const auto size = 1 << order;
+        const auto noisy = play (with, values, size, { noteOn (0, 45) });
+        values[Synth::noiseLevel] = 0.0f;
+        const auto clean = play (without, values, size, { noteOn (0, 45) });
+
+        std::vector<float> data ((size_t) (2 * size), 0.0f);
+        Heard heard;
+        devices::TruePeak truePeak;
+
+        for (size_t i = 0; i < (size_t) size; ++i)
+        {
+            data[i] = noisy[i] - clean[i];
+            heard.peak = std::max ({ heard.peak, (double) std::abs (data[i]), (double) truePeak.push (data[i]) });
+        }
+
+        juce::dsp::FFT fft (order);
+        fft.performFrequencyOnlyForwardTransform (data.data());
+
+        for (int bin = 1; bin < size / 2; ++bin)
+            if (bin * rate / size < 20000.0)
+                heard.power += (double) data[(size_t) bin] * data[(size_t) bin];
+
+        heard.power /= (double) size * size;
+        return heard;
+    };
+
+    for (const auto driven : { false, true })
+    {
+        const auto reference = heardAt (48000.0, driven);
+
+        for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+        {
+            const auto heard = heardAt (rate, driven);
+            const auto level = 10.0 * std::log10 (heard.power / reference.power), peak = 20.0 * std::log10 (heard.peak / reference.peak);
+            INFO (std::string (driven ? "driven, " : "not driven, ")
+                  << rate << " Hz against 48 kHz: " << level << " dB heard, peak " << peak << " dB");
+            CHECK (std::abs (level) < (driven ? 1.0 : 0.5));
+            CHECK (std::abs (peak) < 1.5);
+        }
+    }
+}
+
+TEST_CASE ("The synth's drive fades in over the same time at 96 kHz as at 48 kHz")
+{
+    // The reviewer's finding 8 (2026-11-15).
+    // What the drive changes in a note (driven less not driven) as it starts: over its first third of a millisecond against
+    // the third of a millisecond a millisecond in. It fades in over two thirds of one at any rate, so the two are alike.
+    const auto fadedIn = [] (double rate)
+    {
+        auto values = getSineValues();
+        values[Synth::attack] = 0.5f;
+        Synth driven, plain;
+        driven.prepare (rate, testBlockSize);
+        plain.prepare (rate, testBlockSize);
+        const auto withoutDrive = play (plain, values, (int) (0.01 * rate), { noteOn (0, 81) });
+        values[Synth::drive] = 18.0f;
+        const auto withDrive = play (driven, values, (int) (0.01 * rate), { noteOn (0, 81) });
+        const auto third = (size_t) (rate / 3000.0);
+        auto early = 0.0, later = 0.0;
+
+        for (size_t i = 0; i < third; ++i)
+        {
+            early += std::abs (withDrive[i] - withoutDrive[i]);
+            later += std::abs (withDrive[i + 3 * third] - withoutDrive[i + 3 * third]);
+        }
+
+        return early / later;
+    };
+
+    const auto at48 = fadedIn (48000.0), at96 = fadedIn (96000.0);
+    CAPTURE (at48);
+    CAPTURE (at96);
+    CHECK (at96 == doctest::Approx (at48).epsilon (0.15));
+}
+
+TEST_CASE ("A synced, driven and unison synth leaves nothing off centre, and what it takes away moves smoothly as osc 2 sweeps")
+{
+    // The reviewer's finding 6 (2026-11-15).
+    const auto offsetShare = [] (const std::vector<float>& sound, size_t from, size_t to)
+    {
+        auto sum = 0.0, squares = 0.0, weights = 0.0;
+
+        for (auto i = from; i < to; ++i)
+        {
+            const auto weight = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (double) (i - from) / (double) (to - from));
+            sum += weight * sound[i];
+            squares += weight * sound[i] * sound[i];
+            weights += weight;
+        }
+
+        return std::abs (sum / weights) / std::sqrt (squares / weights);
+    };
+
+    // Synced, with five unison voices or one, undriven: what getSyncedMean() leaves, which nothing after it takes away (the
+    // DC blocker plays only with the drive on: the second review's finding 2, 2026-11-15). Then driven hard through the
+    // filter: a centred but lopsided wave that the drive offsets, which the blocker on the synth's sum takes away.
+    // Each with its limit, near where it is: driven with unison, the voices' beating moves the drive's offset a few times a
+    // second, which a blocker at 5 Hz takes only part of.
+    struct Case
+    {
+        bool driven, unison;
+        double limit;
+    };
+
+    for (const auto [driven, unison, limit] : { Case { false, true, 1.0e-4 }, Case { true, false, 2.0e-4 }, Case { true, true, 0.012 } })
+    {
+        auto values = getDefaults();
+        values[Synth::osc2Sync] = 1.0f;
+        values[Synth::osc2Pitch] = 5.0f;
+        values[Synth::oscMix] = 0.8f;
+        values[Synth::drive] = driven ? 18.0f : 0.0f;
+        values[Synth::unisonOn] = unison ? 1.0f : 0.0f;
+        values[Synth::unisonVoices] = 4.0f;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 45), noteOn (0, 57) });
+        const auto share = offsetShare (played, 12000, 24000);
+        const auto label = std::string (driven ? "driven" : "undriven") + (unison ? ", with unison: " : ": ");
+        INFO (label << share);
+        CHECK (share < limit);
+    }
+
+    // Osc 2 swept down by the filter envelope while synced: what is taken away moves at each control step; a step in it would
+    // show as larger jumps between samples at the steps' ends than between others.
+    auto values = getSineValues();
+    values[Synth::osc2Wave] = 2.0f;
+    values[Synth::oscMix] = 1.0f;
+    values[Synth::osc2Sync] = 1.0f;
+    values[Synth::osc2Envelope] = 24.0f;
+    values[Synth::filterOn] = 0.0f;
+    values[Synth::filterDecay] = 400.0f;
+    values[Synth::filterSustain] = 0.0f;
+    Synth swept;
+    swept.prepare (testRate, testBlockSize);
+    const auto played = play (swept, values, 19200, { noteOn (0, 33) });
+    auto atEnds = 0.0, elsewhere = 0.0;
+    auto numEnds = 0, numElsewhere = 0;
+
+    for (size_t i = 1000; i < played.size(); ++i)
+    {
+        const auto jump = std::abs ((double) played[i] - played[i - 1]);
+        (i % 16 == 0 ? atEnds : elsewhere) += jump;
+        ++(i % 16 == 0 ? numEnds : numElsewhere);
+    }
+
+    CHECK ((atEnds / numEnds) < 1.1 * (elsewhere / numElsewhere));
+}
+
+TEST_CASE ("The synth's drift wanders at the same pace at 96 kHz as at 48 kHz")
+{
+    // The reviewer's finding 8 (2026-11-15).
+    // Its wander drawn from the same seed: the cents a note is off, measured over a few stretches at each rate, alike.
+    const auto centsOff = [] (double rate)
+    {
+        auto values = getSineValues();
+        values[Synth::drift] = 1.0f;
+        Synth synth;
+        synth.prepare (rate, testBlockSize);
+        const auto played = play (synth, values, (int) (1.2 * rate), { noteOn (0, 69) });
+        std::vector<double> cents;
+
+        for (const auto from : { 0.1, 0.4, 0.7, 1.0 })
+        {
+            const auto first = (size_t) (from * rate), last = (size_t) ((from + 0.1) * rate);
+            auto firstCrossing = 0.0, lastCrossing = 0.0;
+            auto crossings = 0;
+
+            for (auto i = first + 1; i < last; ++i)
+            {
+                if (played[i - 1] < 0.0f && played[i] >= 0.0f)
+                {
+                    // Where between the samples it crosses.
+                    const auto at = (double) (i - 1) + played[i - 1] / (played[i - 1] - played[i]);
+
+                    if (crossings == 0)
+                        firstCrossing = at;
+
+                    lastCrossing = at;
+                    ++crossings;
+                }
+            }
+
+            const auto hertz = (crossings - 1) * rate / (lastCrossing - firstCrossing);
+            cents.push_back (1200.0 * std::log2 (hertz / 440.0));
+        }
+
+        return cents;
+    };
+
+    const auto at48 = centsOff (48000.0), at96 = centsOff (96000.0);
+
+    for (size_t i = 0; i < at48.size(); ++i)
+    {
+        CAPTURE (i);
+        CAPTURE (at48[i]);
+        CAPTURE (at96[i]);
+        CHECK (std::abs (at48[i] - at96[i]) < 0.5);
+    }
+}
+
+TEST_CASE ("The synth's drift wanders at its pace however notes and blocks split the samples")
+{
+    // Drift moved a step for every stretch played, whatever its length, so faster where notes and blocks split them: now as
+    // the samples go. Notes on every few samples, and blocks of 7 against blocks of 512.
+    auto values = getSineValues();
+    values[Synth::drift] = 1.0f;
+    std::vector<NoteEvent> notes;
+
+    for (int i = 0; i < 40; ++i)
+        notes.push_back (noteOn (37 * i, 50 + i % 12, 0.8f));
+
+    Synth whole, split;
+    whole.prepare (testRate, 512);
+    split.prepare (testRate, 512);
+    const auto inWhole = play (whole, values, 9600, notes, [] (int) {}, 512);
+    const auto inSplit = play (split, values, 9600, notes, [] (int) {}, 7);
+    CHECK (largestDifference (inWhole, inSplit) < 1.0e-5f);
+}
+
+TEST_CASE ("A clean synth patch, a kick's, plays as without a DC blocker: its note's area left in it, and nothing after it")
+{
+    // The second review's finding 1 (2026-11-15): the blocker on the synth's sum changed every patch's waveform, a clean
+    // one's too: it took out the net area a note has and put it back as a slow tail after it (a kick's about 13 % of its
+    // peak, summing under the next hits). Now it plays only with the drive on. A sine falling two octaves in 40 ms over a
+    // short decay: what it plays has an area, and once the note has gone every sample is exactly 0, which a blocker that
+    // had heard the note would not leave (its tail falls for seconds); and the same driven, where it plays.
+    const auto lastSounding = [] (bool driven, double& area)
+    {
+        auto values = getSineValues();
+        values[Synth::pitchAmount] = 24.0f;
+        values[Synth::pitchDecay] = 40.0f;
+        values[Synth::sustain] = 0.0f;
+        values[Synth::decay] = 150.0f;
+        values[Synth::release] = 20.0f;
+        values[Synth::drive] = driven ? 12.0f : 0.0f;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, (int) testRate, { noteOn (0, 36), noteOff ((int) (0.1 * testRate), 36) });
+        auto last = 0;
+        area = 0.0;
+
+        for (int i = 0; i < (int) played.size(); ++i)
+        {
+            area += (double) played[(size_t) i] / testRate;
+
+            if (! juce::exactlyEqual (played[(size_t) i], 0.0f))
+                last = i;
+        }
+
+        return last;
+    };
+
+    auto area = 0.0;
+    CHECK (lastSounding (false, area) < (int) (0.2 * testRate));
+    CHECK (std::abs (area) > 1.0e-4);
+    CHECK (lastSounding (true, area) > (int) (0.9 * testRate)); // driven, the blocker plays: its tail goes on
 }

@@ -306,14 +306,14 @@ Sampler::Slices Sampler::getSlices (const Sound& sound, const ManualSlices* manu
 Sampler::Sampler()
     : playingSound (getFactorySample (0))
 {
-    sound.store (playingSound.get(), std::memory_order_release);
+    currentSound = playingSound.get(); // no audio thread yet
 }
 
 Sampler::~Sampler() = default;
 
 void Sampler::freeRetired()
 {
-    const auto done = blocksDone.load (std::memory_order_acquire);
+    const auto done = clearBlocks.load();
     retired.erase (std::remove_if (retired.begin(), retired.end(), [done] (const Retired& old) { return done >= old.safeAfter; }),
                    retired.end());
 }
@@ -328,10 +328,13 @@ void Sampler::setSound (std::shared_ptr<const Sound> newSound)
     if (newSound == playingSound)
         return;
 
-    sound.store (newSound.get(), std::memory_order_release);
+    // The one given before, if the audio thread never took it, goes at once: so that however many are given while the
+    // sampler plays nothing (a muted track's), at most the one it took last and the newest wait. If it took it, its voices fade
+    // out from the next block on, and a block under way may have begun new ones on it: the second clear block from now has
+    // none (clearBlocks).
+    if (pendingSound.exchange (newSound.get()) == nullptr)
+        retired.push_back ({ std::move (playingSound), clearBlocks.load() + 2 });
 
-    // The audio thread may play the one before until the end of its next block, when its voices notice the change.
-    retired.push_back ({ std::move (playingSound), blocksDone.load (std::memory_order_acquire) + 2 });
     playingSound = std::move (newSound);
 }
 
@@ -342,8 +345,10 @@ void Sampler::setManualSlices (std::shared_ptr<const ManualSlices> slices)
     if (slices == playingSlices)
         return;
 
-    manualSlices.store (slices.get(), std::memory_order_release);
-    retired.push_back ({ std::move (playingSlices), blocksDone.load (std::memory_order_acquire) + 2 });
+    // As a sound is given (setSound()); none as a stand-in, so that what is pending is never nothing.
+    if (pendingSlices.exchange (slices != nullptr ? slices.get() : &noSlices) == nullptr)
+        retired.push_back ({ std::move (playingSlices), clearBlocks.load() + 2 });
+
     playingSlices = std::move (slices);
 }
 
@@ -406,6 +411,8 @@ void Sampler::reset()
     }
 
     lfo.reset();
+    grid.reset();
+    stepLfo.fill (0.0f);
     startPlaces.setSeed (startSeed);
     numHeld = 0;
     notesPlayed = 0;
@@ -443,8 +450,8 @@ void Sampler::letGoOf (int note)
 
 Sampler::Voice& Sampler::findVoice()
 {
-    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which fades
-    // out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that fade
+    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
     // on untouched, and the new note plays the sound from its start.
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
@@ -471,8 +478,16 @@ Sampler::Voice& Sampler::findVoice()
 void Sampler::stealVoice (Voice& voice)
 {
     // What it played fades out from a copy of it, over a few milliseconds, while it starts the new note from silence. The
-    // copy reuses the last voice's memory (every voice is prepared alike), so this doesn't allocate.
-    auto& fading = voices[(size_t) maxVoices];
+    // copy goes to a place that fades nothing, or else to the one nearest silence, which is cut; it reuses that place's
+    // memory (every voice is prepared alike), so this doesn't allocate.
+    auto* nearest = &voices[(size_t) maxVoices];
+
+    for (auto i = (size_t) maxVoices; i < voices.size() && nearest->amp.isActive(); ++i)
+        if (const auto& place = voices[i];
+            ! place.amp.isActive() || place.fade * place.amp.getLevel() < nearest->fade * nearest->amp.getLevel())
+            nearest = &voices[i];
+
+    auto& fading = *nearest;
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
@@ -561,6 +576,7 @@ void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const flo
     voice.velocityGain = 1.0f - sensitivityValue + sensitivityValue * velocityValue * velocityValue;
     voice.age = 0;
     voice.started = ++notesPlayed;
+    voice.stepPending = true;
 
     // At its full level, whatever fade the voice was in when its last note ended (one cut as playback stopped can end its
     // release first): left fading, the new note would fade out at once.
@@ -574,7 +590,7 @@ void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const flo
 
 void Sampler::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
 {
-    const auto* playing = sound.load (std::memory_order_acquire);
+    const auto* playing = currentSound;
 
     if (playing == nullptr || playing->audio.getNumSamples() == 0)
         return;
@@ -667,8 +683,8 @@ void Sampler::startNote (int note, float velocityValue, std::span<const float> v
 
 void Sampler::startSlice (int note, float velocityValue, std::span<const float> values)
 {
-    const auto* playing = sound.load (std::memory_order_acquire);
-    const auto slices = getSlices (*playing, manualSlices.load (std::memory_order_acquire), values, songTempo, songBarLength);
+    const auto* playing = currentSound;
+    const auto slices = getSlices (*playing, currentSlices, values, songTempo, songBarLength);
     const auto index = note - firstSliceNote;
 
     if (! juce::isPositiveAndBelow (index, slices.count))
@@ -941,7 +957,7 @@ void Sampler::readAt (const Voice& voice, double position, float& left, float& r
         readRound (at + (double) length);
 }
 
-void Sampler::render (float* left, float* right, int numSamples, std::span<const float> values)
+void Sampler::render (float* left, float* right, int numSamples, std::span<const float> values, bool playing, std::int64_t songSample)
 {
     const auto filterMode = dsp::toFilterMode (values[filterType]);
     const auto steep = dsp::isSteep (values[filterSlope]);
@@ -961,71 +977,80 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
     const auto fadeInSamples = (double) values[fadeIn] * 0.001 * sampleRate;
     const auto fadeOutSamples = (double) values[fadeOut] * 0.001 * sampleRate;
 
-    for (int begin = 0; begin < numSamples; begin += controlStep)
+    grid.startBlock (playing, songSample);
+
+    for (int begin = 0; begin < numSamples;)
     {
-        const auto length = std::min (controlStep, numSamples - begin);
-        std::array<float, controlStep> moved {};
+        // Control steps on the song's own grid while it plays (dsp/ControlGrid.h), so that what plays doesn't depend on how
+        // the samples come: a step a block's end or an event cuts short goes on in the next stretch with the values it began
+        // with, its glide moving as far as the step takes it. The LFO's values for the step come as it begins.
+        const auto stretch = grid.next (numSamples - begin);
+        const auto length = stretch.length, at = stretch.at, untilNextStep = stretch.untilNextStep;
 
-        // The glide moves as far as this stretch's length takes it, so it keeps its time however the samples come.
-        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-length / glideSamples));
+        if (stretch.newStep)
+            for (int i = 0; i < untilNextStep; ++i)
+                stepLfo[(size_t) i] = lfo.next (lfoWave);
 
-        for (int i = 0; i < length; ++i)
-            moved[(size_t) i] = lfo.next (lfoWave);
-
-        const auto pitchMove = lfoAim == LfoTarget::pitch ? depth * moved[0] : 0.0f;
-        const auto cutoffMove = lfoAim == LfoTarget::cutoff ? depth * 24.0f * moved[0] : 0.0f;
+        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-untilNextStep / glideSamples));
+        const auto pitchMove = lfoAim == LfoTarget::pitch ? depth * stepLfo[(size_t) at] : 0.0f;
+        const auto cutoffMove = lfoAim == LfoTarget::cutoff ? depth * 24.0f * stepLfo[(size_t) at] : 0.0f;
 
         for (auto& voice : voices)
         {
             if (! voice.amp.isActive() || voice.sound == nullptr)
                 continue;
 
-            voice.age = std::min (voice.age + length, 1 << 30);
-
             // Pitch: a slide moves evenly until it gets there, a glide part of the way each step. A slice plays at its own
-            // pitch; a note against the root key.
-            if (voice.slidePerSample > 0.0f)
+            // pitch; a note against the root key. Once a step, and as the voice (re)starts.
+            if (stretch.newStep || voice.stepPending)
             {
-                const auto stepSize = voice.slidePerSample * (float) length;
-                const auto gap = voice.target - voice.pitch;
-                voice.pitch = std::abs (gap) <= stepSize ? voice.target : voice.pitch + std::copysign (stepSize, gap);
-                voice.slidePerSample = std::abs (gap) <= stepSize ? 0.0f : voice.slidePerSample;
-            }
-            else
-            {
-                voice.pitch += (voice.target - voice.pitch) * glideStep;
-            }
+                voice.stepPending = false;
 
-            const auto keyed = voice.slice < 0 ? voice.pitch - rootNote : 0.0f;
-            const auto semitones = (double) (keyed + offset + bent + pitchMove);
-            voice.step = voice.sound->sampleRate / sampleRate * std::exp2 (semitones / 12.0);
-
-            if (filtered)
-            {
-                auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * keyed + cutoffMove;
-
-                if (velocityRange > 0.0f)
-                    moves += velocityRange * (voice.velocity - 1.0f);
-
-                const auto frequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
-                const dsp::FilterSettings settings { .mode = filterMode,
-                                                     .frequency = frequency,
-                                                     .resonance = values[resonance],
-                                                     .steep = steep,
-                                                     .q = q };
-
-                if (! voice.filterIsSet || ! dsp::areSame (settings, voice.filterSettings))
+                if (voice.slidePerSample > 0.0f)
                 {
-                    const auto coefficients = dsp::makeMultimode (settings, sampleRate);
+                    const auto stepSize = voice.slidePerSample * (float) untilNextStep;
+                    const auto gap = voice.target - voice.pitch;
+                    voice.pitch = std::abs (gap) <= stepSize ? voice.target : voice.pitch + std::copysign (stepSize, gap);
+                    voice.slidePerSample = std::abs (gap) <= stepSize ? 0.0f : voice.slidePerSample;
+                }
+                else
+                {
+                    voice.pitch += (voice.target - voice.pitch) * glideStep;
+                }
 
-                    for (auto& filter : voice.filters)
-                        filter.set (coefficients, length);
+                const auto keyed = voice.slice < 0 ? voice.pitch - rootNote : 0.0f;
+                const auto semitones = (double) (keyed + offset + bent + pitchMove);
+                voice.step = voice.sound->sampleRate / sampleRate * std::exp2 (semitones / 12.0);
 
-                    voice.filterSettings = settings;
-                    voice.filterIsSet = true;
+                if (filtered)
+                {
+                    auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * keyed + cutoffMove;
+
+                    if (velocityRange > 0.0f)
+                        moves += velocityRange * (voice.velocity - 1.0f);
+
+                    const auto frequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
+                    const dsp::FilterSettings settings { .mode = filterMode,
+                                                         .frequency = frequency,
+                                                         .resonance = values[resonance],
+                                                         .steep = steep,
+                                                         .q = q };
+
+                    if (! voice.filterIsSet || ! dsp::areSame (settings, voice.filterSettings))
+                    {
+                        const auto coefficients = dsp::makeMultimode (settings, sampleRate);
+
+                        // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
+                        for (auto& filter : voice.filters)
+                            filter.set (coefficients, untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
+
+                        voice.filterSettings = settings;
+                        voice.filterIsSet = true;
+                    }
                 }
             }
 
+            voice.age = std::min (voice.age + length, 1 << 30);
             const auto stereo = voice.sound->audio.getNumChannels() > 1;
             const auto loopLength = voice.loopEndAt - voice.loopStartAt;
 
@@ -1093,7 +1118,7 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
                 }
 
                 if (lfoAim == LfoTarget::level)
-                    gain *= 1.0f - depth * 0.5f * (1.0f + moved[(size_t) i]);
+                    gain *= 1.0f - depth * 0.5f * (1.0f + stepLfo[(size_t) (at + i)]);
 
                 if (filtered)
                 {
@@ -1115,6 +1140,8 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
                 voice.sound = nullptr;
             }
         }
+
+        begin += length;
     }
 }
 
@@ -1129,10 +1156,18 @@ void Sampler::process (const ProcessContext& block)
     songPlaying = block.isPlaying;
     songTempo = block.tempo > 0.0 ? block.tempo : 120.0;
     songBarLength = block.barLength > 0.0 ? block.barLength : 4.0;
-    const auto* playing = sound.load (std::memory_order_acquire);
+    // What was given since the last block, if anything was: the sound and the slices it plays from now.
+    if (const auto* given = pendingSound.exchange (nullptr); given != nullptr)
+        currentSound = given;
 
-    // A voice of a sound swapped out fades out within this block, which the sound outlives.
-    const auto swapStep = 1.0f / (float) std::max (1, std::min (block.numSamples, (int) (stealFadeSeconds * sampleRate)));
+    if (const auto* given = pendingSlices.exchange (nullptr); given != nullptr)
+        currentSlices = given != &noSlices ? given : nullptr;
+
+    const auto* playing = currentSound;
+
+    // A voice of a sound swapped out fades out, as a voice taken for another note does, however short the blocks: the sound
+    // outlives it (clearBlocks).
+    const auto swapStep = (float) (1.0 / (stealFadeSeconds * sampleRate));
 
     for (auto& voice : voices)
         if (voice.amp.isActive() && voice.sound != playing)
@@ -1211,7 +1246,8 @@ void Sampler::process (const ProcessContext& block)
             handle (block.events[next++], values);
 
         const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;
-        render (left + done, right != nullptr ? right + done : nullptr, until - done, values);
+        render (left + done, right != nullptr ? right + done : nullptr, until - done, values, block.isPlaying,
+                block.songSample + (block.isPlaying ? done : 0));
         done = until;
     }
 
@@ -1219,18 +1255,16 @@ void Sampler::process (const ProcessContext& block)
     while (next < block.events.size())
         handle (block.events[next++], values);
 
-    // A voice still on a sound swapped out stops: the sound may be freed after the next block.
+    // Whether no voice plays any sound but the one given last as the block began: what was swapped out before it began can go
+    // once it ends (clearBlocks). A voice begun in it on a sound given since plays on, and keeps the block from counting.
+    auto clear = true;
+
     for (auto& voice : voices)
     {
-        if (voice.sound != nullptr && voice.sound != playing)
-        {
-            voice.amp.reset();
-            voice.filterEnvelope.reset();
-            voice.note = -1;
+        if (! voice.amp.isActive())
             voice.sound = nullptr;
-            voice.fade = 1.0f;
-            voice.fadeStep = 0.0f;
-        }
+        else if (voice.sound != playing)
+            clear = false;
     }
 
     activeVoices.store (
@@ -1266,6 +1300,8 @@ void Sampler::process (const ProcessContext& block)
     shown.lfoPhase.set (lfo.getPhase());
     shown.tempo.set ((float) songTempo);
     shown.barLength.set ((float) songBarLength);
-    blocksDone.fetch_add (1, std::memory_order_release);
+
+    if (clear)
+        clearBlocks.fetch_add (1);
 }
 } // namespace phazite::devices

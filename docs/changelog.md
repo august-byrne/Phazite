@@ -121,6 +121,29 @@ too. A line names the bug's number in that list.
   and only the track that changed after an edit; opening a commit reads it in the background; the Project view
   finds the unused audio in the background, reading each kept song once. (Switching branches and starting a merge
   still read there: what is left of 126.)
+- **35 Sounds with what isn't a number:** a sampler's, a drum pad's or a wavetable's sound file whose float samples
+  hold what isn't a number plays those samples as silence, rather than silencing the whole mix while it plays.
+- **70 A chord that takes several busy voices at once** in the Synth, the Wavetable, the FM or the Sampler fades out
+  every voice it takes over 3 ms (16 places to fade in), where all but one were cut dead.
+- **71 The Drum Sampler's voices:** a voice taken for a new hit fades out over 5 ms, the quietest dying one first,
+  and a pad can cut its own earlier hits (a new switch for each pad, Cut Itself: on for the 808 Kit's kick and the
+  Trap Kit's 808); a pad whose sound is swapped while it plays fades out.
+- **72 Sounds and tables swapped while they play** are freed only once nothing can still read them, without waiting
+  for the next one given, and never pile up on a track that isn't played; the sampler's old notes fade out over 3 ms
+  however short the blocks.
+- **73 Alike at every sample rate and in any blocks:** the synths' sustain glide, drift, noise and drive fade take the
+  same time and level at any rate (noise is as loud per hertz, with 48 kHz, where the presets are leveled, as it
+  was).
+- **134 The synths' control steps** go by the song's grid too (the Synth, the Wavetable, the FM and the Sampler): the
+  Synth plays the same samples however blocks and automation cut them (35 dB under its sound before), and a count-in,
+  a loop's second pass and a wake from sleep play what an export plays.
+- **135 Offsets under held notes:** Osc 2 Sync on the Synth and Sync, Bend and Pulse Width on the Wavetable leave no
+  constant offset (up to 0.65 and 0.78 of the notes' level before; 0.0003 and 0.003 now), taken out where they
+  arise; where a drive, Ring Mod or an FM warp makes one, a blocker takes it out, and only there, so clean patches
+  play bit for bit as they did.
+- **136 The FM's blocker** is 12 dB at 5 Hz: a new FM's electric piano leaves 0.0085 of its level under held notes,
+  where it left 0.08. What a modulator a few hertz off a whole ratio leaves stays (it is what FM does), as the entry
+  now says.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

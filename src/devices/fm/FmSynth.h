@@ -23,6 +23,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
@@ -227,7 +228,7 @@ private:
         std::array<Oscillator, numOperators> ops;
         dsp::Oversampler2x down;
         dsp::MultimodeFilter filter;
-        float dcIn = 0.0f, dcOut = 0.0f; // what the DC blocker last took and gave
+        std::array<double, 2> dcState {}; // the DC blocker's (a state-variable filter's)
     };
 
     struct Voice
@@ -247,6 +248,7 @@ private:
         int numLanes = 1; // two while its note is spread, set as the note starts
         dsp::FilterSettings filterSettings {};
         bool filterIsSet = false, active = false;
+        bool stepPending = true;            // it (re)started since the last control step: its values are due
         float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
         int age = 0;
     };
@@ -256,12 +258,18 @@ private:
     static constexpr double stopFadeSeconds = 0.01;
     static constexpr double justBegunSeconds = 0.1;
     static constexpr double portamentoSeconds = 0.1;
-    static constexpr double dcBlockHertz = 5.0; // below it the DC blocker takes away what FM leaves off centre
-    float dcBlock = 0.999f;                     // the DC blocker's pole at the sample rate
+    // The DC blocker: a 12 dB high-pass at 5 Hz (Butterworth), which takes away what FM leaves off centre, steady or not: a
+    // modulator at its carrier's ratio puts a sideband at 0 Hz, which a few cents' detune makes wander at their beat and its
+    // envelope moves. 20 Hz keeps its level within 0.02 dB. Its coefficients at the sample rate, in doubles: its poles lie
+    // close to the unit circle.
+    static constexpr double dcBlockHertz = 5.0;
+    double dcA1 = 1.0, dcA2 = 0.0, dcA3 = 0.0;
     bool songPlaying = false;
 
-    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
-    std::array<Voice, maxVoices + 1> voices;
+    // The first maxVoices play notes; the rest fade out what voices played when other notes took them (stealVoice()), each
+    // where it was copied, so that a chord that takes several at once fades each of them out.
+    static constexpr int numFading = maxVoices;
+    std::array<Voice, maxVoices + numFading> voices;
     std::array<int, maxHeld> heldKeys {};
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
@@ -272,6 +280,8 @@ private:
     const Wavetable* sawTable = nullptr;
     const Wavetable* triangleTable = nullptr;
     dsp::Lfo lfo;
+    dsp::ControlGrid grid { controlStep };     // the control steps, on the song's own grid while it plays
+    std::array<float, controlStep> stepLfo {}; // the LFO's values over the step under way
     std::atomic<float> tailSeconds { 0.3f };
     std::atomic<int> activeVoices { 0 };
     Shown shown;
@@ -286,6 +296,6 @@ private:
     void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
     Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
-    void render (float* left, float* right, int numSamples, std::span<const float> parameters);
+    void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
 };
 } // namespace phazite::devices

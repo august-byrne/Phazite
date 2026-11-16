@@ -146,6 +146,9 @@ public:
     // The same on a copy, which is returned.
     Sound played (const Sound&, int blockSize, std::span<const devices::NoteEvent> notes = {});
 
+    // The same with the song stopped (as during a count-in): its place stays where it is.
+    void playStopped (Sound&, int blockSize, std::span<const devices::NoteEvent> notes = {});
+
     // A block of no samples at all, which a host may hand a device.
     void playNothing();
 
@@ -165,6 +168,7 @@ private:
     double sampleRate = 48000.0;
     int longestBlock = 0;
     std::int64_t songSample = 0;
+    bool songPlays = true;
     std::vector<std::unique_ptr<engine::Curve>> curves;
     std::vector<engine::DeviceRunner::Automated> automation;
     std::vector<devices::NoteEvent> blockNotes;

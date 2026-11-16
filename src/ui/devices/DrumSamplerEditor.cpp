@@ -1168,8 +1168,9 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
         "Sound", soundPart, soundControls.getPreferredWidth(), waveformHeight + below, shortestWaveform + below, true
     };
 
-    const auto pad = makePadPart ("Pad", { Field::level, Field::pan, Field::velocity, Field::choke, Field::mute, Field::solo }, 6,
-                                  { "Level", "Pan", "Velocity", "Choke", "Mute", "Solo" });
+    const auto pad =
+        makePadPart ("Pad", { Field::level, Field::pan, Field::velocity, Field::choke, Field::cutItself, Field::mute, Field::solo }, 7,
+                     { "Level", "Pan", "Velocity", "Choke", "Cut Itself", "Mute", "Solo" });
     const auto pitch =
         makePadPart ("Pitch", { Field::tune, Field::fine, Field::sweep, Field::sweepTime }, 4, { "Tune", "Fine", "Sweep", "Sweep Time" });
     const auto filter = makePadPart ("Filter", { Field::filter, Field::cutoff, Field::resonance, Field::velocityToCutoff }, 4,

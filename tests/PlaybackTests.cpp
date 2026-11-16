@@ -415,7 +415,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
     // release, at the song's start, played, then stopped as soon as it is heard.
     phazite::test::HostedDevice device;
 
-    const auto leftAfterStop = [&] (const char* type, int note, double length, float release)
+    const auto leftAfterStop = [&] (const char* type, int note, double length, float release, float drive = 0.0f)
     {
         const auto song = phazite::createSong();
         const auto track = phazite::getTrackIDs (*song)[0];
@@ -423,6 +423,9 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
 
         if (release > 0.0f)
             values.push_back ({ "release", release });
+
+        if (drive > 0.0f)
+            values.push_back ({ "drive", drive });
 
         REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, type, values)).isValid());
 
@@ -462,4 +465,8 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
 
     CHECK (leftAfterStop (phazite::devices::DrumSampler::typeID, 36, 0.25, 0.0f) < 1.0e-4f);
     CHECK (leftAfterStop (phazite::devices::Synth::typeID, 60, 4.0, 400.0f) < 1.0e-4f);
+
+    // Driven, where the DC blocker on the synth's sum plays: what it still rings with fades out once the notes have (the
+    // second review's finding 1, 2026-11-15: its fade after Stop is still needed there).
+    CHECK (leftAfterStop (phazite::devices::Synth::typeID, 60, 4.0, 400.0f, 12.0f) < 1.0e-4f);
 }

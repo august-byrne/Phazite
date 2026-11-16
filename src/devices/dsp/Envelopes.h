@@ -13,10 +13,15 @@ namespace phazite::devices::dsp
 class Adsr
 {
 public:
-    void prepare (double newSampleRate) noexcept { sampleRate = newSampleRate; }
+    // At the rate it is run at: the sample rate, or a control rate.
+    void prepare (double newSampleRate) noexcept
+    {
+        sampleRate = newSampleRate;
+        sustainFollow = (float) (1.0 - std::pow (1.0 - (double) sustainFollowAt44k, 44100.0 / sampleRate));
+    }
 
     // Times in seconds (0 for none), the sustain level from 0 to 1. A change applies from the next stage on, except
-    // the sustain level, which the sustaining stage follows smoothly.
+    // the sustain level, which the sustaining stage follows smoothly, over the same time at any rate.
     void setParameters (float attackSeconds, float decaySeconds, float sustainLevel, float releaseSeconds) noexcept
     {
         attack = attackSeconds;
@@ -102,8 +107,10 @@ private:
         release
     };
 
-    static constexpr float sustainFollow = 0.002f; // a few milliseconds
-    static constexpr double steepestBend = 10.0;   // at a curve of 1, a stage's last tenth goes 63 % of its way (at -1, its first)
+    // How far toward a new sustain level it moves a sample at 44.1 kHz: 63 % of the way in 11 ms. As far in that time at
+    // any other rate (prepare()).
+    static constexpr float sustainFollowAt44k = 0.002f;
+    static constexpr double steepestBend = 10.0; // at a curve of 1, a stage's last tenth goes 63 % of its way (at -1, its first)
 
     // A curve as the exponent of its shape, (e^(bend t) - 1) / (e^bend - 1) over the stage's time t from 0 to 1; nearly
     // straight curves are straight, which keeps the exponent away from 0.
@@ -116,6 +123,7 @@ private:
     static bool isStraightBend (double bend) noexcept { return std::abs (bend) < 1.0e-4; }
 
     double sampleRate = 44100.0;
+    float sustainFollow = sustainFollowAt44k;
     float attack = 0.005f, decay = 0.1f, sustain = 1.0f, release = 0.1f;
     double attackBend = getBend (analogAttackCurve), decayBend = getBend (analogSettleCurve), releaseBend = getBend (analogSettleCurve);
     Stage stage = Stage::idle;

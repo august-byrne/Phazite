@@ -3,7 +3,8 @@
 // into the project, its root key found from the file's own note, a note in its name in the octave of its pitch, or its
 // pitch, its fine taking back how far off the note it is, its loop from its smpl chunk; one of its factory sounds; the
 // engine playing what the song names; slices moved, added and taken away by hand, which stay whatever slices the sound;
-// its slices written as notes into a clip that plays the loop in time; and presets that carry its sound.
+// its slices written as notes into a clip that plays the loop in time; presets that carry its sound; and a float file's
+// samples that aren't numbers read as silence, as a wavetable's are.
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "devices/sampler/FactorySamples.h"
@@ -16,11 +17,14 @@
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
+#include "model/devices/internal/Wavetables.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <cmath>
+#include <limits>
 #include <unordered_map>
 
 namespace
@@ -347,4 +351,51 @@ TEST_CASE ("A sampler's preset carries its sound file to another project, and it
     CHECK (std::find (properties.begin(), properties.end(), phazite::schema::samplerSample) != properties.end());
     CHECK (std::find (properties.begin(), properties.end(), phazite::schema::samplerSlices) != properties.end());
     CHECK (phazite::schema::isSoundFileProperty (phazite::schema::samplerSampleFile));
+}
+
+TEST_CASE ("A sampler's or a wavetable's sound file with samples that aren't numbers is read with silence in their place")
+{
+    // A float file can hold what isn't a number, the infinities and values beyond any level among its samples: read as they
+    // are, a sampler reading between them spreads them to their neighbours, and a wavetable made from them is none.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Broken.wav");
+    juce::AudioBuffer<float> audio (1, 4096);
+
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+        audio.setSample (0, i, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * i / 2048.0));
+
+    audio.setSample (0, 100, std::numeric_limits<float>::quiet_NaN());
+    audio.setSample (0, 200, -std::numeric_limits<float>::infinity());
+    audio.setSample (0, 300, 1.0e30f);
+
+    {
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (48000.0).withNumChannels (1).withBitsPerSample (32));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples()));
+    }
+
+    const auto sound = phazite::readSampleSound (file);
+    REQUIRE (sound != nullptr);
+    REQUIRE (sound->audio.getNumSamples() == 4096);
+
+    for (const auto at : { 100, 200, 300 })
+        CHECK (juce::exactlyEqual (sound->audio.getSample (0, at), 0.0f));
+
+    CHECK (sound->audio.getSample (0, 101) == doctest::Approx (audio.getSample (0, 101)));
+
+    // Its octaves, read between its samples, are numbers too.
+    for (const auto& octave : sound->octaves)
+        for (int i = 0; i < octave.getNumSamples(); ++i)
+            REQUIRE (std::isfinite (octave.getSample (0, i)));
+
+    // Two frames of a wavetable, each a number, the loudest at its peak.
+    const auto table = phazite::readWavetable (file);
+    REQUIRE (table != nullptr);
+    REQUIRE (table->getNumFrames() == 2);
+
+    for (int frame = 0; frame < 2; ++frame)
+        for (const auto sample : table->getFrameForDrawing (frame))
+            REQUIRE (std::isfinite (sample));
 }

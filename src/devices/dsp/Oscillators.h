@@ -78,7 +78,7 @@ public:
         increment = (float) (step < 0.0 ? 0.0 : (step > 0.49 ? 0.49 : step));
 
         const auto limit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
-        const auto level = Wavetable::chooseLevel (limit / std::max (1.0e-9, (double) increment));
+        level = Wavetable::chooseLevel (limit / std::max (1.0e-9, (double) increment));
         sawLevel = saw->getLevel (0, level);
         triangleLevel = triangle->getLevel (0, level);
     }
@@ -116,6 +116,35 @@ public:
         return 0.0f;
     }
 
+    // The area of its wave as it plays at the frequency set last, from its cycle's start to a place in it (from 0 to 1): what
+    // the last cycle that hard sync cuts short adds up to, which is 0 over a whole cycle (Wavetable::getArea()).
+    float getArea (Waveform waveform, float place, float pulseWidth = 0.5f) const noexcept
+    {
+        switch (waveform)
+        {
+            case Waveform::sine:
+                return (1.0f - std::cos (6.2831853f * place)) / 6.2831853f;
+
+            case Waveform::triangle:
+                return triangle->getArea (0, level, place);
+
+            case Waveform::saw:
+                return saw->getArea (0, level, place);
+
+            case Waveform::square:
+            {
+                // The saw a width behind, less the saw (valueAt()): the first's area from -width to place - width, less the
+                // second's to place, each wrapped round its cycle (over which it adds up to nothing).
+                const auto width = pulseWidth < 0.05f ? 0.05f : (pulseWidth > 0.95f ? 0.95f : pulseWidth);
+                const auto wrapped = [] (float x) { return x - std::floor (x); };
+                return saw->getArea (0, level, wrapped (place - width)) - saw->getArea (0, level, 1.0f - width)
+                       - saw->getArea (0, level, place);
+            }
+        }
+
+        return 0.0f;
+    }
+
     float next (Waveform waveform, float pulseWidth = 0.5f) noexcept
     {
         const auto value = valueAt (waveform, phase, pulseWidth);
@@ -131,6 +160,7 @@ private:
     const Wavetable* saw = nullptr;
     const Wavetable* triangle = nullptr;
     Wavetable::Level sawLevel, triangleLevel;
+    int level = 0; // of the waves, which its frequency allows
     float phase = 0.0f, increment = 0.0f;
 
     // A level's wave at a place in its cycle, from 0 to 1.

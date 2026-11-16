@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace phazite::devices
@@ -185,21 +186,193 @@ std::shared_ptr<const Wavetable> Wavetable::make (const juce::String& tableName,
         }
     }
 
-    if (! peakAtOne)
-        return table;
-
     // The loudest frame's peak at 1.
-    auto peak = 0.0f;
+    auto scale = 1.0f;
 
-    for (int frame = 0; frame < table->numFrames; ++frame)
-        for (const auto sample : table->getFrameForDrawing (frame))
-            peak = std::max (peak, std::abs (sample));
+    if (peakAtOne)
+    {
+        auto peak = 0.0f;
 
-    if (peak > 0.0f)
-        for (auto& sample : table->samples)
-            sample /= peak;
+        for (int frame = 0; frame < table->numFrames; ++frame)
+            for (const auto sample : table->getFrameForDrawing (frame))
+                peak = std::max (peak, std::abs (sample));
 
+        if (peak > 0.0f)
+        {
+            scale = 1.0f / peak;
+
+            for (auto& sample : table->samples)
+                sample /= peak;
+        }
+    }
+
+    table->findAreasAndMeans (frames, scale);
     return table;
+}
+
+namespace
+{
+    // For each bend b that the bent means are kept at, and each harmonic h: G (h) = the integral from 0 to 1 of
+    // e^(i 2 pi h p) b / (b - (b - 1) p)^2 dp. The mean of a wave read with its places bent, p (t) = b t / (1 + (b - 1) t), is
+    // the integral over t of w (p (t)), which is the integral over p of w (p) / p' (t) = w (p) b / (b - (b - 1) p)^2: for a
+    // wave that is the sum of Re (c_h e^(i 2 pi h p)), the sum of Re (c_h G (h)), exactly, for any level's harmonics. Each
+    // bend's G at every harmonic from one FFT of the weight, by the trapezoids of 8192 samples of it (its ends together, as
+    // e^(i 2 pi h) is 1). The weight's ends don't meet (from 1 / b to b), so each G is off by its aliases at whole multiples
+    // of 8192 from h, about pi (b - 1 / b) h / (6 8192^2) each: summed over a saw's harmonics, at a bend of 8, under
+    // 0.00005 of the wave's peak. Worked out once, the first time a table is made, off the audio thread (a few ms).
+    struct BendWeights
+    {
+        static constexpr int stride = (Wavetable::numBends + 7) / 8 * 8; // the bends, padded for the vector registers
+
+        // Harmonic by harmonic, from the first, each bend's G: its real part, and its imaginary part negated, so that
+        // Re (c_h G (h)) is c_h's real part times the one plus its imaginary part times the other.
+        std::vector<float> real = std::vector<float> ((size_t) (stride * Wavetable::maxHarmonics));
+        std::vector<float> imagNegated = std::vector<float> ((size_t) (stride * Wavetable::maxHarmonics));
+    };
+
+    const BendWeights& getBendWeights()
+    {
+        static const BendWeights weights = []
+        {
+            constexpr int order = 13, size = 1 << order;
+            static_assert (size >= 4 * Wavetable::maxHarmonics);
+            BendWeights made;
+            juce::dsp::FFT fft (order);
+            std::vector<float> data ((size_t) size * 2);
+
+            for (int index = 0; index < Wavetable::numBends; ++index)
+            {
+                const auto bend = std::exp2 ((double) (index - (Wavetable::numBends - 1) / 2) / Wavetable::bendsPerOctave);
+                const auto weight = [bend] (double p) { return bend / ((bend - (bend - 1.0) * p) * (bend - (bend - 1.0) * p)); };
+                std::fill (data.begin(), data.end(), 0.0f);
+                data[0] = (float) (0.5 * (weight (0.0) + weight (1.0)));
+
+                for (int n = 1; n < size; ++n)
+                    data[(size_t) n] = (float) weight ((double) n / size);
+
+                // Its forward transform is the sum of x_n e^(-i 2 pi h n / N): G (h) is its conjugate, over N.
+                fft.performRealOnlyForwardTransform (data.data(), true);
+
+                for (int h = 1; h <= Wavetable::maxHarmonics; ++h)
+                {
+                    const auto at = (size_t) ((h - 1) * BendWeights::stride + index);
+                    made.real[at] = data[(size_t) h * 2] / (float) size;
+                    made.imagNegated[at] = data[(size_t) h * 2 + 1] / (float) size;
+                }
+            }
+
+            return made;
+        }();
+
+        return weights;
+    }
+
+} // namespace
+
+void Wavetable::findAreasAndMeans (const std::vector<Harmonics>& frames, float scale)
+{
+    static_assert (areaPoints == 128);
+    constexpr int stride = areaPoints + 1;
+    areas.assign ((size_t) (numFrames * numLevels * stride), 0.0f);
+    bentMeans.assign ((size_t) (numFrames * numLevels * numBends), 0.0f);
+    const auto& weights = getBendWeights();
+    juce::dsp::FFT areaTransform (7);
+    std::array<std::complex<float>, areaPoints> folded {}, atPoints {};
+
+    for (int frame = 0; frame < numFrames; ++frame)
+    {
+        const auto* harmonics = frame < (int) frames.size() ? frames[(size_t) frame].data() : nullptr;
+        const auto count = harmonics != nullptr ? std::min ((int) frames[(size_t) frame].size(), maxHarmonics) : 0;
+
+        // Its levels' areas, from its harmonics: for a wave that is the sum of Re (c_h e^(i 2 pi h t)), the area to x is the
+        // sum of Re (d_h (e^(i 2 pi h x) - 1)) with d_h = c_h / (i 2 pi h), exactly. At the places j / areaPoints, e^(i 2 pi h x)
+        // repeats as h goes up by areaPoints, so the d_h fold onto areaPoints of them and one transform of that many gives all
+        // the places (the forward one of their conjugates, whose real part is the same): each level from the harmonics it
+        // keeps, from the fewest, folded in turn.
+        folded.fill ({});
+        auto folds = 0;
+
+        for (int level = numLevels - 1; level >= 0; --level)
+        {
+            auto* area = areas.data() + (size_t) ((frame * numLevels + level) * stride);
+            const auto upTo = std::min (harmonicsAtLevel[(size_t) level], count);
+
+            if (upTo == folds && level < numLevels - 1)
+            {
+                std::copy (area + stride, area + 2 * stride, area); // the same harmonics as the level after it
+                continue;
+            }
+
+            for (; folds < upTo; ++folds)
+            {
+                const auto h = folds + 1;
+                const auto d = harmonics[folds] / std::complex<float> (0.0f, juce::MathConstants<float>::twoPi * (float) h);
+                folded[(size_t) (h % areaPoints)] += std::conj (d);
+            }
+
+            areaTransform.perform (folded.data(), atPoints.data(), false);
+
+            for (int point = 0; point < areaPoints; ++point)
+                area[point] = (atPoints[(size_t) point].real() - atPoints[0].real()) * scale;
+
+            area[areaPoints] = 0.0f; // the whole cycle's
+        }
+
+        // Its bent means, from its harmonics (getBendWeights()): each level's the sum over the harmonics it keeps, which
+        // the levels take from the first in turn, so that one running sum for each bend gives them all, from the fewest.
+        // Harmonic by harmonic, every bend at once, which the compiler does in vector registers.
+        std::array<float, BendWeights::stride> sums {};
+        auto done = 0;
+
+        for (int level = numLevels - 1; level >= 0; --level)
+        {
+            for (const auto upTo = std::min (harmonicsAtLevel[(size_t) level], count); done < upTo; ++done)
+            {
+                const auto re = harmonics[done].real(), im = harmonics[done].imag();
+                const auto* real = weights.real.data() + (size_t) (done * BendWeights::stride);
+                const auto* imagNegated = weights.imagNegated.data() + (size_t) (done * BendWeights::stride);
+
+                for (size_t index = 0; index < sums.size(); ++index)
+                    sums[index] += re * real[index] + im * imagNegated[index];
+            }
+
+            auto* means = bentMeans.data() + (size_t) ((frame * numLevels + level) * numBends);
+
+            for (int index = 0; index < numBends; ++index)
+                means[index] = sums[(size_t) index] * scale;
+        }
+    }
+}
+
+float Wavetable::getArea (int frame, int level, float place) const noexcept
+{
+    if (areas.empty())
+        return 0.0f;
+
+    frame = std::clamp (frame, 0, numFrames - 1);
+    level = std::clamp (level, 0, numLevels - 1);
+    const auto at = std::clamp (place, 0.0f, 1.0f) * (float) areaPoints;
+    const auto index = std::min ((int) at, areaPoints - 1);
+    const auto* area = areas.data() + (size_t) ((frame * numLevels + level) * (areaPoints + 1) + index);
+    return area[0] + (at - (float) index) * (area[1] - area[0]);
+}
+
+Wavetable::Bend Wavetable::findBend (float bend) noexcept
+{
+    const auto at = std::clamp ((std::log2 (std::max (bend, 1.0e-6f)) + 3.0f) * (float) bendsPerOctave, 0.0f, (float) (numBends - 1));
+    const auto index = std::min ((int) at, numBends - 2);
+    return { index, at - (float) index };
+}
+
+float Wavetable::getBentMean (int frame, int level, Bend bend) const noexcept
+{
+    if (bentMeans.empty())
+        return 0.0f;
+
+    frame = std::clamp (frame, 0, numFrames - 1);
+    level = std::clamp (level, 0, numLevels - 1);
+    const auto* mean = bentMeans.data() + (size_t) ((frame * numLevels + level) * numBends + bend.index);
+    return mean[0] + bend.fraction * (mean[1] - mean[0]);
 }
 
 std::shared_ptr<const Wavetable> Wavetable::fromFrames (const juce::String& tableName, const std::vector<std::vector<float>>& frames)

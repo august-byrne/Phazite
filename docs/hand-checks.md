@@ -187,6 +187,10 @@ the [changelog](changelog.md).
 | G172 | Commit a project with large new recordings, then quit at once; open the project again | A window "Finishing the commits of ..." shows until the commit is written, and the commit is there | |
 | G126 | In Source Control, click an older commit in a large project; with the Project view open on a project with several branches, edit freely | The window doesn't freeze, and the commit's lines appear a moment later; nothing stutters, and the count of unused files still follows | |
 | G61 | With the Project view open while a snapshot is being written, look at Clean Up | It stays in place, greyed, and its tooltip says why | |
+| G70 | A Synth pad with a long release: hold 16 notes, then play an 8-note chord on top | The chord comes in without clicks | |
+| G71 | Drum Sampler with the Trap Kit: roll the 808 pad (note 41); turn Cut Itself off and roll again. Then fast hats over long crashes until all 32 voices are busy | Each hit cuts the one before, with no pile-up and no click; with it off the hits overlap. The oldest crash fades out instead of clicking | |
+| G72 | While a Sampler note holds, drop a new sound on it | The old note fades out with no click, and a new note plays the new sound | |
+| G135 | Wavetable with Basic Shapes: sweep Osc 1's Warp Amount with Sync, Bend + and Pulse Width on a held low note, a scope on the master. Then a held chord on a new FM | The wave stays centred, with no thump as notes start or end; the FM shows no slow wobble around zero | |
 
 ## Known bugs that need an ear or a real plug-in
 

@@ -104,6 +104,7 @@ std::shared_ptr<const devices::Wavetable> readWavetable (const juce::File& file)
     if (! reader->read (&audio, 0, length, 0, true, channels > 1))
         return {};
 
+    clearWhatIsNotSound (audio);
     std::vector<float> mono ((size_t) length, 0.0f);
 
     for (int channel = 0; channel < channels; ++channel)

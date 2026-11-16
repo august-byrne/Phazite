@@ -72,34 +72,10 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Devices and playback
 
-- **35. Sampler and drum sampler sounds read from float files aren't checked for values that aren't numbers.**
 - **36. A jump while playing into a part of a long audio file that isn't read yet is silent until it is read** (it fades
   in then). Play from a stop and the loop's start are read ahead; a jump needs pre-roll.
 - **39. A/B's bounce file isn't read ahead at the loop's start or a new place,** and its own meters aren't guarded
   against values that aren't numbers.
-- **70. The synths have one place to fade a stolen voice in, so a second steal within 3 ms cuts the first dead.** A
-  chord of several notes played while all 16 voices sound steals as many voices on one sample, and all but one stop at
-  once, at whatever level they had. Why: `stealVoice()` copies the stolen voice into the one spare voice, over the last
-  (`src/devices/synth/Synth.cpp`, `src/devices/wavetable/WavetableSynth.cpp`, `src/devices/fm/FmSynth.cpp`,
-  `src/devices/sampler/Sampler.cpp`). Fix: fade a stolen voice where it is, or keep a few places to fade in. Partly
-  confirmed by a second reading (devices-instruments 2).
-- **71. The drum sampler steals its oldest voice without a fade, and a pad can't cut its own earlier hits.** The
-  longest sound (a crash, a long 808) is cut with a click once 32 voices sound, which fast hats over long sounds reach;
-  and an 808 pad's notes always overlap. Why: `startVoice()` (`src/devices/drums/DrumSampler.cpp`) takes the oldest
-  voice at once, and the choke leaves out the pad's own voices. Fix: fade a stolen voice over about 5 ms, prefer the
-  quietest one that is dying away, and let a pad cut itself. Confirmed by a second reading (devices-instruments 3).
-- **72. A wavetable or a sampler's sound that was swapped out is freed by a count of `process()` calls,** which the
-  runner makes for stretches of 1 to 32 samples, while the wavetable's readers keep the old table until their next
-  control step (`src/devices/wavetable/WavetableSynth.cpp`, `src/devices/sampler/Sampler.cpp`). It is safe as the code
-  stands only because the freeing happens in a later call that sets a table or a sound. A sampler's note started in the
-  call that swaps its sound is reset as that call ends. Fix: free by a count the audio thread moves on at a control
-  step, or hand over through `src/engine/core/Handover.h`. Not yet checked (devices-instruments 11).
-- **73. Small things depend on the sample rate and on how blocks are split.** An envelope follows a sustain level that
-  moves at a fixed step a sample, so in half the time at 96 kHz (`src/devices/dsp/Envelopes.h`); the synth's drift
-  moves one step for each stretch whatever its length, so faster where notes split blocks (`Synth::moveDrift()`,
-  `src/devices/synth/Synth.cpp`); white noise is 3 dB lower in the band that is heard at 96 kHz; the drive fades over
-  32 samples at any rate. Fix: work each out from seconds and the rate as the device is prepared. Not yet checked
-  (devices-instruments 12).
 - **78. A track unmuted, or no longer silenced by a solo, in the middle of a note stays silent until its next note.**
   Why: a silenced strip throws its notes away but still counts them as sounding, so nothing starts them again
   (`src/engine/core/Engine.cpp`). Fix: start held notes again as the strip is heard again; or, as planned, let mute and
@@ -111,16 +87,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   thread takes at every new plan (`src/engine/audio/AudioFile.cpp`). Fix: an index of the notes sounding, resamplers
   started on the reading thread, and reads outside the lock. Not measured. Not yet checked (engine 13).
 
-- **134. The Synth counts its control steps from where each block starts,** so what it plays depends a little on how
-  the same samples are cut into blocks: with still values 39 dB under its sound, with automation in blocks of 441
-  samples 35 dB. Found by the device conformance suite (`tests/DeviceConformanceTests.cpp`), which lists it as an
-  exception with its allowance. Fix: count the steps on the song's grid (`src/devices/dsp/ControlGrid.h`), as the
-  Phaser, the Flanger, the Chorus and the EQ do since 2026-11-15.
-- **135. The Synth with Osc 2 Sync on, and the Wavetable with its warps (Sync, Bend, Pulse Width), put a constant offset
-  under held notes,** up to 0.88 of the notes' level. Found by the conformance suite, whose offset rule leaves those
-  three parameters at their defaults. Fix: a DC blocker in each voice, as the FM has.
-- **136. The FM leaves an offset that follows its envelope,** about 0.08 of the notes' level at its defaults: its 5 Hz
-  DC blocker takes out only what is steady. An exception in the conformance suite, with an allowance of 0.15.
+- **136. The FM leaves a little under its held notes where a modulator sits a few hertz from a whole multiple of its
+  carrier** (Fine or Detune a little off): frequency modulation then puts a sideband a few hertz above 0 Hz (0.083 of
+  the notes' level at one drawn setting), which no blocker takes away without the lowest notes too. At its defaults
+  the offset is gone (0.08 before, 0.0085 with its 12 dB blocker at 5 Hz). It is what FM synthesis does, heard as
+  nothing; the conformance suite keeps it as an exception with an allowance of 0.10 and this reason. Not a fault to
+  fix: kept here so that the exception has its entry.
 - **137. A Free LFO, step sequencer or breakpoint envelope runs on while the song is stopped and isn't started again by
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts

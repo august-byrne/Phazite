@@ -75,6 +75,28 @@ public:
     // from where it reached, from + (to - from) * reached, not from where it was going.
     float getReached() const noexcept { return reached; }
 
+    // For a device that plays a stretch at a time (the synths): the stretch of at most `available` samples that starts here,
+    // within one step, starting a step if one is due; and moving on by it.
+    struct Stretch
+    {
+        bool newStep = false;  // a step begins with it: its values are due
+        int at = 0;            // samples into its step
+        int untilNextStep = 0; // from its start to the step's end: what the step's values cover from here
+        int length = 0;        // how many samples it plays, up to untilNextStep
+    };
+
+    Stretch next (int available) noexcept
+    {
+        const auto newStep = startsStep();
+
+        if (newStep)
+            startStep();
+
+        const Stretch stretch { newStep, getDone(), left, take (std::max (0, available)) };
+        advance (stretch.length);
+        return stretch;
+    }
+
 private:
     int step = 1;
     int at = 0;     // where the next sample is on the grid

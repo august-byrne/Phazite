@@ -34,6 +34,7 @@ namespace
         if (! reader->read (&sound->audio, 0, length, 0, true, true))
             return {};
 
+        clearWhatIsNotSound (sound->audio);
         return sound;
     }
 

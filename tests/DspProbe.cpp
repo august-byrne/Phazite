@@ -436,7 +436,7 @@ engine::DeviceRunner::Block Device::makeBlock (bool hasSidechain)
     // Whether a value was set since the last block, as the device's node tells its runner (engine/nodes/DeviceNode.h).
     block.valuesChanged = values != valuesPlayed;
     valuesPlayed = values;
-    block.isPlaying = true;
+    block.isPlaying = songPlays;
     block.isRendering = isRendering;
     block.hasSidechain = hasSidechain;
     block.tempo = songTempo;
@@ -475,7 +475,9 @@ void Device::play (Sound& sound, int blockSize, std::span<const devices::NoteEve
         auto block = makeBlock (hasSidechain);
         block.events = blockNotes;
         runner.process (sound, start, length, block);
-        songSample += length;
+
+        if (songPlays)
+            songSample += length;
     }
 }
 
@@ -484,6 +486,13 @@ Sound Device::played (const Sound& sound, int blockSize, std::span<const devices
     auto copy = sound;
     play (copy, blockSize, notes);
     return copy;
+}
+
+void Device::playStopped (Sound& sound, int blockSize, std::span<const devices::NoteEvent> notes)
+{
+    songPlays = false;
+    play (sound, blockSize, notes);
+    songPlays = true;
 }
 
 void Device::playNothing()

@@ -27,6 +27,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
@@ -233,6 +234,7 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     double getTailSeconds() const override;
+    void releaseUnused() override { freeRetired(); }
 
 private:
     static constexpr int controlStep = 16; // samples between updates of pitch, filter and LFO
@@ -268,13 +270,14 @@ private:
         bool filterIsSet = false;
         float filterEnvelopeLevel = 0.0f;
         float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, its sound swapped, or cut as playback stopped
+        bool stepPending = true;            // it (re)started since the last control step: its values are due
         int age = 0;                        // the samples since its note began (up to a limit)
     };
 
     struct Retired
     {
         std::shared_ptr<const void> held;
-        std::uint64_t safeAfter = 0; // blocks done after which the audio thread can't be using it
+        std::uint64_t safeAfter = 0; // clear blocks after which the audio thread can't be using it
     };
 
     double sampleRate = 44100.0;
@@ -284,8 +287,10 @@ private:
     static constexpr double portamentoSeconds = 0.1;  // a portamento note's glide while Glide is off
     static constexpr int declickSamples = 32;         // a fade at a start or an end in the middle of the sound
 
-    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
-    std::array<Voice, maxVoices + 1> voices;
+    // The first maxVoices play notes; the rest fade out what voices played when other notes took them (stealVoice()), each
+    // where it was copied, so that a chord, or a slice that chokes several, fades each of them out.
+    static constexpr int numFading = maxVoices;
+    std::array<Voice, maxVoices + numFading> voices;
     std::array<int, maxHeld> heldKeys {}; // mono mode's keys down, oldest first
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
@@ -295,17 +300,30 @@ private:
     int shownMode = -1;                            // the mode and the voices' mode as the last block played
     double songTempo = 120.0, songBarLength = 4.0; // as the block being processed began, a bar's length in beats
     dsp::Lfo lfo;
+    dsp::ControlGrid grid { controlStep };     // the control steps, on the song's own grid while it plays
+    std::array<float, controlStep> stepLfo {}; // the LFO's values over the step under way
     dsp::SincReader reader;
     dsp::Random startPlaces; // where notes start at random (startRandom), the same every time
     std::atomic<float> tailSeconds { 0.05f };
     std::atomic<int> activeVoices { 0 };
     Shown shown;
 
-    // What the audio thread plays, and the message thread's own of it, with what it let go of until the audio thread can't
-    // be using it.
-    std::atomic<const Sound*> sound { nullptr };
-    std::atomic<const ManualSlices*> manualSlices { nullptr };
-    std::atomic<std::uint64_t> blocksDone { 0 };
+    // What the audio thread plays: the message thread's own of it (playingSound, playingSlices), the one it gave last until
+    // the audio thread takes it as a block begins (pending; no slices given as a stand-in, noSlices, so that what is pending
+    // is never nothing), what the audio thread plays (current), and what the message thread let go of until the audio thread
+    // can't be using it. One given and replaced before the audio thread took it is freed at once (setSound()). A voice
+    // plays the sound it began with until it ends: one of a sound swapped out fades out over a few milliseconds, however
+    // short the blocks, and reads it meanwhile. So what the audio thread took is freed once a block has ended, which began
+    // after it was swapped out, with no voice on any sound but the one taken as it began: the blocks that end so are counted
+    // (clearBlocks), the message thread's count after it gave a sound taken before none of them can have begun (sequentially
+    // consistent), and it is freed then (releaseUnused()).
+    inline static const ManualSlices noSlices {};
+    std::atomic<const Sound*> pendingSound { nullptr };
+    std::atomic<const ManualSlices*> pendingSlices { nullptr };
+    const Sound* currentSound = nullptr;
+    const ManualSlices* currentSlices = nullptr;
+    std::atomic<std::uint64_t> clearBlocks { 0 };
+    static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
     std::shared_ptr<const Sound> playingSound;
     std::shared_ptr<const ManualSlices> playingSlices;
     std::vector<Retired> retired;
@@ -338,6 +356,6 @@ private:
     Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     void readAt (const Voice&, double position, float& left, float& right) const noexcept;
-    void render (float* left, float* right, int numSamples, std::span<const float> parameters);
+    void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
 };
 } // namespace phazite::devices

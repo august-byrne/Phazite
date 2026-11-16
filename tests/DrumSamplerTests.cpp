@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's drum sampler (src/devices/drums/DrumSampler.h): a pad on every note, the default kit on sixteen of them; its
 // pads' one-shots and gated hits, level, pan, velocity, tuning, start, reverse, envelope, sweep, filter, mute, solo and
-// choke groups, sound files swapped in as it plays, and the pads played from its editor; and in a project
-// (src/model/devices/internal/DrumKit.h), putting a file on a pad as an undo step, which the project keeps a copy of, and the
-// piano roll's rows named after the pads that play.
+// choke groups, a pad cutting its own earlier hits, a busy voice taken with a fade, sound files swapped in as it plays, and
+// the pads played from its editor; and in a project (src/model/devices/internal/DrumKit.h), putting a file on a pad as an
+// undo step, which the project keeps a copy of, its samples that aren't numbers read as silence, and the piano roll's rows
+// named after the pads that play.
 #include "GoldenFiles.h"
 #include "TestClips.h"
 #include "TestDevices.h"
@@ -27,8 +28,12 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <memory>
+#include <span>
 #include <vector>
 
 namespace
@@ -189,7 +194,7 @@ TEST_CASE ("The drum sampler's description holds together, a pad on every note, 
     REQUIRE (devices::isValid (DrumSampler::info));
     CHECK (DrumSampler::info.kind == devices::DeviceKind::instrument);
     CHECK (DrumSampler::info.parameters.size() == (size_t) DrumSampler::outputParameter + 1);
-    CHECK (DrumSampler::info.parameters.size() == 128 * 25 + 1);
+    CHECK (DrumSampler::info.parameters.size() == 128 * 26 + 1);
     CHECK (DrumSampler::info.parameters[(size_t) DrumSampler::getParameterIndex (36, DrumSampler::level)].id == "pad36Level");
     CHECK (DrumSampler::info.parameters[(size_t) DrumSampler::getParameterIndex (127, DrumSampler::sweepTime)].name
            == "Pad 127 Sweep Time");
@@ -677,14 +682,16 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
 
     CHECK (std::abs (crossings - 400) <= 1); // 0.4 s of 1 kHz
 
-    // A new sound while the old one plays: the old one stops at the next block, and the new one plays from the next hit.
+    // A new sound while the old one plays: the old one fades out from the next block over 5 ms, and the new one plays from
+    // the next hit.
     played = play (sampler, getDefaults(), 9600, { noteOn (0, 36), noteOn (4800, 36) },
                    [&sampler] (int done)
                    {
                        if (done == 2560)
                            sampler.setSound (36, nullptr); // back to the kick
                    });
-    CHECK (peakOf (played.left, 2560, 4800) < 1.0e-6f);
+    CHECK (peakOf (played.left, 2560, 2600) > 0.01f); // not cut dead
+    CHECK (peakOf (played.left, 2560 + 241, 4800) < 1.0e-6f);
     CHECK (peakOf (played.left, 4800, 9600) > 0.1f);
     CHECK_FALSE (sampler.hasOwnSound (36));
 
@@ -1007,4 +1014,275 @@ TEST_CASE ("Stopping playback cuts the hits that had only just begun, and lets t
     // A jump while playing lets it ring, and so does Stop a hit begun long before (the crash, 0.5 s before).
     CHECK (leftAfter (46, 24064 - 240, false) > 0.01f);
     CHECK (leftAfter (49, 0, true) > 0.01f);
+}
+
+TEST_CASE ("A hit that needs a voice while every voice sounds fades out the quietest dying away, or else the oldest, over 5 ms")
+{
+    // Thirty-two long hits, a sine a second long on each of two pads, then a 33rd: what it took away of the 32 is what they
+    // and the 33rd play apart, less what they play together. A cut dead takes it all at once; a fade, from nothing over 5 ms.
+    const auto playHits = [] (const std::vector<NoteEvent>& events, const std::vector<float>& values)
+    {
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+        sampler.setSound (60, makeSine (220.0, 1.0, testRate));
+        sampler.setSound (61, makeSine (330.0, 1.0, testRate));
+        return play (sampler, values, 9600, events);
+    };
+
+    constexpr int stealAt = 4800, fadeSamples = 240; // 5 ms at 48 kHz
+    std::vector<NoteEvent> first;
+
+    for (int i = 0; i < DrumSampler::maxVoices; ++i)
+        first.push_back (noteOn (i, 60 + i % 2, 0.5f));
+
+    auto all = first;
+    all.push_back (noteOn (stealAt, 61, 0.5f));
+
+    const auto takenAway = [&] (const std::vector<float>& values)
+    {
+        const auto together = playHits (all, values), apart = playHits (first, values),
+                   last = playHits ({ noteOn (stealAt, 61, 0.5f) }, values);
+        std::vector<float> taken;
+
+        for (size_t i = 0; i < together.left.size(); ++i)
+            taken.push_back (apart.left[i] + last.left[i] - together.left[i]);
+
+        return taken;
+    };
+
+    // None dying away: the oldest, the first hit, fades out from where it is.
+    auto taken = takenAway (getDefaults());
+    CHECK (peakOf (taken, 0, stealAt) < 1.0e-6f);
+    const auto early = peakOf (taken, stealAt, stealAt + fadeSamples / 16);
+    const auto whole = peakOf (taken, stealAt, stealAt + 2 * fadeSamples);
+    CAPTURE (early);
+    CAPTURE (whole);
+    REQUIRE (whole > 0.1f);
+    CHECK (early < 0.15f * whole);
+    CHECK (peakOf (taken, stealAt + fadeSamples + 1, 9600) == doctest::Approx (0.25f).epsilon (0.02)); // the first hit, gone
+
+    // With pad 61's hits held only 10 ms and decaying over a second, the quietest of them dying away is taken: the first of
+    // pad 61's, the second hit, less loud by now than a held one.
+    auto values = getDefaults();
+    set (values, 61, DrumSampler::hold, 10.0f);
+    set (values, 61, DrumSampler::decay, 1000.0f);
+    taken = takenAway (values);
+    CHECK (peakOf (taken, stealAt + fadeSamples + 1, 9600) < 0.25f); // what is left of a decaying hit, less than a held one
+    CHECK (peakOf (taken, stealAt + fadeSamples + 1, 9600) > 0.01f);
+}
+
+TEST_CASE ("A drum pad that cuts itself stops its earlier hits as it is hit again; one that doesn't lets them ring on under it")
+{
+    // An 808's long boom, hit twice 100 ms apart: cut, only the second sounds 10 ms after it, as it would alone.
+    const auto playTwice = [] (bool cuts)
+    {
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+        sampler.setSound (60, makeSine (55.0, 1.0, testRate));
+        auto values = getDefaults();
+        set (values, 60, DrumSampler::cutItself, cuts ? 1.0f : 0.0f);
+        return play (sampler, values, 24000, { noteOn (0, 60), noteOn (4800, 60) }).left;
+    };
+
+    DrumSampler alone;
+    alone.prepare (testRate, testBlockSize);
+    alone.setSound (60, makeSine (55.0, 1.0, testRate));
+    const auto second = play (alone, getDefaults(), 24000, { noteOn (4800, 60) }).left;
+    const auto differs = [&second] (const std::vector<float>& played)
+    {
+        auto most = 0.0f;
+
+        for (size_t i = 4800 + 480; i < played.size(); ++i)
+            most = std::max (most, std::abs (played[i] - second[i]));
+
+        return most;
+    };
+
+    CHECK (differs (playTwice (true)) < 1.0e-6f);
+    CHECK (differs (playTwice (false)) > 0.1f);
+    CHECK (DrumSampler::info.parameters[(size_t) DrumSampler::getParameterIndex (36, DrumSampler::cutItself)].id == "pad36CutItself");
+    CHECK (getDefaults()[(size_t) DrumSampler::getParameterIndex (36, DrumSampler::cutItself)] == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("A drum pad's sound file with samples that aren't numbers plays them as silence")
+{
+    // A float file, as one can hold infinities and what isn't a number, or values beyond any level, among its samples.
+    phazite::test::TestSong song;
+    phazite::test::TemporaryFolder elsewhere;
+    const auto file = elsewhere.folder.getChildFile ("Broken.wav");
+    juce::AudioBuffer<float> audio (1, 4800);
+
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+        audio.setSample (0, i, 0.5f * (float) std::sin (0.05 * i));
+
+    audio.setSample (0, 100, std::numeric_limits<float>::quiet_NaN());
+    audio.setSample (0, 200, std::numeric_limits<float>::infinity());
+    audio.setSample (0, 300, 1.0e30f);
+
+    {
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+        auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (48000.0).withNumChannels (1).withBitsPerSample (32));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples()));
+    }
+
+    const auto id = song.setInstrument (song.firstTrack, DrumSampler::typeID);
+    auto& s = *phazite::findSong (song.context);
+    REQUIRE (phazite::setPadSound (s, id, 36, file));
+    phazite::getSession (song.context)->update();
+    auto* sampler = phazite::makeDeviceHandle (s, id).getProcessor<DrumSampler>();
+    REQUIRE (sampler != nullptr);
+    const auto* sound = sampler->getPadSound (36);
+    REQUIRE (sound != nullptr);
+    REQUIRE (sound->audio.getNumSamples() == 4800);
+
+    for (const auto at : { 100, 200, 300 })
+        CHECK (juce::exactlyEqual (sound->audio.getSample (0, at), 0.0f));
+
+    CHECK (sound->audio.getSample (0, 101) == doctest::Approx (audio.getSample (0, 101)));
+}
+
+TEST_CASE ("A drum pad that cuts itself stops its earlier hits on every layer, and on a track of its own too")
+{
+    // The reviewer's finding 8 (2026-11-15).
+    // Two sines a second long stacked on one pad, hit twice 100 ms apart: cut, only the second hit's layers sound 10 ms
+    // after it; and the same where the pad plays into an output of its own (a pad on its own track).
+    const auto playHits = [] (bool cuts, bool ownOutput, std::vector<int> hits)
+    {
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+        sampler.setSound (60, 0, makeSine (55.0, 1.0, testRate));
+        sampler.setSound (60, 1, makeSine (82.5, 1.0, testRate));
+        auto values = getDefaults();
+        set (values, 60, DrumSampler::cutItself, cuts ? 1.0f : 0.0f);
+        std::vector<float> left;
+        juce::AudioBuffer<float> buffer (2, testBlockSize), own (2, testBlockSize);
+        std::vector<NoteEvent> inBlock;
+
+        for (int done = 0; done < 24000; done += testBlockSize)
+        {
+            buffer.clear();
+            own.clear();
+            inBlock.clear();
+
+            for (const auto at : hits)
+                if (at >= done && at < done + testBlockSize)
+                    inBlock.push_back (noteOn (at - done, 60));
+
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            const devices::PartOutput output { 60, { own.getWritePointer (0), own.getWritePointer (1) } };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = testBlockSize;
+            block.parameters = values;
+            block.events = inBlock;
+            block.isPlaying = true;
+
+            if (ownOutput)
+                block.partOutputs = std::span<const devices::PartOutput> (&output, 1);
+
+            sampler.process (block);
+
+            for (int i = 0; i < testBlockSize; ++i)
+                left.push_back ((ownOutput ? own : buffer).getSample (0, i));
+        }
+
+        return left;
+    };
+
+    for (const auto ownOutput : { false, true })
+    {
+        CAPTURE (ownOutput);
+        const auto cut = playHits (true, ownOutput, { 0, 4800 }), rung = playHits (false, ownOutput, { 0, 4800 });
+        const auto second = playHits (true, ownOutput, { 4800 });
+        auto cutApart = 0.0f, rungApart = 0.0f;
+
+        // Cut, the first hit's layers have gone 10 ms after the second, which plays as it would alone; rung on, they are
+        // still there under it.
+        for (size_t i = 4800 + 480; i < cut.size(); ++i)
+        {
+            cutApart = std::max (cutApart, std::abs (cut[i] - second[i]));
+            rungApart = std::max (rungApart, std::abs (rung[i] - second[i]));
+        }
+
+        CHECK (cutApart < 1.0e-6f);
+        CHECK (rungApart > 0.1f);
+        CHECK (peakOf (second, 4800, 24000) > 0.1f);
+    }
+}
+
+TEST_CASE ("Several drum hits that each take a voice on one sample fade out each voice they take")
+{
+    // The reviewer's finding 8 (2026-11-15).
+    // Thirty-two long hits, then four more on one sample, which take the four oldest: each fades out over 5 ms, rather than
+    // all but one cut dead. What was taken away (the 32 and the four apart, less together) against the four oldest alone,
+    // faded by the ramp a voice taken fades by: alike.
+    const auto playHits = [] (const std::vector<NoteEvent>& events)
+    {
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+
+        for (int pad = 60; pad < 64; ++pad)
+            sampler.setSound (pad, makeSine (110.0 * (pad - 58), 1.0, testRate));
+
+        return play (sampler, getDefaults(), 9600, events);
+    };
+
+    constexpr int stealAt = 4800;
+    const auto fadeStep = 1.0 / (0.005 * testRate);
+    std::vector<NoteEvent> first, oldest, four;
+
+    for (int i = 0; i < DrumSampler::maxVoices; ++i)
+        first.push_back (noteOn (i, 60 + i % 4, 0.5f));
+
+    oldest.assign (first.begin(), first.begin() + 4);
+
+    for (int pad = 60; pad < 64; ++pad)
+        four.push_back (noteOn (stealAt, pad, 0.5f));
+
+    auto all = first;
+    all.insert (all.end(), four.begin(), four.end());
+    const auto together = playHits (all), apart = playHits (first), fourAlone = playHits (four), taken = playHits (oldest);
+    auto away = 0.0, notes = 0.0;
+
+    for (size_t i = stealAt; i < together.left.size(); ++i)
+    {
+        const auto gone = (double) apart.left[i] + fourAlone.left[i] - together.left[i];
+        const auto faded = (double) taken.left[i] * std::min (1.0, (double) (i - stealAt) * fadeStep);
+        away += (gone - faded) * (gone - faded);
+        notes += (double) taken.left[i] * taken.left[i];
+    }
+
+    CAPTURE (away / notes);
+    CHECK (away / notes < 0.001);
+}
+
+TEST_CASE ("A drum sampler that plays nothing holds at most two of the sounds given a pad, and lets go of one it played by itself")
+{
+    // The reviewer's finding 3 (2026-11-15).
+    DrumSampler sampler;
+    sampler.prepare (testRate, testBlockSize);
+    std::vector<std::weak_ptr<const DrumSampler::Sound>> given;
+
+    for (int n = 0; n < 100; ++n)
+    {
+        std::shared_ptr<const DrumSampler::Sound> sound = makeSine (220.0 + n, 0.1, testRate);
+        given.push_back (sound);
+        sampler.setSound (60, std::move (sound));
+    }
+
+    const auto alive = std::count_if (given.begin(), given.end(), [] (const auto& each) { return ! each.expired(); });
+    CHECK (alive <= 2);
+    CHECK (alive >= 1);
+
+    // One it played, swapped for another: gone once its hit has faded and a clear block has passed, when its owner next asks.
+    play (sampler, getDefaults(), 512, { noteOn (0, 60) });
+    const std::weak_ptr<const DrumSampler::Sound> played = given.back();
+    sampler.setSound (60, makeSine (330.0, 1.0, testRate));
+    CHECK (! played.expired());
+    play (sampler, getDefaults(), 2048, {});
+    sampler.releaseUnused();
+    CHECK (played.expired());
 }

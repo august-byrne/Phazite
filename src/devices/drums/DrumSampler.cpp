@@ -23,9 +23,9 @@ namespace
 
     // Each field's ID and name, after its pad's note: saved in projects ("pad36Level") and shown ("Pad 36 Level").
     constexpr std::string_view fieldIDs[] = {
-        "Level",     "Pan",         "Tune",        "Fine",        "Start",      "Reverse",  "Attack",           "Hold",  "Decay", "Mode",
-        "Sweep",     "SweepTime",   "Filter",      "Cutoff",      "Resonance",  "Velocity", "VelocityToCutoff", "Choke", "Mute",  "Solo",
-        "LayerMode", "Layer1Level", "Layer2Level", "Layer3Level", "Layer4Level"
+        "Level",     "Pan",         "Tune",        "Fine",        "Start",       "Reverse",  "Attack",           "Hold",  "Decay", "Mode",
+        "Sweep",     "SweepTime",   "Filter",      "Cutoff",      "Resonance",   "Velocity", "VelocityToCutoff", "Choke", "Mute",  "Solo",
+        "LayerMode", "Layer1Level", "Layer2Level", "Layer3Level", "Layer4Level", "CutItself"
     };
     constexpr std::string_view fieldNames[] = { "Level",
                                                 "Pan",
@@ -51,7 +51,8 @@ namespace
                                                 "Layer 1 Level",
                                                 "Layer 2 Level",
                                                 "Layer 3 Level",
-                                                "Layer 4 Level" };
+                                                "Layer 4 Level",
+                                                "Cut Itself" };
     static_assert (std::size (fieldIDs) == fieldsPerPad && std::size (fieldNames) == fieldsPerPad);
 
     // A short text made as the program compiles, so that the parameters' IDs and names have static storage.
@@ -106,10 +107,11 @@ namespace
     constexpr auto ids = makeTexts ("pad", "", fieldIDs);
     constexpr auto names = makeTexts ("Pad ", " ", fieldNames);
 
-    constexpr double fadeSeconds = 0.01;     // how long a cut or choked sound takes to stop
-    constexpr double justBegunSeconds = 0.1; // a hit this young when playback stops is cut
-    constexpr float silent = 0.001f;         // -60 dB: where a decay ends
-    constexpr int kitChokeGroup = 1;         // the hats, which stop each other
+    constexpr double fadeSeconds = 0.01;       // how long a cut or choked sound takes to stop
+    constexpr double stealFadeSeconds = 0.005; // how long a sound takes to stop when its voice is taken for another hit
+    constexpr double justBegunSeconds = 0.1;   // a hit this young when playback stops is cut
+    constexpr float silent = 0.001f;           // -60 dB: where a decay ends
+    constexpr int kitChokeGroup = 1;           // the hats, which stop each other
 
     constexpr bool isHat (int pad)
     {
@@ -166,6 +168,8 @@ namespace
             for (int layer = 0; layer < DrumSampler::numLayers; ++layer)
                 set ((Field) (Field::layer1Level + layer),
                      { .minimum = -48.0f, .maximum = 12.0f, .defaultValue = 0.0f, .unit = Unit::decibels });
+
+            set (Field::cutItself, { .maximum = 1.0f, .unit = Unit::toggle });
         }
 
         made[DrumSampler::outputParameter] = { .id = "output",
@@ -234,9 +238,11 @@ DrumSampler::DrumSampler()
     for (int pad = 0; pad < numPads; ++pad)
     {
         playing[(size_t) pad][0] = getDefaultSound (pad);
-        sounds[(size_t) pad][0].store (playing[(size_t) pad][0].get(), std::memory_order_release);
+        current[(size_t) pad][0] = playing[(size_t) pad][0].get(); // no audio thread yet
         playheads[(size_t) pad].set (-1.0f);
     }
+
+    findLongestSound();
 }
 
 DrumSampler::~DrumSampler() = default;
@@ -261,11 +267,16 @@ void DrumSampler::setSound (int pad, int layer, std::shared_ptr<const Sound> sou
     if (sound == played)
         return;
 
-    sounds[(size_t) pad][(size_t) layer].store (sound.get(), std::memory_order_release);
+    // The one given before, if the audio thread never took it, goes at once: so that however many are given while the
+    // sampler plays nothing (a muted track's), at most the one it took last and the newest wait for each layer. If it took
+    // it, its hits fade out from the next block on, and a block under way may have begun new ones on it: the second clear
+    // block from now has none (clearBlocks). No sound is given as a stand-in, so that what is pending is never nothing.
+    if (pending[(size_t) pad][(size_t) layer].exchange (sound != nullptr ? sound.get() : &noSound) == nullptr)
+        retired.push_back ({ std::move (played), clearBlocks.load() + 2 });
 
-    // The audio thread may play the one before until the end of its next block, when its voices notice the change.
-    retired.push_back ({ std::move (played), blocksDone.load (std::memory_order_acquire) + 2 });
     played = std::move (sound);
+    anyPending.store (true);
+    findLongestSound();
 }
 
 bool DrumSampler::hasOwnSound (int pad, int layer) const noexcept
@@ -275,7 +286,7 @@ bool DrumSampler::hasOwnSound (int pad, int layer) const noexcept
 
 void DrumSampler::freeRetired()
 {
-    const auto done = blocksDone.load (std::memory_order_acquire);
+    const auto done = clearBlocks.load();
     retired.erase (std::remove_if (retired.begin(), retired.end(), [done] (const Retired& old) { return done >= old.safeAfter; }),
                    retired.end());
 }
@@ -307,15 +318,21 @@ void DrumSampler::reset()
 
 double DrumSampler::getTailSeconds() const
 {
-    // The longest sound a pad plays.
+    return longestSound.load (std::memory_order_relaxed);
+}
+
+void DrumSampler::findLongestSound()
+{
+    // The longest sound a pad plays, as given: what a hit rings for at the most. Worked out here, on the message thread,
+    // which owns the sounds, rather than read where the audio thread asks for it.
     auto longest = 0.0;
 
-    for (const auto& layers : sounds)
+    for (const auto& layers : playing)
         for (const auto& sound : layers)
-            if (const auto* each = sound.load (std::memory_order_acquire))
-                longest = std::max (longest, each->audio.getNumSamples() / each->sampleRate);
+            if (sound != nullptr)
+                longest = std::max (longest, sound->audio.getNumSamples() / sound->sampleRate);
 
-    return longest;
+    longestSound.store (longest, std::memory_order_relaxed);
 }
 
 void DrumSampler::hit (int pad, float hitVelocity, std::span<const float> values)
@@ -329,8 +346,7 @@ void DrumSampler::hit (int pad, float hitVelocity, std::span<const float> values
 
     for (int layer = 0; layer < numLayers; ++layer)
     {
-        if (const auto* sound = sounds[(size_t) pad][(size_t) layer].load (std::memory_order_acquire);
-            sound != nullptr && sound->audio.getNumSamples() > 0)
+        if (const auto* sound = current[(size_t) pad][(size_t) layer]; sound != nullptr && sound->audio.getNumSamples() > 0)
         {
             layers[(size_t) found] = layer;
             layerSounds[(size_t) found++] = sound;
@@ -340,12 +356,16 @@ void DrumSampler::hit (int pad, float hitVelocity, std::span<const float> values
     if (found == 0 || isSilenced (values, pad, isSoloing (values)))
         return;
 
-    // Its choke group stops the others in it.
-    if (const auto group = (int) std::lround (at (Field::choke)); group > 0)
-        for (auto& voice : voices)
-            if (voice.pad >= 0 && voice.pad != pad
-                && (int) std::lround (values[(size_t) getParameterIndex (voice.pad, Field::choke)]) == group)
-                voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
+    // Its choke group stops the others in it; and a pad that cuts itself stops its own earlier hits, as an 808 pad's should
+    // (each of a drum machine's voices is one circuit, which a new hit starts again), where a ride's or a crash's ring on.
+    const auto group = (int) std::lround (at (Field::choke));
+    const auto cutsItself = at (Field::cutItself) > 0.5f;
+
+    for (auto& voice : voices)
+        if (voice.pad >= 0
+            && (voice.pad == pad ? cutsItself
+                                 : group > 0 && (int) std::lround (values[(size_t) getParameterIndex (voice.pad, Field::choke)]) == group))
+            voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
 
     // Its layers share the hit as its mode says: all at once, or one of them.
     hitVelocity = std::clamp (hitVelocity, 0.0f, 1.0f);
@@ -387,14 +407,32 @@ void DrumSampler::startVoice (int pad, int layer, const Sound& sound, float hitV
 {
     const auto at = [&values, pad] (Field field) { return values[(size_t) getParameterIndex (pad, field)]; };
 
-    // A free voice, or the oldest.
+    // A free voice; or else one to take: the quietest of those dying away (decaying, or fading as a choke or a cut stops
+    // them), or with none, the oldest. What it played fades out from a copy of it over a few milliseconds (stealVoice()).
+    const std::span<Voice> hitting (voices.data(), (size_t) maxVoices);
     Voice* chosen = nullptr;
 
-    for (auto& voice : voices)
-        if (voice.pad < 0 || chosen == nullptr || (chosen->pad >= 0 && voice.started < chosen->started))
+    for (auto& voice : hitting)
+    {
+        if (voice.pad < 0)
+        {
             chosen = &voice;
+            break;
+        }
+
+        const auto dying = voice.decaying || voice.fadeStep > 0.0f;
+        const auto chosenDying = chosen != nullptr && (chosen->decaying || chosen->fadeStep > 0.0f);
+
+        if (chosen == nullptr || (dying && ! chosenDying) || (dying && voice.level * voice.fade < chosen->level * chosen->fade)
+            || (! dying && ! chosenDying && voice.started < chosen->started))
+            chosen = &voice;
+    }
 
     auto& voice = *chosen;
+
+    if (voice.pad >= 0)
+        stealVoice (voice);
+
     const auto toSamples = [this] (float milliseconds) { return (int) std::lround ((double) milliseconds * 0.001 * sampleRate); };
 
     voice.pad = pad;
@@ -421,6 +459,20 @@ void DrumSampler::startVoice (int pad, int layer, const Sound& sound, float hitV
     voice.ic2 = {};
     applyValues (voice, values);
     voice.started = ++hits;
+}
+
+void DrumSampler::stealVoice (Voice& voice)
+{
+    // A copy of it fades out over a few milliseconds, where nothing fades now, or else where the copy nearest silence was:
+    // so that the longest sound, taken once every voice sounds, stops without a click (a cut dead at its level otherwise).
+    auto* place = &voices[(size_t) maxVoices];
+
+    for (auto i = (size_t) maxVoices; i < voices.size() && place->pad >= 0; ++i)
+        if (const auto& each = voices[i]; each.pad < 0 || each.level * each.fade < place->level * place->fade)
+            place = &voices[i];
+
+    *place = voice;
+    place->fadeStep = std::max (place->fadeStep, (float) (1.0 / (stealFadeSeconds * sampleRate)));
 }
 
 void DrumSampler::applyValues (Voice& voice, std::span<const float> values)
@@ -610,11 +662,19 @@ void DrumSampler::process (const ProcessContext& block)
     if (block.numChannels == 0)
         return;
 
-    // A pad whose sound changed stops: its voice can't read the old one any more. The others follow their pads' values as
-    // they are now (automation, a knob turned); those of pads muted, or left out by a solo, fade.
+    // The sounds given since the last block, if any were: each layer plays its own from now.
+    if (anyPending.exchange (false))
+        for (size_t pad = 0; pad < (size_t) numPads; ++pad)
+            for (size_t layer = 0; layer < (size_t) numLayers; ++layer)
+                if (const auto* taken = pending[pad][layer].exchange (nullptr); taken != nullptr)
+                    current[pad][layer] = taken != &noSound ? taken : nullptr;
+
+    // A hit of a sound swapped out fades out, as a voice taken for another does, reading it meanwhile: the sound outlives it
+    // (clearBlocks). The others follow their pads' values as they are now (automation, a knob turned); those of pads muted,
+    // or left out by a solo, fade.
     for (auto& voice : voices)
-        if (voice.pad >= 0 && sounds[(size_t) voice.pad][(size_t) voice.layer].load (std::memory_order_acquire) != voice.sound)
-            voice.pad = -1;
+        if (voice.pad >= 0 && current[(size_t) voice.pad][(size_t) voice.layer] != voice.sound)
+            voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (stealFadeSeconds * sampleRate)));
 
     follow (values);
 
@@ -697,6 +757,15 @@ void DrumSampler::process (const ProcessContext& block)
         playheads[pad].set (frames > 0 ? (float) (voice->position / frames) : -1.0f);
     }
 
-    blocksDone.fetch_add (1, std::memory_order_release);
+    // Whether no hit plays any sound but its layer's own as the block began: what was swapped out before it began can go once it
+    // ends (clearBlocks).
+    auto clear = true;
+
+    for (const auto& voice : voices)
+        if (voice.pad >= 0 && current[(size_t) voice.pad][(size_t) voice.layer] != voice.sound)
+            clear = false;
+
+    if (clear)
+        clearBlocks.fetch_add (1);
 }
 } // namespace phazite::devices

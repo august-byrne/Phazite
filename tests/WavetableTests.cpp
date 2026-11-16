@@ -3,8 +3,10 @@
 // as Serum writes them, its factory tables, and the synth itself: its pitch, its position moving through the table (by
 // hand and by an envelope for each note), its warps, unison (with its stack and its drift), filter, combs and voices (a key
 // played again, as it rings out, while it is held or under the pedal, each note on a voice of its own), that it doesn't
-// alias, that it lets go of the tables it no longer plays, and that it plays the same every time.
+// alias, that its warps leave nothing off centre (with what a part of a frame's cycle adds up to), that it lets go of the
+// tables it no longer plays only once no control step reads them, and that it plays the same every time.
 #include "TestHelpers.h"
+#include "devices/dsp/MultimodeFilter.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/Wavetable.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -12,7 +14,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <functional>
+#include <limits>
 #include <set>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1261,9 +1268,9 @@ TEST_CASE ("The wavetable synth lets go of a table it no longer plays once the a
     synth->setTable (0, std::move (table));
     CHECK (synth->getTable (0) == mine.lock());
 
-    // Swapped for a factory table: the old one stays until two blocks have played, then goes with the next swap.
+    // Swapped for a factory table before the synth played a step on it: never taken by the audio thread, it goes at once.
     synth->setTable (0, devices::getFactoryWavetable (1));
-    CHECK (! mine.expired());
+    CHECK (mine.expired());
 
     const auto values = getDefaults();
     play (*synth, values, 2 * testBlockSize, { noteOn (0, 60) });
@@ -1273,4 +1280,465 @@ TEST_CASE ("The wavetable synth lets go of a table it no longer plays once the a
     // Nothing given: the first factory table.
     synth->setTable (1, nullptr);
     CHECK (synth->getTable (1) == devices::getFactoryWavetable (0));
+}
+
+TEST_CASE ("A table knows what a part of a frame's cycle adds up to, and the mean of the frame read with its places bent")
+{
+    // A saw rising from -1 to 1 over its cycle, whose area from its start to x is x^2 - x; and its mean read bent, against the
+    // mean of its samples read at the bent places themselves, many to a cycle.
+    const auto table = Wavetable::fromHarmonics ("Saw", { makeSaw() });
+    const auto cycle = table->getFrameForDrawing (0);
+    const auto length = (int) cycle.size();
+    const auto scale = table->getArea (0, 0, 0.5f) / -0.25f; // the made saw's height and way, its peak at 1
+    REQUIRE (std::abs (scale) > 0.5f);
+
+    for (const auto x : { 0.1f, 0.25f, 0.77f, 0.9f })
+        CHECK (table->getArea (0, 0, x) == doctest::Approx (scale * (x * x - x)).epsilon (0.02));
+
+    CHECK (std::abs (table->getArea (0, 0, 1.0f)) < 1.0e-4f);
+
+    for (const auto bend : { 0.125f, 0.3f, 0.7f, 1.0f, 1.6f, 3.0f, 8.0f })
+    {
+        CAPTURE (bend);
+        constexpr int points = 1 << 18;
+        auto sum = 0.0;
+
+        for (int n = 0; n < points; ++n)
+        {
+            const auto t = ((double) n + 0.5) / points;
+            const auto place = bend * t / (1.0 + (bend - 1.0) * t);
+            sum += cycle[(size_t) std::min (length - 1, (int) (place * length))];
+        }
+
+        CHECK (table->getBentMean (0, 0, Wavetable::findBend (bend)) == doctest::Approx (sum / points).epsilon (0.003).scale (1.0));
+    }
+}
+
+TEST_CASE ("The wavetable synth's warps that read a part of the wave, or read it unevenly, leave nothing off centre")
+{
+    // Sync, Bend and Pulse Width read a part of a frame's cycle, read it unevenly, or hold its start, which is no longer
+    // centred: each takes what it leaves off centre away as it plays. What lies under a held note, as a part of how loud the
+    // note is (DspProbe.h's getOffsetShare(), through a Hann window): under four thousandths, near where it is (the device
+    // conformance suite asks for under a fiftieth; the reviewer's finding 1, 2026-11-15, found 1.6 % left at high bends).
+    // Nothing after the corrections takes anything away: the DC blocker plays only with Ring Mod or FM (the second
+    // review's finding 2, 2026-11-15). Without the corrections, the worst leaves a quarter of the note's level.
+    const auto offsetShare = [] (const std::vector<float>& sound, size_t from, size_t to)
+    {
+        auto sum = 0.0, squares = 0.0, weights = 0.0;
+
+        for (auto i = from; i < to; ++i)
+        {
+            const auto weight = 0.5 - 0.5 * std::cos (twoPi * (double) (i - from) / (double) (to - from));
+            sum += weight * sound[i];
+            squares += weight * sound[i] * sound[i];
+            weights += weight;
+        }
+
+        return std::abs (sum / weights) / std::sqrt (squares / weights);
+    };
+
+    auto worst = 0.0;
+
+    for (const auto warp :
+         { WavetableSynth::Warp::sync, WavetableSynth::Warp::bendUp, WavetableSynth::Warp::bendDown, WavetableSynth::Warp::pulseWidth })
+    {
+        for (const auto position : { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 0.9f })
+        {
+            for (const auto amount : { 0.15f, 0.35f, 0.55f, 0.77f, 0.95f })
+            {
+                auto values = getPlainValues (position);
+                values[WavetableSynth::osc1Warp] = (float) warp;
+                values[WavetableSynth::osc1WarpAmount] = amount;
+
+                for (const auto note : { 57, 84 }) // the higher read from a level with fewer harmonics, whose area differs
+                {
+                    const auto played = play (*makeSynth(), values, 19200, { noteOn (0, note) });
+                    const auto share = offsetShare (played.left, 4800, 19200);
+                    INFO ("warp " << (int) warp << " at " << amount << ", position " << position << ", note " << note << ": " << share);
+                    CHECK (share < 0.004);
+                    worst = std::max (worst, share);
+                }
+            }
+        }
+    }
+
+    MESSAGE ("the most left off centre under a warped note: " << worst << " of its level");
+}
+
+TEST_CASE ("A table swapped out is never let go of while a control step still reads it, however short the blocks")
+{
+    // Blocks of one sample, as the runner's stretches between control points can be: a table swapped out in the middle of a
+    // control step is still read until the step ends, which is calls later. The test keeps its own hold on it, and once the
+    // synth has let go of it fills it with what isn't a number: any read of it after that comes out in what the synth plays.
+    auto synth = makeSynth();
+    auto first = Wavetable::fromHarmonics ("Saw", { makeSaw() });
+    synth->setTable (0, first);
+    const auto values = getDefaults();
+    play (*synth, values, 1024 + 5, { noteOn (0, 60) }); // 5 samples into a control step
+
+    const auto poison = [&first]
+    {
+        for (int frame = 0; frame < first->getNumFrames(); ++frame)
+        {
+            for (int level = 0; level < Wavetable::numLevels; ++level)
+            {
+                const auto read = first->getLevel (frame, level);
+                auto* samples = const_cast<float*> (read.samples);
+
+                for (int i = -1; i < read.length + 2; ++i)
+                    samples[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+    };
+
+    auto poisoned = false, allNumbers = true;
+
+    for (int i = 0; i < 64; ++i)
+    {
+        // Another table each sample, which also lets go of what the synth can.
+        synth->setTable (0, devices::getFactoryWavetable (1 + i % 2));
+
+        if (! poisoned && first.use_count() == 1)
+        {
+            poison();
+            poisoned = true;
+        }
+
+        const auto played = play (*synth, values, 1, {}, 1);
+        allNumbers = allNumbers && std::isfinite (played.left[0]) && std::isfinite (played.right[0]);
+    }
+
+    CHECK (poisoned); // let go of, once its step was over
+    CHECK (allNumbers);
+}
+
+TEST_CASE ("A table's bent mean is the mean of its level as the synth reads it, at a level of few harmonics too, saw and square")
+{
+    // The reviewer's finding 1 (2026-11-15).
+    // What a reader plays bent, from the level's own samples by cubic interpolation (readCubic(), as the synth reads them),
+    // many to a cycle, against the mean worked out from the frame's harmonics: within a five-hundredth of the wave's peak, at
+    // the level with all of them, one in the middle and one with 16.
+    Wavetable::Harmonics square ((size_t) Wavetable::maxHarmonics);
+
+    for (int h = 1; h <= Wavetable::maxHarmonics; h += 2)
+        square[(size_t) h - 1] = { 0.0f, -1.0f / (float) h };
+
+    const auto table = Wavetable::fromHarmonics ("Saw and square", { makeSaw(), square });
+    auto worst = 0.0;
+
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        for (const auto level : { 0, 6, 12 })
+        {
+            const auto read = table->getLevel (frame, level);
+
+            for (const auto bend : { 0.125f, 0.2f, 0.45f, 1.7f, 3.3f, 6.4f, 8.0f })
+            {
+                CAPTURE (frame);
+                CAPTURE (level);
+                CAPTURE (bend);
+                constexpr int points = 1 << 17;
+                auto sum = 0.0;
+
+                for (int n = 0; n < points; ++n)
+                {
+                    const auto t = ((double) n + 0.5) / points;
+                    const auto place = bend * t / (1.0 + (bend - 1.0) * t);
+                    sum += devices::readCubic (read, (float) (place * read.length));
+                }
+
+                const auto off = std::abs (table->getBentMean (frame, level, Wavetable::findBend (bend)) - sum / points);
+                CHECK (off < 0.002);
+                worst = std::max (worst, off);
+            }
+        }
+    }
+
+    MESSAGE ("the most a bent mean is off what the synth reads: " << worst);
+}
+
+TEST_CASE ("A wavetable synth that plays nothing holds at most two of the tables given it, and lets go of one it played by itself")
+{
+    // The reviewer's finding 3 (2026-11-15).
+    // A hundred tables given while the synth isn't processed (a muted track's): each but the newest goes as the next comes,
+    // since the audio thread never took it. Counted by what of them is still alive.
+    auto synth = makeSynth();
+    std::vector<std::weak_ptr<const Wavetable>> given;
+
+    for (int n = 0; n < 100; ++n)
+    {
+        auto table = Wavetable::fromHarmonics ("Saw", { makeSaw() });
+        given.push_back (table);
+        synth->setTable (0, std::move (table));
+    }
+
+    const auto alive = std::count_if (given.begin(), given.end(), [] (const auto& each) { return ! each.expired(); });
+    CHECK (alive <= 2);
+    CHECK (alive >= 1); // the newest, which it plays from its next step
+
+    // One it played, swapped for another: gone once the synth has played on a step, when its owner next asks (the playback
+    // session's timer), without another being given.
+    const auto values = getDefaults();
+    play (*synth, values, 64, { noteOn (0, 60) });
+    const std::weak_ptr<const Wavetable> played = synth->getTable (0);
+    synth->setTable (0, Wavetable::fromHarmonics ("Saw", { makeSaw() }));
+    CHECK (! played.expired()); // a step under way may read it
+    play (*synth, values, 64, {});
+    synth->releaseUnused();
+    CHECK (played.expired());
+}
+
+TEST_CASE ("The wavetable synth's Ring Mod and FM warps leave nothing off centre at whole ratios")
+{
+    // The reviewer's finding 6 (2026-11-15).
+    // Osc 2 at osc 1's pitch, or an octave up: ring modulation of two waves at one pitch has a part at 0 Hz, as FM's sidebands
+    // at whole ratios do. What the DC blocker on the synth's sum takes away: under the conformance suite's fiftieth.
+    const auto offsetShare = [] (const std::vector<float>& sound, size_t from, size_t to)
+    {
+        auto sum = 0.0, squares = 0.0, weights = 0.0;
+
+        for (auto i = from; i < to; ++i)
+        {
+            const auto weight = 0.5 - 0.5 * std::cos (twoPi * (double) (i - from) / (double) (to - from));
+            sum += weight * sound[i];
+            squares += weight * sound[i] * sound[i];
+            weights += weight;
+        }
+
+        return std::abs (sum / weights) / std::sqrt (squares / weights);
+    };
+
+    auto worst = 0.0;
+
+    for (const auto warp : { WavetableSynth::Warp::ringMod, WavetableSynth::Warp::fm })
+    {
+        for (const auto pitch : { 0.0f, 12.0f })
+        {
+            for (const auto amount : { 0.5f, 1.0f })
+            {
+                auto values = getPlainValues (0.0f); // the sine
+                values[WavetableSynth::osc1Warp] = (float) warp;
+                values[WavetableSynth::osc1WarpAmount] = amount;
+                values[WavetableSynth::osc2On] = 1.0f;
+                values[WavetableSynth::osc2Pitch] = pitch;
+                values[WavetableSynth::osc2Position] = 0.0f;
+                const auto played = play (*makeSynth(), values, 24000, { noteOn (0, 57) });
+                const auto share = offsetShare (played.left, 12000, 24000);
+                INFO ("warp " << (int) warp << ", osc 2 " << pitch << " semitones up, amount " << amount << ": " << share);
+                CHECK (share < 0.02);
+                worst = std::max (worst, share);
+            }
+        }
+    }
+
+    MESSAGE ("the most left off centre under ring modulation and FM at whole ratios: " << worst);
+}
+
+TEST_CASE ("The wavetable synth's warps take what they leave off centre away smoothly as their amount and position move")
+{
+    // The reviewer's finding 8 (2026-11-15).
+    // An envelope sweeping Osc 1's warp amount and its position, for Sync, Bend and Pulse Width: what is taken away moves at
+    // each control step, so a step in it would show as larger jumps between samples at the steps' ends than between
+    // others. The mean jump at the steps' ends against the mean of the rest: alike.
+    for (const auto warp : { WavetableSynth::Warp::sync, WavetableSynth::Warp::bendUp, WavetableSynth::Warp::pulseWidth })
+    {
+        auto values = getPlainValues (2.0f / 3.0f);
+        values[WavetableSynth::osc1Warp] = (float) warp;
+        values[WavetableSynth::osc1WarpAmount] = 0.2f;
+        values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::envelope2;
+        values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Warp;
+        values[WavetableSynth::mod1Amount] = 0.7f;
+        values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::envelope2;
+        values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::osc1Position;
+        values[WavetableSynth::mod2Amount] = -0.3f;
+        values[WavetableSynth::env2Decay] = 400.0f;
+        const auto played = play (*makeSynth(), values, 19200, { noteOn (0, 40) });
+        auto atEnds = 0.0, elsewhere = 0.0;
+        auto numEnds = 0, numElsewhere = 0;
+
+        for (size_t i = 1000; i < 19200; ++i)
+        {
+            const auto jump = std::abs ((double) played.left[i] - played.left[i - 1]);
+            (i % 16 == 0 ? atEnds : elsewhere) += jump;
+            ++(i % 16 == 0 ? numEnds : numElsewhere);
+        }
+
+        INFO ("warp " << (int) warp);
+        CHECK ((atEnds / numEnds) < 1.1 * (elsewhere / numElsewhere));
+    }
+}
+
+namespace
+{
+// Plays the synth in blocks of a size, the song playing, each block at the song's sample songSampleOf (block), with events at
+// their samples in the first block.
+std::vector<float> playAt (WavetableSynth& synth, const std::vector<float>& values, int blockSize, int numBlocks,
+                           const std::function<std::int64_t (int)>& songSampleOf, const std::vector<NoteEvent>& events)
+{
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::vector<float> played;
+
+    for (int b = 0; b < numBlocks; ++b)
+    {
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = blockSize;
+        block.parameters = values;
+        block.events = b == 0 ? std::span<const NoteEvent> (events) : std::span<const NoteEvent>();
+        block.isPlaying = true;
+        block.songSample = songSampleOf (b);
+        synth.process (block);
+
+        for (int i = 0; i < blockSize; ++i)
+            played.push_back (buffer.getSample (0, i));
+    }
+
+    return played;
+}
+} // namespace
+
+TEST_CASE ("A clean wavetable patch plays as without a DC blocker: its note's area left in it, and nothing after it")
+{
+    // The second review's finding 1 (2026-11-15): the blocker on the synth's sum changed every patch's waveform, a clean
+    // one's too (it took out a note's net area and put it back as a slow tail). Now it plays only while an oscillator has
+    // the Ring Mod or FM warp. A plain wave and a short note: once it has gone, every sample is exactly 0, which a blocker
+    // that had heard it would not leave; and with Ring Mod, where it plays, its tail goes on.
+    const auto lastSounding = [] (bool ringModulated)
+    {
+        auto values = getPlainValues (0.3f);
+        values[WavetableSynth::env1Release] = 30.0f;
+
+        if (ringModulated)
+        {
+            values[WavetableSynth::osc2On] = 1.0f;
+            values[WavetableSynth::osc1Warp] = (float) WavetableSynth::Warp::ringMod;
+            values[WavetableSynth::osc1WarpAmount] = 1.0f;
+        }
+
+        const auto played = play (*makeSynth(), values, (int) testRate, { noteOn (0, 40), noteOff ((int) (0.1 * testRate), 40) });
+        auto last = 0;
+
+        for (int i = 0; i < (int) played.left.size(); ++i)
+            if (! juce::exactlyEqual (played.left[(size_t) i], 0.0f))
+                last = i;
+
+        return last;
+    };
+
+    CHECK (lastSounding (false) < (int) (0.3 * testRate));
+    CHECK (lastSounding (true) > (int) (0.9 * testRate));
+}
+
+TEST_CASE ("A table's area across a part of its cycle is that of its level as the synth reads it, at a level of few harmonics too")
+{
+    // The second review's finding 3 (2026-11-15): the areas were the trapezoids between a level's samples, which the synth
+    // reads by cubic interpolation; now each is worked out exactly from the harmonics the level keeps, as the bent means
+    // are. At the places they are kept at, against the integral of what readCubic() plays, many points to a cycle: saw and
+    // square, at the level with all the harmonics, one in the middle and one with 16.
+    Wavetable::Harmonics square ((size_t) Wavetable::maxHarmonics);
+
+    for (int h = 1; h <= Wavetable::maxHarmonics; h += 2)
+        square[(size_t) h - 1] = { 0.0f, -1.0f / (float) h };
+
+    const auto table = Wavetable::fromHarmonics ("Saw and square", { makeSaw(), square });
+    auto worst = 0.0;
+
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        for (const auto level : { 0, 6, 12 })
+        {
+            CAPTURE (frame);
+            CAPTURE (level);
+            const auto read = table->getLevel (frame, level);
+            constexpr int points = 1 << 17, perPlace = points / Wavetable::areaPoints;
+            auto sum = 0.0;
+
+            for (int n = 0; n < points; ++n)
+            {
+                sum += devices::readCubic (read, (float) (((double) n + 0.5) / points * read.length));
+
+                if ((n + 1) % perPlace == 0)
+                {
+                    const auto place = (n + 1) / perPlace;
+                    const auto off = std::abs (table->getArea (frame, level, (float) place / Wavetable::areaPoints) - sum / points);
+                    CHECK (off < 4.0e-4);
+                    worst = std::max (worst, off);
+                }
+            }
+        }
+    }
+
+    MESSAGE ("the most an area is off what the synth reads: " << worst);
+}
+
+TEST_CASE ("The wavetable synth's envelopes and LFOs keep their pace where a loop goes round, its last step cut short")
+{
+    // The second review's finding 5 (2026-11-15): a step the grid cut short moved its control-rate parts a whole step on. A
+    // loop of 161 samples (ten steps and one sample) goes round 300 times: each pass's last step, cut after one sample, moved
+    // them 16 samples on, 4500 over the passes. Against a play straight on through as many samples: where the free LFO 2 has
+    // put Osc 1's position, and Envelope 3, rising over 3 s, Osc 2's.
+    auto values = getPlainValues (0.25f);
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::osc2Position] = 0.0f;
+    values[WavetableSynth::lfo2Retrigger] = 0.0f;
+    values[WavetableSynth::lfo2Rate] = 0.5f;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::lfo2;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod2Amount] = 0.5f;
+    values[WavetableSynth::env3Attack] = 3000.0f;
+    values[WavetableSynth::env3Sustain] = 1.0f;
+    values[WavetableSynth::mod3Source] = (float) WavetableSynth::ModSource::envelope3;
+    values[WavetableSynth::mod3Target] = (float) WavetableSynth::ModTarget::osc2Position;
+    values[WavetableSynth::mod3Amount] = 0.8f;
+    constexpr int loopLength = 161, passes = 300;
+
+    const auto positions = [&values] (bool looped)
+    {
+        auto synth = makeSynth();
+        playAt (*synth, values, loopLength, passes,
+                [looped] (int b) { return looped ? std::int64_t { 0 } : (std::int64_t) b * loopLength; }, { noteOn (0, 57) });
+        return std::pair { synth->getPlayedPosition (0), synth->getPlayedPosition (1) };
+    };
+
+    const auto straight = positions (false), looped = positions (true);
+    INFO ("straight " << straight.first << ", " << straight.second << "; looped " << looped.first << ", " << looped.second);
+    REQUIRE (std::abs (straight.first - 0.25f) > 0.05f); // the LFO has moved it
+    CHECK (std::abs (looped.first - straight.first) < 0.002f);
+    CHECK (std::abs (looped.second - straight.second) < 0.002f);
+}
+
+TEST_CASE ("The wavetable synth's comb glides its delay across a step the grid cut to one sample, rather than jumping to it")
+{
+    // The second review's finding 5 (2026-11-15). Comb +, its cutoff swept by Envelope 2, a sine through it; in blocks of 17
+    // samples, each where the song has jumped to a step's last sample, so that every block begins with a step of one sample,
+    // after which the delay jumped to its target. How much what plays bends from sample to sample (its second difference)
+    // at those samples, against elsewhere.
+    auto values = getPlainValues (0.0f); // a sine
+    values[WavetableSynth::filterOn] = 1.0f;
+    values[WavetableSynth::filterType] = (float) devices::dsp::FilterMode::combPlus;
+    values[WavetableSynth::cutoff] = 400.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::envelope2;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::cutoff;
+    values[WavetableSynth::mod1Amount] = -0.5f;
+    values[WavetableSynth::env2Decay] = 1000.0f;
+    values[WavetableSynth::env2Sustain] = 0.0f;
+    constexpr int blockSize = 17, numBlocks = 1200;
+    const auto played =
+        playAt (*makeSynth(), values, blockSize, numBlocks, [] (int b) { return (std::int64_t) (32 * b + 15); }, { noteOn (0, 57) });
+    auto atCut = 0.0, elsewhere = 0.0;
+    auto numAtCut = 0, numElsewhere = 0;
+
+    for (size_t i = 4 * blockSize; i < played.size(); ++i)
+    {
+        const auto bent = std::abs ((double) played[i] - 2.0 * played[i - 1] + played[i - 2]);
+        const auto cut = i % blockSize <= 1;
+        (cut ? atCut : elsewhere) += bent;
+        ++(cut ? numAtCut : numElsewhere);
+    }
+
+    INFO ("at the cut steps " << atCut / numAtCut << ", elsewhere " << elsewhere / numElsewhere);
+    CHECK (atCut / numAtCut < 1.5 * (elsewhere / numElsewhere));
 }

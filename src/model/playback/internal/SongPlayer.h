@@ -98,6 +98,10 @@ public:
     // The plug-ins it plays told that nothing of them moves now, before it goes while their instances stay.
     void letGoOfPlugins();
 
+    // What its devices were given and the audio thread has let go of since (a sound swapped out), freed now
+    // (devices::Processor::releaseUnused()): its playback session asks, 30 times a second.
+    void releaseUnused();
+
     // What plays its plug-ins made anew by the next plan, prepared again (a render prepared them for itself), while no plan
     // plays them.
     void makePluginsAnew();

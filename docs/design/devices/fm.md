@@ -144,22 +144,27 @@ The operators run at twice the sample rate and come back down through polyphase 
 don't fold back down as aliasing. An operator whose frequency is above what that rate can play is silent. The saw and
 triangle are read from band-limited tables, and the square is two such saws half a cycle apart. What is heard is the
 carriers' sum, turned down by the square root of their number and by 5 dB more, so that changing the algorithm keeps
-the level and chords stay under full scale. A DC blocker at 5 Hz then takes away the offset that feedback and
-equal-ratio modulators leave.
+the level and chords stay under full scale. A DC blocker then takes away the offset that a modulator at its carrier's
+ratio leaves (its first lower sideband at 0 Hz, as FM puts it there; a few cents apart, wandering at their beat and with
+the modulator's envelope, as a new synth's electric piano has it): a 12 dB high-pass at 5 Hz, which keeps 20 Hz within
+0.02 dB. What it can't take away are the sidebands that ratios a little apart from a whole multiple (Fine, Detune)
+put a few hertz from 0 Hz: a blocker that took them would take the lowest notes too.
 
 After the operators come the filter (`src/devices/dsp/MultimodeFilter.h`, with its own envelope, key tracking and
 velocity, named and ranged as the [Synth](synth.md)'s), and the output level. With Spread above 0 a voice plays two
 complete sets of operators, detuned apart, one on each side, at twice the work.
 
-Pitch, operator levels, the filter and the LFO are updated every 16 samples. An operator's level follows the
+Pitch, operator levels, the filter and the LFO are updated every 16 samples, on the song's own grid while it plays and
+on a running count while it is stopped, as the [Synth](synth.md)'s. An operator's level follows the
 square of a note's velocity, as far as its Velocity says, and what velocity and the key make of it is fixed as the
 note starts.
 
 Poly mode has 16 voices. Every note takes a voice of its own, a key played again too, so that what still rings of it
 rings out over its release. With all voices busy, a new note takes the one that has rung out longest, or else the
-oldest, which fades out over 3 ms. Mono mode
-plays one voice, legato: it glides between held keys without starting the envelopes again and goes back to a key still
-held when the newest is let go. The piano roll's slide and portamento notes glide in both modes. The sustain pedal holds
+oldest, which fades out over 3 ms from a copy of it in a place of its own (one for each voice, so a chord that takes
+several at once fades each). Mono mode plays one voice, legato: it glides between held keys without starting the
+envelopes again and goes back to a key still held when the newest is let go. The piano roll's slide and portamento
+notes glide in both modes. The sustain pedal holds
 notes, and the mod wheel adds to the LFO's depth.
 
 ## Its editor
@@ -203,8 +208,6 @@ plays, a modulator's how bright it makes what it bends.
   moves in steps.
 - Oversampling is fixed at twice the rate: there is no higher quality setting for very bright sounds.
 - The filter is linear: it doesn't self-oscillate and has no drive.
-- When several notes each take a busy voice on the same sample, only the last taken fades out; the others stop at once
-  and can click.
 - An operator's settings can't be copied onto another, and there is no randomizer.
 - The editor shows three of the four groups of operator controls only behind their tabs.
 

@@ -82,4 +82,10 @@ bool areNamesAlike (const juce::String&, const juce::String&);
 // The formats Phazite reads audio files in: JUCE's (WAV, AIFF, FLAC, Ogg Vorbis, MP3 and what the system adds), from any
 // thread.
 juce::AudioFormatManager& getAudioFormats();
+
+// Silence in place of every sample read from a file that isn't sound (devices::soundOf(): not a number, an infinity, or beyond
+// any level sound has), as a float file can hold: a sampler reading one between its samples spreads it to its neighbours, its
+// filters keep it for the rest of the note, and the engine silences the whole mix while any track plays one (its last line
+// of defence). For what a device reads whole from a file before it plays it. How many samples it cleared. From any thread.
+int clearWhatIsNotSound (juce::AudioBuffer<float>&) noexcept;
 } // namespace phazite

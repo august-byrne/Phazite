@@ -19,8 +19,11 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
+#include "devices/dsp/DcBlocker.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
+#include "devices/dsp/Noise.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Oversampling.h"
 #include "devices/dsp/Random.h"
@@ -136,8 +139,9 @@ public:
     double getTailSeconds() const override;
 
 private:
-    static constexpr int controlStep = 16; // samples between updates of pitch, filter and LFO
-    static constexpr int maxHeld = 16;     // keys mono mode remembers, to go back to
+    static constexpr int controlStep = 16;      // samples between updates of pitch, filter and LFO
+    static constexpr int maxHeld = 16;          // keys mono mode remembers, to go back to
+    static constexpr int numFading = maxVoices; // places to fade out voices taken for other notes: a chord's worth at once
 
     struct Voice
     {
@@ -153,10 +157,15 @@ private:
         std::array<dsp::Oscillator, maxUnison> osc1, osc2; // one of each per unison voice
         dsp::Oscillator sub;
         dsp::Random unisonPhases; // where the unison's oscillators start, the same every time
-        dsp::Random noise;
+        dsp::Noise noise;
         dsp::Random drifting;                         // where its drift wanders, the same every time
         std::array<float, 3> driftNow {}, driftTo {}; // osc 1's, osc 2's and the cutoff's, from -1 to 1
-        int driftStepsLeft = 0;                       // control steps until it wanders toward new places
+        int driftSamplesLeft = 0;                     // until it wanders toward new places
+        bool stepPending = true;                      // it (re)started since the last control step: its values are due
+        float lfoDepth = 0.0f;                        // the LFO's depth on it this control step, faded in after its note starts
+        float syncRatio = 1.0f;                       // osc 2's cycles in each of osc 1's this control step, while synced
+        int unison = 1;                               // the unison voices whose oscillators the step tuned,
+        double frequency1 = 0.0, frequency2 = 0.0;    // to these frequencies, before their detune
         dsp::Adsr amp, filterEnvelope;
         std::array<dsp::MultimodeFilter, 2> filters;  // the second only while unison spreads the voice across the stereo field
         std::array<dsp::AntialiasedShaper, 2> drives; // the filter's drive, each side, at twice the rate
@@ -174,15 +183,29 @@ private:
     static constexpr double portamentoSeconds = 0.1;  // a portamento note's glide while Glide is off
     bool songPlaying = false;                         // as the block being processed began
 
-    // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
-    std::array<Voice, maxVoices + 1> voices;
+    // Worked out from seconds as it is prepared, so that each takes its time at any rate: the drift's samples between new
+    // places and how far it glides toward them in a control step, and how far the drive fades in a sample as it comes on or
+    // off.
+    int driftWanderSamples = 1;
+    float driftFollow = 1.0f, driveFadeStep = 1.0f / 32.0f;
+
+    // The control steps, on the song's own grid while it plays (dsp/ControlGrid.h), and the LFO's values over the step under
+    // way; and the DC blocker on each side of its sum, which takes away what its drive leaves off centre.
+    dsp::ControlGrid grid { controlStep };
+    std::array<float, controlStep> stepLfo {};
+    std::array<dsp::DcBlocker, 2> dcBlockers;
+
+    // The first maxVoices play notes; the rest fade out what voices played when other notes took them (stealVoice()), each
+    // where it was copied, so that a chord that takes several at once fades each of them out.
+    std::array<Voice, maxVoices + numFading> voices;
     std::array<int, maxHeld> heldKeys {}; // mono mode's keys down, oldest first
     int numHeld = 0;
     std::uint64_t notesPlayed = 0;
     float lastNote = -1.0f; // where a new note glides from
     float bend = 0.0f, modWheel = 0.0f;
     bool pedalDown = false;
-    int shownMode = -1; // poly (0) or mono (1) as the last block played
+    bool stoppedPlaying = false; // playback stopped since the last note: once nothing sounds, the DC blockers' ring fades
+    int shownMode = -1;          // poly (0) or mono (1) as the last block played
     dsp::Lfo lfo;
     std::atomic<float> tailSeconds { 0.2f };
     std::atomic<int> activeVoices { 0 };
@@ -198,7 +221,7 @@ private:
     void stealVoice (Voice&);
     bool isAnotherKeyHeld (int note) const noexcept; // a voice but one playing this note is held: a legato note glides
     void startDrift (Voice&) noexcept;               // a note's drift, from somewhere new
-    void moveDrift (Voice&) noexcept;                // a control step on
-    void render (float* left, float* right, int numSamples, std::span<const float> parameters);
+    void moveDrift (Voice&, int samples) noexcept;   // so many samples on
+    void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
 };
 } // namespace phazite::devices

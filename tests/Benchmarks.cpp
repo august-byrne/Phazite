@@ -419,6 +419,33 @@ TEST_CASE ("Benchmark: a sound made ready for the sampler as it loads, a minute 
     MESSAGE ("Its hits found: " << milliseconds (hits, 1) << "; its octaves made: " << milliseconds (octaves, 1));
 }
 
+TEST_CASE ("Benchmark: a wavetable of 256 frames made, as a sound file of Serum's becomes one" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // The reviewer's finding 2 (2026-11-15).
+    // 256 frames of 2048 samples, each a saw of its own phases (all 1024 harmonics), read back as a table: its 21 levels a
+    // frame, and what its warps leave off centre (Wavetable::getArea(), getBentMean()). The best of three.
+    std::vector<float> sound ((size_t) (256 * dev::Wavetable::frameSize));
+
+    for (size_t i = 0; i < sound.size(); ++i)
+    {
+        const auto frame = (double) (i / (size_t) dev::Wavetable::frameSize);
+        const auto t = (double) (i % (size_t) dev::Wavetable::frameSize) / dev::Wavetable::frameSize;
+        sound[i] = (float) (std::fmod (t + 0.37 * frame / 256.0, 1.0) * 2.0 - 1.0);
+    }
+
+    auto best = 1.0e9;
+
+    for (int run = 0; run < 3; ++run)
+    {
+        std::shared_ptr<const dev::Wavetable> table;
+        best = std::min (best, millisecondsOf ([&] { table = dev::Wavetable::fromSound ("Bench", sound); }));
+        REQUIRE (table->getNumFrames() == 256);
+    }
+
+    MESSAGE ("A table of 256 frames made: " << milliseconds (best, 1));
+}
+
 TEST_CASE ("Benchmark: an analyzer's work on a second of sound, as an EQ's editor shows it" * doctest::test_suite ("benchmark")
            * doctest::skip())
 {

@@ -1177,3 +1177,49 @@ TEST_CASE ("The FM synth plays the same every time, and lets every note go")
     play (*first, values, 4 * 48000, {});
     CHECK (first->getActiveVoices() == 0);
 }
+
+TEST_CASE ("What lies under the FM synth's held notes comes from a modulator at its carrier's ratio, and is taken away")
+{
+    // A chord held half a second, as the device conformance suite plays it: what lies under its second quarter, as a part
+    // of how loud it is, through a Hann window (DspProbe.h's getOffsetShare()). A new synth's electric piano has operator 4
+    // at its carrier's ratio (1), 4 cents apart, so its first lower sideband falls 4 cents' beat above 0 Hz, as FM does at
+    // equal ratios (Chowning's reflected sidebands): an offset that wanders at that beat and follows operator 4's envelope.
+    // Not its feedback: that leaves its wave centred. Its DC blocker, 12 dB at 5 Hz, takes it away: the 6 dB one before
+    // left 0.08 of the chord's level.
+    const auto offsetShare = [] (const std::vector<float>& values, double rate = 96000.0)
+    {
+        auto synth = makeSynth (rate);
+        const auto quarter = (size_t) (0.25 * rate);
+        const auto played = play (*synth, values, (int) (2 * quarter), { noteOn (0, 48), noteOn (0, 60), noteOn (0, 67), noteOn (0, 72) });
+        const auto from = quarter, to = 2 * quarter;
+        auto sum = 0.0, squares = 0.0, weights = 0.0;
+
+        for (auto i = from; i < to; ++i)
+        {
+            const auto weight = 0.5 - 0.5 * std::cos (twoPi * (double) (i - from) / (double) (to - from));
+            sum += weight * played[i];
+            squares += weight * played[i] * played[i];
+            weights += weight;
+        }
+
+        return std::abs (sum / weights) / std::sqrt (squares / weights);
+    };
+
+    const auto defaults = getDefaults();
+    auto noFeedback = defaults, apart = defaults, offFour = defaults, inTune = defaults;
+    at (noFeedback, 3, Field::feedback) = 0.0f;
+    at (apart, 3, Field::ratio) = 2.0f; // no sideband near 0 Hz
+    at (offFour, 3, Field::on) = 0.0f;
+    at (inTune, 2, Field::detune) = 0.0f; // the sideband at 0 Hz exactly, steady
+
+    const auto atDefaults = std::max (offsetShare (defaults), offsetShare (defaults, 44100.0));
+    MESSAGE ("under the FM synth's held chord, as a part of its level: "
+             << atDefaults << " at its defaults, " << offsetShare (noFeedback) << " without operator 4's feedback, " << offsetShare (apart)
+             << " with operator 4 at twice the ratio, " << offsetShare (offFour) << " with operator 4 off, " << offsetShare (inTune)
+             << " with operator 3 in tune with it");
+    CHECK (atDefaults < 0.02);
+    CHECK (offsetShare (noFeedback) < 0.02);
+    CHECK (offsetShare (apart) < 0.005);
+    CHECK (offsetShare (offFour) < 0.005);
+    CHECK (offsetShare (inTune) < 0.005);
+}

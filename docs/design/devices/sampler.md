@@ -161,8 +161,15 @@ starting the sound or its envelopes again. The piano roll's slide and portamento
 holds notes. Start Random draws its places from a fixed seed, so a render is the same every time.
 
 After the sound come the filter (`src/devices/dsp/MultimodeFilter.h`, one for each side), the amp envelope or the
-fades, and the level. Pitch, the filter and the LFO are updated every 16 samples. The sampler swaps a sound in while it
-plays without the audio thread waiting or freeing memory; a voice still on the old sound fades out.
+fades, and the level. Pitch, the filter and the LFO are updated every 16 samples, on the song's own grid while it plays
+and on a running count while it is stopped, as the [Synth](synth.md)'s. The sampler swaps a sound in while it plays
+without the audio thread waiting or freeing memory: a block takes the sound given last as it begins; one given and
+replaced before a block took it is freed at once, so that a sampler that plays nothing (on a muted track) holds at most
+the sound it plays and the newest. A voice still on the old sound fades out over 3 ms, however short the blocks, and the
+old sound is freed once a block has ended with no voice on it, by the playback session's timer (30 times a second) or
+the next sound given. A voice taken for another note fades out over 3 ms
+from a copy of it in a place of its own (one for each voice, so a chord, or a slice that chokes several, fades each). A
+sound file's samples that aren't numbers (a float file can hold them) are read as silence.
 
 ## Its editor
 
@@ -208,10 +215,6 @@ the frame every editor shares).
   parameter, but not per voice.
 - Pitch and the cutoff are set once every 16 samples and not smoothed between.
 - The filter is linear: it doesn't self-oscillate and has no drive.
-- When several notes each take a busy voice on the same sample, only the last taken fades out; the others stop at once
-  and can click.
-- Sounds read from floating-point files aren't checked for values that aren't numbers (known bug 35 in
-  [known-bugs.md](../../known-bugs.md)).
 - The drawing can't be zoomed or scrolled, so markers on a long sound are placed to the nearest pixel of the whole
   sound; a reversed sound is drawn forwards, marked "Reversed".
 - A right-click on the drawing plays the sound as a left click does, and a double-click removes a slice where it resets

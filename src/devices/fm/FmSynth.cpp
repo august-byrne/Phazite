@@ -451,7 +451,10 @@ FmSynth::FmSynth()
 void FmSynth::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
-    dcBlock = (float) std::exp (-juce::MathConstants<double>::twoPi * dcBlockHertz / sampleRate);
+    const auto g = std::tan (juce::MathConstants<double>::pi * dcBlockHertz / sampleRate);
+    dcA1 = 1.0 / (1.0 + g * (g + juce::MathConstants<double>::sqrt2));
+    dcA2 = g * dcA1;
+    dcA3 = g * dcA2;
 
     for (auto& voice : voices)
     {
@@ -484,7 +487,7 @@ void FmSynth::reset()
 
             lane.down.reset();
             lane.filter.reset();
-            lane.dcIn = lane.dcOut = 0.0f;
+            lane.dcState = {};
         }
 
         voice.note = -1;
@@ -495,6 +498,8 @@ void FmSynth::reset()
     }
 
     lfo.reset();
+    grid.reset();
+    stepLfo.fill (0.0f);
     numHeld = 0;
     notesPlayed = 0;
     lastNote = -1.0f;
@@ -530,8 +535,8 @@ void FmSynth::letGoOf (int note)
 
 FmSynth::Voice& FmSynth::findVoice()
 {
-    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which fades
-    // out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that fade
+    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
     // on untouched, and the new note starts as any does (its operators from their places in their waves, unless the phases
     // run free).
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
@@ -559,8 +564,15 @@ FmSynth::Voice& FmSynth::findVoice()
 void FmSynth::stealVoice (Voice& voice)
 {
     // What it played fades out from a copy of it over a few milliseconds, while it starts the new note from silence. The copy
-    // reuses the last voice's memory (every voice is prepared alike), so this doesn't allocate.
-    auto& fading = voices[(size_t) maxVoices];
+    // goes to a place that fades nothing, or else to the one furthest through its fade, which is cut; it reuses that place's
+    // memory (every voice is prepared alike), so this doesn't allocate.
+    auto* nearest = &voices[(size_t) maxVoices];
+
+    for (auto i = (size_t) maxVoices; i < voices.size() && nearest->active; ++i)
+        if (const auto& place = voices[i]; ! place.active || place.fade < nearest->fade)
+            nearest = &voices[i];
+
+    auto& fading = *nearest;
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
@@ -613,13 +625,14 @@ void FmSynth::beginNote (Voice& voice, int note, float velocityValue, std::span<
 
         lane.down.reset();
         lane.filter.reset();
-        lane.dcIn = lane.dcOut = 0.0f;
+        lane.dcState = {};
     }
 
     voice.velocity = velocityValue;
     voice.pitchEnvelope = 1.0f;
     voice.filterIsSet = false;
     voice.active = true;
+    voice.stepPending = true;
     voice.age = 0;
     voice.started = ++notesPlayed;
 
@@ -838,7 +851,7 @@ double FmSynth::getFilterMagnitude (std::span<const float> values, double cutoff
     return dsp::getMagnitude (dsp::makeMultimode (settings, rate), frequency, rate);
 }
 
-void FmSynth::render (float* left, float* right, int numSamples, std::span<const float> values)
+void FmSynth::render (float* left, float* right, int numSamples, std::span<const float> values, bool playing, std::int64_t songSample)
 {
     const auto algorithmIndex = choiceOf<int> (values[algorithm]);
     const auto& shape = getAlgorithm (algorithmIndex);
@@ -866,97 +879,113 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
     const auto carrierNorm = carrierHeadroom / std::sqrt ((float) std::max (1, roles.numCarriers));
     const auto limit = std::clamp (1.0 - 20000.0 / oversampled, 0.45, 0.9);
 
-    for (int begin = 0; begin < numSamples; begin += controlStep)
+    grid.startBlock (playing, songSample);
+
+    for (int begin = 0; begin < numSamples;)
     {
-        const auto length = std::min (controlStep, numSamples - begin);
-        std::array<float, controlStep> moved {};
-        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-length / glideSamples));
+        // Control steps on the song's own grid while it plays (dsp/ControlGrid.h), so that what plays doesn't depend on how
+        // the samples come: a step a block's end or an event cuts short goes on in the next stretch with the values it began
+        // with. The LFO's values for the step come as it begins.
+        const auto stretch = grid.next (numSamples - begin);
+        const auto length = stretch.length, stepAt = stretch.at, untilNextStep = stretch.untilNextStep;
 
-        for (int i = 0; i < length; ++i)
-            moved[(size_t) i] = lfo.next (lfoWave);
+        if (stretch.newStep)
+            for (int i = 0; i < untilNextStep; ++i)
+                stepLfo[(size_t) i] = lfo.next (lfoWave);
 
-        const auto pitchMove = lfoAim == LfoTarget::pitch ? depth * moved[0] : 0.0f;
-        const auto cutoffMove = lfoAim == LfoTarget::cutoff ? depth * 24.0f * moved[0] : 0.0f;
-        const auto timbreNow = values[timbre] * (lfoAim == LfoTarget::timbre ? std::max (0.0f, 1.0f + depth * moved[0]) : 1.0f);
+        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-untilNextStep / glideSamples));
+        const auto lfoNow = stepLfo[(size_t) stepAt];
+        const auto pitchMove = lfoAim == LfoTarget::pitch ? depth * lfoNow : 0.0f;
+        const auto cutoffMove = lfoAim == LfoTarget::cutoff ? depth * 24.0f * lfoNow : 0.0f;
+        const auto timbreNow = values[timbre] * (lfoAim == LfoTarget::timbre ? std::max (0.0f, 1.0f + depth * lfoNow) : 1.0f);
 
         for (auto& voice : voices)
         {
             if (! voice.active)
                 continue;
 
-            voice.age = std::min (voice.age + length, 1 << 30);
-
-            if (voice.slidePerSample > 0.0f)
+            // Pitch, the operators' levels and the filter, once a step, and as the voice (re)starts.
+            if (stretch.newStep || voice.stepPending)
             {
-                const auto stepSize = voice.slidePerSample * (float) length;
-                const auto gap = voice.target - voice.pitch;
-                voice.pitch = std::abs (gap) <= stepSize ? voice.target : voice.pitch + std::copysign (stepSize, gap);
-                voice.slidePerSample = std::abs (gap) <= stepSize ? 0.0f : voice.slidePerSample;
-            }
-            else
-            {
-                voice.pitch += (voice.target - voice.pitch) * glideStep;
-            }
+                voice.stepPending = false;
 
-            // Each operator's level now, its depth or gain and its feedback's, and in each lane its pitch, at twice the rate;
-            // one too high to play stays silent.
-            const auto note = (double) (voice.pitch + bent + pitchMove + pitchSweep * voice.pitchEnvelope);
-            const auto noteFrequency = dsp::noteToFrequency (note);
-
-            for (int i = 0; i < numOperators; ++i)
-            {
-                const auto at = [i, &values] (Field field) { return values[(size_t) getParameterIndex (i, field)]; };
-                auto& levels = voice.levels[(size_t) i];
-                levels.gain = levels.noteGain * getCarrierGain (at (Field::level));
-                levels.depth =
-                    roles.carries[(size_t) i] ? levels.gain : levels.noteGain * getModulationIndex (at (Field::level)) * timbreNow;
-                levels.feedback = std::clamp (at (Field::feedback) * timbreNow, -1.0f, 1.0f) * strongestFeedback;
-                const auto tuned = at (Field::fixed) > 0.5f ? (double) at (Field::frequency)
-                                                            : noteFrequency * (double) (at (Field::ratio) + at (Field::fine));
-
-                for (int l = 0; l < voice.numLanes; ++l)
+                if (voice.slidePerSample > 0.0f)
                 {
-                    const auto cents = at (Field::detune) + (voice.numLanes > 1 ? (l == 0 ? -halfSpread : halfSpread) : 0.0f);
-                    const auto increment = std::max (0.0, tuned * std::exp2 ((double) cents / 1200.0)) / oversampled;
-                    auto& op = voice.lanes[(size_t) l].ops[(size_t) i];
-                    op.silent = increment >= limit;
-                    op.increment = (float) increment;
-                    const auto chosen = Wavetable::chooseLevel (limit / std::max (1.0e-9, increment));
-                    op.saw = sawTable->getLevel (0, chosen);
-                    op.triangle = triangleTable->getLevel (0, chosen);
+                    const auto stepSize = voice.slidePerSample * (float) untilNextStep;
+                    const auto gap = voice.target - voice.pitch;
+                    voice.pitch = std::abs (gap) <= stepSize ? voice.target : voice.pitch + std::copysign (stepSize, gap);
+                    voice.slidePerSample = std::abs (gap) <= stepSize ? 0.0f : voice.slidePerSample;
                 }
-            }
-
-            if (filtered)
-            {
-                // The cutoff by the key and the LFO, then by its envelope, as far as that has got, and by the note's velocity,
-                // as the synth's filter moves (Synth.cpp); an amount and a velocity of none leave it as it was.
-                auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
-
-                if (! juce::exactlyEqual (envelopeAmount, 0.0f))
-                    moves += envelopeAmount * voice.filterEnvelope.getLevel();
-
-                if (velocityRange > 0.0f)
-                    moves += velocityRange * (voice.velocity - 1.0f);
-
-                const auto cutoffHertz = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
-                const dsp::FilterSettings settings { .mode = filterMode,
-                                                     .frequency = cutoffHertz,
-                                                     .resonance = values[resonance],
-                                                     .steep = steep,
-                                                     .q = q };
-
-                if (! voice.filterIsSet || ! dsp::areSame (settings, voice.filterSettings))
+                else
                 {
-                    const auto coefficients = dsp::makeMultimode (settings, sampleRate);
+                    voice.pitch += (voice.target - voice.pitch) * glideStep;
+                }
+
+                // Each operator's level now, its depth or gain and its feedback's, and in each lane its pitch, at twice the rate;
+                // one too high to play stays silent.
+                const auto note = (double) (voice.pitch + bent + pitchMove + pitchSweep * voice.pitchEnvelope);
+                const auto noteFrequency = dsp::noteToFrequency (note);
+
+                for (int i = 0; i < numOperators; ++i)
+                {
+                    const auto at = [i, &values] (Field field) { return values[(size_t) getParameterIndex (i, field)]; };
+                    auto& levels = voice.levels[(size_t) i];
+                    levels.gain = levels.noteGain * getCarrierGain (at (Field::level));
+                    levels.depth =
+                        roles.carries[(size_t) i] ? levels.gain : levels.noteGain * getModulationIndex (at (Field::level)) * timbreNow;
+                    levels.feedback = std::clamp (at (Field::feedback) * timbreNow, -1.0f, 1.0f) * strongestFeedback;
+                    const auto tuned = at (Field::fixed) > 0.5f ? (double) at (Field::frequency)
+                                                                : noteFrequency * (double) (at (Field::ratio) + at (Field::fine));
 
                     for (int l = 0; l < voice.numLanes; ++l)
-                        voice.lanes[(size_t) l].filter.set (coefficients, length);
+                    {
+                        const auto cents = at (Field::detune) + (voice.numLanes > 1 ? (l == 0 ? -halfSpread : halfSpread) : 0.0f);
+                        const auto increment = std::max (0.0, tuned * std::exp2 ((double) cents / 1200.0)) / oversampled;
+                        auto& op = voice.lanes[(size_t) l].ops[(size_t) i];
+                        op.silent = increment >= limit;
+                        op.increment = (float) increment;
+                        const auto chosen = Wavetable::chooseLevel (limit / std::max (1.0e-9, increment));
+                        op.saw = sawTable->getLevel (0, chosen);
+                        op.triangle = triangleTable->getLevel (0, chosen);
+                    }
+                }
 
-                    voice.filterSettings = settings;
-                    voice.filterIsSet = true;
+                if (filtered)
+                {
+                    // The cutoff by the key and the LFO, then by its envelope, as far as that has got, and by the note's velocity,
+                    // as the synth's filter moves (Synth.cpp); an amount and a velocity of none leave it as it was.
+                    auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
+
+                    if (! juce::exactlyEqual (envelopeAmount, 0.0f))
+                        moves += envelopeAmount * voice.filterEnvelope.getLevel();
+
+                    if (velocityRange > 0.0f)
+                        moves += velocityRange * (voice.velocity - 1.0f);
+
+                    const auto cutoffHertz =
+                        std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
+                    const dsp::FilterSettings settings { .mode = filterMode,
+                                                         .frequency = cutoffHertz,
+                                                         .resonance = values[resonance],
+                                                         .steep = steep,
+                                                         .q = q };
+
+                    if (! voice.filterIsSet || ! dsp::areSame (settings, voice.filterSettings))
+                    {
+                        const auto coefficients = dsp::makeMultimode (settings, sampleRate);
+
+                        // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
+                        for (int l = 0; l < voice.numLanes; ++l)
+                            voice.lanes[(size_t) l].filter.set (coefficients,
+                                                                untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
+
+                        voice.filterSettings = settings;
+                        voice.filterIsSet = true;
+                    }
                 }
             }
+
+            voice.age = std::min (voice.age + length, 1 << 30);
 
             for (int i = 0; i < length; ++i)
             {
@@ -977,11 +1006,15 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                     const auto second = runOperators (lane.ops, voice.levels, shape, roles, envelopes, nullptr) * carrierNorm;
                     const auto out = lane.down.down (first, second);
 
-                    // Without what FM leaves off centre (heavy feedback, a modulator a few cents off its carrier's ratio), which would
-                    // offset what is heard.
-                    const auto centred = out - lane.dcIn + dcBlock * lane.dcOut;
-                    lane.dcIn = out;
-                    lane.dcOut = centred;
+                    // Without what FM leaves off centre (a modulator at or a few cents off its carrier's ratio, heavy feedback),
+                    // which would offset what is heard: its DC blocker, a state-variable high-pass (Cytomic's).
+                    auto& [s1, s2] = lane.dcState;
+                    const auto v3 = (double) out - s2;
+                    const auto v1 = dcA1 * s1 + dcA2 * v3;
+                    const auto v2 = s2 + dcA2 * s1 + dcA3 * v3;
+                    s1 = 2.0 * v1 - s1;
+                    s2 = 2.0 * v2 - s2;
+                    const auto centred = (float) ((double) out - juce::MathConstants<double>::sqrt2 * v1 - v2);
                     lanes[(size_t) l] = filtered ? lane.filter.process (centred) : centred;
                 }
 
@@ -1002,7 +1035,7 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                 }
 
                 if (lfoAim == LfoTarget::level)
-                    gain *= 1.0f - depth * 0.5f * (1.0f + moved[(size_t) i]);
+                    gain *= 1.0f - depth * 0.5f * (1.0f + stepLfo[(size_t) (stepAt + i)]);
 
                 // Spread, the lower lane on the left and the higher on the right; a mono output takes both.
                 const auto spreadOut = voice.numLanes > 1;
@@ -1034,6 +1067,8 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                 voice.filterEnvelope.reset();
             }
         }
+
+        begin += length;
     }
 }
 
@@ -1084,7 +1119,8 @@ void FmSynth::process (const ProcessContext& block)
             handle (block.events[next++], values);
 
         const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;
-        render (left + done, right != nullptr ? right + done : nullptr, until - done, values);
+        render (left + done, right != nullptr ? right + done : nullptr, until - done, values, block.isPlaying,
+                block.songSample + (block.isPlaying ? done : 0));
         done = until;
     }
 

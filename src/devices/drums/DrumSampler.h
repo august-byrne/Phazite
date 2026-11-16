@@ -8,11 +8,12 @@
 // with velocity, which turns it down and closes its filter by as much as it says. Its level, pan and filter follow their
 // values as it rings (automation, a knob turned); the rest is set as it is hit. A pad can have up to four sounds, its
 // layers, each at a level of its own, which share its hits as its layer mode says: stacked, by velocity, in turn or at
-// random. Pads in the same choke group stop each other, as an open hat stops when the closed one plays; a pad muted
-// plays nothing, and while any pad is soloed only the soloed pads play. A new sampler plays the default kit of the sounds
-// Phazite synthesizes (FactoryDrums.h); a pad can play another of them, from the kits that come with Phazite, or a sound
-// file, which the model loads (model/devices/internal/DrumKit.h), and which the sampler swaps in without the audio
-// thread ever waiting or freeing memory.
+// random. Pads in the same choke group stop each other, as an open hat stops when the closed one plays, and a pad that
+// cuts itself stops its own earlier hits, as an 808's boom should; a pad muted plays nothing, and while any pad is
+// soloed only the soloed pads play. A new sampler plays the default kit of the sounds Phazite synthesizes
+// (FactoryDrums.h); a pad can play another of them, from the kits that come with Phazite, or a sound file, which the
+// model loads (model/devices/internal/DrumKit.h), and which the sampler swaps in without the audio thread ever waiting
+// or freeing memory. A hit that needs a voice while all sound fades out the voice it takes.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -69,10 +70,11 @@ public:
         layer1Level, // each sound's level against the others', in decibels
         layer2Level,
         layer3Level,
-        layer4Level
+        layer4Level,
+        cutItself // a new hit stops what it still plays of its earlier ones, as an MPC pad set to Mono or FL Studio's Cut Itself
     };
 
-    static constexpr int fieldsPerPad = 25;
+    static constexpr int fieldsPerPad = 26;
     static constexpr int outputParameter = numPads * fieldsPerPad;
     static constexpr int getParameterIndex (int pad, Field field) noexcept { return pad * fieldsPerPad + (int) field; }
 
@@ -144,6 +146,7 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     double getTailSeconds() const override;
+    void releaseUnused() override { freeRetired(); }
 
 private:
     struct Voice
@@ -171,18 +174,28 @@ private:
     struct Retired
     {
         std::shared_ptr<const Sound> sound;
-        std::uint64_t safeAfter = 0; // blocks done after which the audio thread can't be playing it
+        std::uint64_t safeAfter = 0; // clear blocks after which the audio thread can't be playing it
     };
 
     template <typename Each>
     using PerLayer = std::array<std::array<Each, numLayers>, numPads>;
 
     double sampleRate = 44100.0;
-    PerLayer<std::atomic<const Sound*>> sounds;
-    std::array<Voice, maxVoices> voices {};
+    // What each pad's layers play, handed over as the sampler's sound is (Sampler.h): the one given last until the audio
+    // thread takes it as a block begins (no sound given as a stand-in, noSound, so that what is pending is never nothing;
+    // anyPending says there is something to take, so that a block doesn't look at all 512), what the audio thread plays,
+    // and the blocks that ended with every hit on its layer's sound, after which what was swapped out before them can go.
+    inline static const Sound noSound {};
+    PerLayer<std::atomic<const Sound*>> pending {};
+    PerLayer<const Sound*> current {};
+    std::atomic<bool> anyPending { false };
+    std::atomic<std::uint64_t> clearBlocks { 0 };
+    std::atomic<double> longestSound { 0.0 }; // in seconds: its tail, worked out where the sounds are given
+    // The first maxVoices play hits; the rest fade out what voices played when other hits took them (stealVoice()).
+    static constexpr int numFading = maxVoices;
+    std::array<Voice, maxVoices + numFading> voices {};
     dsp::SincReader reader; // for a pad tuned, or at another rate than the engine's
     std::uint64_t hits = 0;
-    std::atomic<std::uint64_t> blocksDone { 0 };
 
     // The audio thread's: each pad's next sound in turn, and the one it played last at random; and what picks one.
     std::array<std::uint8_t, numPads> nextLayer {}, lastLayer {};
@@ -212,10 +225,12 @@ private:
 
     void hit (int pad, float hitVelocity, std::span<const float> parameters);
     void startVoice (int pad, int layer, const Sound&, float hitVelocity, std::span<const float> parameters); // a layer's
+    void stealVoice (Voice&); // what it plays fades out from a copy of it, so that it can start another hit
     void release (int pad);
     void applyValues (Voice&, std::span<const float> parameters); // its level, pan and filter, as its pad's values are now
     void follow (std::span<const float> parameters);              // every voice's, and fades those of pads that mute or solo leave out
     void render (float* left, float* right, int numSamples, std::span<const PartOutput>, int outputStart);
     void freeRetired();
+    void findLongestSound();
 };
 } // namespace phazite::devices

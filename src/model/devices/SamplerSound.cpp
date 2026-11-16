@@ -223,7 +223,10 @@ std::optional<SampleSettings> readSampleSettings (const juce::File& file)
     juce::AudioBuffer<float> opening (juce::jlimit (1, 2, (int) reader->numChannels), length);
 
     if (reader->read (&opening, 0, length, 0, true, true))
+    {
+        clearWhatIsNotSound (opening); // as the sound it plays is (readSampleSound())
         pitch = devices::detectPitch (opening, reader->sampleRate);
+    }
 
     // The note its own data name; else a note in its name, in the octave its pitch is in, or from middle C; else its pitch.
     const auto unity = data.getValue ("MidiUnityNote", "").getIntValue();
@@ -340,6 +343,7 @@ std::shared_ptr<const Sampler::Sound> readSampleSound (const juce::File& file)
     if (! reader->read (&sound->audio, 0, length, 0, true, true))
         return {};
 
+    clearWhatIsNotSound (sound->audio);
     sound->onsets = devices::detectOnsets (sound->audio, sound->sampleRate);
     sound->beats = readAudioFileInfo (*reader, file.getFileNameWithoutExtension()).loopBeats;
     Sampler::makeOctaves (*sound);

@@ -227,6 +227,9 @@ namespace
     constexpr double driftWanderSeconds = 0.45, driftGlideSeconds = 0.3;
     constexpr double centsToLog = 0.69314718055994531 / 1200.0; // a pitch in cents as the natural logarithm of its ratio
 
+    // The filter's drive fades in and out over this as it comes on or off, as the synth's (Synth.cpp).
+    constexpr double driveFadeSeconds = 32.0 / 48000.0;
+
     // A stack's steps, in semitones, in Synth::Stack's order.
     constexpr float stackSteps[][Synth::maxStackSteps] = {
         { 0.0f, 0.0f, 0.0f }, { 0.0f, 12.0f, 0.0f }, { 0.0f, 12.0f, 24.0f }, { 0.0f, 7.0f, 0.0f }, { 0.0f, 7.0f, 12.0f },
@@ -349,6 +352,11 @@ void WavetableSynth::renderStep (const OscillatorRun& run, Reader& reader, float
             break;
     }
 
+    // Without what its warp leaves off centre.
+    if (! juce::exactlyEqual (reader.offset, 0.0f))
+        for (int i = 0; i < length; ++i)
+            out[i] -= reader.offset;
+
     reader.phase = t;
 }
 
@@ -459,7 +467,7 @@ WavetableSynth::WavetableSynth()
     for (int osc = 0; osc < numOscillators; ++osc)
     {
         owned[(size_t) osc] = getFactoryWavetable (0);
-        tables[(size_t) osc].store (owned[(size_t) osc].get(), std::memory_order_release);
+        stepTables[(size_t) osc] = owned[(size_t) osc].get(); // no audio thread yet
         playedPositions[(size_t) osc].store (sawPosition, std::memory_order_relaxed);
     }
 }
@@ -475,11 +483,15 @@ void WavetableSynth::setTable (int osc, std::shared_ptr<const Wavetable> table)
         table = getFactoryWavetable (0);
 
     freeRetired();
-    tables[(size_t) osc].store (table.get(), std::memory_order_release);
 
-    // The audio thread reads the one before until the end of its next block, when it takes the new one.
-    if (auto& before = owned[(size_t) osc]; before != nullptr)
-        retired.push_back ({ std::move (before), blocksDone.load (std::memory_order_acquire) + 2 });
+    if (table == owned[(size_t) osc])
+        return;
+
+    // The one given before, if the audio thread never took it, goes at once: so that however many are given while the synth
+    // plays nothing (a muted track's), at most the one it took last and the newest wait. If it took it, it reads it until
+    // the step under way ends: until the count moves on, the next step taking the new one (a step counts before it takes).
+    if (pending[(size_t) osc].exchange (table.get()) == nullptr)
+        retired.push_back ({ std::move (owned[(size_t) osc]), stepsBegun.load() + 1 });
 
     owned[(size_t) osc] = std::move (table);
 }
@@ -491,7 +503,7 @@ std::shared_ptr<const Wavetable> WavetableSynth::getTable (int osc) const
 
 void WavetableSynth::freeRetired()
 {
-    const auto done = blocksDone.load (std::memory_order_acquire);
+    const auto done = stepsBegun.load();
     retired.erase (std::remove_if (retired.begin(), retired.end(), [done] (const Retired& old) { return done >= old.safeAfter; }),
                    retired.end());
 }
@@ -522,10 +534,14 @@ void WavetableSynth::prepare (double newSampleRate, int)
     const auto controlRate = sampleRate / controlStep;
     driftWanderSteps = (float) (driftWanderSeconds * controlRate);
     driftFollow = (float) (1.0 - std::exp (-1.0 / (driftGlideSeconds * controlRate)));
+    driveFadeStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
+    for (auto& blocker : dcBlockers)
+        blocker.prepare (sampleRate);
 
     for (auto& voice : voices)
     {
         voice.amp.prepare (sampleRate);
+        voice.noise.prepare (sampleRate);
         voice.envelope2.prepare (controlRate);
         voice.envelope3.prepare (controlRate);
 
@@ -555,6 +571,7 @@ void WavetableSynth::reset()
         voice.stepPending = true;
         voice.fade = 1.0f;
         voice.fadeStep = 0.0f;
+        voice.controlAhead = 0;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
         voice.drifting.setSeed (driftSeed + (std::uint32_t) index);
@@ -569,14 +586,19 @@ void WavetableSynth::reset()
     for (size_t i = 0; i < freeLfos.size(); ++i)
         freeLfos[i].reset (0.0f, lfoSeed + (std::uint32_t) i);
 
+    for (auto& blocker : dcBlockers)
+        blocker.reset();
+
     freeLfoValues.fill (0.0f);
+    freeLfosAhead = 0;
     noteRandom.setSeed (randomSeed);
     numHeld = 0;
     notesPlayed = 0;
-    samplesLeftInStep = 0;
+    grid.reset();
     lastNote = -1.0f;
     bend = modWheel = 0.0f;
     pedalDown = false;
+    stoppedPlaying = false;
     shownMode = -1;
 }
 
@@ -606,8 +628,8 @@ void WavetableSynth::letGoOf (int note)
 
 WavetableSynth::Voice& WavetableSynth::findVoice()
 {
-    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which
-    // fades out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that
+    // fade out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail
     // rings on untouched, and the new note starts from its waves' starts and its envelopes'.
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
@@ -634,9 +656,16 @@ WavetableSynth::Voice& WavetableSynth::findVoice()
 void WavetableSynth::stealVoice (Voice& voice)
 {
     // What it played fades out from a copy of it, over a few milliseconds, while it starts the new note from silence:
-    // no jump to the new note at the old one's level. The copy reuses the last voice's memory (every voice is prepared
-    // alike), so this doesn't allocate.
-    auto& fading = voices[(size_t) maxVoices];
+    // no jump to the new note at the old one's level. The copy goes to a place that fades nothing, or else to the one
+    // nearest silence, which is cut; it reuses that place's memory (every voice is prepared alike), so this doesn't allocate.
+    auto* nearest = &voices[(size_t) maxVoices];
+
+    for (auto i = (size_t) maxVoices; i < voices.size() && nearest->amp.isActive(); ++i)
+        if (const auto& place = voices[i];
+            ! place.amp.isActive() || place.fade * place.amp.getLevel() < nearest->fade * nearest->amp.getLevel())
+            nearest = &voices[i];
+
+    auto& fading = *nearest;
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
@@ -691,6 +720,15 @@ void WavetableSynth::startDrift (Voice& voice) noexcept
             wander.stepsLeft = std::max (1, (int) (voice.drifting.nextUnipolar() * driftWanderSteps / wander.pace));
         }
     }
+}
+
+bool WavetableSynth::movesOn (int& ahead, bool whatever) noexcept
+{
+    if (! whatever && ahead > controlStep / 2)
+        return false;
+
+    ahead += controlStep;
+    return true;
 }
 
 void WavetableSynth::moveDrift (Voice& voice, int unison) noexcept
@@ -793,6 +831,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     voice.envelope2.noteOn();
     voice.envelope3.noteOn();
     voice.stepPending = true;
+    voice.controlAhead = 0;
     startDrift (voice);
 }
 
@@ -875,6 +914,7 @@ void WavetableSynth::handle (const NoteEvent& event, std::span<const float> valu
     {
         case NoteEvent::Type::noteOn:
         case NoteEvent::Type::portamentoOn:
+            stoppedPlaying = false;
             startNote (event.number, event.value, values, event.type == NoteEvent::Type::portamentoOn);
             break;
 
@@ -911,6 +951,7 @@ void WavetableSynth::handle (const NoteEvent& event, std::span<const float> valu
         {
             numHeld = 0;
             pedalDown = false;
+            stoppedPlaying = stoppedPlaying || ! songPlaying;
 
             // Playback stopped or jumped: every note lets go. Those that had only just begun when it stopped fade out at
             // once too, so that nothing the song began just before Stop sounds after it: the loop's first notes, when Stop
@@ -945,37 +986,47 @@ namespace
     }
 } // namespace
 
-void WavetableSynth::render (float* left, float* right, int numSamples, std::span<const float> values)
+void WavetableSynth::render (float* left, float* right, int numSamples, std::span<const float> values, bool playing,
+                             std::int64_t songSample)
 {
     const auto settings = readSettings (values, bend, right != nullptr);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
-    const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-controlStep / glideSamples));
-    const std::array<const Wavetable*, numOscillators> playing { tables[0].load (std::memory_order_acquire),
-                                                                 tables[1].load (std::memory_order_acquire) };
     const auto nyquistLimit = 0.45 * sampleRate;
 
     // Each oscillator's pitch as a ratio of the other's, for the warps that follow it.
     const std::array<float, numOscillators> otherRatios { std::exp2 ((settings.pitch[1] - settings.pitch[0]) / 12.0f),
                                                           std::exp2 ((settings.pitch[0] - settings.pitch[1]) / 12.0f) };
 
+    grid.startBlock (playing, songSample);
+
     for (int start = 0; start < numSamples;)
     {
-        // The control rate keeps its own grid of controlStep samples across blocks and the events that split them, so that
-        // the modulators and the glide move at their rate however the samples come: a step a block's end or an event cut
-        // short goes on in the next stretch.
-        const auto newStep = samplesLeftInStep == 0;
+        // Control steps on the song's own grid while it plays, a running count while it is stopped (dsp/ControlGrid.h), so
+        // that the modulators and the glide move at their rate however the samples come and however the passage was reached:
+        // a step a block's end or an event cuts short goes on in the next stretch.
+        const auto stretch = grid.next (numSamples - start);
+        const auto newStep = stretch.newStep;
+        const auto length = stretch.length;
+        const auto untilNextStep = stretch.untilNextStep;
+        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-untilNextStep / glideSamples));
 
         if (newStep)
-            samplesLeftInStep = controlStep;
+        {
+            // The step before is finished: what it read can go (setTable()), and this one takes the tables given since, if any
+            // were. Counted first, so that the message thread's count after it gave one is of a step that takes it.
+            stepsBegun.fetch_add (1);
 
-        const auto length = std::min (samplesLeftInStep, numSamples - start);
-        const auto untilNextStep = samplesLeftInStep;
-        samplesLeftInStep -= length;
+            for (size_t osc = 0; osc < stepTables.size(); ++osc)
+                if (const auto* given = pending[osc].exchange (nullptr); given != nullptr)
+                    stepTables[osc] = given;
+        }
 
-        // The LFOs that run free, a step each control step.
-        if (newStep)
+        // The LFOs that run free, a step each control step, kept up with the samples played where the grid cuts one short.
+        if (newStep && movesOn (freeLfosAhead))
             for (size_t i = 0; i < freeLfos.size(); ++i)
                 freeLfoValues[i] = freeLfos[i].next (settings.lfoShapes[i]);
+
+        freeLfosAhead -= length;
 
         for (auto& voice : voices)
         {
@@ -989,13 +1040,16 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             // levels, the filter and gains. A stretch that goes on with a step keeps them.
             if (newStep || voice.stepPending)
             {
+                // Its own control-rate parts (Envelopes 2 and 3, its LFOs, its drift) move a step at each step and as it
+                // starts, kept up with the samples it plays where a step runs short (movesOn()).
+                const auto movesOnNow = movesOn (voice.controlAhead, voice.stepPending);
                 voice.stepPending = false;
                 voice.unison = settings.unison;
 
                 // A slide moves evenly until it gets there, a glide part of the way each step.
                 if (voice.slidePerSample > 0.0f)
                 {
-                    const auto step = voice.slidePerSample * (float) controlStep;
+                    const auto step = voice.slidePerSample * (float) untilNextStep;
                     const auto gap = voice.target - voice.pitch;
                     voice.pitch = std::abs (gap) <= step ? voice.target : voice.pitch + std::copysign (step, gap);
                     voice.slidePerSample = std::abs (gap) <= step ? 0.0f : voice.slidePerSample;
@@ -1006,12 +1060,21 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 }
 
                 std::array<float, (size_t) ModSource::random + 1> sources {};
-                sources[(size_t) ModSource::envelope2] = voice.envelope2.next();
-                sources[(size_t) ModSource::envelope3] = voice.envelope3.next();
+                if (movesOnNow)
+                {
+                    voice.envelope2Now = voice.envelope2.next();
+                    voice.envelope3Now = voice.envelope3.next();
+
+                    for (size_t i = 0; i < voice.lfos.size(); ++i)
+                        if (settings.lfoRetrigger[i])
+                            voice.lfosNow[i] = voice.lfos[i].next (settings.lfoShapes[i]);
+                }
+
+                sources[(size_t) ModSource::envelope2] = voice.envelope2Now;
+                sources[(size_t) ModSource::envelope3] = voice.envelope3Now;
 
                 for (size_t i = 0; i < voice.lfos.size(); ++i)
-                    sources[(size_t) ModSource::lfo1 + i] =
-                        settings.lfoRetrigger[i] ? voice.lfos[i].next (settings.lfoShapes[i]) : freeLfoValues[i];
+                    sources[(size_t) ModSource::lfo1 + i] = settings.lfoRetrigger[i] ? voice.lfosNow[i] : freeLfoValues[i];
 
                 sources[(size_t) ModSource::velocity] = voice.velocity;
                 sources[(size_t) ModSource::note] = (voice.pitch - 60.0f) / 48.0f;
@@ -1040,13 +1103,13 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 // The unison's drift: each voice of each oscillator a little further on its own way.
                 const auto drifting = settings.drift > 0.0f;
 
-                if (drifting)
+                if (drifting && movesOnNow)
                     moveDrift (voice, settings.unison);
 
                 for (int osc = 0; osc < numOscillators; ++osc)
                 {
                     auto& run = voice.oscillators[(size_t) osc];
-                    const auto* table = playing[(size_t) osc];
+                    const auto* table = stepTables[(size_t) osc];
                     run.on = settings.on[(size_t) osc] && table != nullptr;
 
                     if (! run.on)
@@ -1096,6 +1159,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         mipLevels[step] = Wavetable::chooseLevel (aliasLimit / std::max (1.0e-9, fastest[step] * (double) speed));
 
                     const auto lastFrame = table->getNumFrames() - 1;
+                    const auto bendPlace = Wavetable::findBend (run.bend); // once an oscillator: its readers share its bend
 
                     for (int u = 0; u < settings.unison; ++u)
                     {
@@ -1104,11 +1168,44 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         const auto frame = std::clamp (run.position + spread, 0.0f, 1.0f) * (float) lastFrame;
                         const auto firstFrame = std::min ((int) frame, lastFrame);
                         const auto mipLevel = mipLevels[(size_t) u % stackLength];
+                        const auto nextFrame = std::min (firstFrame + 1, lastFrame);
                         reader.from = table->getLevel (firstFrame, mipLevel);
-                        reader.to = table->getLevel (std::min (firstFrame + 1, lastFrame), mipLevel);
+                        reader.to = table->getLevel (nextFrame, mipLevel);
                         reader.morph = frame - (float) firstFrame;
                         reader.left = settings.lefts[(size_t) u];
                         reader.right = settings.rights[(size_t) u];
+
+                        // What its warp leaves off centre, which it takes away: every frame is centred over its whole cycle,
+                        // but sync reads a part of its last cycle, bend reads the cycle unevenly, and pulse width holds the
+                        // wave's start for the rest of the cycle (Wavetable::getArea(), getBentMean()).
+                        const auto morphed = [&] (auto&& of)
+                        { return (1.0f - reader.morph) * of (firstFrame) + reader.morph * of (nextFrame); };
+
+                        switch (run.warp)
+                        {
+                            case Warp::sync:
+                            {
+                                const auto cut = run.syncRatio - std::floor (run.syncRatio);
+                                reader.offset = morphed ([&] (int each) { return table->getArea (each, mipLevel, cut); }) / run.syncRatio;
+                                break;
+                            }
+
+                            case Warp::bendUp:
+                            case Warp::bendDown:
+                                reader.offset = morphed ([&] (int each) { return table->getBentMean (each, mipLevel, bendPlace); });
+                                break;
+
+                            case Warp::pulseWidth:
+                                reader.offset = (1.0f - run.pulseWidth) * readAt (reader.from, reader.to, reader.morph, 0.0f);
+                                break;
+
+                            case Warp::none:
+                            case Warp::mirror:
+                            case Warp::fm:
+                            case Warp::ringMod:
+                                reader.offset = 0.0f;
+                                break;
+                        }
                     }
                 }
 
@@ -1134,8 +1231,9 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                                                                     .q = dsp::getResonanceQ (filterResonance) },
                                                                   sampleRate);
 
+                    // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
                     for (auto& side : voice.filters)
-                        side.set (coefficients, untilNextStep);
+                        side.set (coefficients, untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
 
                     voice.driveGain = settings.driveGain;
                     voice.cutoffNow = (float) frequency;
@@ -1146,6 +1244,8 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 voice.gainLeft = volume * 1.41421356f * std::cos (angle);
                 voice.gainRight = volume * 1.41421356f * std::sin (angle);
             }
+
+            voice.controlAhead -= length;
 
             //==================================================================
             // Each sample: as many unison voices as the step set readers for, spread across the sides if more than one.
@@ -1258,7 +1358,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                             value += 0.5f * jump * dsp::polyBlep (t, dt);
                         }
 
-                        raw[(size_t) osc] = value;
+                        raw[(size_t) osc] = value - reader.offset;
                         reader.phase = t + dt < 1.0f ? t + dt : t + dt - 1.0f;
                     }
 
@@ -1291,18 +1391,18 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                     centre += voice.subGain * voice.sub.next (settings.subWave);
 
                 if (voice.noiseGain > 0.0f)
-                    centre += voice.noiseGain * voice.noise.nextBipolar();
+                    centre += voice.noiseGain * voice.noise.next();
 
                 soundLeft += centre;
                 soundRight += centre;
 
                 // The filter, its drive saturating what goes in (its quiet parts keeping their level) at twice the rate so
-                // that it doesn't alias, faded in and out over 32 samples as it comes on or off: both sides through it
+                // that it doesn't alias, faded in and out over driveFadeSeconds as it comes on or off: both sides through it
                 // while unison spreads the voice, otherwise one.
                 const auto channels = stereo ? 2 : 1;
                 std::array<float, 2> sides { soundLeft, soundRight };
                 const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
-                voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -1.0f / 32.0f, 1.0f / 32.0f);
+                voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -driveFadeStep, driveFadeStep);
 
                 for (int channel = 0; channel < channels; ++channel)
                 {
@@ -1409,6 +1509,9 @@ void WavetableSynth::process (const ProcessContext& block)
     auto* left = block.channels[0];
     auto* right = block.numChannels > 1 ? block.channels[1] : nullptr;
     size_t next = 0;
+    const auto sounding = [this]
+    { return std::any_of (voices.begin(), voices.end(), [] (const Voice& each) { return each.amp.isActive(); }); };
+    const auto soundedBefore = sounding();
 
     // A stretch at a time, between the events.
     for (int done = 0; done < block.numSamples;)
@@ -1417,13 +1520,32 @@ void WavetableSynth::process (const ProcessContext& block)
             handle (block.events[next++], values);
 
         const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;
-        render (left + done, right != nullptr ? right + done : nullptr, until - done, values);
+        render (left + done, right != nullptr ? right + done : nullptr, until - done, values, block.isPlaying,
+                block.songSample + (block.isPlaying ? done : 0));
         done = until;
     }
 
     // Events at the block's end, for the next one.
     while (next < block.events.size())
         handle (block.events[next++], values);
+
+    // Without what ring modulation and FM leave off centre at whole ratios (the product of two waves at one pitch has a part
+    // at 0 Hz, as FM's sidebands do): on its sum, one blocker a side (dsp/DcBlocker.h), only while an oscillator that is on
+    // has one of those warps. Otherwise its waves are centred as they are made (the other warps by Wavetable::getArea() and
+    // getBentMean()), and its sum is left as it is, bit for bit, as the blocker would change its waveform: a slow tail after
+    // each note. Once playback has stopped and no note sounds in the block, what the blockers still ring with fades out, so
+    // that nothing sounds on after Stop.
+    auto wanted = false;
+
+    for (int osc = 0; osc < numOscillators; ++osc)
+    {
+        const auto warp = choiceOf<Warp> (values[(size_t) getParameter (osc, oscWarp)]);
+        wanted = wanted || (values[(size_t) getParameter (osc, oscOn)] > 0.5f && (warp == Warp::fm || warp == Warp::ringMod));
+    }
+    const auto quiet = stoppedPlaying && ! soundedBefore && ! sounding();
+
+    for (size_t side = 0; side < (right != nullptr ? 2u : 1u); ++side)
+        dcBlockers[side].process (side == 0 ? left : right, block.numSamples, wanted, quiet);
 
     // What the editor shows: where the newest note plays in each table, or without one where the knob is.
     const Voice* newest = nullptr;
@@ -1458,6 +1580,5 @@ void WavetableSynth::process (const ProcessContext& block)
     }
 
     activeVoices.store (active, std::memory_order_relaxed);
-    blocksDone.fetch_add (1, std::memory_order_release);
 }
 } // namespace phazite::devices

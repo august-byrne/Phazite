@@ -134,7 +134,9 @@ harmonics whose aliases stay above 20 kHz, sampled finely enough to be read by s
 ([dsp-audit.md](../../archive/dsp-audit.md), section 3.2). The square is one such saw taken from another a pulse width behind
 it, so its width can move and it carries no constant offset at any width. The sine comes from a polynomial. With Sync
 on, oscillator 2 is read at a place that oscillator 1's cycle gives, and its jump back to its start is smoothed by a
-two-point PolyBLEP. The sub runs at a half or a quarter of oscillator 1's frequency.
+two-point PolyBLEP; the part of its last cycle that each of oscillator 1's cuts short isn't centred, so what it adds up to over
+oscillator 1's cycle is worked out from its wave and taken away, and a synced oscillator carries no constant offset either.
+The sub runs at a half or a quarter of oscillator 1's frequency.
 
 **Unison.** Each oscillator plays up to seven copies, tuned evenly from one side of the detune to the other and panned
 evenly across the spread at equal power, each at a level that keeps the voice as loud (one over the square root of
@@ -146,18 +148,35 @@ With unison on and a stereo output, a voice runs two filters, one a side; the su
 section's Q by a curve of its own, from 0.5 to 25. The cutoff a voice plays is Cutoff moved, in semitones, by the
 filter envelope, the key, the velocity, the LFO and the drift, and kept between 20 Hz and 0.45 of the sample rate.
 Filter Drive soft-clips what goes into the filter at twice the sample rate, the curve played by its antiderivative so
-that what it adds doesn't fold back as aliasing; it fades in and out over 32 samples.
+that what it adds doesn't fold back as aliasing; it fades in and out over two thirds of a millisecond, at any rate.
 
 **Envelopes.** Each stage takes exactly its time along its curve and lands on its target; a note that starts or ends in
 the middle of a stage goes on from the level it has reached.
 
-**Control rate.** Pitch, the filter's coefficients and the LFO's moves on pitch and cutoff are worked out every 16
-samples; the oscillators, the filter, the envelopes, tremolo and pulse-width modulation run at every sample.
+**Control rate.** Pitch, the filter's coefficients, the drift and the LFO's moves on pitch and cutoff are worked out every
+16 samples, on the song's own grid while it plays (a step at every multiple of 16 samples from the song's start) and on
+a running count while it is stopped (`src/devices/dsp/ControlGrid.h`), as the [Wavetable](wavetable.md), the FM and the
+Sampler do: a note that starts between two steps gets its values for what is left of the step, and where the song's
+place leaves the count (playback starting, a jump, a loop's wrap, the device waking from sleep) a step begins there. So
+what it plays doesn't depend on how the samples come in blocks, nor on how a passage was reached: after a count-in, in a
+loop's second pass and after a sleep it plays what a render plays. The oscillators, the filter, the envelopes, tremolo
+and pulse-width modulation run at every sample. The noise is random samples, as they are at 48 kHz, the rate the
+presets are leveled at ([presets](../../presets.md#leveling)); at 44.1 kHz the square root of 44.1 / 48 quieter, so
+that each hertz of the band holds as much as at 48 kHz; and from twice those rates, the same noise made at 44.1 or
+48 kHz and raised to the rate by the drives' half-band filters, so that nothing of it lies above 24 kHz
+(`src/devices/dsp/Noise.h`). So its level in the band that is heard, its peaks and what the drive does to it are alike
+at every rate. The envelopes follow a new sustain level over the same time at any rate. A DC blocker on each side of the
+synth's sum (12 dB at 5 Hz, `src/devices/dsp/DcBlocker.h`) takes away what the drive leaves off centre of a wave that is
+centred but lopsided. It plays only while the drive is on: it changes the waveform of whatever it plays (it takes out a
+note's net area and puts it back as a slow tail), so a clean patch, whose waves are centred as they are made, plays
+without it, bit for bit. Taken on and let go in mid-note, it fades in and out over 5 ms; once playback has stopped and
+no note sounds, what it still rings with fades out over 3 ms, so that nothing sounds on after Stop.
 
 **Notes.** In Poly every note takes a voice of its own. A key played again while its last note rings out leaves that
 tail ringing and starts a new voice; played again while its key or the sustain pedal still holds a voice, that voice
 lets go first, so a key never holds two. With all 16 voices busy, a new note takes the voice that has been ringing out
-longest, then the oldest; what the taken voice played fades out over 3 ms. In Mono one voice plays: a key pressed over
+longest, then the oldest; what the taken voice played fades out over 3 ms, from a copy of it in a place of its own (one
+for each voice, so a chord that takes several at once fades each). In Mono one voice plays: a key pressed over
 a held one moves the pitch without starting the envelopes again, and letting it go returns to the key still held. A
 switch between Poly and Mono lets go of every note.
 
@@ -204,12 +223,8 @@ Voice. A dock narrower than all of them shows them in pages, two or three whole 
   aliases on high notes.
 - Pitch and cutoff move in steps of 16 samples without interpolation: a fast LFO at full depth on a resonant filter can
   be heard stepping.
-- One voice fades out what a taken voice played: when a chord takes several voices within those 3 ms, all but the last
-  taken stop at once.
 - Sixteen voices, fixed; oscillators always start each note at the start of their waves (no free-running phase); the
   noise is white only.
-- Drift moves a whole step at each control step, also at one that an event or a block's end cuts short, so it wanders
-  faster where many notes split a block.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).
 - No effects of its own, a chorus included: the [Chorus](chorus.md) and Phazite's other devices follow it.
 

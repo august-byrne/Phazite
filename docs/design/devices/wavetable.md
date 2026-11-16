@@ -149,6 +149,12 @@ project that loads it ([devices.md](../devices.md)).
 - **Ring Mod**: the other oscillator multiplies this one.
 
 A warp that reads the wave faster than the note picks the copy with fewer harmonics that its fastest reading allows.
+Every frame is centred over its whole cycle, but not over a part of it: Sync reads a part of its last cycle, the Bends read
+the cycle unevenly, and Pulse Width holds the wave's start. Each takes what that leaves off centre away as it plays: the
+table keeps, for each frame and each of its band-limited copies, its area from its start across its cycle and its mean
+read at bends from 1/8 to 8, worked out as the table is made (a fifth more memory, and about a sixth more time: both
+exactly from the frame's harmonics), so that a warped note
+carries no constant offset.
 
 **Unison.** Both oscillators play up to eight copies, tuned evenly across the detune, panned evenly across the spread
 at equal power and, with Position Spread, spread across the table, each at a level that keeps the note as loud. The
@@ -161,22 +167,35 @@ drawn from a fixed seed.
 [Synth](synth.md) share. The cutoff a voice plays is Filter Cutoff moved by key tracking and the slots aimed at it,
 kept between 20 Hz and 0.45 of the sample rate. Filter Drive soft-clips what goes into the filter at twice the sample
 rate through a per-voice oversampler, the curve played by its antiderivative so that what it adds doesn't fold back as
-aliasing; it fades in and out over 32 samples.
+aliasing; it fades in and out over two thirds of a millisecond, at any rate.
 
 **Modulation.** The slots are worked out for each voice on its own, so an envelope sweeps every note's table from its
 start. Several slots on one target add up. Envelopes 2 and 3, the LFOs, the slots, the pitch, the frames read and the
-filter's coefficients are worked out at the control rate, every 16 samples, on a grid that goes on across blocks; the
-oscillators, the filter and Envelope 1 run at every sample. A track's modulators and macros
+filter's coefficients are worked out at the control rate, every 16 samples, on the song's own grid while it plays and on
+a running count while it is stopped, as the [Synth](synth.md)'s; the oscillators, the filter and Envelope 1 run at every sample. A track's modulators and macros
 ([automation-and-modulation.md](../automation-and-modulation.md)) still move any of its knobs for the whole track.
 
 **Notes.** As the [Synth](synth.md)'s: in Poly every note takes a voice of its own, a key played again too; with all
-16 busy a new note takes the voice ringing out longest, then the oldest, whose sound fades out over 3 ms; Mono plays
+16 busy a new note takes the voice ringing out longest, then the oldest, whose sound fades out over 3 ms in a place of
+its own (one for each voice, so a chord that takes several at once fades each); Mono plays
 one voice legato and returns to the key still held. Glide works in both modes, for every note. Portamento and slide
 notes ([piano-roll.md](../piano-roll.md)) glide as on the Synth. Pitch bend, the sustain pedal (controller 64) and the
 mod wheel (controller 1, a modulation source) are the controllers it answers.
 
 **The same every time.** Noise, the unison's starting phases, the drift and the Random source come from fixed seeds,
-so a render repeats exactly.
+so a render repeats exactly. A table chosen while notes play is read from the next control step on, which takes what was
+given last; one given and replaced before a step took it is freed at once, so that a synth that plays nothing (on a muted
+track) holds at most the table it plays and the newest. One a step took is freed once the count of steps begun has moved
+on past where it was when the next was given, by the playback session's timer (30 times a second) or the next table
+given, whichever comes first. The noise is as the Synth's, alike at every rate. A DC blocker on each side of its sum (12
+dB at 5 Hz) takes away what ring modulation and FM leave at whole ratios. It plays only while an oscillator that is on
+has one of those warps: it changes the waveform of whatever it plays, so every other patch, whose waves are centred as
+they are made (the other warps by their areas and bent means), plays without it, bit for bit. Taken on and let go in
+mid-note, it fades in and out over 5 ms; once playback has stopped and no note sounds, what it still rings with fades
+out over 3 ms, so that nothing sounds on after Stop. Envelopes 2 and 3, the LFOs and the drift move a control step at a
+time; where the grid cuts a step short (a loop going round, a jump), they move on only when that keeps them nearer the
+samples played, so that they keep their pace, and a comb's delay set at a step of one sample glides over the next step
+rather than jumping.
 
 ## Its editor
 
@@ -215,10 +234,6 @@ and Matrix, one showing at a time. In the dock they show in pages, two to a page
 - The filter is linear: it never self-oscillates, there is no ladder or diode model, and Filter Drive, before the
   filter, gives back the gain it adds, so a loud voice driven hard comes out quieter.
 - Glide has no legato-only mode, as the Synth's has.
-- One voice fades out what a taken voice played: when a chord takes several voices within those 3 ms, all but the last
-  taken stop at once.
-- A table that is swapped out is let go once two more blocks have played, counted in calls, not acknowledged by the
-  audio thread at a control step.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).
 - No effects of its own: Phazite's devices follow it.
 

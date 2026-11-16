@@ -230,6 +230,12 @@ void SongPlayer::letGoOfPlugins()
             processor->getInstance().setMovedByEngine (std::span<const int>());
 }
 
+void SongPlayer::releaseUnused()
+{
+    for (const auto& [id, node] : devices)
+        node->getRunner().getProcessor().releaseUnused();
+}
+
 void SongPlayer::makePluginsAnew()
 {
     std::erase_if (devices, [] (const auto& device)

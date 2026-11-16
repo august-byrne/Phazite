@@ -144,6 +144,7 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/CombFilter.h
     src/devices/dsp/ControlGrid.h
     src/devices/dsp/Crossover.h
+    src/devices/dsp/DcBlocker.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
     src/devices/dsp/Filters.cpp
@@ -151,6 +152,7 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Math.h
     src/devices/dsp/MultimodeFilter.cpp
     src/devices/dsp/MultimodeFilter.h
+    src/devices/dsp/Noise.h
     src/devices/dsp/NoteValues.h
     src/devices/dsp/Oscillators.cpp
     src/devices/dsp/Oscillators.h
@@ -1248,6 +1250,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ContainerChainTests.cpp
         tests/ContainerTests.cpp
         tests/ContainerUiTests.cpp
+        tests/ControlGridTests.cpp
         tests/ControlsTests.cpp
         tests/DawProjectTests.cpp
         tests/DesignTokenTests.cpp
@@ -1446,6 +1449,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsTests.cpp
         tests/VinylTests.cpp
         tests/VocoderTests.cpp
+        tests/VoiceStealTests.cpp
         tests/Vst3PluginTests.cpp
         tests/Vst3StateTests.cpp
         tests/WarpTests.cpp
