@@ -4,6 +4,7 @@
 // in the highs without aliases worth hearing, the hiss's level and the crackle's density, the noise only while the song plays
 // and until two seconds after the sound stops, the crackle where the song is however it is reached, parameters that move
 // without a click, its rest in silence, and all of it at every sample rate and block size, the same every time.
+#include "DspProbe.h"
 #include "TestHelpers.h"
 #include "devices/dsp/Filters.h"
 #include "devices/vinyl/Vinyl.h"
@@ -11,8 +12,12 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <algorithm>
 #include <cmath>
+#include <complex>
 #include <functional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -356,13 +361,24 @@ TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl play
     REQUIRE (latency > 0);
     CHECK_FALSE (runner.getProcessor().sleepsOnSilence());
 
-    // At no mix: the sound, as late as the vinyl plays it, sample for sample.
-    const auto values = with ({ { "mix", 0.0f }, { "wow", 25.0f }, { "flutter", 10.0f }, { "distortion", 1.0f }, { "crackle", -6.0f } });
+    // At no mix: the sound as the vinyl's linear way leaves it (its oversampling turns the top octave's phase), as late as the
+    // vinyl plays it: what came in, that late, to within what that turn makes of a sound below a sixteenth of the rate, with Bass
+    // Mono off; none of the wow, flutter, distortion or crackle.
+    const auto values = with (
+        { { "mix", 0.0f }, { "wow", 25.0f }, { "flutter", 10.0f }, { "distortion", 1.0f }, { "crackle", -6.0f }, { "bassMono", 20.0f } });
     juce::Random random (5);
     std::vector<float> noise ((size_t) (40 * blockSize)), played;
 
     for (auto& sample : noise)
         sample = random.nextFloat() - 0.5f;
+
+    // Below a sixteenth of the rate, where the half-band filters turn next to nothing.
+    const auto lows = devices::dsp::makeFilter (devices::dsp::FilterShape::lowPass, rate / 16.0, rate, 0.70710678);
+
+    devices::dsp::Filter first, second;
+
+    for (auto& sample : noise)
+        sample = second.process (first.process (sample, lows), lows);
 
     juce::AudioBuffer<float> buffer (2, blockSize);
     phazite::engine::DeviceRunner::Block block;
@@ -379,12 +395,302 @@ TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl play
         played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
     }
 
-    auto same = true;
+    auto largest = 0.0f;
 
     for (auto i = (size_t) std::max (2 * blockSize, latency); i < noise.size(); ++i)
-        same = same && juce::exactlyEqual (played[i], noise[i - (size_t) latency]);
+        largest = std::max (largest, std::abs (played[i] - noise[i - (size_t) latency]));
 
-    CHECK (same);
+    INFO ("what comes out differs from what came in by " << 20.0 * std::log10 (std::max (largest, 1.0e-12f) / 0.5f) << " dB under it");
+    CHECK (largest < 0.5f * 0.01f); // 40 dB under it
+}
+
+TEST_CASE ("At a mix below 100 %, the vinyl meets what came in in phase: its oversampling and Bass Mono turn the copy as the sound")
+{
+    // The same tone on both sides, with nothing moving it (no wow or flutter, no distortion, no noise): what comes out is the
+    // sound through the band, half and half (or a quarter) with what came in. The copy for the mix was only delayed, while the
+    // sound went through the oversampling's half-band filters, which turn the top octave's phase, and through Bass Mono's
+    // all-pass, which turns the middle's half a cycle at its frequency: half and half, the two cancelled each other there.
+    // The copy now takes the sound's way through both, and what is left is the band's own doing.
+    const auto levelAt = [] (double rate, double hertz, float mix, float bassMono)
+    {
+        const auto values = clean ({ { "bassMono", bassMono }, { "mix", mix } });
+        phazite::engine::DeviceRunner runner (Vinyl::info, std::make_unique<Vinyl>());
+        constexpr int blockSize = 480, numSamples = 28800;
+        runner.prepare (rate, blockSize);
+        juce::AudioBuffer<float> sound (2, numSamples);
+
+        for (int i = 0; i < numSamples; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                sound.setSample (channel, i, 0.25f * (float) std::sin (twoPi * hertz * i / rate));
+
+        phazite::engine::DeviceRunner::Block block;
+        block.values = values;
+
+        for (int start = 0; start < numSamples; start += blockSize)
+            runner.process (sound, start, blockSize, block);
+
+        // Read over the second half, as a least-squares fit of the tone.
+        std::complex<double> fit;
+
+        for (int i = numSamples / 2; i < numSamples; ++i)
+            fit += (double) sound.getSample (0, i) * std::polar (1.0, -twoPi * hertz * i / rate);
+
+        return 2.0 * std::abs (fit) / (numSamples / 2) / 0.25;
+    };
+
+    for (const auto bassMono : { 100.0f, 20.0f }) // Bass Mono on and off
+        for (const auto rate : { 44100.0, 48000.0 })
+        {
+            for (const auto hertz : { 50.0, 100.0, 200.0, 1000.0, 10000.0, 15000.0, 18000.0 })
+            {
+                // The band's response, as the vinyl plays it (Butterworth filters of 12 dB an octave); and what the way through the
+                // record does to the level of both (its delay line read between samples dulls the very top a little).
+                const auto band =
+                    devices::dsp::getResponse (devices::dsp::makeFilter (devices::dsp::FilterShape::highPass, 20.0, rate, 0.70710678),
+                                               hertz, rate)
+                    * devices::dsp::getResponse (devices::dsp::makeFilter (devices::dsp::FilterShape::lowPass, 20000.0, rate, 0.70710678),
+                                                 hertz, rate);
+                const auto way = levelAt (rate, hertz, 1.0f, bassMono) / std::abs (band);
+                CHECK (std::abs (20.0 * std::log10 (way)) < 0.5);
+
+                for (const auto mix : { 0.5f, 0.25f })
+                {
+                    const auto expected = way * std::abs ((double) (1.0f - mix) + (double) mix * band); // the copy the sound's way
+                    const auto decibels = 20.0 * std::log10 (levelAt (rate, hertz, mix, bassMono) / expected);
+                    INFO ("Bass Mono at " << bassMono << " Hz, at " << rate << " Hz, mix " << mix << ", " << hertz << " Hz: " << decibels
+                                          << " dB from the band's");
+                    CHECK (std::abs (decibels) < 0.1);
+                }
+            }
+        }
+}
+
+TEST_CASE ("The vinyl's Mix leaving 0 % and coming back to it, with Bass Mono on, turns the copy for the mix without a click")
+{
+    // Bass Mono's all-pass turns the bass half a cycle at its frequency. The copy for the mix, merely delayed at 0 % and
+    // turned as the sound above it, was faded between the two over 64 samples as the Mix left 0 %, while the copy was still
+    // nearly all that was heard: the bass went from its level through nothing to its level upside down in 1.5 ms, a click.
+    // The copy is now turned at every mix while Bass Mono is on, so the Mix moving turns nothing. Measured against the Mix
+    // held where the ramp starts and where it ends: the largest step from one sample to the next, which a click raises.
+    namespace probe = phazite::test::probe;
+    constexpr double sampleRate = 48000.0;
+    constexpr int bar = 96000, numSamples = bar + 9600; // a bar at 120 beats a minute, and a little more
+
+    // A 100 Hz tone, and a kick: a falling thump on each beat.
+    auto tone = probe::makeSine (100.0, numSamples, sampleRate, 0.5f);
+    probe::Sound kick (2, numSamples);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto t = (double) (i % 24000) / sampleRate;
+        const auto value =
+            (float) (0.8 * std::exp (-t * 12.0) * std::sin (twoPi * (50.0 * t + 40.0 * (1.0 - std::exp (-t * 30.0)) / 30.0)));
+        kick.setSample (0, i, value);
+        kick.setSample (1, i, value);
+    }
+
+    const auto largestStep = [] (const probe::Sound& sound)
+    {
+        auto largest = 0.0;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 1; i < sound.getNumSamples(); ++i)
+                largest = std::max (largest, (double) std::abs (sound.getSample (channel, i) - sound.getSample (channel, i - 1)));
+
+        return largest;
+    };
+
+    for (const auto* what : { "the tone", "the kick" })
+    {
+        const auto& in = std::string_view (what) == "the tone" ? tone : kick;
+
+        for (const auto rising : { true, false })
+        {
+            // The Mix moving, against it held where the ramp starts and where it ends.
+            const auto playedWith = [&] (float from, float to)
+            {
+                probe::Device device (Vinyl::info);
+                device.values = clean ({ { "bassMono", 100.0f }, { "mix", from } });
+                device.prepare (sampleRate, 480);
+
+                if (! juce::exactlyEqual (from, to))
+                    device.automate (Vinyl::mix, from, to, bar);
+
+                return device.played (in, 480);
+            };
+
+            const auto start = rising ? 0.0f : 0.3f, end = rising ? 0.3f : 0.0f;
+            const auto moving = largestStep (playedWith (start, end));
+            const auto held = std::max (largestStep (playedWith (start, start)), largestStep (playedWith (end, end)));
+            const auto raised = 20.0 * std::log10 (moving / held);
+            INFO (std::string (what) << ", the Mix " << std::string (rising ? "leaving 0 %" : "coming back to 0 %") << ": its largest step "
+                                     << raised << " dB over the Mix held");
+            CHECK (raised < 0.5);
+        }
+    }
+}
+
+TEST_CASE ("A vinyl's Mix resting a little over 0 % with Bass Mono on leaves the bass at its frequency as loud as at 0 %")
+{
+    // The copy for the mix was merely delayed at 0 % and turned as the Mix went through its first 5 %, so a Mix resting there
+    // set the two half a cycle apart at Bass Mono's frequency, and the bass there fell by tens of decibels. Turned at every mix
+    // while Bass Mono is on, the copy leaves a tone there at its level, whatever the Mix.
+    namespace probe = phazite::test::probe;
+    constexpr double sampleRate = 48000.0;
+    constexpr int numSamples = 28800;
+    const auto tone = probe::makeSine (100.0, numSamples, sampleRate, 0.25f);
+
+    const auto levelAt = [&tone] (float mix)
+    {
+        probe::Device device (Vinyl::info);
+        device.values = clean ({ { "bassMono", 100.0f }, { "mix", mix } });
+        device.prepare (sampleRate, 480);
+        return probe::getToneLevel (device.played (tone, 480), 0, 100.0, sampleRate, numSamples / 2);
+    };
+
+    const auto atNone = levelAt (0.0f);
+
+    for (const auto mix : { 0.01f, 0.025f, 0.05f })
+    {
+        const auto decibels = probe::inDecibels (levelAt (mix) / atNone);
+        INFO ("at a Mix of " << mix * 100.0f << " %, 100 Hz is " << decibels << " dB from its level at 0 %");
+        CHECK (std::abs (decibels) < 0.1);
+    }
+}
+
+TEST_CASE ("Bass Mono switched on and off at a Mix below 100 % turns the vinyl's copy for the mix without a click")
+{
+    // As Bass Mono comes on or goes off, the sound's split comes in or goes over 20 ms, and the copy for the mix goes between
+    // merely delayed and turned as far as the split has come in. Its largest step from one sample to the next, against the
+    // vinyl's at either setting held: no larger, on a tone at Bass Mono's frequency and on a kick.
+    namespace probe = phazite::test::probe;
+    constexpr double sampleRate = 48000.0;
+    constexpr int stretch = 9600, numStretches = 6;
+    const auto tone = probe::makeSine (100.0, stretch * numStretches, sampleRate, 0.5f);
+    probe::Sound kick (2, stretch * numStretches);
+
+    for (int i = 0; i < kick.getNumSamples(); ++i)
+    {
+        const auto t = (double) (i % 24000) / sampleRate;
+        const auto value =
+            (float) (0.8 * std::exp (-t * 12.0) * std::sin (twoPi * (50.0 * t + 40.0 * (1.0 - std::exp (-t * 30.0)) / 30.0)));
+        kick.setSample (0, i, value);
+        kick.setSample (1, i, value);
+    }
+
+    const auto largestStep = [] (const probe::Sound& sound)
+    {
+        auto largest = 0.0;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 1; i < sound.getNumSamples(); ++i)
+                largest = std::max (largest, (double) std::abs (sound.getSample (channel, i) - sound.getSample (channel, i - 1)));
+
+        return largest;
+    };
+
+    const probe::Sound* inputs[] = { &tone, &kick };
+
+    for (const auto* in : inputs)
+    {
+        const auto playedWith = [in] (int switches)
+        {
+            probe::Device device (Vinyl::info);
+            device.values = clean ({ { "bassMono", switches == 2 ? 20.0f : 100.0f }, { "mix", 0.3f } });
+            device.prepare (sampleRate, 480);
+            probe::Sound out;
+
+            for (int part = 0; part < numStretches; ++part)
+            {
+                if (switches == 0)
+                    device.values[Vinyl::bassMono] = part % 2 == 0 ? 100.0f : 20.0f;
+
+                const auto played = device.played (probe::getPart (*in, part * stretch, stretch), 480);
+                out = part == 0 ? played : probe::join (out, played);
+            }
+
+            return out;
+        };
+
+        const auto switched = largestStep (playedWith (0)), held = std::max (largestStep (playedWith (1)), largestStep (playedWith (2)));
+        const auto raised = 20.0 * std::log10 (switched / held);
+        INFO (std::string (in == &tone ? "the tone" : "the kick") << ": its largest step " << raised << " dB over Bass Mono's held");
+        CHECK (raised < 0.5);
+    }
+}
+
+TEST_CASE ("The vinyl's copy for its mix rests at 100 % and comes back without a click as the Mix leaves it")
+{
+    // At 100 % its runner never reads the copy, so the vinyl doesn't make it: an all-pass, a second pair of half-band filters
+    // and a read of a delay line a sample, each side. As the Mix leaves 100 % the copy is made again from what came in lately,
+    // so that its first samples are as if it had never stopped: what comes out is what comes out of a vinyl whose Mix was a
+    // hair under 100 %, its copy made all along.
+    namespace probe = phazite::test::probe;
+    constexpr double sampleRate = 48000.0;
+    const auto in = probe::makeNoise (48000, 9, 0.5f);
+
+    const auto playedFrom = [&in] (float start)
+    {
+        probe::Device device (Vinyl::info);
+        device.values = clean ({ { "bassMono", 100.0f }, { "mix", start } });
+        device.prepare (sampleRate, 480);
+        auto out = device.played (probe::getPart (in, 0, 24000), 480);
+        device.values[Vinyl::mix] = 0.5f; // by hand: the runner glides there over the next block
+        return probe::join (out, device.played (probe::getPart (in, 24000, 24000), 480));
+    };
+
+    const auto rested = playedFrom (1.0f), madeAllAlong = playedFrom (0.99999f);
+    const auto under = probe::inDecibels (probe::getLargestDifference (rested, madeAllAlong) / probe::getPeak (madeAllAlong));
+    INFO ("the two differ by " << under << " dB under the sound");
+    CHECK (under < -80.0);
+}
+
+TEST_CASE ("Finding 3: the vinyl's copy for its mix goes on a second at 100 %: a Mix moved through it and back never makes it again")
+{
+    // As the Mix left 100 % the copy was made again at once from what came in lately, its latency's worth and 256 samples
+    // more, in the block it left in: automation moving the Mix through 100 % and back made it again each time. It now goes
+    // on for a second after the Mix reaches 100 % and rests only then; made again after a longer rest, it comes back as if it
+    // had never stopped, at 192 kHz as at 48.
+    namespace probe = phazite::test::probe;
+
+    for (const auto sampleRate : { 48000.0, 192000.0 })
+    {
+        CAPTURE (sampleRate);
+        const auto seconds = [sampleRate] (double s) { return (int) (s * sampleRate); };
+        const auto in = probe::makeNoise (seconds (2.6), 9, 0.5f);
+
+        // The Mix at 50 %, then at 100 % for half a second and back, then for a second and a half and back; or, made all
+        // along, a hair under 100 % where it is at 100 %.
+        const auto playedWith = [&] (float full, std::vector<int>* rebuilds)
+        {
+            probe::Device device (Vinyl::info);
+            device.values = clean ({ { "bassMono", 100.0f }, { "mix", 0.5f } });
+            device.prepare (sampleRate, 480);
+            auto& vinyl = dynamic_cast<Vinyl&> (device.getRunner().getProcessor());
+            probe::Sound out;
+            auto at = 0;
+
+            for (const auto& [mix, length] : { std::pair { 0.5f, 0.2 }, { full, 0.5 }, { 0.5f, 0.2 }, { full, 1.5 }, { 0.5f, 0.2 } })
+            {
+                device.values[Vinyl::mix] = mix;
+                const auto played = device.played (probe::getPart (in, at, seconds (length)), 480);
+                out = at == 0 ? played : probe::join (out, played);
+                at += seconds (length);
+
+                if (rebuilds != nullptr)
+                    rebuilds->push_back (vinyl.getDryRebuilds());
+            }
+
+            return out;
+        };
+
+        std::vector<int> rebuilds;
+        const auto rested = playedWith (1.0f, &rebuilds), madeAllAlong = playedWith (0.99999f, nullptr);
+        CHECK (rebuilds == std::vector<int> { 1, 1, 1, 1, 2 }); // at its start; and after resting, not after half a second
+        const auto under = probe::inDecibels (probe::getLargestDifference (rested, madeAllAlong) / probe::getPeak (madeAllAlong));
+        INFO ("the two differ by " << under << " dB under the sound");
+        CHECK (under < -80.0);
+    }
 }
 
 TEST_CASE ("The vinyl's wow swings the pitch once a turn, with a quarter as much again at twice the rate, as deep as it says")

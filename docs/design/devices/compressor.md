@@ -74,20 +74,36 @@ The characters:
 - **VCA** hears the average level (RMS over about 10 ms, scaled so that a steady sine reads as its peak), so short
   peaks pass.
 - **FET** hears each peak, and adds odd harmonics the further it turns down: a tenth of Drive's range once it turns
-  down 12 dB.
+  down 12 dB. How far it turns down is followed smoothly (over about 20 ms), sample by sample, so the colour plays the
+  same however the song's blocks are cut.
 - **Opto** hears the average, and lets go in two stages: at the Release for the first half of the way back, then six
   times slower, and up to twelve times slower again after it has held more than 3 dB of reduction for a while.
 - **Tube** hears the average, and adds even harmonics the further it turns down, as FET adds odd ones.
 
 Drive pushes what goes out up to 18 dB into a curve and takes the same gain back off: `tanh` for Clean and FET, with
 a share of `tanh` squared for VCA (a little), Opto (more) and Tube (the most), which adds even harmonics and whose DC
-is filtered out. The curve plays at twice the sample rate by its antiderivative (first-order antiderivative
-anti-aliasing: Parker, Zavalishin and Le Bivic, 2016), so that its harmonics don't fold back as aliasing and what it
-leaves straight stays level to 20 kHz. While nothing drives the sound it takes a plain delay of the same length, and
-the two paths cross-fade over 64 samples. When the mix is below 100 %, the copy of what came in goes through the same
-filters, so that the two meet in phase.
+is filtered out. Over the first tenth of Drive's travel (1.8 dB into the curve) the curve fades in from a straight
+line, so the sound never jumps as Drive leaves 0: the curve came in whole at once, which took a full-scale peak 2.4 dB
+down. FET's and Tube's colour fades its curve in over their first 3 dB of reduction (a tenth of a dB of reduction
+colours a hair), and from there on they have the whole curve, as they were tuned by ear: at 6 dB of reduction their
+harmonics are the whole curve's, within half a decibel. The curve plays at twice the sample rate by its
+antiderivative (first-order antiderivative anti-aliasing: Parker, Zavalishin and Le Bivic, 2016), so that its
+harmonics don't fold back as aliasing and what it leaves straight stays level to 20 kHz; then a first-order all-pass
+makes its delay up to a whole 6 samples (it is 5.137 at low frequencies), as JUCE's oversampler makes up its own.
+While the curve plays no part (FET with nothing turned down, say), the straight line alone plays. While nothing drives
+the sound it takes a plain delay of the same length, and the two paths cross-fade over 1.5 ms, once the drive has
+played 256 samples from silence for what its filters start with to ring out, or 150 ms for a curve with even
+harmonics (VCA, Opto and Tube) whose curve is already in, for the filter that takes their offset out to settle: so that
+no offset comes in with it, a thump, as Duck turns to Compress with Drive up. Drive leaving 0 starts with its curve out,
+so the filter settles as the curve comes in, and the drive is heard after 256 samples on any character. A change of
+character while the drive is heard warms the new curve up beside the one playing, on the same sound (256 samples, or
+150 ms for one with even harmonics), and the sound then fades from one to the other over 1.5 ms: it stays driven all
+through, its level moving no more than either curve's, and no offset comes in. The copy of what came in for the mix goes through the same
+filters while the drive plays (and, where the sound then takes Duck's latency, the same delay after them, as it does
+while ducking), so that the two meet in phase at any mix, from the moment the Mix leaves 100 %.
 
-Compressing, the device reports the drive's delay as its latency, a few samples, driven or not.
+Compressing, the device reports the drive's delay as its latency, 6 samples, driven or not, and the driven sound comes
+exactly that late.
 
 ### Duck
 
@@ -168,12 +184,6 @@ Mix is the knob on the device's row in the Devices view.
 - The history takes one reading at each refresh of the display, so a fast attack or release draws as a straight line.
 - A drag of the threshold's line starts from the Threshold as modulation plays it, and sets that as the value by
   hand.
-- Drive jumps as it leaves 0: the curve goes from a straight line to `tanh` at once
-  ([known bug 32](../../known-bugs.md)).
-- A compressor set to Duck that automation switches to Compress combs the top octave at a Mix below 100 %
-  ([known bug 33](../../known-bugs.md)).
-- The driven sound comes a fraction of a sample later than the latency reported
-  ([known bug 43](../../known-bugs.md)).
 
 ## In the code
 

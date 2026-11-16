@@ -2,6 +2,7 @@
 // The building blocks of Phazite's devices' DSP (src/devices/dsp/): filters, comb filters, the filter types every Phazite
 // filter offers, envelopes, oscillators, random numbers, delay lines.
 #include "TestHelpers.h"
+#include "devices/dsp/AlignedShaper.h"
 #include "devices/dsp/CombFilter.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
@@ -11,6 +12,7 @@
 #include "devices/dsp/Oscillators.h"
 #include "devices/dsp/Random.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -878,4 +880,38 @@ TEST_CASE ("Decibels, saturation and note frequencies")
     CHECK (dsp::noteToFrequency (69.0) == doctest::Approx (440.0));
     CHECK (dsp::noteToFrequency (81.0) == doctest::Approx (880.0));
     CHECK (dsp::noteToFrequency (60.0) == doctest::Approx (261.6256).epsilon (0.0001));
+}
+
+TEST_CASE ("A whole number of samples made up from any delay leaves the all-pass a part it is stable at, and delays by it")
+{
+    // Made up to the next whole sample less a thousandth, a delay a hair over a whole number left a part a hair under 0,
+    // where the all-pass's coefficient is over 1 and it runs away. Made up by half a sample to one and a half, every delay
+    // leaves the all-pass a part it plays steadily, its delay at 0 Hz that part.
+    for (auto latency = 5.0f; latency < 7.0f; latency += 0.0125f)
+    {
+        CAPTURE (latency);
+        const auto whole = dsp::AlignedShaper::getWholeSamples (latency);
+        const auto part = (float) whole - latency;
+        CHECK (part >= dsp::FractionalDelay::shortest - 1.0e-4f);
+        CHECK (part < dsp::FractionalDelay::longest + 1.0e-4f);
+
+        dsp::FractionalDelay delay;
+        delay.setDelay (std::clamp (part, dsp::FractionalDelay::shortest, dsp::FractionalDelay::longest - 1.0e-6f));
+        auto weight = 0.0, moment = 0.0, last = 0.0;
+
+        for (int n = 0; n < 256; ++n)
+        {
+            const auto y = (double) delay.process (n == 0 ? 1.0f : 0.0f);
+            weight += y;
+            moment += n * y;
+            last = std::abs (y);
+        }
+
+        CHECK (weight == doctest::Approx (1.0).epsilon (1.0e-4));
+        CHECK (moment / weight == doctest::Approx ((double) part).epsilon (1.0e-3));
+        CHECK (last < 1.0e-9);
+    }
+
+    // The shaper's own: 5.137 samples, made up to 6.
+    CHECK (dsp::AlignedShaper::getLatencySamples() == 6);
 }

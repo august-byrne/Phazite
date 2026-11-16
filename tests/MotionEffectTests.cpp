@@ -4,17 +4,29 @@
 // as an ensemble, feedback that rings without running away, the flanger's sign and the chorus's voices turning without a
 // click, Safe Bass (the phaser's and the flanger's split, as their runners play them), and their LFOs in time with the song,
 // the same at each render. The chorus's voices, their phase, spread and shimmer, and its split, are in ChorusTests.cpp.
+#include "DspProbe.h"
 #include "MotionTestHelpers.h"
+#include "PlaybackConditions.h"
 #include "TestHelpers.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Filters.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
+#include "devices/motion/SafeBass.h"
+#include "engine/core/Engine.h"
+#include "engine/nodes/DeviceNode.h"
 
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1010,4 +1022,335 @@ TEST_CASE ("The chorus's Safe Bass leaves what is below it as it was, and its LF
     play (chorus, values, makeNoise (blockSize), nullptr, { .playing = true, .startBeat = 2.0 });
     const auto perBlock = blockSize / rate * 2.0 / 4.0; // a cycle is 4 beats; 2 beats a second
     CHECK (chorus.getPhase().get() == doctest::Approx (0.5 + perBlock).epsilon (0.001));
+}
+
+TEST_CASE ("The sweeping effects and the EQ play what a render plays after a loop goes round, a start elsewhere and a sleep")
+{
+    // Their control steps (8 samples, the EQ's 32) were counted from their last reset, so a loop's second pass, playback
+    // started off the steps' grid and a device that slept on silence stepped elsewhere than a render of the same song,
+    // which starts at 0 and never sleeps. Counted from the song's place while it plays, they step where the render does:
+    // once what each holds of before the jump has rung out, what it plays is the render's. Every continuous parameter
+    // moves by automation, in time with the song's LFOs.
+    namespace probe = phazite::test::probe;
+    constexpr int songLength = 65536, settle = 16384, compared = 8192, block = 512;
+    const auto song = probe::makeNoise (songLength, 41, 0.5f);
+
+    const auto makeDevice = [] (const devices::DeviceInfo& info)
+    {
+        auto device = std::make_unique<probe::Device> (info);
+
+        if (device->has ("sync"))
+            device->set ("sync", 1.0f);
+
+        device->prepare (rate, block);
+
+        for (size_t i = 0; i < info.parameters.size(); ++i)
+        {
+            const auto& parameter = info.parameters[i];
+
+            if (parameter.unit == devices::Unit::choice || parameter.unit == devices::Unit::toggle)
+                continue;
+
+            const auto range = devices::getRange (parameter);
+            const auto place = range.convertTo0to1 (device->values[i]);
+            device->automate ((int) i, device->values[i], range.convertFrom0to1 (place < 0.5f ? place + 0.1f : place - 0.1f),
+                              2 * songLength);
+        }
+
+        return device;
+    };
+
+    // Plays the song's stretch from one sample to another, from where the device's song is (moved there first).
+    const auto playStretch = [&song] (probe::Device& device, int from, int to)
+    {
+        device.moveTo (from);
+        return device.played (probe::getPart (song, from, to - from), block);
+    };
+
+    struct Case
+    {
+        const char* what;
+        std::vector<std::pair<int, int>> stretches; // played one after another, each from a place of the song
+        int compareFrom;
+    };
+
+    const Case cases[] = {
+        { "a loop's second pass", { { 0, 40000 }, { 12345, songLength } }, 12345 + settle },
+        { "a start off the grid", { { 1003, songLength } }, 1003 + settle },
+        { "a wake from sleep", { { 0, 20011 }, { 24016, songLength } }, 24016 + settle },
+    };
+
+    for (const auto* info : { &Phaser::info, &Flanger::info, &Chorus::info, &devices::Equalizer::info })
+    {
+        auto rendered = makeDevice (*info);
+        const auto reference = rendered->played (song, block);
+        const auto peak = probe::getPeak (reference);
+
+        for (const auto& each : cases)
+        {
+            auto device = makeDevice (*info);
+            probe::Sound last;
+
+            for (const auto& [from, to] : each.stretches)
+                last = playStretch (*device, from, to);
+
+            // The last stretch's samples from compareFrom, against the render's at the same places.
+            const auto lastFrom = each.stretches.back().first;
+            const auto difference = probe::getLargestDifference (probe::getPart (last, each.compareFrom - lastFrom, compared),
+                                                                 probe::getPart (reference, each.compareFrom, compared));
+            const auto under = probe::inDecibels (difference / peak);
+            INFO (std::string (info->name.data(), info->name.size())
+                  << ", " << std::string (each.what) << ": " << under << " dB under its sound");
+            CHECK (under < -90.0);
+        }
+    }
+}
+
+namespace
+{
+namespace engine = phazite::engine;
+using phazite::test::PlaybackCondition;
+
+// An instrument that plays a steady level, 0.5 on both sides, whatever notes it is given: what an effect after it does to a
+// level, sample by sample, is what comes out.
+class SteadyLevel final : public devices::Processor
+{
+public:
+    static inline const devices::DeviceInfo info { .typeID = "testSteadyLevel",
+                                                   .name = "Steady Level",
+                                                   .kind = devices::DeviceKind::instrument };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const devices::ProcessContext& context) override
+    {
+        for (int channel = 0; channel < context.numChannels; ++channel)
+            juce::FloatVectorOperations::fill (context.channels[channel], 0.5f, context.numSamples);
+    }
+};
+
+// A glide: an effect, a value set by hand that it glides from, and the one it glides to.
+struct Glide
+{
+    const char* what;
+    const devices::DeviceInfo* info;
+    std::function<std::unique_ptr<devices::Processor>()> make;
+    const char* parameter;
+    float from, to;
+};
+
+int indexOf (const devices::DeviceInfo& info, std::string_view id)
+{
+    for (size_t i = 0; i < info.parameters.size(); ++i)
+        if (info.parameters[i].id == id)
+            return (int) i;
+
+    FAIL ("no such parameter");
+    return -1;
+}
+
+// Phazite's engine playing a track at a condition: the steady level into the effect, a note held all along, into the master.
+// What it plays, in the condition's blocks, the glide's value set as the block at changeAt starts (a block starts there).
+struct GlidePlayer
+{
+    const PlaybackCondition& condition;
+    const Glide& glide;
+    engine::Engine player;
+    std::shared_ptr<engine::DeviceNode> effect;
+
+    GlidePlayer (const PlaybackCondition& c, const Glide& g, std::optional<engine::Plan::BeatRange> loop)
+        : condition (c),
+          glide (g)
+    {
+        auto plan = std::make_unique<engine::Plan>();
+        plan->tempo = engine::TempoMap ({ { 0.0, condition.getTempo() } }, { { 0.0, 4, 4 } }, condition.getSampleRate());
+        plan->maximumBlockSize = condition.blockSize;
+        plan->loop = loop;
+        engine::Plan::Strip track, master;
+        track.id = 1;
+
+        for (auto* strip : { &track, &master })
+        {
+            strip->state = std::make_shared<engine::StripState>();
+            strip->state->prepare (condition.getSampleRate(), condition.blockSize);
+        }
+
+        track.notes = std::make_shared<const engine::NoteSequence> (std::vector<engine::NoteSequence::Note> { { 0.0, 100000.0, 60, 0.8f } },
+                                                                    std::vector<engine::NoteSequence::Control> {});
+        auto level = std::make_shared<engine::DeviceNode> (SteadyLevel::info, std::make_unique<SteadyLevel>());
+        effect = std::make_shared<engine::DeviceNode> (*glide.info, glide.make());
+
+        for (auto* node : { level.get(), effect.get() })
+            node->getRunner().prepare (condition.getSampleRate(), condition.blockSize);
+
+        if (glide.info != &devices::Equalizer::info) // the sweeping effects stand still: what moves is the glide
+            effect->setValue (indexOf (*glide.info, "depth"), 0.0f);
+
+        effect->setValue (indexOf (*glide.info, glide.parameter), glide.from);
+        track.devices.push_back ({ std::move (level), {} });
+        track.devices.push_back ({ effect, {} });
+        track.hasInstrument = true;
+        master.inputs.push_back ({ 0, nullptr });
+        plan->strips.push_back (std::move (track));
+        plan->strips.push_back (std::move (master));
+        player.prepare (condition.getSampleRate(), condition.blockSize);
+        player.setPlan (std::move (plan));
+    }
+
+    juce::AudioBuffer<float> play (int numSamples, std::int64_t changeAt)
+    {
+        juce::AudioBuffer<float> played (2, numSamples);
+        played.clear();
+
+        for (int done = 0; done < numSamples;)
+        {
+            if (done == changeAt)
+                effect->setValue (indexOf (*glide.info, glide.parameter), glide.to);
+
+            auto length = std::min (condition.blockSize, numSamples - done);
+
+            if (done < changeAt)
+                length = std::min (length, (int) (changeAt - done));
+
+            float* channels[] = { played.getWritePointer (0, done), played.getWritePointer (1, done) };
+            player.process (channels, 2, length);
+            done += length;
+        }
+
+        return played;
+    }
+};
+
+// The largest change from one sample to the next, on either side, over a stretch.
+float getLargestStep (const juce::AudioBuffer<float>& sound, int from, int to)
+{
+    auto largest = 0.0f;
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (auto i = std::max (1, from); i < std::min (to, sound.getNumSamples()); ++i)
+            largest = std::max (largest, std::abs (sound.getSample (channel, i) - sound.getSample (channel, i - 1)));
+
+    return largest;
+}
+
+bool areSame (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+{
+    if (a.getNumSamples() != b.getNumSamples())
+        return false;
+
+    for (int channel = 0; channel < 2; ++channel)
+        if (std::memcmp (a.getReadPointer (channel), b.getReadPointer (channel), sizeof (float) * (size_t) a.getNumSamples()) != 0)
+            return false;
+
+    return true;
+}
+} // namespace
+
+TEST_CASE (
+    "Finding 6: at every condition the sweeping effects and the EQ glide on through a loop and a count-in, no step beyond the glide's")
+{
+    // A control step that the song's jump cut short (a loop going round where its length isn't a whole number of steps, the
+    // song starting after a count-in, which plays as stopped) left a glide where it was going rather than where it had got
+    // to: the EQ's output gain, the chorus's copies' gains as one set of them fades to another and Safe Bass's fade
+    // jumped by what was left of the step. Played by Phazite's engine on a steady level, the effect standing still but for
+    // the glide (a value its runner doesn't glide, or one the device glides further), set going a few samples before the jump: what comes out moves no faster than the same glide does with nothing in its way, live and as a render. (Safe Bass fades at 5 Hz, under what is heard, so a steady level barely shows its fade: the check below follows it itself.)
+    const Glide glides[] = {
+        { "the phaser's Safe Bass turned on", &Phaser::info, [] { return std::unique_ptr<devices::Processor> (new Phaser()); }, "safeBass",
+          20.0f, 200.0f },
+        { "the flanger's Safe Bass turned on", &Flanger::info, [] { return std::unique_ptr<devices::Processor> (new Flanger()); },
+          "safeBass", 20.0f, 200.0f },
+        { "the chorus's Safe Bass turned on", &Chorus::info, [] { return std::unique_ptr<devices::Processor> (new Chorus()); }, "safeBass",
+          20.0f, 200.0f },
+        { "the chorus's voices turned from one to three a side", &Chorus::info,
+          [] { return std::unique_ptr<devices::Processor> (new Chorus()); }, "voices", 0.0f, 2.0f },
+        { "the EQ's output turned down", &devices::Equalizer::info,
+          [] { return std::unique_ptr<devices::Processor> (new devices::Equalizer()); }, "output", 0.0f, -12.0f },
+    };
+
+    phazite::test::atEveryCondition (
+        [&glides] (const PlaybackCondition& condition)
+        {
+            const auto sampleRate = condition.getSampleRate();
+            const auto after = (int) (0.06 * sampleRate); // what is compared, from where the glide is set going
+            const auto onGrid = [] (double samples) { return (std::int64_t) (samples / 32.0) * 32; };
+            const auto beatSamples = condition.getBeatSamples();
+
+            for (const auto& glide : glides)
+            {
+                CAPTURE (std::string (glide.what));
+
+                // The glide's own steepest step, set going on a step's first sample with nothing in its way.
+                const auto start = onGrid (0.25 * sampleRate);
+                const auto alone = GlidePlayer (condition, glide, std::nullopt).play ((int) start + after, start);
+                const auto ownStep = getLargestStep (alone, (int) start, (int) start + after);
+                REQUIRE (ownStep > 1.0e-5f); // the glide moves what comes out
+
+                // Round a loop from a sample on the grids' lines to one 4 samples past one: the glide set going half a step
+                // (of the sweeping effects' 8 samples) before the loop's end.
+                const auto loopStart = onGrid (0.5 * sampleRate), loopEnd = onGrid (sampleRate) + 4;
+                const engine::Plan::BeatRange loop { (double) loopStart / beatSamples, (double) loopEnd / beatSamples };
+                const auto played = [&] (bool asRender)
+                {
+                    GlidePlayer looping (condition, glide, loop);
+                    looping.player.setPlayingAsRender (asRender);
+                    looping.player.play();
+                    return looping.play ((int) (loopEnd + after), loopEnd - 4);
+                };
+
+                const auto live = played (false);
+                const auto loopStep = getLargestStep (live, (int) loopEnd - 4, (int) loopEnd - 4 + after);
+                INFO ("round the loop: a step of " << loopStep << ", the glide's own " << ownStep);
+                CHECK (loopStep <= 1.5f * ownStep + 1.0e-6f);
+                CHECK (areSame (live, played (true)));
+
+                // After a count-in of a bar to a place on the grids' lines: the glide set going on the first sample of the
+                // count-in's last sweeping step.
+                GlidePlayer counting (condition, glide, std::nullopt);
+                counting.player.locate ((double) onGrid (sampleRate) / beatSamples);
+                counting.player.play (true);
+                const auto countIn = std::llround (4.0 * beatSamples);
+                const auto setAt = countIn % 8 != 0 ? countIn - countIn % 8 : countIn - 8;
+                const auto afterCountIn = counting.play ((int) (countIn + after), setAt);
+                const auto countInStep = getLargestStep (afterCountIn, (int) setAt, (int) setAt + after);
+                INFO ("after the count-in: a step of " << countInStep << ", the glide's own " << ownStep);
+                CHECK (countInStep <= 1.5f * ownStep + 1.0e-6f);
+            }
+        });
+}
+
+TEST_CASE ("Finding 6: Safe Bass's fade goes on from where a step cut short by the song's jump got to")
+{
+    // Its fade (at 5 Hz, under what is heard, so that a steady level barely shows it) went on from where the step cut short
+    // was going: a jump of what was left of the step. On the song's grid of steps (dsp/ControlGrid.h), as the sweeping effects
+    // play it: turned on, a step half played, then the song jumps to a sample off the step's line.
+    devices::SafeBass bassSplit;
+    bassSplit.prepare (rate);
+    bassSplit.startBlock (devices::SafeBass::lowest); // off, at once
+    devices::dsp::ControlGrid grid { 8 };
+    grid.startBlock (true, 4096);
+    bassSplit.startBlock (150.0f);
+
+    // A whole step, then half of the next.
+    auto last = 0.0f;
+
+    for (const auto samples : { 8, 4 })
+    {
+        if (grid.startsStep())
+            bassSplit.startStretch (grid.startStep(), grid.getReached());
+
+        last = bassSplit.getFadeAt (grid.getDone() + samples - 1);
+        grid.advance (samples);
+    }
+
+    const auto slope = bassSplit.getFadeAt (3) - bassSplit.getFadeAt (2); // a sample's step of the fade
+
+    // The song jumps; the next step starts from where the fade got to, and steps on as it did.
+    grid.startBlock (true, 4096 + 12 + 1000 + 3);
+    REQUIRE (grid.startsStep());
+    CHECK (grid.getReached() == doctest::Approx (0.5f));
+    bassSplit.startStretch (grid.startStep(), grid.getReached());
+    const auto first = bassSplit.getFadeAt (0);
+    INFO ("the fade got to " << last << " and went on at " << first << ", a sample's step being " << slope);
+    CHECK (std::abs ((first - last) - slope) < 0.01f * slope);
 }

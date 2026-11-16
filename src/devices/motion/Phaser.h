@@ -13,6 +13,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/SyncedLfo.h"
 
@@ -68,6 +69,12 @@ private:
 
     double sampleRate = 44100.0;
     dsp::SyncedLfo lfo;
+
+    // The song's grid of control steps (dsp/ControlGrid.h); each side's coefficients for the step under way, and whether Safe
+    // Bass splits the sound in it.
+    dsp::ControlGrid grid { controlStep };
+    std::array<dsp::FilterCoefficients, 2> stepCoefficients {};
+    bool stepSplits = false;
     std::array<std::array<dsp::Filter, maxNotches>, 2> sections {};
     SafeBass bassSplit;
     std::atomic<float> shownFeedback { 0.0f }; // for its tail, which the message thread asks for

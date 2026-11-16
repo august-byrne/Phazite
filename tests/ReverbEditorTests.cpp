@@ -105,3 +105,41 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     mouse.release();
     CHECK (valueOf ("decay") < 8.0f);
 }
+
+TEST_CASE ("Finding 1: a value changed costs the reverb's map its decays once, however often it paints or a pointer asks")
+{
+    // The map worked out the decay at each of its 40 pitches again for every point it placed: thousands of decay curves a
+    // paint, each hundreds to tens of thousands of line updates. Now it works out its 43 once a change, and paints from them.
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    phazite::ui::ReverbEditor editor (phazite::makeDeviceHandle (s, id));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    const auto paintAndAsk = [&editor]
+    {
+        auto& map = editor.getGraph();
+        juce::ignoreUnused (map.createComponentSnapshot (map.getLocalBounds()));
+        juce::ignoreUnused (editor.getDecayHandle(), editor.getDampingHandle(), editor.getPredelayHandle(), editor.getShownSeconds());
+    };
+
+    editor.refresh();
+    paintAndAsk();
+    const auto once = editor.getDecayLineUpdates();
+    CHECK (once > 0);
+    CHECK (once <= 43 * 2500);
+
+    paintAndAsk();
+    paintAndAsk();
+    CHECK (editor.getDecayLineUpdates() == once); // nothing changed: nothing worked out again
+
+    auto* decay = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("decay"));
+    REQUIRE (decay != nullptr);
+    decay->setValue (12.0, juce::sendNotificationSync);
+    editor.refresh();
+    paintAndAsk();
+    paintAndAsk();
+    CHECK (editor.getDecayLineUpdates() > once);
+    CHECK (editor.getDecayLineUpdates() - once <= 43 * 2500);
+}

@@ -113,6 +113,7 @@ void Flanger::reset()
     bassSplit.reset();
     lfo.reset();
     sign = 1.0f;
+    grid.reset();
 }
 
 void Flanger::process (const ProcessContext& block)
@@ -137,21 +138,35 @@ void Flanger::process (const ProcessContext& block)
     lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
                     block.beat, block.bars);
 
-    for (int start = 0; start < block.numSamples; start += controlStep)
+    // How far the copy lags as the block starts, for its editor.
+    for (int channel = 0; channel < numChannels; ++channel)
+        delays[(size_t) channel].set ((float) getSweptDelay (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0)));
+
+    // A control step at a time, on the song's grid of them (dsp/ControlGrid.h).
+    grid.startBlock (block.isPlaying, block.songSample);
+
+    for (int start = 0; start < block.numSamples;)
     {
-        const auto length = std::min (controlStep, block.numSamples - start);
-        sign += std::clamp (targetSign - sign, -signStep, signStep);
-        const auto splitting = bassSplit.startStretch (length);
+        if (grid.startsStep())
+        {
+            const auto stepLength = grid.startStep();
+            sign += std::clamp (targetSign - sign, -signStep, signStep);
+            stepSplits = bassSplit.startStretch (stepLength, grid.getReached());
+
+            for (int channel = 0; channel < numChannels; ++channel)
+            {
+                const auto milliseconds = getSweptDelay (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0));
+                combs[(size_t) channel].setTarget (makeComb (values, milliseconds, sign, sampleRate), stepLength);
+            }
+        }
+
+        const auto length = grid.take (block.numSamples - start);
+        const auto done = grid.getDone();
+        const auto splitting = stepSplits;
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            const auto milliseconds = getSweptDelay (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0));
             auto& comb = combs[(size_t) channel];
-            comb.setTarget (makeComb (values, milliseconds, sign, sampleRate), length);
-
-            if (start == 0)
-                delays[(size_t) channel].set ((float) milliseconds);
-
             auto* samples = block.channels[channel] + start;
             auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
 
@@ -164,7 +179,7 @@ void Flanger::process (const ProcessContext& block)
 
                 if (splitting)
                 {
-                    const auto parts = bassSplit.split (channel, x, i);
+                    const auto parts = bassSplit.split (channel, x, done + i);
                     in = parts.through;
                     around = parts.around;
 
@@ -177,6 +192,8 @@ void Flanger::process (const ProcessContext& block)
         }
 
         lfo.advance (length);
+        grid.advance (length);
+        start += length;
     }
 
     shownPhase.set ((float) lfo.getPhase());

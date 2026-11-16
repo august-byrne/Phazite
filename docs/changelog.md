@@ -71,6 +71,27 @@ too. A line names the bug's number in that list.
   control grabbed before playback starts writes from where playback starts.
 - **Recording kept when a project goes:** closing a project, quitting, Save As and an untitled project's first save
   stop recording first, as Stop does, and keep the take; a take's audio and notes are placed by the take's own tempo.
+- **32 The compressor's Drive:** its curve fades in from a straight line over the first tenth of Drive's travel, and
+  FET's and Tube's colour over the first 3 dB of reduction (whole from there, as before), so neither the first touch
+  of Drive nor a colour taking hold makes the sound jump (2 dB before; 0.02 dB now). A change of character while the
+  drive is heard cross-fades from one curve to the other, and the colour follows the reduction sample by sample, so
+  it plays the same however the samples are cut into blocks.
+- **33 Duck switched to Compress:** a compressor made for Duck that automation switches to Compress keeps its dry copy
+  in phase with its driven sound at any Mix (12 dB down at 18 kHz before), and nothing is lost or played twice at
+  the switch.
+- **43 The compressor's latency:** its driven sound comes exactly as late as the latency it reports, 6 samples, made
+  up by an all-pass (`dsp::AlignedShaper`); it was 5.137 against 5.
+- **34 The Vinyl's Mix:** the copy for the mix takes the record's own linear path (its oversampling, its delay, and
+  Bass Mono's all-pass while Bass Mono is on), so a Mix below 100 % keeps its bass and its top octave: it lost 17 dB
+  at Bass Mono's frequency and up to 18 dB in the top octave. At 0 % only the phase is turned.
+- **74 A Multiband band's saturation** turned on or off fades over 1.5 ms against the plain delay, after the saturation
+  has settled, instead of dropping samples (an error as loud as the sound before; 66 dB under it now).
+- **75 The delay's echo and the reverb room's lines** are exactly as long as set (one sample long before: 2 % at
+  1 ms), and the room fades over its decay time, damped or not; the reverb editor's decay map follows each line's own
+  damping, within a tenth of the measured decay, and costs a fiftieth of what it did at long decays.
+- **134 The effects' control steps** (the Phaser, the Flanger, the Chorus and the EQ; the Synth's are still open) go
+  by the song's own grid (`dsp::ControlGrid`), so what they play no longer depends on how the samples are cut into
+  blocks, and a loop's second pass, a start anywhere and a wake from sleep play what an export plays.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

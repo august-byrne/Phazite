@@ -115,7 +115,6 @@ namespace
 
     constexpr auto parameters = makeParameters();
 
-    constexpr int stretch = 32;               // samples between updates of moving coefficients
     constexpr double smoothingSeconds = 0.02; // how long a parameter's change takes to settle, about
 
     bool isShelfOrBell (int type)
@@ -224,6 +223,7 @@ void Equalizer::reset()
     }
 
     outputGain = -1.0f;
+    grid.reset();
 }
 
 void Equalizer::update (Band& band, int index, std::span<const float> values, bool jump)
@@ -291,14 +291,31 @@ void Equalizer::process (const ProcessContext& block)
     const auto numChannels = std::min (block.numChannels, 2);
     const auto targetOutput = dsp::decibelsToGain (block.parameters[(size_t) outputParameter]);
 
-    for (int start = 0; start < block.numSamples; start += stretch)
+    // A stretch at a time, on the song's grid of them (dsp/ControlGrid.h): its bands move, and its output gain is worked out,
+    // as a stretch starts.
+    grid.startBlock (block.isPlaying, block.songSample);
+
+    for (int start = 0; start < block.numSamples;)
     {
-        const auto length = std::min (stretch, block.numSamples - start);
+        if (grid.startsStep())
+        {
+            grid.startStep();
+
+            for (int index = 0; index < numBands; ++index)
+                update (bands[(size_t) index], index, block.parameters, false);
+
+            // From where the last stretch's ramp reached: all the way, unless the song jumped in the middle of it.
+            const auto reached = grid.getReached();
+            outputFrom = outputGain < 0.0f ? targetOutput : reached >= 1.0f ? outputGain : outputFrom + (outputGain - outputFrom) * reached;
+            outputGain = isNear (outputFrom, targetOutput, 1.0e-5f) ? targetOutput : outputFrom + (targetOutput - outputFrom) * smoothing;
+        }
+
+        const auto length = grid.take (block.numSamples - start);
+        const auto done = grid.getDone(), stretchLength = grid.getStepLength();
 
         for (int index = 0; index < numBands; ++index)
         {
             auto& band = bands[(size_t) index];
-            update (band, index, block.parameters, false);
 
             for (int channel = 0; channel < numChannels; ++channel)
             {
@@ -316,16 +333,16 @@ void Equalizer::process (const ProcessContext& block)
         }
 
         // The output gain, ramped across the stretch.
-        const auto from = outputGain < 0.0f ? targetOutput : outputGain;
-        outputGain = isNear (from, targetOutput, 1.0e-5f) ? targetOutput : from + (targetOutput - from) * smoothing;
-
         for (int channel = 0; channel < numChannels; ++channel)
         {
             auto* data = block.channels[channel] + start;
 
             for (int i = 0; i < length; ++i)
-                data[i] *= from + (outputGain - from) * (float) (i + 1) / (float) length;
+                data[i] *= outputFrom + (outputGain - outputFrom) * (float) (done + i + 1) / (float) stretchLength;
         }
+
+        grid.advance (length);
+        start += length;
     }
 
     if (numChannels > 0)

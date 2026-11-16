@@ -3,13 +3,16 @@
 // and release times, input and makeup gains, stereo link, cuts, meters and characters, deaf to a sidechain; and ducking, under
 // its key or its own sound, its threshold and depth, its attack in a straight line, its hold from the hit and while the key
 // stays loud, its release and its curve, a new hit during the release, its key's cuts and Listen, and its meters.
+#include "DspProbe.h"
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/dynamics/Compressor.h"
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstddef>
+#include <functional>
 #include <type_traits>
 #include <vector>
 
@@ -1062,6 +1065,583 @@ TEST_CASE ("The compressor's drive, and FET's and Tube's colour, leave the trebl
             const auto decibels = levelOf (hertz) - reference;
             INFO ("character " << (int) character << ", " << hertz << " Hz: " << decibels << " dB against 1130 Hz");
             CHECK (std::abs (decibels) < 0.5);
+        }
+    }
+}
+
+TEST_CASE ("The compressor's drive fades its curve in from a straight line: its first touch, and FET's colour as it begins, don't jump")
+{
+    // The curve came in whole at the first touch of Drive (and as soon as FET or Tube turned down at all): tanh at unity gain,
+    // which takes a full-scale peak 2.4 dB down. Faded in over the drive's first tenth, a touch changes a hair.
+    const auto peakOf = [] (Compressor::Character character, float driven, const std::vector<curves::Point>& curve)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto values = getDefaults();
+        values[Compressor::character] = (float) character;
+        setCurve (values, curve);
+        values[Compressor::drive] = driven;
+        const auto sine = [] (int time, int)
+        { return toGain (-1.0f) * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 200.0 * time / testRate); };
+        auto played = play (compressor, values, 24000, sine)[0];
+        played.erase (played.begin(), played.begin() + 12000); // after the drive has glided to where it is set
+        const auto [lowest, highest] = std::minmax_element (played.begin(), played.end());
+        return 20.0 * std::log10 (std::max (-*lowest, *highest));
+    };
+
+    const auto straight = curves::findShape ("No Compression")->points;
+    const auto undriven = peakOf (Compressor::Character::clean, 0.0f, straight);
+
+    for (const auto driven : { 0.001f, 0.01f })
+    {
+        const auto step = peakOf (Compressor::Character::clean, driven, straight) - undriven;
+        INFO ("Drive at " << driven * 100.0f << " %: the peak " << step << " dB from where it is undriven");
+        CHECK (std::abs (step) < 0.05 * driven / 0.001f);
+    }
+
+    // Drive turned from 0 to a hair and back while a tone plays, a few blocks each: the drive comes in from a plain delay,
+    // which it plays exactly in step with, and goes again, without a sample out of place.
+    {
+        Compressor turned, plain;
+        turned.prepare (testRate, testBlockSize);
+        plain.prepare (testRate, testBlockSize);
+        auto values = getDefaults();
+        setCurve (values, straight);
+        auto touched = values;
+        touched[Compressor::drive] = 0.001f;
+        const auto tone = [] (int time, int)
+        { return toGain (-20.0f) * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 200.0 * time / testRate); };
+        auto largest = 0.0f;
+
+        // play() plays as many samples more as the latency each time: the tone goes on from where the last call left it.
+        const auto latency = Compressor::getDriveLatency();
+        const auto perCall = 3 * testBlockSize + latency + latency % 2;
+
+        for (int part = 0; part < 8; ++part)
+        {
+            const auto from = [&tone, part, perCall] (int time, int channel) { return tone (part * perCall + time, channel); };
+            const auto out = play (turned, part % 2 == 1 ? touched : values, 3 * testBlockSize, from)[0];
+            const auto expected = play (plain, values, 3 * testBlockSize, from)[0];
+
+            for (size_t i = 0; i < out.size(); ++i)
+                largest = std::max (largest, std::abs (out[i] - expected[i]));
+        }
+
+        const auto under = 20.0 * std::log10 (std::max (largest, 1.0e-12f) / toGain (-20.0f));
+        INFO ("turning the drive on and off moves the sound by " << under << " dB under it");
+        CHECK (under < -60.0);
+    }
+
+    // FET turning a peak 1 dB under full scale down by a third of a decibel: its colour, a hair of drive, colours a hair.
+    const auto gently = curves::makeCompression (-3.0f, 1.2f);
+    const auto colour = peakOf (Compressor::Character::fet, 0.0f, gently) - peakOf (Compressor::Character::clean, 0.0f, gently);
+    INFO ("FET against Clean: " << colour << " dB");
+    CHECK (std::abs (colour) < 0.15);
+}
+
+TEST_CASE ("The compressor's driven sound comes exactly as late as the latency it reports")
+{
+    // Its drive's filters and curve delay the lows 5.137 samples, and it reported 5: an all-pass makes the
+    // rest up to a whole 6, which the plain delay and the copy for the mix take too.
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        for (const auto character : { Compressor::Character::clean, Compressor::Character::fet, Compressor::Character::tube })
+        {
+            namespace probe = phazite::test::probe;
+            probe::Device device (Compressor::info);
+            setCurve (device.values, curves::findShape ("No Compression")->points);
+            device.values[Compressor::character] = (float) character;
+            device.values[Compressor::drive] = 0.5f;
+            device.prepare (rate, 512);
+            const auto latency = device.getLatencySamples();
+            CHECK (latency == Compressor::getDriveLatency());
+            const auto in = probe::makeNoiseBelow (rate / 16.0, 8192 + latency, rate, 6, 0.01f);
+            const auto out = device.played (in, 512);
+            const auto found = probe::findDelay (in, out, 0, latency + 64);
+            INFO ("character " << (int) character << " at " << rate << " Hz: it says " << latency << " and is " << found.samples
+                               << " late");
+            CHECK (std::abs (found.samples - latency) < 0.02);
+            CHECK (found.likeness > 0.99);
+        }
+    }
+}
+
+TEST_CASE ("A compressor made for Duck that automation switches to Compress, driven, meets the copy for its mix in phase")
+{
+    // Ducking, it is made with Duck's look-ahead as its latency; automation then has it compress, driven, at a mix below
+    // 100 %. Its sound went through the drive's filters and a delay for the rest of the latency, while the copy for the mix
+    // was only delayed: half and half, the two cancelled the highs. Now the copy goes the sound's way.
+    namespace probe = phazite::test::probe;
+
+    for (const auto rate : { 44100.0, 48000.0 })
+    {
+        for (const auto mix : { 0.5f, 0.25f })
+        {
+            for (const auto hertz : { 1000.0, 10000.0, 15000.0, 18000.0, 20000.0 })
+            {
+                probe::Device device (Compressor::info);
+                setCurve (device.values, curves::findShape ("No Compression")->points);
+                device.values[Compressor::mode] = (float) Compressor::Mode::duck;
+                device.prepare (rate, 480);
+                REQUIRE (device.getLatencySamples() > Compressor::getDriveLatency());
+
+                device.values[Compressor::mode] = (float) Compressor::Mode::compress;
+                device.values[Compressor::drive] = 0.5f;
+                device.values[Compressor::mix] = mix;
+                constexpr int numSamples = 19200;
+                const auto played = device.played (probe::makeSine (hertz, numSamples, rate, 0.001f), 480);
+                const auto decibels = probe::inDecibels (probe::getToneLevel (played, 0, hertz, rate, numSamples / 2) / 0.001);
+                INFO ("at " << rate << " Hz, mix " << mix << ", " << hertz << " Hz: " << decibels << " dB");
+                CHECK (std::abs (decibels) < 0.5);
+            }
+        }
+    }
+}
+
+namespace
+{
+// Plays a compressor in blocks, on both channels alike, with the values that valuesAt gives for each block's first sample,
+// and returns its left channel as it comes out (as late as its latency).
+std::vector<float> playInBlocks (Compressor& compressor, int numSamples, int blockSize, const std::function<float (int)>& input,
+                                 const std::function<const std::vector<float>&(int)>& valuesAt)
+{
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::vector<float> out;
+    out.reserve ((size_t) numSamples);
+
+    for (int done = 0; done < numSamples; done += blockSize)
+    {
+        const auto length = std::min (blockSize, numSamples - done);
+
+        for (int i = 0; i < length; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                buffer.setSample (channel, i, input (done + i));
+
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = length;
+        block.parameters = valuesAt (done);
+        compressor.process (block);
+        out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + length);
+    }
+
+    return out;
+}
+
+// A tone's level, as an amplitude, over a stretch of a sound.
+double toneLevelIn (const std::vector<float>& sound, int from, double hertz, double rate)
+{
+    return getToneLevel (sound, (size_t) from, sound.size(), hertz, rate);
+}
+} // namespace
+
+TEST_CASE ("A compressor switched between Duck and Compress at a Mix below 100 % plays its copy for the mix on: nothing lost or again")
+{
+    // Duck's copy for the mix came straight from one line, as late as its latency; Compress's from the drive's line and then a
+    // second for the rest of Duck's latency, which ducking never filled. Switched to Compress while it played, the copy played
+    // what that second line held (silence, or what it held when it last compressed) for 10 ms, and the samples on their way
+    // were never played. Neither turning anything down nor driving: what comes out is what came in, as late as the latency.
+    namespace probe = phazite::test::probe;
+
+    for (const auto preparedToDuck : { true, false })
+    {
+        probe::Device device (Compressor::info);
+        setCurve (device.values, curves::findShape ("No Compression")->points);
+        device.values[Compressor::depth] = 0.0f;
+        device.values[Compressor::mix] = 0.5f;
+        device.values[Compressor::mode] = (float) (preparedToDuck ? Compressor::Mode::duck : Compressor::Mode::compress);
+        device.prepare (testRate, 480);
+        const auto latency = device.getLatencySamples();
+        const auto in = probe::makeNoise (480 * 30, 17, 0.25f);
+        probe::Sound out;
+
+        for (int part = 0; part < 6; ++part)
+        {
+            const auto ducks = (part % 2 == 0) == preparedToDuck;
+            device.values[Compressor::mode] = (float) (ducks ? Compressor::Mode::duck : Compressor::Mode::compress);
+            const auto played = device.played (probe::getPart (in, part * 2400, 2400), 480);
+            out = part == 0 ? played : probe::join (out, played);
+        }
+
+        auto largest = 0.0;
+
+        for (int i = latency; i < out.getNumSamples(); ++i)
+            largest = std::max (largest, (double) std::abs (out.getSample (0, i) - in.getSample (0, i - latency)));
+
+        INFO ("prepared to " << std::string (preparedToDuck ? "duck" : "compress") << ": " << probe::inDecibels (largest / 0.25)
+                             << " dB under the sound off what came in");
+        CHECK (largest < 1.0e-5);
+    }
+}
+
+TEST_CASE ("FET's and Tube's colour at a working reduction is the whole curve, as they were tuned by ear, faded in from 0 dB")
+{
+    // Their colour adds up to a tenth of Drive's travel, all of it inside the drive's fade of its curve from a straight line,
+    // so at 6 dB of reduction they had half the curve, where they were tuned with all of it. Their colour's curve now comes in
+    // over their first 3 dB of reduction: at 6 dB, the harmonics are the whole curve's, which the curve's formula gives for the
+    // level going into it, at the drive their colour adds.
+    const auto ratioOf = [] (float even, double gain, double amplitude, int harmonic)
+    {
+        // f (g a sin x) / g, f the curve: tanh, with a share of tanh squared.
+        constexpr int points = 8192;
+        std::complex<double> fundamental, other;
+
+        for (int k = 0; k < points; ++k)
+        {
+            const auto x = juce::MathConstants<double>::twoPi * k / points;
+            const auto t = std::tanh (gain * amplitude * std::sin (x));
+            const auto y = (t + (double) even * t * t) / gain;
+            fundamental += y * std::polar (1.0, -x);
+            other += y * std::polar (1.0, -harmonic * x);
+        }
+
+        return std::abs (other) / std::abs (fundamental);
+    };
+
+    struct Colour
+    {
+        Compressor::Character character;
+        float even;
+        int harmonic;                     // FET's odd harmonics, Tube's even ones
+        Compressor::Character uncoloured; // hearing as it does, with no colour: Clean for FET, VCA for Tube
+    };
+
+    for (const auto& colour : { Colour { Compressor::Character::fet, 0.0f, 3, Compressor::Character::clean },
+                                Colour { Compressor::Character::tube, 0.3f, 2, Compressor::Character::vca } })
+    {
+        CAPTURE ((int) colour.character);
+        constexpr double hertz = 200.0;
+        constexpr int numSamples = 96000;
+        const auto sine = [] (int time) { return 0.9f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * time / testRate); };
+
+        // Turning down about 6 dB, slowly, so that the gain hardly moves within a cycle.
+        auto values = getDefaults();
+        setCurve (values, curves::makeCompression (-10.0f, 4.0f));
+        values[Compressor::attack] = 200.0f;
+        values[Compressor::release] = 2000.0f;
+        const auto played = [&] (Compressor::Character character, float& reduction)
+        {
+            values[Compressor::character] = (float) character;
+            Compressor compressor;
+            compressor.prepare (testRate, testBlockSize);
+            const auto out =
+                playInBlocks (compressor, numSamples, testBlockSize, sine, [&values] (int) -> const std::vector<float>& { return values; });
+            compressor.getReductionMeter().take();
+            playInBlocks (
+                compressor, testBlockSize, testBlockSize, [&sine] (int t) { return sine (numSamples + t); },
+                [&values] (int) -> const std::vector<float>& { return values; });
+            reduction = compressor.getReductionMeter().take();
+            return out;
+        };
+
+        auto reduction = 0.0f, cleanReduction = 0.0f;
+        const auto coloured = played (colour.character, reduction);
+        const auto clean = played (colour.uncoloured, cleanReduction);
+        INFO ("it turns down " << reduction << " dB");
+        REQUIRE (reduction > 4.0f);
+        REQUIRE (reduction < 12.0f);
+        CHECK (cleanReduction == doctest::Approx (reduction).epsilon (0.01)); // the same ear, the same reduction
+
+        const auto from = numSamples * 3 / 4;
+        const auto measured =
+            toneLevelIn (coloured, from, hertz * colour.harmonic, testRate) / toneLevelIn (coloured, from, hertz, testRate);
+        const auto ripple = toneLevelIn (clean, from, hertz * colour.harmonic, testRate) / toneLevelIn (clean, from, hertz, testRate);
+        const auto drive = std::pow (10.0, 0.1 * std::min (1.0, (double) reduction / 12.0) * 18.0 / 20.0);
+        const auto expected = ratioOf (colour.even, drive, toneLevelIn (clean, from, hertz, testRate), colour.harmonic);
+        const auto off = 20.0 * std::log10 (measured / expected);
+        INFO ("at " << reduction << " dB of reduction, harmonic " << colour.harmonic << ": " << 20.0 * std::log10 (measured)
+                    << " dB under the fundamental, the whole curve's " << 20.0 * std::log10 (expected) << " (" << off
+                    << " dB off), Clean's " << 20.0 * std::log10 (ripple));
+        CHECK (ripple < 0.1 * measured); // the gain's own ripple is no part of it
+        CHECK (std::abs (off) < 0.5);
+    }
+}
+
+TEST_CASE ("A driven compressor's copy for its mix is ready as the Mix leaves 100 %: no step")
+{
+    // At 100 % the copy went through the drive's filters not at all; as the Mix left it they started from silence, while the
+    // drive was heard whole, and the copy came in near nothing as the runner raised it. A quiet tone, which the curve leaves
+    // straight, comes out as the drive plays it at any mix: what comes out with the Mix moving is what comes out at 100 %.
+    namespace probe = phazite::test::probe;
+    const auto in = probe::makeSine (1000.0, 48000, testRate, 0.01f);
+
+    const auto playedWith = [&in] (bool moves)
+    {
+        probe::Device device (Compressor::info);
+        setCurve (device.values, curves::findShape ("No Compression")->points);
+        device.values[Compressor::drive] = 0.5f;
+        device.prepare (testRate, 480);
+        auto out = device.played (probe::getPart (in, 0, 9600), 480);
+
+        if (moves)
+            device.automate (Compressor::mix, 1.0f, 0.5f, 4800);
+
+        return probe::join (out, device.played (probe::getPart (in, 9600, 38400), 480));
+    };
+
+    const auto moving = playedWith (true), still = playedWith (false);
+    const auto under = probe::inDecibels (probe::getLargestDifference (moving, still) / 0.01);
+    INFO ("with the Mix moving, it differs by " << under << " dB under the tone");
+    CHECK (under < -60.0);
+}
+
+TEST_CASE ("A drive that starts again with its curve already in brings no offset in with it")
+{
+    // Tube's even harmonics leave an offset, which a 10 Hz filter takes out of what the curve adds. Started again from silence
+    // (ducking switched to compressing, or a change of character) with Drive up, that filter had taken out only a part of the
+    // offset by the time the drive was faded in: a thump. The mean of what comes out after the change, over each 200 ms (forty
+    // cycles of the tone, which leave nothing of it, and long against a fade's few milliseconds).
+    const auto offsetAfter = [] (bool fromDuck)
+    {
+        auto compressing = getDefaults();
+        setCurve (compressing, curves::findShape ("No Compression")->points);
+        compressing[Compressor::drive] = 1.0f;
+        compressing[Compressor::character] = (float) Compressor::Character::tube;
+        auto before = compressing;
+
+        if (fromDuck)
+        {
+            before[Compressor::mode] = (float) Compressor::Mode::duck;
+            before[Compressor::depth] = 0.0f;
+        }
+        else
+        {
+            before[Compressor::character] = (float) Compressor::Character::fet;
+        }
+
+        Compressor compressor;
+
+        if (fromDuck)
+            compressor.takeValuesBeforePrepare (before);
+
+        compressor.prepare (testRate, 480);
+        constexpr int change = 48000, numSamples = 96000, window = 9600; // forty cycles of 2 kHz, 200 ms
+        const auto out = playInBlocks (
+            compressor, numSamples, 480,
+            [] (int t) { return 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 2000.0 * t / testRate); },
+            [&] (int sample) -> const std::vector<float>& { return sample < change ? before : compressing; });
+
+        auto largest = 0.0;
+
+        for (int from = change; from + window <= numSamples; from += window / 4)
+        {
+            auto sum = 0.0;
+
+            for (int i = from; i < from + window; ++i)
+                sum += out[(size_t) i];
+
+            largest = std::max (largest, std::abs (sum / window));
+        }
+
+        return 20.0 * std::log10 (std::max (largest, 1.0e-12));
+    };
+
+    for (const auto fromDuck : { true, false })
+    {
+        const auto offset = offsetAfter (fromDuck);
+        INFO (std::string (fromDuck ? "from ducking" : "from FET") << ": an offset as large as " << offset << " dB of full scale");
+        CHECK (offset < -70.0);
+    }
+}
+
+TEST_CASE ("The compressor's drive fades in over a time, at any rate, and plays the same in any blocks")
+{
+    // A quiet tone high in the band, where the drive's filters turn its phase from the plain delay's: from the first to the
+    // last sample where what comes out is neither the plain delay's nor the drive's is the fade between them, 1.5 ms (64
+    // samples at 44.1 kHz), not 64 samples at any rate (a third of a millisecond at 192 kHz).
+    for (const auto rate : { 48000.0, 192000.0 })
+    {
+        CAPTURE (rate);
+        const auto hertz = rate * 0.3;
+        const auto tone = [hertz, rate] (int t)
+        { return 0.001f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * t / rate); };
+        auto undriven = getDefaults();
+        setCurve (undriven, curves::findShape ("No Compression")->points);
+        auto driven = undriven;
+        driven[Compressor::drive] = 0.5f;
+        const auto change = ((int) (0.1 * rate) / 512 + 1) * 512, numSamples = (int) (0.2 * rate); // a block's start
+
+        const auto playedWith = [&] (int blockSize, bool turns, bool startsDriven)
+        {
+            Compressor compressor;
+            compressor.prepare (rate, 512);
+            return playInBlocks (compressor, numSamples, blockSize, tone, [&] (int sample) -> const std::vector<float>&
+                                 { return startsDriven || (turns && sample >= change) ? driven : undriven; });
+        };
+
+        const auto turned = playedWith (512, true, false), plain = playedWith (512, false, false), drive = playedWith (512, false, true);
+        auto first = -1, last = -1; // the first and the last sample that is neither
+
+        for (auto i = (size_t) change; i < turned.size(); ++i)
+        {
+            if (std::abs (turned[i] - plain[i]) > 2.0e-5f && std::abs (turned[i] - drive[i]) > 2.0e-5f)
+            {
+                first = first < 0 ? (int) i : first;
+                last = (int) i;
+            }
+        }
+
+        const auto fading = last - first + 1;
+
+        INFO ("it fades over " << fading << " samples, " << 1000.0 * fading / rate << " ms");
+        CHECK (fading > (int) (0.0012 * rate));
+        CHECK (fading < (int) (0.002 * rate));
+
+        // In single samples, the same to the bit.
+        CHECK (playedWith (1, true, false) == turned);
+    }
+}
+
+namespace
+{
+// A loud tone, 1 kHz at 0.9 of full scale: 48 samples to a cycle at the tests' rate.
+float loudTone (int t)
+{
+    return 0.9f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * t / testRate);
+}
+
+// A sound's level over ten of loudTone()'s cycles from a sample, in decibels: its RMS, as a sine's peak.
+double levelOver (const std::vector<float>& sound, int from)
+{
+    auto squares = 0.0;
+
+    for (int i = from; i < from + 480; ++i)
+        squares += (double) sound[(size_t) i] * sound[(size_t) i];
+
+    return 10.0 * std::log10 (std::max (2.0 * squares / 480.0, 1.0e-24));
+}
+
+// The largest offset in a sound from a sample on, in decibels of full scale: the mean over each 200 ms (two hundred of
+// loudTone()'s cycles, which leave nothing of it, and long against a fade's few milliseconds), every 50 ms.
+double offsetFrom (const std::vector<float>& sound, int from)
+{
+    constexpr int window = 9600;
+    auto largest = 0.0;
+
+    for (auto start = from; start + window <= (int) sound.size(); start += window / 4)
+    {
+        auto sum = 0.0;
+
+        for (int i = start; i < start + window; ++i)
+            sum += sound[(size_t) i];
+
+        largest = std::max (largest, std::abs (sum / window));
+    }
+
+    return 20.0 * std::log10 (std::max (largest, 1.0e-12));
+}
+} // namespace
+
+TEST_CASE ("Finding 2: a change of character while the drive is heard stays driven through it: no jump in level, no offset")
+{
+    // A change to a curve with an offset to take out (Opto's or Tube's even harmonics) while the drive was heard faded the
+    // drive out to the plain delay, played that for 150 ms while the new curve's offset filter settled, and faded back in: a
+    // loud tone at Drive 100 % came up to 17 dB louder meanwhile. Now the new curve warms up beside the one playing, on the
+    // same sound, and the sound fades from one to the other.
+    using Character = Compressor::Character;
+    constexpr int change = 48000, numSamples = 3 * 48000; // a block's start, a second in; then two seconds
+
+    for (const auto driven : { 0.5f, 1.0f })
+    {
+        for (const auto [from, to] : { std::pair { Character::clean, Character::tube }, std::pair { Character::tube, Character::clean },
+                                       std::pair { Character::clean, Character::opto }, std::pair { Character::fet, Character::tube } })
+        {
+            auto before = getDefaults();
+            setCurve (before, curves::findShape ("No Compression")->points);
+            before[Compressor::drive] = driven;
+            before[Compressor::character] = (float) from;
+            auto after = before;
+            after[Compressor::character] = (float) to;
+            Compressor compressor;
+            compressor.prepare (testRate, 480);
+            const auto out = playInBlocks (compressor, numSamples, 480, loudTone,
+                                           [&] (int sample) -> const std::vector<float>& { return sample < change ? before : after; });
+
+            const auto steadyBefore = levelOver (out, change - 4800), steadyAfter = levelOver (out, numSamples - 4800);
+            auto loudest = -200.0;
+
+            for (auto at = change; at + 480 <= numSamples; at += 48)
+                loudest = std::max (loudest, levelOver (out, at));
+
+            const auto offset = offsetFrom (out, change);
+            INFO ("Drive " << driven * 100.0f << " %, character " << (int) from << " to " << (int) to << ": " << steadyBefore
+                           << " dB before, " << steadyAfter << " dB after, " << loudest << " dB at the loudest; an offset as large as "
+                           << offset << " dB of full scale");
+            CHECK (loudest < std::max (steadyBefore, steadyAfter) + 0.5);
+            CHECK (offset < -78.0);
+        }
+    }
+}
+
+TEST_CASE ("Finding 2: Drive leaving 0 on VCA is heard within its curve's glide, and brings no offset in")
+{
+    // VCA's curve has a little of the even harmonics' in it, so the drive waited 150 ms for their offset's filter to settle
+    // before it was heard, though its curve's share starts at none, and the filter settles as the curve comes in.
+    auto undriven = getDefaults();
+    setCurve (undriven, curves::findShape ("No Compression")->points);
+    undriven[Compressor::character] = (float) Compressor::Character::vca;
+    auto driven = undriven;
+    driven[Compressor::drive] = 0.5f;
+    constexpr int change = 48000, numSamples = 2 * 48000;
+    const auto playedWith = [&] (bool turns)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, 480);
+        return playInBlocks (compressor, numSamples, 480, loudTone,
+                             [&] (int sample) -> const std::vector<float>& { return turns && sample >= change ? driven : undriven; });
+    };
+
+    const auto turned = playedWith (true), plain = playedWith (false);
+    auto first = -1;
+
+    for (auto i = change; i < numSamples && first < 0; ++i)
+        if (std::abs (turned[(size_t) i] - plain[(size_t) i]) > 1.0e-3f)
+            first = i;
+
+    const auto steady = levelOver (turned, numSamples - 4800);
+    const auto glided = levelOver (turned, change + (int) (0.06 * testRate)); // three of the curve's glides on
+    const auto offset = offsetFrom (turned, change);
+    INFO ("heard " << 1000.0 * (first - change) / testRate << " ms after the change; " << glided << " dB 60 ms on, " << steady
+                   << " dB at the end; an offset as large as " << offset << " dB of full scale");
+    CHECK (first >= change);
+    CHECK (first < change + (int) (0.01 * testRate));
+    CHECK (std::abs (glided - steady) < 1.0);
+    CHECK (offset < -78.0);
+}
+
+TEST_CASE ("Finding 4: FET's and Tube's colour plays the same however its blocks are cut, as it pumps")
+{
+    // Their colour took how far they had turned down in the last block, so that it came a block late, and in blocks of one
+    // at each sample's reduction. Now it follows the reduction smoothly, sample by sample: the same to the bit in any blocks.
+    const auto pumping = [] (int t)
+    {
+        const auto loud = (t / 4800) % 2 == 0; // a tenth of a second loud, a tenth quiet
+        return (loud ? 0.5f : 0.05f) * (float) std::sin (juce::MathConstants<double>::twoPi * 200.0 * t / testRate);
+    };
+
+    for (const auto character : { Compressor::Character::fet, Compressor::Character::tube })
+    {
+        for (const auto driven : { 0.0f, 0.3f })
+        {
+            auto values = getDefaults();
+            setCurve (values, curves::makeCompression (-14.0f, 4.0f)); // 0.5 is 8 dB over: 6 dB down
+            values[Compressor::character] = (float) character;
+            values[Compressor::drive] = driven;
+            const auto inBlocksOf = [&] (int blockSize)
+            {
+                Compressor compressor;
+                compressor.prepare (testRate, 512);
+                return playInBlocks (compressor, 48000, blockSize, pumping,
+                                     [&values] (int) -> const std::vector<float>& { return values; });
+            };
+
+            const auto ofOne = inBlocksOf (1), of64 = inBlocksOf (64), of512 = inBlocksOf (512);
+            CAPTURE ((int) character);
+            CAPTURE (driven);
+            CHECK (ofOne == of512);
+            CHECK (of64 == of512);
         }
     }
 }

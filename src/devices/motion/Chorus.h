@@ -24,6 +24,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/SyncedLfo.h"
@@ -118,6 +119,7 @@ private:
     {
         dsp::DelayLine line;
         std::array<std::array<float, mostVoices>, numSets> now {}, step {}; // each copy's delay, in samples, and its glide a sample
+        std::array<std::array<float, mostVoices>, numSets> target {};       // where each is at the control step's end
         dsp::Filter cut;
     };
 
@@ -133,6 +135,15 @@ private:
     std::atomic<double> tailSeconds { 0.02 };
     std::array<std::array<LiveValue, mostVoices>, 2> delays;
     LiveValue shownPhase;
+
+    // The song's grid of control steps (dsp/ControlGrid.h); for the step under way, whether Safe Bass splits the sound, and
+    // each set's gains as it started and their glide a sample.
+    dsp::ControlGrid grid { controlStep };
+    bool stepSplits = false;
+    std::array<float, numSets> outFrom {}, loopFrom {}, outStep {}, loopStep {};
+
+    // At a control step's start: what the copies do over it, from the values now.
+    void startStep (std::span<const float> values, int numChannels, int wantedCount, int stepLength) noexcept;
 
     static_assert (std::atomic<double>::is_always_lock_free);
 };

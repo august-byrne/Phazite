@@ -14,10 +14,12 @@
 // down. Each hears what comes in (feed-forward), so that once settled it follows its curve exactly whatever its character; a
 // compressor that listened to what it put out would settle elsewhere than the curve drawn, and run away where the curve
 // expands. Drive saturates what it puts out in the character's colour (FET's odd harmonics, Opto's and Tube's even ones,
-// Clean's and VCA's soft clipping), at twice the sample rate, its curve played by its antiderivative (dsp/Oversampling.h),
-// so that what it adds doesn't fold back as aliasing and what it leaves straight stays level to 20 kHz (at the sound's own
-// rate the antiderivative alone averaged every two samples: 5 dB down at 15 kHz, of the whole sound, whenever the drive or
-// FET's or Tube's colour engaged); undriven, the sound takes a plain delay as long instead. It hears its own sound alone,
+// Clean's and VCA's soft clipping), its curve faded in from a straight line over the first tenth of its travel, so that the
+// sound never jumps as it leaves 0 (nor as FET's or Tube's colour begins to drive it); at twice the sample rate, its curve
+// played by its antiderivative (dsp/Oversampling.h), so that what it adds doesn't fold back as aliasing and what it leaves
+// straight stays level to 20 kHz (at the sound's own rate the antiderivative alone averaged every two samples: 5 dB down at
+// 15 kHz, of the whole sound, whenever the drive or FET's or Tube's colour engaged); undriven, the sound takes a plain delay
+// as long instead, which the drive's comes exactly as late as (dsp/AlignedShaper.h). It hears its own sound alone,
 // through the key's low cut so that bass notes don't pump it, as a bus compressor's sidechain high-pass does (the high cut is
 // Duck's): a sidechain it is given isn't heard while it compresses, kept for when it ducks again.
 //
@@ -39,10 +41,12 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/AlignedShaper.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/Oversampling.h"
+#include "devices/dsp/Saturation.h"
 
 #include <juce_core/juce_core.h>
 
@@ -152,15 +156,14 @@ private:
     void duck (const ProcessContext&);
 
     double sampleRate = 44100.0;
-    float makeupSmoothing = 0.001f; // of the way to the makeup gain, per sample
-    float makeupDecibels = 0.0f, inputDecibels = 0.0f, driveAmount = 0.0f;
-    float lastInputDecibels = 0.0f, lastInput = 1.0f;   // the input gain last worked out
-    float lastGainDecibels = 0.0f, lastGain = 1.0f;     // the gain last worked out
-    float lastLevel = -1.0f, lastWanted = 0.0f;         // the level last heard, and the gain its curve wanted
-    float lastMost = 0.0f;                              // the most it turned down in its last block, for its colour
-    float lastDriveAmount = -1.0f, driveGain = 1.0f;    // into drive's curve
-    float lastMakeupDecibels = 0.0f, makeupGain = 1.0f; // after it
-    bool wasDriven = false;
+    float makeupSmoothing = 0.001f;                                        // of the way to the makeup gain, per sample
+    float makeupDecibels = 0.0f, inputDecibels = 0.0f, driveAmount = 0.0f; // the drive's, the knob's alone
+    float lastInputDecibels = 0.0f, lastInput = 1.0f;                      // the input gain last worked out
+    float lastGainDecibels = 0.0f, lastGain = 1.0f;                        // the gain last worked out
+    float lastLevel = -1.0f, lastWanted = 0.0f;                            // the level last heard, and the gain its curve wanted
+    float colourAmount = 0.0f;                                             // how far it turns down, followed smoothly, for its colour
+    float lastDriveAmount = -1.0f, driveGain = 1.0f;                       // into drive's curve
+    float lastMakeupDecibels = 0.0f, makeupGain = 1.0f;                    // after it
     bool isFirstBlock = true;
     static constexpr double listenMilliseconds = 500.0;
     float keyShare = 0.0f, keyStep = 0.01f; // how much of the key it plays, from 0 to 1, and its step per sample
@@ -179,26 +182,54 @@ private:
     float releaseStart = 0.0f, memory = 0.0f, memoryRise = 0.0001f, memoryFall = 0.0001f;
     float opticalCoefficient = 0.0f; // Opto's slow release stage, per sample, at the release set
 
-    // Drive: each channel's sound into the curve at twice the rate, played by its antiderivative (first-order antiderivative
-    // anti-aliasing: Parker, Zavalishin and Le Bivic, 2016; dsp/Oversampling.h), and the DC that the even harmonics leave,
-    // filtered out. The sound goes through it while Drive is up or the character has a colour of its own (FET, Tube), a
-    // straight line in the curve's place while nothing colours it; otherwise through a plain delay as long, the two faded
-    // between over 64 samples.
-    std::array<dsp::AntialiasedShaper, 2> drives;
-    std::array<dsp::DelayLine, 2> undriven;
-    float driveBlend = 0.0f; // how far the sound goes through the drive
-    float lastEven = 0.0f;   // the curve's share of even harmonics, as last played
-    int driveLatency = 0;
-    std::array<dsp::Filter, 2> dcBlockers {};
+    // Drive: each channel's sound at twice the rate, through the curve and through a straight line, each played by its
+    // antiderivative (first-order antiderivative anti-aliasing: Parker, Zavalishin and Le Bivic, 2016; dsp/Saturation.h), and
+    // what the curve adds to the straight line, the DC that the even harmonics leave filtered out of it, added as far as the
+    // drive has faded the curve in (curveShare); back at the sound's rate, then a part of a sample more, so that it comes
+    // exactly as late as the plain delay at low frequencies (dsp/AlignedShaper.h). The sound goes through it while Drive is up
+    // or the character has a colour of its own (FET, Tube), the straight line alone while nothing colours it; otherwise through
+    // a plain delay as long, the two faded between over 1.5 ms.
+    struct Drive
+    {
+        dsp::Oversampler2x oversampler;
+        dsp::AntialiasedCurve bent, straight;
+        dsp::Filter dcBlocker; // on what the curve adds, at twice the rate
+        dsp::FractionalDelay rest;
+        bool curveRested = false; // the curve played no part in the last sample
 
-    // The copy of what came in for its mix (ProcessContext::dry): as late as the sound, through a plain delay, and while the
-    // sound goes through the drive and the mix uses the copy, through filters like the drive's with it, faded alike: the
-    // filters to twice the rate and back turn the phase of the top octave, and the copy is turned as the sound is, so that
-    // the two meet in phase at any mix.
-    std::array<dsp::AntialiasedShaper, 2> dryDrives;
-    std::array<dsp::DelayLine, 2> dryDelays;
-    float lastMix = 1.0f;   // the mix in its last block
-    bool dryInStep = false; // the copy went through its filters in the last block
+        void reset() noexcept;
+
+        template <typename Curve>
+        float play (float sample, float gain, const Curve&, float share, const dsp::FilterCoefficients& dcBlocker, bool blocksDc) noexcept;
+    };
+
+    std::array<Drive, 2> drives, nextDrives; // the curve playing, and another warming beside it to take over
+    std::array<dsp::DelayLine, 2> undriven;
+    float driveBlend = 0.0f;      // how far the sound goes through the drive
+    float driveBlendStep = 0.01f; // its step a sample as it fades
+    float curveShare = 0.0f;      // how far the drive has faded its curve in from a straight line, from 0 to 1
+    float knobShare = 0.0f;       // the knob's part of it
+    bool drivesRan = false;       // whether the drive played in the last block
+    int driveWarm = 0;            // the samples it has played since it started, from silence
+    int warmUp = 1;               // how many it plays first, from silence, before it is faded in
+    int evenWarmUp = 1;           // how many it plays first for a curve with an offset to take out
+    bool isFresh = true;          // nothing played since it was reset: silence in all of it
+    float playingEven = 0.0f;     // the curve's share of even harmonics, as it plays
+    bool changesCurve = false;    // another curve warming in nextDrives, then faded to
+    float nextEven = 0.0f;        // its share of even harmonics
+    int nextWarm = 0, nextWarmUp = 1;
+    float nextBlend = 0.0f; // how far the sound has faded from the curve playing to it
+    int driveLatency = 0;
+
+    // How many samples the drive plays from silence before it is heard, for a curve's even share and how far it is in.
+    int getDriveWarmUp (float even, float share) const noexcept;
+
+    // The copy of what came in for its mix (ProcessContext::dry): as late as the sound, the same way through (the drive's
+    // plain delay, then a delay for the rest of the latency where that is Duck's), and while the sound goes through the drive,
+    // through the drive's filters and straight line with it, faded alike: the filters to twice the rate and back turn the phase
+    // of the top octave, and the copy is turned as the sound is, so that the two meet in phase at any mix.
+    std::array<dsp::AlignedShaper, 2> dryDrives;
+    std::array<dsp::DelayLine, 2> dryDelays, dryRests;
 
     // Duck's: the key's loudest over the last keyPeakMilliseconds, a millisecond at a time (each finished millisecond's
     // loudest, and the one going on now's); how far it turns the sound down now, in decibels; the samples since the last hit,

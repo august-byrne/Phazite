@@ -11,6 +11,8 @@
 
 #include "DeviceEditorBase.h"
 
+#include <cstdint>
+
 namespace phazite::ui
 {
 class ReverbEditor : public DeviceEditorBase
@@ -32,6 +34,10 @@ public:
 
     // What the map's top says of the mode: its name, and for a plate what it holds back ("Plate  Diffusion 58%").
     juce::String getModeText() const;
+
+    // The work the map's decays have taken since it was made, in the reverb's lines' energies worked out
+    // (Reverb::getDecayAt()): it works them out again when a value or the sample rate changes, not for each paint. For tests.
+    std::int64_t getDecayLineUpdates() const;
 
     // Brings the map up to date; the ticker does it.
     void refresh();

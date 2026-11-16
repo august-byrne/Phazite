@@ -346,6 +346,35 @@ TEST_SUITE ("golden")
                      "second, on a beat and chord stabs.");
     }
 
+    TEST_CASE ("Golden render: Phazite's vinyl at half mix, its Bass Mono on, on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Vinyl::typeID, "effect-vinyl-half-mix",
+                     { { "wow", 8.0f }, { "distortion", 0.5f }, { "bassMono", 150.0f }, { "mix", 0.5f } },
+                     "Phazite's vinyl half and half with the sound, its wow and groove distortion on and the lows mono under "
+                     "150 Hz, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's compressor driven in Tube at half mix, on a beat and stabs")
+    {
+        // Its curve turning down from -24 dB, Tube's colour and the drive's curve in, half and half with the sound.
+        const auto corner = phazite::devices::curves::axisForDecibels (-24.0f);
+        checkEffect (phazite::devices::Compressor::typeID, "effect-compressor-driven",
+                     { { "point2X", corner },
+                       { "point2Y", corner },
+                       { "character", (float) phazite::devices::Compressor::Character::tube },
+                       { "drive", 0.6f },
+                       { "mix", 0.5f } },
+                     "Phazite's compressor in Tube, turning down from -24 dB and driven 60 %, at half mix, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's multiband with its bands' saturation on, on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Multiband::typeID, "effect-multiband-saturated",
+                     { { "midSaturation", 0.6f }, { "highSaturation", -0.5f }, { "midPre", 9.0f }, { "masterSaturation", 0.3f } },
+                     "Phazite's multiband, its mid band driven 9 dB into its saturation, its high band and its master saturating too, "
+                     "on a beat and chord stabs.");
+    }
+
     TEST_CASE ("Golden render: Phazite's stereo expander on a beat and stabs")
     {
         checkEffect (phazite::devices::StereoExpander::typeID, "effect-stereo-expander", { { "width", 2.0f } },

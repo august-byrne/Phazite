@@ -6,8 +6,10 @@
 #include "TestHelpers.h"
 #include "devices/dynamics/Multiband.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace
@@ -171,7 +173,7 @@ TEST_CASE ("The multiband describes itself: global parameters, then each band's,
     // Its latency is the most both look-aheads take, whatever they are set to, and the two saturations' at twice the rate.
     Multiband multiband;
     multiband.prepare (testRate, testBlockSize);
-    const auto saturation = (int) std::lround (phazite::devices::dsp::AntialiasedShaper::getLatencySamples());
+    const auto saturation = phazite::devices::dsp::AlignedShaper::getLatencySamples();
     CHECK (saturation > 0);
     CHECK (saturation < 8);
     CHECK (multiband.getLatencySamples() == 2 * (int) std::lround (Multiband::mostLookaheadSeconds * testRate) + 2 * saturation);
@@ -292,6 +294,112 @@ TEST_CASE ("The multiband's LMH Mix, its master band driven by the mid band, its
     const auto mono = play (multiband, values, 24000, [&left] (int t) { return std::pair { left (t).first, 0.0f }; });
     CHECK (getLevel (mono.left) == doctest::Approx (getLevel (mono.right)).epsilon (0.01));
     CHECK (getLevel (mono.left) == doctest::Approx (-26.0f).epsilon (0.05)); // half of it each side
+}
+
+TEST_CASE ("A multiband band's saturation turned on or off neither skips nor repeats samples: the two ways fade over 64 samples")
+{
+    // The bands changed in one sample from a plain delay to their saturations, which started from silence, and back: a few
+    // samples lost as it came on. A quiet tone, under every curve's threshold, so that a saturation leaves it straight: with
+    // it turned on and off every few blocks, what comes out is what comes out with it off throughout.
+    for (const auto* which : { "midSaturation", "masterSaturation" })
+    {
+        INFO (std::string (which));
+        auto plain = getDefaults();
+
+        for (const auto* band : { "low", "mid", "high", "master" })
+            limitAt (plain, band, 12.0f);
+
+        auto saturated = plain;
+        set (saturated, which, 0.5f);
+        const auto tone = sine (200.0, -30.0f);
+        Multiband switched, steady;
+        switched.prepare (testRate, testBlockSize);
+        steady.prepare (testRate, testBlockSize);
+        constexpr int stretch = 3 * testBlockSize, numStretches = 8;
+        auto largest = 0.0f;
+
+        for (int part = 0; part < numStretches; ++part)
+        {
+            const auto from = [&tone, part] (int t) { return tone (part * stretch + t); };
+            const auto out = play (switched, part % 2 == 1 ? saturated : plain, stretch, from);
+            const auto expected = play (steady, plain, stretch, from);
+
+            for (size_t i = 0; i < out.left.size(); ++i)
+                largest = std::max (largest, std::abs (out.left[i] - expected.left[i]));
+        }
+
+        const auto under = 20.0f * std::log10 (std::max (largest, 1.0e-12f) / juce::Decibels::decibelsToGain (-30.0f));
+        INFO ("it differs from the tone by " << under << " dB under it");
+        CHECK (under < -60.0f);
+    }
+}
+
+TEST_CASE ("A multiband band's saturation fades in over a time, at any rate, and plays the same in any blocks")
+{
+    // A loud tone, which the mid band's saturation rounds off: from the first to the last sample where what comes out is
+    // neither the plain delay's nor the saturation's is the fade between them, 1.5 ms (64 samples at 44.1 kHz), not 64
+    // samples at any rate (a third of a millisecond at 192 kHz).
+    for (const auto rate : { 48000.0, 192000.0 })
+    {
+        CAPTURE (rate);
+        auto plain = getDefaults();
+
+        for (const auto* band : { "low", "mid", "high", "master" })
+            limitAt (plain, band, 12.0f);
+
+        auto saturated = plain;
+        set (saturated, "midSaturation", 0.5f);
+        const auto change = ((int) (0.05 * rate) / 512 + 1) * 512, numSamples = (int) (0.1 * rate); // a block's start
+
+        const auto playedWith = [&] (int blockSize, bool turns, bool startsSaturated)
+        {
+            Multiband multiband;
+            multiband.prepare (rate, 512);
+            juce::AudioBuffer<float> buffer (2, blockSize);
+            std::vector<float> out;
+
+            for (int done = 0; done < numSamples; done += blockSize)
+            {
+                const auto length = std::min (blockSize, numSamples - done);
+
+                for (int i = 0; i < length; ++i)
+                    for (int channel = 0; channel < 2; ++channel)
+                        buffer.setSample (channel, i, 0.9f * (float) std::sin (twoPi * 1000.0 * (done + i) / rate));
+
+                float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+                devices::ProcessContext context;
+                context.channels = channels;
+                context.numChannels = 2;
+                context.numSamples = length;
+                context.parameters = startsSaturated || (turns && done >= change) ? saturated : plain;
+                multiband.process (context);
+                out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + length);
+            }
+
+            return out;
+        };
+
+        const auto turned = playedWith (512, true, false), straight = playedWith (512, false, false), whole = playedWith (512, false, true);
+        auto first = -1, last = -1; // the first and the last sample that is neither
+
+        for (auto i = (size_t) change; i < turned.size(); ++i)
+        {
+            if (std::abs (turned[i] - straight[i]) > 1.0e-5f && std::abs (turned[i] - whole[i]) > 1.0e-5f)
+            {
+                first = first < 0 ? (int) i : first;
+                last = (int) i;
+            }
+        }
+
+        const auto fading = last - first + 1;
+
+        INFO ("it fades over " << fading << " samples, " << 1000.0 * fading / rate << " ms");
+        CHECK (fading > (int) (0.0012 * rate));
+        CHECK (fading < (int) (0.002 * rate));
+
+        // In single samples, the same to the bit (the change falls on a block's start either way).
+        CHECK (playedWith (1, true, false) == turned);
+    }
 }
 
 TEST_CASE ("The multiband's LMH Mix meets the bands in phase: half and half, a tone at either crossover keeps its level")

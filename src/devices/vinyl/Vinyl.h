@@ -26,7 +26,10 @@
 // Every move glides: the wow's depth and rate over 50 ms, and how far they swing the delay no faster than would bend the
 // pitch 7 cents, so that a deep wow turned up never swoops; the flutter's depth over 300 ms, the band's edges over 5 ms, the
 // rest over 20 ms. The delay line's middle is the device's latency: as deep a wow as the slowest rate allows, and the
-// flutter's deepest, with the oversampling's few samples; about 11 ms. Its runner applies the mix, with what came in as late.
+// flutter's deepest, with the oversampling's few samples; about 11 ms. Its runner applies the mix, with what came in as late,
+// which the vinyl passes the sound's linear way with it (its oversampling, its delay and, while it is on, Bass Mono's
+// all-pass), but not what moves and colours it, so that the two meet in phase at any mix: at no mix, what came in with its
+// phase turned, its level within a few tenths of a decibel to 18 kHz.
 //
 // Its editor reads the record's turn, the pitch now and its history, and the clicks as they come. Real-time safe: nothing
 // is allocated after prepare(), and while the song is stopped and nothing comes in it rests, after its delay line has
@@ -94,10 +97,17 @@ public:
     SampleTap& getPitchTap() noexcept { return pitchTap; }
     SurfaceNoise& getSurfaceNoise() noexcept { return noise; }
 
+    // How many times its copy for the mix has been made again from what came in lately, as the Mix left 100 % after resting
+    // there; and how many samples back it reads again for it, at any rate (the copy keeps its way into its delay line at 100 %). For
+    // tests.
+    int getDryRebuilds() const noexcept { return dryRebuilds; }
+    int getDryRebuildSamples() const noexcept;
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
     int getLatencySamples() const override { return latency; }
+    bool delaysDry() const noexcept override { return true; }
     double getTailSeconds() const override;
     bool sleepsOnSilence() const noexcept override { return false; } // its noise must start with the song, sound or none
 
@@ -119,8 +129,35 @@ private:
         dsp::Filter lowCut, highCut;
     };
 
+    // A channel of the copy of what came in for its mix (ProcessContext::dry), which it delays itself: at every mix, the
+    // sound's linear way, through Bass Mono's all-pass (while it is on) and twice the rate, through a delay line read at its
+    // middle, as late as the curve. Mixed with a copy merely delayed, the sound cancelled itself where those turn its phase:
+    // half and half, the top octave (as the saturator's did) and the middle at Bass Mono's frequency.
+    struct DryWay
+    {
+        dsp::Crossover phase;
+        dsp::Oversampler2x upper, lower; // to twice the rate, and back (each used one way)
+        dsp::DelayLine line;             // at twice the rate
+        dsp::DelayLine plain;            // what came in, merely delayed
+
+        // A sample through Bass Mono's all-pass into the delay line at twice the rate, at every mix (cheap: the copy is
+        // made again from it); and on from there the rest of the sound's way, read as far back as it says.
+        void feed (float phasedSample) noexcept;
+        float turn (float phasedSample, double back) noexcept;
+
+        // The way back to the sound's rate made again, from silence, over the delay line's reads of the last samples as
+        // they were; and the whole way silent.
+        void rebuild (int samples, double back) noexcept;
+        void restTurn() noexcept;
+    };
+
     double sampleRate = 44100.0;
     int latency = 0;
+    std::array<DryWay, 2> dryWays;
+    float lastMix = 1.0f;            // the Mix in the last block
+    bool dryRan = false;             // the copy went the sound's way in the last block
+    int sinceMixed = 0, dryHold = 1; // samples since the Mix was last under 100 % (up to the hold), and the hold
+    int dryRebuilds = 0;
     double centre = 0.0;                // the delay line's middle, in samples at twice the rate
     double flutterReach = 0.0;          // the most the flutter moves it either way, in the same
     dsp::FilterCoefficients highsShape; // the curve's high-pass, at twice the rate
@@ -161,6 +198,7 @@ private:
     int readingEvery = 441, sinceReading = 0;
 
     void restCurves() noexcept;
+    void restDry() noexcept;
     void rest (int numSamples) noexcept;
     void turnBy (double samples) noexcept;
     float getTurnNow() const noexcept; // 0 to 1

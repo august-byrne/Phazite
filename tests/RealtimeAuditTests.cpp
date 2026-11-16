@@ -2075,4 +2075,35 @@ TEST_SUITE ("realtime-audit")
         CHECK_FALSE (phazite::isLoopOn (played));
         checkSteadyPlaybackDoesNotAllocate (m);
     }
+
+    TEST_CASE ("Real-time audit: edited while it plays: the vinyl's Mix moved through 100 % and back, and again after resting there")
+    {
+        // Its copy for the mix goes on for a second after the Mix reaches 100 %, then rests; as the Mix leaves 100 % after a
+        // rest, the copy is made again in that block from what came in lately (Vinyl.h).
+        using phazite::devices::Vinyl;
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        const auto vinyl = song.addEffect (keys, Vinyl::typeID);
+        song.setParameter (vinyl, "bassMono", 100.0f);
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing { .edits = {
+                          { 10, "the Mix at 50 %", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
+                          { 30, "the Mix at 100 %", [&] { song.setParameter (vinyl, "mix", 1.0f); } },
+                          { 60, "back to 50 % within the second: the copy went on", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
+                          { 80, "at 100 % again", [&] { song.setParameter (vinyl, "mix", 1.0f); } },
+                          { 300, "back to 50 % after resting there: the copy made again", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
+                      } });
+        report ("Edited while it plays: the vinyl's Mix through 100 % and back", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()).getDryRebuilds() >= 2);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
 }

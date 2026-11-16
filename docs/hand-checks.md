@@ -174,6 +174,10 @@ the [changelog](changelog.md).
 | G103 | On a Bluetooth or other late output, in Touch, move a fader on a drum hit while playing; play it back | The automation's change lands on the hit | |
 | G38 | While recording, drag the top bar's position field, then click in the ruler | One jump where the field is let go, no stray short takes; after the click the sound from the first instant is in the new take | |
 | G163 | Hold a fader while recording and press Stop, then Escape. And: loop on, a track in Write, count-in on, press Record and stop after two beats | The take's clip stays, and Undo removes it alone. The lane after where playback stopped is as it was | |
+| G32 | Compressor in FET, then in Tube: turn Drive up slowly from 0 on a loud drum loop; then on a drum bus turning down about 6 dB with Drive at 0 | No step as Drive leaves 0 or as the compressor starts turning down; the colour at 6 dB sounds as it did before 2026-11-15 (against an older build) | |
+| G32b | Compressor on a loud loop with Drive at 50 %: switch its character between Clean, FET, VCA, Opto and Tube while it plays; automate Drive from 0 to 60 % on a beat with Tube | No jump in level and no thump at a switch; the drive is there on the beat | |
+| G34 | Vinyl with Bass Mono at 100 Hz on a bass line and a bright sound: Mix at 50 %, then turned from 0 % to 30 % and back, then Bass Mono switched on and off | Neither the bass around 100 Hz nor the highs hollow out against Mix at 100 %, and nothing clicks | |
+| G74 | Multiband on a full mix: switch a band's saturation on and off while it plays | No click | |
 
 ## Known bugs that need an ear or a real plug-in
 
@@ -181,8 +185,6 @@ Numbers are those of [known-bugs.md](known-bugs.md).
 
 | # | Check | Proves | Checked on |
 |---|---|---|---|
-| K34 | Vinyl on a bright sound, Mix at 50 % | Whether the mix hollows out the highs (bug 34 is not measured) | |
-| K32 | Compressor in FET, turn Drive up slowly from 0 on a loud drum loop | Whether the step at the start of Drive's range is heard | |
 | K36 | In a song with an audio file of several minutes, click far ahead in the ruler while it plays | How long the silence before the sound is | |
 | K42 | Export a song with the slowest plug-in you own | That no real plug-in keeps one block for 30 seconds, which would end its helper | |
 

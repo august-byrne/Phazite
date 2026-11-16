@@ -8,7 +8,9 @@
 #include "devices/reverb/Reverb.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace
@@ -180,6 +182,52 @@ double firstSoundOf (const std::vector<float>& sound, double sampleRate = testRa
     const auto first = std::find_if (sound.begin(), sound.end(), [threshold] (float sample) { return std::abs (sample) > threshold; });
     return (double) std::distance (sound.begin(), first) / sampleRate;
 }
+
+// How long a tone's tail takes to fade by 60 dB: a tone held for a second and let go, its tail's level over every four
+// cycles, a line fitted through it from 5 to 45 dB down.
+double measureToneDecay (const std::vector<float>& values, double hertz, double rate)
+{
+    const auto held = (int) rate, hop = (int) std::lround (4.0 * rate / hertz);
+    const auto played = play (
+        values, held + (int) (1.5 * values[Reverb::decay] * rate), [hertz, rate, held] (int t)
+        { return t < held ? 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * t / rate) : 0.0f; }, rate);
+    // Around the tone alone, through two narrow band-passes (55 dB down an octave and a half away), so that what its stop sets
+    // ringing elsewhere, which a damped room keeps far longer below it, doesn't count.
+    const auto around = [hertz, rate] (const std::vector<float>& side)
+    {
+        const auto band = phazite::devices::dsp::makeFilter (phazite::devices::dsp::FilterShape::bandPass, hertz, rate, 8.0);
+        phazite::devices::dsp::Filter first, second;
+        std::vector<float> out;
+        out.reserve (side.size());
+
+        for (const auto sample : side)
+            out.push_back (second.process (first.process (sample, band), band));
+
+        return out;
+    };
+    const Stereo heard = hertz < 200.0 ? played : Stereo { around (played.left), around (played.right) };
+    auto first = -1.0, n = 0.0, sumT = 0.0, sumD = 0.0, sumTT = 0.0, sumTD = 0.0;
+
+    for (int from = held; from + hop <= (int) heard.left.size(); from += hop)
+    {
+        const auto level =
+            energyOf (heard.left, (size_t) from, (size_t) (from + hop)) + energyOf (heard.right, (size_t) from, (size_t) (from + hop));
+        first = first < 0.0 ? level : first;
+        const auto decibels = 10.0 * std::log10 (std::max (level, 1.0e-30) / first);
+
+        if (decibels > -5.0 || decibels < -45.0)
+            continue;
+
+        const auto t = (double) (from - held) / rate;
+        n += 1.0;
+        sumT += t;
+        sumD += decibels;
+        sumTT += t * t;
+        sumTD += t * decibels;
+    }
+
+    return -60.0 / ((n * sumTD - sumT * sumD) / (n * sumTT - sumT * sumT));
+}
 } // namespace
 
 TEST_CASE ("The reverb's description holds together, and its tail lasts its decay")
@@ -228,6 +276,148 @@ TEST_CASE ("The reverb fades by 60 dB over its decay time")
         values[Reverb::decay] = decay;
         const auto measured = measureDecay (play (values, (int) (testRate * decay * 1.5), impulse));
         CHECK (measured == doctest::Approx (decay).epsilon (0.2));
+    }
+}
+
+TEST_CASE ("The room's lines are as long as their losses are worked out for: it fades over its decay time to a few thousandths")
+{
+    // Each line read itself a sample further back than its length, and its wobble swings it longer by the wobble's depth on
+    // average, while each pass's loss was worked out for its length alone: the smallest room, whose lines are shortest, rang
+    // longer than its decay. Measured in its lows, where its damping takes nothing.
+    auto values = getDefaults();
+    values[Reverb::size] = 0.0f;
+    values[Reverb::damping] = 20000.0f;
+    values[Reverb::lowCut] = 20.0f;
+
+    // The time it takes to fade by 60 dB, from the straight line that fits its energy decay curve best between -5 and -50
+    // dB: steadier than two points of it, which the lines' beating sways by a few thousandths.
+    const auto fitDecay = [] (const Stereo& response, double rate)
+    {
+        std::vector<double> remaining (response.left.size() + 1, 0.0);
+
+        for (auto i = response.left.size(); i-- > 0;)
+            remaining[i] = remaining[i + 1] + (double) response.left[i] * response.left[i] + (double) response.right[i] * response.right[i];
+
+        auto n = 0.0, sumT = 0.0, sumD = 0.0, sumTT = 0.0, sumTD = 0.0;
+
+        for (size_t i = 0; i < response.left.size(); ++i)
+        {
+            const auto decibels = 10.0 * std::log10 (remaining[i] / remaining[0]);
+
+            if (decibels > -5.0 || decibels < -50.0)
+                continue;
+
+            const auto t = (double) i / rate;
+            n += 1.0;
+            sumT += t;
+            sumD += decibels;
+            sumTT += t * t;
+            sumTD += t * decibels;
+        }
+
+        const auto slope = (n * sumTD - sumT * sumD) / (n * sumTT - sumT * sumT);
+        return -60.0 / slope;
+    };
+
+    for (const auto rate : { 44100.0, 96000.0 })
+    {
+        for (const auto decay : { 2.0f, 4.0f }) // long enough for the tail's start not to sway the measurement
+        {
+            values[Reverb::decay] = decay;
+            const auto measured = fitDecay (below (play (values, (int) (rate * decay * 1.5), impulse, rate), 300.0, rate), rate);
+            INFO (decay << " s at " << rate << " Hz: it fades over " << measured << " s");
+            CHECK (std::abs (measured / decay - 1.0) < 0.004);
+        }
+    }
+
+    // Damped, each line's low-pass delays the lows a few samples more each pass (6.5 at 1 kHz on a 488-sample line at 44.1 kHz),
+    // which its loss counts too (it rang the lows a percent longer, 1.953 s for 2 s at 25 Hz, now 1.933): the lows never ring
+    // longer than set, and lose only a little to the damping. Measured on a tone held for a second and let go: its tail's
+    // level over every four cycles, a line fitted through it from 5 to 45 dB down.
+    values[Reverb::damping] = 1000.0f;
+
+    for (const auto rate : { 44100.0, 96000.0 })
+    {
+        for (const auto decay : { 2.0f, 4.0f })
+        {
+            values[Reverb::decay] = decay;
+
+            const auto measured = measureToneDecay (values, 25.0, rate);
+            INFO (decay << " s damped at 1 kHz, at " << rate << " Hz: a tone at 25 Hz fades over " << measured << " s");
+            CHECK (measured < decay);
+            CHECK (measured > 0.95 * decay);
+        }
+    }
+}
+
+TEST_CASE ("The room's decay curve, which its editor draws, is how long it rings at each frequency, at any damping and size")
+{
+    // getDecayAt() took the damping knob's coefficient for every line, though each line's is scaled by its length: at 1 kHz's
+    // damping in the smallest room the curve said 1.15 s at 300 Hz where the room rang 0.97 s (19 % long), and 19 % short at
+    // 1 kHz. Now it works out each line's loss and pass at the frequency, and how the energy flows between them as the room
+    // plays it: within a tenth everywhere here, within 4 % at eight of the twelve points (the model counts energies, not
+    // waves; the measurement itself is the same at 44.1 and 48 kHz to 2 %). Measured as a room's decay in a band is (ISO 3382): its impulse
+    // response through a third-octave band-pass, the slope of its energy decay curve from 5 to 25 dB down, which averages the
+    // many modes in the band (a single tone's tail is a few of them, which ring from a third shorter to twice as long).
+    auto values = getDefaults();
+    values[Reverb::decay] = 2.0f;
+    values[Reverb::lowCut] = 20.0f;
+    values[Reverb::diffusion] = 0.0f; // its allpass filters, which ring on by themselves, plain delays
+    constexpr double rate = 48000.0;
+
+    const auto bandDecay = [] (const Stereo& response, double hertz)
+    {
+        const auto band = phazite::devices::dsp::makeFilter (phazite::devices::dsp::FilterShape::bandPass, hertz, rate, 4.32);
+        std::vector<double> remaining (response.left.size() + 1, 0.0);
+        std::array<phazite::devices::dsp::Filter, 4> filters {};
+        std::vector<double> energy (response.left.size(), 0.0);
+
+        for (size_t i = 0; i < response.left.size(); ++i)
+        {
+            const auto left = filters[1].process (filters[0].process (response.left[i], band), band);
+            const auto right = filters[3].process (filters[2].process (response.right[i], band), band);
+            energy[i] = (double) left * left + (double) right * right;
+        }
+
+        for (auto i = energy.size(); i-- > 0;)
+            remaining[i] = remaining[i + 1] + energy[i];
+
+        auto n = 0.0, sumT = 0.0, sumD = 0.0, sumTT = 0.0, sumTD = 0.0;
+
+        for (size_t i = 0; i < energy.size(); ++i)
+        {
+            const auto decibels = 10.0 * std::log10 (remaining[i] / remaining[0]);
+
+            if (decibels > -5.0 || decibels < -25.0)
+                continue;
+
+            const auto t = (double) i / rate;
+            n += 1.0;
+            sumT += t;
+            sumD += decibels;
+            sumTT += t * t;
+            sumTD += t * decibels;
+        }
+
+        return -60.0 / ((n * sumTD - sumT * sumD) / (n * sumTT - sumT * sumT));
+    };
+
+    for (const auto damping : { 1000.0f, 4000.0f })
+    {
+        for (const auto size : { 0.0f, 1.0f })
+        {
+            values[Reverb::damping] = damping;
+            values[Reverb::size] = size;
+            const auto response = play (values, (int) (3.0 * rate), impulse, rate);
+
+            for (const auto hertz : { 300.0, 1000.0, 3000.0 })
+            {
+                const auto measured = bandDecay (response, hertz), curve = Reverb::getDecayAt (values, hertz, rate);
+                INFO ("damping " << damping << " Hz, size " << size << ", at " << hertz << " Hz: it rings " << measured
+                                 << " s, the curve says " << curve);
+                CHECK (std::abs (curve / measured - 1.0) < 0.1);
+            }
+        }
     }
 }
 
@@ -731,4 +921,51 @@ TEST_CASE ("A mode, a size, a decay or a diffusion changed while the reverb play
     const auto difference =
         10.0 * std::log10 (energyOf (played.left, from, played.left.size()) / energyOf (alone.left, from, alone.left.size()));
     CHECK (std::abs (difference) < 1.0);
+}
+
+TEST_CASE ("Finding 1: the room's decay curve takes a bounded number of line updates at any values, a few at its defaults")
+{
+    // getDecayAt() stepped the energies a quarter of the shortest pass at a time until what came out was 40 dB down, kept
+    // every step's in a vector and took the logarithm of each: 3,072 line updates at the defaults, 75,792 at the longest decay
+    // in the smallest room (0.05 and 1.3 ms in a Debug build), and its editor asked for it thousands of times a paint. Now it solves for what is yet to come out
+    // and finds where the curve passes 5, 10... 25 dB down by halves, through the step's flow squared again and again.
+    const auto atDefaults = [] (double hertz)
+    {
+        std::int64_t updates = 0;
+        Reverb::getDecayAt (getDefaults(), hertz, testRate, updates);
+        return updates;
+    };
+
+    CHECK (atDefaults (500.0) <= 1200);
+    std::int64_t most = 0;
+
+    for (const auto rate : { 44100.0, 192000.0 })
+    {
+        for (const auto size : { 0.0f, 0.5f, 1.0f })
+        {
+            for (const auto decay : { 0.2f, 2.0f, 20.0f })
+            {
+                for (const auto damping : { 1000.0f, 20000.0f })
+                {
+                    for (const auto hertz : { 20.0, 500.0, 16000.0 })
+                    {
+                        auto values = getDefaults();
+                        values[Reverb::size] = size;
+                        values[Reverb::decay] = decay;
+                        values[Reverb::damping] = damping;
+                        std::int64_t updates = 0;
+                        const auto seconds = Reverb::getDecayAt (values, hertz, rate, updates);
+                        INFO ("size " << size << ", decay " << decay << " s, damping " << damping << " Hz, at " << hertz << " Hz and "
+                                      << rate << " Hz: " << seconds << " s in " << updates << " line updates");
+                        CHECK (seconds > 0.0);
+                        CHECK (seconds < 1.2 * decay);
+                        CHECK (updates <= 2500);
+                        most = std::max (most, updates);
+                    }
+                }
+            }
+        }
+    }
+
+    CHECK (most >= 1000); // the bound above isn't loose
 }

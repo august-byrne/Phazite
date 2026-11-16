@@ -8,6 +8,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
 #include "devices/core/SampleTap.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/Filters.h"
 
 #include <array>
@@ -63,6 +64,7 @@ public:
 
 private:
     static constexpr int maxSections = 4; // a 48 dB per octave cut
+    static constexpr int stretch = 32;    // samples between updates of moving coefficients
 
     struct Band
     {
@@ -75,8 +77,9 @@ private:
     };
 
     double sampleRate = 44100.0;
-    float smoothing = 0.1f; // of each step's distance to the target, per stretch of samples
-    float outputGain = 1.0f;
+    float smoothing = 0.1f;                     // of each step's distance to the target, per stretch of samples
+    float outputGain = 1.0f, outputFrom = 1.0f; // as the stretch under way ends, and as it started
+    dsp::ControlGrid grid { stretch };          // the song's grid of them (dsp/ControlGrid.h)
     std::array<Band, numBands> bands {};
     SampleTap outputTap;
 

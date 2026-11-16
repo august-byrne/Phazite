@@ -56,8 +56,6 @@ Beside the picture are Sync, Note, Time and Ping-Pong, and the Feedback as a lar
 - A change of time can only glide, which re-pitches the echoes; there is no mode that fades or jumps to the new time.
 - The feedback always passes the saturation, which bends at every level and isn't anti-aliased, so no echo is ever
   entirely clean; and it stops at 95 %, so the echoes can't be held.
-- The echo is one sample longer than set, since the line is read before the sound is pushed into it: a comb made with
-  a very short Time is slightly flat.
 - A synced echo is a bar at most, and any echo 5 s.
 - A press over the echoes sets the time and the feedback together from where the pointer is, and a right-click presses
   as a left-click does.

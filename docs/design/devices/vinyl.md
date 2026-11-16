@@ -72,6 +72,23 @@ run-out groove ends, so an export ends with the song.
 **The player.** After the noise, the two sides are narrowed by the Width, and the Low Cut and the High Cut, Butterworth
 filters, roll the band's ends off, the noise's too.
 
+**The mix.** The device's runner blends what the record plays with what came in, which the vinyl passes the record's
+linear way itself, at every Mix, 0 % too: through the oversampling and the delay line read at its middle, as the sound
+is, and through Bass Mono's all-pass while Bass Mono is on (as it comes on or goes off, as far as the sound's own
+split has come in, over 20 ms), but not what moves or colours the sound (the wow and flutter, the distortion, the
+side's lows, the noise, the width and the band). Merely delayed, the copy cancelled the sound where those turn its
+phase: half and half, the middle 17 dB down at Bass Mono's frequency and the top octave 5 to 18 dB down at 15 and 18
+kHz; and a copy merely delayed at 0 % but turned above it set the two half a cycle apart at Bass Mono's frequency at a
+Mix resting a little over 0 %. Now what is left between the two is the record's own doing, at any Mix. So at a Mix of
+0 % what comes out is what came in with its phase turned (by Bass Mono's all-pass while it is on, and in the top
+octave by the oversampling), its level within a hundredth of a decibel to 5 kHz; at the top the delay line's read between
+samples, the sound's own, takes 0.04 dB off at 10 kHz, 0.19 at 15 and 0.37 at 18 kHz (at 44.1 kHz; 0.03, 0.13 and 0.27
+at 48 kHz). The half-band filters themselves cost nothing in level, only phase. At 100 % the vinyl doesn't make the copy, which nothing
+hears, once the Mix has been there a second (so that a Mix moved through 100 % and back, or automation touching it,
+goes on with the copy it had): it keeps only the copy's way into its delay line, at twice the rate. As the Mix leaves 100 %
+after that, it makes the way back again from the line's last 128 samples, the same work at any rate (a few 32-sample
+calls' worth), so that the copy comes in without a click.
+
 Because its noise must start with the song whether sound comes in or not, the vinyl is never put to sleep by its
 runner. It rests on its own while the song is stopped, nothing comes in and its delay line has emptied.
 
@@ -89,9 +106,12 @@ and Distortion, Width and Bass Mono.
 
 ## Limits
 
-- Its Mix blends the record's sound, which has passed a moving delay and filters at twice the rate, with a dry copy
-  that is only delayed, so a Mix below 100 % may comb the top octave. It is not measured
-  ([known bug 34](../../known-bugs.md)).
+- At a Mix below 100 % the wow's moving delay against what came in sweeps a gentle comb through the sound, as two
+  copies at different speeds do (a chorus); the band's filters turn its edges' phase against what came in too.
+- With Bass Mono on, the phase of the lows is turned at every Mix, 0 % too: its all-pass is part of the sound's way,
+  and the copy for the mix takes it so that the two meet in phase. So the vinyl at 0 % is not a bypass: an untouched
+  copy of the sound played beside it (a parallel track, a send) cancels around Bass Mono's frequency, as against any
+  all-pass. The device's switch bypasses it.
 - It adds about 11 ms of latency, which Phazite makes up for on the other tracks.
 - No rumble or hum, no spin-down, no scratches that tick once a turn, and no wear or year control that sets the band,
   the noise and the stereo together, where iZotope's Vinyl has them.

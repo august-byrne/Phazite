@@ -138,9 +138,12 @@ namespace
                    == (int) std::size (parameters));
     static_assert (Multiband::getSoloParameter (Multiband::high) == Multiband::highSolo);
 
-    constexpr double gainSeconds = 0.02;      // how long a change of a band's pre or post gain takes, about
-    constexpr float keyHighCutOff = 19999.0f; // the key's high cut at its top: off
-    constexpr double keyFadeSeconds = 0.005;  // between the key and what it puts out, as Listen turns on or off
+    constexpr double gainSeconds = 0.02;              // how long a change of a band's pre or post gain takes, about
+    constexpr float keyHighCutOff = 19999.0f;         // the key's high cut at its top: off
+    constexpr double keyFadeSeconds = 0.005;          // between the key and what it puts out, as Listen turns on or off
+    constexpr double saturationFadeSeconds = 0.00145; // between a plain delay and the saturations, either way: 64 samples at 44.1 kHz
+    constexpr int saturationWarmUp = 256;             // samples the saturations play, from silence, before they are faded in (as the
+                                                      // compressor's drive: what their filters start with has rung out by then)
 
     int roundToChoice (float value, int count) noexcept
     {
@@ -209,7 +212,7 @@ void Multiband::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
     lookahead = std::max (1, (int) std::lround (mostLookaheadSeconds * sampleRate));
-    saturationLatency = (int) std::lround (dsp::AntialiasedShaper::getLatencySamples());
+    saturationLatency = dsp::AlignedShaper::getLatencySamples();
     preSmoothing = getCoefficient (gainSeconds, sampleRate);
 
     for (auto* lines : { &bandsInStep, &masterInStep })
@@ -231,6 +234,7 @@ void Multiband::prepare (double newSampleRate, int)
     }
 
     keyStep = (float) std::min (1.0, 1.0 / (keyFadeSeconds * sampleRate));
+    blendStep = (float) std::min (1.0, 1.0 / (saturationFadeSeconds * sampleRate));
 
     for (auto& line : keyDelays)
         line.prepare (getLatencySamples());
@@ -277,6 +281,8 @@ void Multiband::reset()
 
     lastCurves = {};
     bandsSaturated = masterSaturated = false;
+    bandsBlend = masterBlend = 0.0f;
+    bandsWarm = masterWarm = 0;
 
     for (auto& compressor : compressors)
     {
@@ -492,6 +498,8 @@ void Multiband::process (const ProcessContext& block)
                                dsp::makeFilter (dsp::FilterShape::lowPass, keyHighFrequency, sampleRate, dsp::getButterworthQ (4, 1)) };
     const auto latency = getLatencySamples();
 
+    const auto startsAfresh = isFirstBlock;
+
     if (isFirstBlock)
     {
         preGains = targetPre;
@@ -525,16 +533,18 @@ void Multiband::process (const ProcessContext& block)
         }
     }
 
-    // Whether the bands go through their saturations (while any of them saturates), and the master through its own; each
-    // starting from silence as it begins to.
+    // Whether the bands go through their saturations (while any of them saturates), and the master through its own: faded in
+    // from the plain delay over 64 samples, each starting from silence as it begins to, and faded out again before they rest.
     auto bandsSaturate = false;
 
     for (int band = low; band <= high; ++band)
         bandsSaturate = bandsSaturate || saturationCurves[(size_t) band].room > 0.0f;
 
     const auto masterSaturates = saturationCurves[(size_t) master].room > 0.0f;
+    const auto bandsRun = bandsSaturate || bandsBlend > 0.0f, masterRuns = masterSaturates || masterBlend > 0.0f;
+    const auto bandsTarget = bandsSaturate ? 1.0f : 0.0f, masterTarget = masterSaturates ? 1.0f : 0.0f;
 
-    if (bandsSaturate && ! bandsSaturated)
+    if (bandsRun && ! bandsSaturated)
     {
         for (int band = low; band <= high; ++band)
             for (auto& saturator : saturators[(size_t) band])
@@ -542,14 +552,28 @@ void Multiband::process (const ProcessContext& block)
 
         for (auto& inStep : dryInStep)
             inStep.reset();
+
+        bandsWarm = 0;
     }
 
-    if (masterSaturates && ! masterSaturated)
+    if (masterRuns && ! masterSaturated)
+    {
         for (auto& saturator : saturators[(size_t) master])
             saturator.reset();
 
-    bandsSaturated = bandsSaturate;
-    masterSaturated = masterSaturates;
+        masterWarm = 0;
+    }
+
+    // From a reset, with silence in all of it, each way takes its saturations as they are set at once.
+    if (startsAfresh)
+    {
+        bandsBlend = bandsTarget;
+        masterBlend = masterTarget;
+        bandsWarm = masterWarm = saturationWarmUp;
+    }
+
+    bandsSaturated = bandsRun;
+    masterSaturated = masterRuns;
 
     // What a band's detector hears from a pair of samples: its peak, held for its sustain, or its average over it.
     const auto hear = [&] (int band, float left, float right)
@@ -610,7 +634,7 @@ void Multiband::process (const ProcessContext& block)
         // The low cut, then the split into three bands; and the dry sound, in the phase the bands add up to and delayed as they
         // are.
         std::array<std::array<float, 2>, 3> bands {};
-        std::array<float, 2> dry {};
+        std::array<float, 2> dry {}, drySaturated {};
 
         for (size_t channel = 0; channel < 2; ++channel)
         {
@@ -623,8 +647,8 @@ void Multiband::process (const ProcessContext& block)
             dryDelays[channel].push (phased);
             dry[channel] = dryDelays[channel].read (lookahead);
 
-            if (bandsSaturate)
-                dry[channel] = dryInStep[channel].process (dry[channel], straight);
+            if (bandsRun)
+                drySaturated[channel] = dryInStep[channel].process (dry[channel], straight);
 
             const auto split = [&] (size_t crossover, float sound, float& below, float& above)
             {
@@ -669,7 +693,13 @@ void Multiband::process (const ProcessContext& block)
         // Each band: its stereo separation, its pre gain, what its compressor hears (its band, or the key while its Key is on,
         // ahead of the sound), the gain, its post gain and its saturation; the mid band's sound, as its compressor gets it, for
         // a master the mid band drives.
-        std::array<float, 2> sum {}, midHeard {};
+        std::array<float, 2> sum {}, sumSaturated {}, midHeard {};
+        bandsWarm = std::min (bandsWarm + (bandsRun ? 1 : 0), saturationWarmUp);
+        masterWarm = std::min (masterWarm + (masterRuns ? 1 : 0), saturationWarmUp);
+        const auto bandsTo = bandsWarm < saturationWarmUp ? 0.0f : bandsTarget,
+                   masterTo = masterWarm < saturationWarmUp ? 0.0f : masterTarget;
+        bandsBlend += std::clamp (bandsTo - bandsBlend, -blendStep, blendStep);
+        masterBlend += std::clamp (masterTo - masterBlend, -blendStep, blendStep);
 
         for (int band = low; band <= high; ++band)
         {
@@ -709,36 +739,43 @@ void Multiband::process (const ProcessContext& block)
                 most[b] = std::max (most[b], -c.gain);
             }
 
-            if (bandsSaturate)
+            auto saturatedLeft = l, saturatedRight = r;
+
+            if (bandsRun)
             {
-                l = saturators[b][0].process (l, saturationCurves[b]);
-                r = saturators[b][1].process (r, saturationCurves[b]);
+                saturatedLeft = saturators[b][0].process (l, saturationCurves[b]);
+                saturatedRight = saturators[b][1].process (r, saturationCurves[b]);
             }
 
             loudestIn[b] = std::max (loudestIn[b], std::max (std::abs (bandDelays[b][0].read (0)), std::abs (bandDelays[b][1].read (0))));
             loudestHeard[b] = std::max (loudestHeard[b], heard);
 
             if (bandModes[b] == Mode::muted || (soloed && ! solos[b]))
-                l = r = 0.0f;
+                l = r = saturatedLeft = saturatedRight = 0.0f;
 
-            loudestOut[b] = std::max ({ loudestOut[b], std::abs (l), std::abs (r) });
+            loudestOut[b] = std::max ({ loudestOut[b], std::abs (saturatedLeft), std::abs (saturatedRight) });
             sum[0] += l;
             sum[1] += r;
+            sumSaturated[0] += saturatedLeft;
+            sumSaturated[1] += saturatedRight;
         }
 
-        // The master band, on the bands mixed with the dry sound.
+        // The master band, on the bands mixed with the dry sound: as late as the saturations, through a plain delay or through
+        // them, or while they fade in or out, the two faded between.
         const auto m = (size_t) master;
         auto l = dry[0] + lmh * (sum[0] - dry[0]);
         auto r = dry[1] + lmh * (sum[1] - dry[1]);
-
-        // While the bands don't saturate, as late as if they did.
         bandsInStep[0].push (l);
         bandsInStep[1].push (r);
+        l = bandsInStep[0].read (saturationLatency);
+        r = bandsInStep[1].read (saturationLatency);
 
-        if (! bandsSaturate)
+        if (bandsRun)
         {
-            l = bandsInStep[0].read (saturationLatency);
-            r = bandsInStep[1].read (saturationLatency);
+            const auto saturatedLeft = drySaturated[0] + lmh * (sumSaturated[0] - drySaturated[0]);
+            const auto saturatedRight = drySaturated[1] + lmh * (sumSaturated[1] - drySaturated[1]);
+            l += bandsBlend * (saturatedLeft - l);
+            r += bandsBlend * (saturatedRight - r);
         }
         preGains[m] += (targetPre[m] - preGains[m]) * preSmoothing;
         postGains[m] += (targetPost[m] - postGains[m]) * preSmoothing;
@@ -774,19 +811,20 @@ void Multiband::process (const ProcessContext& block)
             most[m] = std::max (most[m], -c.gain);
         }
 
-        // Its saturation, or while it doesn't saturate, a delay as long.
+        // Its saturation, or while it doesn't saturate, a delay as long; while it fades in or out, the two faded between.
         masterInStep[0].push (l);
         masterInStep[1].push (r);
+        const auto plainLeft = masterInStep[0].read (saturationLatency), plainRight = masterInStep[1].read (saturationLatency);
 
-        if (masterSaturates)
+        if (masterRuns)
         {
-            l = saturators[m][0].process (l, saturationCurves[m]);
-            r = saturators[m][1].process (r, saturationCurves[m]);
+            l = plainLeft + masterBlend * (saturators[m][0].process (l, saturationCurves[m]) - plainLeft);
+            r = plainRight + masterBlend * (saturators[m][1].process (r, saturationCurves[m]) - plainRight);
         }
         else
         {
-            l = masterInStep[0].read (saturationLatency);
-            r = masterInStep[1].read (saturationLatency);
+            l = plainLeft;
+            r = plainRight;
         }
 
         if (bandModes[m] == Mode::muted)

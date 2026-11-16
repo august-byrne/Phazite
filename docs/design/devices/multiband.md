@@ -86,12 +86,15 @@ delaying what the compressor hears less than the sound. A band can therefore be 
 **Saturation.** Up to its threshold the sound passes as it is; past it, it rounds off into the Ceiling, as `tanh`
 does (below 0 %) or by a cubic that reaches the ceiling flat (above 0 %). The curve plays at twice the sample rate by
 its antiderivative (first-order antiderivative anti-aliasing: Parker, Zavalishin and Le Bivic, 2016), so that what it
-adds doesn't fold back as aliasing. While any of the three bands saturates, all three and the sound mixed back in go
-that way, so that they stay in step; while none does, they take a plain delay of the same length, which leaves a
-limited peak where it is. The master's saturation works the same way on its own.
+adds doesn't fold back as aliasing; then a first-order all-pass makes its delay up to a whole 6 samples (it is 5.137 at
+low frequencies). While any of the three bands saturates, all three and the sound mixed back in go that way, so that
+they stay in step; while none does, they take a plain delay of the same length, which leaves a limited peak where it
+is. As the first band's Saturation leaves 0 %, the saturations play 256 samples from silence, for what their filters
+start with to ring out, and then fade in over 1.5 ms; as the last returns to it, they fade out over 1.5 ms: nothing is
+skipped or repeated. The master's saturation works the same way on its own.
 
-**Latency.** Always the most the two look-aheads take, 10 ms, and the delay of the two saturations in a row, whatever
-the settings. The engine makes up for it on the other tracks. While Low Latency is on, the Multiband is left out of
+**Latency.** Always the most the two look-aheads take, 10 ms, and the delay of the two saturations in a row, 12
+samples, whatever the settings. The engine makes up for it on the other tracks. While Low Latency is on, the Multiband is left out of
 what plays and the sound passes as it comes.
 
 **Sidechain.** The key is the track the device's sidechain listens to, or what comes in when none is set (see
@@ -145,8 +148,6 @@ for the session, not to the project. Each edit of a parameter is one undo step.
 - The whole chain is not oversampled; only the saturations run at twice the rate, with no higher setting.
 - A new Multiband's limit at 0 dB is a compressor's curve with an attack, not a brick wall: fast peaks pass over it.
   The [Limiter](limiter.md) keeps a ceiling.
-- When the first band's Saturation leaves 0 %, or the last one returns to it, the bands switch between the plain
-  delay and their saturators in one sample, without a fade: a few samples are skipped or repeated.
 - The curve is small in the dock and its axes crowd quiet levels together, so points far below 0 dB are hard to
   place; points cannot be typed or moved with the keyboard, and no threshold or ratio is shown.
 - The bands' graph draws the bands as blocks, not the crossovers' slopes, and shows no gain reduction on the spectrum.

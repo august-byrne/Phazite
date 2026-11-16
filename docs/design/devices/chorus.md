@@ -54,7 +54,10 @@ Each side has one delay line that every copy of that side reads, by 4-point Lagr
 the Delay times one plus the Depth times the sweep, where the sweep is the LFO's shape, with Shimmer's fast sine on it,
 read at the copy's own place in the cycle (the right side ahead by Stereo, each voice after the one before by Voice
 Phase) and, with Spread, squeezed into the copy's own part of the whole sweep. New delays are worked out every 8
-samples and glide between, and no copy lags by less than 2 samples. At the defaults it is the first mode of the
+samples, on a grid counted from the song's place while it plays (on from where it was while it is stopped), so that
+it plays the same however the samples are cut into blocks, round a loop, from any start and after a sleep, as a
+render of the song does, and glide between (from where a glide got to, where the song jumps in the middle of a step),
+and no copy lags by less than 2 samples. At the defaults it is the first mode of the
 Juno-60's chorus: one copy a side, swept from 1.75 to 5.25 ms by a triangle at 0.5 Hz, the sides opposite.
 
 Each copy's share of the output is one over the square root of the number of voices, so that several copies together

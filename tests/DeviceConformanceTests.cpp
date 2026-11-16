@@ -30,6 +30,7 @@
 // rule prints what it measured for each device.
 #include "DspProbe.h"
 #include "TestHelpers.h"
+#include "devices/dsp/Crossover.h"
 #include "devices/dsp/Random.h"
 #include "model/devices/internal/Devices.h"
 
@@ -136,6 +137,12 @@ constexpr Exception exceptions[] = {
     { "phaziteSaturator", Rule::mix, -45.0,
       "It delays its copy for the mix itself, through the half-band filters its sound goes through (Processor::delaysDry()), so "
       "that the two meet in phase at any mix: 6.02 samples rather than the 6 it can report." },
+    { "phaziteVinyl", Rule::mix, -5.0,
+      "Its copy for the mix takes the sound's linear way at every mix, so that the two meet in phase: the oversampling's half-band "
+      "filters and the delay line read between samples, and Bass Mono's all-pass while it is on (as at its defaults, 100 Hz), which "
+      "turns the lows' phase: what the rule measures, 5.25 dB under what came in. At no mix, what came in through that all-pass "
+      "as late as its latency, to 40 dB under, its level within a hundredth of a decibel to 5 kHz and 0.37 dB at 18 kHz (checked "
+      "by tests of their own below)." },
     { "phaziteFM", Rule::offset, 0.15,
       "Frequency modulation at whole ratios leaves a part of each note at 0 Hz, which follows the note's envelope; its DC "
       "blocker (5 Hz) takes away what is steady, not what moves with the envelope." },
@@ -144,13 +151,7 @@ constexpr Exception exceptions[] = {
     // and glides counted from each call's start rather than from the song's control points, so what they play depends, a
     // little, on where the blocks fall.
     { "phaziteSynth", Rule::blocks, -30.0, "Its control steps (its LFO, envelopes and glides) start again with each block and each note." },
-    { "phazitePhaser", Rule::blocks, -65.0, "Its sweep moves in control steps from each block's start." },
-    { "phaziteFlanger", Rule::blocks, -30.0, "Its sweep moves in control steps from each block's start." },
-    { "phaziteChorus", Rule::blocks, -25.0, "Its sweep moves in control steps from each block's start." },
     { "phaziteSynth", Rule::automatedBlocks, -30.0, "Its control steps start again with each call." },
-    { "phaziteEq", Rule::automatedBlocks, -30.0, "Its bands glide to their new values over each call." },
-    { "phaziteFlanger", Rule::automatedBlocks, -15.0, "Its sweep and its glides move in control steps from each call's start." },
-    { "phaziteChorus", Rule::automatedBlocks, -6.0, "Its sweep and its glides move in control steps from each call's start." },
 };
 
 // Parameters left at their defaults while an instrument's settings are drawn for the offset rule, each of which puts an
@@ -930,6 +931,80 @@ TEST_CASE ("Nothing constant lies under an instrument's notes, at its defaults a
 
             judge (info, Rule::offset, findings);
         });
+}
+
+TEST_CASE ("The vinyl at no mix keeps the level of what comes in at every frequency, with Bass Mono on and off")
+{
+    // What the mix rule still holds it to (its exception): its copy for the mix, which takes the sound's linear way, turns the
+    // phase of what came in and keeps its level: flat to a hundredth of a decibel to 5 kHz, and at the top within what its delay
+    // line, read between samples as the sound's is, takes off: 0.04 dB at 10 kHz, 0.19 at 15 and 0.37 at 18 kHz at 44.1 kHz,
+    // 0.03, 0.13 and 0.27 at 48 kHz. The half-band filters cost nothing in level, to a millionth of a decibel.
+    const auto* info = phazite::findOwnDevice ("phaziteVinyl");
+    REQUIRE (info != nullptr);
+    const double frequencies[] = { 30.0, 100.0, 300.0, 1000.0, 5000.0, 10000.0, 15000.0, 18000.0 };
+
+    for (const auto bassMono : { 100.0f, 20.0f })
+    {
+        for (const auto rate : { 44100.0, 48000.0 })
+        {
+            const auto atNoMix = [info, rate, bassMono] (const Sound& in)
+            {
+                probe::Device device (*info);
+                device.set (devices::mixParameterID, 0.0f);
+                device.set ("bassMono", bassMono);
+                device.prepare (rate, usualBlock);
+                return device.played (in, usualBlock);
+            };
+
+            const auto response = probe::getResponse (atNoMix, frequencies, rate, 0.25f, 4800, 9600);
+
+            for (size_t i = 0; i < std::size (frequencies); ++i)
+            {
+                INFO ("Bass Mono at " << bassMono << " Hz, " << frequencies[i] << " Hz at " << rate << " Hz: " << response[i] << " dB");
+                CHECK (std::abs (response[i]) < (frequencies[i] <= 5000.0 ? 0.01 : frequencies[i] <= 10000.0 ? 0.05 : 0.4));
+            }
+        }
+    }
+}
+
+TEST_CASE ("Finding 5: the vinyl at no mix with Bass Mono on plays what came in through Bass Mono's all-pass, as late as its latency")
+{
+    // Its mix rule's exception allowed anything. What the copy for the mix does at no mix is what it says: what came in
+    // through the all-pass that Bass Mono turns the lows' phase with, as late as the latency, but for the half-band filters'
+    // and the delay line's few hundredths of a decibel at the top. Measured as the mix rule measures, on noise below a
+    // sixteenth of the rate, against the all-pass played here.
+    const auto* info = phazite::findOwnDevice ("phaziteVinyl");
+    REQUIRE (info != nullptr);
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        probe::Device device (*info);
+        device.set (devices::mixParameterID, 0.0f);
+        device.set ("bassMono", 100.0f);
+        device.prepare (rate, usualBlock);
+        const auto latency = device.getLatencySamples();
+        const auto in = probe::makeNoiseBelow (rate / 16.0, 16 * usualBlock, rate, 7, 0.5f);
+        const auto out = device.played (in, usualBlock);
+        auto worst = 0.0;
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            devices::dsp::Crossover bassMono;
+            bassMono.setFrequency (100.0, rate);
+            std::vector<float> turned ((size_t) in.getNumSamples());
+
+            for (int i = 0; i < in.getNumSamples(); ++i)
+                turned[(size_t) i] = bassMono.processAllPass (in.getSample (channel, i));
+
+            // From the eighth block: by then Bass Mono's split has glided in whole.
+            for (int i = 8 * usualBlock; i < out.getNumSamples(); ++i)
+                worst = std::max (worst, (double) std::abs (out.getSample (channel, i) - turned[(size_t) (i - latency)]));
+        }
+
+        const auto under = probe::inDecibels (worst / probe::getPeak (in));
+        INFO ("at " << rate << " Hz it differs from the all-pass by " << under << " dB under what came in");
+        CHECK (under < -40.0);
+    }
 }
 
 TEST_CASE ("The exceptions name devices there are, each once for a rule")

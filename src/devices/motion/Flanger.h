@@ -14,6 +14,7 @@
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/CombFilter.h"
+#include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/SyncedLfo.h"
 
 #include <array>
@@ -69,6 +70,8 @@ private:
     float signStep = 0.1f; // how far the feedback's sign moves per control step while it turns
     float sign = 1.0f;     // the feedback's sign, gliding through 0 when it turns
     dsp::SyncedLfo lfo;
+    dsp::ControlGrid grid { controlStep }; // the song's grid of control steps (dsp/ControlGrid.h)
+    bool stepSplits = false;               // whether Safe Bass splits the sound in the step under way
     std::array<dsp::CombFilter, 2> combs;
     SafeBass bassSplit;
     std::atomic<double> tailSeconds { 0.05 };

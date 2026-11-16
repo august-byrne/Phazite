@@ -136,10 +136,12 @@ void Delay::process (const ProcessContext& block)
     {
         delaySamples += (target - delaySamples) * timeSmoothing;
 
-        // Each echo darker and thinner than the one before; the feedback saturates softly, so it never runs away.
-        const auto echoLeft = highCuts[0].process (lowCuts[0].process (lines[0].read (delaySamples), lowCutFilter), highCutFilter);
+        // What went in the delay ago: read before this sample goes in, so one less back from the last one in. Each echo
+        // darker and thinner than the one before; the feedback saturates softly, so it never runs away.
+        const auto back = delaySamples - 1.0f;
+        const auto echoLeft = highCuts[0].process (lowCuts[0].process (lines[0].read (back), lowCutFilter), highCutFilter);
         const auto echoRight =
-            right != nullptr ? highCuts[1].process (lowCuts[1].process (lines[1].read (delaySamples), lowCutFilter), highCutFilter) : 0.0f;
+            right != nullptr ? highCuts[1].process (lowCuts[1].process (lines[1].read (back), lowCutFilter), highCutFilter) : 0.0f;
         const auto backLeft = dsp::softClip (echoLeft * amount), backRight = dsp::softClip (echoRight * amount);
         const auto inLeft = left[i], inRight = right != nullptr ? right[i] : 0.0f;
 

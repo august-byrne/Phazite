@@ -94,16 +94,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Devices and playback
 
-- **32. The compressor's Drive jumps as it leaves 0:** at any Drive above 0.01 %, or the moment FET or Tube turn down at
-  all, the curve goes from a straight line to tanh at unity gain (2.4 dB down on a full-scale peak). Fix: fade the curve
-  in with the drive.
-- **33. A compressor made for Duck that automation switches to Compress** doesn't turn its dry copy as its drive turns
-  its sound, so a Mix below 100 % combs the top octave there.
-- **43. The compressor's driven sound comes 0.137 samples later than the latency it reports** (5.137 against 5: its
-  oversampler's filters; the undriven path and the dry copy are 5 exactly). Fix: a fractional delay on the shaper's
-  path, as JUCE's oversampler makes up its own with an all-pass.
-- **34. The Vinyl's Mix** blends its sound, played through a moving delay at twice the rate, with a dry copy it never
-  touches. Not measured; the Saturator's comb (fixed 2026-11-13) came from the same mix.
 - **35. Sampler and drum sampler sounds read from float files aren't checked for values that aren't numbers.**
 - **36. A jump while playing into a part of a long audio file that isn't read yet is silent until it is read** (it fades
   in then). Play from a stop and the loop's start are read ahead; a jump needs pre-roll.
@@ -132,14 +122,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `src/devices/synth/Synth.cpp`); white noise is 3 dB lower in the band that is heard at 96 kHz; the drive fades over
   32 samples at any rate. Fix: work each out from seconds and the rate as the device is prepared. Not yet checked
   (devices-instruments 12).
-- **74. Turning a Multiband band's saturation on or off skips or repeats a few samples.** Why: the bands change in
-  one sample from a plain delay to oversamplers that start silent, and back (`src/devices/dynamics/Multiband.cpp`); the
-  Filter fades the same change over 64 samples. Fix: play both ways through a fade of 64 samples. Not yet checked
-  (devices-effects 10).
-- **75. The delay's echo and the reverb's Room lines are one sample longer than set:** 2 % long at 1 ms, which
-  detunes a comb made with the delay. Why: they read their delay lines before they push the new sample, and don't take
-  the one sample off as the chorus does (`src/devices/delay/Delay.cpp`, `src/devices/reverb/Reverb.cpp`). Fix: read one
-  sample less. Not yet checked (devices-effects 12).
 - **78. A track unmuted, or no longer silenced by a solo, in the middle of a note stays silent until its next note.**
   Why: a silenced strip throws its notes away but still counts them as sounding, so nothing starts them again
   (`src/engine/core/Engine.cpp`). Fix: start held notes again as the strip is heard again; or, as planned, let mute and
@@ -151,12 +133,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   thread takes at every new plan (`src/engine/audio/AudioFile.cpp`). Fix: an index of the notes sounding, resamplers
   started on the reading thread, and reads outside the lock. Not measured. Not yet checked (engine 13).
 
-- **134. The Synth, the Phaser, the Flanger and the Chorus count their control steps from where each block starts, and
-  the EQ glides its bands over each block,** so what they play depends a little on how the same samples are cut into
-  blocks: with still values up to 39, 73, 35 and 31 dB under their sound; with automation in blocks of 441 samples the
-  Synth 35, the EQ 37, the Flanger 21 and the Chorus 8 to 12 dB under it. Found by the device conformance suite
-  (`tests/DeviceConformanceTests.cpp`), which lists each as an exception with its allowance. Fix: count the steps from
-  the song's sample position, as the Wavetable, the FM, the Sampler and the Drum Sampler do, which are exact.
+- **134. The Synth counts its control steps from where each block starts,** so what it plays depends a little on how
+  the same samples are cut into blocks: with still values 39 dB under its sound, with automation in blocks of 441
+  samples 35 dB. Found by the device conformance suite (`tests/DeviceConformanceTests.cpp`), which lists it as an
+  exception with its allowance. Fix: count the steps on the song's grid (`src/devices/dsp/ControlGrid.h`), as the
+  Phaser, the Flanger, the Chorus and the EQ do since 2026-11-15.
 - **135. The Synth with Osc 2 Sync on, and the Wavetable with its warps (Sync, Bend, Pulse Width), put a constant offset
   under held notes,** up to 0.88 of the notes' level. Found by the conformance suite, whose offset rule leaves those
   three parameters at their defaults. Fix: a DC blocker in each voice, as the FM has.

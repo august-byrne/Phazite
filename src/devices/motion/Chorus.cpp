@@ -257,6 +257,87 @@ void Chorus::reset()
     bassSplit.reset();
     lfo.reset();
     fresh = true;
+    grid.reset();
+}
+
+void Chorus::startStep (std::span<const float> values, int numChannels, int wantedCount, int stepLength) noexcept
+{
+    const auto lfoPhase = lfo.getPhase();
+    stepSplits = bassSplit.startStretch (stepLength, grid.getReached());
+
+    // Another number of copies: a set of that many fades in where they are, as the set that played fades out where it was.
+    // One change at a time: the next waits until the set before has faded out.
+    auto started = false; // the front set's copies start where they are, rather than gliding there
+
+    if (fresh)
+    {
+        front = 0;
+        sets[0] = { .count = wantedCount, .fade = 1.0f };
+        sets[1] = {};
+    }
+    else if (wantedCount != sets[(size_t) front].count && sets[(size_t) (1 - front)].count == 0)
+    {
+        front = 1 - front;
+        sets[(size_t) front].count = wantedCount;
+        started = true;
+    }
+
+    // Each set's copies' gains, gliding over the step to where its fade and the feedback put them: a set's copies together
+    // send back the feedback's share, and two sets, while one gives way to the other, no more than one does. Each glides on
+    // from where it reached: where it was going, unless the song jumped in the middle of the last step.
+    const auto reached = grid.getReached();
+
+    for (size_t s = 0; s < (size_t) numSets; ++s)
+    {
+        auto& set = sets[s];
+
+        if (reached < 1.0f)
+        {
+            set.outGain = outFrom[s] + (set.outGain - outFrom[s]) * reached;
+            set.loopGain = loopFrom[s] + (set.loopGain - loopFrom[s]) * reached;
+        }
+        outFrom[s] = loopFrom[s] = outStep[s] = loopStep[s] = 0.0f;
+
+        if (set.count == 0)
+            continue;
+
+        if (! fresh)
+            set.fade = std::clamp (set.fade + ((int) s == front ? fadeStep : -fadeStep), 0.0f, 1.0f);
+
+        const auto outTo = set.fade * getOutGain (values, set.count), loopTo = set.fade * getLoopGain (values, set.count);
+        outFrom[s] = fresh ? outTo : set.outGain;
+        loopFrom[s] = fresh ? loopTo : set.loopGain;
+        outStep[s] = (outTo - outFrom[s]) / (float) stepLength;
+        loopStep[s] = (loopTo - loopFrom[s]) / (float) stepLength;
+        set.outGain = outTo;
+        set.loopGain = loopTo;
+    }
+
+    // Where each copy is going over the step, and its glide there a sample.
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        auto& side = sides[(size_t) channel];
+
+        for (size_t s = 0; s < (size_t) numSets; ++s)
+        {
+            const auto count = sets[s].count;
+            const auto isFront = (int) s == front;
+
+            for (int voice = 0; voice < count; ++voice)
+            {
+                const auto v = (size_t) voice;
+                const auto milliseconds = getDelayOf (values, count, getPhaseOf (values, count, lfoPhase, channel, voice), voice);
+                side.target[s][v] = std::clamp ((float) (milliseconds * 0.001 * sampleRate), shortestSamples, longestSamples);
+
+                if (fresh || (started && isFront))
+                    side.now[s][v] = side.target[s][v];
+
+                side.step[s][v] = (side.target[s][v] - side.now[s][v]) / (float) stepLength;
+            }
+        }
+    }
+
+    fresh = false;
 }
 
 void Chorus::process (const ProcessContext& block)
@@ -282,82 +363,25 @@ void Chorus::process (const ProcessContext& block)
 
     lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
                     block.beat, block.bars);
+    const auto phaseAtStart = lfo.getPhase(); // what its editor is shown
 
-    for (int start = 0; start < block.numSamples; start += controlStep)
+    // A control step at a time, on the song's grid of them (dsp/ControlGrid.h).
+    grid.startBlock (block.isPlaying, block.songSample);
+
+    for (int start = 0; start < block.numSamples;)
     {
-        const auto length = std::min (controlStep, block.numSamples - start);
-        const auto lfoPhase = lfo.getPhase();
-        const auto splitting = bassSplit.startStretch (length);
+        if (grid.startsStep())
+            startStep (values, numChannels, wantedCount, grid.startStep());
 
-        // Another number of copies: a set of that many fades in where they are, as the set that played fades out where it
-        // was. One change at a time: the next waits until the set before has faded out.
-        auto started = false; // the front set's copies start where they are, rather than gliding there
-
-        if (fresh)
-        {
-            front = 0;
-            sets[0] = { .count = wantedCount, .fade = 1.0f };
-            sets[1] = {};
-        }
-        else if (wantedCount != sets[(size_t) front].count && sets[(size_t) (1 - front)].count == 0)
-        {
-            front = 1 - front;
-            sets[(size_t) front].count = wantedCount;
-            started = true;
-        }
-
-        // Each set's copies' gains, gliding over the step to where its fade and the feedback put them: a set's copies
-        // together send back the feedback's share, and two sets, while one gives way to the other, no more than one does.
-        std::array<float, numSets> outFrom {}, loopFrom {}, outStep {}, loopStep {};
-
-        for (size_t s = 0; s < (size_t) numSets; ++s)
-        {
-            auto& set = sets[s];
-
-            if (set.count == 0)
-                continue;
-
-            if (! fresh)
-                set.fade = std::clamp (set.fade + ((int) s == front ? fadeStep : -fadeStep), 0.0f, 1.0f);
-
-            const auto outTo = set.fade * getOutGain (values, set.count), loopTo = set.fade * getLoopGain (values, set.count);
-            outFrom[s] = fresh ? outTo : set.outGain;
-            loopFrom[s] = fresh ? loopTo : set.loopGain;
-            outStep[s] = (outTo - outFrom[s]) / (float) length;
-            loopStep[s] = (loopTo - loopFrom[s]) / (float) length;
-            set.outGain = outTo;
-            set.loopGain = loopTo;
-        }
+        const auto length = grid.take (block.numSamples - start);
+        const auto done = grid.getDone();
+        const auto splitting = stepSplits;
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
             auto& side = sides[(size_t) channel];
-            std::array<std::array<float, mostVoices>, numSets> target {};
-
-            for (size_t s = 0; s < (size_t) numSets; ++s)
-            {
-                const auto count = sets[s].count;
-                const auto isFront = (int) s == front;
-
-                for (int voice = 0; voice < count; ++voice)
-                {
-                    const auto v = (size_t) voice;
-                    const auto milliseconds = getDelayOf (values, count, getPhaseOf (values, count, lfoPhase, channel, voice), voice);
-                    target[s][v] = std::clamp ((float) (milliseconds * 0.001 * sampleRate), shortestSamples, longestSamples);
-
-                    if (fresh || (started && isFront))
-                        side.now[s][v] = target[s][v];
-
-                    side.step[s][v] = (target[s][v] - side.now[s][v]) / (float) length;
-
-                    if (start == 0 && isFront)
-                        delays[(size_t) channel][v].set ((float) milliseconds);
-                }
-            }
-
             auto* samples = block.channels[channel] + start;
             auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
-            auto outGain = outFrom, loopGain = loopFrom;
 
             for (int i = 0; i < length; ++i)
             {
@@ -365,10 +389,11 @@ void Chorus::process (const ProcessContext& block)
                 // in is split and added up again, to stay in phase with the two (SafeBass.h).
                 const auto x = samples[i];
                 auto in = x, around = 0.0f;
+                const auto along = (float) (done + i + 1); // samples into the step, this one's end
 
                 if (splitting)
                 {
-                    const auto parts = bassSplit.split (channel, x, i);
+                    const auto parts = bassSplit.split (channel, x, done + i);
                     in = parts.through;
                     around = parts.around;
 
@@ -382,15 +407,14 @@ void Chorus::process (const ProcessContext& block)
                 for (size_t s = 0; s < (size_t) numSets; ++s)
                 {
                     const auto count = (size_t) sets[s].count;
-                    outGain[s] += outStep[s];
-                    loopGain[s] += loopStep[s];
+                    const auto outGain = outFrom[s] + outStep[s] * along, loopGain = loopFrom[s] + loopStep[s] * along;
 
                     for (size_t v = 0; v < count; ++v)
                     {
                         side.now[s][v] += side.step[s][v];
                         const auto copy = side.line.read (side.now[s][v] - 1.0f);
-                        out += outGain[s] * copy;
-                        back += loopGain[s] * copy;
+                        out += outGain * copy;
+                        back += loopGain * copy;
                     }
                 }
 
@@ -398,19 +422,35 @@ void Chorus::process (const ProcessContext& block)
                 side.line.push (cutting ? side.cut.process (line, cutFilter) : line);
                 samples[i] = around + out;
             }
-
-            for (size_t s = 0; s < (size_t) numSets; ++s)
-                for (size_t v = 0; v < (size_t) sets[s].count; ++v)
-                    side.now[s][v] = target[s][v];
         }
 
-        // A set that has faded out rests.
-        if (auto& behind = sets[(size_t) (1 - front)]; behind.count != 0 && behind.fade <= 0.0f)
-            behind = {};
-
-        fresh = false;
         lfo.advance (length);
+        grid.advance (length);
+        start += length;
+
+        // The step's end: each copy where it was going, and a set that has faded out rests.
+        if (grid.endsStep())
+        {
+            for (int channel = 0; channel < numChannels; ++channel)
+            {
+                auto& side = sides[(size_t) channel];
+
+                for (size_t s = 0; s < (size_t) numSets; ++s)
+                    for (size_t v = 0; v < (size_t) sets[s].count; ++v)
+                        side.now[s][v] = side.target[s][v];
+            }
+
+            if (auto& behind = sets[(size_t) (1 - front)]; behind.count != 0 && behind.fade <= 0.0f)
+                behind = {};
+        }
     }
+
+    // How far the copies that play lag, as the block started, for its editor.
+    if (const auto count = sets[(size_t) front].count; count > 0)
+        for (int channel = 0; channel < numChannels; ++channel)
+            for (int voice = 0; voice < count; ++voice)
+                delays[(size_t) channel][(size_t) voice].set (
+                    (float) getDelayOf (values, count, getPhaseOf (values, count, phaseAtStart, channel, voice), voice));
 
     shownPhase.set ((float) lfo.getPhase());
 

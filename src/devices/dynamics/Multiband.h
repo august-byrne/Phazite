@@ -31,6 +31,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/AlignedShaper.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dsp/Oversampling.h"
@@ -168,7 +169,7 @@ private:
 
     double sampleRate = 44100.0;
     int lookahead = 1;
-    int saturationLatency = 0; // a saturation's, rounded
+    int saturationLatency = 0; // a saturation's, in whole samples
     float preSmoothing = 0.001f;
 
     // A band's saturation as its antiderivative plays it: straight up to its threshold, then rounding off into its ceiling.
@@ -182,10 +183,18 @@ private:
         bool isSame (const SaturationCurve&) const noexcept;
     };
 
-    std::array<std::array<dsp::AntialiasedShaper, 2>, numBands> saturators; // each band's, per channel
-    std::array<dsp::AntialiasedShaper, 2> dryInStep;                        // the sound mixed back in, kept in step with them
+    // The saturations, each exactly as late as the plain delay of a whole number of samples that the sound takes while none
+    // saturates (dsp/AlignedShaper.h); the two ways faded between over 1.5 ms as a saturation turns on or off, as the
+    // Filter fades its drive, once the saturations have played 256 samples from silence (so that what their filters start
+    // with has rung out), rather than changing in one sample to saturations that start from silence (which lost a few
+    // samples) and back.
+    std::array<std::array<dsp::AlignedShaper, 2>, numBands> saturators; // each band's, per channel
+    std::array<dsp::AlignedShaper, 2> dryInStep;                        // the sound mixed back in, kept in step with them
     std::array<SaturationCurve, numBands> lastCurves {};
     bool bandsSaturated = false, masterSaturated = false;    // whether the bands, and the master, went that way last
+    float bandsBlend = 0.0f, masterBlend = 0.0f;             // how far each goes through its saturations, from 0 to 1
+    int bandsWarm = 0, masterWarm = 0;                       // samples their saturations have played since they started
+    float blendStep = 0.01f;                                 // how far either fades a sample
     std::array<dsp::DelayLine, 2> bandsInStep, masterInStep; // as long as a saturation, for while none saturates
 
     // A crossover's bands add up to what went in through an all-pass of the crossover's order: of a 24 dB crossover, second

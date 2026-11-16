@@ -70,7 +70,13 @@ Decay plus the Pre-Delay as its tail and has no latency.
 A map of the tail, in the manner of FabFilter's Pro-R: time across and pitch up (50 Hz to 16 kHz), each pitch lit
 until it has faded by 60 dB, so the wedge is long in the bass and shorter past the Damping, starts after the
 Pre-Delay's gap, and shows nothing below the Low Cut or above the High Cut. It is drawn from the reverb's own decay
-formula. Hits coming in drift into the map and fade. The map's top names the mode, and for a plate what a short Decay
+formula: for the room, each line's loss and damping at the pitch and how long a pass through it takes there, and how the
+energy flows between the lines as the room plays it, which comes within a tenth of how long the room is measured to ring
+in a third-octave band (at two dampings and both ends of Size, 300 Hz to 3 kHz). The flow is worked out without stepping
+through the tail: what is yet to come out is solved for, and where its curve passes each 5 dB from 5 to 25 dB down is
+found by halves, through one step's flow squared again and again, so one pitch costs about the same at any Decay and
+Size (under a twentieth of a millisecond in a Debug build). The map works its 43 pitches out once when a value changes,
+not for each paint. Hits coming in drift into the map and fade. The map's top names the mode, and for a plate what a short Decay
 holds back ("Plate  Diffusion 58%").
 
 The map's edges drag, each as one undo step: the wedge's end (or a drag anywhere in the tail) for the Decay, the gap

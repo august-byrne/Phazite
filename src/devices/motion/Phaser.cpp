@@ -117,6 +117,7 @@ void Phaser::reset()
 
     bassSplit.reset();
     lfo.reset();
+    grid.reset();
 }
 
 double Phaser::getTailSeconds() const
@@ -146,21 +147,36 @@ void Phaser::process (const ProcessContext& block)
     lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
                     block.beat, block.bars);
 
-    for (int start = 0; start < block.numSamples; start += controlStep)
+    // Where its notches are as the block starts, for its editor.
+    for (int channel = 0; channel < numChannels; ++channel)
+        centres[(size_t) channel].set ((float) getSweptCentre (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0), sampleRate));
+
+    // A control step at a time, on the song's grid of them (dsp/ControlGrid.h).
+    grid.startBlock (block.isPlaying, block.songSample);
+
+    for (int start = 0; start < block.numSamples;)
     {
-        const auto length = std::min (controlStep, block.numSamples - start);
-        const auto splitting = bassSplit.startStretch (length);
+        if (grid.startsStep())
+        {
+            stepSplits = bassSplit.startStretch (grid.startStep(), grid.getReached());
+
+            for (int channel = 0; channel < numChannels; ++channel)
+            {
+                const auto centre = getSweptCentre (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0), sampleRate);
+                stepCoefficients[(size_t) channel] = dsp::makeFilter (dsp::FilterShape::allPass, centre, sampleRate, q);
+            }
+        }
+
+        const auto length = grid.take (block.numSamples - start);
+        const auto done = grid.getDone();
+        const auto splitting = stepSplits;
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            const auto centre = getSweptCentre (values, lfo.valueAt (lfoShape, channel == 1 ? offset : 0.0), sampleRate);
-            const auto coefficients = dsp::makeFilter (dsp::FilterShape::allPass, centre, sampleRate, q);
+            const auto& coefficients = stepCoefficients[(size_t) channel];
             auto& chain = sections[(size_t) channel];
             auto* samples = block.channels[channel] + start;
             auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
-
-            if (start == 0)
-                centres[(size_t) channel].set ((float) centre);
 
             for (int i = 0; i < length; ++i)
             {
@@ -171,7 +187,7 @@ void Phaser::process (const ProcessContext& block)
 
                 if (splitting)
                 {
-                    const auto parts = bassSplit.split (channel, x, i);
+                    const auto parts = bassSplit.split (channel, x, done + i);
                     in = parts.through;
                     around = parts.around;
 
@@ -200,6 +216,8 @@ void Phaser::process (const ProcessContext& block)
         }
 
         lfo.advance (length);
+        grid.advance (length);
+        start += length;
     }
 
     shownPhase.set ((float) lfo.getPhase());

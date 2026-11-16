@@ -62,10 +62,15 @@ public:
     }
 
     // As a stretch of a block starts (an effect's control step), so many samples long: the fade and the glide move on over
-    // it. Whether it splits the sound in the stretch at all: not while it is off and faded out.
-    bool startStretch (int length) noexcept
+    // it, the fade from as far as the last stretch's reached (dsp/ControlGrid.h: all of it, unless the song jumped in the
+    // middle of it). Whether it splits the sound in the stretch at all: not while it is off and faded out.
+    bool startStretch (int length, float reached = 1.0f) noexcept
     {
         const auto samples = (float) length;
+
+        if (reached < 1.0f)
+            amount = from + (amount - from) * reached;
+
         from = amount;
 
         if (on && amount < 1.0f)
@@ -115,6 +120,9 @@ public:
         const auto faded = from + step * (float) (i + 1);
         return { x + faded * (bands.high - x), faded * bands.low, x + faded * (both - x) };
     }
+
+    // How far it has faded in at the i-th sample of the stretch, from 0 to 1. For tests.
+    float getFadeAt (int i) const noexcept { return whole ? 1.0f : from + step * (float) (i + 1); }
 
 private:
     static constexpr double fadeSeconds = 0.01;

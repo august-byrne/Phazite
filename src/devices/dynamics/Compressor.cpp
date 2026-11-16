@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace phazite::devices
 {
@@ -161,12 +162,81 @@ namespace
         }
     };
 
-    constexpr float driveBlendStep = 1.0f / 64.0f; // of the way between the plain delay and the drive, each sample
+    // How long the fade between the plain delay and the drive takes, either way: 64 samples at 44.1 kHz.
+    constexpr double driveFadeSeconds = 0.00145;
+
+    // Samples the drive plays, from silence, before it is faded in: what its half-band filters start with has rung out by
+    // then, to the bit (after 64 samples it was still 53 dB under a 10 kHz tone, after 128, 94). A curve with even harmonics
+    // plays longer, for the filter that takes their offset out of what it adds to settle (a 10 Hz high-pass: after 150 ms
+    // it has taken out all but a thousandth of the offset; after 256 samples, less than a third of it): its offset came in with
+    // the fade, a thump.
+    constexpr int driveWarmUp = 256;
+    constexpr double evenWarmUpSeconds = 0.15;
+
+    // How much of the drive's travel fades its curve in from a straight line (1.8 dB into the curve): at the curve's whole
+    // at once, the first touch of Drive took a full-scale peak 2.4 dB down. FET's and Tube's colour fades its curve in over
+    // their first 3 dB of reduction, so that they sound as they were tuned from there on (their colour adds at most a tenth
+    // of Drive's travel, all of it inside the knob's fade) and nothing jumps as they begin to turn down.
+    constexpr float curveFadeDrive = 0.1f;
+    constexpr float colourCurveReduction = 3.0f;
 } // namespace
+
+// A sample through the drive: its gain into the curve and back out, the curve faded in as far as its share says, the DC that
+// the even harmonics leave filtered out of what the curve adds. While the share is none, and nothing has an offset to take out,
+// the straight line alone: the curve's antiderivative is the costly part, and its averaging starts again as the share leaves 0.
+template <typename Curve>
+float Compressor::Drive::play (float sample, float gain, const Curve& curve, float share, const dsp::FilterCoefficients& dc,
+                               bool blocksDc) noexcept
+{
+    const auto [first, second] = oversampler.up (sample);
+    std::array<float, 2> played {};
+    const auto curveRests = share <= 0.0f && ! blocksDc;
+
+    if (! curveRests && std::exchange (curveRested, false))
+        bent.reset();
+
+    curveRested = curveRested || curveRests;
+
+    for (size_t k = 0; k < 2; ++k)
+    {
+        const auto x = k == 0 ? first : second;
+        const auto plain = straight.process (x, dsp::StraightCurve {});
+
+        if (curveRests)
+        {
+            played[k] = plain;
+            continue;
+        }
+
+        auto added = bent.process (x * gain, curve) / gain - plain;
+
+        if (blocksDc)
+            added = dcBlocker.process (added, dc);
+
+        played[k] = plain + share * added;
+    }
+
+    return rest.process (oversampler.down (played[0], played[1]));
+}
+
+void Compressor::Drive::reset() noexcept
+{
+    oversampler.reset();
+    bent.reset();
+    straight.reset();
+    dcBlocker.reset();
+    rest.reset();
+    curveRested = false;
+}
+
+int Compressor::getDriveWarmUp (float even, float share) const noexcept
+{
+    return even > 0.0f && share > 0.0f ? evenWarmUp : driveWarmUp;
+}
 
 int Compressor::getDriveLatency()
 {
-    return (int) std::lround (dsp::AntialiasedShaper::getLatencySamples());
+    return dsp::AlignedShaper::getLatencySamples();
 }
 
 const DeviceInfo Compressor::info { .typeID = typeID,
@@ -188,13 +258,19 @@ void Compressor::prepare (double newSampleRate, int)
     driveLatency = getDriveLatency();
     latency = ducksAsPrepared ? std::max (driveLatency, (int) std::lround (duckLookaheadSeconds * sampleRate)) : driveLatency;
 
-    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays })
+    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays, &dryRests })
         for (auto& delay : *delays)
             delay.prepare (std::max (1, latency));
 
     for (auto& delay : undriven)
         delay.prepare (std::max (1, driveLatency));
 
+    for (auto* set : { &drives, &nextDrives })
+        for (auto& each : *set)
+            each.rest.setDelay ((float) driveLatency - dsp::AntialiasedShaper::getLatencySamples());
+
+    driveBlendStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
+    evenWarmUp = std::max (driveWarmUp, (int) std::lround (evenWarmUpSeconds * sampleRate));
     gainDelay.prepare (std::max (1, latency));
     reset();
 }
@@ -238,20 +314,28 @@ void Compressor::reset()
         for (auto& filter : channel)
             filter.reset();
 
-    for (auto& filter : dcBlockers)
-        filter.reset();
-
-    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays, &undriven })
+    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays, &dryRests, &undriven })
         for (auto& delay : *delays)
             delay.reset();
 
-    for (auto* shapers : { &drives, &dryDrives })
-        for (auto& shaper : *shapers)
-            shaper.reset();
+    for (auto* set : { &drives, &nextDrives })
+        for (auto& each : *set)
+            each.reset();
+
+    for (auto& shaper : dryDrives)
+        shaper.reset();
 
     driveBlend = 0.0f;
-    lastMix = 1.0f;
-    dryInStep = false;
+    curveShare = 0.0f;
+    knobShare = 0.0f;
+    lastDriveAmount = -1.0f;
+    drivesRan = false;
+    driveWarm = 0;
+    warmUp = driveWarmUp;
+    isFresh = true;
+    playingEven = 0.0f;
+    changesCurve = false;
+    nextBlend = 0.0f;
     gainDelay.reset();
     isFirstBlock = true;
     keyShare = 0.0f;
@@ -260,8 +344,7 @@ void Compressor::reset()
     memory = 0.0f;
     lastLevel = -1.0f;
     lastWanted = 0.0f;
-    lastMost = 0.0f;
-    wasDriven = false;
+    colourAmount = 0.0f;
 }
 
 void Compressor::process (const ProcessContext& block)
@@ -273,6 +356,8 @@ void Compressor::process (const ProcessContext& block)
         duck (block);
     else
         compress (block);
+
+    isFresh = false;
 }
 
 void Compressor::compress (const ProcessContext& block)
@@ -292,9 +377,9 @@ void Compressor::compress (const ProcessContext& block)
     const auto hearsAverage = type == Character::vca || type == Character::opto || type == Character::tube;
     const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
     const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
-    const auto targetDrive = std::min (1.0f, values[drive] + colourShares[(size_t) type] * std::min (1.0f, lastMost / colourReduction));
+    const auto colourOf = colourShares[(size_t) type];
     const auto even = evenShares[(size_t) type];
-    const auto dcBlocker = dsp::makeFilter (dsp::FilterShape::highPass, dcBlockerFrequency, sampleRate, 0.70710678);
+    const auto dcBlocker = dsp::makeFilter (dsp::FilterShape::highPass, dcBlockerFrequency, 2.0 * sampleRate, 0.70710678);
     gains.update (getCurve (values));
     reduction.setTimes (values[attack] * 0.001f, values[release] * 0.001f);
 
@@ -302,43 +387,95 @@ void Compressor::compress (const ProcessContext& block)
     const auto slowRelease = values[release] * 0.001f * (opticalSlowdown + opticalMemorySlowdown * memory);
     opticalCoefficient = (float) std::exp (-1.0 / ((double) slowRelease * sampleRate));
 
+    // How far the drive's curve is in: the knob's share over its first tenth, or FET's and Tube's colour's over their first
+    // 3 dB of reduction, the more of the two; the knob's glides, and the colour's follows how far it turns down, smoothly,
+    // sample by sample, so that it plays the same however its blocks are cut.
+    const auto knobShareWanted = std::clamp (values[drive] / curveFadeDrive, 0.0f, 1.0f);
+
     if (isFirstBlock)
     {
         makeupDecibels = targetMakeup;
         inputDecibels = targetInput;
-        driveAmount = targetDrive;
+        driveAmount = values[drive];
+        knobShare = knobShareWanted;
+        curveShare = knobShare;
         isFirstBlock = false;
     }
 
     // Whether the sound goes through the drive: while its knob is up or the character has a colour of its own, whether or not
-    // that colours the sound now (a straight line in the curve's place meanwhile), and until a drive turned off has faded out.
-    // Coming on, it starts from silence, faded in.
-    const auto shaped = values[drive] > 0.0f || colourShares[(size_t) type] > 0.0f || driveAmount > 1.0e-4f;
-    const DriveCurve curve { even };
+    // that colours the sound now (the straight line alone meanwhile), and until a drive turned off has faded out. Coming on,
+    // it starts from silence, plays a while for what its filters start with to ring out (longer for a curve with an offset to
+    // take out, unless the curve's share starts at none, so that the filter settles as it comes in), and is faded in; from a
+    // reset, with silence in all of it, at once. Another curve, while the drive is heard, warms up beside the one playing,
+    // on the same sound, and the sound fades from one to the other: it stays driven all through, and no offset comes in.
+    const auto shaped = values[drive] > 0.0f || colourOf > 0.0f || driveAmount > 1.0e-4f;
+    const auto drivesRun = shaped || driveBlend > 0.0f;
 
-    if (shaped && driveBlend <= 0.0f)
-        for (auto& shaper : drives)
-            shaper.reset();
-
-    if (! juce::exactlyEqual (even, lastEven)) // another curve: its averaging starts again
+    if (drivesRun && ! drivesRan)
     {
-        for (auto& shaper : drives)
-            shaper.restartAveraging();
+        for (auto& each : drives)
+            each.reset();
 
-        lastEven = even;
-    }
-
-    // The copy of what came in for the mix goes through filters like the drive's with the sound, while the mix uses it (from
-    // silence then, as the mix leaves 100 %); not where the sound takes Duck's latency, the drive's and a delay for the rest.
-    const auto rest = latency - driveLatency;
-    const auto turnsDry = block.dry != nullptr && rest <= 0 && (shaped || driveBlend > 0.0f) && (values[mix] < 1.0f || lastMix < 1.0f);
-    lastMix = values[mix];
-
-    if (turnsDry && ! dryInStep)
         for (auto& shaper : dryDrives)
             shaper.reset();
 
-    dryInStep = turnsDry;
+        driveWarm = 0;
+        warmUp = getDriveWarmUp (even, curveShare);
+        playingEven = even;
+        changesCurve = false;
+    }
+
+    if (isFresh)
+    {
+        driveBlend = shaped ? 1.0f : 0.0f;
+        playingEven = even;
+        warmUp = getDriveWarmUp (even, curveShare);
+        driveWarm = warmUp;
+        changesCurve = false;
+    }
+
+    drivesRan = drivesRun;
+
+    // A curve still warming that is no longer wanted is dropped; one fading in fades in whole, and another is warmed after.
+    if (changesCurve && nextBlend <= 0.0f && ! juce::exactlyEqual (even, nextEven))
+        changesCurve = false;
+
+    if (! juce::exactlyEqual (even, playingEven) && ! changesCurve)
+    {
+        if (driveBlend > 0.0f)
+        {
+            for (auto& each : nextDrives)
+                each.reset();
+
+            nextEven = even;
+            nextWarm = 0;
+            nextWarmUp = getDriveWarmUp (even, curveShare);
+            nextBlend = 0.0f;
+            changesCurve = true;
+        }
+        else
+        {
+            // Not heard: its averaging starts again, its offset's filter from nothing, and its warm-up from the start.
+            for (auto& each : drives)
+            {
+                each.bent.restartAveraging();
+                each.dcBlocker.reset();
+            }
+
+            playingEven = even;
+            driveWarm = 0;
+            warmUp = getDriveWarmUp (even, curveShare);
+        }
+    }
+
+    DriveCurve curve { playingEven };
+    const DriveCurve nextCurve { nextEven };
+
+    // The copy of what came in for the mix goes through filters like the drive's with the sound, while the drive plays, so that
+    // they are ready whenever the mix leaves 100 %; where the sound then takes Duck's latency, the copy goes on through a delay
+    // for the rest of it as the sound does.
+    const auto rest = latency - driveLatency;
+    const auto turnsDry = block.dry != nullptr && drivesRun;
 
     // The gain is worked out again only when it changes (docs/archive/performance-audit.md, A5).
     auto loudestPeak = 0.0f, most = 0.0f, least = 0.0f;
@@ -401,7 +538,8 @@ void Compressor::compress (const ProcessContext& block)
         }
 
         makeupDecibels += (targetMakeup - makeupDecibels) * makeupSmoothing;
-        driveAmount += (targetDrive - driveAmount) * makeupSmoothing;
+        driveAmount += (values[drive] - driveAmount) * makeupSmoothing;
+        colourAmount += (std::max (0.0f, amount) - colourAmount) * makeupSmoothing;
 
         if (const auto gainDecibels = makeupDecibels - amount; ! juce::exactlyEqual (gainDecibels, lastGainDecibels))
         {
@@ -412,34 +550,45 @@ void Compressor::compress (const ProcessContext& block)
         // The sound, turned down and driven into its curve (the makeup after it); or what it hears, to listen to, faded in and
         // out.
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
-        const auto driven = driveAmount > 1.0e-4f;
 
         // Duck's gain, which it plays late, is none for what goes through now: should automation have it duck next, it turns
         // what is still on its way no further down.
         gainDelay.push (1.0f);
 
-        if (driven && ! juce::exactlyEqual (driveAmount, lastDriveAmount))
+        // The drive: the knob's, and FET's and Tube's colour's as far as they turn down.
+        const auto colouring = std::min (1.0f, colourAmount / colourReduction);
+        const auto drivenBy = std::min (1.0f, driveAmount + colourOf * colouring);
+
+        if (! juce::exactlyEqual (drivenBy, lastDriveAmount))
         {
-            lastDriveAmount = driveAmount;
-            driveGain = dsp::decibelsToGain (driveAmount * mostDrive);
+            lastDriveAmount = drivenBy;
+            driveGain = dsp::decibelsToGain (drivenBy * mostDrive);
         }
 
-        driveBlend += std::clamp ((shaped ? 1.0f : 0.0f) - driveBlend, -driveBlendStep, driveBlendStep);
-        const auto throughDrive = driveBlend > 0.0f;
+        knobShare += (knobShareWanted - knobShare) * makeupSmoothing;
 
-        if (throughDrive && ! juce::exactlyEqual (makeupDecibels, lastMakeupDecibels))
+        if (knobShareWanted <= 0.0f && knobShare < 1.0e-6f)
+            knobShare = 0.0f;
+
+        curveShare = colourOf > 0.0f ? std::max (knobShare, std::min (1.0f, colourAmount / colourCurveReduction)) : knobShare;
+
+        // Faded in once it has warmed up; and another curve, once it has, faded to.
+        driveWarm = std::min (driveWarm + (drivesRun ? 1 : 0), warmUp);
+        const auto blendTarget = shaped && driveWarm >= warmUp ? 1.0f : 0.0f;
+        driveBlend += std::clamp (blendTarget - driveBlend, -driveBlendStep, driveBlendStep);
+
+        if (changesCurve)
+        {
+            nextWarm = std::min (nextWarm + 1, nextWarmUp);
+
+            if (nextWarm >= nextWarmUp)
+                nextBlend = std::min (1.0f, nextBlend + driveBlendStep);
+        }
+
+        if (drivesRun && ! juce::exactlyEqual (makeupDecibels, lastMakeupDecibels))
         {
             lastMakeupDecibels = makeupDecibels;
             makeupGain = dsp::decibelsToGain (makeupDecibels);
-        }
-
-        // Between the curve and a straight line, the averaging starts again.
-        if (driven != wasDriven)
-        {
-            for (auto& shaper : drives)
-                shaper.restartAveraging();
-
-            wasDriven = driven;
         }
 
         for (int channel = 0; channel < numChannels; ++channel)
@@ -450,26 +599,15 @@ void Compressor::compress (const ProcessContext& block)
             undriven[c].push (turnedDown);
             auto sound = undriven[c].read (driveLatency);
 
-            if (throughDrive)
+            if (drivesRun)
             {
-                // Without the makeup, into the curve and back out at the level it came in at; then the makeup. While
-                // nothing drives it, a straight line through the same filters.
+                // Without the makeup, into the curve and back out at the level it came in at, as far as the drive has faded
+                // the curve in; then the makeup. While nothing drives it, the straight line alone, through the same filters.
                 const auto plain = turnedDown / makeupGain;
-                auto y = 0.0f;
+                auto y = drives[c].play (plain, driveGain, curve, curveShare, dcBlocker, playingEven > 0.0f);
 
-                if (driven)
-                {
-                    y = drives[c].process (plain * driveGain, curve);
-
-                    if (even > 0.0f)
-                        y = dcBlockers[c].process (y, dcBlocker);
-
-                    y /= driveGain;
-                }
-                else
-                {
-                    y = drives[c].process (plain, dsp::StraightCurve {});
-                }
+                if (changesCurve)
+                    y += nextBlend * (nextDrives[c].play (plain, driveGain, nextCurve, curveShare, dcBlocker, nextEven > 0.0f) - y);
 
                 sound += driveBlend * (y * makeupGain - sound);
             }
@@ -488,18 +626,34 @@ void Compressor::compress (const ProcessContext& block)
 
             block.channels[channel][i] = out;
 
-            // The copy of what came in, as late; and turned as the drive's filters turn the sound.
+            // The copy of what came in, as late, the same way; and turned as the drive's filters turn the sound.
             if (block.dry != nullptr)
             {
                 auto& came = block.dry[channel][i];
                 dryDelays[c].push (came);
-                auto late = dryDelays[c].read (latency);
+                auto late = dryDelays[c].read (driveLatency);
 
                 if (turnsDry)
                     late += driveBlend * (dryDrives[c].process (came, dsp::StraightCurve {}) - late);
 
+                if (rest > 0)
+                {
+                    dryRests[c].push (late);
+                    late = dryRests[c].read (rest);
+                }
+
                 came = late;
             }
+        }
+
+        // Faded to the other curve whole: it plays on.
+        if (changesCurve && nextBlend >= 1.0f)
+        {
+            std::swap (drives, nextDrives);
+            playingEven = nextEven;
+            curve.even = nextEven;
+            changesCurve = false;
+            nextBlend = 0.0f;
         }
 
         loudestPeak = std::max (loudestPeak, level);
@@ -511,7 +665,6 @@ void Compressor::compress (const ProcessContext& block)
     reductionMeter.raise (most);
     boostMeter.raise (-least);
     gainReduction.push (most);
-    lastMost = most;
 }
 
 void Compressor::duck (const ProcessContext& block)
@@ -556,9 +709,10 @@ void Compressor::duck (const ProcessContext& block)
     const auto thresholdDecibels = values[Compressor::threshold];
 
     // Compress's drive starts again, from silence, when it compresses again.
-    wasDriven = false;
+    drivesRan = false;
     driveBlend = 0.0f;
-    dryInStep = false;
+    changesCurve = false;
+    nextBlend = 0.0f;
     auto loudestKey = 0.0f, most = 0.0f;
 
     for (int i = 0; i < block.numSamples; ++i)
@@ -673,12 +827,21 @@ void Compressor::duck (const ProcessContext& block)
             const auto turnedDown = sound * gain;
             block.channels[channel][i] = turnedDown + keyShare * (keyHeard - turnedDown);
 
-            // The copy of what came in for the mix, as late as the sound.
+            // The copy of what came in for the mix, as late as the sound and the same way (as Compress sends it), so that a
+            // change of mode plays on what is on its way.
             if (block.dry != nullptr)
             {
-                auto& delay = dryDelays[(size_t) channel];
-                delay.push (block.dry[channel][i]);
-                block.dry[channel][i] = delay.read (latency);
+                auto& came = block.dry[channel][i];
+                dryDelays[c].push (came);
+                auto late = dryDelays[c].read (driveLatency);
+
+                if (rest > 0)
+                {
+                    dryRests[c].push (late);
+                    late = dryRests[c].read (rest);
+                }
+
+                came = late;
             }
         }
 
@@ -689,6 +852,6 @@ void Compressor::duck (const ProcessContext& block)
     levelMeter.raise (dsp::gainToDecibels (loudestKey));
     reductionMeter.raise (most);
     gainReduction.push (most);
-    lastMost = 0.0f; // Compress's colour, which nothing turned down for
+    colourAmount = 0.0f; // Compress's colour, which nothing turned down for
 }
 } // namespace phazite::devices

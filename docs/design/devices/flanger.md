@@ -38,8 +38,11 @@ The editor groups them as Sweep, LFO and Tone.
 
 Each side is a comb filter, the one behind the Comb + and Comb - types of the [Filter](filter.md) and the synths: a
 delay line whose output is fed back into it and added to what goes in. The copy's delay is the Delay shortened by up
-to five octaves, as the Depth and the LFO say, and never less than 2 samples; it is worked out every 8 samples, glides
-between, and is read between samples by 4-point Lagrange interpolation.
+to five octaves, as the Depth and the LFO say, and never less than 2 samples; it is worked out every 8 samples, on a
+grid counted from the song's place while it plays (on from where it was while it is stopped), so that it plays the
+same however the samples are cut into blocks, round a loop, from any start and after a sleep, as a render does, glides
+between,
+and is read between samples by 4-point Lagrange interpolation.
 
 The Feedback sets how much the loop loses each time round, from everything at 0 % to 2 % at full. The gains into and
 out of the loop follow it, so that the comb's notches are as deep at any feedback and its peaks rise by as many

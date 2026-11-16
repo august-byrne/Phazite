@@ -8,6 +8,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 namespace phazite::ui
 {
@@ -88,24 +90,7 @@ public:
             if (parameters[i].isValid())
                 values[i] = parameters[i].getValue();
 
-        auto now = values;
-        now.push_back ((float) getSampleRate());
-
-        if (now == shapeFor)
-            return;
-
-        shapeFor = std::move (now);
-        ++shapesWorkedOut;
-        auto slowest = 0.0;
-
-        for (int row = 0; row < rows; ++row)
-        {
-            rowDecays[(size_t) row] = Reverb::getDecayAt (values, getPitch ((float) row + 0.5f), getSampleRate());
-            slowest = std::max (slowest, rowDecays[(size_t) row]);
-        }
-
-        shownSeconds = (getPredelaySeconds() + slowest) * 1.15;
-        middleDecay = Reverb::getDecayAt (values, 500.0, getSampleRate());
+        getDecays();
     }
 
     int getShapesWorkedOut() const noexcept { return shapesWorkedOut; }
@@ -118,7 +103,44 @@ public:
 
     double getPredelaySeconds() const { return values[Reverb::predelay] * 0.001; }
 
-    double getShownSeconds() const { return shownSeconds; }
+    // The decays the map draws, each worked out once for the values and the sample rate: a paint, and every handle a press
+    // or a pointer asks for, take them from here.
+    struct Decays
+    {
+        std::vector<float> values; // what they were worked out for
+        double sampleRate = 0.0;
+        std::array<double, rows> byRow {};
+        double slowest = 0.0, bass = 0.0, damping = 0.0, middle = 0.0;
+    };
+
+    const Decays& getDecays() const
+    {
+        const auto rate = getSampleRate();
+        if (values != decays.values || ! juce::exactlyEqual (rate, decays.sampleRate))
+        {
+            decays.values = values;
+            decays.sampleRate = rate;
+            ++shapesWorkedOut;
+            decays.slowest = 0.0;
+
+            for (int row = 0; row < rows; ++row)
+            {
+                decays.byRow[(size_t) row] = Reverb::getDecayAt (values, getPitch ((float) row + 0.5f), rate, lineUpdates);
+                decays.slowest = std::max (decays.slowest, decays.byRow[(size_t) row]);
+            }
+
+            decays.bass = Reverb::getDecayAt (values, getBassPitch(), rate, lineUpdates);
+            decays.damping = Reverb::getDecayAt (values, (double) values[Reverb::damping], rate, lineUpdates);
+            decays.middle = Reverb::getDecayAt (values, 500.0, rate, lineUpdates);
+        }
+
+        return decays;
+    }
+
+    // The work its decays have taken, in the reverb's lines' energies worked out (Reverb::getDecayAt()).
+    std::int64_t getDecayLineUpdates() const noexcept { return lineUpdates; }
+
+    double getShownSeconds() const { return (getPredelaySeconds() + getDecays().slowest) * 1.15; }
 
     juce::Rectangle<float> getMapArea() const
     {
@@ -152,10 +174,13 @@ public:
 
     double getPitch (float row) const { return lowestPitch * std::pow (highestPitch / lowestPitch, (double) row / rows); }
 
+    // Where the decay's handle sits up the map: in the bass, above the low cut.
+    double getBassPitch() const { return std::max (lowestPitch, (double) values[Reverb::lowCut]) * 1.5; }
+
     juce::Point<float> getDecayHandle() const
     {
-        const auto bass = std::max (lowestPitch, (double) values[Reverb::lowCut]) * 1.5;
-        return { xFor (getPredelaySeconds() + Reverb::getDecayAt (values, bass, getSampleRate())), yFor (bass) };
+        const auto bass = getBassPitch();
+        return { xFor (getPredelaySeconds() + getDecays().bass), yFor (bass) };
     }
 
     juce::Point<float> getPredelayHandle() const { return { xFor (getPredelaySeconds()), getMapArea().getCentreY() }; }
@@ -163,7 +188,7 @@ public:
     juce::Point<float> getDampingHandle() const
     {
         const auto damping = (double) values[Reverb::damping];
-        return { xFor (getPredelaySeconds() + Reverb::getDecayAt (values, damping, getSampleRate())), yFor (damping) };
+        return { xFor (getPredelaySeconds() + getDecays().damping), yFor (damping) };
     }
 
     float getLowCutY() const { return yFor (std::max (lowestPitch, (double) values[Reverb::lowCut])); }
@@ -180,6 +205,8 @@ public:
         const auto start = xFor (getPredelaySeconds());
         const auto rowHeight = area.getHeight() / rows;
 
+        const auto& decayed = getDecays();
+
         for (int row = 0; row < rows; ++row)
         {
             const auto pitch = getPitch ((float) row + 0.5f);
@@ -187,7 +214,7 @@ public:
             if (pitch < values[Reverb::lowCut] || pitch > values[Reverb::highCut])
                 continue;
 
-            const auto end = xFor (getPredelaySeconds() + rowDecays[(size_t) row]);
+            const auto end = xFor (getPredelaySeconds() + decayed.byRow[(size_t) row]);
             const auto band = juce::Rectangle<float>::leftTopRightBottom (start, area.getBottom() - (float) (row + 1) * rowHeight, end,
                                                                           area.getBottom() - (float) row * rowHeight);
             g.setGradientFill (
@@ -200,7 +227,7 @@ public:
         {
             const auto age = (double) (hits.size() - 1 - i) / DisplayTicker::ticksPerSecond;
             const auto level = hits.get (i);
-            const auto decay = middleDecay;
+            const auto decay = decayed.middle;
 
             if (level < 0.02f || age > decay)
                 continue;
@@ -353,13 +380,12 @@ private:
     std::vector<ParameterHandle> parameters; // every parameter, in the reverb's order, for the map
     graph::HandleDrag drag { *this };        // after the handles it moves
     std::vector<float> values;
-    std::vector<float> shapeFor;           // the values and the rate the tail's shape was worked out for
-    std::array<double, rows> rowDecays {}; // each row's time to fade, in seconds
-    double shownSeconds = 1.0, middleDecay = 1.0;
-    int shapesWorkedOut = 0;
-    graph::LevelHistory hits;       // what came in, a peak a tick, as a gain
-    int dragged = -1, hovered = -1; // handles, by their parameters
+    mutable int shapesWorkedOut = 0; // the times the decays were worked out again
+    graph::LevelHistory hits;        // what came in, a peak a tick, as a gain
+    int dragged = -1, hovered = -1;  // handles, by their parameters
     double dragStartSeconds = 1.0;
+    mutable Decays decays;
+    mutable std::int64_t lineUpdates = 0;
     DrawnNumbers drawn;
 
     void hover (int handle)
@@ -444,6 +470,11 @@ juce::String ReverbEditor::getModeText() const
 int ReverbEditor::getShapesWorkedOut() const noexcept
 {
     return graph->getShapesWorkedOut();
+}
+
+std::int64_t ReverbEditor::getDecayLineUpdates() const
+{
+    return graph->getDecayLineUpdates();
 }
 
 void ReverbEditor::refresh()

@@ -149,6 +149,10 @@ public:
     // A block of no samples at all, which a host may hand a device.
     void playNothing();
 
+    // The song jumps to a sample, the device not reset, as when a loop goes round, playback starts elsewhere or a device
+    // that slept on silence wakes: the next block plays from there.
+    void moveTo (std::int64_t sample) noexcept { songSample = sample; }
+
     double getSampleRate() const noexcept { return sampleRate; }
     int getLatencySamples() const noexcept { return runner.getLatencySamples(); } // once prepared
     double getTailSeconds() const { return runner.getTailSeconds(); }

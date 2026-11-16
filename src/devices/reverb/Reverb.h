@@ -32,6 +32,8 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <span>
 
 namespace phazite::devices
 {
@@ -68,6 +70,11 @@ public:
     // How long the tail takes to fade by 60 dB at a frequency, in seconds, for the parameters' values in the device's
     // order: the decay for the bass, less for the treble past the damping frequency. For its editor's graph.
     static double getDecayAt (std::span<const float> parameters, double frequency, double sampleRate);
+
+    // The same, adding to lineUpdates the work it took: in its lines' energies worked out, one line's from every line's once
+    // being one. A room's takes 900 to 1,500 at any values (a plate's none): its editor works it
+    // out for each of its map's pitches when a value changes.
+    static double getDecayAt (std::span<const float> parameters, double frequency, double sampleRate, std::int64_t& lineUpdates);
 
     // The plate as its parameters make it: how large it is, of the paper's (its Size, less where the Decay is too short for a
     // plate so large to fade in), how far its allpass filters smear (its Diffusion, less where the Decay is shorter than

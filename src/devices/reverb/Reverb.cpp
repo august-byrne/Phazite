@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <iterator>
 
 namespace phazite::devices
 {
@@ -103,6 +105,15 @@ namespace
         return lineMilliseconds[line] * 0.001 * sampleRate * (smallest + (1.0 - smallest) * size);
     }
 
+    // How long a pass through a room's line of a length takes, in samples, for the lows: the length; on average, its wobble's
+    // depth, which lengthens it by none to twice that; and its damping one-pole's delay at low frequencies, (1 - c) / c for its
+    // coefficient c (6.5 samples at 1 kHz at 44.1 kHz). Each pass's loss is worked out for it, so that the lows fade over the
+    // decay time: counted for the length alone, the smallest room's lows rang a percent or two longer than set.
+    double getPassSamples (double lineSamples, double dampingCoefficient, double sampleRate)
+    {
+        return lineSamples + modulationMilliseconds * 0.001 * sampleRate + (1.0 - dampingCoefficient) / dampingCoefficient;
+    }
+
     // The low-pass on each pass, y += c (x - y): its coefficient for a frequency, and how much it keeps of a frequency.
     double getDampingCoefficient (double frequency, double sampleRate)
     {
@@ -113,6 +124,15 @@ namespace
     {
         const auto omega = juce::MathConstants<double>::twoPi * std::min (frequency, 0.5 * sampleRate) / sampleRate;
         return c / std::sqrt (1.0 - 2.0 * (1.0 - c) * std::cos (omega) + (1.0 - c) * (1.0 - c));
+    }
+
+    // A room's line's damping coefficient, for the damping knob's c and the line's length as a share of the lines' mean: as
+    // much treble lost on a pass as its length is of the mean, as its loss is (Jot and Chaigne, 1991), matched at the Nyquist
+    // frequency, where a one-pole low-pass of coefficient c keeps c / (2 - c).
+    double getLineDamping (double c, double shareOfMean)
+    {
+        const auto kept = std::pow (c / (2.0 - c), shareOfMean);
+        return 2.0 * kept / (1.0 + kept);
     }
 
     //==============================================================================
@@ -285,6 +305,12 @@ double Reverb::getPlateSize (double scale)
 
 double Reverb::getDecayAt (std::span<const float> values, double frequency, double sampleRate)
 {
+    std::int64_t lineUpdates = 0;
+    return getDecayAt (values, frequency, sampleRate, lineUpdates);
+}
+
+double Reverb::getDecayAt (std::span<const float> values, double frequency, double sampleRate, std::int64_t& lineUpdates)
+{
     const auto isPlate = values[mode] > 0.5f;
     const auto c = getDampingCoefficient (values[damping] * (isPlate ? plateDampingShare : 1.0), sampleRate);
     const auto magnitude = getDampingMagnitude (c, frequency, sampleRate);
@@ -298,15 +324,170 @@ double Reverb::getDecayAt (std::span<const float> values, double frequency, doub
         return setting.scale * loopTime * getDecayRatio (loopTime, setting.diffusion);
     }
 
-    // A pass through an average line: the loss that makes the decay, and the damping filter's at this frequency.
+    // The room as it plays, as energies: each line passes on what it holds at its pass's rate (its pass at this frequency,
+    // its damping's delay there included), keeping what its loss (worked out for its pass at low frequencies) and its own
+    // damping at this frequency leave, and the Householder matrix shares that out, (1 - 2/N)^2 of it back into the same
+    // line and (2/N)^2 into each other; what comes out is what the lines pass on. Its decay is the slope of the energy decay
+    // curve of what comes out from 5 to 25 dB down, as a room's is measured (ISO 3382): the lines that damp less keep much of
+    // their energy to themselves, so the room rings longer than the average of its lines would. With the damping knob's
+    // coefficient taken for every line, as if each had it, the curve was 19 % long at 300 Hz at 1 kHz's damping in the
+    // smallest room (and 19 % short at 1 kHz): a line's own is scaled by its length, and the long lines damp much more.
+    std::array<double, numLines> lengths {}, passSeconds {}, kept {};
     auto meanSamples = 0.0;
 
     for (int line = 0; line < numLines; ++line)
-        meanSamples += getLineSamples (line, values[size], sampleRate) / numLines;
+    {
+        lengths[(size_t) line] = getLineSamples (line, values[size], sampleRate);
+        meanSamples += lengths[(size_t) line] / numLines;
+    }
 
-    const auto decibelsPerPass = 60.0 * meanSamples / ((double) values[decay] * sampleRate);
-    const auto dampedDecibels = -20.0 * std::log10 (magnitude);
-    return 60.0 * meanSamples / (sampleRate * (decibelsPerPass + dampedDecibels));
+    const auto omega = juce::MathConstants<double>::twoPi * std::min (frequency, 0.5 * sampleRate) / sampleRate;
+    auto shortestPass = 1.0e9;
+
+    for (size_t line = 0; line < (size_t) numLines; ++line)
+    {
+        const auto lineDamping = getLineDamping (c, lengths[line] / meanSamples);
+        const auto lowPass = getPassSamples (lengths[line], lineDamping, sampleRate);
+        const auto loss = std::pow (10.0, -3.0 * lowPass / ((double) values[decay] * sampleRate));
+        const auto magnitudeHere = getDampingMagnitude (lineDamping, frequency, sampleRate);
+        kept[line] = loss * loss * magnitudeHere * magnitudeHere;
+
+        // The one-pole's group delay at this frequency: (1 - c) / c at 0 Hz, for a = 1 - c.
+        const auto a = 1.0 - lineDamping;
+        const auto delay = (a * std::cos (omega) - a * a) / (1.0 - 2.0 * a * std::cos (omega) + a * a);
+        passSeconds[line] = (lowPass - (1.0 - lineDamping) / lineDamping + delay) / sampleRate;
+        shortestPass = std::min (shortestPass, passSeconds[line]);
+    }
+
+    // The energy's flow over a step of a quarter of the shortest pass: each line keeps what its loss and damping leave of it
+    // over the step, less what leaves it (its share of the step's pass), which the matrix shares out. As a matrix, by the line
+    // it flows into and the line it flows from: what each keeps to itself on its diagonal, and toOther of what leaves each
+    // in every line.
+    constexpr int n = numLines;
+    constexpr double toSelf = (1.0 - 2.0 / n) * (1.0 - 2.0 / n), toOther = (2.0 / n) * (2.0 / n);
+    const auto step = 0.25 * shortestPass;
+    double keeps[n] {}, out[n] {}; // of each line's energy at a step's start: what it keeps to itself, and what comes out
+
+    for (int line = 0; line < n; ++line)
+    {
+        const auto share = step / passSeconds[(size_t) line];
+        const auto fading = std::pow (kept[(size_t) line], share);
+        out[line] = fading * std::min (1.0, share);
+        keeps[line] = fading - out[line] + (toSelf - toOther) * out[line];
+    }
+
+    // What is yet to come out, all steps on, of each line's energy: what comes out over a step, and what is yet to come out of
+    // what the step leaves, remaining = out + flow^T remaining. For a flow made so, remaining = z / (1 - toOther sum (z)), for
+    // z = out / (1 - keeps): every line loses some of its energy on each step, so neither is ever 0.
+    double remaining[n] {};
+    auto shared = 0.0;
+
+    for (int line = 0; line < n; ++line)
+    {
+        remaining[line] = out[line] / (1.0 - keeps[line]);
+        shared += toOther * remaining[line];
+    }
+
+    for (auto& each : remaining)
+        each /= 1.0 - shared;
+
+    lineUpdates += 2 * n;
+    const auto remainingIn = [&remaining] (const double (&held)[n])
+    {
+        auto sum = 0.0;
+
+        for (int line = 0; line < n; ++line)
+            sum += remaining[line] * held[line];
+
+        return sum;
+    };
+
+    // The flow over 1, 2, 4... steps, until so many take the curve past 25 dB down: a room's takes at most a few thousand.
+    constexpr int mostPowers = 20;
+    constexpr double levels[] = { -5.0, -10.0, -15.0, -20.0, -25.0 }; // in decibels, where the curve is timed
+    double powers[mostPowers][n][n] {};
+
+    for (int to = 0; to < n; ++to)
+        for (int from = 0; from < n; ++from)
+            powers[0][to][from] = (to == from ? keeps[from] : 0.0) + toOther * out[from];
+
+    const auto apply = [&lineUpdates] (const double (&by)[n][n], const double (&held)[n], double (&next)[n])
+    {
+        for (int to = 0; to < n; ++to)
+        {
+            auto sum = 0.0;
+
+            for (int from = 0; from < n; ++from)
+                sum += by[to][from] * held[from];
+
+            next[to] = sum;
+        }
+
+        lineUpdates += n;
+    };
+
+    double start[n], held[n], next[n];
+    std::fill (std::begin (start), std::end (start), 1.0);
+    const auto total = remainingIn (start), lowest = total * std::pow (10.0, 0.1 * levels[std::size (levels) - 1]);
+    int top = 0;
+
+    for (;;)
+    {
+        apply (powers[top], start, next);
+
+        if (remainingIn (next) < lowest)
+            break;
+
+        if (++top == mostPowers)
+            return (double) values[decay];
+
+        const auto& half = powers[top - 1];
+        auto& power = powers[top];
+
+        for (int to = 0; to < n; ++to)
+            for (int through = 0; through < n; ++through)
+                for (int from = 0; from < n; ++from)
+                    power[to][from] += half[to][through] * half[through][from];
+
+        lineUpdates += n * n;
+    }
+
+    // When the curve passes each level: the last step it is above it, found by halves, and where it crosses within the next,
+    // its decibels taken as falling straight over it. The decay is the slope of the line that fits them best.
+    std::copy (std::begin (start), std::end (start), std::begin (held));
+    std::int64_t steps = 0;
+    auto sumT = 0.0, sumD = 0.0, sumTT = 0.0, sumTD = 0.0;
+
+    for (const auto level : levels)
+    {
+        const auto wanted = total * std::pow (10.0, 0.1 * level);
+
+        for (auto power = top; power >= 0; --power)
+        {
+            apply (powers[power], held, next);
+
+            if (remainingIn (next) >= wanted)
+            {
+                std::copy (std::begin (next), std::end (next), std::begin (held));
+                steps += std::int64_t { 1 } << power;
+            }
+        }
+
+        const auto before = remainingIn (held);
+        apply (powers[0], held, next);
+        const auto after = remainingIn (next);
+        const auto within = after > 0.0 && before > after ? std::log (before / wanted) / std::log (before / after) : 0.0;
+        const auto t = ((double) steps + std::clamp (within, 0.0, 1.0)) * step;
+        sumT += t;
+        sumD += level;
+        sumTT += t * t;
+        sumTD += t * level;
+    }
+
+    constexpr auto points = (double) std::size (levels);
+    const auto spread = points * sumTT - sumT * sumT;
+    const auto slope = spread > 0.0 ? (points * sumTD - sumT * sumD) / spread : 0.0;
+    return slope < 0.0 ? -60.0 / slope : (double) values[decay];
 }
 
 void Reverb::prepare (double newSampleRate, int)
@@ -533,26 +714,25 @@ void Reverb::processRoom (const ProcessContext& block, int numChannels)
     }
 
     // Each line's loss on each pass, so that every line fades by 60 dB over the decay time; worked out for the size at
-    // the block's start. And its damping: as much treble lost on a pass as its length is of the lines' mean, as its loss
-    // is (Jot and Chaigne, 1991), so that a short line, which goes round more often, loses its treble no faster than a
-    // long one and the tail keeps its colour as it fades. Matched at the Nyquist frequency, where a one-pole low-pass of
-    // coefficient c keeps c / (2 - c); the mean line's is the damping knob's, which getDecayAt() draws.
+    // the block's start, and for how long a pass takes (getPassSamples()). And its damping: as much treble lost on a pass as its
+    // length is of the lines' mean, as its loss is (Jot and Chaigne, 1991), so that a short line, which goes round more often,
+    // loses its treble no faster than a long one and the tail keeps its colour as it fades. Matched at the Nyquist frequency,
+    // where a one-pole low-pass of coefficient c keeps c / (2 - c); the mean line's is the damping knob's, which getDecayAt()
+    // draws.
     std::array<float, numLines> lengths {}, losses {}, dampings {};
     auto meanLength = 0.0f;
 
     for (int line = 0; line < numLines; ++line)
     {
         lengths[(size_t) line] = (float) getLineSamples (line, shownSize, sampleRate);
-        losses[(size_t) line] = (float) std::pow (10.0, -3.0 * lengths[(size_t) line] / (decaySeconds * sampleRate));
         meanLength += lengths[(size_t) line] / (float) numLines;
     }
 
-    const auto keptAtNyquist = (double) dampingCoefficient / (2.0 - (double) dampingCoefficient);
-
     for (int line = 0; line < numLines; ++line)
     {
-        const auto kept = std::pow (keptAtNyquist, (double) (lengths[(size_t) line] / meanLength));
-        dampings[(size_t) line] = (float) (2.0 * kept / (1.0 + kept));
+        dampings[(size_t) line] = (float) getLineDamping ((double) dampingCoefficient, (double) (lengths[(size_t) line] / meanLength));
+        const auto pass = getPassSamples (lengths[(size_t) line], dampings[(size_t) line], sampleRate);
+        losses[(size_t) line] = (float) std::pow (10.0, -3.0 * pass / (decaySeconds * sampleRate));
     }
 
     const auto sizeStep = (values[size] - shownSize) * std::min (1.0f, smoothing * (float) block.numSamples);
@@ -608,9 +788,10 @@ void Reverb::processRoom (const ProcessContext& block, int numChannels)
             phase += phaseSteps[line];
             phase -= std::floor (phase);
 
+            // Read before this sample goes in: one less back from the last one in.
             const auto delay = lengths[line] / startScale * scale + modulationDepth * (1.0f + dsp::sineOfPhase (phase));
             auto& smooth = damped[line];
-            smooth += (lines[line].read (delay) - smooth) * dampings[line];
+            smooth += (lines[line].read (delay - 1.0f) - smooth) * dampings[line];
             out[line] = smooth * losses[line];
             sum += out[line];
         }

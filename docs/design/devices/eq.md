@@ -33,9 +33,12 @@ chosen so that the gain is the analog section's at 0 Hz, at the Nyquist frequenc
 bell or a shelf near the top of the spectrum therefore keeps its width and symmetry. See
 [dsp-audit.md](../../archive/dsp-audit.md).
 
-Parameters move smoothly: the coefficients are worked out again every 32 samples while a band's frequency, gain or Q
-glides to its new value over about 20 ms, frequency and Q on a logarithmic scale. A shelf or a bell at 0 dB is not
-played at all. The output gain ramps the same way.
+Parameters move smoothly: the coefficients are worked out again every 32 samples, on a grid counted from
+the song's place while it plays (so that what it plays doesn't depend on how the samples are cut into blocks, and a
+loop's second pass, a start anywhere and a wake from sleep play as a render does), while a band's frequency, gain or
+Q glides to its new value over about 20 ms, frequency and Q on a logarithmic scale. A shelf or a bell at 0 dB is not
+played at all. The output gain ramps the same way; where the song jumps (a loop going round, the song starting after a
+count-in) in the middle of a step, the ramp goes on from where it got to.
 
 The EQ is minimum phase, runs at the sound's own rate and reports no latency.
 

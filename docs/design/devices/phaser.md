@@ -54,7 +54,9 @@ sections take a sample, each says what it would put out for any input (a gain an
 satisfies the loop is worked out from those, so there is no one-sample delay in the feedback to detune the notches,
 and it can't run away.
 
-The sections' coefficients are worked out every 8 samples.
+The sections' coefficients are worked out every 8 samples, on a grid counted from the song's place while it plays
+(on from where it was while it is stopped), so that it plays the same however the samples are cut into blocks, round a
+loop, from any start and after a sleep, as a render of the song does.
 
 Safe Bass splits the sound with a Linkwitz-Riley crossover of 24 dB an octave: the sections hear only the band above
 the frequency, and the band below goes around them. The dry sound that the runner mixes back in is split and added up

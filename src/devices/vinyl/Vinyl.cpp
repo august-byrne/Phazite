@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace phazite::devices
 {
@@ -77,11 +78,14 @@ namespace
     constexpr double flutterMostRms = 4.5;               // the flutter moves the delay at most this many RMS either way
     constexpr double residueLowCut = 20.0;               // what the curve adds, without anything under this
     constexpr double wowGlideSeconds = 0.05, glideSeconds = 0.02, bandGlideSeconds = 0.005, flutterGlideSeconds = 0.3;
-    constexpr double mostSwoop = 0.004;   // how far a change of the wow may bend the pitch as it glides: 7 cents
-    constexpr int splitStep = 32;         // samples between the split's moves as it glides
-    constexpr float soundFloor = 3.2e-5f; // -90 dBFS: anything over this coming in is sound, for the noise's hold
-    constexpr float silence = 1.0e-6f;    // -120 dBFS: under this, nothing comes in (as its runner hears it)
-    constexpr double restSeconds = 0.1;   // and after the delay line, this long for the filters to ring out, before it rests
+    constexpr double mostSwoop = 0.004;    // how far a change of the wow may bend the pitch as it glides: 7 cents
+    constexpr int splitStep = 32;          // samples between the split's moves as it glides
+    constexpr float soundFloor = 3.2e-5f;  // -90 dBFS: anything over this coming in is sound, for the noise's hold
+    constexpr float silence = 1.0e-6f;     // -120 dBFS: under this, nothing comes in (as its runner hears it)
+    constexpr double restSeconds = 0.1;    // and after the delay line, this long for the filters to ring out, before it rests
+    constexpr int dryReplaySamples = 128;  // the delay line's reads that make the copy's way back again (after 128 samples its
+                                           // filters' silent start is 94 dB under a 10 kHz tone)
+    constexpr double dryHoldSeconds = 1.0; // how long the copy goes on after the Mix reaches 100 %, before it rests
 
     // The groove's curve: softClip (Math.h) about a point a little off its middle, so that it is lopsided (a second harmonic
     // first, a third as it is pushed), less what the point itself gives and as steep there as a straight line. With its
@@ -217,6 +221,12 @@ void Vinyl::prepare (double newSampleRate, int)
     for (auto& channel : channels)
         channel.line.prepare ((int) std::ceil (centre + wowReach + flutterReach) + 4);
 
+    for (auto& way : dryWays)
+    {
+        way.line.prepare ((int) std::ceil (centre) + dsp::AntialiasedCurve::delay + 2 * dryReplaySamples + 4); // and read again
+        way.plain.prepare (latency);
+    }
+
     highsShape = dsp::makeFilter (dsp::FilterShape::highPass, highsHertz, fastRate, butterworthQ);
     residuePole = (float) std::exp (-twoPi * residueLowCut / fastRate);
 
@@ -235,6 +245,7 @@ void Vinyl::prepare (double newSampleRate, int)
     bandSmoothing = (float) (1.0 - std::exp (-1.0 / (bandGlideSeconds * sampleRate)));
     splitSmoothing = (float) (1.0 - std::exp (-(double) splitStep / (glideSeconds * sampleRate)));
     holdSamples = (int) std::lround (holdSeconds * sampleRate);
+    dryHold = (int) std::lround (dryHoldSeconds * sampleRate);
     restAfter = 2 * latency + (int) std::lround (restSeconds * sampleRate);
     readingEvery = std::max (1, (int) std::lround (sampleRate / pitchReadingsPerSecond));
 
@@ -267,6 +278,10 @@ void Vinyl::reset()
         channel.highCut.reset();
     }
 
+    restDry();
+    dryRan = false;
+    lastMix = 1.0f;
+    sinceMixed = dryHold; // resting
     restCurves();
     sideSplit.reset();
     middlePhase.reset();
@@ -282,11 +297,66 @@ void Vinyl::reset()
     isFirstBlock = true;
 }
 
+int Vinyl::getDryRebuildSamples() const noexcept
+{
+    return dryReplaySamples;
+}
+
+void Vinyl::restDry() noexcept
+{
+    for (auto& way : dryWays)
+    {
+        way.restTurn();
+        way.phase.reset();
+        way.plain.reset();
+    }
+
+    dryRan = false;
+}
+
+void Vinyl::DryWay::restTurn() noexcept
+{
+    upper.reset();
+    lower.reset();
+    line.reset();
+}
+
 void Vinyl::setSplit (double frequency) noexcept
 {
     splitFrequency = frequency;
     sideSplit.setFrequency (frequency, sampleRate);
     middlePhase.setFrequency (frequency, sampleRate);
+
+    for (auto& way : dryWays)
+        way.phase.setFrequencyAs (middlePhase);
+}
+
+void Vinyl::DryWay::feed (float phasedSample) noexcept
+{
+    const auto [first, second] = upper.up (phasedSample);
+    line.push (first);
+    line.push (second);
+}
+
+float Vinyl::DryWay::turn (float phasedSample, double back) noexcept
+{
+    // The rest of the sound's way after Bass Mono's all-pass: twice the rate through the delay line, read as far back as its
+    // middle and as late again as the curve, read between samples as the sound is read there while nothing moves it, so that
+    // the two stay in phase to the top (which the read dulls a little, both alike), and back.
+    const auto [first, second] = upper.up (phasedSample);
+    line.push (first);
+    const auto firstRead = line.read ((float) back);
+    line.push (second);
+    return lower.down (firstRead, line.read ((float) back));
+}
+
+void Vinyl::DryWay::rebuild (int samples, double back) noexcept
+{
+    // Each of the last samples' two reads as they were made, a push apart, two pushes a sample.
+    lower.reset();
+
+    for (auto k = samples - 1; k >= 0; --k)
+        lower.down (line.read ((float) (back + 2.0 * k + 1.0)), line.read ((float) (back + 2.0 * k)));
 }
 
 // The record a part of a turn further, by a pair that turns it as far each sample, worked out again only as the rate moves.
@@ -320,6 +390,7 @@ void Vinyl::rest (int numSamples) noexcept
         }
 
         restCurves();
+        restDry();
         sideSplit.reset();
         middlePhase.reset();
         ++restingFor;
@@ -405,7 +476,12 @@ void Vinyl::process (const ProcessContext& block)
     if (quietIn && ! noiseWanted && ! noise.isSounding() && restingFor >= restAfter)
     {
         for (int channel = 0; channel < numChannels; ++channel)
+        {
             juce::FloatVectorOperations::clear (block.channels[channel], block.numSamples);
+
+            if (block.dry != nullptr) // the copy for its mix, as late, is as silent
+                juce::FloatVectorOperations::clear (block.dry[channel], block.numSamples);
+        }
 
         silentFor = std::min (silentFor + block.numSamples, holdSamples);
         rest (block.numSamples);
@@ -422,6 +498,32 @@ void Vinyl::process (const ProcessContext& block)
     auto* left = block.channels[0];
     auto* right = numChannels > 1 ? block.channels[1] : nullptr;
     auto lastPitch = 0.0f;
+    auto resetsDryPhase = false;
+
+    // The copy for its mix: at every mix, 0 % too, the sound's linear way (the same oversampling and delay, and Bass Mono's
+    // all-pass as far as the sound's own split has come in), so that the two meet in phase at any mix; at no mix, what came in
+    // with its phase turned, its level kept within a few tenths of a decibel to 18 kHz. A copy merely delayed cancelled the
+    // top octave against the sound (5 to 18 dB at 15 and 18 kHz, half and half), and one merely delayed at 0 % but turned
+    // above it cancelled the bass at Bass Mono's frequency by tens of decibels at a Mix resting under 5 %. Made whole only while
+    // the mix uses it, and for a second after the Mix reaches 100 % (so that a Mix moved through 100 % and back, or automation
+    // that touches it, goes on with it); meanwhile only its way into its delay line, at twice the rate. As the Mix leaves 100 %
+    // after a rest, its way back is made again from the line's last reads, so that its first samples are as if it had never
+    // stopped: 128 samples' work at any rate, where making it all again from what came in took its latency's and 256 more
+    // (14 times a 32-sample call's work at 48 kHz, 37 times at 192).
+    const auto mixed = values[mix] < 1.0f || lastMix < 1.0f;
+    const auto dryRuns = block.dry != nullptr && (mixed || sinceMixed < dryHold);
+    sinceMixed = mixed ? 0 : std::min (sinceMixed + block.numSamples, dryHold);
+    lastMix = values[mix];
+
+    if (dryRuns && ! dryRan)
+    {
+        ++dryRebuilds;
+
+        for (auto& way : dryWays)
+            way.rebuild (dryReplaySamples, centre + dsp::AntialiasedCurve::delay);
+    }
+
+    dryRan = dryRuns;
 
     for (int i = 0; i < block.numSamples; ++i)
     {
@@ -460,7 +562,10 @@ void Vinyl::process (const ProcessContext& block)
         }
 
         // The cut: the lows in mono, the split gliding to its frequency in octaves.
-        if (right != nullptr && (bassAmount > 0.0f || targetBass > 0.0f))
+        const auto turnsBass = right != nullptr && (bassAmount > 0.0f || targetBass > 0.0f);
+        const auto bassShare = bassAmount;
+
+        if (turnsBass)
         {
             if (++sinceSplitMoved >= splitStep)
             {
@@ -484,6 +589,7 @@ void Vinyl::process (const ProcessContext& block)
                 bassAmount = 0.0f;
                 sideSplit.reset();
                 middlePhase.reset();
+                resetsDryPhase = true;
             }
         }
 
@@ -591,6 +697,40 @@ void Vinyl::process (const ProcessContext& block)
 
         if (right != nullptr)
             right[i] = channels[1].highCut.process (channels[1].lowCut.process (r, lowCutNow), highCutNow);
+
+        // The copy of what came in, for its mix: the sound's way, but for what moves it and colours it (the wow and flutter,
+        // the distortion, the sides of the lows, the noise, the width and the band), so that the two meet in phase at any
+        // mix; merely delayed at no mix, which leaves what came in exactly.
+        if (block.dry != nullptr)
+        {
+            for (int channel = 0; channel < numChannels; ++channel)
+            {
+                auto& way = dryWays[(size_t) channel];
+                auto& came = block.dry[channel][i];
+                way.plain.push (came);
+                const auto delayed = way.plain.read (latency);
+
+                // Bass Mono's all-pass, always, cheap: what makes the copy again is through it, and settled.
+                auto phased = came;
+
+                if (turnsBass)
+                    phased += bassShare * (way.phase.processAllPass (came) - came);
+
+                if (dryRuns)
+                {
+                    came = way.turn (phased, centre + dsp::AntialiasedCurve::delay);
+                }
+                else
+                {
+                    way.feed (phased); // the way the copy is made again from; as late either way, and at 100 % nothing hears it
+                    came = delayed;
+                }
+            }
+        }
+
+        if (std::exchange (resetsDryPhase, false))
+            for (auto& way : dryWays)
+                way.phase.reset();
     }
 
     // Resting comes after its delay line has emptied of what last came in.

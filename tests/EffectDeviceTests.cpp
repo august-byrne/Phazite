@@ -5,6 +5,7 @@
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "devices/dsp/Filters.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
@@ -204,6 +205,51 @@ TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, 
     CHECK (getPeak (bounced.left, 23900, 24500) > 0.02f);
     CHECK (getPeak (bounced.right, 23900, 24500) < 1.0e-3f);
     CHECK (getPeak (bounced.right, 47900, 48500) > 0.005f);
+}
+
+TEST_CASE ("The delay's echo comes exactly as late as its time says, however short")
+{
+    // It read its line before it pushed the new sample, and took nothing off for it: each echo a sample late, 2 % long at
+    // 1 ms, which detuned a comb made with it. The echo is what came in through its band, exactly as late (whole
+    // samples at these rates).
+    for (const auto rate : { 48000.0, 96000.0 })
+    {
+        for (const auto milliseconds : { 1.0f, 2.5f, 10.0f })
+        {
+            auto values = getDefaults (devices::Delay::info);
+            set (values, devices::Delay::info, "sync", 0.0f);
+            set (values, devices::Delay::info, "milliseconds", milliseconds);
+            set (values, devices::Delay::info, "feedback", 0.0f);
+            set (values, devices::Delay::info, "lowCut", 20.0f);
+            set (values, devices::Delay::info, "highCut", 20000.0f);
+            devices::Delay delay;
+            delay.prepare (rate, testBlockSize);
+            juce::Random random (7);
+            std::vector<float> noise (4800);
+
+            for (auto& sample : noise)
+                sample = random.nextFloat() - 0.5f;
+
+            const auto out =
+                play (delay, values, (int) noise.size(), [&noise] (int t) { return std::pair { noise[(size_t) t], noise[(size_t) t] }; });
+
+            // What came in, as late as set, through the band.
+            const auto late = (int) std::lround (milliseconds * 0.001 * rate);
+            const auto lowCut = devices::dsp::makeFilter (devices::dsp::FilterShape::highPass, 20.0, rate, 0.70710678);
+            const auto highCut = devices::dsp::makeFilter (devices::dsp::FilterShape::lowPass, 20000.0, rate, 0.70710678);
+            devices::dsp::Filter low, high;
+            auto largest = 0.0f;
+
+            for (size_t i = 0; i < noise.size(); ++i)
+            {
+                const auto in = i >= (size_t) late ? noise[i - (size_t) late] : 0.0f;
+                largest = std::max (largest, std::abs (out.left[i] - high.process (low.process (in, lowCut), highCut)));
+            }
+
+            INFO (milliseconds << " ms at " << rate << " Hz: the echo differs by " << toDecibels (largest / 0.5f) << " dB");
+            CHECK (largest < 1.0e-5f);
+        }
+    }
 }
 
 TEST_CASE ("The saturator: curves that round peaks off, harmonics when driven, and auto gain that keeps quiet sound level")
