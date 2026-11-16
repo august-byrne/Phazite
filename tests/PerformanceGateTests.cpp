@@ -1148,6 +1148,11 @@ TEST_CASE (
     REQUIRE (phazite::findChanges (history->getLastVersionSong(), song.getState()).empty());
     const auto wholeSong = phazite::countElementsCompared() - before;
 
+    // The count is the whole program's: what this history and those that went still compare on their threads is in first (a
+    // whole song's comparison landed in the note's count once, in a whole run on a busy machine).
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    phazite::test::waitForVersionsWrites();
+
     // A note added: its track compared again, not the song.
     before = phazite::countElementsCompared();
     phazite::addNote (s.context, built.clips[0], 72, at (2.5), lasting (0.25), 100);
