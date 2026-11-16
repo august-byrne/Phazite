@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioClipModel.h"
 #include "internal/AudioClips.h"
+#include "internal/AudioWork.h"
 #include "internal/ClipRenders.h"
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
@@ -12,6 +13,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -54,6 +56,203 @@ namespace
             change (song);
         }
     }
+
+    //==============================================================================
+    // What an audio clip played as a job started (AudioWork.h): its file, and the part of it.
+    struct ClipTaken
+    {
+        ClipID id;
+        juce::File file;
+        FilePart part;
+        float gain = 0.0f; // in decibels
+        double fileSeconds = 0.0;
+    };
+
+    std::vector<ClipTaken> takeAudioClips (const ProjectContext& context, const std::vector<ClipID>& clips)
+    {
+        std::vector<ClipTaken> taken;
+
+        for (const auto clip : clips)
+        {
+            const auto clipState = findAudioClip (context, clip);
+
+            if (clipState.isValid()
+                && std::none_of (taken.begin(), taken.end(), [clip] (const ClipTaken& each) { return each.id == clip; }))
+                taken.push_back ({ clip, getClipFile (*findSong (context), clipState), getFilePart (clipState),
+                                   getClipGain (*findSong (context), clip), getClipFileLength (*findSong (context), clipState) });
+        }
+
+        return taken;
+    }
+
+    // Whether the clips are still there and play the files they played as the job started, and the same parts of them at the
+    // same gains if asIt (Normalize's: what it read was the part's peak, and it sets the gain).
+    bool stillPlay (const ProjectContext& context, const std::vector<ClipTaken>& clips, bool asIt)
+    {
+        return std::all_of (clips.begin(), clips.end(),
+                            [&context, asIt] (const ClipTaken& taken)
+                            {
+                                const auto clipState = findAudioClip (context, taken.id);
+
+                                if (! clipState.isValid() || getClipFile (*findSong (context), clipState) != taken.file)
+                                    return false;
+
+                                const auto part = getFilePart (clipState);
+                                return ! asIt
+                                       || (part.start == taken.part.start && part.end == taken.part.end
+                                           && getClipGain (*findSong (context), taken.id) == taken.gain);
+                            });
+    }
+
+    juce::String describeClips (const std::vector<ClipTaken>& clips)
+    {
+        return clips.size() == 1 ? clips.front().file.getFileNameWithoutExtension() : juce::String ((int) clips.size()) + " clips";
+    }
+
+    // Normalize's job: each clip's peak, read in the background, then its gain, as one undo step (normalizeClips()).
+    class NormalizeJob final : public AudioWork::Job
+    {
+    public:
+        NormalizeJob (std::vector<ClipTaken> taken, juce::String name)
+            : clips (std::move (taken)),
+              stepName (std::move (name))
+        {
+        }
+
+        juce::String getTitle() const override { return "Normalizing " + describeClips (clips); }
+
+        void read (const BackgroundJobs::ShouldStop& shouldStop, std::atomic<float>& progress) override
+        {
+            for (size_t i = 0; i < clips.size(); ++i)
+            {
+                const auto share = [&progress, i, count = clips.size()] (float done) { progress = ((float) i + done) / (float) count; };
+                const auto read = readPeak (clips[i].file, clips[i].part, shouldStop, share);
+
+                if (read.stopped)
+                    return;
+
+                peaks.push_back (read.peak);
+            }
+        }
+
+        void finish (ProjectContext& context) override
+        {
+            if (! stillPlay (context, clips, true))
+            {
+                reportProblem (
+                    context, "Nothing was normalized",
+                    (clips.size() == 1 ? juce::String ("The clip") : juce::String ("A clip"))
+                        + " went, was trimmed or had its gain changed while Phazite read its audio, so the peak it found no longer fits. "
+                          "Normalize again.");
+                return;
+            }
+
+            // A clip whose part is silent, or whose file can't be read, keeps its gain.
+            auto& song = *findSong (context);
+            const UndoStep step (song, stepName);
+
+            for (size_t i = 0; i < clips.size() && i < peaks.size(); ++i)
+                if (const auto peak = peaks[i]; peak.has_value() && *peak > 0.0f)
+                    setClipGain (song, clips[i].id, normalizedPeak - juce::Decibels::gainToDecibels (*peak, -200.0f));
+        }
+
+    private:
+        const std::vector<ClipTaken> clips;
+        const juce::String stepName;
+        std::vector<std::optional<float>> peaks; // as read, in the clips' order
+    };
+
+    void startNormalize (ProjectContext& context, const std::vector<ClipID>& clips, const juce::String& stepName)
+    {
+        if (auto taken = takeAudioClips (context, clips); ! taken.empty())
+            getAudioWork (context).add (std::make_unique<NormalizeJob> (std::move (taken), stepName));
+    }
+
+    // Quantize Audio's job: the hits in each clip's file, found in the background unless they are already, then moved to the
+    // grid, as one undo step.
+    class QuantizeJob final : public AudioWork::Job
+    {
+    public:
+        // What the finder knows of each clip's file already is taken here, on the message thread: the read never touches the
+        // finder, which belongs to the context, as a read given up may outlive it.
+        QuantizeJob (std::vector<ClipTaken> taken, Transients& transients, BeatDuration step, double share)
+            : clips (std::move (taken)),
+              finder (transients),
+              grid (step),
+              strength (share)
+        {
+            for (const auto& clip : clips)
+                known.push_back (finder.lookUp (clip.file));
+        }
+
+        juce::String getTitle() const override { return "Quantizing " + describeClips (clips); }
+
+        void read (const BackgroundJobs::ShouldStop& shouldStop, std::atomic<float>& progress) override
+        {
+            for (size_t i = 0; i < clips.size(); ++i)
+            {
+                const auto share = [&progress, i, count = clips.size()] (float done) { progress = ((float) i + done) / (float) count; };
+
+                if (known[i].has_value())
+                {
+                    hits.push_back (*known[i]);
+                    continue;
+                }
+
+                auto found = Transients::analyse (clips[i].file, shouldStop, share);
+
+                if (! found.has_value())
+                    return;
+
+                hits.push_back (std::move (*found));
+            }
+        }
+
+        void finish (ProjectContext& context) override
+        {
+            if (! stillPlay (context, clips, false) || hits.size() != clips.size())
+            {
+                reportProblem (context, "Nothing was quantized",
+                               (clips.size() == 1 ? juce::String ("The clip") : juce::String ("A clip"))
+                                   + " went, or plays another file now, since Phazite began to find its hits. Quantize again.");
+                return;
+            }
+
+            auto& song = *findSong (context);
+
+            {
+                const UndoStep step (song, "Quantize Audio");
+
+                for (size_t i = 0; i < clips.size(); ++i)
+                {
+                    finder.keep (clips[i].file, hits[i]);
+                    quantizeClipAudio (song, clips[i].id, hits[i], grid, strength);
+                }
+            }
+
+            // A file longer than what is looked at for hits: its first minutes alone were quantized, which the user is told.
+            juce::StringArray longer;
+
+            for (const auto& clip : clips)
+                if (clip.fileSeconds > Transients::longestSeconds)
+                    longer.add (clip.file.getFileNameWithoutExtension());
+
+            if (! longer.isEmpty())
+                reportProblem (
+                    context, "Quantize Audio quantized the first " + juce::String ((int) (Transients::longestSeconds / 60.0)) + " minutes",
+                    longer.joinIntoString (", ") + (longer.size() == 1 ? " is" : " are") + " longer than "
+                        + juce::String ((int) (Transients::longestSeconds / 60.0))
+                        + " minutes: the hits after that weren't looked for, and play as they did.");
+        }
+
+    private:
+        const std::vector<ClipTaken> clips;
+        Transients& finder; // the context's, which outlives its work
+        const BeatDuration grid;
+        const double strength;
+        std::vector<std::optional<std::vector<double>>> known; // what the finder had found already, as it started
+        std::vector<std::vector<double>> hits;                 // in the clips' order
+    };
 } // namespace
 
 std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID id)
@@ -193,7 +392,17 @@ void setClipGain (ProjectContext& context, ClipID id, float decibels)
 
 void normalizeClip (ProjectContext& context, ClipID id)
 {
-    changeClip (context, id, "Normalize Clip", [id] (Song& song) { normalizeClips (song, { id }); });
+    startNormalize (context, { id }, "Normalize Clip");
+}
+
+void normalizeClips (ProjectContext& context, const std::vector<ClipID>& clips)
+{
+    startNormalize (context, clips, "Normalize");
+}
+
+bool isReadingAudio (const ProjectContext& context)
+{
+    return getAudioWork (context).isBusy();
 }
 
 void setClipPitch (ProjectContext& context, ClipID id, float semitones)
@@ -290,14 +499,9 @@ void quantizeAudio (ProjectContext& context, const std::vector<ClipID>& clips, B
     if (! canQuantizeAudio (context, clips) || grid.inBeats() <= 0.0)
         return;
 
-    // Each clip's hits, found now if they haven't been: the command can't wait for them.
-    auto& song = *findSong (context);
-    auto& finder = getTransientFinder (context);
-    const UndoStep step (song, "Quantize Audio");
-
-    for (const auto clip : clips)
-        if (const auto clipState = findAudioClip (context, clip); clipState.isValid())
-            quantizeClipAudio (song, clip, finder.findNow (getClipFile (song, clipState)), grid, strength);
+    // Each clip's hits, found in the background if they haven't been (known bug 123), then its step.
+    if (auto taken = takeAudioClips (context, clips); ! taken.empty())
+        getAudioWork (context).add (std::make_unique<QuantizeJob> (std::move (taken), getTransientFinder (context), grid, strength));
 }
 
 bool canQuantizeAudio (const ProjectContext& context, const std::vector<ClipID>& clips)

@@ -2,6 +2,8 @@
 // Shared includes and helpers for Phazite's tests.
 #pragma once
 
+#include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/mixer/FreezeModel.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -71,6 +73,18 @@ private:
 // the test it fired in from the test's thread; what JUCE's logAssertion() allocated for its message is left out of the
 // real-time audit's counts, which say that an assertion fired instead (known bug 153).
 int getNumAudioThreadAssertions();
+// Waits until the imports, Normalize and Quantize Audio started in a project have read their audio, in the background
+// (model/arrangement/internal/AudioWork.h), and made their changes.
+inline void waitForAudioWork (const ProjectContext& context)
+{
+    REQUIRE (runTimersUntil ([&context] { return ! isReadingAudio (context); }));
+}
+
+// The same, for whatever context the test's song is open in (a device's handle reaches its song alone).
+inline void waitForAudioWork()
+{
+    REQUIRE (runTimersUntil ([] { return ! AudioWork::isAnyBusy(); }));
+}
 
 // Runs freezes and bounces as the app's main window does, without a window: it keeps the render while it runs, and
 // what came of each.
@@ -92,6 +106,8 @@ struct RenderHost : public TrackRenderHost
     juce::Array<juce::File> wrote; // the files renders wrote for the user
 
     void renderWrote (const juce::String&, const juce::File& file) override { wrote.add (file); }
+
+    bool isShowingRender() const override { return render != nullptr; }
 };
 
 // A folder in the temp directory, deleted again at the end of the test.

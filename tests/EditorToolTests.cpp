@@ -294,7 +294,11 @@ TEST_CASE ("A clip dragged onto a track of the other kind, a folder or a return 
         dropTarget.fileDragMove ({ sound.getFullPathName() }, at.x, at.y);
         CHECK (screen.playlist.getDragReadout().startsWith ("Goes on a new track below"));
         undo.check ("a file dropped on a track it doesn't suit",
-                    [&] { dropTarget.filesDropped ({ sound.getFullPathName() }, at.x, at.y); });
+                    [&]
+                    {
+                        dropTarget.filesDropped ({ sound.getFullPathName() }, at.x, at.y);
+                        phazite::test::waitForAudioWork (screen.context); // read in the background (known bug 123)
+                    });
         phazite::test::deliverChanges();
         CHECK (screen.playlist.getDragReadout().isEmpty());
         CHECK (phazite::getAllPlaylistTracks (screen.context).size() == tracksBefore + 1);

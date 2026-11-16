@@ -584,6 +584,7 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
 
     // A file put on a pad plays instead, until Reset brings the kit's sound back.
     REQUIRE (device.setPadSound (36, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Boom.wav"), 0.2)));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
     CHECK (device.getPadName (36) == juce::String ("Boom"));
     device.clearPadSound (36);
     CHECK (device.getPadName (36) == juce::String ("808 Kick"));

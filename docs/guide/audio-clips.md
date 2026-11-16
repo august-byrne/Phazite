@@ -89,6 +89,10 @@ drum loop plays on the beat. The clip's start stays where it is. In the audio cl
 (**Ctrl+U**), to the editor's grid; in the playlist, **Quantize Audio** in a clip's right-click menu works on every
 selected audio clip, to the playlist's grid.
 
+Normalize and Quantize Audio read the clip's audio first. For a long recording that takes a moment: the window holds
+still meanwhile (it takes no clicks or keys but play and stop), and after a second a small window shows how far it
+is, with **Cancel**, which leaves the clip as it was.
+
 ## Consolidating
 
 **Consolidate** (**Ctrl+J**) joins the selected clips on each track, or what lies in the selected range of time, into

@@ -66,7 +66,7 @@ struct PlaylistScreen
         song->getUndoManager().clearUndoHistory();
 
         addUndoCommands (registry, getSelection (context));
-        addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+        addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
         addTrackCommands (registry, getSelection (context));
         addTempoCommands (registry, getSelection (context));
         ui::addTimelineCommands (registry, [this] { return &playlist; });
@@ -183,7 +183,7 @@ struct PianoRollScreen
         song->getUndoManager().clearUndoHistory();
 
         addUndoCommands (registry, getSelection (context));
-        addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+        addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
         ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);
         setSong (context, song.get());

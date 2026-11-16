@@ -9,6 +9,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginInstances.h"
 
+#include <algorithm>
 #include <functional>
 #include <map>
 
@@ -147,6 +148,28 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext& contex
 }
 
 bool locateAudioFile (ProjectContext& context, const juce::String& path, const juce::File& found)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr || path.isEmpty() || ! found.existsAsFile())
+        return false;
+
+    // Nothing to copy for a path the song doesn't play.
+    const auto files = getProjectAudioFiles (context);
+
+    if (std::none_of (files.begin(), files.end(), [&path] (const ProjectAudioFile& file) { return file.path == path; }))
+        return false;
+
+    // Copied into the project in the background, as an import copies a file (known bug 123); the path replaced once it is.
+    return bringFilesIntoProject (*song, { .files = { found },
+                                           .title = "Copying " + found.getFileName(),
+                                           .problem = found.getFileName()
+                                                      + " didn't take the missing file's place: the project changed while it "
+                                                        "was copied in.",
+                                           .apply = [&context, path, found] { return locateAudioFileNow (context, path, found); } });
+}
+
+bool locateAudioFileNow (ProjectContext& context, const juce::String& path, const juce::File& found)
 {
     auto* song = findSong (context);
 

@@ -15,6 +15,7 @@
 #include "ui/theme/LookAndFeel.h"
 #include "ui/theme/Popups.h"
 
+#include <deque>
 #include <optional>
 
 namespace phazite
@@ -52,6 +53,7 @@ public:
     void runRender (std::unique_ptr<TrackRender>) override;
     void renderFinished (const juce::String& title, const juce::Result&) override;
     void renderWrote (const juce::String& title, const juce::File&) override;
+    bool isShowingRender() const override { return renderWindow != nullptr || ! rendersWaiting.empty(); }
 
     ui::AppShell& getShell() noexcept { return *shell; }
 
@@ -98,6 +100,10 @@ private:
         renderWindow, cleanUpWindow, aboutWindow, updatesWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
+
+    // Renders waiting for the one that shows to end (one at a time).
+    std::deque<std::unique_ptr<TrackRender>> rendersWaiting;
+    void showNextRender();
 
     juce::DialogWindow* launch (juce::DialogWindow::LaunchOptions&); // a dialog, modal, over this window
     void requestQuit();                                              // as the close button and Quit do
@@ -149,7 +155,11 @@ private:
                std::function<void()> action = {});
     ui::TitleBar::WindowActions getWindowActions(); // what the title bar's own window buttons do
 
-    void timerCallback() override { updateTitle(); }
+    void timerCallback() override
+    {
+        updateTitle();
+        showNextRender(); // one waiting its turn, if the window before went without saying so
+    }
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the keys changed, or the update check
 
     juce::StringArray getMenuBarNames() override;

@@ -40,26 +40,39 @@ bool Playlist::placeFile (const juce::File& file)
         return false;
 
     const auto tracks = selection.getTracks();
-    return addFiles ({ file.getFullPathName() }, tracks.empty() ? TrackID() : tracks.front(), getPlayStartBeat (context));
+    return addFiles ({ file.getFullPathName() }, tracks.empty() ? TrackID() : tracks.front(), getPlayStartBeat (context), true);
 }
 
-bool Playlist::addFiles (const juce::StringArray& paths, TrackID target, BeatPosition start)
+bool Playlist::addFiles (const juce::StringArray& paths, TrackID target, BeatPosition start, bool fromBrowser)
 {
     if (! context.hasProject())
         return false;
 
-    const auto added = phazite::importFiles (context, paths, target, start);
-    range.clear();
-    selection.clear();
+    // Read in the background (known bug 123): the clips come once the files are copied into the project, selected if the
+    // selection is still the one of the drop (something other than the user may have changed it meanwhile).
+    return importFilesInBackground (context, paths, target, start,
+                                    [safeThis = juce::Component::SafePointer<Playlist> (this), clips = selection.getClips(),
+                                     tracks = selection.getTracks(), paths, fromBrowser] (const std::vector<ClipID>& added)
+                                    {
+                                        if (safeThis == nullptr || added.empty())
+                                            return;
 
-    for (const auto clip : added)
-        selection.add (clip);
+                                        if (safeThis->selection.getClips() == clips && safeThis->selection.getTracks() == tracks)
+                                        {
+                                            safeThis->range.clear();
+                                            safeThis->selection.clear();
 
-    if (added.empty())
-        return false;
+                                            for (const auto clip : added)
+                                                safeThis->selection.add (clip);
+                                        }
 
-    lastClip = added.front(); // what Draw and Paint place next
-    return true;
+                                        safeThis->lastClip = added.front(); // what Draw and Paint place next
+
+                                        // What came from the browser goes into its recent items now that it is in the song.
+                                        if (fromBrowser && safeThis->onBrowserSoundPlaced != nullptr)
+                                            for (const auto& path : paths)
+                                                safeThis->onBrowserSoundPlaced (juce::File (path));
+                                    });
 }
 
 bool Playlist::isInterestedInFileDrag (const juce::StringArray& paths)
@@ -175,8 +188,11 @@ void Playlist::itemDropped (const SourceDetails& details)
     if (const auto preset = getDraggedPreset (details.description))
         placed = loadPreset (context, *preset, row >= 0 && rows[(size_t) row].track.kind == TrackType::master ? TrackID() : track);
     else if (const auto file = getDraggedFile (details.description))
-        placed = addFiles ({ file->getFullPathName() }, row >= 0 && rows[(size_t) row].track.kind == TrackType::master ? TrackID() : track,
-                           getFileDropBeat (std::max (0, position.x)));
+    {
+        // Noted as placed once its clip is in the song (onBrowserSoundPlaced), not as it is dropped.
+        addFiles ({ file->getFullPathName() }, row >= 0 && rows[(size_t) row].track.kind == TrackType::master ? TrackID() : track,
+                  getFileDropBeat (std::max (0, position.x)), true);
+    }
     else if (const auto device = getDraggedDevice (details.description))
         placed = addDeviceTo (context, track, *device);
 

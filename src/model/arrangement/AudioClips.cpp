@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/AudioClips.h"
 #include "AudioClipModel.h"
+#include "internal/AudioWork.h"
 #include "internal/Clips.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
@@ -462,14 +463,17 @@ bool isRendered (const Song& song, ClipID clip)
 
 juce::File getRenderFile (const Song& song, const juce::File& source, const stretch::Settings& settings)
 {
-    auto key = source.getFullPathName() + "|" + juce::String (settings.timeRatio, 9) + "|" + juce::String (settings.semitones, 4) + "|"
-               + (settings.reversed ? "backwards" : "forwards") + "|" + renderVersion;
+    // Written into a stream, which grows by doubling: a String appended to point by point copies the whole key each time,
+    // which took a tenth of a second of the message thread at each plan for a clip with thousands of warp markers.
+    juce::MemoryOutputStream key;
+    key << source.getFullPathName() << "|" << juce::String (settings.timeRatio, 9) << "|" << juce::String (settings.semitones, 4) << "|"
+        << (settings.reversed ? "backwards" : "forwards") << "|" << renderVersion;
 
     // Along tempo changes, the whole stretch: two clips under the same changes share it.
     for (const auto& [in, out] : settings.timeMap)
         key << "|" << juce::String (in, 6) << ":" << juce::String (out, 6);
 
-    return song.getCacheFolder().getChildFile (renderFilePrefix + juce::String::toHexString (key.hashCode64()) + ".wav");
+    return song.getCacheFolder().getChildFile (renderFilePrefix + juce::String::toHexString (key.toString().hashCode64()) + ".wav");
 }
 
 SecondsRange getAudioFileRange (const Song& song, const juce::ValueTree& clipState)
@@ -883,33 +887,50 @@ std::optional<float> getClipPeak (const Song& song, ClipID clip)
     if (! clipState.isValid())
         return {};
 
-    const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (getClipFile (song, clipState)));
-
-    if (reader == nullptr || reader->numChannels == 0 || reader->sampleRate <= 0.0)
-        return {};
-
-    // The samples the part covers, whole: from the one it starts in to the one it ends in.
-    const auto part = getFilePart (clipState);
-    const auto first = juce::jlimit ((juce::int64) 0, reader->lengthInSamples, (juce::int64) std::floor (part.start * reader->sampleRate));
-    const auto end = juce::jlimit (first, reader->lengthInSamples, (juce::int64) std::ceil (part.end * reader->sampleRate));
-
-    if (end == first)
-        return 0.0f;
-
-    std::vector<juce::Range<float>> levels ((size_t) reader->numChannels);
-    reader->readMaxLevels (first, end - first, levels.data(), (int) reader->numChannels);
-    auto peak = 0.0f;
-
-    for (const auto& level : levels)
-        peak = std::max ({ peak, std::abs (level.getStart()), std::abs (level.getEnd()) });
-
-    return peak;
+    return readPeak (getClipFile (song, clipState), getFilePart (clipState), nullptr, nullptr).peak;
 }
 
-void normalizeClips (Song& song, const std::vector<ClipID>& clips)
+PeakRead readPeak (const juce::File& file, FilePart part, const std::function<bool()>& shouldStop,
+                   const std::function<void (float)>& progress)
 {
-    for (const auto clip : getAudioClipsAmong (song, clips))
-        if (const auto peak = getClipPeak (song, clip); peak.has_value() && *peak > 0.0f)
-            setClipGain (song, clip, normalizedPeak - juce::Decibels::gainToDecibels (*peak, -200.0f));
+    PeakRead read;
+    const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
+
+    if (reader == nullptr || reader->numChannels == 0 || reader->numChannels > 64 || ! (reader->sampleRate > 0.0))
+        return read;
+
+    // As long as it says it is: the read is a second at a time and can stop, so a header that lies costs only time.
+    const auto held = reader->lengthInSamples;
+
+    // The samples the part covers, whole: from the one it starts in to the one it ends in, a second at a time, so that it can
+    // stop between them.
+    const auto first = juce::jlimit ((juce::int64) 0, held, (juce::int64) std::floor (part.start * reader->sampleRate));
+    const auto end = juce::jlimit (first, held, (juce::int64) std::ceil (part.end * reader->sampleRate));
+    const auto piece = juce::jlimit ((juce::int64) 4096, (juce::int64) 1 << 20, (juce::int64) reader->sampleRate);
+    const auto bytesPerFrame = (juce::int64) reader->numChannels * std::max (1, (int) reader->bitsPerSample / 8);
+    std::vector<juce::Range<float>> levels ((size_t) reader->numChannels);
+    auto peak = 0.0f;
+
+    for (auto at = first; at < end; at += piece)
+    {
+        if (shouldStop != nullptr && shouldStop())
+        {
+            read.stopped = true;
+            return read;
+        }
+
+        const auto length = std::min (piece, end - at);
+        reader->readMaxLevels (at, length, levels.data(), (int) reader->numChannels);
+        AudioWork::noteRead (length * bytesPerFrame);
+
+        for (const auto& level : levels)
+            peak = std::max ({ peak, std::abs (level.getStart()), std::abs (level.getEnd()) });
+
+        if (progress != nullptr)
+            progress ((float) ((double) (at + length - first) / (double) (end - first)));
+    }
+
+    read.peak = peak;
+    return read;
 }
 } // namespace phazite

@@ -305,7 +305,7 @@ std::optional<double> detectPitch (const juce::AudioBuffer<float>& audio, double
     return total / agreeing;
 }
 
-std::vector<Onset> detectOnsets (const juce::AudioBuffer<float>& audio, double sampleRate)
+std::vector<Onset> detectOnsets (const juce::AudioBuffer<float>& audio, double sampleRate, const std::function<bool()>& shouldStop)
 {
     std::vector<Onset> onsets;
     const auto frames = audio.getNumSamples();
@@ -343,6 +343,9 @@ std::vector<Onset> detectOnsets (const juce::AudioBuffer<float>& audio, double s
 
     for (int n = 0; n < numFrames; ++n)
     {
+        if (n % 256 == 0 && shouldStop != nullptr && shouldStop())
+            return {};
+
         std::fill (data.begin(), data.end(), 0.0f);
 
         for (int j = 0; j < size; ++j)

@@ -205,6 +205,10 @@ the [changelog](changelog.md).
 | G20 | In the piano roll, with a clip right before another, select notes that run to its end and press Ctrl+D | Only the copies that fit are made, the hint bar says how many weren't for about six seconds, and Edit > Undo names the step for the copies made | |
 | G174 | Set a track to Write, hold its pan knob, press Space, move the knob, press Escape while still holding | The knob goes to the lane's value and that is what plays | |
 | G169 | Make a new project, commit a few times, press Save; open Source Control while it saves | The progress window shows and Cancel works; the button reads "Saving the project...", Merge is greyed, and a bounce under way starts again once the save is done | |
+| G123a | Drop a ten-minute recording on the playlist and, at once, press Ctrl+Z, click and drag; then press Ctrl+S while its window shows | Nothing happens until the clip lands, selected; after a second "Importing ..." shows with Cancel (Cancel leaves nothing); Space still plays and stops; the save's wait appears only after the import ends | |
+| G123b | Normalize and Quantize Audio on that clip; delete the clip in the first second of one | Each shows its progress after a second and is one undo step; deleting the clip meanwhile gives a notice that nothing was normalized | |
+| G123c | Drop a long WAV on a drum pad, on the sampler and on a wavetable; quit during an import | The window holds still, then the device gets the sound; Phazite quits without waiting for the import | |
+| G128 | Add a folder of tens of thousands of sounds and type in the browser's search; type a broad word, then a folder's name | Keys never stutter and results follow a moment later; a broad word ends the list with "The first 200 of N"; a folder's name lists its sounds, with the folder itself | |
 
 ## Performance on other machines
 

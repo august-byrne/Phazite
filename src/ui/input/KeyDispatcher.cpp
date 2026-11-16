@@ -137,6 +137,14 @@ std::vector<juce::KeyPress> KeyDispatcher::getKeysOverPlugins() const
     return keys;
 }
 
+bool KeyDispatcher::keyPressedWhileHeld (const juce::KeyPress& key)
+{
+    if (const auto* command = findCommandForKey (key); command != nullptr && runsWhileMouseIsDown (*command))
+        return runForKey (*command, key);
+
+    return false;
+}
+
 bool KeyDispatcher::keyPressedOverPlugin (const juce::KeyPress& key)
 {
     if (const auto* command = findCommandForKey (key); command != nullptr && command->overPlugins)

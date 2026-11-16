@@ -109,7 +109,7 @@ struct AudioScreen
         song->getUndoManager().clearUndoHistory();
 
         phazite::addUndoCommands (registry, phazite::getSelection (context));
-        phazite::addSelectionCommands (registry, phazite::getSelection (context), phazite::getRangeSelection (context));
+        phazite::addSelectionCommands (registry, phazite::getSelection (context), phazite::getRangeSelection (context), &context);
         phazite::ui::addTimelineCommands (registry, [this] { return &editor; });
         phazite::test::deliverChanges();
         window.addKeyListener (&keys);

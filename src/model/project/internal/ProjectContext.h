@@ -14,6 +14,7 @@
 namespace phazite
 {
 class AutomationWatcher;
+class AudioWork;
 class ClipRenders;
 class EngineContext;
 class PlaybackSession;
@@ -40,6 +41,10 @@ AutomationWatcher* getAutomationWatcher (const ProjectContext&);
 // What renders the open song's audio clips stretched, pitched or reversed (model/arrangement/internal/ClipRenders.h):
 // nullptr while no project is open.
 ClipRenders* getClipRenders (const ProjectContext&);
+
+// What runs the work of the commands that read much of an audio file, in the background, for the open song
+// (model/arrangement/internal/AudioWork.h).
+AudioWork& getAudioWork (const ProjectContext&);
 
 // What finds the hits in the audio files of the projects it holds (model/arrangement/internal/Transients.h), kept while it
 // lives, as a file's are the same whichever project plays it.

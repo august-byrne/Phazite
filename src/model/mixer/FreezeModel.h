@@ -70,6 +70,10 @@ public:
     juce::String getGoOnName() const;
     void goOn();
 
+    // Its progress window's Cancel, before the window deletes it: what goes on as its window goes (work that holds the
+    // window, model/arrangement/internal/AudioWork.h) is cancelled only so; the others cancel as they are deleted.
+    void cancel();
+
     struct Impl; // the render, and what its thread shares with this (Freeze.cpp)
     explicit TrackRender (std::unique_ptr<Impl>);
 
@@ -110,6 +114,10 @@ public:
 
     // A render that wrote a file for the user (an export as DAWproject) has, after renderFinished(): where it is, to show.
     virtual void renderWrote (const juce::String& /*title*/, const juce::File&) {}
+
+    // Whether it runs a render now: one at a time (the app's window is modal), so the work that shows its progress after a
+    // second waits until it doesn't (model/arrangement/internal/AudioWork.h).
+    virtual bool isShowingRender() const { return false; }
 };
 
 // The commands' functions, for the selected track (the first, if several are): Freeze Track, or Unfreeze Track on a frozen

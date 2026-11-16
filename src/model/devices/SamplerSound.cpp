@@ -263,14 +263,18 @@ bool setSampleFile (Song& song, DeviceID id, const juce::File& file)
         return false;
 
     const auto settings = readSampleSettings (file);
+    return settings.has_value() && setSampleFile (song, id, file, *settings);
+}
 
-    if (! settings.has_value())
+bool setSampleFile (Song& song, DeviceID id, const juce::File& file, const SampleSettings& settings)
+{
+    if (! isSampler (song, id) || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
         return false;
 
     const auto copy = copyIntoProject (song, file);
     const UndoStep step (song, "Put " + copy.getFileNameWithoutExtension() + " on the Sampler");
     setDeviceSound (song, id, schema::samplerSampleFile, getProjectPath (song, copy));
-    setSoundSettings (song, id, settings->root, settings->fine, settings->loop);
+    setSoundSettings (song, id, settings.root, settings.fine, settings.loop);
     return true;
 }
 

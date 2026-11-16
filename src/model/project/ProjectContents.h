@@ -42,7 +42,10 @@ std::vector<ProjectAudioFile> getProjectAudioFiles (const ProjectContext&);
 // A missing file found again, or another put in its place: the project's copy of the file found (copied into its Audio
 // folder, as an import copies it) takes the path's place everywhere the song plays it, as one undo step, "Locate Audio File".
 // Whether anything changed: nothing for a path the song doesn't play, a file that isn't there, or one at the same path.
+// The file is copied in the background (model/arrangement/internal/AudioWork.h), the step made once it is: true once that
+// started. locateAudioFileNow(): the change itself, at once, for a file that is the project's own already.
 bool locateAudioFile (ProjectContext&, const juce::String& path, const juce::File& found);
+bool locateAudioFileNow (ProjectContext&, const juce::String& path, const juce::File& found);
 
 //==============================================================================
 // How a plug-in plays now (model/plugins/internal/PluginInstances.h).

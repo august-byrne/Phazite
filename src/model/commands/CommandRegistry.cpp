@@ -27,8 +27,22 @@ bool CommandRegistry::add (Command command)
     return true;
 }
 
-bool CommandRegistry::addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs)
+bool CommandRegistry::addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs, juce::String* whyNot)
 {
+    // One undo step for all it runs: not a command whose step comes later, once its work in the background is done.
+    for (const auto& commandID : commandIDs)
+    {
+        if (const auto* command = find (commandID); command != nullptr && command->changesLater)
+        {
+            if (whyNot != nullptr)
+                *whyNot = command->name
+                          + " changes the song once its work in the background is done, as a step of its own, which a "
+                            "macro, one undo step for all it runs, can't hold.";
+
+            return false;
+        }
+    }
+
     Command macro;
     macro.id = id;
     macro.name = name;
@@ -38,7 +52,7 @@ bool CommandRegistry::addMacro (const juce::String& id, const juce::String& name
     macro.perform = [this, commandIDs]
     {
         for (const auto& commandID : commandIDs)
-            if (auto* command = find (commandID))
+            if (auto* command = find (commandID); command != nullptr && ! command->changesLater) // added since: see above
                 runWithoutUndoStep (*command);
     };
 

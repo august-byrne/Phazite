@@ -12,6 +12,7 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -232,7 +233,16 @@ bool canImport (const ProjectContext&, const juce::File&);
 // Whether a file dropped on a track goes on it, rather than on a new track below it: an audio or MIDI file on a track that
 // suits it (audio and notes don't share a track; a folder, a return and the master hold no clips).
 bool importsOnto (const ProjectContext&, const juce::File&, TrackID);
+
+// At once, on the calling thread: for tests, and what Phazite makes itself.
 std::vector<ClipID> importFiles (ProjectContext&, const juce::StringArray& paths, TrackID target, BeatPosition start);
+
+// What the user drops or places: the files read in the background (each audio file's copy into the project, with its look
+// at a file of the same name there), the window usable meanwhile, then added as one undo step, as importFiles() adds them,
+// and added called with the clips (model/arrangement/internal/AudioWork.h says how it shows its progress and when it changes
+// nothing). Whether any of the files can be imported, so that it started.
+bool importFilesInBackground (ProjectContext&, const juce::StringArray& paths, TrackID target, BeatPosition start,
+                              std::function<void (const std::vector<ClipID>&)> added = nullptr);
 
 // The song's sections (Sections.h), in its order, as the playlist draws them in its time bar and behind the tracks.
 struct SongSection

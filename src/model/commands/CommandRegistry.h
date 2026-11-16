@@ -53,6 +53,10 @@ struct Command
     // holds what they play now, not what they gave last (known bug 166).
     bool needsPluginStates {};
     std::function<bool()> readsPluginStates {};
+    // Optional: whether its change comes later than its perform, as an undo step of its own made once work in the background
+    // is done (Normalize and Quantize Audio: model/arrangement/internal/AudioWork.h); its registry opens no step for it, and
+    // a macro, which promises one undo step for all it runs, refuses it (addMacro()).
+    bool changesLater {};
 
     static constexpr int notePriority = 1;
 };
@@ -76,8 +80,9 @@ public:
     bool add (Command);
 
     // A command that runs other commands in order, as one undo step (named after the macro); the plug-ins' states got
-    // first, once, if a step of it reads them.
-    bool addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs);
+    // first, once, if a step of it reads them. False, with why if asked, for one that holds a command whose change comes
+    // later (changesLater), which would make a step of its own after the macro's.
+    bool addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs, juce::String* whyNot = nullptr);
 
     const Command* find (const juce::String& id) const;
     juce::Array<const Command*> getAll() const;

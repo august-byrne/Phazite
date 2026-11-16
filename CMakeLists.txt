@@ -274,6 +274,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/AudioClipModel.cpp
     src/model/arrangement/AudioClipModel.h
     src/model/arrangement/AudioClips.cpp
+    src/model/arrangement/AudioWork.cpp
     src/model/arrangement/ClipRenders.cpp
     src/model/arrangement/Clipboard.cpp
     src/model/arrangement/Clips.cpp
@@ -300,6 +301,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Transients.cpp
     src/model/arrangement/internal/Arrangement.h
     src/model/arrangement/internal/AudioClips.h
+    src/model/arrangement/internal/AudioWork.h
     src/model/arrangement/internal/ClipRenders.h
     src/model/arrangement/internal/Clipboard.h
     src/model/arrangement/internal/Clips.h
@@ -1045,6 +1047,8 @@ target_sources(phazite_app PRIVATE
     src/app/AppServices.h
     src/app/ClipWaveforms.cpp
     src/app/ClipWaveforms.h
+    src/app/InputHold.cpp
+    src/app/InputHold.h
     src/app/MainWindow.cpp
     src/app/MainWindow.h
     src/app/PluginWindow.cpp
@@ -1225,6 +1229,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AudioRecordingTests.cpp
         tests/AudioThreadMonitor.cpp
         tests/AudioThreadMonitor.h
+        tests/AudioWorkTests.cpp
         tests/AutomationFollowsClipsTests.cpp
         tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
@@ -1323,6 +1328,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MainWindowTests.cpp
         tests/LongRun.cpp
         tests/MessageQueueTests.cpp
+        tests/MessageThreadWorkBenchmarks.cpp
         tests/MetronomeTests.cpp
         tests/ModulationModelTests.cpp
         tests/ModulationUiTests.cpp

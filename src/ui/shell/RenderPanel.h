@@ -5,6 +5,8 @@
 
 #include "model/mixer/FreezeModel.h"
 
+#include <functional>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace phazite::ui
@@ -23,6 +25,9 @@ public:
     void cancel();
     void goOn();
     juce::TextButton& getGoOnButton() noexcept { return goOnButton; }
+
+    // Told once its Cancel has closed it (the next render waiting its turn shows then).
+    std::function<void()> onCancelled;
 
     bool isRendering() const noexcept { return render != nullptr; }
     juce::TextButton& getCancelButton() noexcept { return cancelButton; }

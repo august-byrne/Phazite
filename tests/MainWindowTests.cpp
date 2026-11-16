@@ -18,17 +18,23 @@
 #include "TestClips.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
 #include "app/MainWindow.h"
 #include "app/PluginWindow.h"
 #include "app/ProjectSession.h"
 #include "devices/eq/Equalizer.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioWork.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/input/Keymap.h"
 #include "ui/input/KeymapStore.h"
@@ -820,4 +826,231 @@ TEST_CASE ("The main window opens where it was closed, maximized if it was, and 
         MainScreen screen (startingWith ("-50 -30 2500 1400", false), { twoScreens.getFirst() });
         CHECK (screen.window->getBounds() == twoScreens.getFirst());
     }
+}
+
+namespace
+{
+// A render of the test's own, which renders nothing, for the progress window to show.
+struct StandInRender final : phazite::TrackRender::Impl
+{
+    explicit StandInRender (juce::String name)
+        : title (std::move (name))
+    {
+    }
+
+    float getProgress() const override { return 0.0f; }
+    juce::String getTitle() const override { return title; }
+
+    const juce::String title;
+};
+
+bool isShowing (const MainScreen& screen, const juce::String& title)
+{
+    for (auto* dialog : screen.getOpenDialogs())
+        if (dialog->getName() == title)
+            return true;
+
+    return false;
+}
+
+// Holds every job's read where it starts until let go (known bug 123's review: a slow read).
+struct ReadGate
+{
+    explicit ReadGate (phazite::AudioWork& w)
+        : work (w)
+    {
+        work.setOnReadStep (
+            [this] (int, const phazite::BackgroundJobs::ShouldStop& stop)
+            {
+                while (! letGo && ! stop())
+                    juce::Thread::sleep (1);
+            });
+    }
+
+    ~ReadGate() { work.setOnReadStep (nullptr); }
+
+    phazite::AudioWork& work;
+    std::atomic<bool> letGo { false };
+};
+} // namespace
+
+TEST_CASE ("While audio work reads, the window takes no input: an undo, a click, a drag and the wheel change nothing and wait for "
+           "nothing, and the work's step comes right after the step before it")
+{
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    auto& song = *phazite::findSong (context);
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto clips =
+        phazite::importFiles (context, { phazite::test::writeSound (screen.temp.folder.getChildFile ("Tone.wav"), 2.0).getFullPathName() },
+                              track, phazite::test::at (0.0));
+    REQUIRE (clips.size() == 1);
+    dispatchPendingMessages();
+
+    const auto stepBefore = phazite::describeUndo (&song);
+    const auto songBefore = phazite::test::writeSong (song, phazite::test::SongPart::whole);
+    ReadGate gate (phazite::getAudioWork (context));
+    phazite::normalizeClip (context, clips[0]);
+    CHECK (phazite::InputHold::isHold (juce::Component::getCurrentlyModalComponent()));
+
+    // In the first second: Ctrl+Z, a click and a drag in the middle of the window, and the wheel there.
+    auto* peer = screen.window->getPeer();
+    REQUIRE (peer != nullptr);
+    peer->handleKeyPress (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0));
+    phazite::test::Mouse mouse (*screen.window);
+    const auto middle = screen.window->getLocalBounds().getCentre();
+    mouse.click (middle);
+    mouse.press (middle);
+    mouse.dragTo (middle + juce::Point<int> (80, 30));
+    mouse.release();
+    mouse.wheel (middle, 0.5f);
+    dispatchPendingMessages();
+    CHECK (phazite::describeUndo (&song) == stepBefore);
+    CHECK (phazite::test::writeSong (song, phazite::test::SongPart::whole) == songBefore);
+
+    // Let go: its step, and nothing of what was tried meanwhile after it.
+    gate.letGo = true;
+    phazite::test::waitForAudioWork (context);
+    dispatchPendingMessages();
+    CHECK (juce::Component::getCurrentlyModalComponent() == nullptr);
+    CHECK (phazite::describeUndo (&song) == juce::String ("Undo Normalize Clip"));
+    phazite::undo (song);
+    CHECK (phazite::describeUndo (&song) == stepBefore);
+    CHECK (phazite::test::writeSong (song, phazite::test::SongPart::whole) == songBefore);
+}
+
+TEST_CASE ("A render asked for while another's window shows waits its turn, whichever came first, and neither is cancelled")
+{
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    auto& work = phazite::getAudioWork (context);
+    work.setShowAfter (0);
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Take.wav"), 2.0);
+
+    SUBCASE ("The import's window first: a save's wait asked for meanwhile waits for it")
+    {
+        ReadGate gate (work);
+        REQUIRE (phazite::importFilesInBackground (context, { sound.getFullPathName() }, track, phazite::test::at (0.0)));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return isShowing (screen, "Importing Take.wav"); }));
+
+        screen.window->runRender (std::make_unique<phazite::TrackRender> (std::make_unique<StandInRender> ("Waiting for the plug-ins")));
+        dispatchPendingMessages();
+        CHECK (isShowing (screen, "Importing Take.wav"));
+        CHECK_FALSE (isShowing (screen, "Waiting for the plug-ins"));
+
+        gate.letGo = true;
+        phazite::test::waitForAudioWork (context);
+        CHECK (phazite::getClips (context, track).size() == 1); // not cancelled: it landed
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return isShowing (screen, "Waiting for the plug-ins"); }));
+        screen.window->renderFinished ("Waiting for the plug-ins", juce::Result::ok());
+    }
+
+    SUBCASE ("Another's window first: the import's waits for it, and reads meanwhile")
+    {
+        screen.window->runRender (std::make_unique<phazite::TrackRender> (std::make_unique<StandInRender> ("Freezing Bass")));
+        dispatchPendingMessages();
+        REQUIRE (isShowing (screen, "Freezing Bass"));
+
+        ReadGate gate (work);
+        REQUIRE (phazite::importFilesInBackground (context, { sound.getFullPathName() }, track, phazite::test::at (0.0)));
+        dispatchPendingMessages();
+        CHECK (isShowing (screen, "Freezing Bass"));
+        CHECK_FALSE (isShowing (screen, "Importing Take.wav"));
+
+        screen.window->renderFinished ("Freezing Bass", juce::Result::ok());
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return isShowing (screen, "Importing Take.wav"); }));
+        gate.letGo = true;
+        phazite::test::waitForAudioWork (context);
+        CHECK (phazite::getClips (context, track).size() == 1);
+    }
+
+    work.setShowAfter (phazite::AudioWork::showAfterMilliseconds);
+}
+
+TEST_CASE ("While audio work holds the window, the transport's keys pass, each press of them, and every other key waits for "
+           "nothing")
+{
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto clips =
+        phazite::importFiles (context, { phazite::test::writeSound (screen.temp.folder.getChildFile ("Tone.wav"), 2.0).getFullPathName() },
+                              track, phazite::test::at (0.0));
+    REQUIRE (clips.size() == 1);
+    dispatchPendingMessages();
+
+    // What the keys run.
+    struct Invoked final : phazite::CommandRegistry::Listener
+    {
+        void commandAdded (const phazite::Command&) override {}
+        void commandInvoked (const phazite::Command& command) override { ids.add (command.id); }
+        juce::StringArray ids;
+    } invoked;
+
+    screen.registry.addListener (&invoked);
+    auto* peer = screen.window->getPeer();
+    REQUIRE (peer != nullptr);
+    const juce::KeyPress space (juce::KeyPress::spaceKey);
+    auto& song = *phazite::findSong (context);
+    ReadGate gate (phazite::getAudioWork (context));
+    const auto hold = [&]
+    {
+        phazite::normalizeClip (context, clips[0]);
+        REQUIRE (phazite::InputHold::isHold (juce::Component::getCurrentlyModalComponent()));
+    };
+    const auto letGo = [&]
+    {
+        gate.letGo = true;
+        phazite::test::waitForAudioWork (context);
+        dispatchPendingMessages();
+        REQUIRE (juce::Component::getCurrentlyModalComponent() == nullptr);
+    };
+
+    SUBCASE ("Space starts the song, let go and pressed again it stops it; Ctrl+Z waits for nothing")
+    {
+        hold();
+        peer->handleKeyPress (space);
+        peer->handleKeyPress (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0));
+        CHECK (invoked.ids == juce::StringArray { "transport.playStop" });
+        CHECK (phazite::isSongPlaying (song));
+
+        peer->handleKeyUpOrDown (false);
+        peer->handleKeyPress (space);
+        CHECK (invoked.ids == juce::StringArray { "transport.playStop", "transport.playStop" });
+        CHECK_FALSE (phazite::isSongPlaying (song));
+        letGo();
+    }
+
+    SUBCASE ("Space pressed before the hold and let go during it: pressed again during it, it stops the song")
+    {
+        peer->handleKeyPress (space);
+        REQUIRE (phazite::isSongPlaying (song));
+        hold();
+        peer->handleKeyUpOrDown (false);
+        peer->handleKeyPress (space);
+        CHECK (invoked.ids == juce::StringArray { "transport.playStop", "transport.playStop" });
+        CHECK_FALSE (phazite::isSongPlaying (song));
+        letGo();
+    }
+
+    SUBCASE ("Space pressed during the hold and let go after it: pressed again after it, it stops the song")
+    {
+        hold();
+        peer->handleKeyPress (space);
+        REQUIRE (phazite::isSongPlaying (song));
+        letGo();
+        peer->handleKeyUpOrDown (false);
+        peer->handleKeyPress (space);
+        CHECK (invoked.ids == juce::StringArray { "transport.playStop", "transport.playStop" });
+        CHECK_FALSE (phazite::isSongPlaying (song));
+    }
+
+    screen.registry.removeListener (&invoked);
+
+    if (phazite::isSongPlaying (song))
+        REQUIRE (screen.registry.invoke ("transport.playStop"));
 }

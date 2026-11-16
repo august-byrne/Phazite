@@ -73,8 +73,10 @@ public:
     // An item went into the song, placed or dropped there.
     std::function<void (const LibraryItem&)> onUsed;
 
-    // Puts an item into the song with onPlace, and notes it as used, for the recent items.
+    // Puts an item into the song with onPlace, and notes it as used, for the recent items: a sound or a MIDI file once its
+    // import has put it in the song, which reads it in the background (notePlaced(), from the playlist).
     bool place (const LibraryItem&);
+    void notePlaced (const juce::File&);
 
     // Plays a sound or a MIDI file, unless previews are off; stops the preview for anything else. A click on an item plays
     // it, and stops it if it is a loop playing (togglePreview()).
@@ -201,7 +203,9 @@ private:
     void presetSaved (const juce::File&);
     void reveal (BrowserPlace::Kind, const juce::File&); // a file in a place: its folders opened, and it selected
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);
-    void updateSearch();
+    // What search finds for the text in the field, found in the background (BrowserModel::startSearch()): the tree shows the
+    // rows it showed until the newest text's arrive. Again, to look again for the same (the index changed).
+    void updateSearch (bool again = false);
     void focusTree();
     Node* findFirstRow() const; // the first row that can be selected; swapping, the first it can try, while one shows
     void layOutTreeNow();       // the tree's rows where they are now, for a scroll to go by (JUCE's tree waits a message)
@@ -224,22 +228,22 @@ private:
     void askForName (const juce::TreeViewItem*, const juce::String& name, std::function<void (const juce::String&)> done);
     void newCollection (std::optional<LibraryItem> toAdd); // named as the user types, with an item in it if one is given
 
-    // A search through a big library takes a while: once one has, typing waits for the keys to pause (docs/performance-
-    // audit.md, U7). Small ones search at each key.
-    struct SearchDelay : juce::Timer
-    {
-        std::function<void()> search;
-        void timerCallback() override
-        {
-            stopTimer();
-            search();
-        }
-    } searchDelay;
-    double lastSearchMilliseconds = 0.0;
-    static constexpr double slowSearchMilliseconds = 5.0;
+    // The search the rows of searchRoot show: its text and its filters, which a search for the same shows again without
+    // looking (a swap's end, which puts back the rows as they were).
+    juce::String searchShown;
+    BrowserFilters filtersShown;
+
+    // Whether the newest text's results are still to come, and what waits for them (Enter, Down, a swap's end): run once
+    // they are shown, or at once while none are to come.
+    bool searchPending = false;
+    std::function<void()> whenSearchShown;
+    void afterSearch (std::function<void()>);
+    bool focusWhenShown = false; // Enter or Down: the tree, once the results are in, unless the text changes first
+    void focusTreeAfterSearch();
+    void runWhenSearchShown();
 
     void textEditorTextChanged (juce::TextEditor&) override;
-    void textEditorReturnKeyPressed (juce::TextEditor&) override { focusTree(); }
+    void textEditorReturnKeyPressed (juce::TextEditor&) override;    // to the newest text's results, once they are in
     void textEditorEscapeKeyPressed (juce::TextEditor&) override;    // puts back what a swap tried, else empties the search
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the sound pack's download went on
     void timerCallback() override;

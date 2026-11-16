@@ -187,15 +187,19 @@ struct Swap::Impl : private juce::Timer
     juce::String oldName;
     TrackID noteTrack; // the track an instrument's note plays on, until it stops
     bool ended = false;
+    bool keeping = false;             // its sounds being copied into the project, to keep once they are (Swap::keep())
+    std::function<void()> afterwards; // what keep() was given, once kept
 };
 
 //==============================================================================
 Swap::Swap (ProjectContext& context, DeviceID device, int pad)
-    : impl (std::make_unique<Impl> (context, device, pad))
+    : impl (std::make_shared<Impl> (context, device, pad))
 {
     auto* song = impl->getSong();
 
-    if (song == nullptr)
+    // Not while another's keep is under way (its sounds copied in): it opens closed, and is asked for again once that is kept
+    // (Browser::startSwap()).
+    if (song == nullptr || Trial::isKeepPending (*song))
     {
         impl->ended = true;
         return;
@@ -204,18 +208,20 @@ Swap::Swap (ProjectContext& context, DeviceID device, int pad)
     impl->oldName = pad >= 0 ? getPadName (*song, device, pad) : juce::String();
 
     // Something else that changes the song keeps what is tried first, as a step of its own, and ends the swap.
-    impl->trial = std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad) : "Swap Preset", [this] { impl->keep(); });
+    impl->trial =
+        std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad) : "Swap Preset", [kept = impl.get()] { kept->keep(); });
 }
 
 Swap::~Swap()
 {
-    if (isOpen())
+    if (isOpen() && ! impl->keeping)
         putBack();
 }
 
 bool Swap::isOpen() const
 {
-    return impl->getSong() != nullptr && impl->trial != nullptr && impl->trial->isOpen();
+    // Kept, its sounds being copied in: closed, as once kept.
+    return ! impl->keeping && impl->getSong() != nullptr && impl->trial != nullptr && impl->trial->isOpen();
 }
 
 DeviceID Swap::getDevice() const
@@ -283,10 +289,55 @@ juce::File Swap::getTried() const
     return isOpen() ? impl->tried : juce::File();
 }
 
-void Swap::keep()
+bool Swap::keep (std::function<void()> afterwards)
 {
-    if (isOpen())
-        impl->keep();
+    if (! isOpen())
+        return false;
+
+    // The sounds it tried by their full paths, copied into the project in the background first, as a sound put on a pad is
+    // (known bug 123): kept once they are, its trial open meanwhile, input held; put back if that is cancelled.
+    auto& song = *impl->getSong();
+    juce::Array<juce::File> outside;
+    const auto sounds = findDeviceState (song, impl->device).getChildWithName (schema::SOUNDS);
+
+    for (int i = 0; i < sounds.getNumProperties(); ++i)
+        if (const auto path = sounds[sounds.getPropertyName (i)].toString(); juce::File::isAbsolutePath (path))
+            if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
+                outside.add (file);
+
+    impl->keeping = true;
+    bringFilesIntoProject (song, { .files = outside,
+                                   .title = "Copying " + impl->tried.getFileName(),
+                                   .problem = "What the swap tried wasn't kept.",
+                                   .apply =
+                                       [kept = impl]
+                                   {
+                                       kept->keeping = false;
+                                       kept->trial->setKeepPending (false);
+                                       kept->keep();
+
+                                       if (const auto then = std::exchange (kept->afterwards, nullptr))
+                                           then();
+
+                                       return true;
+                                   },
+                                   .otherwise =
+                                       [kept = impl]
+                                   {
+                                       kept->keeping = false;
+                                       kept->trial->setKeepPending (false);
+                                       kept->afterwards = nullptr;
+                                       kept->putBack();
+                                   },
+                                   .forTheOpenTrial = true });
+
+    // Its keep under way: kept once its sounds are in, and not a second time meanwhile (Trial::setKeepPending()).
+    if (! impl->keeping)
+        return false;
+
+    impl->afterwards = std::move (afterwards);
+    impl->trial->setKeepPending (true);
+    return true;
 }
 
 void Swap::putBack()
@@ -301,7 +352,7 @@ void Swap::putBack()
 std::optional<int> findOpenSwap (const Song& song, DeviceID device)
 {
     for (const auto* open : Swap::Impl::getOpen())
-        if (open->song.get() == &song && open->device == device && open->getSong() != nullptr && open->trial != nullptr
+        if (open->song.get() == &song && open->device == device && ! open->keeping && open->getSong() != nullptr && open->trial != nullptr
             && open->trial->isOpen())
             return open->pad;
 

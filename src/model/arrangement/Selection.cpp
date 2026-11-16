@@ -358,7 +358,7 @@ juce::String describeSelection (const Selection& selection, const RangeSelection
     return verb;
 }
 
-void addSelectionCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range)
+void addSelectionCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range, ProjectContext* context)
 {
     const auto undoTarget = undoTargetOf (selection);
     const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
@@ -487,17 +487,19 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .isTicked =
               ifSong (selection, [&selection] (const Song& song) { return doAllClipsFollowTempo (song, getSelectedClips (selection)); }) });
 
-    // Each selected audio clip's gain, from its loudest peak (as the audio clip editor's button sets one clip's).
-    registry.add (
-        { .id = "clip.normalize",
-          .name = "Normalize",
-          .category = "Clip",
-          .description = "Sets each selected audio clip's gain so that its loudest peak plays at " + juce::String (normalizedPeak, 0)
-                         + " dB. Their audio files don't change.",
-          .synonyms = { "normalise", "maximize", "peak", "level", "louder", "gain staging" },
-          .perform = withSong (selection, [&selection] (Song& song) { normalizeClips (song, getSelectedClips (selection)); }),
-          .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
-          .undoTarget = undoTarget });
+    // Each selected audio clip's gain, from its loudest peak (as the audio clip editor's button sets one clip's): read in the
+    // background, its own undo step made once the peaks are in (normalizeClips()), so the registry opens none.
+    if (context != nullptr)
+        registry.add ({ .id = "clip.normalize",
+                        .name = "Normalize",
+                        .category = "Clip",
+                        .description = "Sets each selected audio clip's gain so that its loudest peak plays at "
+                                       + juce::String (normalizedPeak, 0) + " dB. Their audio files don't change.",
+                        .synonyms = { "normalise", "maximize", "peak", "level", "louder", "gain staging" },
+                        .perform = [context, &selection] { normalizeClips (*context, getSelectedClips (selection)); },
+                        .isEnabled = ifSong (selection, [&selection] (const Song& song)
+                                             { return hasAudioClips (song, getSelectedClips (selection)); }),
+                        .changesLater = true });
 
     registry.add ({ .id = "edit.split",
                     .name = "Split",

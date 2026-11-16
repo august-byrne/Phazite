@@ -133,6 +133,7 @@ Tracks, clips, sections, the grid, the selection and the time line.
 | `SongRange.h`, `internal/SongRange.h` | The time range selected across tracks, by beats and IDs. |
 | `internal/Arrangement.h` | Time edits across every track: inserting, removing, moving and copying a range of beats. |
 | `internal/Import.h` | Importing files: audio and MIDI files dropped onto the playlist or put there from the browser. |
+| `internal/AudioWork.h` | The work of the commands that read much of an audio file (an import, Normalize, Quantize Audio): in the background, one job at a time, with a progress window after a second, each making its undo step once what it read is in. |
 | `internal/Consolidate.h` | What consolidating clips joins on each track. |
 | `internal/Clipboard.h` | Cut, Copy and Paste, whose clipboard the project context keeps. |
 | `TimelineModel.h` | The time line as the editors reach it, in beats. |

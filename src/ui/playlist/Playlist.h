@@ -39,8 +39,11 @@ public:
     std::function<void (ClipID)> onOpenClip;
 
     // Adds an audio or MIDI file at the play start (where Space plays from), as the browser's Enter does: onto the
-    // selected track if it suits the file, or a new track after it. Returns false if nothing could be added.
+    // selected track if it suits the file, or a new track after it. Returns false if nothing could be added. Its import reads
+    // in the background (model/arrangement/internal/AudioWork.h): onBrowserSoundPlaced hears of each file from the browser,
+    // placed so or dragged in, once its clip is in the song, for the browser's recent items.
     bool placeFile (const juce::File&);
+    std::function<void (const juce::File&)> onBrowserSoundPlaced;
 
     // How wide the track headers' column is: its right edge drags it, from minHeaderWidth to maxHeaderWidth, and a
     // double-click on it puts it back, as in Logic Pro and REAPER. The app keeps it in its settings (onHeaderWidthChanged).
@@ -358,7 +361,7 @@ private:
 
     // Audio and MIDI files dropped from Explorer: onto a track that suits them, or onto new tracks.
     void importFiles (const juce::StringArray& paths, juce::Point<int> position);
-    bool addFiles (const juce::StringArray& paths, TrackID target, BeatPosition start); // as one undo step
+    bool addFiles (const juce::StringArray& paths, TrackID target, BeatPosition start, bool fromBrowser = false); // one undo step
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void fileDragMove (const juce::StringArray&, int x, int y) override;
     void fileDragExit (const juce::StringArray&) override;

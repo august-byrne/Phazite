@@ -55,8 +55,20 @@ selected sound and the preview's controls. The places at the top of the tree, in
 
 ## Search
 
-Typing in the search field lists what matches across the sounds, the presets and the devices, best matches first:
-names that start with what was typed, then names with a word that does.
+Typing in the search field lists what matches across the sounds, the presets, the folders and the devices: every word
+typed, in any order, in an item's name, its tags or the names of the folders it is in, as Ableton Live's, Bitwig's and
+FL Studio's browsers match. Best matches first: names that start with what was typed, then names with a word that
+starts with its first word, then names and tags that hold every word, then items that hold some of the words only in
+their folders' names; shorter names first among equals. Folders that match come after everything else, as a way to
+what they hold.
+
+- The search runs in the background as each key is typed, so typing never waits for it: each key's search cancels the
+  one before, and the list shows the rows it showed until the newest text's results are in; Enter and Down wait for them
+  (they are milliseconds away) and act on them. What it looks through for each item (its name, words, tags and
+  folders, in lowercase) is made once, as the index is built. Items that rank the same keep the index's order, from
+  one key to the next.
+- It lists the best 200; where there are more, the last line says how many ("The first 200 of 3,412: type more to
+  find fewer").
 
 - Ctrl+F (**Search the Browser**, in Phazite's and Ableton Live's keymaps) shows the browser and puts the cursor in
   the search field. Down or Enter moves from the field to the results.

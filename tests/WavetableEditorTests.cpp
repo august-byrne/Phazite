@@ -127,6 +127,8 @@ TEST_CASE ("A sound dropped on a wavetable oscillator's drawing becomes its tabl
     const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Drops/Choir.wav"), 0.2);
 
     REQUIRE (editor.dropFile (1, sound));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    editor.refresh();                  // as the devices view refreshes it once the song changed
     CHECK (editor.getTableButton (1).getButtonText() == juce::String ("Choir"));
     CHECK (screen.describeUndo() == juce::String ("Undo Put Choir on Osc 2"));
 

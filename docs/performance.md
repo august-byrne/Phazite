@@ -488,6 +488,47 @@ Eight Surge XTs, a chord each, in a block of 128 samples.
 | A helper each, all handed over first, then waited for | 239 µs | 341 µs | 1.7 ms | 2.3 % here, 54 % in the helpers | 310 MB | 13 (times), 10 |
 | One helper with all eight, handed over first | 236 µs | 337 µs | 1.3 ms | 1.9 % here, 45 % in the helpers | 232 MB | 10 |
 
+### Benchmark: what the browser's search and the commands that read audio files keep the message thread for
+
+`tests/MessageThreadWorkBenchmarks.cpp`, measured 2026-11-15 (known bugs 128 and 123; the first "after" while other builds
+ran on the machine, the second round's alone). Before: the browser searched the whole index on the message thread at
+each key, and an import, Normalize and Quantize Audio read their audio there.
+
+The browser's search, typing "kick deep" key by key into a library of 50,000 sounds (empty files in sample packs'
+folders, indexed by the library) and an index of 500,000 made in the test:
+
+| What | Before | After |
+|---|---|---|
+| 50,000 sounds: the message thread, per key | 60 to 83 ms (the whole search) | 0.06 to 0.14 ms (the search started; the rows made once its results are in) |
+| 50,000 sounds: until the results show | the same | 4 to 11 ms |
+| 50,000 sounds: the search itself, wherever it runs | 60 to 83 ms | 3.6 to 7.5 ms (search keys made with the index) |
+| 500,000 sounds: the search itself, on its own thread | (the index stopped at 50,000) | 37 to 53 ms |
+
+A ten-minute stereo recording at 48 kHz, 24-bit (173 MB), with a file of the same name in the project already:
+
+| Command | Before: the message thread | After: the call | After: the message thread in all | After: done after |
+|---|---|---|---|---|
+| Import (the file compared with the one there) | 512 ms | 0.1 ms | 16 ms | 109 ms |
+| Normalize | 470 ms | 0.03 ms | 24 ms | 299 ms |
+| Quantize Audio (its hits found first) | 4,247 ms | 0.03 ms | 167 ms | 2,781 ms |
+
+"The message thread in all" is the call and everything the message thread ran until the change was made: the change
+itself, the plan it compiles, the clip's render it starts, and the other timers. The reading is on a thread of its own;
+the window takes no input meanwhile, and a job that takes longer than a second shows its progress window with Cancel.
+
+Quantize Audio's change itself, on a ten-minute clip (`Quantize Audio's edit of 1,000 and 5,000 hits`): the edit, then
+what the message thread runs for a second after it (the plan, the render's recipe). Most of what came after was the name
+of the clip's render, a key of thousands of points built by appending to a string, which copied it whole at each point,
+several times for each plan; written into a stream now (`getRenderFile()`, `src/model/arrangement/AudioClips.cpp`).
+
+| Hits | The edit (ms) | After it, before (ms) | After it, now (ms) |
+|---|---|---|---|
+| 1,000 | 3.6 to 3.9 | 181 | 92 |
+| 5,000 | 12 to 13 | 381 | 122 |
+
+A sound tried on a drum pad by Swap (`a sound tried on a drum pad by Swap`, 20 tries): median 0.07 ms before and after
+(a try copies nothing: the sound kept is copied in by its keep, in the background).
+
 ## The gates
 
 Timings can't be compared with stored numbers on a shared or another machine, so two kinds of gate fail a change that
@@ -521,6 +562,9 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
 - the piano roll's hover reads no notes from the song, and ten steps of its selection rectangle fewer than its clip
   holds, choosing each note once (`countNotesRead()`, `Selection::getNoteComparisons()`; 0 and 362 of 500 measured,
   15,000 and 9,181 before).
+- an import, Normalize and Quantize Audio read no byte of audio on the message thread (`AudioWork::getMessageThreadReads()`,
+  known bug 123), and a key typed in the browser's search looks through none of the library there
+  (`Library::getItemsSearchedOnMessageThread()`, in `tests/BrowserTests.cpp`; known bug 128).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

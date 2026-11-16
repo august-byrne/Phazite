@@ -3,6 +3,7 @@
 // restoring an autosave after a crash.
 #pragma once
 
+#include "InputHold.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
@@ -160,6 +161,11 @@ public:
     // whether a modal component is that hold, no dialog; and what to do once no such wait is left (at once if none is).
     bool isWaitingForPluginStates() const noexcept { return gatesWaiting > 0; }
     bool isHoldingInput (const juce::Component* modal) const noexcept;
+
+    // The window's one hold on its input (InputHold.h), which a wait for the plug-ins' states takes, and the work that reads
+    // audio files too (model/arrangement/internal/AudioWork.h: InputHolder), as the main window gives it them: whether a
+    // modal is a hold, isHoldingInput() answers for either.
+    InputHold& getInputHold() noexcept { return inputHold; }
     void afterPluginStatesGate (std::function<void()>);
 
     // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
@@ -237,7 +243,7 @@ private:
     bool sessionEnding = false;    // setSessionEnding()'s
     int gatesWaiting = 0;          // gatePluginStates()'s, still waiting
     std::vector<std::function<void()>> afterGates;
-    juce::Component::SafePointer<juce::Component> inputHold;
+    InputHold inputHold; // the window's one hold on its input, whatever waits (InputHold.h)
     void gatePluginStates (std::function<void (bool go)>);
     int closesWaiting = 0; // closeThen()s that wait for the plug-ins' states
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);

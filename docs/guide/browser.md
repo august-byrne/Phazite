@@ -31,8 +31,12 @@ One click opens a folder. A folder you added has **Remove from the Browser** in 
 
 ## Search and tags
 
-Type in the search field to list what matches across the sounds, the presets and the devices, best matches first.
-**Down** or **Enter** moves from the field to the results.
+Type in the search field to list what matches across the sounds, the presets, the folders and the devices: every word
+you type, in any order, in a name, its tags or the names of the folders it is in. The best matches come first: names that
+start with what you typed, then names with a word that does, then everything else that matches, with folders last. The
+list shows the best 200; where there are more, its last line says how many ("The first 200 of 3,412"), so type more
+words to find fewer. Typing never waits for the search, which runs while you type. **Down** or **Enter** moves from the
+field to the results of what you typed last.
 
 Phazite tags each sound from the words in its name and its folders' names: what it is (Kick, Snare, Clap, Hat, Cymbal,
 Tom, Percussion, Bass, FX, Foley, Vocal, Synth), loop or one-shot, its tempo ("120 BPM") and its key ("F# minor"). WAV

@@ -7,6 +7,7 @@
 #include "internal/SamplerSound.h"
 #include "internal/Swap.h"
 #include "internal/Wavetables.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -122,7 +123,21 @@ bool DeviceHandle::isPadEmpty (int pad) const
 bool DeviceHandle::setPadSound (int pad, const juce::File& file, int layer) const
 {
     auto* song = songOf (impl);
-    return song != nullptr && phazite::setPadSound (*song, impl->id, pad, file, layer);
+
+    if (song == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
+        return false;
+
+    // Copied into the project in the background, the pad given it once it is (known bug 123).
+    return bringFilesIntoProject (*song, { .files = { file },
+                                           .title = "Copying " + file.getFileName(),
+                                           .problem = file.getFileName()
+                                                      + " wasn't put on the pad: its drum sampler went before it was copied "
+                                                        "into the project.",
+                                           .apply = [weak = impl->song, id = impl->id, pad, file, layer]
+                                           {
+                                               auto* s = weak.get();
+                                               return s != nullptr && phazite::setPadSound (*s, id, pad, file, layer);
+                                           } });
 }
 
 void DeviceHandle::clearPadSound (int pad, int layer) const
@@ -181,7 +196,21 @@ void DeviceHandle::setFactoryWavetable (int osc, int index) const
 bool DeviceHandle::setWavetableFile (int osc, const juce::File& file) const
 {
     auto* song = songOf (impl);
-    return song != nullptr && phazite::setWavetableFile (*song, impl->id, osc, file);
+
+    if (song == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
+        return false;
+
+    // Copied into the project in the background, the oscillator given it once it is (known bug 123).
+    return bringFilesIntoProject (*song, { .files = { file },
+                                           .title = "Copying " + file.getFileName(),
+                                           .problem = file.getFileName()
+                                                      + " wasn't made a wavetable: its synth went before it was copied into "
+                                                        "the project.",
+                                           .apply = [weak = impl->song, id = impl->id, osc, file]
+                                           {
+                                               auto* s = weak.get();
+                                               return s != nullptr && phazite::setWavetableFile (*s, id, osc, file);
+                                           } });
 }
 
 juce::String DeviceHandle::getSampleName() const
@@ -205,7 +234,25 @@ int DeviceHandle::getFactorySample() const
 bool DeviceHandle::setSampleFile (const juce::File& file) const
 {
     auto* song = songOf (impl);
-    return song != nullptr && phazite::setSampleFile (*song, impl->id, file);
+
+    if (song == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
+        return false;
+
+    // Copied into the project, and its root key found, in the background; the sampler given it once they are (known bug 123).
+    auto settings = std::make_shared<std::optional<SampleSettings>>();
+    return bringFilesIntoProject (*song, { .files = { file },
+                                           .title = "Copying " + file.getFileName(),
+                                           .problem = file.getFileName()
+                                                      + " wasn't put on the sampler: it went before the sound was copied into "
+                                                        "the project, or the sound can't be read.",
+                                           .prepare = [file, settings] { *settings = readSampleSettings (file); },
+                                           .apply =
+                                               [weak = impl->song, id = impl->id, file, settings]
+                                           {
+                                               auto* s = weak.get();
+                                               return s != nullptr && settings->has_value()
+                                                      && phazite::setSampleFile (*s, id, file, **settings);
+                                           } });
 }
 
 void DeviceHandle::setFactorySample (int index) const

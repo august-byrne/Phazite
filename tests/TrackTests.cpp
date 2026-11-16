@@ -27,7 +27,7 @@ struct Tracks
 
         song->getUndoManager().clearUndoHistory();
         setSong (context, song.get());
-        phazite::addSelectionCommands (registry, selection, range);
+        phazite::addSelectionCommands (registry, selection, range, &context);
         phazite::addTrackCommands (registry, selection);
         phazite::ui::addTrackViewCommands (registry, context);
     }

@@ -8,6 +8,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -29,8 +30,9 @@ struct Onset
 // a snare or noise. Takes a few milliseconds.
 std::optional<double> detectPitch (const juce::AudioBuffer<float>&, double sampleRate);
 
-// Where its hits begin, in time order, at least 40 ms apart, each placed just before its rise and on a zero crossing.
-std::vector<Onset> detectOnsets (const juce::AudioBuffer<float>&, double sampleRate);
+// Where its hits begin, in time order, at least 40 ms apart, each placed just before its rise and on a zero crossing; none once
+// shouldStop says so, which it asks every few hundred frames (a long recording's, whose Cancel waits for it).
+std::vector<Onset> detectOnsets (const juce::AudioBuffer<float>&, double sampleRate, const std::function<bool()>& shouldStop = nullptr);
 
 // The zero crossing nearest a sample (the sample of the two around it that is nearer zero), within reach samples either
 // way, its channels mixed; the sample itself where there is none, and within the sound always.

@@ -11,8 +11,10 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/arrangement/internal/Transients.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -829,6 +831,33 @@ TEST_CASE ("Fuzz: what Phazite reads of an audio file without playing it is a le
 
                    if (info.key.has_value() && ! juce::isPositiveAndBelow (info.key->root, 12))
                        return "a key that isn't one";
+
+                   return {};
+               });
+
+    // What Normalize and Quantize Audio read of the whole of one, in the background (known bug 123): a file that says it is
+    // longer, or has more channels or a higher rate, than it can hold is read as far as it holds, to a peak and hits they
+    // can use.
+    fuzz::run ("audio files read whole", seeds, fuzz::Shape::bytes, 200,
+               [&] (const juce::MemoryBlock& input) -> std::string
+               {
+                   const auto* data = static_cast<const char*> (input.getData());
+                   const auto starts = [&] (const char* magic) { return input.getSize() >= 4 && std::memcmp (data, magic, 4) == 0; };
+                   const auto file = folder.getChildFile (starts ("FORM") ? "Whole.aif" : starts ("fLaC") ? "Whole.flac" : "Whole.wav");
+                   file.replaceWithData (input.getData(), input.getSize());
+                   const auto peak = phazite::readPeak (file, { 0.0, 30.0 }, nullptr, nullptr).peak;
+                   const auto hits = phazite::Transients::analyse (file);
+                   file.deleteFile();
+
+                   if (peak.has_value() && (! std::isfinite (*peak) || *peak < 0.0f))
+                       return "a peak that can't be: " + std::to_string (*peak);
+
+                   if (! hits.has_value())
+                       return "hits that stopped without being asked to";
+
+                   for (size_t i = 0; i < hits->size(); ++i)
+                       if (! std::isfinite ((*hits)[i]) || (*hits)[i] < 0.0 || (i > 0 && (*hits)[i] < (*hits)[i - 1]))
+                           return "hits out of time or order";
 
                    return {};
                });

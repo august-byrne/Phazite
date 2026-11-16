@@ -355,6 +355,7 @@ void addSliceSong (TestSong& song)
     const auto track = song.firstTrack;
     const auto sampler = song.setInstrument (track, Sampler::typeID);
     REQUIRE (phazite::getDeviceHandle (song.context, sampler).setSampleFile (writeHits (song.getSoundsFolder().getChildFile ("Hits.wav"))));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
     song.setParameter (sampler, "mode", (float) Sampler::Mode::slice);
     song.setParameter (sampler, "sensitivity", 1.0f);
     const auto clip = song.addMidiClip (track, 0.0, 4.0);

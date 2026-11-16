@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/StartupSound.h"
 #include "model/engine/internal/AudioIO.h"
@@ -8,6 +9,7 @@
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/internal/Export.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/AboutPanel.h"
@@ -174,6 +176,14 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     setPluginWindowServices (&pluginWindowServices);
     deviceWindows = std::make_unique<DeviceWindows> (s.getContext(), this);
 
+    // The work that reads much of an audio file (an import, Normalize, Quantize Audio) shows its progress here after a second.
+    getAudioWork (s.getContext()).setHost (this);
+    // And the window takes no input while it reads, but the transport's keys and the few others that change nothing.
+    s.getInputHold().setWindow (
+        shell, [this] (const juce::KeyPress& key) { return shortcutKeys.keyPressedWhileHeld (key); },
+        [this] (bool isKeyDown) { shortcutKeys.keyStateChanged (isKeyDown, nullptr); });
+    getAudioWork (s.getContext()).setInputHolder (&s.getInputHold());
+
     // The playlist's clips draw their waveforms from Phazite's own cache of their files' levels (ClipWaveforms.h).
     ui::setClipWaveformMaker (getClipWaveformMaker());
 
@@ -186,6 +196,7 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     {
         delete exportWindow.getComponent();       // its export holds the song
         delete renderWindow.getComponent();       // its freeze or bounce too
+        rendersWaiting.clear();                   // and those waiting their turn
         delete progressionsWindow.getComponent(); // it plays and changes that project's chords
         delete cleanUpWindow.getComponent();      // it lists that project's files
         deviceWindows->closeAll();                // storing what their plug-ins changed into the song
@@ -229,6 +240,10 @@ MainWindow::~MainWindow()
     session.onExport = nullptr;
     session.onCleanUpAudio = nullptr;
     session.dialogParent = nullptr;
+    getAudioWork (session.getContext()).setHost (nullptr);
+    getAudioWork (session.getContext()).setInputHolder (nullptr);
+    session.getInputHold().setWindow (nullptr, nullptr);
+    rendersWaiting.clear();
 
     // Close the dialogs: they point into the engine context and the commands, which are destroyed after this window, and
     // an export, a freeze or a bounce into the project's song. And the devices' windows, which use the keys and services
@@ -912,9 +927,27 @@ void MainWindow::showCleanUp()
 
 void MainWindow::runRender (std::unique_ptr<TrackRender> render)
 {
-    delete renderWindow.getComponent(); // one at a time: the window is modal, so there is none
+    // One at a time (the window is modal): another waits its turn, never replacing the one that shows, whose work would go
+    // on unseen or, cancelled by its going, be lost (an import's copy, say).
+    if (render == nullptr)
+        return;
+
+    if (renderWindow != nullptr)
+    {
+        rendersWaiting.push_back (std::move (render));
+        return;
+    }
 
     auto* panel = new ui::RenderPanel (std::move (render));
+    panel->onCancelled = [safeThis = juce::Component::SafePointer<MainWindow> (this)]
+    {
+        juce::MessageManager::callAsync (
+            [safeThis]
+            {
+                if (safeThis != nullptr)
+                    safeThis->showNextRender();
+            });
+    };
 
     juce::DialogWindow::LaunchOptions o;
     o.dialogTitle = panel->getTitle();
@@ -928,13 +961,43 @@ void MainWindow::runRender (std::unique_ptr<TrackRender> render)
     renderWindow = launch (o);
 }
 
+void MainWindow::showNextRender()
+{
+    if (renderWindow != nullptr || rendersWaiting.empty())
+        return;
+
+    auto next = std::move (rendersWaiting.front());
+    rendersWaiting.pop_front();
+    runRender (std::move (next));
+}
+
 void MainWindow::renderFinished (const juce::String& title, const juce::Result& result)
 {
     // What it says, taken first: the title and the result may be the render's, which goes with its window.
     const auto shownTitle = title;
     const auto failed = result.failed();
     const auto error = result.getErrorMessage();
-    delete renderWindow.getComponent(); // and the render, which is calling back: it lets go of itself last
+
+    // One waiting its turn ends where it waits; otherwise the one that shows, whose window goes, and the next shows.
+    const auto waiting = std::find_if (rendersWaiting.begin(), rendersWaiting.end(),
+                                       [&shownTitle] (const std::unique_ptr<TrackRender>& r) { return r->getTitle() == shownTitle; });
+
+    if (waiting != rendersWaiting.end())
+    {
+        auto ended = std::move (*waiting); // which is calling back: it lets go of itself last
+        rendersWaiting.erase (waiting);
+        ended = nullptr;
+    }
+    else
+    {
+        delete renderWindow.getComponent(); // and the render, which is calling back: it lets go of itself last
+        juce::MessageManager::callAsync (
+            [safeThis = juce::Component::SafePointer<MainWindow> (this)]
+            {
+                if (safeThis != nullptr)
+                    safeThis->showNextRender();
+            });
+    }
 
     if (failed)
         tell (shownTitle, error, true);

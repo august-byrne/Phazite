@@ -55,6 +55,7 @@ std::optional<SampleSettings> readSampleSettings (const juce::File&);
 // its markers on the whole sound, its loop the file's own (on) or off where it starts, and no slices changed by hand; the
 // mode and everything else as they were. Returns false, changing nothing, for a file that isn't a sound Phazite can read.
 bool setSampleFile (Song&, DeviceID, const juce::File&);
+bool setSampleFile (Song&, DeviceID, const juce::File&, const SampleSettings&); // with its settings read already
 
 // One of its factory sounds, as one undo step named after it, at the sound's root key, its markers on the whole sound, its
 // loop off (or on, over the whole of a sound that is one seamless loop) and no slices changed by hand; nothing if it plays

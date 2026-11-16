@@ -75,6 +75,7 @@ TEST_CASE ("The project's audio files: each once, with the tracks that play it; 
     auto& song = *findSong (test.context);
     const auto found = phazite::test::writeSound (sounds.getChildFile ("Found/Loop take 2.wav"), 2.0);
     CHECK (phazite::locateAudioFile (test.context, "Audio/Loop.wav", found));
+    phazite::test::waitForAudioWork (test.context); // copied into the project in the background (known bug 123)
     CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Locate Audio File"));
     files = phazite::getProjectAudioFiles (test.context);
     REQUIRE (files.size() == 2);

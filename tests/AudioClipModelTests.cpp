@@ -339,6 +339,18 @@ float getGain (Song& song, phazite::ClipID clip)
     return info->gain;
 }
 
+// Normalize's work, which reads the clip's audio in the background (known bug 123), waited for.
+void waitForAudioWork (const phazite::ProjectContext& context)
+{
+    REQUIRE (phazite::test::runTimersUntil ([&context] { return ! phazite::isReadingAudio (context); }));
+}
+
+void normalize (phazite::ProjectContext& context, phazite::ClipID clip)
+{
+    phazite::normalizeClip (context, clip);
+    waitForAudioWork (context);
+}
+
 // The gain Normalize gives a clip that peaks at a level (a share of full scale).
 float normalizedGainFor (float peak)
 {
@@ -354,6 +366,8 @@ TEST_CASE ("Normalize sets an audio clip's gain from the loudest peak of the par
     // The tone peaks at a quarter of full scale, -12 dB: its gain goes up by 11 dB, to play its peak at -1 dB.
     CHECK (phazite::getClipPeak (*song.song, song.audio).value_or (0.0f) == doctest::Approx (0.25f).epsilon (0.001));
     phazite::normalizeClip (context, song.audio);
+    CHECK (song.get().gain == doctest::Approx (0.0f)); // its audio is read in the background, the step made after
+    waitForAudioWork (context);
     CHECK (song.get().gain == doctest::Approx (normalizedGainFor (0.25f)).epsilon (0.001));
     CHECK (song.describeUndo() == juce::String ("Undo Normalize Clip"));
     phazite::undo (*song.song);
@@ -364,24 +378,24 @@ TEST_CASE ("Normalize sets an audio clip's gain from the loudest peak of the par
     const auto loudThenQuiet = writeLevels (song.temp.folder.getChildFile ("Loud then quiet.wav"), { { 2.0, 0.9f }, { 2.0, 0.1f } });
     const auto whole = importAt (song, loudThenQuiet, 16.0);
     phazite::setClipGain (context, whole, 6.0f);
-    phazite::normalizeClip (context, whole);
+    normalize (context, whole);
     CHECK (getGain (song, whole) == doctest::Approx (normalizedGainFor (0.9f)).epsilon (0.001));
 
     const auto quietPart = importAt (song, loudThenQuiet, 32.0);
     phazite::trimClipStart (context, quietPart, beat (36.0));
-    phazite::normalizeClip (context, quietPart);
+    normalize (context, quietPart);
     CHECK (getGain (song, quietPart) == doctest::Approx (normalizedGainFor (0.1f)).epsilon (0.001));
 
     // Within the editor's range: a clip too quiet for it goes up as far as it can, and a silent one, which has no peak, and a
     // MIDI clip keep their gains, with no undo step.
     const auto nearlySilent = importAt (song, writeLevels (song.temp.folder.getChildFile ("Whisper.wav"), { { 1.0, 0.0005f } }), 48.0);
-    phazite::normalizeClip (context, nearlySilent);
+    normalize (context, nearlySilent);
     CHECK (getGain (song, nearlySilent) == doctest::Approx (phazite::maxClipGain));
 
     const auto silent = importAt (song, writeLevels (song.temp.folder.getChildFile ("Silence.wav"), { { 1.0, 0.0f } }), 56.0);
     const auto steps = song.describeUndo();
-    phazite::normalizeClip (context, silent);
-    phazite::normalizeClip (context, song.midi);
+    normalize (context, silent);
+    normalize (context, song.midi);
     CHECK (getGain (song, silent) == doctest::Approx (0.0f));
     CHECK (song.describeUndo() == steps);
 }
@@ -391,7 +405,7 @@ TEST_CASE ("Normalize is a command for the selected audio clips, each from its o
     Song song;
     auto& context = song.context;
     phazite::CommandRegistry registry;
-    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
     const auto* normalize = registry.find ("clip.normalize");
     REQUIRE (normalize != nullptr);
 
@@ -404,6 +418,7 @@ TEST_CASE ("Normalize is a command for the selected audio clips, each from its o
     context.getSongSelection().add (loud);
     CHECK (normalize->isEnabled());
     CHECK (registry.invoke ("clip.normalize"));
+    waitForAudioWork (context);
     CHECK (song.get().gain == doctest::Approx (normalizedGainFor (0.25f)).epsilon (0.001));
     CHECK (getGain (song, loud) == doctest::Approx (normalizedGainFor (0.8f)).epsilon (0.001));
     CHECK (song.describeUndo() == juce::String ("Undo Normalize"));
@@ -418,7 +433,7 @@ TEST_CASE ("Reverse and Follow Tempo are commands for the selected audio clips")
     Song song;
     auto& context = song.context;
     phazite::CommandRegistry registry;
-    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
     const auto* reverse = registry.find ("clip.reverse");
     const auto* follow = registry.find ("clip.followTempo");
     REQUIRE (reverse != nullptr);

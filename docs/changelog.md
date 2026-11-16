@@ -227,6 +227,18 @@ too. A line names the bug's number in that list.
   project opens, so an unchanged file shows no changes; a project Phazite saved is the same, byte for byte, once
   opened and saved again, which the fuzzer now checks at every round.
 - **S4.9 Files from others are untrusted** is built with 106 and 148.
+- **123 Audio is read and copied in the background.** An import, Normalize, Quantize Audio, a sound put on a pad, the
+  sampler or a wavetable, Swap's Keep and Locate Audio File read and copy their audio on a thread of the song's work
+  while the window holds its input (play and stop still work), show a progress window with Cancel after a second,
+  and make their undo step once the audio is read, changing nothing and saying why if the clip, the track or the
+  project changed meanwhile; a render asked for meanwhile waits its turn. The window's hold is one for these and for
+  the wait for plug-ins' states. Quantize Audio's warped clips no longer cost a tenth of a second at each plan to
+  name their render. Left: a preset's sounds are still copied at once (known bug 183).
+- **128 The browser's search runs in the background** through search keys made with the index, each key cancelling
+  the search before it; it finds folders, and sounds by their folders' names, says where its list is cut ("The first
+  200 of N"), keeps equal matches in the index's order, and Enter or Down acts on the newest text's results.
+- **An unsaved project discarded while its folder couldn't be deleted** is marked and deleted at the next start, and
+  the look for unused audio skips empty and temporary files.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

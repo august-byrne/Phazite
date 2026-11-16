@@ -45,7 +45,7 @@ struct EditorScreen
         context.getSongSelection().clear();
         song->getUndoManager().clearUndoHistory();
 
-        phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+        phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
         phazite::ui::addTimelineCommands (registry, [this] { return &editor; });
         phazite::test::dispatchPendingMessages();
     }
@@ -442,6 +442,7 @@ TEST_CASE ("In the audio clip editor, Normalize beside the gain sets it from the
     // The vocal peaks at a quarter of full scale (-12 dB): clicked, its gain goes up by 11 dB, which the field shows.
     phazite::test::Mouse mouse (*normalize);
     mouse.click (normalize->getLocalBounds().getCentre());
+    phazite::test::waitForAudioWork (screen.context); // its peak is read in the background (known bug 123)
     const auto expected = phazite::normalizedPeak - juce::Decibels::gainToDecibels (0.25f);
     CHECK (screen.get().gain == doctest::Approx (expected).epsilon (0.001));
     CHECK (screen.describeUndo() == juce::String ("Undo Normalize Clip"));

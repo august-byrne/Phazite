@@ -94,6 +94,14 @@ void setClipGain (ProjectContext&, ClipID, float decibels);
 // A clip whose part is silent, or whose file can't be read, keeps its gain.
 void normalizeClip (ProjectContext&, ClipID);
 
+// "Normalize": the same for each audio clip among these, from its own peak, as one undo step. Both read the parts in the
+// background (model/arrangement/internal/AudioWork.h), and make their step once the peaks are in; nothing changes if a
+// clip went or was trimmed meanwhile, and the user is told.
+void normalizeClips (ProjectContext&, const std::vector<ClipID>&);
+
+// Whether the work of an import, Normalize or Quantize Audio waits, reads or is still to make its change.
+bool isReadingAudio (const ProjectContext&);
+
 // "Change Clip Pitch": in semitones, with cents as hundredths, kept within the editor's range. The clip keeps its length.
 void setClipPitch (ProjectContext&, ClipID, float semitones);
 
@@ -139,7 +147,9 @@ std::optional<std::vector<WarpMarker>> getTransients (const ProjectContext&, Cli
 
 // "Quantize Audio": in each audio clip among these (MIDI clips are left as they are), each hit it plays moves towards the line
 // of a grid nearest it (lines a step apart from the song's start) by a share of the way (1 for all of it), through warp
-// markers, the clip following the tempo, as Ableton Live quantizes audio. One undo step. Whether any is an audio clip.
+// markers, the clip following the tempo, as Ableton Live quantizes audio. One undo step, made once the hits are found, in the
+// background where they aren't yet (model/arrangement/internal/AudioWork.h): nothing changes if a clip went or plays another
+// file meanwhile, and the user is told. Whether any is an audio clip.
 void quantizeAudio (ProjectContext&, const std::vector<ClipID>&, BeatDuration grid, double strength = 1.0);
 bool canQuantizeAudio (const ProjectContext&, const std::vector<ClipID>&);
 

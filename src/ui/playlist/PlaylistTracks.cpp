@@ -308,7 +308,8 @@ void Playlist::addCommands (CommandRegistry& registry)
                                    "so that they play on the beat and follow the tempo.",
                     .synonyms = { "audio quantize", "warp", "tighten", "timing", "transients", "align drums" },
                     .perform = [this] { quantizeAudio (context, selection.getClips(), BeatDuration::fromBeats (getGridStepInBeats())); },
-                    .isEnabled = [this] { return canQuantizeAudio (context, selection.getClips()); } });
+                    .isEnabled = [this] { return canQuantizeAudio (context, selection.getClips()); },
+                    .changesLater = true });
 
     // An automation point's exact value, typed in a field over it (typeAutomationValue()).
     registry.add ({ .id = "automation.typeValue",

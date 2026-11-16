@@ -215,10 +215,12 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
     screen.window.pressKey (downKey);
     CHECK (screen.previewer.getFile().getFileName() == juce::String ("Snare.wav"));
 
-    // Enter puts the sound into the song, and Recent lists it.
+    // Enter puts the sound into the song, and Recent lists it once its import has put it there (the playlist says so).
     screen.window.pressKey (returnKey);
     REQUIRE (screen.placed.size() == 1);
     CHECK (screen.placed[0].name == juce::String ("Snare"));
+    CHECK (screen.library.getRecent().empty());
+    screen.browser.notePlaced (screen.placed[0].file);
     REQUIRE (! screen.library.getRecent().empty());
     CHECK (screen.library.getRecent()[0].name == juce::String ("Snare"));
 
@@ -242,13 +244,12 @@ TEST_CASE ("The browser's search finds sounds and devices, and the star keeps fa
     BrowserScreen screen;
     auto& search = screen.browser.getSearchField();
 
-    // The rows once a search has run. A text field tells of changes asynchronously, and a search after a slow one waits a
-    // moment for the typing to stop (Browser::textEditorTextChanged), which CI's slowest build (linux-asan) took now and then.
+    // The rows once a search has run: a text field tells of changes asynchronously, and the search runs in the background
+    // (known bug 128), its results posted to the message thread.
     const auto rowsFor = [&screen, &search] (const juce::String& query, const juce::StringArray& expected)
     {
         search.setText (query, true);
-        phazite::test::dispatchPendingMessages();
-        phazite::test::runTimersUntil ([&screen, &expected] { return screen.getRows() == expected; });
+        phazite::test::dispatchMessagesUntil ([&screen, &expected] { return screen.getRows() == expected; });
         return screen.getRows();
     };
 
@@ -288,6 +289,20 @@ TEST_CASE ("The browser's search finds sounds and devices, and the star keeps fa
     phazite::test::dispatchPendingMessages();
     CHECK (screen.library.getFavorites().empty());
     CHECK (screen.getRows()[1].startsWith ("Nothing yet"));
+}
+
+TEST_CASE ("Performance gate: a key typed in the browser's search looks through none of the library on the message thread")
+{
+    BrowserScreen screen;
+    auto& search = screen.browser.getSearchField();
+    const auto before = phazite::Library::getItemsSearchedOnMessageThread();
+
+    // Each key's search runs in the background, and its rows come once it is done (known bug 128).
+    for (const auto* typed : { "b", "br", "bre", "brea", "break" })
+        search.setText (typed, true);
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Break 120 BPM, 120 BPM"); }));
+    CHECK (phazite::Library::getItemsSearchedOnMessageThread() == before);
 }
 
 TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter adds it")
@@ -353,12 +368,17 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     const auto beat4 = juce::roundToInt (playlist.getView().beatToX (phazite::BeatPosition::fromBeats (4.0)));
     const juce::DragAndDropTarget::SourceDetails onTrack (sound, &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat4, 10)));
 
+    juce::Array<juce::File> landed; // the browser's sounds in the song, as the playlist tells it
+    playlist.onBrowserSoundPlaced = [&landed] (const juce::File& file) { landed.add (file); };
     REQUIRE (target.isInterestedInDragSource (onTrack));
     target.itemDropped (onTrack);
+    CHECK (landed.isEmpty());                  // not yet: once it is in the song
+    phazite::test::waitForAudioWork (context); // a sound is read in the background, its clip added once it is (known bug 123)
     const auto kickClips = phazite::getClips (*song, track);
     REQUIRE (kickClips.size() == 1);
     CHECK (startOf (kickClips[0]) == doctest::Approx (4.0));
-    CHECK (phazite::ui::wasPlaced (sound));
+    CHECK (landed == juce::Array<juce::File> { kick.file });
+    CHECK (selection.getClips() == std::vector { kickClips[0] }); // the selection was the drop's still: the new clip
 
     // An instrument dropped below the tracks gets a track of its own.
     phazite::LibraryItem synth;
@@ -385,6 +405,7 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     const auto beat16 = juce::roundToInt (playlist.getView().beatToX (phazite::BeatPosition::fromBeats (16.0)));
     target.itemDropped (
         { phazite::ui::toDragDescription (breakLoop), &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat16, 10)) });
+    phazite::test::waitForAudioWork (context);
     const auto withLoop = phazite::getClips (*song, track);
     REQUIRE (withLoop.size() == 2);
     const auto loopID = withLoop[0] == kickClips[0] ? withLoop[1] : withLoop[0];
@@ -397,6 +418,12 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (8.0));
     selection.selectOnly (track);
     REQUIRE (playlist.placeFile (kick.file));
+
+    // Something other than the user changes the selection while it reads: the new clip doesn't replace that.
+    selection.deselectAll();
+    phazite::test::waitForAudioWork (context);
+    CHECK (selection.getClips().empty());
+    CHECK (selection.getTracks().empty());
     const auto clips = phazite::getClips (*song, track);
     REQUIRE (clips.size() == 3);
     CHECK (std::any_of (clips.begin(), clips.end(), [&startOf] (phazite::ClipID clip) { return std::abs (startOf (clip) - 8.0) < 0.001; }));
@@ -589,4 +616,77 @@ TEST_CASE ("The browser is laid out as VS Code's Explorer: its title, its rows' 
     REQUIRE (screen.browser.getSelectedItem().has_value());
     CHECK (screen.browser.getSelectedItem()->name == juce::String ("Kick"));
     CHECK (edgeOf ("Kick") == focus);
+}
+
+TEST_CASE ("Enter in the search acts on the newest text's results, which it waits for; the same text after the index changed is "
+           "looked for again")
+{
+    BrowserScreen screen;
+    auto& search = screen.browser.getSearchField();
+    search.grabKeyboardFocus();
+    search.setText ("break", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Break 120 BPM, 120 BPM"); }));
+
+    // The next text's search held until let go: Enter meanwhile waits for its results, and acts on them.
+    std::atomic<bool> letGo { false };
+    screen.library.setBeforeSearch (
+        [&letGo]
+        {
+            while (! letGo)
+                juce::Thread::sleep (1);
+        });
+
+    search.setText ("kick", true);
+    phazite::test::dispatchPendingMessages(); // the field tells of its change, and the search starts
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK_FALSE (screen.browser.getTree().hasKeyboardFocus (true));
+
+    letGo = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.browser.getSelectedItem().has_value(); }));
+    screen.library.setBeforeSearch (nullptr);
+    CHECK (screen.browser.getSelectedItem()->name == juce::String ("Kick"));
+    CHECK (screen.browser.getTree().hasKeyboardFocus (true));
+
+    // The text taken away, the index made again with another kick: the same text finds it, not the rows from before.
+    search.setText ({}, true);
+    phazite::test::dispatchPendingMessages();
+    phazite::test::writeSound (screen.soundPack.getFolder().getChildFile ("Drums/Kick Two.wav"), 0.3);
+    screen.library.refresh();
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }, 60000));
+    phazite::test::dispatchPendingMessages(); // the index's change told
+    search.setText ("kick", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&screen]
+        {
+            const auto rows = screen.getRows();
+            return std::any_of (rows.begin(), rows.end(), [] (const juce::String& row) { return row.startsWith ("Kick Two"); });
+        }));
+}
+
+TEST_CASE ("Typing on after Enter, before the results are in, keeps the keys in the search field")
+{
+    BrowserScreen screen;
+    auto& search = screen.browser.getSearchField();
+    search.grabKeyboardFocus();
+
+    std::atomic<bool> letGo { false };
+    screen.library.setBeforeSearch (
+        [&letGo]
+        {
+            while (! letGo)
+                juce::Thread::sleep (1);
+        });
+
+    search.setText ("kick", true);
+    phazite::test::dispatchPendingMessages();
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey)); // waits for "kick"'s results
+    search.setText ("kicks", true);                                      // and typing goes on
+    phazite::test::dispatchPendingMessages();
+
+    letGo = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.getRows().contains ("Drums"); }));
+    phazite::test::dispatchPendingMessages();
+    screen.library.setBeforeSearch (nullptr);
+    CHECK (search.hasKeyboardFocus (true));
+    CHECK_FALSE (screen.browser.getTree().hasKeyboardFocus (true));
 }

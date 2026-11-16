@@ -14,6 +14,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -166,9 +167,16 @@ void playTake (Song&, ClipID, int take);
 // part of the file, on the caller's thread.
 std::optional<float> getClipPeak (const Song&, ClipID);
 
-// Each audio clip among them gets its gain set so that its loudest peak plays at normalizedPeak (AudioClipModel.h: what
-// normalizeClip() does), in the caller's undo step; MIDI clips are left as they are.
-void normalizeClips (Song&, const std::vector<ClipID>&);
+// The same of a part of a file, read a second at a time: no peak for a file that can't be read, and stopped (with none)
+// once shouldStop says so; progress hears how much is read, from 0 to 1. Any thread: what Normalize reads in the
+// background (AudioWork.h).
+struct PeakRead
+{
+    std::optional<float> peak;
+    bool stopped = false;
+};
+
+PeakRead readPeak (const juce::File&, FilePart, const std::function<bool()>& shouldStop, const std::function<void (float)>& progress);
 
 // Every audio clip of the song, on every track.
 std::vector<ClipID> getAudioClips (const Song&);

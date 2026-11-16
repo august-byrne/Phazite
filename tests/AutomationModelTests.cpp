@@ -516,7 +516,7 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     CHECK_FALSE (selection.isSelected (makeup, 0));
 
     phazite::CommandRegistry registry;
-    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
     phazite::addAutomationCommands (registry, context);
     CHECK (phazite::getCurrentName (*registry.find ("edit.delete")) == juce::String ("Delete 2 Automation Points"));
 
@@ -588,7 +588,7 @@ TEST_CASE ("Selected points stay selected, and only they, as points are added or
 
     // Delete takes them, not their neighbours.
     phazite::CommandRegistry registry;
-    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
     phazite::addAutomationCommands (registry, context);
     phazite::test::UndoCheck undo (*song.song);
     undo.command (registry, "edit.delete");

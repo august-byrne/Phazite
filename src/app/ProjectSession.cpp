@@ -39,46 +39,6 @@ namespace
 
     constexpr int waitShownMilliseconds = 1000; // how long a save or a close waits for plug-ins before the window says so
 
-    // What keeps the window from taking input while a command waits for the plug-ins' states, before the progress window
-    // shows: a modal component of its own, never shown, which leaves a click alone (no beep, nothing brought forward) and
-    // takes key presses for nothing. JUCE sends every key event to the front modal component, so a key let go meanwhile
-    // reaches nothing else: as it goes, the window's key listeners hear that keys changed, so that none is taken for still
-    // held after the wait (known bug 166).
-    struct InputHold final : juce::Component
-    {
-        InputHold() { enterModalState (false); }
-
-        ~InputHold() override
-        {
-            if (isCurrentlyModal (false))
-                exitModalState (0);
-        }
-
-        void inputAttemptWhenModal() override {}
-        bool keyPressed (const juce::KeyPress&) override { return true; }
-
-        bool keyStateChanged (bool) override { return true; }
-
-        // Its end: what holds keys (the shortcuts' dispatcher, the computer keyboard) told that keys changed, as JUCE's window
-        // tells it (ComponentPeer::handleKeyUpOrDown()), so that each lets go of those no longer down, a note's included.
-        void release()
-        {
-            if (isCurrentlyModal (false))
-                exitModalState (0);
-
-            // Every window's, which may have no focused component.
-            std::vector<juce::Component::SafePointer<juce::Component>> windows;
-
-            for (int i = 0; i < juce::ComponentPeer::getNumPeers(); ++i)
-                windows.emplace_back (&juce::ComponentPeer::getPeer (i)->getComponent());
-
-            for (const auto& window : windows)
-                if (auto* shown = window.getComponent())
-                    if (auto* peer = shown->getPeer())
-                        peer->handleKeyUpOrDown (false);
-        }
-    };
-
     // A wait for the plug-ins' states: whether it is over, whether the progress window (the renders' host) shows it, with
     // what title; whether it is a command's, whose window offers to go on without them or to drop the command; and whether
     // the command was dropped.
@@ -1262,32 +1222,34 @@ void ProjectSession::gatePluginStates (std::function<void (bool)> run)
     }
 
     ++gatesWaiting;
-    auto done = std::make_shared<bool> (false);
-    auto hold = std::make_shared<std::unique_ptr<InputHold>>();
+    auto done = std::make_shared<bool> (false), held = std::make_shared<bool> (false);
     withPluginStates (
-        [run, done, hold, finish] (bool go)
+        [this, run, done, held, finish, session = std::weak_ptr<bool> (alive)] (bool go)
         {
             *done = true;
 
-            if (*hold != nullptr)
-                (*hold)->release();
+            // Let go of before what runs, on purpose: the command runs as it would have with nothing to wait for, the window's
+            // input and focus its own again; a hold it begins (an import it starts) holds the window again in this same call,
+            // with nothing run between the two (InputHold.h).
+            if (std::exchange (*held, false) && ! session.expired())
+                inputHold.releaseInput();
 
-            hold->reset();
             run (go);
             finish();
         },
         false, true);
 
+    // The window's one hold (InputHold.h), the same as the work that reads audio files takes.
     if (! *done)
     {
-        *hold = std::make_unique<InputHold>();
-        inputHold = hold->get();
+        *held = true;
+        inputHold.holdInput();
     }
 }
 
 bool ProjectSession::isHoldingInput (const juce::Component* modal) const noexcept
 {
-    return gatesWaiting > 0 && modal != nullptr && modal == inputHold.getComponent();
+    return InputHold::isHold (modal); // whichever work holds it: a wait for the plug-ins' states, or audio files' work
 }
 
 void ProjectSession::afterPluginStatesGate (std::function<void()> then)

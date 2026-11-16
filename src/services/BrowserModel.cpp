@@ -39,6 +39,17 @@ namespace
 
     const auto byName = [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; };
 
+    // A count as the browser writes it: "3,412".
+    juce::String withThousands (int number)
+    {
+        auto text = juce::String (std::abs (number));
+
+        for (auto at = text.length() - 3; at > 0; at -= 3)
+            text = text.substring (0, at) + "," + text.substring (at);
+
+        return number < 0 ? "-" + text : text;
+    }
+
     // Whether a file is within a folder, by their paths: the index's files are found from the folders the places name, so
     // that their paths start with the folders' as written.
     bool isWithin (const LibraryItem& item, const juce::String& folderPath)
@@ -388,16 +399,43 @@ BrowserContents BrowserModel::getContents (const LibraryItem& folder) const
 
 BrowserContents BrowserModel::search (const juce::String& query, const BrowserFilters& filters) const
 {
+    const auto indexed = library.getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    return describeSearch (query, filters,
+                           Library::searchIndex (*indexed, library.getAllDevices(), query.trim(), maxFound,
+                                                 [&filters] (const LibraryItem& item) { return filters.accepts (item); }));
+}
+
+void BrowserModel::startSearch (const juce::String& query, const BrowserFilters& filters, std::function<void (BrowserContents)> found) const
+{
+    library.startSearch (
+        query.trim(), maxFound, [filters] (const LibraryItem& item) { return filters.accepts (item); },
+        [this, query, filters, found = std::move (found)] (SearchResults results)
+        { found (describeSearch (query, filters, std::move (results))); });
+}
+
+void BrowserModel::cancelSearch() const
+{
+    library.cancelSearch();
+}
+
+BrowserContents BrowserModel::describeSearch (const juce::String& query, const BrowserFilters& filters, SearchResults results) const
+{
     BrowserContents contents;
-    contents.items = library.search (query.trim(), 200, [&filters] (const LibraryItem& item) { return filters.accepts (item); });
+    contents.items = std::move (results.items);
+    const auto typed = query.trim();
 
     if (contents.items.empty())
         contents.messages.add (library.isIndexing() ? juce::String ("Still looking through your sounds...")
-                               : filters.isEmpty()  ? "Nothing matches \"" + query.trim() + "\""
-                                                    : "Nothing matches \"" + query.trim() + "\" with the filters set");
+                               : filters.isEmpty()  ? "Nothing matches \"" + typed + "\""
+                                                    : "Nothing matches \"" + typed + "\" with the filters set");
+
+    // Where the list is cut, how many more there are (known bug 128).
+    if (results.total > (int) contents.items.size())
+        contents.messages.add ("The first " + withThousands ((int) contents.items.size()) + " of " + withThousands (results.total)
+                               + ": type more to find fewer");
 
     if (library.isIndexFull())
-        contents.messages.add ("Search covers the first " + juce::String (Library::maxIndexed) + " sounds");
+        contents.messages.add ("Search covers the first " + withThousands (Library::maxIndexed) + " sounds");
 
     return contents;
 }

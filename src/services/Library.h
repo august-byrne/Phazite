@@ -6,14 +6,18 @@
 #pragma once
 
 #include "Settings.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/DeviceType.h"
 #include "model/presets/PresetModel.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace phazite
@@ -73,6 +77,38 @@ struct LibraryItem
 };
 
 //==============================================================================
+// What search looks through for an item, made once, as the index is built, rather than at each key typed (known bug 128):
+// in lowercase, its name, the words of its name (each after a space, for a word of the name that starts with the query's
+// first), its name with its tags, and the names of its folders below the library's root, which it is in.
+struct SearchKey
+{
+    std::string name, words, text, folders;
+};
+
+SearchKey makeSearchKey (const LibraryItem&, const juce::File& root);
+
+// The index, as it was built last: the sounds, MIDI files and presets found, the folders they are in, and each one's search
+// key, in the same order. Shared, never changed: the next one is another. full: the walk stopped at Library::maxIndexed files.
+struct LibraryIndex
+{
+    std::vector<LibraryItem> files, folders;
+    std::vector<SearchKey> fileKeys, folderKeys;
+    bool full = false;
+
+    void addFile (LibraryItem, const juce::File& root);
+    void addFolder (LibraryItem, const juce::File& root);
+};
+
+// What a search found: the best, as many as it was asked for, and how many match in all; stopped, if it was cancelled
+// before it was done (and found nothing).
+struct SearchResults
+{
+    std::vector<LibraryItem> items;
+    int total = 0;
+    bool stopped = false;
+};
+
+//==============================================================================
 class Library : private juce::AsyncUpdater
 {
 public:
@@ -110,14 +146,39 @@ public:
     // The devices that can be added: instruments or effects.
     std::vector<LibraryItem> listDevices (LibraryItem::Kind) const;
 
-    // Sounds and presets (in the factory library, the user's folders and presets, and their folders below) and devices
-    // whose names or tags have every word of the query, best first: names that start with the query, then names with a
-    // word that does. Only those that accepts takes, when it is given, before the best are taken.
-    std::vector<LibraryItem> search (const juce::String& query, int maximum = 200,
-                                     const std::function<bool (const LibraryItem&)>& accepts = nullptr) const;
+    // Sounds, presets and folders (in the factory library, the user's folders and presets, and their folders below) and
+    // devices that have every word of the query, in any order, in their names, their tags or the names of the folders
+    // they are in, best first: names that start with the query, then names with a word that starts with its first word,
+    // then names and tags that hold every word, then those that hold some only in their folders' names; then shorter names
+    // first, then by name, as Ableton Live's browser and FL Studio's rank them; and the folders after everything else, as a
+    // way to what they hold. Only those that accepts takes, when it is
+    // given, are counted. At once, on the calling thread: the browser's search runs in the background (startSearch()).
+    using Accepts = std::function<bool (const LibraryItem&)>;
+    std::vector<LibraryItem> search (const juce::String& query, int maximum = 200, const Accepts& accepts = nullptr) const;
+
+    // The same through an index and devices given, with how many match in all; stopped (with nothing) once shouldStop says
+    // so, which it asks between thousands of items. Any thread.
+    static SearchResults searchIndex (const LibraryIndex&, const std::vector<LibraryItem>& devices, const juce::String& query, int maximum,
+                                      const Accepts& accepts, const std::function<bool()>& shouldStop = nullptr);
+
+    // The browser's search, as the user types (known bug 128): through the index as it is now, on a thread of its own, so
+    // that a key typed never waits for it. Each search started cancels the one before, so that only the newest text's
+    // results arrive, in found, on the message thread; cancelSearch() cancels it with none. Message thread.
+    void startSearch (const juce::String& query, int maximum, Accepts accepts, std::function<void (SearchResults)> found) const;
+    void cancelSearch() const;
+
+    // Tests: what a search's thread does before it looks (held until let go, so that its results come later).
+    void setBeforeSearch (std::function<void()> before) const { beforeSearch = std::move (before); }
+
+    // How many items the searches looked through on the message thread, since the program started: none for the browser's
+    // search as the user types (the performance gates check that). Any thread.
+    static juce::int64 getItemsSearchedOnMessageThread() noexcept { return searchedOnMessageThread.load(); }
 
     // Each item search would find for the query, every one, in no order: for counting what it finds.
     void forEachMatch (const juce::String& query, const std::function<void (const LibraryItem&)>&) const;
+
+    // The instruments and the effects, as listDevices() gives them.
+    std::vector<LibraryItem> getAllDevices() const;
 
     // Instruments and effects whose names, makers or kinds have every word of the query, best first; for an empty
     // query, all of them: instruments, then effects, each with the built-in ones first. The plug-in picker shows them.
@@ -130,7 +191,8 @@ public:
     bool isIndexing() const;
     std::function<void()> onIndexChanged;
 
-    // The index as it was built last: shared, never changed (the next one is another).
+    // The index as it was built last: shared, never changed (the next one is another); and its files alone.
+    std::shared_ptr<const LibraryIndex> getWholeIndex() const;
     std::shared_ptr<const std::vector<LibraryItem>> getIndex() const;
 
     // Indexes the sounds again, as after Phazite Sounds has been installed.
@@ -203,7 +265,7 @@ private:
     // The index, what it read of the sounds' files by path, and the members of the sets that went and where those found
     // again went (their keys before and after), guarded by indexLock.
     mutable juce::CriticalSection indexLock;
-    std::shared_ptr<const std::vector<LibraryItem>> index;
+    std::shared_ptr<const LibraryIndex> index;
     std::map<juce::String, SoundFacts> facts;
     std::set<juce::String> lookedFor;
     std::map<juce::String, juce::String> movedTo;
@@ -237,5 +299,31 @@ private:
     void writeFavorites() const;
     void writeCollections() const;
     Collection* findCollection (const juce::String& name) const;
+
+    // The browser's search (startSearch()): the number of the newest, which a search that isn't it stops at, and what it
+    // calls back with its results (message thread); what a search's thread found, which the message thread takes; the
+    // search's thread.
+    struct SearchDelivery final : juce::AsyncUpdater
+    {
+        explicit SearchDelivery (const Library& l)
+            : library (l)
+        {
+        }
+
+        void handleAsyncUpdate() override { library.deliverSearch(); }
+
+        const Library& library;
+    };
+
+    mutable std::atomic<int> searchNumber { 0 };
+    mutable std::function<void (SearchResults)> searchFound;
+    mutable std::function<void()> beforeSearch;
+    mutable std::mutex deliveredLock;
+    mutable std::optional<std::pair<int, SearchResults>> delivered;
+    mutable SearchDelivery searchDelivery { *this };
+    mutable BackgroundJobs searches { "Phazite browser search", 1, juce::Thread::Priority::normal };
+    static inline std::atomic<juce::int64> searchedOnMessageThread { 0 };
+
+    void deliverSearch() const;
 };
 } // namespace phazite

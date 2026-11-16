@@ -697,13 +697,12 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     searchField.setTooltip ("Type to find sounds, presets, instruments and effects, the best matches first; Down or Enter goes to them");
     searchField.setFont (juce::FontOptions (TextSize::body));
     searchField.addListener (this);
-    searchDelay.search = [this] { updateSearch(); };
     searchField.onNavigationKey = [this] (const juce::KeyPress& key)
     {
         if (key != juce::KeyPress::downKey)
             return false;
 
-        focusTree();
+        focusTreeAfterSearch(); // to the newest text's results, which are milliseconds away
         return true;
     };
 
@@ -764,8 +763,9 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     // Search finds more once the index of the sounds is ready, and the filters count what it found.
     library.onIndexChanged = [this]
     {
+        searchShown.clear(); // the rows shown are of the index before: the same text finds them again
         if (searchField.getText().trim().isNotEmpty())
-            updateSearch();
+            updateSearch (true);
         else if (! filters.isEmpty())
             rebuildPlaces();
     };
@@ -779,6 +779,7 @@ Browser::~Browser()
 {
     soundPack.removeChangeListener (this);
     library.onIndexChanged = nullptr;
+    model.cancelSearch(); // which would call back into it
 
     // What a swap tried stays, as anything else that changes the song leaves it.
     if (swap != nullptr && swap->isOpen())
@@ -902,11 +903,9 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
 
 void Browser::textEditorTextChanged (juce::TextEditor&)
 {
-    if (lastSearchMilliseconds > slowSearchMilliseconds && searchField.getText().trim().isNotEmpty())
-        searchDelay.startTimer (150);
-    else
-        updateSearch();
-
+    // Typed on after Enter or Down: the field keeps the keys, and the results to come don't take them.
+    focusWhenShown = false;
+    updateSearch();
     showFilters(); // Clear, while the search has words
 }
 
@@ -952,24 +951,82 @@ void Browser::clearFiltersAndSearch()
     showFilters();
 }
 
-void Browser::updateSearch()
+void Browser::updateSearch (bool again)
 {
-    searchDelay.stopTimer();
     const auto query = searchField.getText().trim();
 
     // The places; or while a device's presets are swapped, they alone.
     if (query.isEmpty())
     {
+        model.cancelSearch();
+        searchPending = false;
         tree->setRootItem (swapRoot != nullptr ? swapRoot.get() : placesRoot.get());
+        runWhenSearchShown();
         return;
     }
 
-    const auto started = juce::Time::getMillisecondCounterHiRes();
-    searchRoot->clearSubItems();
-    addRows (*searchRoot, model.search (query, filters));
-    lastSearchMilliseconds = juce::Time::getMillisecondCounterHiRes() - started;
+    // The rows of the same search, as they were (the search before a swap, back as it ends, its row selected again).
+    if (! again && query == searchShown && filters == filtersShown && searchRoot->getNumSubItems() > 0)
+    {
+        model.cancelSearch();
+        searchPending = false;
+        tree->setRootItem (searchRoot.get());
+        runWhenSearchShown();
+        return;
+    }
 
-    tree->setRootItem (searchRoot.get());
+    // In the background, so that no key typed waits for it, each search cancelling the one before (known bug 128).
+    searchPending = true;
+    model.startSearch (query, filters,
+                       [this, query, searched = filters] (const BrowserContents& found)
+                       {
+                           searchRoot->clearSubItems();
+                           addRows (*searchRoot, found);
+                           searchShown = query;
+                           filtersShown = searched;
+                           tree->setRootItem (searchRoot.get());
+                           searchPending = false;
+                           runWhenSearchShown();
+                       });
+}
+
+void Browser::afterSearch (std::function<void()> then)
+{
+    if (! searchPending)
+    {
+        then();
+        return;
+    }
+
+    whenSearchShown = [before = std::move (whenSearchShown), then = std::move (then)]
+    {
+        if (before != nullptr)
+            before();
+
+        then();
+    };
+}
+
+void Browser::runWhenSearchShown()
+{
+    if (const auto then = std::exchange (whenSearchShown, nullptr))
+        then();
+
+    if (std::exchange (focusWhenShown, false))
+        focusTree();
+}
+
+void Browser::focusTreeAfterSearch()
+{
+    if (searchPending)
+        focusWhenShown = true;
+    else
+        focusTree();
+}
+
+void Browser::textEditorReturnKeyPressed (juce::TextEditor&)
+{
+    focusTreeAfterSearch(); // the newest text's results, which are milliseconds away
 }
 
 void Browser::focusSearch()
@@ -1062,8 +1119,17 @@ bool Browser::place (const LibraryItem& item)
     if (onPlace == nullptr || ! onPlace (item))
         return false;
 
-    noteUsed (item);
+    // A sound or a MIDI file is noted once its import has put it into the song (notePlaced()).
+    if (item.kind != LibraryItem::Kind::sound && item.kind != LibraryItem::Kind::midi)
+        noteUsed (item);
+
     return true;
+}
+
+void Browser::notePlaced (const juce::File& file)
+{
+    if (const auto item = library.findItem (file.getFullPathName()))
+        noteUsed (*item);
 }
 
 void Browser::noteUsed (const LibraryItem& item)
@@ -1391,10 +1457,20 @@ void Browser::startSwap (DeviceID device, int pad)
 
     if (swap != nullptr)
     {
-        if (swap->isOpen())
-            swap->keep();
+        // Its sound copied into the project first (in the background): the next swap starts once it is kept, as none
+        // opens meanwhile (SwapModel.h).
+        const auto pending = swap->isOpen()
+                             && swap->keep (
+                                 [safeThis = juce::Component::SafePointer<Browser> (this), device, pad, same]
+                                 {
+                                     if (safeThis != nullptr && ! same)
+                                         safeThis->startSwap (device, pad);
+                                 });
 
         endSwap();
+
+        if (pending)
+            return;
     }
 
     endedSwapRoot = nullptr;
@@ -1489,11 +1565,17 @@ void Browser::endSwap()
     setFilters (filtersBeforeSwap);
     updateSearch();
 
-    if (const auto before = std::move (treeBeforeSwap))
-        tree->restoreOpennessState (*before, true);
+    // Onto the rows of the search before the swap, once they are back (found again if the index changed meanwhile).
+    afterSearch (
+        [this, before = std::shared_ptr<juce::XmlElement> (std::move (treeBeforeSwap)), scroll = scrollBeforeSwap]
+        {
+            if (before != nullptr)
+                tree->restoreOpennessState (*before, true);
 
-    scrollTreeTo (scrollBeforeSwap);
-    selectionMoved();
+            scrollTreeTo (scroll);
+            selectionMoved();
+        });
+
     filterBar.setVisible (true);
     showFilters();
     resized();

@@ -37,11 +37,25 @@ namespace
         return {};
     }
 
-    // Deletes a folder of these. What can't be deleted now (a file still open) goes at a later start
-    // (findProjectToRestore()).
+    // What marks a folder of these as discarded (Don't Save, or a project closed with nothing to keep) as its project goes:
+    // if it can't be deleted yet (a read given up still writing there as Phazite quits), the next start deletes it rather
+    // than offering its project back.
+    constexpr const char* discardedMarker = "Discarded";
+
+    // Whether a file in a project's Audio folder is no audio to recover: empty (a name kept for a copy that never came) or a
+    // copy's temporary file (juce::TemporaryFile's "<name>_temp<hex>", which writeWholeFile() writes into and a quit left).
+    bool isLeftOverOfACopy (const juce::File& file)
+    {
+        const auto name = file.getFileNameWithoutExtension();
+        const auto at = name.lastIndexOf ("_temp");
+        return file.getSize() == 0 || (at > 0 && at + 5 < name.length() && name.substring (at + 5).containsOnly ("0123456789abcdefABCDEF"));
+    }
+
+    // Deletes a folder of these, once no read given up (one stuck in the system) may still write into it (AudioWork.h). What
+    // can't be deleted now (a file still open) goes at a later start (findProjectToRestore()).
     void deleteFolder (const juce::File& folder)
     {
-        folder.deleteRecursively();
+        AudioWork::whenNoneWritesInto (folder, [folder] { folder.deleteRecursively(); });
     }
 
     // When a project was last changed, as far as a crash left it: its autosave, or the newest of the files it made or brought
@@ -98,6 +112,12 @@ juce::File UnsavedFolder::findProjectToRestore (const juce::File& parentFolder)
         if (held == nullptr)
             continue; // another Phazite has its project open
 
+        if (folder.getChildFile (discardedMarker).existsAsFile())
+        {
+            deleteFolder (folder); // discarded as it closed, its deletion put off then
+            continue;
+        }
+
         const auto file = findProjectFileIn (folder);
         const auto lastChange = file.existsAsFile() ? findLastChange (file) : std::nullopt;
 
@@ -136,7 +156,12 @@ UnsavedFolder::UnsavedFolder (const juce::File& f, std::unique_ptr<juce::InterPr
 
 UnsavedFolder::~UnsavedFolder()
 {
+    // What isn't deleted now (put off while a read given up still writes there, or a file held open) is marked, before the
+    // lock goes: a later start that finds it deletes it.
     deleteFolder (folder);
+
+    if (folder.isDirectory())
+        folder.getChildFile (discardedMarker).create();
 }
 
 int UnsavedFolder::recoverUnusedAudio (Song& song)
@@ -149,7 +174,8 @@ int UnsavedFolder::recoverUnusedAudio (Song& song)
 
     // In the order they were made, as they were recorded.
     auto unused = song.getFile().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);
-    unused.removeIf ([&] (const juce::File& file) { return played.contains (file) || getFileKind (file) != FileKind::audio; });
+    unused.removeIf ([&] (const juce::File& file)
+                     { return played.contains (file) || getFileKind (file) != FileKind::audio || isLeftOverOfACopy (file); });
     std::sort (unused.begin(), unused.end(),
                [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
 

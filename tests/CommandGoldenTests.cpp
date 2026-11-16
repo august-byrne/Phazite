@@ -20,6 +20,7 @@
 #include "app/AppCommands.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -151,6 +152,9 @@ juce::String describeCommand (const phazite::Command& command)
 
     if (command.readsPluginStates != nullptr)
         switches.add ("plugin-states-when");
+
+    if (command.changesLater)
+        switches.add ("changes-later");
 
     const auto synonyms = command.synonyms.isEmpty() ? juce::String ("-") : command.synonyms.joinIntoString (", ");
     const auto flags = switches.isEmpty() ? juce::String ("-") : switches.joinIntoString (" ");
@@ -339,6 +343,13 @@ struct Script
                     REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.finished.isEmpty(); }, 60000));
                     CHECK (renders.finished[0].endsWith (": ok"));
                 });
+    }
+
+    // Runs a command whose work reads audio in the background (model/arrangement/internal/AudioWork.h), and waits for its
+    // change, which it makes once what it read is in.
+    void runReading (const juce::String& id)
+    {
+        record (id, [this] { REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! phazite::isReadingAudio (context); })); });
     }
 
     // A change the script makes itself, as an undo step of its own (or several, which undo and redo exactly together).
@@ -636,7 +647,8 @@ TEST_SUITE ("golden")
         // What it plays: backwards and forwards again, following the song's tempo and at its own speed again (by its own
         // switch, and by the song's for every sample), and normalized.
         s.run ({ "clip.reverse", "clip.reverse", "clip.followTempo", "clip.followTempo", "transport.samplesFollowTempo",
-                 "transport.samplesFollowTempo", "clip.normalize" });
+                 "transport.samplesFollowTempo" });
+        s.runReading ("clip.normalize");
 
         // Copied, pasted at the playhead onto its track, and the pasted one cut.
         s.run ({ "edit.copy" });

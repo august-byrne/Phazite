@@ -166,6 +166,8 @@ TEST_CASE ("The Project view lists the song's audio files, a missing one with it
     };
 
     mouse.click (locate.getCentre());
+    phazite::test::waitForAudioWork(); // the file found copied into the project in the background (known bug 123)
+    view.refreshNow();
     REQUIRE (view.getNumAudioFiles() == 1);
     CHECK (view.describeAudioFile (0) == "Kick found.wav: " + trackName);
     CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Locate Audio File"));

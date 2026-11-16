@@ -45,6 +45,11 @@ To make clips:
 
 - Drag a sound, a MIDI file, an instrument or a preset from the [browser](browser.md) onto a track, or onto the empty
   space below the tracks for a new track. Audio and MIDI files dragged in from your file explorer work the same way.
+  Phazite copies each audio file into the project's Audio folder: for a long recording that takes a moment, while the
+  window holds still (it takes no clicks or keys but play and stop), and after a second a small window shows how far
+  it is, with **Cancel**, which leaves the project as it was. Putting a sound on a drum pad, the sampler or a wavetable
+  copies it the same way. While Phazite holds the window for such work (or while it waits for plug-ins to give their
+  states), the window can be moved but not minimised, maximised or closed, as under a dialog.
 - Double-click empty space on a track that has an instrument: an empty MIDI clip, a bar long, starts at the grid line
   before the click.
 - Record ([Recording](recording.md)).

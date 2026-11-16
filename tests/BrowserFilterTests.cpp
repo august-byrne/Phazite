@@ -711,3 +711,57 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     CHECK (song.context.getUndoManager()->getUndoDescription() == juce::String ("Load Preset Warm Pad"));
     CHECK (getRows (browser) == rowsBefore);
 }
+
+TEST_CASE ("A Swap asked for on another pad while one is kept starts once that keep has copied its sound in, copied once; and the "
+           "search before a swap is back as it ends")
+{
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
+    const auto pack = song.getSoundsFolder().getChildFile ("Pack");
+    phazite::test::writeSound (pack.getChildFile ("Kick One.wav"), 0.2);
+    phazite::test::writeSound (pack.getChildFile ("Kick Two.wav"), 0.3);
+
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack sounds { temp.folder.getChildFile ("Packs") };
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings);
+    library.addUserFolder (pack);
+    REQUIRE (waitForIndex (library));
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
+    phazite::test::TestWindow window (browser, 320, 700);
+    const auto audioFolder = song.getProject().getAudioFolder();
+
+    // A search, a row of it selected.
+    browser.getSearchField().setText ("kick", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Kick Two"); }));
+    phazite::test::Mouse mouse (browser.getTree());
+    mouse.click (getRow (browser, "Kick Two").getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.getSelectedItem().has_value());
+
+    // The kick's pad tries a sound; Swap asked for on the snare's pad keeps it first, which copies it in, in the background.
+    browser.startSwap (drums, 36);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    mouse.click (getRow (browser, "Pack").getCentre());
+    phazite::test::dispatchPendingMessages();
+    window.pressKey (juce::KeyPress (juce::KeyPress::downKey));
+    REQUIRE (phazite::getDeviceHandle (song.context, drums).getPadName (36) == juce::String ("Kick One"));
+
+    browser.startSwap (drums, 38);
+    CHECK_FALSE (browser.isSwapping()); // not until the keep is in
+    phazite::test::waitForAudioWork (song.context);
+    phazite::test::dispatchPendingMessages();
+    CHECK (browser.isSwapping());
+    CHECK (phazite::findOpenSwap (song.context, drums) == std::optional<int> (38));
+    CHECK (audioFolder.findChildFiles (juce::File::findFiles, false).size() == 1);
+    CHECK (audioFolder.getChildFile ("Kick One.wav").existsAsFile());
+
+    // Esc ends it: the search before it, its row selected.
+    window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&browser] { return ! browser.isSwapping(); }));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&browser] { return browser.getSelectedItem().has_value() && browser.getSelectedItem()->name == juce::String ("Kick Two"); }));
+    CHECK (browser.getSearchField().getText() == juce::String ("kick"));
+}

@@ -125,6 +125,7 @@ TEST_CASE ("A sound dropped on the sampler's drawing is put on it, as one undo s
     auto& editor = *screen.editor;
     const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Drops/Vox.wav"), 0.5);
     REQUIRE (editor.dropFile (sound));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
     screen.settle();
     CHECK (editor.getSoundButton().getButtonText() == juce::String ("Vox"));
     CHECK (screen.describeUndo() == juce::String ("Undo Put Vox on the Sampler"));

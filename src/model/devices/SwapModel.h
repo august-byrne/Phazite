@@ -44,14 +44,16 @@ public:
     juce::File getTried() const; // what is in place now, or none while the old one is
 
     // Keeps what is tried as one undo step ("Put Kick 03 on Pad 1", "Load Preset Warm Pad"), a sound copied into the project
-    // as one put on a pad is; or puts the old one back, leaving nothing to redo. Either closes it.
-    void keep();
+    // as one put on a pad is; or puts the old one back, leaving nothing to redo. Either closes it. A sound tried from outside
+    // the project is copied in first, in the background (AudioWork.h): then keep() returns true, and afterwards runs once it
+    // is kept; no other swap opens for the song meanwhile. False when it was kept at once (afterwards isn't called).
+    bool keep (std::function<void()> afterwards = nullptr);
     void putBack();
 
     struct Impl;
 
 private:
-    std::unique_ptr<Impl> impl;
+    std::shared_ptr<Impl> impl; // which a keep copying its sounds in keeps a while
 
     JUCE_DECLARE_NON_COPYABLE (Swap)
 };

@@ -136,6 +136,8 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     writeNoise (file);
 
     CHECK (editor.dropFile (50, file));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    editor.refresh();                  // as the devices view refreshes it once the song changed
     CHECK (editor.getSelectedPad() == 50);
     CHECK (getShownPad (editor, 50).getDescription() == juce::String ("Shaker"));
     CHECK (device.hasPadSound (50));
@@ -148,6 +150,8 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     // On the snare's second layer: its place names it, the pad counts it, and Clear takes it off.
     editor.selectPad (38);
     CHECK (editor.dropFile (38, file, 1));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    editor.refresh();                  // as the devices view refreshes it once the song changed
     CHECK (editor.getLayerSlot (1).getDescription() == juce::String ("Shaker"));
     CHECK (editor.getLayerSlot (0).getDescription() == juce::String ("Snare"));
     CHECK (getShownPad (editor, 38).getDescription() == juce::String ("Snare +1"));
@@ -186,6 +190,8 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     CHECK (getShownPad (editor, 60).getDescription().isEmpty());
     CHECK (device.isPadEmpty (60));
     CHECK (editor.dropFile (60, file));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    editor.refresh();                  // as the devices view refreshes it once the song changed
     CHECK (getShownPad (editor, 60).getDescription() == juce::String ("Shaker"));
     CHECK_FALSE (device.isPadEmpty (60));
 

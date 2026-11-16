@@ -363,8 +363,8 @@ void Trial::keepOpenTrial (juce::UndoManager& undoManager)
 
     for (auto* trial : trials)
     {
-        if (trial->getUndoManager() != &undoManager || trial->applying)
-            continue;
+        if (trial->getUndoManager() != &undoManager || trial->applying || trial->keepPending)
+            continue; // one whose keep is under way is kept by it, once
 
         // Without changes, it begins again at its next one, after the step beginning now.
         if (! trial->hasChanges())
@@ -379,6 +379,15 @@ void Trial::keepOpenTrial (juce::UndoManager& undoManager)
         if (isOpenTrial (trial))
             trial->keep (trial->name);
     }
+}
+
+bool Trial::isKeepPending (const Song& song)
+{
+    for (auto* trial : getOpenTrials())
+        if (trial->getUndoManager() == &song.getUndoManager() && trial->keepPending)
+            return true;
+
+    return false;
 }
 
 bool Trial::isInProgress (const Song& song)

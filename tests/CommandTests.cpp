@@ -244,3 +244,20 @@ TEST_CASE ("The registry tells its listeners about each command it adds, in orde
     REQUIRE (registry.add (makeCommand ("test.after", "Added after the listener left")));
     CHECK (recorder.ids.size() == 2);
 }
+
+TEST_CASE ("A macro, one undo step for all it runs, refuses a command whose change comes later, as a step of its own")
+{
+    phazite::CommandRegistry registry;
+    auto ran = 0;
+    REQUIRE (registry.add ({ .id = "test.now", .name = "Now", .perform = [&ran] { ++ran; } }));
+    REQUIRE (registry.add ({ .id = "test.later", .name = "Normalize", .perform = [&ran] { ++ran; }, .changesLater = true }));
+
+    juce::String whyNot;
+    CHECK_FALSE (registry.addMacro ("macro.both", "Both", { "test.now", "test.later" }, &whyNot));
+    CHECK (whyNot.startsWith ("Normalize changes the song once its work in the background is done"));
+    CHECK (registry.find ("macro.both") == nullptr);
+
+    CHECK (registry.addMacro ("macro.now", "Now Twice", { "test.now", "test.now" }));
+    CHECK (registry.invoke ("macro.now"));
+    CHECK (ran == 2);
+}

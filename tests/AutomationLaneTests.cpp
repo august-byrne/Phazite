@@ -41,7 +41,7 @@ struct LaneScreen
         phazite::showAutomationLane (context, volume);
         song->getUndoManager().clearUndoHistory();
 
-        phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+        phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context), &context);
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
         window.addKeyListener (&shortcutKeys); // as the main window does

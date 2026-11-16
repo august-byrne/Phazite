@@ -46,7 +46,7 @@ struct Song
     {
         tracks = phazite::ensureTracks (*song, 2);
         setSong (context, song.get());
-        phazite::addSelectionCommands (registry, selection, range);
+        phazite::addSelectionCommands (registry, selection, range, &context);
         phazite::addSectionCommands (registry, selection);
         phazite::addLoopCommands (registry, selection, range);
     }

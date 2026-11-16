@@ -797,7 +797,7 @@ TEST_CASE ("With FL Studio's keymap, a selected time range loops while it is sel
 TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and the loop follows it")
 {
     PlaylistScreen screen;
-    phazite::addSelectionCommands (screen.registry, screen.selection, screen.range);
+    phazite::addSelectionCommands (screen.registry, screen.selection, screen.range, &screen.context);
     screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
     screen.addClip (0, 0.0, 4.0);
     phazite::test::dispatchPendingMessages();
@@ -2806,6 +2806,8 @@ TEST_CASE ("A sound file dropped on a track's row in the playlist becomes a clip
     const auto at = playlist.getLocalPoint (lanes, inLanes);
     dropTarget.fileDragMove ({ sound.getFullPathName() }, at.x, at.y);
     dropTarget.filesDropped ({ sound.getFullPathName() }, at.x, at.y);
+    CHECK (phazite::getClips (context, tracks[1]).empty()); // read in the background (known bug 123): added once it is
+    phazite::test::waitForAudioWork (context);
     phazite::test::dispatchPendingMessages();
 
     CHECK (phazite::getClips (context, tracks[0]).empty());

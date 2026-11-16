@@ -160,58 +160,96 @@ namespace
         return words;
     }
 
-    // A search, and how well an item matches it: 0 if the item's name starts with the query, 1 if a word of its name
-    // starts with the query's first word, 2 if its name and tags merely hold every word; -1 if they don't.
+    std::string toLowerText (const juce::String& text)
+    {
+        return text.toLowerCase().toStdString();
+    }
+
+    // A search, and how well an item matches it, by its search key: 0 if the item's name starts with the query, 1 if a word
+    // of its name starts with the query's first word, 2 if its name and tags merely hold every word, 3 if some of the words
+    // are only in the names of its folders; -1 if any word is in none of them.
     struct Query
     {
         explicit Query (const juce::String& text)
-            : words (getQueryWords (text)),
-              phrase (words.joinIntoString (" "))
         {
+            const auto typed = getQueryWords (text);
+
+            for (const auto& word : typed)
+                words.push_back (word.toStdString());
+
+            phrase = typed.joinIntoString (" ").toStdString();
+
+            if (! words.empty())
+                firstWord = " " + words.front();
         }
 
-        int getScore (const LibraryItem& item) const
+        bool isEmpty() const noexcept { return words.empty(); }
+
+        int getScore (const SearchKey& key) const
         {
-            const auto name = item.name.toLowerCase();
-            const auto haystack = name + " " + item.tags.joinIntoString (" ").toLowerCase();
+            auto onlyInFolders = false;
 
             for (const auto& word : words)
-                if (! haystack.contains (word))
+            {
+                if (key.text.find (word) != std::string::npos)
+                    continue;
+
+                if (key.folders.find (word) == std::string::npos)
                     return -1;
 
-            if (name.startsWith (phrase))
+                onlyInFolders = true;
+            }
+
+            if (onlyInFolders)
+                return 3;
+
+            if (key.name.compare (0, phrase.size(), phrase) == 0)
                 return 0;
 
-            const auto tokens = getTokens (item.name);
-            return std::any_of (tokens.begin(), tokens.end(), [this] (const juce::String& t) { return t.startsWith (words[0]); }) ? 1 : 2;
+            return key.words.find (firstWord) != std::string::npos ? 1 : 2;
         }
 
-        const juce::StringArray words;
-        const juce::String phrase;
+        std::vector<std::string> words;
+        std::string phrase, firstWord;
     };
 
-    // The matches, best first: by score, then shorter names, then by name.
-    std::vector<LibraryItem> getBest (std::vector<std::pair<int, LibraryItem>> matches, int maximum)
-    {
-        std::stable_sort (matches.begin(), matches.end(),
-                          [] (const auto& a, const auto& b)
-                          {
-                              if (a.first != b.first)
-                                  return a.first < b.first;
+    // Whether a search should stop, asked so often as it goes through the items.
+    constexpr size_t itemsBetweenStops = 4096;
+} // namespace
 
-                              if (a.second.name.length() != b.second.name.length())
-                                  return a.second.name.length() < b.second.name.length();
+//==============================================================================
+SearchKey makeSearchKey (const LibraryItem& item, const juce::File& root)
+{
+    SearchKey key;
+    key.name = toLowerText (item.name);
 
-                              return a.second.name.compareNatural (b.second.name) < 0;
-                          });
+    for (const auto& token : getTokens (item.name))
+        key.words += " " + token.toStdString(); // lowercase already
 
-        std::vector<LibraryItem> results;
+    key.text = key.name + " " + toLowerText (item.tags.joinIntoString (" "));
 
-        for (size_t i = 0; i < matches.size() && (int) i < maximum; ++i)
-            results.push_back (std::move (matches[i].second));
+    // The folders between the root and it, by their names: "Pack 1/Drums/Kicks" as "pack 1 drums kicks".
+    if (root != juce::File() && item.file != juce::File())
+        if (const auto parent = item.file.getParentDirectory(); parent.isAChildOf (root))
+            key.folders = toLowerText (parent.getRelativePathFrom (root).replaceCharacters ("\\/", "  "));
 
-        return results;
-    }
+    return key;
+}
+
+void LibraryIndex::addFile (LibraryItem item, const juce::File& root)
+{
+    fileKeys.push_back (makeSearchKey (item, root));
+    files.push_back (std::move (item));
+}
+
+void LibraryIndex::addFolder (LibraryItem item, const juce::File& root)
+{
+    folderKeys.push_back (makeSearchKey (item, root));
+    folders.push_back (std::move (item));
+}
+
+namespace
+{
 
     //==============================================================================
     // A sound's tags and key: what it is, from the words of its name and folders; a loop or a one-shot, its tempo and its
@@ -454,7 +492,13 @@ struct Library::Indexer : public juce::Thread
                 break;
 
             if (const auto& file = entry.getFile(); entry.isDirectory())
+            {
+                // Search finds a folder by its name too, as Ableton Live's and FL Studio's browsers do.
+                if ((int) folders.size() < maxIndexed)
+                    folders.push_back ({ file, root });
+
                 walk (file, root, inside, files);
+            }
             else if (owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
                 files.push_back ({ file, root, entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
         }
@@ -517,7 +561,19 @@ struct Library::Indexer : public juce::Thread
             items.push_back (owner.makeFileItem (found.file, found.root, fact, true));
         }
 
-        publish (items, read);
+        // The folders, and the search keys of both, made here once rather than at each key typed (known bug 128).
+        for (const auto& found : folders)
+        {
+            LibraryItem folder;
+            folder.kind = LibraryItem::Kind::folder;
+            folder.name = found.file.getFileName();
+            folder.file = found.file;
+            folderItems.push_back (std::move (folder));
+            folderKeys.push_back (makeSearchKey (folderItems.back(), found.root));
+        }
+
+        full = (int) files.size() >= maxIndexed;
+        publish (files, items, read);
 
         // The members of the sets that went since, looked for among the files found.
         findMovedMembers (files);
@@ -535,16 +591,26 @@ struct Library::Indexer : public juce::Thread
         }
 
         if (! unread.empty())
-            publish (items, read);
+            publish (files, items, read);
 
         // Kept for the next start, when anything changed.
         if (owner.factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
             writeFactsFile (owner.factsFile, read);
     }
 
-    void publish (const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read)
+    void publish (const std::vector<Found>& files, const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read)
     {
-        auto built = std::make_shared<const std::vector<LibraryItem>> (items);
+        auto made = std::make_shared<LibraryIndex>();
+        made->files = items;
+        made->fileKeys.reserve (items.size());
+
+        for (size_t i = 0; i < items.size(); ++i)
+            made->fileKeys.push_back (makeSearchKey (items[i], files[i].root));
+
+        made->folders = folderItems;
+        made->folderKeys = folderKeys;
+        made->full = full;
+        std::shared_ptr<const LibraryIndex> built = std::move (made);
 
         {
             const juce::ScopedLock lock (owner.indexLock);
@@ -610,6 +676,10 @@ struct Library::Indexer : public juce::Thread
     Library& owner;
     const juce::Array<juce::File> roots;
     const std::vector<Member> members; // of the sets, as they were when the index started
+    std::vector<Found> folders;        // as the walk found them
+    std::vector<LibraryItem> folderItems;
+    std::vector<SearchKey> folderKeys;
+    bool full = false;
 };
 
 //==============================================================================
@@ -621,7 +691,7 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
       factoryPresetsFolder (std::move (factoryPresets)),
       factsFile (std::move (factsToKeep)),
       audioExtensions (engine.getAudioFileExtensions()), // which the index can check on its own thread
-      index (std::make_shared<const std::vector<LibraryItem>>())
+      index (std::make_shared<const LibraryIndex>())
 {
     readSets();
     reindex();
@@ -629,6 +699,9 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
 
 Library::~Library()
 {
+    cancelSearch();
+    searches.removeAll (true); // a search looks at whether it should stop between thousands of items
+    searchDelivery.cancelPendingUpdate();
     indexer = nullptr;
     cancelPendingUpdate();
 }
@@ -816,54 +889,181 @@ std::vector<LibraryItem> Library::listDevices (LibraryItem::Kind kind) const
     return items;
 }
 
-std::vector<LibraryItem> Library::search (const juce::String& query, int maximum,
-                                          const std::function<bool (const LibraryItem&)>& accepts) const
+std::vector<LibraryItem> Library::getAllDevices() const
 {
+    auto devices = listDevices (LibraryItem::Kind::instrument);
+    auto effects = listDevices (LibraryItem::Kind::effect);
+    devices.insert (devices.end(), std::make_move_iterator (effects.begin()), std::make_move_iterator (effects.end()));
+    return devices;
+}
+
+std::vector<LibraryItem> Library::search (const juce::String& query, int maximum, const Accepts& accepts) const
+{
+    const auto indexed = getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    return searchIndex (*indexed, getAllDevices(), query, maximum, accepts).items;
+}
+
+SearchResults Library::searchIndex (const LibraryIndex& index, const std::vector<LibraryItem>& devices, const juce::String& query,
+                                    int maximum, const Accepts& accepts, const std::function<bool()>& shouldStop)
+{
+    SearchResults results;
     const Query wanted (query);
 
-    if (wanted.words.isEmpty())
-        return {};
+    if (wanted.isEmpty())
+        return results;
 
-    std::vector<std::pair<int, LibraryItem>> matches;
-
-    const auto consider = [&matches, &wanted, &accepts] (const LibraryItem& item)
+    // The matches by their scores and where they are; the items themselves copied only for the best.
+    struct Match
     {
-        if (accepts != nullptr && ! accepts (item))
-            return;
-
-        if (const auto score = wanted.getScore (item); score >= 0)
-            matches.emplace_back (score, item);
+        int score;
+        const LibraryItem* item;
+        size_t place; // in the index: the last of the ties, so that equals keep their order from key to key
     };
 
-    const auto indexed = getIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    std::vector<Match> matches;
+    size_t looked = 0;
 
-    for (const auto& item : *indexed)
-        consider (item);
+    const auto consider = [&] (const LibraryItem& item, const SearchKey& key)
+    {
+        if (const auto score = wanted.getScore (key); score >= 0 && (accepts == nullptr || accepts (item)))
+            matches.push_back ({ score, &item, looked });
+    };
 
-    for (const auto kind : { LibraryItem::Kind::instrument, LibraryItem::Kind::effect })
-        for (const auto& item : listDevices (kind))
-            consider (item);
+    const auto through = [&] (const std::vector<LibraryItem>& items, const std::vector<SearchKey>& keys)
+    {
+        for (size_t i = 0; i < items.size() && i < keys.size(); ++i, ++looked)
+        {
+            if (looked % itemsBetweenStops == 0 && shouldStop != nullptr && shouldStop())
+                return false;
 
-    return getBest (std::move (matches), maximum);
+            consider (items[i], keys[i]);
+        }
+
+        return true;
+    };
+
+    std::vector<SearchKey> deviceKeys;
+
+    for (const auto& device : devices)
+        deviceKeys.push_back (makeSearchKey (device, {}));
+
+    const auto finished =
+        through (index.files, index.fileKeys) && through (index.folders, index.folderKeys) && through (devices, deviceKeys);
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        searchedOnMessageThread += (juce::int64) looked;
+
+    if (! finished)
+    {
+        results.stopped = true;
+        return results;
+    }
+
+    // The best first: sounds, presets and devices before folders, which are a way to them; then by score, then shorter
+    // names, then by name, then by their places in the index (std::partial_sort keeps no order of its own among equals).
+    const auto better = [] (const Match& a, const Match& b)
+    {
+        if (const auto aFolder = a.item->kind == LibraryItem::Kind::folder; aFolder != (b.item->kind == LibraryItem::Kind::folder))
+            return ! aFolder;
+
+        if (a.score != b.score)
+            return a.score < b.score;
+
+        if (a.item->name.length() != b.item->name.length())
+            return a.item->name.length() < b.item->name.length();
+
+        if (const auto byName = a.item->name.compareNatural (b.item->name); byName != 0)
+            return byName < 0;
+
+        return a.place < b.place;
+    };
+
+    const auto kept = std::min (matches.size(), (size_t) std::max (0, maximum));
+    std::partial_sort (matches.begin(), matches.begin() + (std::ptrdiff_t) kept, matches.end(), better);
+    results.total = (int) matches.size();
+    results.items.reserve (kept);
+
+    for (size_t i = 0; i < kept; ++i)
+        results.items.push_back (*matches[i].item);
+
+    return results;
+}
+
+void Library::startSearch (const juce::String& query, int maximum, Accepts accepts, std::function<void (SearchResults)> found) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // What it looks through, taken here: the index as it is now (shared, never changed) and the devices.
+    const auto number = ++searchNumber;
+    searchFound = std::move (found);
+    searches.add (
+        [this, number, indexed = getWholeIndex(), devices = getAllDevices(), query, maximum, accepts = std::move (accepts),
+         before = beforeSearch] (const BackgroundJobs::ShouldStop& shouldStop)
+        {
+            if (before != nullptr)
+                before();
+
+            const auto isOld = [this, number, &shouldStop] { return shouldStop() || searchNumber.load() != number; };
+
+            if (isOld())
+                return;
+
+            auto results = searchIndex (*indexed, devices, query, maximum, accepts, isOld);
+
+            if (results.stopped || isOld())
+                return;
+
+            {
+                const std::scoped_lock held (deliveredLock);
+                delivered.emplace (number, std::move (results));
+            }
+
+            searchDelivery.triggerAsyncUpdate();
+        });
+}
+
+void Library::cancelSearch() const
+{
+    ++searchNumber;
+    searchFound = nullptr;
+
+    const std::scoped_lock held (deliveredLock);
+    delivered.reset();
+}
+
+void Library::deliverSearch() const
+{
+    std::optional<std::pair<int, SearchResults>> taken;
+
+    {
+        const std::scoped_lock held (deliveredLock);
+        taken.swap (delivered);
+    }
+
+    // The newest search's alone: one started since, or cancelled, has its own (or none).
+    if (! taken.has_value() || taken->first != searchNumber.load() || searchFound == nullptr)
+        return;
+
+    const auto found = std::exchange (searchFound, nullptr);
+    found (std::move (taken->second));
 }
 
 void Library::forEachMatch (const juce::String& query, const std::function<void (const LibraryItem&)>& matched) const
 {
     const Query wanted (query);
 
-    if (wanted.words.isEmpty())
+    if (wanted.isEmpty())
         return;
 
-    const auto indexed = getIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    const auto indexed = getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
 
-    for (const auto& item : *indexed)
-        if (wanted.getScore (item) >= 0)
+    for (size_t i = 0; i < indexed->files.size(); ++i)
+        if (wanted.getScore (indexed->fileKeys[i]) >= 0)
+            matched (indexed->files[i]);
+
+    for (const auto& item : getAllDevices())
+        if (wanted.getScore (makeSearchKey (item, {})) >= 0)
             matched (item);
-
-    for (const auto kind : { LibraryItem::Kind::instrument, LibraryItem::Kind::effect })
-        for (const auto& item : listDevices (kind))
-            if (wanted.getScore (item) >= 0)
-                matched (item);
 }
 
 std::vector<LibraryItem> Library::searchDevices (const juce::String& query) const
@@ -884,19 +1084,10 @@ std::vector<LibraryItem> Library::searchDevices (const juce::String& query) cons
     std::stable_sort (effects.begin(), effects.end(), byName);
     devices.insert (devices.end(), effects.begin(), effects.end());
 
-    const Query wanted (query);
-
-    if (wanted.words.isEmpty())
+    if (Query (query).isEmpty())
         return devices;
 
-    std::vector<std::pair<int, LibraryItem>> matches;
-
-    for (auto& device : devices)
-        if (const auto score = wanted.getScore (device); score >= 0)
-            matches.emplace_back (score, std::move (device));
-
-    const auto count = (int) matches.size();
-    return getBest (std::move (matches), count);
+    return searchIndex ({}, devices, query, (int) devices.size(), nullptr).items;
 }
 
 bool Library::isIndexing() const
@@ -904,15 +1095,21 @@ bool Library::isIndexing() const
     return indexer != nullptr && indexer->isThreadRunning();
 }
 
-std::shared_ptr<const std::vector<LibraryItem>> Library::getIndex() const
+std::shared_ptr<const LibraryIndex> Library::getWholeIndex() const
 {
     const juce::ScopedLock lock (indexLock);
     return index;
 }
 
+std::shared_ptr<const std::vector<LibraryItem>> Library::getIndex() const
+{
+    const auto whole = getWholeIndex();
+    return { whole, &whole->files }; // which keeps the whole index while it lives
+}
+
 bool Library::isIndexFull() const
 {
-    return (int) getIndex()->size() >= maxIndexed;
+    return getWholeIndex()->full;
 }
 
 juce::StringArray Library::getSoundTypes()

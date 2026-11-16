@@ -215,6 +215,8 @@ TEST_CASE ("Swap tries sounds on a drum pad and keeps one as one undo step, copi
         CHECK_FALSE (handle.getSwap().has_value());
     }
 
+    phazite::test::waitForAudioWork (song.context); // its sound copied in, in the background, then kept (known bug 123)
+
     // One step, its sound copied into the project as a sound put on a pad is; undone, the old one is back.
     CHECK (handle.getPadName (36) == juce::String ("Kick Two"));
     CHECK (handle.hasPadSound (36));
@@ -357,5 +359,6 @@ TEST_CASE ("A swap is in progress for Auto Save, which waits for it, once it has
     swap.tryFile (kick);
     CHECK (phazite::Trial::isInProgress (model));
     swap.keep();
+    phazite::test::waitForAudioWork (song.context); // its sound copied in, then kept
     CHECK_FALSE (phazite::Trial::isInProgress (model));
 }

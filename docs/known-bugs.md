@@ -92,11 +92,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
 its fix.
 
-- **123. Whole audio files are read and copied on the message thread.** Importing compares a file of the same name
-  byte for byte and copies it inside the undo step (`src/model/arrangement/Import.cpp`); Normalize reads the clip's
-  whole part (`src/model/arrangement/AudioClips.cpp`); Quantize Audio loads up to ten minutes of audio and finds its
-  hits at once (`src/model/arrangement/Transients.cpp`). A long recording stops the window for seconds. Fix: background
-  jobs with their progress, the undo step made as they finish. Not yet checked (model-arrangement 12).
 - **124. Every new plan reads all the automation again, asks the disk about each audio clip's file twice and makes the
   tempo map several times for each clip,** and changes of view state make a new plan too (moving the playhead no longer
   does, since 2026-11-14) (`src/model/playback/SongPlayer.cpp`,
@@ -115,15 +110,19 @@ its fix.
   reads it (`src/model/versions/VersionsModel.cpp`), and 65 test call sites expect the result in that call. Fix: the
   switch and the merge read on the history's thread and finish when the read is in, the view showing "Switching..."
   meanwhile; the commands' callers then wait for that.
-- **128. The browser's search looks through the whole index on the message thread at each key,** stops at 50,000
-  files and 200 results without saying that there are more, and doesn't search folders' names
-  (`src/services/Library.cpp`, `src/services/BrowserModel.cpp`). Fix: search keys made ahead, a search that runs in
-  the background and can be cancelled, and a word where results are cut. Not yet checked (ui-shell-browser 6).
 - **145. A plan's compile costs about 0.4 ms a track, on every edit.** With 100 busy tracks every edit, and every step
   of a drag, takes about 40 ms of the message thread, measured on 2026-11-14 ([performance.md](performance.md),
   "a song of 100 tracks"), so a drag stutters in a large song. Why: every edit compiles the whole song again
   (`src/model/playback/SongPlayer.cpp`; see also 124). Fix: compile again only what changed (roadmap step S5.7), with
   the 100-track benchmark before and after.
+
+- **183. Loading a preset that holds sounds copies them into the project on the message thread.** A drum kit or a
+  sampler preset whose sounds are outside the project has each copied, and compared in full with a file of the same
+  name, in the call that loads it (`copyDeviceFilesInto()`, `src/model/devices/DeviceFiles.cpp`, from
+  `src/model/presets/Presets.cpp`), where a sound put on a pad, an import and Swap's Keep have gone to the
+  background since known bug 123 was fixed (2026-11-16). A kit of long samples from a slow disk stops the window
+  while they copy. Fix: bring them in as those do (`bringFilesIntoProject()`,
+  `src/model/arrangement/internal/Import.h`), the preset applied once the copies are made.
 
 ## Tests
 

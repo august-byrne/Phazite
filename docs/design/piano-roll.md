@@ -244,6 +244,22 @@ the playlist and in the command search.
   start holds, and so do markers no hit replaces. In the audio clip editor it is Quantize (Ctrl+U), to its grid; in
   the playlist, the clip menu's Quantize Audio, to the playlist's. One undo step.
 
+**Commands that read much of a file work in the background.** An import's copy of a file into the project (and its
+look at a file of the same name there), the copy of a sound put on a drum pad, the sampler or a wavetable, kept by
+Swap or found for a missing file, Normalize's peaks and Quantize Audio's hits are read on a thread of their own, one
+command after another, so that a long recording never stops the window's drawing and the audio. To the user they
+behave as if they read at once: from the moment one starts, the window takes no clicks or keys (but those of the
+few commands that change nothing, as while a mouse button is down: play and stop, the tools, the zoom), so nothing
+done meanwhile lands before their step or is lost under it; a short one ends before anyone notices, and one that takes
+longer than a second shows its progress with Cancel in the window a freeze shows (a render asked for meanwhile waits
+its turn). The command's undo step is the next after the step before it, never inside a drag or a Swap's trial in
+progress (a trial open as it starts is kept first, as an edit made at once keeps it). If something other than the user
+changed the song meanwhile so that the result no longer fits (the clip or the track gone, the clip trimmed, at another
+gain or playing another file, the project moved), nothing changes and a notice says why; opening another project
+stops it at once. Cancel leaves the project as it was, and lets go of the window at once, even when the read is stuck
+in the system (a network share gone), which is then let finish unseen, what it wrote deleted. A quit doesn't wait for
+it, nor does another project; an unsaved project's folder is deleted once no such read may write there.
+
 **Stretched, pitched and reversed audio is prepared in the background.** Phazite renders the whole file with Rubber
 Band's R3 engine into the project's cache folder, and the clip plays the render. The clip is silent until the render
 is ready, and the editor and the status bar say so meanwhile. Clips that play a file alike share a render, and undo

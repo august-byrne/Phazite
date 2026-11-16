@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PlaylistModel.h"
 #include "internal/AudioClips.h"
+#include "internal/AudioWork.h"
 #include "internal/Clips.h"
 #include "internal/Import.h"
 #include "internal/Sections.h"
@@ -669,6 +670,19 @@ std::vector<ClipID> importFiles (ProjectContext& context, const juce::StringArra
 {
     auto* song = findSong (context);
     return song != nullptr ? importFiles (*song, paths, target, start) : std::vector<ClipID>();
+}
+
+bool importFilesInBackground (ProjectContext& context, const juce::StringArray& paths, TrackID target, BeatPosition start,
+                              std::function<void (const std::vector<ClipID>&)> added)
+{
+    auto* song = findSong (context);
+    auto job = song != nullptr ? makeImportJob (*song, paths, target, start, std::move (added)) : nullptr;
+
+    if (job == nullptr)
+        return false;
+
+    getAudioWork (context).add (std::move (job));
+    return true;
 }
 
 std::vector<SongSection> getSongSections (const ProjectContext& context)

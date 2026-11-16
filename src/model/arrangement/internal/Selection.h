@@ -12,6 +12,7 @@
 namespace phazite
 {
 class CommandRegistry;
+class ProjectContext;
 
 //==============================================================================
 // A time range across some tracks, as dragging empty space or a clip's upper half selects it in the
@@ -81,6 +82,7 @@ bool isAnythingSelected (const Selection&, const RangeSelection&);
 juce::String describeSelection (const Selection&, const RangeSelection&, const juce::String& verb);
 
 // The selection commands, for the selection's song: delete, delete and close the gap, duplicate, select all and
-// deselect all.
-void addSelectionCommands (CommandRegistry&, Selection&, RangeSelection&);
+// deselect all, and the clips' commands; Normalize too, given the project context whose selection it is, whose work reads
+// the clips' audio in the background (AudioWork.h).
+void addSelectionCommands (CommandRegistry&, Selection&, RangeSelection&, ProjectContext* = nullptr);
 } // namespace phazite

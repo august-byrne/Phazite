@@ -21,7 +21,10 @@
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SongIndex.h"
@@ -899,4 +902,37 @@ TEST_CASE (
     CHECK (pluginChanged > 0);
     CHECK (pluginChanged * 8 < wholeSong);
     CHECK (song.getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: an import, Normalize and Quantize Audio read none of the audio on the message thread")
+{
+    phazite::test::TestSong s;
+    auto& song = getSong (s);
+
+    // Ten seconds of clicks, and a file of the same name in the project already, the same: the import compares the two.
+    const auto clicks = phazite::test::writeClicks (s.getSoundsFolder(), 20, 120.0);
+    const auto audioFolder = s.getProject().getAudioFolder();
+    REQUIRE (audioFolder.createDirectory());
+    REQUIRE (clicks.copyFileTo (audioFolder.getChildFile (clicks.getFileName())));
+
+    const auto before = phazite::AudioWork::getMessageThreadReads();
+    REQUIRE (phazite::importFilesInBackground (s.context, { clicks.getFullPathName() }, s.firstTrack, at (0.0)));
+    phazite::test::waitForAudioWork (s.context);
+    const auto clips = phazite::getClips (s.context, s.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto clip = clips[0].id;
+
+    phazite::normalizeClip (s.context, clip);
+    phazite::test::waitForAudioWork (s.context);
+    phazite::quantizeAudio (s.context, { clip }, lasting (1.0));
+    phazite::test::waitForAudioWork (s.context);
+
+    // Each made its change, and the message thread read none of the audio for them (known bug 123).
+    CHECK (phazite::getAudioClip (s.context, clip)->gain > 0.0f);
+    CHECK_FALSE (phazite::getWarpMarkers (s.context, clip).empty());
+    CHECK (phazite::AudioWork::getMessageThreadReads() == before);
+
+    // What the gate counts: a peak read at once, on the message thread, counts its bytes.
+    REQUIRE (phazite::getClipPeak (song, clip).has_value());
+    CHECK (phazite::AudioWork::getMessageThreadReads() > before);
 }

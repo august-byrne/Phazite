@@ -618,6 +618,18 @@ int main (int argc, char** argv)
         // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h).
         phazite::getPluginHost (*engineContext).setHelperProgram (juce::File (PHAZITE_TEST_HOST));
 
+        // A test case outside a TEST_SUITE block takes the suite that doctest.h, as it is included, sets back to "" for the
+        // file; that is a static initialiser, which MSVC ran after some of the file's own once an inline variable made at
+        // startup split them (DrumSampler's noSound, in AudioWorkTests.cpp), depending on how the program was linked. A test
+        // case registered first had no suite, which doctest reads as a string under any --test-suite filter (the golden
+        // tests, the audit, the benchmarks): the program crashed (2026-11-16). The tests open suites as blocks alone, so a
+        // case outside one is in "", as doctest's own "set back" says; its suite isn't part of how doctest tells cases apart.
+        // This leans on doctest's insides (detail::getRegisteredTests(), the registered case changed through a const_cast,
+        // TestCase::operator< leaving the suite out): recheck it when doctest is bumped.
+        for (const auto& testCase : doctest::detail::getRegisteredTests())
+            if (testCase.m_test_suite == nullptr)
+                const_cast<doctest::detail::TestCase&> (testCase).m_test_suite = "";
+
         doctest::Context context (argc, argv);
         result = context.run();
 

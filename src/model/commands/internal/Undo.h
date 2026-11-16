@@ -125,11 +125,17 @@ public:
     // Whether a song has a trial open, changes and all: Auto Save waits until it ends (model/project/internal/Project.h).
     static bool isInProgress (const Song&);
 
+    // Its keep under way, waiting for work in the background (Swap's, whose sounds are copied in first: AudioWork.h): it
+    // isn't kept a second time meanwhile by a change that begins elsewhere (keepOpenTrial() leaves it be), and no other trial
+    // opens for the song until it is kept (isKeepPending(): Swap opens closed).
+    void setKeepPending (bool pending) noexcept { keepPending = pending; }
+    static bool isKeepPending (const Song&);
+
 private:
     juce::WeakReference<Song> song;
     juce::String name;
     std::function<void()> keepFirst;
-    bool open = true, begun = false, applying = false;
+    bool open = true, begun = false, applying = false, keepPending = false;
 
     juce::UndoManager* getUndoManager() const;
     void close();

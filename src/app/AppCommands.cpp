@@ -30,7 +30,7 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
 
     addUndoCommands (registry, selection);
     addTransportCommands (registry, selection, getPlaybackHost (engine));
-    addSelectionCommands (registry, selection, range);
+    addSelectionCommands (registry, selection, range, &context);
     addClipboardCommands (registry, context);
     addTrackCommands (registry, selection);
     ui::addTrackViewCommands (registry, context); // right after the model's: the order decides key ties and lists

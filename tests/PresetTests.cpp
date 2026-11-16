@@ -417,6 +417,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
         const auto drums = phazite::getInstrument (context, first.track (0))->id;
         auto handle = phazite::makeDeviceHandle (first.getSong(), drums);
         REQUIRE (handle.setPadSound (0, sound));
+        phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
         REQUIRE (phazite::saveDevicePreset (context, drums, file));
     }
 
@@ -469,6 +470,7 @@ TEST_CASE ("A preset's sounds that can't be taken are told by name, those on a n
         const auto drums = phazite::getInstrument (context, first.track (0))->id;
         auto handle = phazite::makeDeviceHandle (first.getSong(), drums);
         REQUIRE (handle.setPadSound (0, boom));
+        phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
         REQUIRE (phazite::saveDevicePreset (context, drums, file));
     }
 
@@ -561,6 +563,7 @@ TEST_CASE ("A preset whose sound can't be copied beside it isn't saved, leaves n
     const auto drums = phazite::getInstrument (song.context, song.track (0))->id;
     auto handle = phazite::makeDeviceHandle (song.getSong(), drums);
     REQUIRE (handle.setPadSound (0, boom));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
 
     CHECK_FALSE (phazite::saveDevicePreset (song.context, drums, file));
     CHECK_FALSE (file.exists());

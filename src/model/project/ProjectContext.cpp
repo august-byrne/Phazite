@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectContext.h"
 #include "internal/ProjectContext.h"
+#include "model/arrangement/internal/AudioWork.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
@@ -361,7 +362,8 @@ struct ProjectContext::Impl
     ProblemReporter problems;                      // what tells the user of a problem with the song, the app's
     Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
-    Transients transients; // the hits found in audio files, whichever project plays them
+    Transients transients;                // the hits found in audio files, whichever project plays them
+    std::unique_ptr<AudioWork> audioWork; // what reads much of an audio file for a command, in the background
     int projectNumber = 0;
 
     void dropSong()
@@ -378,10 +380,12 @@ struct ProjectContext::Impl
 ProjectContext::ProjectContext (EngineContext& engine)
     : impl (std::make_unique<Impl> (engine))
 {
+    impl->audioWork = std::make_unique<AudioWork> (*this);
 }
 
 ProjectContext::~ProjectContext()
 {
+    impl->audioWork = nullptr; // what it reads stopped, changing nothing
     impl->songWatcher = nullptr;
     impl->dropSong();
 }
@@ -495,6 +499,11 @@ Transients& getTransientFinder (const ProjectContext& context)
     return context.getImpl().transients;
 }
 
+AudioWork& getAudioWork (const ProjectContext& context)
+{
+    return *context.getImpl().audioWork;
+}
+
 Clipboard& getClipboard (ProjectContext& context)
 {
     return context.getImpl().clipboard;
@@ -536,6 +545,9 @@ void setSong (ProjectContext& context, Song* song)
         ++impl.projectNumber;
         impl.clipboard = {};
     }
+
+    // What reads audio for the project before stops at once (AudioWork.h), before its folder may go.
+    impl.audioWork->songChanged (song);
 
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     impl.rangeSelection.clear();

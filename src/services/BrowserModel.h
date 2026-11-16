@@ -104,9 +104,16 @@ public:
     // presets it holds, while it holds any. Nothing for a device without presets.
     std::vector<BrowserPlace> getPresetPlaces (const juce::String& folderName) const;
 
-    // What search finds in all the places, with the filters' values, or why it finds nothing; and a line when it covers only
-    // part of the sounds.
+    // What search finds in all the places, with the filters' values, the best maxFound (Library::search() says how they
+    // are ranked), or why it finds nothing; a line where the list is cut, saying how many match ("The first 200 of 3,412");
+    // and a line when it covers only part of the sounds. At once, on the calling thread.
     BrowserContents search (const juce::String& query, const BrowserFilters& = {}) const;
+    static constexpr int maxFound = 200;
+
+    // The same as the browser searches while the user types: in the background, each search cancelling the one before, so
+    // that found has the newest text's alone, on the message thread (Library::startSearch()); or none, once cancelled.
+    void startSearch (const juce::String& query, const BrowserFilters&, std::function<void (BrowserContents)> found) const;
+    void cancelSearch() const;
 
     // What each filter offers, over what search finds for the query, or over every sound without one.
     FilterOptions getFilterOptions (const juce::String& query, const BrowserFilters&) const;
@@ -140,5 +147,6 @@ private:
     // it has in all.
     std::vector<LibraryItem> getFiltered (const BrowserPlace&, const BrowserFilters&, int& total) const;
     std::vector<LibraryItem> getIndexedIn (const juce::File& folder, const BrowserFilters&) const;
+    BrowserContents describeSearch (const juce::String& query, const BrowserFilters&, SearchResults) const;
 };
 } // namespace phazite

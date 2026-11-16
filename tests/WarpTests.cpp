@@ -234,7 +234,10 @@ TEST_CASE ("Quantize Audio moves each hit a clip plays towards the grid line nea
     auto& context = warp.song.context;
     REQUIRE (phazite::canQuantizeAudio (context, { warp.clip }));
 
+    // Its hits found in the background (known bug 123): the step comes once they are.
     phazite::quantizeAudio (context, { warp.clip }, phazite::test::lasting (1.0));
+    CHECK (phazite::getWarpMarkers (context, warp.clip).empty());
+    REQUIRE (phazite::test::runTimersUntil ([&context] { return ! phazite::isReadingAudio (context); }));
     CHECK (warp.getUndoName() == juce::String ("Quantize Audio"));
     CHECK (phazite::getClipTempo (warp.getSong(), warp.clip) == doctest::Approx (120.0));
     const auto markers = phazite::getWarpMarkers (context, warp.clip);
@@ -258,6 +261,7 @@ TEST_CASE ("Quantize Audio moves each hit a clip plays towards the grid line nea
     phazite::undo (warp.getSong());
     CHECK (phazite::getWarpMarkers (context, warp.clip).empty());
     phazite::quantizeAudio (context, { warp.clip }, phazite::test::lasting (1.0), 0.5);
+    REQUIRE (phazite::test::runTimersUntil ([&context] { return ! phazite::isReadingAudio (context); }));
     const auto halfway = phazite::getWarpMarkers (context, warp.clip);
     REQUIRE (halfway.size() == 4);
     CHECK (halfway[1].beat.inBeats() == doctest::Approx (1.03).epsilon (0.002)); // from 1.06

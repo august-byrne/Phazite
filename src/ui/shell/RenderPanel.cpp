@@ -48,10 +48,18 @@ RenderPanel::~RenderPanel()
 void RenderPanel::cancel()
 {
     stopTimer();
+
+    if (render != nullptr)
+        render->cancel();
+
     render = nullptr;
+    const auto cancelled = onCancelled; // this goes with its window
 
     if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
         window->exitModalState (0); // which deletes it
+
+    if (cancelled != nullptr)
+        cancelled();
 }
 
 void RenderPanel::goOn()

@@ -930,6 +930,11 @@ juce::String TrackRender::getTitle() const
     return impl->getTitle();
 }
 
+void TrackRender::cancel()
+{
+    impl->cancel();
+}
+
 //==============================================================================
 bool isFrozen (const ProjectContext& context, TrackID id)
 {
