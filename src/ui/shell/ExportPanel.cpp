@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ExportPanel.h"
+#include "RenderPanel.h"
 #include "ui/components/ValueText.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -494,6 +495,9 @@ void ExportPanel::timerCallback()
 {
     if (running != nullptr)
         progress = running->getProgress();
+
+    // A plug-in it has waited for as long as a hang takes live, named on the bar (known bug 42): Cancel is the user's.
+    RenderPanel::showWait (progressBar, shownWait, running != nullptr ? running->getWait() : std::nullopt);
 }
 
 void ExportPanel::lookAndFeelChanged()

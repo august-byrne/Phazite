@@ -168,6 +168,7 @@ juce::String makeContainerName (const Song&);
 // The commands act on the selected devices: grouping them, which selects the container ("Group into Container"), and
 // ungrouping the selected container, which selects its devices ("Ungroup Container").
 bool canGroupSelectedDevices (const Selection&);
+bool doSelectedDevicesHoldPlugins (const Selection&); // what grouping them reads of the plug-ins' states, got first
 void groupSelectedDevices (Selection&);
 bool canUngroupSelectedContainer (const Selection&);
 void ungroupSelectedContainer (Selection&);

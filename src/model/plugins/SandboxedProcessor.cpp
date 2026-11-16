@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <utility>
 
 namespace phazite
@@ -300,11 +301,13 @@ void SandboxedProcessor::keep (std::span<const devices::NoteEvent> events) noexc
 
 bool SandboxedProcessor::waitInRender() noexcept
 {
-    // For as long as the plug-in takes, a little at a time: until its helper has gone, or it has kept the block so long
-    // that it hangs, which its helper is ended for, or the render is cancelled.
-    const auto limit = (std::int64_t) instance.getRemote().getHelper().getAudioHangMilliseconds() * renderHangFactor * 1'000'000;
+    // For as long as the plug-in takes, a little at a time (known bug 42): until its helper has gone, or the render is
+    // cancelled; the render's window names it once it has waited as long as a hang takes live.
+    renderWaitSince.store (sandbox::getNanoseconds(), std::memory_order_release);
+    const auto answer = instance.waitForAnswer (std::numeric_limits<std::int64_t>::max(), &renderCancelled);
+    renderWaitSince.store (0, std::memory_order_release);
 
-    switch (instance.waitForAnswer (limit, &renderCancelled))
+    switch (answer)
     {
         case SandboxedInstance::Answer::played:
             return true;
@@ -378,7 +381,21 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
             return false;
         }
 
-        instance.finishPreparing();
+        // Waited for as a block is (known bug 166), so that the render names it; prepared, or the render fails (its helper
+        // gone, or ended as it never came), or it is cancelled: never a block played as silence without a word.
+        renderWaitSince.store (sandbox::getNanoseconds(), std::memory_order_release);
+        const auto prepared = instance.finishPreparing (&renderCancelled);
+        renderWaitSince.store (0, std::memory_order_release);
+
+        if (! prepared && ! instance.getRemote().getChannel().isBusy())
+        {
+            if (! renderCancelled.load (std::memory_order_acquire))
+                failedInRender.store (true, std::memory_order_release);
+
+            instance.let();
+            skip (context);
+            return false;
+        }
     }
     else if (! instance.tryHold())
     {

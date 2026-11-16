@@ -23,6 +23,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace phazite
 {
@@ -41,6 +42,16 @@ juce::String getWhyNotFreeze (const ProjectContext&, TrackID);
 juce::String getWhyNotBounce (const ProjectContext&, TrackID);
 
 //==============================================================================
+// What a render (a freeze, a bounce, a consolidation, an export) waits for, for the window that shows it: a plug-in that has
+// kept a block (or its channel for the render's rate) longer than a hang takes live, by name, and for how long. A render
+// waits for a plug-in for as long as it takes, as it may only be slow (known bug 42): the user decides, by the window's
+// Cancel.
+struct RenderWait
+{
+    juce::String plugin;
+    double seconds = 0.0;
+};
+
 // A freeze or a bounce in progress, rendering on a thread of its own while this lives. It stops playback first, and lets
 // the project play again when it is done. It calls back on the message thread, once, after the render thread has
 // finished, with what came of it; deleting it first cancels it, without a callback, leaving the project as it was.
@@ -52,6 +63,12 @@ public:
 
     float getProgress() const;     // from 0 to 1
     juce::String getTitle() const; // what it does: "Freezing Bass", "Bouncing Bass"
+    std::optional<RenderWait> getWait() const;
+
+    // A second way out of its window but Cancel, which stops it: its button's name (none for none), and what it does then
+    // (a command's wait for the plug-ins' states: Go On Without Them).
+    juce::String getGoOnName() const;
+    void goOn();
 
     struct Impl; // the render, and what its thread shares with this (Freeze.cpp)
     explicit TrackRender (std::unique_ptr<Impl>);

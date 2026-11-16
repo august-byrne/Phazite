@@ -468,6 +468,19 @@ void reloadDevice (ProjectContext& context, DeviceID device, juce::Component& ta
                                           .withButton ("OK", 0)
                                           .withAssociatedComponent (&target),
                                       nullptr);
+
+    // One that crashed again before anything changed since it was reloaded opens from what the project holds, rather than
+    // from the settings it may have crashed for.
+    else if (phazite::wasReloadedFromProject (context, device))
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::InfoIcon)
+                                          .withTitle ("The plug-in reloaded from the project")
+                                          .withMessage ("It crashed again a moment after it was reloaded, so it opened with the "
+                                                        "settings the project holds, not with its own last ones, which the next "
+                                                        "Reload tries again.")
+                                          .withButton ("OK", 0)
+                                          .withAssociatedComponent (&target),
+                                      nullptr);
 }
 
 void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device, DevicePlace place, TrackID track,

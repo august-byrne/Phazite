@@ -811,6 +811,14 @@ bool canGroupSelectedDevices (const Selection& selection)
     return song != nullptr && canGroupIntoContainer (*song, selection.getDevices());
 }
 
+bool doSelectedDevicesHoldPlugins (const Selection& selection)
+{
+    auto* song = selection.getSong();
+    const auto devices = selection.getDevices();
+    return song != nullptr
+           && std::any_of (devices.begin(), devices.end(), [song] (DeviceID id) { return holdsPlugin (findDeviceState (*song, id)); });
+}
+
 void groupSelectedDevices (Selection& selection)
 {
     if (auto* song = selection.getSong())
@@ -843,16 +851,19 @@ void ungroupSelectedContainer (Selection& selection)
 
 void addContainerCommands (CommandRegistry& registry, Selection& selection)
 {
-    registry.add ({ .id = "device.group",
-                    .name = "Group into Container",
-                    .category = "Device",
-                    .description = "Groups the selected devices into a container, with eight macros that turn several knobs at once "
-                                   "and chains that play side by side: effects, or a track's instrument with its effects.",
-                    .synonyms = { "rack", "chain", "fx chain", "combine", "macro", "group devices", "layer", "instrument rack" },
-                    .perform = [&selection] { groupSelectedDevices (selection); },
-                    .isEnabled = [&selection] { return canGroupSelectedDevices (selection); },
-                    .undoTarget = undoTargetOf (selection),
-                    .keyPriority = Command::notePriority }); // shares Ctrl+G with grouping tracks: devices are selected on their own
+    registry.add (
+        { .id = "device.group",
+          .name = "Group into Container",
+          .category = "Device",
+          .description = "Groups the selected devices into a container, with eight macros that turn several knobs at once "
+                         "and chains that play side by side: effects, or a track's instrument with its effects.",
+          .synonyms = { "rack", "chain", "fx chain", "combine", "macro", "group devices", "layer", "instrument rack" },
+          .perform = [&selection] { groupSelectedDevices (selection); },
+          .isEnabled = [&selection] { return canGroupSelectedDevices (selection); },
+          .undoTarget = undoTargetOf (selection),
+          .keyPriority = Command::notePriority,
+          .readsPluginStates = [&selection]
+          { return doSelectedDevicesHoldPlugins (selection); } }); // shares Ctrl+G with grouping tracks: devices are selected on their own
 
     registry.add ({ .id = "device.ungroup",
                     .name = "Ungroup Container",

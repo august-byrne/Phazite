@@ -22,6 +22,19 @@ RenderPanel::RenderPanel (std::unique_ptr<TrackRender> r)
     for (auto* c : std::initializer_list<juce::Component*> { &title, &progressBar, &cancelButton })
         addAndMakeVisible (c);
 
+    // A second way out, where it has one (a command's wait for the plug-ins' states: Go On Without Them, its Cancel then
+    // dropping the command); and Escape is Cancel.
+    if (const auto name = render != nullptr ? render->getGoOnName() : juce::String(); name.isNotEmpty())
+    {
+        goOnButton.setButtonText (name);
+        goOnButton.setTooltip ("Goes on with the settings each plug-in gave last");
+        goOnButton.onClick = [this] { goOn(); };
+        addAndMakeVisible (goOnButton);
+        cancelButton.setTooltip ("Drops what waits, changing nothing");
+    }
+
+    setWantsKeyboardFocus (true);
+
     setSize (width, height);
     startTimerHz (10);
 }
@@ -41,10 +54,49 @@ void RenderPanel::cancel()
         window->exitModalState (0); // which deletes it
 }
 
+void RenderPanel::goOn()
+{
+    // What it does first, then the window goes as Cancel's does, the render finished.
+    if (render != nullptr)
+        render->goOn();
+
+    cancel();
+}
+
+bool RenderPanel::keyPressed (const juce::KeyPress& key)
+{
+    if (key != juce::KeyPress::escapeKey || goOnButton.getButtonText().isEmpty())
+        return false;
+
+    cancel();
+    return true;
+}
+
 void RenderPanel::timerCallback()
 {
-    if (render != nullptr)
-        progress = render->getProgress();
+    if (render == nullptr)
+        return;
+
+    progress = render->getProgress();
+
+    // A plug-in it has waited for as long as a hang takes live, named on the bar (known bug 42): Cancel is the user's.
+    showWait (progressBar, shownWait, render->getWait());
+}
+
+void RenderPanel::showWait (juce::ProgressBar& bar, juce::String& shown, const std::optional<RenderWait>& wait)
+{
+    const auto text = wait.has_value() ? "Waiting for " + wait->plugin + " (" + juce::String ((int) wait->seconds) + " s)" : juce::String();
+
+    if (text == shown)
+        return;
+
+    shown = text;
+
+    // The percentage again once the wait is over (JUCE's bar shows no percentage from the time it is given a text).
+    if (text.isEmpty())
+        bar.setPercentageDisplay (true);
+    else
+        bar.setTextToDisplay (text);
 }
 
 void RenderPanel::paint (juce::Graphics& g)
@@ -59,6 +111,9 @@ void RenderPanel::resized()
     area.removeFromTop (Space::m);
     progressBar.setBounds (area.removeFromTop (controlHeight));
     area.removeFromTop (Space::m);
-    cancelButton.setBounds (area.removeFromTop (controlHeight).removeFromRight (buttonWidth));
+    auto buttons = area.removeFromTop (controlHeight);
+    cancelButton.setBounds (buttons.removeFromRight (buttonWidth));
+    buttons.removeFromRight (Space::m);
+    goOnButton.setBounds (buttons.removeFromRight (2 * buttonWidth));
 }
 } // namespace phazite::ui

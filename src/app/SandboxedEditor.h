@@ -5,7 +5,12 @@
 // resized; the two are as large on the screen as the plug-in makes its editor, whatever the Interface Size (this one's size
 // is the plug-in's divided by it, fitted again as it changes), and the plug-in's as large as this, where the plug-in can be
 // resized. Phazite never calls into the helper's window, so that a helper that hangs can't hang Phazite's window with
-// it: everything goes through the control channel. The keys Phazite takes over a plug-in (ui/input/PluginKeys.h) the
+// it: everything goes through the control channel. On Windows the helper's window is a child of a window of this one's own
+// (its socket), a child of the window this is in, which this places: as it goes, it takes the socket out of that window,
+// hidden, and asks the helper to close its editor without waiting; the socket goes once the helper's window has left it
+// (closed, or with its helper). Windows destroys a window's children with it, and a child of another process's thread
+// only as that thread answers: destroyed with Phazite's window, a helper's that hangs kept Phazite waiting until the
+// helper was ended (known bug 165). The keys Phazite takes over a plug-in (ui/input/PluginKeys.h) the
 // helper hands back, which run here, unless the window's plug-in gets every key; the helper is told which they are, and
 // again as they change (the computer keyboard switched, Send All Keys to the Plug-in). A plug-in whose helper has gone
 // shows nothing of its own. It keeps its instance while it shows it, and closes the editor in the helper as it goes.
@@ -41,6 +46,10 @@ private:
     float fittedScale = 1.0f;      // getScale() as it was last fitted to it
     std::int64_t placedWindow = 0; // where the helper was told to show it
     juce::Rectangle<int> placedArea;
+    void* socket = nullptr;       // on Windows, the window the helper's is in (its native handle), made as it first shows
+    void* socketParent = nullptr; // the window that is in, watched as it goes
+
+    void lookAndFeelChanged() override; // the socket's colour, the theme's again
     bool toldKeys = false, toldEveryKey = false;
     std::vector<juce::KeyPress> toldWanted;
 

@@ -46,6 +46,13 @@ struct Command
     // Optional: whether the command's keys work while a plug-in's window has the keyboard focus, so that a sound can be
     // played while it is tweaked (play and stop). The plug-in gets every other key.
     bool overPlugins {};
+    // Optional: whether it reads what the project's plug-ins hold of their own (it stores their states into the song, or
+    // copies, saves or restores them: a commit, a preset saved, Save As), always; or, for one whose acting on them depends
+    // on what is selected (Delete and Duplicate of tracks), whether it does now, asked as it is invoked. It then runs once
+    // the plug-ins that said they changed have given their states (CommandRegistry::setPluginStatesGate()), so that it
+    // holds what they play now, not what they gave last (known bug 166).
+    bool needsPluginStates {};
+    std::function<bool()> readsPluginStates {};
 
     static constexpr int notePriority = 1;
 };
@@ -63,7 +70,8 @@ public:
     // Adds a command; its id must be new, and it needs a name and an action. False if not.
     bool add (Command);
 
-    // A command that runs other commands in order, as one undo step (named after the macro).
+    // A command that runs other commands in order, as one undo step (named after the macro); the plug-ins' states got
+    // first, once, if a step of it reads them.
     bool addMacro (const juce::String& id, const juce::String& name, const juce::StringArray& commandIDs);
 
     const Command* find (const juce::String& id) const;
@@ -75,9 +83,20 @@ public:
     const Command* getCommand (int index) const; // nullptr if there is none
     int indexOf (const juce::String& id) const;  // -1 if there is none
 
-    // Runs a command if it exists and is enabled, in one undo step named after it if it changes a project.
+    // Runs a command if it exists and is enabled, in one undo step named after it if it changes a project. One that needs
+    // the plug-ins' states runs once the gate below lets it (at once, without one, as in the tests), and is true then for
+    // having been taken; meanwhile no other command that changes a project, or needs the states, runs (false for those):
+    // play, stop, zoom and the views' own do.
     bool invoke (const juce::String& id);
     static bool isEnabled (const Command&);
+
+    // What runs a command that needs the plug-ins' states (the app's open project, which asks its plug-ins and shows a wait
+    // of more than a second in its progress window): it calls back once, with true once the states are in (or the wait was
+    // given up on, which goes on with what each gave last), or false if the command is not to run (another project opened
+    // meanwhile). Whether a command waits for it now.
+    using PluginStatesGate = std::function<void (std::function<void (bool run)>)>;
+    void setPluginStatesGate (PluginStatesGate gate) { pluginStatesGate = std::move (gate); }
+    bool isWaitingForPluginStates() const noexcept { return waitingForStates; }
 
     // The command palette's search: matches on the name, category and synonyms, best first.
     juce::Array<const Command*> search (const juce::String& query, int maxResults = 20) const;
@@ -98,8 +117,13 @@ private:
     std::vector<std::unique_ptr<Command>> commands;
     std::map<juce::String, size_t> indexByID;
     juce::ListenerList<Listener> listeners;
+    PluginStatesGate pluginStatesGate;
+    bool waitingForStates = false;
+    std::shared_ptr<bool> alive = std::make_shared<bool> (true); // what the gate calls back checks
 
     void runWithoutUndoStep (const Command&);
+    bool run (const juce::String& id);                 // invoke()'s, once it may
+    static bool readsPluginStatesNow (const Command&); // its flag, or its question asked now
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CommandRegistry)
 };

@@ -391,6 +391,14 @@ bool ProjectContext::hasProject() const noexcept
     return impl->song != nullptr;
 }
 
+void ProjectContext::withPluginStates (std::function<void (bool)> then)
+{
+    if (pluginStatesGate != nullptr)
+        pluginStatesGate (std::move (then));
+    else
+        then (true);
+}
+
 int ProjectContext::getProjectNumber() const noexcept
 {
     return impl->projectNumber;

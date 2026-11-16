@@ -149,6 +149,10 @@ bool isDeviceWindowOpen (const ProjectContext&, DeviceID);
 // undo step, as nothing of the song changes. Returns why it didn't load, or nothing if it did.
 std::optional<juce::String> reloadDevice (ProjectContext&, DeviceID);
 
+// Whether its last reload opened it from the settings the project holds, rather than from those it had as it crashed: it
+// crashed again soon after the reload before, from its own (PluginInstances::reload()), which its notice says; the next tries its own.
+bool wasReloadedFromProject (ProjectContext&, DeviceID);
+
 // One of Phazite's own devices, for its editor (model/devices/DeviceHandle.h); a handle of nothing for another device.
 DeviceHandle getDeviceHandle (ProjectContext&, DeviceID);
 

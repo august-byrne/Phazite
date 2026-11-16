@@ -20,7 +20,9 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 | A plug-in's state kept as its `.vstpreset` | Built | Not yet tried by a person with a preset going to another DAW and back |
 | Notes ended on Stop, whatever the plug-in takes | Built | |
 | A plug-in that fails during an export, freeze or bounce fails it | Built | |
-| Plug-ins opened, saved and closed without the window waiting for them | Built | |
+| Plug-ins opened, saved and closed without the window waiting for them | Built | A plug-in added, or brought back by an undo once the project's have loaded, still opens while the window waits |
+| Stores, preparing and plug-in windows closed without the window waiting | Built | |
+| A slow plug-in waited for in a render, named after 5 seconds, with Cancel | Built | |
 | A plug-in's window as large as the plug-in at any Interface Size | Built | |
 | A choice of how plug-ins share helpers | Declined | One helper for each plug-in file measured cheap enough |
 | Containing a hostile plug-in | Declined | The sandbox is for crashes and hangs |
@@ -126,7 +128,40 @@ Phazite's window never waits for a plug-in as a project opens, saves or closes, 
   state may have changed since they last gave it: a value or a program set, by Phazite, in the plug-in's window or by
   MIDI, its settings said to have changed (a VST3's `setDirty()`), or its window open since (a plug-in needn't say what
   its window changes, a sample loaded say); and they ask again one that didn't answer the last time.
+- **Commands that read the plug-ins' states** (commit, stage, checkout, a branch switched to, discard, restore, merge
+  and abort merge, a snapshot restored, Save As, DAWproject export; Delete and Duplicate of tracks that hold a plug-in
+  or a drum sampler's pad tracks, and grouping devices among which one is, but not of notes, clips or a time range) run
+  once the plug-ins that said they changed have given their states, as a save does. So do the other ways in to the same
+  (`ProjectContext::withPluginStates()`, the one gate the registry's commands go through too): a preset loaded into a
+  device or saved, from the browser's menus, a plug-in's window or a track dropped into the browser; a chain duplicated
+  in a container; Stage's "+" in Source Control; a branch merged from the branch picker; a DAWproject imported as a
+  branch. A wait of more than a second shows the progress window, "Waiting for the settings of *name*", with **Go On
+  Without Them** (the command runs with what each plug-in gave last) and **Cancel** (the command is dropped, changing
+  nothing; Escape is Cancel). Meanwhile no other command that changes the song runs, and the window takes no input (a
+  modal component of the session's own, never shown, until the wait is over or the progress window takes over), so no
+  drag changes the song under it; a key let go meanwhile is told to the window as the wait ends, so that neither a
+  shortcut nor a note of the computer keyboard is taken for still held. A command says so with `needsPluginStates`, or
+  `readsPluginStates` for one that asks what is selected as it runs; a macro asks once before it starts. A preset's
+  Swap in the browser needs none: it swaps only Phazite's own devices.
+- **Other stores** (a drag that copies, a device's own buttons, Auto Save's snapshot, a plug-in's window closed) wait for
+  no plug-in: each writes the state a plug-in gave last, and asks those that said they changed, whose answers are
+  written in as they come (into the device an undo brings back, if it was taken away, unless the instance playing it
+  now changed since it opened); the versions count a plug-in's reports only as far as the state they hold has them, so a
+  late answer shows as a change to commit. So that what a plug-in gave last is its own, one that says it changed is
+  asked for its state once it has been quiet for a quarter of a second, or a second after its first change at the
+  latest as changes go on, and no sooner after the last ask than ten times as long as that answer took (a 20 MB state
+  measured 48 ms an answer, 7 ms of it the message thread's copy).
+- **A plug-in reloaded after a crash** opens from the state it gave last, the user's latest settings. If it crashes
+  again within 5 seconds of a reload, the next reload opens it from what the project holds, and says so, keeping its own
+  state aside: the reload after that tries its own again, and a reload that fails keeps it as it was.
+- **A sample rate or a block size changed:** a plug-in's channel for it is asked of its helper without waiting; the
+  engine skips the plug-in (silent) until it has come, and a render waits for it, failing if the helper refused it.
 - **Closing:** a project's plug-ins are let go of at once; each helper quits on its own, without anything waiting for it.
+  Windows ending its session (a shutdown or a sign-out) while a close waits for the plug-ins' settings goes on without
+  those still to answer, so that the save question comes before Windows ends Phazite; while a command waits for them,
+  the close starts once the command has run or been dropped. A program that asks Phazite to close (the installer's
+  update, through Windows' Restart Manager) ends no session: Phazite quits as it would from its own menu, and a close
+  the user cancels leaves it as it was.
 
 ## Stop ends every note
 
@@ -140,14 +175,17 @@ An export, a freeze or a bounce waits for a plug-in instead of skipping its bloc
 plug-in is still on too), so the file holds what the plug-in plays. Plug-ins are told that they play offline (JUCE's
 `setNonRealtime()`, a VST3's process mode) before the render's first block, so that one that streams from disk or
 loads in the background has what it plays in time, and that they play live again as the render gives them back
-(finished or cancelled), so that the first live block doesn't wait for the switch. A render does not wait for ever:
-a plug-in whose helper goes while the song renders, or that keeps a block for 30 seconds, fails the render, which
-names the plug-in ("*name* crashed while Phazite rendered. Reload the plug-in, then render again."); one that had
-crashed before fails it at its start ("*name* has crashed. Reload the plug-in, then render again."), unless it is
-switched off, as it isn't heard then. Nothing is written. Cancelling a render does not wait for a plug-in, not even
-one to be prepared for the engine's rate again while it keeps the render's block: its channel waits for the block
-(the engine skips its blocks meanwhile), and a plug-in that keeps it as long as a hang takes is ended. A crashed
-plug-in keeps the rate the engine last asked of it, which its reload opens it at.
+(finished or cancelled), so that the first live block doesn't wait for the switch. A render waits for a plug-in that
+keeps a block for as long as it takes, as REAPER and Bitwig do, since it may only be slow: once it has waited as long as
+a hang takes live (5 seconds), its window's progress bar names the plug-in ("Waiting for *name* (12 s)"), and its
+Cancel is the user's answer. The render never keeps Phazite's window: it waits on a thread of its own, a little at a
+time, and Cancel or closing the project ends the wait at once. A plug-in whose helper goes while the song renders
+fails the render, which names the plug-in ("*name* crashed while Phazite rendered. Reload the plug-in, then render
+again."); one that had crashed before fails it at its start ("*name* has crashed. Reload the plug-in, then render
+again."), unless it is switched off, as it isn't heard then. Nothing is written. Cancelling a render does not wait
+for a plug-in, not even one to be prepared for the engine's rate again while it keeps the render's block: its channel
+waits for the block (the engine skips its blocks meanwhile), and a plug-in that keeps it as long as a hang takes is
+ended. A crashed plug-in keeps the rate the engine last asked of it, which its reload opens it at.
 
 While the open song renders, the render has the song's plug-ins, and playback stops. A song rendered beside the open
 one (an older commit's bounce) gets plug-in instances of its own.
@@ -171,8 +209,12 @@ one (an older commit's bounce) gets plug-in instances of its own.
 A plug-in's editor is a window of its helper's, shown inside a window of Phazite's, which the helper places over it
 again as it moves or is resized. It is as large on the screen as the plug-in makes it, whatever the Interface Size, and
 fitted again as that changes. Phazite never calls into the helper's window, so a helper that hangs can't hang
-Phazite's window. The keys Phazite takes over a plug-in window (play, stop, the computer keyboard) are handed back
-by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
+Phazite's window. On Windows the helper's window sits in a window of Phazite's own (a socket) and tells Phazite's window
+nothing of what happens in it; as the plug-in's window closes, the socket is taken out of Phazite's window, hidden, and
+the helper is asked to close its editor without anything waiting, the socket going once the helper's window has left
+it. A window destroyed with a child of another process's in it waits for that process's thread, which kept Phazite 2
+seconds at every close, and as long as a hung helper lived. The keys Phazite takes over a plug-in window (play, stop,
+the computer keyboard) are handed back by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
 ([commands-keys-help.md](commands-keys-help.md)).
 
 ## Decisions
@@ -183,7 +225,9 @@ by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
   instances, and memory stays reasonable. There is no setting for it.
 - The sandbox exists to survive crashes and hangs. It does not contain a hostile plug-in: a helper runs with the
   user's rights, and a plug-in the user installs is trusted as any program they install is.
-- A hung helper is ended rather than waited for, after 10 seconds without an answer or 5 seconds on one block.
+- A hung helper is ended rather than waited for, after 10 seconds without an answer or 5 seconds on one block, while
+  it plays live. A render waits on, naming the plug-in, until the user cancels it: no limit of a render's, nor a
+  setting, can tell a slow plug-in from a hung one (2026-11-15, known bug 42).
 - A plug-in that crashed as it loaded stays off until the user reloads it, rather than being tried at every start.
 - A render fails, naming the plug-in, rather than writing a file with a silent part.
 - A late, busy or crashed effect fades to silence rather than passing its input through dry (the owner, 2026-11-14).

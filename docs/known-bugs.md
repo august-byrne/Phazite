@@ -33,37 +33,28 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Plug-ins
 
-- **42. A render ends a plug-in's helper that keeps one block for 30 seconds,** though the plug-in may only be slow (six
-  times the live hang limit: `renderHangFactor` in `src/model/plugins/internal/SandboxedProcessor.h`). Before 2026-11-13
-  a render waited without end, which hung Phazite on a real hang. Not seen with a real plug-in. Fix, if one needs it: a
-  setting, or a question to the user once the limit is reached.
-- **165. Closing a plug-in's window keeps the message thread waiting about 2 seconds,** so closing a project with
-  several plug-in windows open waits that long for each in turn. Why: `SandboxedEditor`'s destructor
-  (`src/app/SandboxedEditor.cpp`) asks the helper to close its editor and waits for the answer (`closeMilliseconds`),
-  while the helper's window, a child of Phazite's, can't be destroyed until Phazite's thread takes the messages Windows
-  sends it then, which it doesn't while it waits: the wait always runs out (measured 2.0 to 2.8 s with the tests'
-  stand-in, 2026-11-14, `tests/SandboxedPluginTests.cpp`). Fix: take the helper's window out of Phazite's (or give it
-  `WS_EX_NOPARENTNOTIFY`) and close it without waiting, then check that a hung helper can't hang Phazite's window as it
-  goes.
-- **166. What is left of the message thread waiting for plug-ins** after S1.4 (opening, saving, Auto Save and closing a
-  project wait for none): a store that isn't a save (Local History's snapshot, a commit, copying a track, a preset
-  saved) still asks the plug-ins whose states may have changed and waits for them together, up to 10 seconds; a
-  plug-in prepared for another sample rate or a longer block waits for its helper (`SandboxedInstance::prepareNow()`,
-  up to 10 seconds, behind whatever else the helper does, such as opening another plug-in); and a plug-in added, or
-  brought back by an undo once the project's plug-ins have loaded, opens while the message thread waits, as before
-  (`src/model/plugins/PluginInstances.cpp`). Fix: the same asks without waiting (`SandboxedInstance::askState()`,
-  `PluginInstances::whenStatesIn()`), and prepare and open in the background, the engine skipping the plug-in
-  meanwhile.
+- **166. What is left of the message thread waiting for plug-ins.** A plug-in added, or brought back by an undo once
+  the project's plug-ins have loaded, opens while the message thread waits (`PluginInstances::open()` →
+  `host.createInstance`, up to the load limit of 60 s); Reload waits for the helper to start and the plug-in to open
+  (`PluginInstances::reload()`, 20 s and more); opening a plug-in's window waits for the helper to make its editor
+  (`createSandboxedEditor()` → `openEditor`, up to 10 s); a parameter's text and a typed value wait up to 250 ms each
+  (`Parameter::getText()`, `getValueForText()`); and on Linux and macOS closing a plug-in's window still waits up to
+  2 s (the window that takes the helper's is Windows' only). Stores, saves, closes, preparing for another rate and
+  closing a window on Windows wait for none since 2026-11-15. Fix: the added plug-in opens in the background as a
+  project's do (shown as loading, silent meanwhile, its window opening when it is ready); the editor and the texts
+  asked without waiting, shown when the answer comes.
+- **181. A plug-in's value that is not a number gets in unchecked.** `jlimit` passes NaN on
+  (`src/model/plugins/SandboxedInstance.cpp`, about lines 108, 110 and 295; `src/model/devices/ParameterHandle.cpp`,
+  about 333; `Parameters.cpp`, about 395); what the helper sends is stored as it comes (about 844); the plug-in's
+  text is read with `getFloatValue()`, which can overflow on a long exponent; and a double past a float's range is
+  cast in `src/sandbox/core/PluginInfo.cpp` (about 47) and `RemoteInstance.cpp` (about 259). Fix: `std::isfinite`
+  where each value comes in, and `readFloat()` (`src/model/base/Json.h`) for the texts. Seen while known bug 148
+  was fixed.
 - **167. A plug-in with latency that joins a playing song moves the other tracks' delay compensation in one step.** As
   a project's plug-ins load in the background, each comes in with a new plan and fades in over 5 ms, but the delays
   that keep the other tracks in time with it change at once (`src/model/playback/SongPlayer.cpp`,
   `src/engine/core/Engine.cpp`): a click or a skip on tracks that play meanwhile. Fix: fade the mix out and in across
   a plan whose compensation changed, as a jump does. Left by S1.4; not measured.
-- **168. Windows shutting down while a close waits for a plug-in's settings never shows the save question.** The
-  close gathers the plug-ins' states first, with a window after a second whose Cancel goes on without them
-  (`ProjectSession::withPluginStates()`, `src/app/ProjectSession.cpp`); a session that ends during that wait ends
-  Phazite before the question. The autosave holds the changes. Fix: answer the session's end by going on without the
-  states at once. Left by S1.4.
 - **177. Over a plug-in's window, a shortcut on the digit row doesn't match on layouts where that row types other
   characters** (AZERTY, Czech): the keys sent to plug-in windows (`PluginKeys::getWantedKeys()`) are the keymaps' keys
   as written, not matched the three ways the window's own keys are (`KeyDispatcher::findMatches()`). Today only Space
@@ -229,6 +220,14 @@ its fix.
   the 100-track benchmark before and after.
 
 ## Tests
+
+- **182. The test program can crash as it exits, after every case has passed.** Seen once (2026-11-15,
+  `SandboxedPluginTests`, "SEGFAULT" after "Status: SUCCESS!"): the main thread was in `ExitProcess`, past every static
+  destructor, when a Windows thread-pool worker started (the graphics stack's, under JUCE's Direct2D windows) and ran
+  the program's thread-local initialiser, doctest's `g_oss`, which allocated after the C runtime's lock was gone. No
+  code of Phazite's was on its stack, and it didn't happen again in five runs. Fix, if it comes back: end the test
+  program without tearing the runtime down (`_exit` after the last check), which gives up the check of JUCE's leak
+  detector after `main` (`tests/TestMain.cpp`), or make that check before leaving `main`.
 
 - **180. Other tests compare against the wall clock with a slack, and can fail on a loaded machine.** Found by the
   survey made as known bug 178 was fixed (2026-11-15); none is a fault of Phazite's. A beat compared within 0.001

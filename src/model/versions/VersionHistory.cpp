@@ -1370,7 +1370,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
         song.storeDeviceStates();
         copy = song.getState().createCopy();
         parameters = readPluginParameters();
-        committed = song.getDeviceChangesOutsideHistory();
+        committed = song.getDeviceChangesHeld();
     }
 
     // A merge waiting, finished, or of none (Schema.h: MERGING) is never part of a commit's song, whichever song it is from:
@@ -1917,7 +1917,7 @@ bool VersionHistory::stage (const SongChange& line)
 
     // Its plug-ins' own settings as they are now go in with it.
     song.storeDeviceStates();
-    takeLine (line, song.getState(), readPluginParameters(), song.getDeviceChangesOutsideHistory());
+    takeLine (line, song.getState(), readPluginParameters(), song.getDeviceChangesHeld());
     return true;
 }
 
@@ -1938,7 +1938,7 @@ void VersionHistory::stageAll()
     song.storeDeviceStates();
     staged = song.getState().createCopy();
     stagedParameters = readPluginParameters();
-    reportedAtStaged = song.getDeviceChangesOutsideHistory();
+    reportedAtStaged = song.getDeviceChangesHeld();
     stagedChanged();
     tellNow();
 }

@@ -272,6 +272,16 @@ DeviceID duplicateChain (ProjectContext& context, DeviceID chain)
     return duplicateChain (*song, chain);
 }
 
+void duplicateChainWithPluginStates (ProjectContext& context, DeviceID chain)
+{
+    context.withPluginStates (
+        [&context, chain] (bool go)
+        {
+            if (go)
+                duplicateChain (context, chain);
+        });
+}
+
 bool canRemoveChain (const ProjectContext& context, DeviceID chain)
 {
     auto* song = findSong (context);

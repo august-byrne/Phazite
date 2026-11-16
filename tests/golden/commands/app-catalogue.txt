@@ -1,4 +1,4 @@
-# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), in order, with their keys as Windows and Linux write them, and whether they get the plug-ins' states first (plugin-states, or plugin-states-when for what is selected). Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
 edit.undo | ctrl + Z
 edit.redo | ctrl + shift + Z, ctrl + Y
 edit.undoOrRedo
@@ -7,9 +7,9 @@ transport.playPause | shift + spacebar
 transport.goToStart | home
 transport.goToEnd | end
 transport.lowLatency
-edit.delete | delete, backspace
+edit.delete | delete, backspace | plugin-states-when
 edit.deleteAndCloseGap
-edit.duplicate | ctrl + D
+edit.duplicate | ctrl + D | plugin-states-when
 edit.duplicateAsAlias
 clip.makeUnique
 edit.mute | 0
@@ -56,7 +56,7 @@ track.addReturn
 track.freeze
 track.bounceInPlace
 clip.consolidate | ctrl + J
-device.group | ctrl + G
+device.group | ctrl + G | plugin-states-when
 device.ungroup | ctrl + shift + G
 automation.automateLastTouched | ctrl + shift + A
 automation.showLanes | A
@@ -92,34 +92,34 @@ help.example.houseGroove
 project.new | ctrl + N
 project.open | ctrl + O
 project.openRecent
-project.saveAs | ctrl + shift + S
+project.saveAs | ctrl + shift + S | plugin-states
 project.save | ctrl + S
 project.autoSave
-version.save | ctrl + alt + S
+version.save | ctrl + alt + S | plugin-states
 version.undoCommit
-version.stage
+version.stage | plugin-states
 version.unstage
-version.stageAll
+version.stageAll | plugin-states
 version.unstageAll
-version.discardAll
-version.putBack
-version.checkout
-version.backToBranch
-version.bringBack
+version.discardAll | plugin-states
+version.putBack | plugin-states
+version.checkout | plugin-states
+version.backToBranch | plugin-states
+version.bringBack | plugin-states
 version.takeFrom
-version.restoreChange
+version.restoreChange | plugin-states
 version.showChanges
-version.newBranch
-version.switchBranch
-version.merge
-version.finishMerge
-version.cancelMerge
+version.newBranch | plugin-states
+version.switchBranch | plugin-states
+version.merge | plugin-states
+version.finishMerge | plugin-states
+version.cancelMerge | plugin-states
 version.hear
 version.compare | N
 version.bounce
 version.deleteBounce
-version.exportDawProject
-version.restoreSnapshot
+version.exportDawProject | plugin-states
+version.restoreSnapshot | plugin-states
 version.verify
 version.recover
 version.resetToReadable

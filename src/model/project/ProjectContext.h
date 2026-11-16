@@ -13,6 +13,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -104,11 +105,22 @@ public:
     void addListener (Listener*);
     void removeListener (Listener*);
 
+    // What copies, saves, replaces or records what the plug-ins hold of their own (a preset loaded or saved, a chain
+    // duplicated, a track dragged into the browser, every command with Command::needsPluginStates) does it once those that
+    // said they changed have given their states: then runs with true to go on, false if it is dropped (the wait's Cancel,
+    // another project opened), once (known bug 166). The app's session sets how (asking them, the window holding input,
+    // and a wait of more than a second in its progress window); without one, then runs at once. The command registry's
+    // gate is this one.
+    using PluginStatesGate = std::function<void (std::function<void (bool go)>)>;
+    void setPluginStatesGate (PluginStatesGate gate) { pluginStatesGate = std::move (gate); }
+    void withPluginStates (std::function<void (bool go)> then);
+
     struct Impl; // the open song, the selection and the range selection (internal/ProjectContext.h)
     Impl& getImpl() const noexcept { return *impl; }
 
 private:
     std::unique_ptr<Impl> impl;
+    PluginStatesGate pluginStatesGate;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectContext)
 };

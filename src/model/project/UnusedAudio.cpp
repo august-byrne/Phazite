@@ -238,6 +238,7 @@ void UnusedAudioFinder::find()
     UnusedAudioLook prepared;
     prepared.projectFile = findSong (context)->getFile();
     prepared.songPaths = findSongPaths (context);
+    lookedFor = prepared.songPaths;
     prepared.projectNumber = context.getProjectNumber();
 
     if (const auto* history = getVersionHistory (context))
@@ -268,8 +269,9 @@ void UnusedAudioFinder::looked (UnusedAudio look)
 {
     looking = false;
 
-    // Not another project's, which opened meanwhile: looked for again.
-    if (look.projectNumber == context.getProjectNumber())
+    // Not another project's, which opened meanwhile, nor one begun before the song changed what it plays (it would count a
+    // file played now, located or imported meanwhile): looked for again.
+    if (look.projectNumber == context.getProjectNumber() && findSong (context) != nullptr && findSongPaths (context) == lookedFor)
         found = std::move (look);
     else
         lookAgain = true;

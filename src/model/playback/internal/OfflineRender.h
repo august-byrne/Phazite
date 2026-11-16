@@ -6,8 +6,10 @@
 // end left out), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
 // with the project's plug-ins, which it has alone while it lives (PlaybackSession::lendToRender()); deleting it, on the
 // message thread, cancels what is left, waits for its thread and gives them back. A plug-in that had crashed before a job
-// starts, crashes as it plays, or keeps a block so long that its helper is ended for it (SandboxedProcessor.h), fails the
-// job, which says so, naming it: nothing is written without it (one switched off isn't heard, and fails nothing). Its
+// starts, or whose helper goes as it plays (a crash, or ended for a hang: SandboxedProcessor.h), fails the job, which says
+// so, naming it: nothing is written without it (one switched off isn't heard, and fails nothing). One that keeps a block
+// is waited for as long as it takes (it may only be slow: known bug 42), and named, once that is as long as a hang takes
+// live, for the render's window (findWait()), whose Cancel the user then has. Its
 // plug-ins are told that they play offline while it renders them (each block of a render says so, and the helper sets
 // them so: host/core/Instance.h), and live again as it gives them back, finished or cancelled
 // (SandboxedInstance::playLive()). Cancelling doesn't wait for a plug-in either.
@@ -15,6 +17,7 @@
 
 #include "SongPlayer.h"
 #include "engine/nodes/LoudnessMeter.h"
+#include "model/mixer/FreezeModel.h"
 
 #include <atomic>
 #include <functional>
@@ -68,6 +71,11 @@ public:
     // part of the job, from 0 to 1.
     bool isCancelled() const noexcept { return threadShouldExit(); }
     void setProgress (int job, double ofJob) noexcept;
+
+    // The plug-in it has waited for the longest, for a block or a channel for its rate, if that is longer than a hang takes
+    // live (its helper's audio hang limit), and for how long (any thread): what its window says it waits for.
+    using Wait = RenderWait;
+    std::optional<Wait> findWait() const;
 
 private:
     struct Compiled

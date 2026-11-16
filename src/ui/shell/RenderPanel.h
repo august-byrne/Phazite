@@ -18,11 +18,19 @@ public:
 
     static constexpr int width = 420, height = 128;
 
-    // Cancel stops the render (which goes) and closes the dialog window it is in.
+    // Cancel stops the render (which goes) and closes the dialog window it is in; the second way out, where the render
+    // has one (getGoOnName()), does what it does first; Escape is Cancel there.
     void cancel();
+    void goOn();
+    juce::TextButton& getGoOnButton() noexcept { return goOnButton; }
 
     bool isRendering() const noexcept { return render != nullptr; }
     juce::TextButton& getCancelButton() noexcept { return cancelButton; }
+    juce::ProgressBar& getProgressBar() noexcept { return progressBar; }
+
+    // A render's wait for a plug-in on its progress bar, "Waiting for Kontakt (12 s)", in the place of its percentage, which
+    // comes back once it is over; what the bar shows now is kept in shown. The export's window shows it so too.
+    static void showWait (juce::ProgressBar&, juce::String& shown, const std::optional<RenderWait>&);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -32,7 +40,9 @@ private:
     double progress = 0.0; // what the progress bar shows
     juce::Label title;
     juce::ProgressBar progressBar { progress };
-    juce::TextButton cancelButton { "Cancel" };
+    juce::TextButton cancelButton { "Cancel" }, goOnButton;
+    bool keyPressed (const juce::KeyPress&) override;
+    juce::String shownWait; // what the bar says of a plug-in the render waits for (showWait())
 
     void timerCallback() override;
 

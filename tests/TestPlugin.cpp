@@ -93,9 +93,11 @@ void TestPlugin::setGain (const Song& song, DeviceID id, float gain)
     changed.writeFloat (1.0f);
     REQUIRE (instance.getRemote().setState (changed.getMemoryBlock(), stateMilliseconds));
 
-    // Its instance's value for it, once the helper has told.
+    // Its instance's value for it, once the helper has told; and a moment later its state as it is now, which Phazite asks
+    // for unasked once the plug-in is quiet (a store, which doesn't wait, writes it: PluginInstances::store()).
     const auto index = instance.findParameter (gainID);
     REQUIRE (index >= 0);
     REQUIRE (dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance.getParameterValue (index), gain); }));
+    REQUIRE (dispatchMessagesUntil ([&] { return ! instance.isStateUnasked() && ! instance.isAskingState(); }));
 }
 } // namespace phazite::test

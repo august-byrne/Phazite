@@ -518,6 +518,15 @@ TEST_CASE ("Bring Back sets a plug-in's settings only where they differ from the
     REQUIRE (
         dispatchMessagesUntil ([&s, device] { return phazite::findPluginInstance (*phazite::findSong (s.context), device) != nullptr; }));
     const auto gain = TestPlugin::getGain (*phazite::findSong (s.context), device);
+
+    // A moment later, as a person commits: the plug-in, opened from no state of the song's, has given its own (a commit
+    // writes what each gave last: model/plugins/internal/PluginInstances.h).
+    REQUIRE (dispatchMessagesUntil (
+        [&s]
+        {
+            const auto& song = *phazite::findSong (s.context);
+            return phazite::getPluginsWithOlderStates (song).isEmpty() && phazite::getPluginsAnswering (song).isEmpty();
+        }));
     const auto version = keepVersion (s.context, "Before");
 
     // What writes the plug-in's settings into the song, which its instance then takes.

@@ -39,7 +39,17 @@ TestSong::TestSong (Start start)
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
     addSongCommands (commands, context, renders);
-    save = [this] (std::function<void (bool)> then) { then (project->save().wasOk()); };
+
+    // As the app's (ProjectSession::addCommands()), but for its progress window: a command that reads the plug-ins' states
+    // runs once those that said they changed have given them.
+    context.setPluginStatesGate (
+        [this] (std::function<void (bool)> run)
+        { whenPluginStatesIn (project->getSong(), SandboxedInstance::Ask::changedAndAnswering, [run] (bool) { run (true); }); });
+    commands.setPluginStatesGate ([this] (std::function<void (bool)> run) { context.withPluginStates (std::move (run)); });
+
+    // As the app's save (ProjectSession::saveThen()): its plug-ins asked for their states first.
+    save = [this] (std::function<void (bool)> then)
+    { whenPluginStatesIn (project->getSong(), true, [this, then] (bool) { then (project != nullptr && project->save().wasOk()); }); };
 
     // Its history read, and its initial commit made, as a project's are as it starts.
     REQUIRE (waitForVersionHistory (context));
@@ -84,9 +94,19 @@ juce::File TestSong::getSoundsFolder() const
     return folder.getChildFile ("Sounds");
 }
 
+void TestSong::saveWithPluginStates()
+{
+    // As the app saves: every plug-in asked for its state first, which a save doesn't wait for
+    // (ProjectSession::saveThen(); model/plugins/internal/PluginInstances.h).
+    auto asked = false;
+    whenPluginStatesIn (project->getSong(), true, [&asked] (bool) { asked = true; });
+    REQUIRE (dispatchMessagesUntil ([&asked] { return asked; }));
+    REQUIRE (project->save().wasOk());
+}
+
 void TestSong::reopen (bool waitForPlugins)
 {
-    REQUIRE (project->save().wasOk());
+    saveWithPluginStates();
     const auto file = project->getFile();
     setSong (context, nullptr);
     project = nullptr;

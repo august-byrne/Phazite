@@ -14,8 +14,10 @@
 // the plug-ins a song holds as it opens (the first sync()) open in the background, each in its helper, beside each other,
 // the song playing meanwhile without them, each coming in as it is ready (the session's plan made again); a save asks
 // them all for their states at once and writes once the answers are in or their time is up (whenStatesIn()), a plug-in
-// that doesn't answer keeping the state it last gave (getOlderStates() names it); and an instance let go of closes in its
-// helper, which goes on a thread of the host's, without anything waiting for either (PluginHost.h).
+// that doesn't answer keeping the state it last gave (getOlderStates() names it); a store that isn't a save (a copy, a
+// commit, a preset, a window closed) writes what each gave last, asking those that may have changed, and a plug-in that
+// says it changed is asked once it is quiet, so that what it gave last is its own (known bug 166); and an instance let go
+// of closes in its helper, which goes on a thread of the host's, without anything waiting for either (PluginHost.h).
 #pragma once
 
 #include "SandboxedInstance.h"
@@ -82,6 +84,7 @@ public:
     // plug-ins whose states the song holds are older than theirs: they didn't answer since they may have changed, or their
     // helper went.
     void whenStatesIn (bool all, std::function<void (bool allIn)>);
+    void whenStatesIn (SandboxedInstance::Ask, std::function<void (bool allIn)>); // asking as askState() does
     void giveUpStates();
     juce::StringArray getOlderStates() const;
     juce::StringArray getAsked() const; // those whose answers are still to come, by name
@@ -97,14 +100,32 @@ public:
     bool reload (DeviceID, juce::String& error);
     int getGeneration (DeviceID) const; // one more at each reload
 
+    // Whether the last reload of a crashed one opened it from the state the song holds, rather than its own last: it crashed
+    // again soon after a reload from its own (within so many milliseconds: five seconds; shorter or longer in a test), so
+    // that its own may be what it crashes for; the next reload tries its own again.
+    bool wasReloadedFromSong (DeviceID) const;
+    static void setSoonAfterReload (double milliseconds) noexcept;
+
+    // How many of the changes a plug-in told the store still keeps, to say how far a state holds them (the tests' measure).
+    size_t countReportsKept (DeviceID) const;
+    static double getSoonAfterReload() noexcept;
+
     // What the plug-ins keep of their own, stored into their elements in the song, outside the undo history, where it
     // differs from what is there: a plug-in's state, its program, and the values set by hand of the parameters automation or
-    // modulation moves (VALUE). One device, a track's (its folder's tracks' and its containers' too), or every one. Those
-    // whose states may have changed since they last gave them are asked at once and waited for together, within one time
-    // limit; one that doesn't answer keeps the state it last gave.
+    // modulation moves (VALUE). One device, a track's (its folder's tracks' and its containers' too), or every one. Nothing
+    // waits for a plug-in (known bug 166): each state is the one the plug-in gave last, which is its own unless it changed a
+    // moment ago (a plug-in that says it changed is asked for its state once it is quiet, unasked) or doesn't answer; and
+    // those that said they changed since are asked at once, their answers written into the same elements as they come.
+    // What needs every plug-in's own state now asks first, and goes on once the answers are in (whenStatesIn(), then
+    // this): a save, and every command that reads them (Command::needsPluginStates).
     void store (DeviceID);
     void storeTrack (TrackID);
     void storeAll();
+
+    // A device's program and state as the song holds them, given to its instance though they may not have changed in the
+    // song: what a preset loaded into it sets may be what a store just wrote, the state the plug-in gave last, which needn't
+    // be its own.
+    void giveSongState (DeviceID);
 
     // Hears what the plug-ins change themselves.
     struct Listener
@@ -129,7 +150,11 @@ private:
         bool wasKnown = false;             // whether scanning had found it as it was opened
         juce::String error;                // why it didn't load
         int generation = 0;
-        std::shared_ptr<Opening> opening; // while it loads
+        std::shared_ptr<Opening> opening;          // while it loads
+        std::optional<double> reloadedTime;        // as it was last reloaded after a crash (juce::Time::getMillisecondCounterHiRes())
+        bool reloadedFromSong = false;             // that reload opened it from the song's state, not its own (reload())
+        std::optional<juce::MemoryBlock> ownState; // its own last state, kept aside as it was reloaded
+        juce::MemoryBlock songStateTried;          // the song's, which that reload opened it from
     };
 
     Song& song;
@@ -151,8 +176,39 @@ private:
     void setUp (SandboxedInstance&, const juce::ValueTree& deviceState, const juce::MemoryBlock& openedFrom, int openedProgram);
     void listen (DeviceID, SandboxedInstance&);
     void store (const std::vector<DeviceID>&);
-    void write (DeviceID); // what it keeps, as it last gave it
+    void write (DeviceID, juce::ValueTree device, SandboxedInstance&); // what it keeps, as it last gave it, into its element
     void timerCallback() override;
+    void lookSoon(); // the timer started, unless it runs
+
+    // The changes each plug-in said it made, by the count of its state's changes each came at and the song's count of its
+    // reports then; and the song's count as far as the state it last had holds them (Song::setDeviceChangesHeld()).
+    std::map<DeviceID, std::vector<std::pair<int, int>>> reports;
+    void noteReport (DeviceID, const SandboxedInstance&);
+    void pruneReports (DeviceID, const SandboxedInstance&);
+    int countReportsHeld (DeviceID, const SandboxedInstance&);
+
+    // The answers a store asked for, still to come: for a device, to be written into its element (which an undo may bring
+    // back, if it goes meanwhile), from its instance (kept until then).
+    struct Answering
+    {
+        DeviceID id;
+        juce::ValueTree device;
+        std::shared_ptr<SandboxedInstance> instance;
+    };
+
+    std::vector<Answering> answering;
+    void takeAnswers();
+
+    // While a save waits (whenStatesIn()): the plug-ins it asked, by how many changes each had then (asked again, once, if
+    // the answer it waits for is to an older ask), which it waits for alone.
+    struct Wanted
+    {
+        int changes = 0;
+        bool askedAgain = false;
+    };
+
+    std::map<DeviceID, Wanted> wantedStates;
+    bool askStates (SandboxedInstance::Ask);
     void takeFromSong (const juce::ValueTree& deviceState, const juce::Identifier& property);
     void takeValueFromSong (const juce::ValueTree& value);
 
@@ -179,6 +235,7 @@ std::optional<PluginInstances::Status> getPluginStatus (const Song&, DeviceID);
 // in (PluginInstances::whenStatesIn(): with true at once without a session); the wait given up, and the plug-ins still
 // answering, by name; the plug-ins whose states the song holds are older than theirs, and those still loading, by name.
 void whenPluginStatesIn (const Song&, bool all, std::function<void (bool allIn)>);
+void whenPluginStatesIn (const Song&, SandboxedInstance::Ask, std::function<void (bool allIn)>);
 bool askPluginStates (const Song&, bool all);
 void giveUpPluginStates (const Song&);
 juce::StringArray getPluginsAnswering (const Song&);

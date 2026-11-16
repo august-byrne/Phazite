@@ -457,6 +457,13 @@ std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
     return {};
 }
 
+bool wasReloadedFromProject (ProjectContext& context, DeviceID id)
+{
+    auto* song = findSong (context);
+    auto* session = song != nullptr ? findSession (*song) : nullptr;
+    return session != nullptr && session->getPlugins().wasReloadedFromSong (id);
+}
+
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);

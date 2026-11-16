@@ -17,6 +17,8 @@
 #include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include "SessionEnd.h"
+
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
@@ -173,6 +175,7 @@ public:
         addSongCommands (*commands, session->getContext(), *mainWindow);
         session->addCommands (*commands, *mainWindow);
         mainWindow->addCommands();
+        sessionEnd = std::make_unique<SessionEndWatch> ([this] (bool ending) { sessionEndChanged (ending); });
 
         // The keymap the user chose, with their own changes to it.
         ui::loadKeySettings (*commandBridge, services->settings);
@@ -216,6 +219,7 @@ public:
     void shutdown() override
     {
         smokeTestCheck = nullptr;
+        sessionEnd = nullptr; // before the session it tells
 
         if (services != nullptr && commandBridge != nullptr)
             ui::saveKeySettings (*commandBridge, services->settings);
@@ -263,12 +267,34 @@ public:
             juce::Logger::writeToLog ("No audio output is open.");
     }
 
+    // The computer's session ending, as Phazite's own window for it hears it (SessionEnd.h): nothing waits for a plug-in's
+    // settings from now on, so that the save question comes before Windows ends Phazite (known bug 168); a close already
+    // waiting for them asks it now, and otherwise one begins, as JUCE's window may be asked after this one or before it.
+    // Its end cancelled: Phazite waits for its plug-ins again.
+    void sessionEndChanged (bool ending)
+    {
+        if (session == nullptr)
+            return;
+
+        session->setSessionEnding (ending);
+
+        if (ending && ! session->isClosing() && ! isDialogShowing())
+            systemRequestedQuit();
+    }
+
+    // A dialog the user is to finish first (such as "Save changes?"): not the window's hold on its input while a command
+    // waits for the plug-ins' states, after which a quit asked meanwhile goes on.
+    bool isDialogShowing() const
+    {
+        auto* modal = juce::Component::getCurrentlyModalComponent();
+        return modal != nullptr && (session == nullptr || ! session->isHoldingInput (modal));
+    }
+
     void systemRequestedQuit() override
     {
-        // Let the user finish an open dialog first (such as "Save changes?").
-        if (auto* modal = juce::Component::getCurrentlyModalComponent())
+        if (isDialogShowing())
         {
-            modal->toFront (true);
+            juce::Component::getCurrentlyModalComponent()->toFront (true);
             return;
         }
 
@@ -278,12 +304,21 @@ public:
             return;
         }
 
-        // Closed, then what the versions still write finished behind a window that says so (ProjectSession.h).
+        // Once a command that waits for the plug-ins' states has run, or been dropped.
+        if (session->isWaitingForPluginStates())
+        {
+            session->afterPluginStatesGate ([this] { systemRequestedQuit(); });
+            return;
+        }
+
         session->closeThen (
             [this] (bool closed)
             {
+                // Closed, then what the versions still write finished behind a window that says so (ProjectSession.h).
                 if (closed && session != nullptr)
                     session->closeAndFinishThen ([] { quit(); });
+                else if (session != nullptr)
+                    session->setSessionEnding (false); // the close cancelled: Phazite goes on, and waits for its plug-ins again
             });
     }
 
@@ -355,6 +390,7 @@ private:
     std::unique_ptr<CommandRegistry> commands;
     std::unique_ptr<ui::CommandBridge> commandBridge; // uses the commands
     std::unique_ptr<ProjectSession> session;
+    std::unique_ptr<SessionEndWatch> sessionEnd; // tells the session
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<SmokeTestCheck> smokeTestCheck; // uses the window and the session
 };

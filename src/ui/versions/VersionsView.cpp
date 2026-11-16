@@ -389,9 +389,10 @@ public:
                 return;
             }
 
+            // The command for the line selected, which gets the plug-ins' states first (known bug 166).
             if (! isStaged && view.getStagePosition (row).contains (at))
             {
-                stageChange (view.context, change);
+                view.commands.invoke ("version.stage");
                 return;
             }
 

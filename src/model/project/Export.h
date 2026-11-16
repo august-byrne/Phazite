@@ -11,6 +11,8 @@
 // stem is complete; the folder they replace goes to the recycle bin.
 #pragma once
 
+#include "model/mixer/FreezeModel.h"
+
 #include <juce_core/juce_core.h>
 
 #include <functional>
@@ -82,7 +84,8 @@ class SongExport
 public:
     ~SongExport();
 
-    float getProgress() const; // from 0 to 1
+    float getProgress() const;                 // from 0 to 1
+    std::optional<RenderWait> getWait() const; // a plug-in it waits for (model/mixer/FreezeModel.h)
 
     struct Impl; // the render, and what its thread shares with this (Export.cpp)
     explicit SongExport (std::unique_ptr<Impl>);

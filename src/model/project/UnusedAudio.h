@@ -62,7 +62,9 @@ int deleteUnusedAudio (ProjectContext&, const UnusedAudio&, const juce::Array<ju
 // Clean Up window): what the song plays taken on the message thread, the rest read on a thread of its own, each saved
 // file read again only once it changed and each piece of the versions once (VersionHistory.h). find() looks again (once
 // the look under way is done, if one is); onFound is told on the message thread once a look is done, or once it can't
-// look (getFound() keeps the last look then). A look under way stops at its next step as the finder goes. Message thread.
+// look (getFound() keeps the last look then); a look begun before the song changed what it plays (a file located, a clip
+// added) is looked again rather than shown, as it would count a file now played. A look under way stops at its next step
+// as the finder goes. Message thread.
 struct UnusedAudioLook;
 
 class UnusedAudioFinder
@@ -81,6 +83,7 @@ private:
     BackgroundJobs jobs;
     std::shared_ptr<UnusedAudioLook> saved; // what was read of the saved files, which the looks keep
     std::optional<UnusedAudio> found;
+    juce::StringArray lookedFor; // what the song played as the look under way began
     bool looking = false, lookAgain = false;
 
     void looked (UnusedAudio);

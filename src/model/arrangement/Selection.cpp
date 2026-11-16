@@ -10,10 +10,13 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <set>
 #include <vector>
 
 namespace phazite
@@ -277,6 +280,38 @@ bool canDeleteSelection (const Selection& selection, const RangeSelection& range
            || hasSelectedClips (selection) || hasSelectedTracks (selection);
 }
 
+bool doesDeleteReadPlugins (const Selection& selection, const RangeSelection& range)
+{
+    // Delete and Duplicate act on tracks only when nothing they come to first is selected (deleteSelection()'s order), and
+    // only tracks among those take devices along: notes, points, a time range, sections and clips hold no plug-in's state.
+    auto* song = selection.getSong();
+
+    if (song == nullptr || hasSelectedNotes (selection) || getSelectedPoints (selection).has_value() || ! range.isEmpty()
+        || hasSelectedSections (selection) || hasSelectedClips (selection))
+        return false;
+
+    std::set<TrackID> taken; // the tracks it acts on, with those in their folders
+
+    for (const auto track : getSelectedOutermostTracks (selection))
+    {
+        auto tracks = getTracksInFolder (*song, track);
+        tracks.push_back (track);
+        taken.insert (tracks.begin(), tracks.end());
+    }
+
+    for (const auto id : taken)
+        if (holdsPlugin (findTrackState (*song, id)))
+            return true;
+
+    // And the tracks of the pads of their drum samplers, which a delete takes along.
+    for (const auto id : getTrackIDs (*song))
+        if (const auto pad = getPlayedPad (*song, id); pad.has_value() && ! taken.contains (id))
+            if (taken.contains (getDeviceChannel (*song, pad->first)) && holdsPlugin (findTrackState (*song, id)))
+                return true;
+
+    return false;
+}
+
 bool hasSelectedRangeOrClips (const Selection& selection, const RangeSelection& range)
 {
     return ! range.isEmpty() || hasSelectedClips (selection);
@@ -337,7 +372,8 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                     .perform = [&selection, &range] { deleteSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
                     .undoTarget = undoTarget,
-                    .currentName = [&selection, &range] { return describeSelection (selection, range, "Delete"); } });
+                    .currentName = [&selection, &range] { return describeSelection (selection, range, "Delete"); },
+                    .readsPluginStates = [&selection, &range] { return doesDeleteReadPlugins (selection, range); } });
 
     registry.add ({ .id = "edit.deleteAndCloseGap",
                     .name = "Delete and Close Gap",
@@ -359,7 +395,8 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                     .perform = [&selection, &range] { duplicateSelection (selection, range, false); },
                     .isEnabled = [&selection, &range] { return canDeleteSelection (selection, range); },
                     .undoTarget = undoTarget,
-                    .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); } });
+                    .currentName = [&selection, &range] { return describeSelection (selection, range, "Duplicate"); },
+                    .readsPluginStates = [&selection, &range] { return doesDeleteReadPlugins (selection, range); } });
 
     registry.add ({ .id = "edit.duplicateAsAlias",
                     .name = "Duplicate as Alias",

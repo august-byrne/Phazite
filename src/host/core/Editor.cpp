@@ -81,6 +81,17 @@ public:
             removeFromDesktop();
             parent = window;
             addToDesktop (0, reinterpret_cast<void*> ((juce::pointer_sized_int) window));
+
+#if JUCE_WINDOWS
+            // What happens in it isn't told to Phazite's window it is in (a click, its window destroyed), which Windows would
+            // send to Phazite's thread and wait for: the helper waits for nothing of Phazite's (known bug 165). Set again for
+            // each native window JUCE makes, which it does here alone. JUCE workaround W51 (docs/juce-workarounds.md).
+            if (auto* peer = getPeer())
+            {
+                auto* handle = static_cast<HWND> (peer->getNativeHandle());
+                SetWindowLongPtrW (handle, GWL_EXSTYLE, GetWindowLongPtrW (handle, GWL_EXSTYLE) | WS_EX_NOPARENTNOTIFY);
+            }
+#endif
         }
 
         // Its place in its own units, which its window counts in the screen's pixels; as large as Phazite's area where the

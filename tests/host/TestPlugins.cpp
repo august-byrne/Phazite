@@ -600,6 +600,10 @@ namespace
         {
             waitAtSlowGate();
             StandIn::getStateInformation (data);
+
+            // As a plug-in with samples in its state: 20 MB more, while the bulk file is there (TestPlugins::getSlowBulk()).
+            if (TestPlugins::getSlowBulk().existsAsFile())
+                data.setSize (data.getSize() + 20 * 1024 * 1024, true);
         }
 
         // A Level below 0 in the state it opens from crashes it, as a plug-in that crashes as it loads does (set later, it
@@ -610,6 +614,13 @@ namespace
 
             if (! prepared && level->getValue() < 0.0f)
                 crashNow();
+
+            // A second value of 1 after its Level makes it take the Level as its own window would set it, telling the host.
+            juce::MemoryInputStream in (data, (size_t) size, false);
+            in.skipNextBytes (4);
+
+            if (in.getNumBytesRemaining() >= 4 && in.readFloat() > 0.5f)
+                level->setValueNotifyingHost (level->getValue());
         }
 
     private:
@@ -767,6 +778,11 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
     }
 
     return nullptr;
+}
+
+juce::File TestPlugins::getSlowBulk()
+{
+    return getSlowGate().getSiblingFile ("PhaziteTestSlowBulk");
 }
 
 juce::File TestPlugins::getSlowGate (bool closing)

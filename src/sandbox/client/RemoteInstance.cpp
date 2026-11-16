@@ -84,28 +84,48 @@ RemoteInstance::~RemoteInstance()
 
 bool RemoteInstance::prepare (double sampleRate, const BlockChannel::Limits& limits, int timeoutMilliseconds)
 {
+    auto asked = askToPrepare (sampleRate, limits);
+
+    if (asked == nullptr)
+        return false;
+
+    asked->reply->wait (timeoutMilliseconds);
+    return finishPreparing (*asked);
+}
+
+std::unique_ptr<RemoteInstance::Preparing> RemoteInstance::askToPrepare (double sampleRate, const BlockChannel::Limits& limits)
+{
     const auto name = makeChannelName();
     auto newChannel = BlockChannel::create (name, limits);
 
     if (newChannel == nullptr)
-        return false;
+        return nullptr;
 
     auto message = helper.makeRequest (MessageType::prepareInstance);
     message.add (id);
     write (message, name, limits, sampleRate);
-    const auto answer = helper.request (message, timeoutMilliseconds);
-    newChannel->forgetName(); // opened by the helper, or never to be
+    auto asked = std::make_unique<Preparing>();
+    asked->channel = std::move (newChannel);
+    asked->sampleRate = sampleRate;
+    asked->reply = helper.send (message, false); // the heartbeat's own limit goes on meanwhile
+    return asked;
+}
 
-    if (! answer.has_value())
+bool RemoteInstance::finishPreparing (Preparing& asked)
+{
+    // Opened by the helper, or never to be: the helper keeps its name no longer.
+    asked.channel->forgetName();
+
+    if (! asked.reply->isDone() || asked.reply->getReply().isEmpty() || ! helper.isRunning())
         return false;
 
-    MessageReader reader (*answer);
+    MessageReader reader (asked.reply->getReply());
 
     if (! reader.readBool())
         return false;
 
-    channel = std::move (newChannel);
-    channelRate = sampleRate;
+    channel = std::move (asked.channel);
+    channelRate = asked.sampleRate;
     return true;
 }
 
@@ -141,14 +161,11 @@ bool RemoteInstance::setState (const juce::MemoryBlock& state, int timeoutMillis
 
 bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
 {
+    // Its program from now on, as the helper sets it in turn (asked without waiting too).
     auto message = helper.makeRequest (MessageType::setProgram);
     message.add (id).add ((std::int32_t) index);
-
-    if (! helper.request (message, timeoutMilliseconds).has_value())
-        return false;
-
     program = index;
-    return true;
+    return helper.request (message, timeoutMilliseconds).has_value();
 }
 
 std::optional<RemoteInstance::EditorSize> RemoteInstance::openEditor (int timeoutMilliseconds)

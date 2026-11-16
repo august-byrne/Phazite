@@ -37,6 +37,9 @@ std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
+
+// Whether a track's element, a container's or a device's is, or holds among its devices (in containers too), a plug-in's.
+bool holdsPlugin (const juce::ValueTree&);
 bool isContainerState (const juce::ValueTree& deviceState);
 
 // Whether a device's element is an instrument's, which turns notes into sound: one of Phazite's own instruments, a plug-in

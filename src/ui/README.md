@@ -218,7 +218,7 @@ The window's content and everything around the views.
 | `Welcome.*` | The welcome window. |
 | `NewProjectPanel.*` | The new-project window. |
 | `ExportPanel.*` | The export window, for the song or its stems. |
-| `RenderPanel.*` | The window a freeze or a bounce shows while it renders. |
+| `RenderPanel.*` | The window a freeze or a bounce shows while it renders, naming a plug-in it has waited for as long as a hang takes. |
 | `CleanUpPanel.*` | The window of Clean Up Unused Audio. |
 | `ProgressionsPanel.*` | The Chord Progressions window. |
 | `AboutPanel.*` | The About window: Phazite's version, copyright and the notice its licence asks for, and every licence it ships, from the model's `src/model/engine/AppInfo.h`. |

@@ -50,8 +50,8 @@ public:
     bool canSaveTrackPreset() const;
 
     // Saves a preset of a track in the presets' Tracks folder, named after it (with a number if the name is taken), as a
-    // track dropped here is; shows it in Presets. Returns the file, or none if nothing was saved.
-    juce::File saveTrackPreset (TrackID);
+    // track dropped here is, once the plug-ins that said they changed have given their states; shows it in Presets.
+    void saveTrackPreset (TrackID);
 
     // A device's presets, as its Presets button in the Devices view shows them: Phazite's for it, by kind of sound, then
     // the user's; the one chosen loads into the device as one undo step (PresetModel.h: loadPresetInto()). And Save

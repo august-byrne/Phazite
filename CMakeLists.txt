@@ -1051,7 +1051,9 @@ target_sources(phazite_app PRIVATE
     src/app/RunMarker.cpp
     src/app/RunMarker.h
     src/app/SandboxedEditor.cpp
-    src/app/SandboxedEditor.h)
+    src/app/SandboxedEditor.h
+    src/app/SessionEnd.cpp
+    src/app/SessionEnd.h)
 
 phazite_use_core(phazite_app)
 phazite_precompile_juce(phazite_app ${PHAZITE_UI_MODULES})

@@ -96,5 +96,8 @@ struct TrackRender::Impl
     virtual ~Impl() = default;
     virtual float getProgress() const = 0;
     virtual juce::String getTitle() const = 0;
+    virtual std::optional<RenderWait> getWait() const { return {}; } // a render's (OfflineRender::findWait())
+    virtual juce::String getGoOnName() const { return {}; }          // a second way out of its window but Cancel, if any
+    virtual void goOn() {}
 };
 } // namespace phazite

@@ -151,7 +151,7 @@ void showChainMenu (ProjectContext& context, DeviceID chain, juce::Component& ta
     menu.addSectionHeader (info->name);
     menu.addItem ("Rename", rename != nullptr, false, rename != nullptr ? rename : [] {});
     menu.addItem ("Duplicate", canAddChain (context, container), false,
-                  act ([&projectContext, chain] { duplicateChain (projectContext, chain); }));
+                  act ([&projectContext, chain] { duplicateChainWithPluginStates (projectContext, chain); }));
 
     // A container split into bands keeps its chains in their bands' order. Side by side, they move left and right.
     if (canMoveChains (context, container))

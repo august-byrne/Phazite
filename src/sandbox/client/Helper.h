@@ -62,14 +62,16 @@ public:
     private:
         friend class Helper;
         std::int64_t request = 0;
+        bool holdsOffHang = true;
         juce::WaitableEvent answered { true }; // stays signalled once it is
         juce::MemoryBlock reply;
         std::atomic<bool> done { false };
     };
 
     // A request sent without waiting for its answer, from any thread but the pipe's: while its reply is kept and not done,
-    // the helper isn't taken for hung for not answering the heartbeat, as for request().
-    std::shared_ptr<Reply> send (MessageWriter&);
+    // the helper isn't taken for hung for not answering the heartbeat, as for request(), unless it doesn't hold that off
+    // (a channel for another rate, which the helper makes at once: known bug 166).
+    std::shared_ptr<Reply> send (MessageWriter&, bool holdsOffHang = true);
 
     // A message that wants no answer.
     bool post (MessageWriter&);

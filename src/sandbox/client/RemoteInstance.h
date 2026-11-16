@@ -51,10 +51,24 @@ public:
     // plays.
     BlockChannel& getChannel() noexcept { return *channel; }
     bool prepare (double sampleRate, const BlockChannel::Limits&, int timeoutMilliseconds);
+
+    // The same asked for without waiting (nullptr if the channel couldn't be made); then, once its reply is done (or never
+    // to be: the helper went, or the asker gives up), the new channel taken in, if the helper opened it: false if it didn't,
+    // and the old one stays. Only the engine's preparing calls them, while no block plays as the channel changes.
+    struct Preparing
+    {
+        std::shared_ptr<Helper::Reply> reply;
+        std::unique_ptr<BlockChannel> channel;
+        double sampleRate = 0.0;
+    };
+
+    std::unique_ptr<Preparing> askToPrepare (double sampleRate, const BlockChannel::Limits&);
+    bool finishPreparing (Preparing&);
     double getSampleRate() const noexcept { return channelRate; } // its channel's: as it opened, or was last prepared
 
     // Its state, as the plug-in keeps its settings (a VST3's as its format's preset file, which other hosts read:
-    // sandbox/core/Vst3State.h), within the time; none if it didn't come.
+    // sandbox/core/Vst3State.h), within the time; none if it didn't come. Given one, or a program (below), within the time,
+    // or for 0 without waiting: the helper takes what it is asked in turn, so that what is asked after has its answer after.
     std::optional<juce::MemoryBlock> getState (int timeoutMilliseconds);
     bool setState (const juce::MemoryBlock&, int timeoutMilliseconds);
 
@@ -62,13 +76,14 @@ public:
     std::shared_ptr<Helper::Reply> askState();
     static std::optional<juce::MemoryBlock> readState (const Helper::Reply&);
 
-    // Its program (one of getInfo().programs): as it opened, then as it was set or the helper last told (any thread).
+    // Its program (one of getInfo().programs): as it opened, then as it was last set or the helper last told (any thread).
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
     bool setProgram (int index, int timeoutMilliseconds);
 
     // Its editor, a window of the helper's (getInfo().hasEditor): made, with its size and whether it can be resized, or
     // none; shown in a window of Phazite's (by its native handle) at a place in its pixels, or hidden with no window (no
-    // waiting); and closed. And the keys Phazite takes over it, by their codes and modifiers (JUCE's), which the helper
+    // waiting); and closed, within the time (0: asked without waiting). And the keys Phazite takes over it, by their codes
+    // and modifiers (JUCE's), which the helper
     // hands back as the listener's editorKey(), unless the plug-in gets every key.
     struct EditorSize
     {

@@ -293,6 +293,7 @@ struct SongExport::Impl
 {
     virtual ~Impl() = default;
     virtual float getProgress() const = 0;
+    virtual std::optional<RenderWait> getWait() const = 0;
 };
 
 namespace
@@ -344,6 +345,7 @@ namespace
         }
 
         float getProgress() const override { return renderer != nullptr ? renderer->getProgress() : 0.0f; }
+        std::optional<RenderWait> getWait() const override { return renderer != nullptr ? renderer->findWait() : std::nullopt; }
 
         void finish (const ExportReport& rendered)
         {
@@ -440,6 +442,7 @@ namespace
         }
 
         float getProgress() const override { return renderer != nullptr ? renderer->getProgress() : 0.0f; }
+        std::optional<RenderWait> getWait() const override { return renderer != nullptr ? renderer->findWait() : std::nullopt; }
 
         void finish (const ExportReport& rendered)
         {
@@ -499,6 +502,11 @@ SongExport::SongExport (std::unique_ptr<Impl> i)
 }
 
 SongExport::~SongExport() = default;
+
+std::optional<RenderWait> SongExport::getWait() const
+{
+    return impl->getWait();
+}
 
 float SongExport::getProgress() const
 {

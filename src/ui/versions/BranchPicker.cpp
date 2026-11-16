@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BranchPicker.h"
 #include "VersionsView.h"
+#include "model/project/ProjectContext.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 #include "ui/theme/Popups.h"
@@ -381,7 +382,14 @@ void BranchPicker::choose (int index)
                     break;
 
                 case Row::Kind::merge:
-                    mergeBranch (projectContext, row.branch.id);
+                    // Once the plug-ins that said they changed have given their states, as version.merge's command is
+                    // (ProjectContext::withPluginStates(); known bug 166): its clashes are found against what they have now.
+                    projectContext.withPluginStates (
+                        [&projectContext, id = row.branch.id] (bool go)
+                        {
+                            if (go)
+                                mergeBranch (projectContext, id);
+                        });
                     break;
 
                 case Row::Kind::remove:

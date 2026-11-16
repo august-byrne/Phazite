@@ -114,6 +114,24 @@ TEST_CASE ("Clean Up lists the audio nothing plays: not the song's, nor a versio
     CHECK (getNames (lookForUnused (p.s.context)) == juce::StringArray ("Generated/Leftover.wav"));
 }
 
+TEST_CASE ("A look for unused audio that the song outran is looked again rather than shown")
+{
+    // A look begun before a file in the Audio folder was put on a track counted it unused once it was done, which the
+    // Project view showed ("2 files" where one was: seen under load in ProjectViewTests.cpp).
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    s.saveWithPluginStates(); // a folder of its own
+    REQUIRE (waitForVersionHistory (s.context));
+    const auto take = writeSound (s.getProject().getAudioFolder().getChildFile ("Take.wav"), 0.5);
+    REQUIRE (phazite::canCleanUpAudio (s.context));
+
+    phazite::UnusedAudioFinder finder (s.context);
+    finder.find(); // what the song plays taken now: not the take
+    s.addAudioClip (track, take, 0.0);
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    CHECK (getNames (*finder.getFound()).isEmpty());
+}
+
 TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosave or a backup plays")
 {
     // The audit's model-project-services 13: what the file on the disk, the autosave and the backups play is in use too, so

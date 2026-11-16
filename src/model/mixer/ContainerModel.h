@@ -90,6 +90,9 @@ DeviceID getContainerOfChain (const ProjectContext&, DeviceID chain);
 bool canAddChain (const ProjectContext&, DeviceID container);
 DeviceID addChain (ProjectContext&, DeviceID container);
 DeviceID duplicateChain (ProjectContext&, DeviceID chain);
+// The same once the plug-ins that said they changed have given their states (ProjectContext::withPluginStates()), as a
+// chain's menu duplicates it: the copy holds what they have now (known bug 166).
+void duplicateChainWithPluginStates (ProjectContext&, DeviceID chain);
 
 // Whether a chain can be removed (not its container's last), and removing it with its devices ("Remove Chain").
 bool canRemoveChain (const ProjectContext&, DeviceID chain);

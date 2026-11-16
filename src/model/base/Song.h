@@ -70,6 +70,13 @@ public:
 
     const std::map<std::uint64_t, int>& getDeviceChangesOutsideHistory() const noexcept { return deviceChangesOutsideHistory; }
 
+    // The same counts as far as the states stored in the song hold them: a plug-in's stored state may be one it gave before
+    // its last changes (a store waits for no plug-in: model/plugins/internal/PluginInstances.h), whose answer, written in
+    // later, then counts as a change the versions show (known bug 166). The store sets a device's count as it writes its
+    // state; one it didn't set counts as now.
+    void setDeviceChangesHeld (std::uint64_t deviceID, int count) { deviceChangesHeld[deviceID] = count; }
+    std::map<std::uint64_t, int> getDeviceChangesHeld() const;
+
     // Values set by hand as they are set: by a control, a command or a preset (setValueSetByHand(),
     // model/devices/internal/Parameters.h), or by a plug-in itself, in its window. For what plays the song, what writes its
     // automation while it plays and what remembers the parameter touched last. Message thread only.
@@ -96,7 +103,7 @@ private:
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given
     int changesOutsideHistory = 0;
-    std::map<std::uint64_t, int> deviceChangesOutsideHistory;
+    std::map<std::uint64_t, int> deviceChangesOutsideHistory, deviceChangesHeld;
     juce::ListenerList<ParameterListener> parameterListeners;
     std::function<void (std::uint64_t)> deviceStateStore;
 

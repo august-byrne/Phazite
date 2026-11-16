@@ -270,6 +270,15 @@ TEST_CASE ("An effect's knob turned in the Devices view, then double-clicked bac
             effects.emplace_back (s.addEffect (track, type.description.fileOrIdentifier.toRawUTF8()), type.name);
 
     REQUIRE (effects.size() > 10);
+
+    // A moment later, as a person commits: the plug-in, opened from no state of the song's, has given its own (a commit
+    // writes what each gave last: model/plugins/internal/PluginInstances.h).
+    REQUIRE (dispatchMessagesUntil (
+        [&s]
+        {
+            const auto& opened = *phazite::findSong (s.context);
+            return phazite::getPluginsWithOlderStates (opened).isEmpty() && phazite::getPluginsAnswering (opened).isEmpty();
+        }));
     keepVersion (s.context);
     REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     auto& song = *phazite::findSong (s.context);

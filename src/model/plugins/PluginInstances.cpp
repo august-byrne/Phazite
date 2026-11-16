@@ -16,8 +16,9 @@ namespace phazite
 namespace
 {
     constexpr double defaultSampleRate = 44100.0;
-    constexpr int openBlockSize = 512;   // what a new instance is opened for, before the engine prepares it
-    constexpr int lookMilliseconds = 10; // how often what opens in the background, and the states asked for, are looked at
+    constexpr int openBlockSize = 512;     // what a new instance is opened for, before the engine prepares it
+    constexpr int lookMilliseconds = 10;   // how often what opens in the background, and the states asked for, are looked at
+    constexpr size_t maxReportsKept = 256; // the changes a plug-in told that it hasn't given its state for, at most
 
     // The program the song keeps a plug-in on, or -1 for none.
     int readPluginProgram (const juce::ValueTree& device)
@@ -125,14 +126,23 @@ PluginInstances::~PluginInstances()
     song.setDeviceStateStore ({});
 
     // Told of nothing more: what plays them may hold them a little longer.
+    std::vector<std::shared_ptr<SandboxedInstance>> held;
+
     for (auto& [id, entry] : entries)
+        held.push_back (entry.instance);
+
+    for (auto& waiting : answering)
+        held.push_back (waiting.instance);
+
+    for (const auto& instance : held)
     {
-        if (entry.instance != nullptr)
+        if (instance != nullptr)
         {
-            entry.instance->onParameterChanged = nullptr;
-            entry.instance->onGesture = nullptr;
-            entry.instance->onStateChanged = nullptr;
-            entry.instance->onLatencyChanged = nullptr;
+            instance->onParameterChanged = nullptr;
+            instance->onGesture = nullptr;
+            instance->onStateChanged = nullptr;
+            instance->onLatencyChanged = nullptr;
+            instance->onStateMayChange = nullptr;
         }
     }
 }
@@ -327,14 +337,40 @@ void PluginInstances::timerCallback()
         }
     }
 
-    auto statesIn = true;
+    // The answers that came; then those that said they changed and are quiet since asked unasked, so that a store, which
+    // doesn't wait, finds their own states (known bug 166). Looked at again while any is asked, or may be.
+    takeAnswers();
+    auto statesIn = true, anyUnasked = false;
 
-    if (! waitingForStates.empty())
-        for (auto& [id, entry] : entries)
-            if (entry.instance != nullptr && ! entry.instance->takeAskedState())
-                statesIn = false;
+    for (auto& [id, entry] : entries)
+    {
+        if (entry.instance == nullptr)
+            continue;
 
-    if (! anyOpening && (waitingForStates.empty() || statesIn))
+        pruneReports (id, *entry.instance);
+
+        // At once while a save waits: one it waits for whose answer (to an ask before it: a store's, or one unasked) is older
+        // than its changes as the save asked, is asked again, once. The save waits for its own asks alone (known bug 166:
+        // one asked unasked meanwhile held it off).
+        const auto wanted = waitingForStates.empty() ? wantedStates.end() : wantedStates.find (id);
+        const auto waitedFor = wanted != wantedStates.end();
+
+        if (waitedFor && ! wanted->second.askedAgain && ! entry.instance->isAskingState()
+            && ! entry.instance->hasGivenStateSince (wanted->second.changes))
+        {
+            wanted->second.askedAgain = true;
+            entry.instance->askState (SandboxedInstance::Ask::all);
+        }
+        else if (entry.instance->shouldBeAsked())
+        {
+            entry.instance->askState (SandboxedInstance::Ask::changedAndAnswering, true);
+        }
+
+        statesIn = statesIn && ! (waitedFor && entry.instance->isAskingState());
+        anyUnasked = anyUnasked || entry.instance->isAskingState() || entry.instance->isStateUnasked();
+    }
+
+    if (! anyOpening && ! anyUnasked && answering.empty() && (waitingForStates.empty() || statesIn))
         stopTimer();
 
     if (anyOpened)
@@ -353,20 +389,40 @@ void PluginInstances::timerCallback()
 void PluginInstances::callWaiting (bool allIn)
 {
     // Each once, taken out first; and nothing of this touched after them, which one may let go of all the same.
+    wantedStates.clear();
+
     for (const auto& then : std::exchange (waitingForStates, {}))
         then (allIn);
 }
 
 bool PluginInstances::askStates (bool all)
 {
+    return askStates (all ? SandboxedInstance::Ask::all : SandboxedInstance::Ask::changed);
+}
+
+bool PluginInstances::askStates (SandboxedInstance::Ask which)
+{
     auto statesIn = true;
+
+    // The plug-ins asked now are those a wait waits for (known bug 166: one asked unasked meanwhile isn't), each by its
+    // count of changes as it was asked.
+    if (waitingForStates.empty())
+        wantedStates.clear();
 
     for (auto& [id, entry] : entries)
     {
         if (entry.instance != nullptr)
         {
-            // Auto Save asks again one that didn't answer before, which a store that waits doesn't (store()).
-            entry.instance->askState (all ? SandboxedInstance::Ask::all : SandboxedInstance::Ask::changed);
+            // An answer to an earlier ask taken in first, so that this one asks again (a store's or one asked unasked, which
+            // may be older than the plug-in's changes since); one still to come is asked again, once, when it is in, if the
+            // plug-in changed after it was asked (timerCallback()). Auto Save asks again one that didn't answer before,
+            // which a store doesn't (store()).
+            entry.instance->takeAskedStateIfIn(); // never given up on here: it would be asked again at once, for ever
+            entry.instance->askState (which);
+
+            if (entry.instance->isAskingState() && ! wantedStates.contains (id))
+                wantedStates[id] = { entry.instance->countStateChanges(), false };
+
             statesIn = entry.instance->takeAskedState() && statesIn;
         }
     }
@@ -376,7 +432,12 @@ bool PluginInstances::askStates (bool all)
 
 void PluginInstances::whenStatesIn (bool all, std::function<void (bool)> then)
 {
-    if (askStates (all) && waitingForStates.empty())
+    whenStatesIn (all ? SandboxedInstance::Ask::all : SandboxedInstance::Ask::changed, std::move (then));
+}
+
+void PluginInstances::whenStatesIn (SandboxedInstance::Ask which, std::function<void (bool)> then)
+{
+    if (askStates (which) && waitingForStates.empty())
     {
         then (true);
         return;
@@ -428,7 +489,7 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
     };
 
     // A value it set itself: a VALUE of the song's takes it in, without an undo step, and the song tells what listens to it.
-    instance.onParameterChanged = [this, id, refOf] (int parameter, float value)
+    instance.onParameterChanged = [this, id, refOf, &instance] (int parameter, float value)
     {
         const auto ref = refOf (parameter);
 
@@ -448,8 +509,9 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
         }
 
         // A change of its own (the helper tells none it was given), which the next save stores: an unsaved change.
-        song.markChangedOutsideHistory (id.getRaw());
+        noteReport (id, instance);
         song.tellValueSetByHand (ref, value, true);
+        lookSoon();
     };
 
     instance.onGesture = [this, refOf] (int parameter, bool starting)
@@ -459,13 +521,21 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
     };
 
     // Its own settings changed: an unsaved change, which the next save stores.
-    instance.onStateChanged = [this, id] { song.markChangedOutsideHistory (id.getRaw()); };
+    instance.onStateChanged = [this, id, &instance]
+    {
+        noteReport (id, instance);
+        lookSoon();
+    };
 
     instance.onLatencyChanged = [this]
     {
         if (listener != nullptr)
             listener->pluginLatencyChanged();
     };
+
+    // Asked for its state once it is quiet after a change, whoever made it.
+    instance.onStateMayChange = [this] { lookSoon(); };
+    lookSoon(); // one opened from no state of the song's is asked for its own
 }
 
 void PluginInstances::sync()
@@ -476,7 +546,24 @@ void PluginInstances::sync()
     for (const auto& device : findPlugins (song))
         held.insert (getDeviceID (device));
 
-    std::erase_if (entries, [&held] (const auto& entry) { return ! held.contains (entry.first); });
+    // Told of nothing more as they go (known bug 166: one kept for an answer still to come told its changes to the song).
+    std::erase_if (entries,
+                   [&held] (const auto& entry)
+                   {
+                       if (held.contains (entry.first))
+                           return false;
+
+                       if (const auto& instance = entry.second.instance)
+                       {
+                           instance->onParameterChanged = nullptr;
+                           instance->onGesture = nullptr;
+                           instance->onStateChanged = nullptr;
+                           instance->onLatencyChanged = nullptr;
+                           instance->onStateMayChange = nullptr;
+                       }
+
+                       return true;
+                   });
 
     // As the song opens, in the background, beside each other (known bug 69), and so one an undo or redo brings back while
     // any of those still loads; any other at once, as a plug-in added opens (find()).
@@ -509,11 +596,36 @@ bool PluginInstances::reload (DeviceID id, juce::String& error)
     if (! status.has_value() || (*status != Status::crashed && *status != Status::crashedWhileLoading))
         return false;
 
-    // One whose helper went opens in a new one, the same instance; one that crashed as it loaded loads again.
+    // One whose helper went opens in a new one, the same instance, from the state it last had: its own, the user's latest
+    // settings; unless it crashed again since it was reloaded so, before anything of it changed, when those settings may be
+    // what it crashes for: from the state the song holds then (known bug 166), which its notice says.
     if (*status == Status::crashed)
     {
-        if (! host.reload (*entries[id].instance, error))
+        // Its own last state kept aside whatever is tried (the one kept already, if the last reload opened it from the
+        // song's); the song's tried in its place only for a crash soon after a reload from its own, which its own may be
+        // what it crashes for; the next reload tries its own again, as does one that fails.
+        auto& entry = entries[id];
+        auto& instance = *entry.instance;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto keptAside = entry.reloadedFromSong && entry.ownState.has_value() && instance.getLastState() == entry.songStateTried;
+        const auto own = keptAside ? *entry.ownState : instance.getLastState(); // its newer one, if it gave one since
+        const auto fromSong =
+            ! entry.reloadedFromSong && entry.reloadedTime.has_value() && now - *entry.reloadedTime < getSoonAfterReload();
+        const auto tried = fromSong ? readPluginState (device) : own;
+        instance.setStateInformation (tried.getData(), (int) tried.getSize());
+
+        if (! host.reload (instance, error))
+        {
+            instance.setStateInformation (own.getData(), (int) own.getSize());
+            entry.reloadedFromSong = false;
+            entry.ownState.reset();
             return false;
+        }
+
+        entry.reloadedFromSong = fromSong;
+        entry.ownState = own;
+        entry.songStateTried = fromSong ? tried : juce::MemoryBlock();
+        entry.reloadedTime = juce::Time::getMillisecondCounterHiRes();
     }
     else
     {
@@ -535,6 +647,28 @@ bool PluginInstances::reload (DeviceID id, juce::String& error)
     return true;
 }
 
+namespace
+{
+    constexpr double defaultSoonAfterReload = 5000.0; // how soon a crash after a reload from its own state falls back
+    std::atomic<double> soonAfterReload { defaultSoonAfterReload };
+} // namespace
+
+void PluginInstances::setSoonAfterReload (double milliseconds) noexcept
+{
+    soonAfterReload = milliseconds >= 0.0 ? milliseconds : defaultSoonAfterReload;
+}
+
+double PluginInstances::getSoonAfterReload() noexcept
+{
+    return soonAfterReload.load();
+}
+
+bool PluginInstances::wasReloadedFromSong (DeviceID id) const
+{
+    const auto found = entries.find (id);
+    return found != entries.end() && found->second.reloadedFromSong;
+}
+
 int PluginInstances::getGeneration (DeviceID id) const
 {
     const auto found = entries.find (id);
@@ -548,42 +682,91 @@ void PluginInstances::store (DeviceID id)
 
 void PluginInstances::store (const std::vector<DeviceID>& ids)
 {
-    // Those whose states may have changed asked at once, and waited for together, within one limit (known bug 69: each was
-    // asked in turn, each with a limit of its own). One whose answer to an earlier ask (a save's) is still to come isn't
-    // waited for: it keeps the state it last gave, until that answer comes.
-    std::vector<SandboxedInstance*> asked;
-
+    // Nothing waits for a plug-in (known bug 166: these waited for those whose states may have changed, up to 10 seconds):
+    // what each gave last is written now, which is its own state unless it changed a moment ago (it is asked as it changes:
+    // timerCallback()); and those that said they changed since, and answered when last asked (a save just before took the
+    // rest, and asks again one that didn't), are asked at once, their answers written into the same
+    // elements as they come (outside the undo history, as this is: a device taken away gets its answer where an undo
+    // brings it back from). One that doesn't answer keeps the state it gave last. One whose answer to an earlier ask (a
+    // save's) is still to come has that answer written.
     for (const auto id : ids)
     {
         if (const auto found = entries.find (id); found != entries.end() && found->second.instance != nullptr)
         {
-            if (auto& instance = *found->second.instance; ! instance.isAskingState())
-            {
-                instance.askState (SandboxedInstance::Ask::changedAndAnswering);
-                asked.push_back (&instance);
-            }
+            const auto device = findDeviceState (song, id);
+            auto& instance = *found->second.instance;
+            instance.askState (SandboxedInstance::Ask::changedAndAnswering);
+            write (id, device, instance);
+
+            if (instance.isAskingState() && device.isValid())
+                answering.push_back ({ id, device, found->second.instance });
         }
     }
 
-    const auto until = juce::Time::getMillisecondCounterHiRes() + SandboxedInstance::getStateMilliseconds();
-
-    for (auto* instance : asked)
-        instance->takeAskedState (until);
-
-    for (const auto id : ids)
-        write (id);
+    if (! answering.empty())
+        startTimer (lookMilliseconds);
 }
 
-void PluginInstances::write (DeviceID id)
+void PluginInstances::takeAnswers()
 {
-    const auto found = entries.find (id);
-    auto device = findDeviceState (song, id);
+    // Every answer that came, taken in; those a store asked for, written where it stored them. Where the song has another
+    // instance of it by then (an undo brought the device back, opened from what was there), that one is given what came.
+    // Given up on once their time has passed only while a save waits for them, or a store: Auto Save gives up on its own
+    // asks itself, and would ask again one given up on here before it looked (AutosaveTimer).
+    for (auto& [id, entry] : entries)
+        if (entry.instance != nullptr)
+        {
+            if (waitingForStates.empty())
+                entry.instance->takeAskedStateIfIn();
+            else
+                entry.instance->takeAskedState();
+        }
 
-    if (found == entries.end() || found->second.instance == nullptr || ! device.isValid())
+    for (auto& waiting : std::exchange (answering, {}))
+    {
+        if (! waiting.instance->takeAskedState())
+        {
+            answering.push_back (std::move (waiting));
+            continue;
+        }
+
+        const auto found = entries.find (waiting.id);
+        const auto now = found != entries.end() ? found->second.instance : nullptr;
+
+        if (now == waiting.instance)
+        {
+            write (waiting.id, waiting.device, *waiting.instance);
+            continue;
+        }
+
+        // Another instance plays the device now (an undo brought it back): the old one's answer is written and given to it
+        // only while it is as it opened, from what its element still holds; one changed since keeps its own (known bug 166:
+        // the old answer overwrote what was set in the new one).
+        const auto isTheSongs = now != nullptr && waiting.device == findDeviceState (song, waiting.id);
+
+        if (now == nullptr || (isTheSongs && ! now->hasChangedSinceOpened() && readPluginState (waiting.device) == now->getLastState()))
+        {
+            write (waiting.id, waiting.device, *waiting.instance);
+
+            if (isTheSongs)
+                takeFromSong (waiting.device, schema::pluginState);
+        }
+
+        // Told of nothing more: it isn't the song's.
+        waiting.instance->onParameterChanged = nullptr;
+        waiting.instance->onGesture = nullptr;
+        waiting.instance->onStateChanged = nullptr;
+        waiting.instance->onLatencyChanged = nullptr;
+        waiting.instance->onStateMayChange = nullptr;
+    }
+}
+
+void PluginInstances::write (DeviceID id, juce::ValueTree device, SandboxedInstance& instance)
+{
+    if (! device.isValid())
         return;
 
     const juce::ScopedValueSetter<bool> writing (storing, true);
-    auto& instance = *found->second.instance;
 
     // Its settings, as it last gave them, or as it last had them, if its helper went or didn't give them in time: then the
     // song keeps what it holds rather than nothing. And its program.
@@ -594,6 +777,10 @@ void PluginInstances::write (DeviceID id)
         storeProperty (device, schema::pluginState, writeBytes (block));
     else if (isNow)
         device.removeProperty (schema::pluginState, nullptr);
+
+    // How far it holds the changes the plug-in said it made: the versions count those after as still to commit (known bug
+    // 166), as its answer, written in later, then shows.
+    song.setDeviceChangesHeld (id.getRaw(), countReportsHeld (id, instance));
 
     // With it, the plug-in's ID in its format (a VST3's class ID, from its preset file), and the version of the plug-in that
     // made it, which the versions name when it changes.
@@ -699,6 +886,13 @@ void PluginInstances::takeFromSong (const juce::ValueTree& device, const juce::I
 
     const auto block = readPluginState (device);
     instance.setStateInformation (block.getData(), (int) block.getSize());
+    lookSoon();
+}
+
+void PluginInstances::giveSongState (DeviceID id)
+{
+    if (const auto device = findDeviceState (song, id); findPluginOf (device).isValid())
+        takeFromSong (device, schema::pluginState);
 }
 
 void PluginInstances::takeValueFromSong (const juce::ValueTree& value)
@@ -711,6 +905,82 @@ void PluginInstances::takeValueFromSong (const juce::ValueTree& value)
 
     if (const auto index = found->second.instance->findParameter (value[schema::valueParameter].toString()); index >= 0)
         found->second.instance->setParameterValue (index, (float) value[schema::valueSetByHand]);
+
+    lookSoon();
+}
+
+void PluginInstances::noteReport (DeviceID id, const SandboxedInstance& instance)
+{
+    // An unsaved change, counted by the song; and which of the plug-in's changes it came with, so that a state written
+    // later says how far it holds them (write()).
+    song.markChangedOutsideHistory (id.getRaw());
+    auto& noted = reports[id];
+    noted.push_back ({ instance.countStateChanges(), song.getChangesOutsideHistory (id.getRaw()) });
+
+    // Of one that never answers, as a knob turns dozens of times a second: the first and the latest kept, those between
+    // let go (a state held is then taken to hold fewer of them, which shows a change to commit at worst).
+    if (noted.size() > maxReportsKept)
+        noted.erase (noted.begin() + 1, noted.end() - (std::ptrdiff_t) (maxReportsKept / 2));
+}
+
+void PluginInstances::pruneReports (DeviceID id, const SandboxedInstance& instance)
+{
+    // As answers come in: those the state it last had holds forgotten but the last of them, which says how many it holds.
+    const auto found = reports.find (id);
+
+    if (found == reports.end())
+        return;
+
+    auto& noted = found->second;
+
+    if (! instance.isStateOlder())
+    {
+        noted.clear();
+        return;
+    }
+
+    auto keepFrom = noted.begin();
+
+    for (auto it = noted.begin(); it != noted.end(); ++it)
+        if (it->first <= instance.getStateTakenAt())
+            keepFrom = it;
+
+    noted.erase (noted.begin(), keepFrom);
+}
+
+size_t PluginInstances::countReportsKept (DeviceID id) const
+{
+    const auto found = reports.find (id);
+    return found != reports.end() ? found->second.size() : 0;
+}
+
+int PluginInstances::countReportsHeld (DeviceID id, const SandboxedInstance& instance)
+{
+    // The song's count of the plug-in's own changes as of the state it last had: all of them for one that is its own (and
+    // the reports before it forgotten), else those that came with changes up to the one it was taken at.
+    const auto now = song.getChangesOutsideHistory (id.getRaw());
+    auto& noted = reports[id];
+
+    if (! instance.isStateOlder())
+    {
+        noted.clear();
+        return now;
+    }
+
+    auto held = noted.empty() ? now : noted.front().second - 1;
+
+    for (const auto& [changes, count] : noted)
+        if (changes <= instance.getStateTakenAt())
+            held = count;
+
+    return held;
+}
+
+void PluginInstances::lookSoon()
+{
+    // Not started again while it runs: changes many times a second would put it off for ever.
+    if (! isTimerRunning())
+        startTimer (lookMilliseconds);
 }
 
 void PluginInstances::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
@@ -772,6 +1042,14 @@ std::optional<PluginInstances::Status> getPluginStatus (const Song& song, Device
 {
     auto* session = findSession (song);
     return session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
+}
+
+void whenPluginStatesIn (const Song& song, SandboxedInstance::Ask which, std::function<void (bool)> then)
+{
+    if (auto* session = findSession (song))
+        session->getPlugins().whenStatesIn (which, std::move (then));
+    else
+        then (true);
 }
 
 void whenPluginStatesIn (const Song& song, bool all, std::function<void (bool)> then)

@@ -10,6 +10,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <functional>
 #include <optional>
 
 namespace phazite
@@ -73,4 +74,9 @@ bool loadPreset (ProjectContext&, const juce::File&, TrackID);
 // 2.12) and a device's Presets menu in the Devices view. Returns whether it did: not for a preset of another device, nor
 // of a container or a track.
 bool loadPresetInto (ProjectContext&, DeviceID, const juce::File&);
+
+// The same once the plug-ins that said they changed have given their states (ProjectContext::withPluginStates()), as the
+// browser's menus and a plug-in's window load one: the undo step then brings back what the plug-in has now (known bug
+// 166). Then is told whether it loaded; not at all if the load was dropped (the wait's Cancel, another project).
+void loadPresetWithPluginStates (ProjectContext&, DeviceID, const juce::File&, std::function<void (bool loaded)> then = {});
 } // namespace phazite

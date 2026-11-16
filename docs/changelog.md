@@ -160,6 +160,26 @@ too. A line names the bug's number in that list.
   and a note added or a clip dragged reads and repaints only the clips it changed: 3 ms instead of 300 in a song of
   4,800 clips. The song's changes name the clips, tracks and channels they touched (`SongChanges`). A jump of the
   mixer or the playlist makes what comes into view over the next turns of the message loop, never stalling a frame.
+- **165 Plug-in windows close at once:** closing a plug-in's window no longer keeps Phazite waiting two seconds, nor
+  as long as a hung helper lives (2.0 s and 4.9 s before; about 20 ms now): the helper's window sits in a window of
+  Phazite's own, which leaves Phazite's window first; keys a plug-in's window doesn't use still reach Phazite.
+- **166 Plug-ins' states without waiting, and never stale:** copies, commits, snapshots, presets and closed plug-in
+  windows no longer wait for the plug-ins; what reads their states asks first, in one place: a command says whether
+  it reads them (always, or by what is selected), and commit, Source Control's restores and merges, presets saved
+  and loaded, Save As, DAWproject export, Duplicate and Delete of tracks with plug-ins, a chain's Duplicate and the
+  Stage "+" run once the plug-ins that changed have answered, the window holding its input meanwhile and a progress
+  window after a second (Go On Without Them, or Cancel). A plug-in that keeps telling changes is asked a second
+  after its first; a commit records the count of a plug-in's changes as of the state it holds, so an answer that
+  comes later shows as a change. A sample-rate or block change prepares plug-ins in the background, silent
+  meanwhile. Left: plug-ins added later, Reload, a window opening and parameter texts still wait (known bug 166).
+- **166 Reload:** a plug-in that crashes again within five seconds of a reload opens from what the project holds,
+  says so, and its own last settings are kept for the next try.
+- **168 The save question at shutdown:** Windows shutting down or signing out is heard by a window of Phazite's own
+  (JUCE workaround W49); a close that waits for a plug-in's settings then goes on without them at once, so the save
+  question shows; a shutdown cancelled, or an installer asking Phazite to close, is an ordinary close.
+- **42 Slow plug-ins in renders:** an export, a freeze or a bounce waits for a slow plug-in as long as it takes, its
+  progress bar naming the plug-in after 5 seconds, and Cancel stops it at once; a plug-in that can't be prepared
+  for the render's rate fails the render instead of leaving silence in it.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

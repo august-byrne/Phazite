@@ -77,4 +77,15 @@ void Song::storeDeviceStates (std::uint64_t trackID)
     if (deviceStateStore != nullptr)
         deviceStateStore (trackID);
 }
+
+std::map<std::uint64_t, int> Song::getDeviceChangesHeld() const
+{
+    auto counts = deviceChangesOutsideHistory;
+
+    for (const auto& [device, held] : deviceChangesHeld)
+        if (const auto found = counts.find (device); found != counts.end())
+            found->second = std::min (found->second, held);
+
+    return counts;
+}
 } // namespace phazite

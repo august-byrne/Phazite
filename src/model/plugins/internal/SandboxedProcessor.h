@@ -6,10 +6,12 @@
 // block of a plug-in whose helper has gone or whose channel waits to be prepared are silent: an effect's sound fades out
 // over a few milliseconds (its input, as late as the plug-in would have played it), an instrument's stops; and the
 // plug-in's sound fades in again as it plays again. A block kept for seconds is a hang, which its helper is ended for
-// (sandbox/client/Helper.h). A render waits for the plug-in instead (for a block of live playback it is still on too), but
-// not for ever: until its helper has gone, until it has kept the block so long that it hangs (several times as long as a
-// hang is live), or until the render is cancelled; the render then says so (hasFailedInRender()), as it does for a
-// plug-in that had crashed before it began (OfflineRender.h). The notes of a block that couldn't be handed over go with the next that
+// (sandbox/client/Helper.h). A render waits for the plug-in instead (for a block of live playback it is still on too), for
+// as long as it takes, as REAPER's and Bitwig's do (a plug-in may only be slow: known bug 42, when a render ended a helper
+// that kept a block for 30 seconds), a little at a time: until its helper has gone, which the render then says
+// (hasFailedInRender()), as it does for a plug-in that had crashed before it began (OfflineRender.h), or until the render
+// is cancelled. Once it has waited as long as a hang takes live, the render's window names the plug-in it waits for
+// (OfflineRender::findWait()), so that the user can cancel it. The notes of a block that couldn't be handed over go with the next that
 // is, at its start, so that no note that ended sounds on. Its mix with what came in is the engine's, as for Phazite's own
 // devices. Its parameters are the plug-in's, by its own IDs for them (a VST3's numbers), so that the song's automation,
 // modulators and macros move them on Phazite's engine as they move its own devices': the block goes whole, with their
@@ -57,13 +59,11 @@ public:
     void start (const devices::ProcessContext&) override;
 
     // For the render that plays it (any thread): whether a block of the render's wasn't played because the plug-in's helper
-    // went, or was ended for keeping the block too long, since this was made; and the render cancelled, which ends its
-    // wait for a block.
+    // went (a crash, or ended for a hang), since this was made; the render cancelled, which ends its wait for a block; and
+    // since when a render waits for its block (sandbox::getNanoseconds()), or 0 while none does.
     bool hasFailedInRender() const noexcept { return failedInRender.load (std::memory_order_acquire); }
     void cancelRender() noexcept { renderCancelled.store (true, std::memory_order_release); }
-
-    // How many times as long as a hang is live (sandbox::Helper's audio hang limit) a render waits for a block.
-    static constexpr int renderHangFactor = 6;
+    std::int64_t getRenderWaitSince() const noexcept { return renderWaitSince.load (std::memory_order_acquire); }
 
     // How long its sound takes to fade out as it stops playing (an effect's then silent rather than dry: a limiter or a
     // fully wet reverb passed dry is worse than a gap), and to fade in as it plays again.
@@ -101,6 +101,7 @@ private:
     std::vector<devices::NoteEvent> waiting;
 
     std::atomic<bool> failedInRender { false }, renderCancelled { false };
+    std::atomic<std::int64_t> renderWaitSince { 0 };
 
     bool handOver (const devices::ProcessContext&) noexcept;                    // held and handed over, or silent
     void collect (const devices::ProcessContext&, std::int64_t since) noexcept; // its answer, then the channel let go

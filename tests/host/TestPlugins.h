@@ -34,7 +34,8 @@ struct TestPlugins
         slow,           // an effect that passes its sound at its Level ("60"), and waits while a slow gate is shut
         slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own,
         slowSibling,    // the third in the first's file (one helper for both, as a file of several plug-ins has). Each crashes as
-                        // it is made from a state whose Level is below 0
+                        // it is made from a state whose Level is below 0, and takes its Level as its own window would, telling the
+                        // host, from a state with a second value of 1 after it
     };
 
     static constexpr Kind kinds[] = { Kind::effect,    Kind::synth,        Kind::crash,      Kind::hang,           Kind::latency,
@@ -45,6 +46,7 @@ struct TestPlugins
     // closing gate's) as it goes. In the temporary folder, which the helpers share with the tests' process. And the file each
     // slow one leaves as it begins to wait as it is made, so that a test sees it has begun.
     static juce::File getSlowGate (bool closing = false);
+    static juce::File getSlowBulk(); // while it is there, a slow stand-in's state is 20 MB larger, as one with samples in it
     static juce::File getSlowWaiting (Kind);
 
     // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time

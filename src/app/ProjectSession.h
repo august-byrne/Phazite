@@ -148,6 +148,20 @@ public:
     // back at once: the program's end finishes them then, without a window.
     void closeAndFinishThen (std::function<void()>);
 
+    // The computer's session ending (Windows shutting down, or the user signing out), or not after all (the user cancelled
+    // the close it asked for): while it ends, a close or a save waits for no plug-in, one still to answer keeping the
+    // settings it gave last, and those already waiting go on at once (a message later), so that closing asks its question
+    // before Windows ends Phazite (known bug 168). Whether a close waits for the plug-ins now, which then asks what closing
+    // asks.
+    void setSessionEnding (bool);
+    bool isClosing() const noexcept { return closesWaiting > 0; }
+
+    // Whether what reads the plug-ins' states (a command, a preset loaded) waits for them now, the window holding its input;
+    // whether a modal component is that hold, no dialog; and what to do once no such wait is left (at once if none is).
+    bool isWaitingForPluginStates() const noexcept { return gatesWaiting > 0; }
+    bool isHoldingInput (const juce::Component* modal) const noexcept;
+    void afterPluginStatesGate (std::function<void()>);
+
     // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
     // moment after each change (model/project/internal/Project.h: AutosaveTimer::setAutoSave()), so its changes show in
     // source control at once; a new project, once its first save put it somewhere. The settings keep it (the main
@@ -215,10 +229,17 @@ private:
     void tellOlderPluginStates (const juce::StringArray& plugins);
     std::unique_ptr<juce::Timer> finishing; // what looks whether the versions' writes are done (closeAndFinishThen())
 
-    // The open project's plug-ins asked for their states, and then what comes next (ProjectSession.cpp); and this session's
-    // life, which what comes a message later checks.
-    void withPluginStates (std::function<void (bool sameProject)>);
+    // The open project's plug-ins asked for their states (every one's, or those that said they changed), and then what comes
+    // next (ProjectSession.cpp); and this session's life, which what comes a message later checks.
+    // A command's wait (forCommand) offers to go on without them or to drop it, which then is told as false.
+    void withPluginStates (std::function<void (bool sameProject)>, bool all = true, bool forCommand = false);
     std::weak_ptr<void> shownWait; // the wait the progress window shows, if it does
+    bool sessionEnding = false;    // setSessionEnding()'s
+    int gatesWaiting = 0;          // gatePluginStates()'s, still waiting
+    std::vector<std::function<void()>> afterGates;
+    juce::Component::SafePointer<juce::Component> inputHold;
+    void gatePluginStates (std::function<void (bool go)>);
+    int closesWaiting = 0; // closeThen()s that wait for the plug-ins' states
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     void showError (const juce::String& title, const juce::String& message);
     void showNotice (const juce::String& title, const juce::String& message);

@@ -238,6 +238,21 @@ bool isPluginState (const juce::ValueTree& deviceState)
     return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == schema::deviceIsPlugin;
 }
 
+bool holdsPlugin (const juce::ValueTree& tree)
+{
+    if (isPluginState (tree))
+        return true;
+
+    if (tree.hasType (schema::DEVICE) && ! isContainerState (tree))
+        return false;
+
+    for (const auto& child : tree)
+        if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN)) && holdsPlugin (child))
+            return true;
+
+    return false;
+}
+
 bool isContainerState (const juce::ValueTree& deviceState)
 {
     return deviceState.hasType (schema::CONTAINER);

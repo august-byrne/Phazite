@@ -494,6 +494,7 @@ namespace
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
         juce::String getTitle() const override { return renderTitle; }
+        std::optional<RenderWait> getWait() const override { return render != nullptr ? render->findWait() : std::nullopt; }
         bool hasStarted() const noexcept { return render != nullptr; }
 
     protected:
@@ -787,6 +788,7 @@ namespace
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
         juce::String getTitle() const override { return "Consolidating"; }
+        std::optional<RenderWait> getWait() const override { return render != nullptr ? render->findWait() : std::nullopt; }
         bool hasStarted() const noexcept { return render != nullptr; }
 
     private:
@@ -890,6 +892,21 @@ TrackRender::TrackRender (std::unique_ptr<Impl> i)
 }
 
 TrackRender::~TrackRender() = default;
+
+std::optional<RenderWait> TrackRender::getWait() const
+{
+    return impl->getWait();
+}
+
+juce::String TrackRender::getGoOnName() const
+{
+    return impl->getGoOnName();
+}
+
+void TrackRender::goOn()
+{
+    impl->goOn();
+}
 
 float TrackRender::getProgress() const
 {

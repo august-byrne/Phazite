@@ -52,7 +52,22 @@ bool CommandRegistry::addMacro (const juce::String& id, const juce::String& name
         return nullptr;
     };
 
+    // The plug-ins' states got first, once, before it starts, if a step of it reads them.
+    macro.readsPluginStates = [this, commandIDs]
+    {
+        for (const auto& commandID : commandIDs)
+            if (auto* command = find (commandID); command != nullptr && readsPluginStatesNow (*command))
+                return true;
+
+        return false;
+    };
+
     return add (std::move (macro));
+}
+
+bool CommandRegistry::readsPluginStatesNow (const Command& command)
+{
+    return command.needsPluginStates || (command.readsPluginStates != nullptr && command.readsPluginStates());
 }
 
 const Command* CommandRegistry::find (const juce::String& id) const
@@ -88,6 +103,41 @@ bool CommandRegistry::isEnabled (const Command& command)
 }
 
 bool CommandRegistry::invoke (const juce::String& id)
+{
+    const auto* command = find (id);
+
+    if (command == nullptr || ! isEnabled (*command))
+        return false;
+
+    // While a command waits for the plug-ins' states, none that changes a project runs in between: what it reads is what
+    // the song is as it runs.
+    const auto reads = readsPluginStatesNow (*command);
+
+    if (waitingForStates && (reads || command->undoTarget != nullptr))
+        return false;
+
+    if (reads && pluginStatesGate != nullptr)
+    {
+        waitingForStates = true;
+        pluginStatesGate (
+            [this, id, kept = std::weak_ptr<bool> (alive)] (bool shouldRun)
+            {
+                if (kept.expired())
+                    return;
+
+                waitingForStates = false;
+
+                if (shouldRun)
+                    run (id);
+            });
+
+        return true;
+    }
+
+    return run (id);
+}
+
+bool CommandRegistry::run (const juce::String& id)
 {
     const auto* command = find (id);
 

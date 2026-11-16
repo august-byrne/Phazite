@@ -13,11 +13,18 @@ namespace
 {
     constexpr int defaultStateMilliseconds = 10000; // how long a plug-in's state may take to come or go
     std::atomic<int> stateMilliseconds { defaultStateMilliseconds };
-    constexpr int prepareMilliseconds = 10000;
+    // How long a channel for another rate may take to come, which the helper makes after whatever it does before (opening
+    // another plug-in, which may take a minute): after that the helper is taken for hung, as its answer holds off the
+    // heartbeat (sandbox/client/Helper.h).
+    constexpr int prepareMilliseconds = 60000;
+    constexpr double quietMilliseconds = 250.0;          // how long a plug-in that said it changed is left alone before it is asked
+    constexpr double latestAskMilliseconds = 1000.0;     // how long after its first change it is asked at the latest
+    constexpr double answerSpacing = 10.0;               // and no sooner after its last ask than so many times its last answer took
     constexpr int textMilliseconds = 250;                // how a value reads, for a tooltip or a field
     constexpr int smallestChannel = 4096;                // the longest block a channel takes at least
     constexpr std::int64_t smallestDeadline = 1'000'000; // a millisecond, which a round trip to the helper takes well within
     constexpr std::int64_t waitNanoseconds = 50'000'000; // how long a wait for a block goes before it looks whether to go on
+    constexpr int waitMilliseconds = 50;                 // and a wait for a channel
     constexpr int preparingLookMilliseconds = 10;        // how often the message thread looks at a channel that waits
 } // namespace
 
@@ -63,7 +70,7 @@ public:
 
         if (juce::MessageManager::existsAndIsCurrentThread())
         {
-            ++owner.stateChanges;
+            owner.noteStateChange();
 
             if (! movedByEngine)
                 owner.remote->setParameter (index, newValue);
@@ -219,6 +226,7 @@ void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> 
     onGone = std::move (gone);
     channelRate = openedAtRate;
     preparing.store (false, std::memory_order_release);
+    prepareAsked = nullptr; // the helper that went owes its answer for ever
     stopTimer();
 
     {
@@ -389,26 +397,27 @@ void SandboxedInstance::prepareToPlay (double sampleRate, int maximumBlockSize)
     if (hasCrashed())
         return;
 
-    // A new channel only for another rate or a longer block than it takes; not while the helper keeps a block, which it
-    // can't prepare the plug-in before it gives back: the channel waits for it then.
+    // A new channel only for another rate or a longer block than it takes, asked of the helper without waiting (known bug
+    // 166: the message thread waited for it, behind whatever else the helper did): the engine skips its blocks until it has
+    // come. Not asked while the helper keeps a block, which it can't prepare the plug-in before it gives back: the channel
+    // waits for that block first.
     hold();
 
-    if (isPrepared())
+    if (isPrepared() && prepareAsked == nullptr)
     {
         preparing.store (false, std::memory_order_release);
     }
     else
     {
-        if (remote->getChannel().isBusy())
-        {
+        // The clock of one that prepares already goes on (known bug 166: each new plan put the limit off).
+        if (! isPreparing())
             preparingSince = sandbox::getNanoseconds();
-            preparing.store (true, std::memory_order_release);
+
+        preparing.store (true, std::memory_order_release);
+        prepareNow();
+
+        if (isPreparing())
             startTimer (preparingLookMilliseconds);
-        }
-        else
-        {
-            prepareNow();
-        }
     }
 
     let();
@@ -422,13 +431,45 @@ bool SandboxedInstance::isPrepared() noexcept
 
 void SandboxedInstance::prepareNow()
 {
+    // The channel asked for before, taken in once the helper has answered (or has gone); then, for a rate or a block asked
+    // since, another asked for, once the helper has given back the block it keeps. One the helper couldn't make leaves the
+    // channel there is.
+    if (prepareAsked != nullptr)
+    {
+        if (! prepareAsked->reply->isDone() && ! hasCrashed())
+            return;
+
+        const auto askedRate = prepareAsked->sampleRate;
+        const auto askedSamples = prepareAsked->channel->getLimits().maxSamples;
+
+        if (remote->finishPreparing (*prepareAsked))
+            channelRate = remote->getSampleRate();
+
+        prepareAsked = nullptr;
+
+        if (juce::exactlyEqual (askedRate, getPreparedRate()) && std::max (smallestChannel, getPreparedBlockSize()) <= askedSamples)
+        {
+            preparing.store (false, std::memory_order_release);
+            return;
+        }
+    }
+
+    if (isPrepared() || hasCrashed())
+    {
+        preparing.store (false, std::memory_order_release);
+        return;
+    }
+
+    if (remote->getChannel().isBusy())
+        return;
+
     auto limits = remote->getChannel().getLimits();
     limits.maxSamples = std::max ({ smallestChannel, getPreparedBlockSize(), limits.maxSamples });
+    prepareAsked = remote->askToPrepare (getPreparedRate(), limits);
+    preparingSince = sandbox::getNanoseconds();
 
-    if (remote->prepare (getPreparedRate(), limits, prepareMilliseconds))
-        channelRate = getPreparedRate();
-
-    preparing.store (false, std::memory_order_release);
+    if (prepareAsked == nullptr)
+        preparing.store (false, std::memory_order_release);
 }
 
 void SandboxedInstance::playLive()
@@ -437,14 +478,40 @@ void SandboxedInstance::playLive()
         remote->playLive();
 }
 
-void SandboxedInstance::finishPreparing()
+bool SandboxedInstance::finishPreparing (const std::atomic<bool>* cancelled)
 {
-    if (isPreparing() && ! hasCrashed() && ! remote->getChannel().isBusy())
+    // On a thread that may wait (a render's, or JUCE's processBlock()), the channel held, the helper's block back: the channel
+    // waited for, a little at a time, until it has come for the rate and block asked last (one asked before, for others, is
+    // taken in and another asked), its helper has gone, or the render is cancelled (known bug 166: a render cancelled waited
+    // up to a minute, and one that began while an earlier channel was still to come played the plug-in's blocks as silence);
+    // the helper taken for hung if it doesn't come in time.
+    const auto since = sandbox::getNanoseconds();
+
+    while (isPreparing() && ! hasCrashed() && ! remote->getChannel().isBusy())
+    {
+        if (cancelled != nullptr && cancelled->load (std::memory_order_acquire))
+            return false;
+
         prepareNow();
+
+        if (prepareAsked != nullptr)
+            prepareAsked->reply->wait (waitMilliseconds);
+
+        if (sandbox::getNanoseconds() - since > (std::int64_t) prepareMilliseconds * 1'000'000)
+        {
+            remote->getHelper().reportHung();
+            return false;
+        }
+    }
+
+    // Prepared for what was asked: not merely done preparing, as a channel the helper refused, or one that couldn't be made,
+    // leaves the old one, for another rate or a shorter block (the review of known bug 166: a render played it so).
+    return ! isPreparing() && ! hasCrashed() && isPrepared();
 }
 
 void SandboxedInstance::timerCallback()
 {
+    // One whose helper has gone prepares as it is reloaded (replaceRemote()).
     if (! isPreparing() || hasCrashed())
     {
         stopTimer();
@@ -455,13 +522,17 @@ void SandboxedInstance::timerCallback()
     if (! tryHold())
         return;
 
-    if (! remote->getChannel().isBusy())
+    prepareNow();
+
+    if (! isPreparing())
     {
-        prepareNow();
         stopTimer();
     }
-    else if (sandbox::getNanoseconds() - preparingSince > (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000)
+    else if (const auto waited = sandbox::getNanoseconds() - preparingSince;
+             (prepareAsked == nullptr && waited > (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000)
+             || (prepareAsked != nullptr && waited > (std::int64_t) prepareMilliseconds * 1'000'000))
     {
+        // A block kept as long as a hang takes, or a channel the helper doesn't make in time.
         remote->getHelper().reportHung();
     }
 
@@ -577,10 +648,11 @@ int SandboxedInstance::getCurrentProgram()
 
 void SandboxedInstance::setCurrentProgram (int index)
 {
+    // Without waiting for the helper (known bug 166), which takes what it is asked in turn.
     if (! hasCrashed() && juce::isPositiveAndBelow (index, (int) remote->getInfo().programs.size()))
     {
-        ++stateChanges;
-        remote->setProgram (index, stateMilliseconds);
+        noteStateChange();
+        remote->setProgram (index, 0);
     }
 }
 
@@ -623,18 +695,23 @@ void SandboxedInstance::setStateInformation (const void* data, int size)
     // The state it has now: an answer still to come from before is older, and is given up; taken in, it would replace this
     // one, and the next store would write it over what the song gave the plug-in (a preset, an undo).
     lastState.replaceAll (data, (size_t) std::max (0, size));
+    givenSinceOpened = true;
     stateAsked = nullptr;
     stateTakenAt = stateChanges;
     editorSinceTaken = editorsOpen > 0;
 
+    // Without waiting for the helper (known bug 166): what is asked of it after this, it answers after it.
     if (! hasCrashed())
-        remote->setState (lastState, stateMilliseconds);
+        remote->setState (lastState, 0);
 }
 
 void SandboxedInstance::keepStateAsOpened() noexcept
 {
     if (stateTakenAt >= 0)
         stateTakenAt = stateChanges;
+
+    openedAt = stateChanges;
+    givenSinceOpened = false;
 }
 
 bool SandboxedInstance::mayHaveChangedState() const noexcept
@@ -645,6 +722,34 @@ bool SandboxedInstance::mayHaveChangedState() const noexcept
 bool SandboxedInstance::isStateOlder() const noexcept
 {
     return stateTakenAt != stateChanges;
+}
+
+void SandboxedInstance::noteStateChange() noexcept
+{
+    ++stateChanges;
+    changedAt = juce::Time::getMillisecondCounterHiRes();
+
+    if (firstUnaskedChangeAt <= 0.0)
+        firstUnaskedChangeAt = changedAt;
+
+    if (onStateMayChange != nullptr)
+        onStateMayChange();
+}
+
+bool SandboxedInstance::isStateUnasked() const noexcept
+{
+    return ! hasCrashed() && stateTakenAt != stateChanges && stateMissedAt != stateChanges;
+}
+
+bool SandboxedInstance::shouldBeAsked() const noexcept
+{
+    // Once it has been quiet for a moment, or at the latest a second after the first change it hasn't been asked about, as
+    // changes go on (a plug-in that reports a value of its own all the time: an LFO's, a meter's); and no more often than ten
+    // times as long as its last answer took (a state of tens of megabytes costs both sides each time).
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto due =
+        now - changedAt >= quietMilliseconds || (firstUnaskedChangeAt > 0.0 && now - firstUnaskedChangeAt >= latestAskMilliseconds);
+    return stateAsked == nullptr && isStateUnasked() && due && now - stateAskedSince >= answerSpacing * lastAnswerMilliseconds;
 }
 
 void SandboxedInstance::editorOpened() noexcept
@@ -660,11 +765,11 @@ void SandboxedInstance::editorClosed() noexcept
     ++editorMoves;
 }
 
-void SandboxedInstance::askState (Ask which)
+void SandboxedInstance::askState (Ask which, bool unasked)
 {
-    // A store that waits asks what said it changed and answers, so that it doesn't wait again for one that didn't, nor ask
-    // again what a save just took (a close's save after its gathering); Auto Save asks what may have changed, as its window
-    // was open too, and asks again one that didn't answer before.
+    // A store, and what is asked unasked, ask what said it changed and answers, so that one that didn't answer isn't asked
+    // again until it changes again, nor is what a save just took; Auto Save asks what may have changed, as its window was
+    // open too, and asks again one that didn't answer before.
     const auto wanted = which == Ask::all || (which == Ask::changed && mayHaveChangedState())
                         || (which == Ask::changedAndAnswering && stateTakenAt != stateChanges && stateMissedAt != stateChanges);
 
@@ -672,7 +777,9 @@ void SandboxedInstance::askState (Ask which)
         return;
 
     stateAsked = remote->askState();
+    stateAskedUnasked = unasked;
     stateAskedAt = stateChanges;
+    firstUnaskedChangeAt = 0.0;
     editorMovesAtAsk = editorMoves;
     stateAskedSince = juce::Time::getMillisecondCounterHiRes();
 }
@@ -689,6 +796,9 @@ bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
     {
         // As it was when it was asked: changed since, it is asked again at the next save; and so is one whose window is open,
         // or was shown or closed meanwhile.
+        lastAnswerMilliseconds = juce::Time::getMillisecondCounterHiRes() - stateAskedSince;
+        ++answers;
+
         if (auto taken = sandbox::RemoteInstance::readState (*stateAsked))
         {
             lastState = std::move (*taken);
@@ -712,6 +822,16 @@ bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
     }
 
     return false;
+}
+
+void SandboxedInstance::takeAskedStateIfIn()
+{
+    // Or given up on once its time has passed, if it was asked unasked (while it waits, the helper isn't taken for hung:
+    // sandbox/client/Helper.h); what else asked for it (Auto Save, a save, a store) gives it up itself.
+    if (stateAsked != nullptr
+        && (stateAsked->isDone()
+            || (stateAskedUnasked && juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())))
+        takeAskedState (0.0, true);
 }
 
 void SandboxedInstance::setStateMilliseconds (int milliseconds) noexcept
@@ -840,7 +960,7 @@ void SandboxedInstance::handleAsyncUpdate()
         if (juce::isPositiveAndBelow (index, (int) parameters.size())
             && ! juce::exactlyEqual (parameters[(size_t) index]->getValue(), value))
         {
-            ++stateChanges;
+            noteStateChange();
             parameters[(size_t) index]->setFromPlugin (value);
 
             if (onParameterChanged != nullptr)
@@ -860,7 +980,7 @@ void SandboxedInstance::handleAsyncUpdate()
     }
 
     if (newState)
-        ++stateChanges;
+        noteStateChange();
 
     if (newState && onStateChanged != nullptr)
         onStateChanged();

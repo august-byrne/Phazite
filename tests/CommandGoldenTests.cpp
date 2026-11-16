@@ -146,6 +146,12 @@ juce::String describeCommand (const phazite::Command& command)
     if (command.overPlugins)
         switches.add ("over-plugins");
 
+    if (command.needsPluginStates)
+        switches.add ("plugin-states");
+
+    if (command.readsPluginStates != nullptr)
+        switches.add ("plugin-states-when");
+
     const auto synonyms = command.synonyms.isEmpty() ? juce::String ("-") : command.synonyms.joinIntoString (", ");
     const auto flags = switches.isEmpty() ? juce::String ("-") : switches.joinIntoString (" ");
     return command.id + " | " + command.name + " | " + command.category + " | " + command.description + " | " + synonyms + " | " + flags;

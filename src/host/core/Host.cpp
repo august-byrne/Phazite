@@ -15,6 +15,7 @@ using sandbox::MessageWriter;
 namespace
 {
     constexpr int noticesPerSecond = 30;
+    constexpr double maximumSampleRate = 768000.0; // the highest a plug-in is prepared for
 } // namespace
 
 class Host::Pipe final : public juce::InterprocessConnection
@@ -358,7 +359,9 @@ void Host::prepareInstance (MessageReader& reader, MessageWriter& answer)
     const auto channelName = reader.readString();
     const auto limits = readLimits (reader);
     const auto sampleRate = reader.readDouble();
-    auto channel = instance != nullptr ? sandbox::BlockChannel::open (channelName.toStdString(), limits) : nullptr;
+    // Refused for a rate no plug-in plays at (as a channel that doesn't open is): its channel stays as it was.
+    const auto playable = sampleRate > 0.0 && sampleRate <= maximumSampleRate;
+    auto channel = instance != nullptr && playable ? sandbox::BlockChannel::open (channelName.toStdString(), limits) : nullptr;
     const auto opened = channel != nullptr;
 
     if (opened)

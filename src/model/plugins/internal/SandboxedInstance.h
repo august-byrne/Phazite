@@ -66,13 +66,15 @@ public:
     double getPreparedRate() const noexcept { return preparedRate.load (std::memory_order_relaxed); }
     int getPreparedBlockSize() const noexcept { return preparedBlockSize.load (std::memory_order_relaxed); }
 
-    // Whether its helper still keeps the block it was handed when it was last prepared, so that its channel for the rate
-    // asked waits for that block to come back (any thread): the engine skips its blocks meanwhile, and a render (the channel
-    // held, the block back) prepares it itself (finishPreparing()). The message thread looks a hundred times a second, and
-    // ends its helper once the block has been kept as long as a hang takes. Nothing waits for the plug-in so: cancelling a
-    // render that it keeps a block of doesn't wait for the helper, which can't prepare it until it gives the block back.
+    // Whether its channel for the rate and the longest block it was last prepared for is still to come (any thread): asked of
+    // the helper without waiting, once the helper has given back the block it kept then, if it kept one. The engine skips its
+    // blocks meanwhile, and a render (the channel held, the block back) waits for the channel itself (finishPreparing()).
+    // The message thread looks a hundred times a second, and ends its helper once the block has been kept as long as a hang
+    // takes, or the channel hasn't come in a minute. Nothing waits for the plug-in so (known bug 166: the message thread
+    // waited for the helper, behind whatever else it did): cancelling a render that it keeps a block of doesn't wait for
+    // the helper, which can't prepare it until it gives the block back.
     bool isPreparing() const noexcept { return preparing.load (std::memory_order_acquire); }
-    void finishPreparing();
+    bool finishPreparing (const std::atomic<bool>* cancelled = nullptr); // whether it is prepared then, for what was asked
 
     // A render has given it back (message thread): the plug-in told now that it plays live again, not as the first live block
     // comes, which the switch would make late (a post: nothing waits for the helper).
@@ -120,6 +122,7 @@ public:
     std::function<void (int parameter, float value)> onParameterChanged;
     std::function<void (int parameter, bool starting)> onGesture;
     std::function<void()> onStateChanged, onLatencyChanged;
+    std::function<void()> onStateMayChange; // any change counted that may have changed its state, whoever made it (message thread)
 
     // What its editor in the helper tells (message thread), for the editor's window in Phazite: its new size, as the
     // plug-in resized it; and a key Phazite takes over it, down or let go, by its code and modifiers (JUCE's).
@@ -171,7 +174,8 @@ public:
     // last gave it or was given one (a value or a program set, by Phazite or by the plug-in, its settings said to have
     // changed, or its window open since: a plug-in needn't say what its window changes), whether or not it answered when
     // last asked (Auto Save); or of one that said it changed (a value or a program set, its settings said to have changed)
-    // and answered when last asked (a store that waits for it). Not again while an answer is still to come, nor of one whose helper has gone; and an answer still to come is
+    // and answered when last asked (a store, or asked unasked: shouldBeAsked()). Not again while an answer is still to come,
+    // nor of one whose helper has gone; and an answer still to come is
     // given up as it is given a state, which that answer would be older than. takeAskedState() takes the answer in once it
     // has come (the state it last had from then on), waiting for it until a time
     // (juce::Time::getMillisecondCounterHiRes(); none for 0), and gives it up once the state's time limit has passed since
@@ -183,11 +187,28 @@ public:
         changedAndAnswering
     };
 
-    void askState (Ask);
+    void askState (Ask, bool unasked = false); // unasked: by nothing that waits for it (shouldBeAsked())
     bool takeAskedState (double waitUntil = 0.0, bool giveUp = false);
+    void takeAskedStateIfIn(); // the answer taken in if it has come; one asked unasked given up on after its time
     bool isAskingState() const noexcept { return stateAsked != nullptr; }
     bool mayHaveChangedState() const noexcept;
     bool isStateOlder() const noexcept; // than the plug-in's: it may have changed since it last gave its state, unasked or unanswered
+
+    // Whether it is time to ask it for its state, unasked, so that the state it last gave is its own by the time a store
+    // writes it without waiting (PluginInstances::store()): it said it changed (a value or a program set, by Phazite or by
+    // it, its settings said to have changed), and has been quiet since for a moment (a knob turned in its window isn't asked
+    // at each step), or at the latest a second after its first change since it was asked, as changes go on; and no sooner
+    // after its last ask than ten times as long as that answer took; it isn't asked already, and answered when last asked.
+    // The answers that came, counted, and how long the last took (for the tests' measures).
+    bool shouldBeAsked() const noexcept;
+    int countAnswers() const noexcept { return answers; }
+    double getLastAnswerMilliseconds() const noexcept { return lastAnswerMilliseconds; }
+    bool isStateUnasked() const noexcept; // as shouldBeAsked(), but for the moment and an answer to come: it may be, later
+
+    // The changes counted so far (above), and whether it has answered an ask made since so many, or didn't in time.
+    int countStateChanges() const noexcept { return stateChanges; }
+    int getStateTakenAt() const noexcept { return stateTakenAt; } // the count the state it last had is as of (-1: none)
+    bool hasGivenStateSince (int changes) const noexcept { return stateTakenAt >= changes || stateMissedAt >= changes; }
 
     // Opened in the background as its project opened, while the engine played silence in its place (message thread): the
     // first processor made of it then fades its sound in, as after a block it didn't play (SandboxedProcessor.h).
@@ -202,6 +223,7 @@ public:
     // What it was set to as it opened (the values the song sets by hand, which it sets again at each opening) counted as no
     // change of its state, which is the one it opened from, if it opened from one.
     void keepStateAsOpened() noexcept;
+    bool hasChangedSinceOpened() const noexcept { return stateChanges != openedAt || givenSinceOpened; } // or given a state
 
     // How long a state may take to come or go, for a plug-in that never answers (shorter in the tests).
     static void setStateMilliseconds (int) noexcept;
@@ -224,8 +246,15 @@ private:
     // (-1 for none: it opened from nothing), and the last it was asked at and didn't answer; and the answer still to come,
     // asked at a count, since a time.
     int stateChanges = 0, stateTakenAt = -1, stateMissedAt = -1, stateAskedAt = 0;
+    double changedAt = 0.0;                                          // as the last of them was (juce::Time::getMillisecondCounterHiRes())
+    int openedAt = 0;                                                // the count as it opened (keepStateAsOpened())
+    double firstUnaskedChangeAt = 0.0, lastAnswerMilliseconds = 0.0; // shouldBeAsked()'s
+    int answers = 0;
+    bool givenSinceOpened = false;
+    void noteStateChange() noexcept;
     std::shared_ptr<sandbox::Helper::Reply> stateAsked;
     double stateAskedSince = 0.0;
+    bool stateAskedUnasked = false;
     // Its editors shown now, and shown or closed (counted, and as its state was asked); and whether one has shown since its
     // state was last taken.
     int editorsOpen = 0, editorMoves = 0, editorMovesAtAsk = 0;
@@ -243,6 +272,7 @@ private:
     double channelRate = 0.0;
     std::atomic<bool> preparing { false };
     std::int64_t preparingSince = 0;
+    std::unique_ptr<sandbox::RemoteInstance::Preparing> prepareAsked; // the channel asked of the helper, until it comes (held)
 
     // What came from the helper, for the message thread.
     juce::CriticalSection lock;
@@ -288,7 +318,7 @@ private:
     void timerCallback() override; // a channel that waits for the helper's block
 
     bool isPrepared() noexcept; // its channel for the rate and block asked (held)
-    void prepareNow();          // its channel made for them (held, the helper's block back)
+    void prepareNow();          // its channel asked for them, or taken in once it has come (held)
     void playBlock (juce::AudioBuffer<float>&, const juce::MidiBuffer&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SandboxedInstance)

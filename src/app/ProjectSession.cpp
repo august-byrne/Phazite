@@ -39,16 +39,58 @@ namespace
 
     constexpr int waitShownMilliseconds = 1000; // how long a save or a close waits for plug-ins before the window says so
 
-    // A wait for the plug-ins' states: whether it is over, and whether the progress window (the renders' host) shows it,
-    // with what title.
+    // What keeps the window from taking input while a command waits for the plug-ins' states, before the progress window
+    // shows: a modal component of its own, never shown, which leaves a click alone (no beep, nothing brought forward) and
+    // takes key presses for nothing. JUCE sends every key event to the front modal component, so a key let go meanwhile
+    // reaches nothing else: as it goes, the window's key listeners hear that keys changed, so that none is taken for still
+    // held after the wait (known bug 166).
+    struct InputHold final : juce::Component
+    {
+        InputHold() { enterModalState (false); }
+
+        ~InputHold() override
+        {
+            if (isCurrentlyModal (false))
+                exitModalState (0);
+        }
+
+        void inputAttemptWhenModal() override {}
+        bool keyPressed (const juce::KeyPress&) override { return true; }
+
+        bool keyStateChanged (bool) override { return true; }
+
+        // Its end: what holds keys (the shortcuts' dispatcher, the computer keyboard) told that keys changed, as JUCE's window
+        // tells it (ComponentPeer::handleKeyUpOrDown()), so that each lets go of those no longer down, a note's included.
+        void release()
+        {
+            if (isCurrentlyModal (false))
+                exitModalState (0);
+
+            // Every window's, which may have no focused component.
+            std::vector<juce::Component::SafePointer<juce::Component>> windows;
+
+            for (int i = 0; i < juce::ComponentPeer::getNumPeers(); ++i)
+                windows.emplace_back (&juce::ComponentPeer::getPeer (i)->getComponent());
+
+            for (const auto& window : windows)
+                if (auto* shown = window.getComponent())
+                    if (auto* peer = shown->getPeer())
+                        peer->handleKeyUpOrDown (false);
+        }
+    };
+
+    // A wait for the plug-ins' states: whether it is over, whether the progress window (the renders' host) shows it, with
+    // what title; whether it is a command's, whose window offers to go on without them or to drop the command; and whether
+    // the command was dropped.
     struct StatesWait
     {
-        bool over = false, shown = false;
+        bool over = false, shown = false, forCommand = false, dropped = false;
         juce::String title;
     };
 
-    // The wait as the progress window shows it: what it names, and its Cancel (the window going while the wait isn't over),
-    // which goes on without the plug-ins still to answer (the states they gave last are kept, as for a time-out).
+    // The wait as the progress window shows it: what it names, and its Cancel (the window going while the wait isn't over):
+    // a save's or a close's goes on without the plug-ins still to answer (the states they gave last are kept, as for a
+    // time-out); a command's is dropped, nothing done, and its window's Go On Without Them goes on (known bug 166).
     struct WaitForStates final : TrackRender::Impl
     {
         WaitForStates (Song& s, std::shared_ptr<StatesWait> shownWait)
@@ -63,14 +105,27 @@ namespace
             wait->shown = false;
 
             if (auto* waiting = song.get(); waiting != nullptr && ! wait->over)
+            {
+                wait->dropped = wait->forCommand && ! goingOn;
                 giveUpPluginStates (*waiting);
+            }
         }
 
         float getProgress() const override { return -1.0f; } // no end known: JUCE's bar shows it busy
         juce::String getTitle() const override { return wait->title; }
+        juce::String getGoOnName() const override { return wait->forCommand ? juce::String ("Go On Without Them") : juce::String(); }
+
+        void goOn() override
+        {
+            goingOn = true;
+
+            if (auto* waiting = song.get(); waiting != nullptr && ! wait->over)
+                giveUpPluginStates (*waiting);
+        }
 
         juce::WeakReference<Song> song;
         std::shared_ptr<StatesWait> wait;
+        bool goingOn = false;
     };
 
     // The wait for the versions' writes as the program quits (closeAndFinishThen()), as the progress window shows it: its
@@ -104,6 +159,9 @@ ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentPro
 
     // What went wrong with the open song that the model can't show itself (sound lost from a take), as an error.
     setProblemReporter (context, [this] (const juce::String& title, const juce::String& message) { showError (title, message); });
+
+    // What reads the plug-ins' states gets them first, the session's way (gatePluginStates()).
+    context.setPluginStatesGate ([this] (std::function<void (bool)> run) { gatePluginStates (std::move (run)); });
 }
 
 ProjectSession::~ProjectSession()
@@ -576,14 +634,22 @@ void ProjectSession::saveThen (std::function<void (bool saved)> callback)
         });
 }
 
-void ProjectSession::withPluginStates (std::function<void (bool sameProject)> then)
+void ProjectSession::withPluginStates (std::function<void (bool sameProject)> then, bool all, bool forCommand)
 {
     // Its plug-ins asked for their states at once; then what comes next: at once if they are in already, else a message after
     // they are (or once the wait is given up), never as the song's plug-ins go, and only while this session lives, told
     // whether the project asked for is still the one open. A wait of more than a second shows in the progress window, whose
-    // Cancel goes on without the plug-ins still to answer.
+    // Cancel goes on without the plug-ins still to answer. While the computer's session ends, at once, with the states they
+    // gave last (known bug 168).
+    if (sessionEnding)
+    {
+        then (project != nullptr);
+        return;
+    }
+
     const auto number = context.getProjectNumber();
     const auto wait = std::make_shared<StatesWait>();
+    wait->forCommand = forCommand;
     const auto calledAt = std::make_shared<bool> (true); // while whenPluginStatesIn() hasn't returned
     const std::weak_ptr<bool> session = alive;
 
@@ -594,10 +660,10 @@ void ProjectSession::withPluginStates (std::function<void (bool sameProject)> th
         if (wait->shown && renders != nullptr)
             renders->renderFinished (wait->title, juce::Result::ok()); // which deletes the window
 
-        then (project != nullptr && context.getProjectNumber() == number);
+        then (! wait->dropped && project != nullptr && context.getProjectNumber() == number);
     };
 
-    whenPluginStatesIn (project->getSong(), true,
+    whenPluginStatesIn (project->getSong(), all ? SandboxedInstance::Ask::all : SandboxedInstance::Ask::changedAndAnswering,
                         [session, calledAt, next] (bool)
                         {
                             if (*calledAt)
@@ -773,9 +839,12 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
     // Every plug-in asked for its settings at once, rather than trusted to say they changed, the message thread waiting for
     // none (known bug 69); then what closing does with them, a close always going on: if another project is open by then
     // (a quit or an open that went first), closing that one.
+    ++closesWaiting;
     withPluginStates (
         [this, callback] (bool sameProject)
         {
+            --closesWaiting;
+
             if (sameProject)
                 closeWithPluginStates (callback);
             else
@@ -821,6 +890,15 @@ void ProjectSession::closeAndFinishThen (std::function<void()> callback)
 
     timer->startTimer (100);
     finishing = std::move (timer);
+}
+
+void ProjectSession::setSessionEnding (bool ending)
+{
+    // What waits for the plug-ins goes on without those still to answer, as the progress window's Cancel does.
+    sessionEnding = ending;
+
+    if (ending && project != nullptr)
+        giveUpPluginStates (project->getSong());
 }
 
 void ProjectSession::closeWithPluginStates (std::function<void (bool)> callback)
@@ -1160,9 +1238,72 @@ void ProjectSession::showError (const juce::String& title, const juce::String& m
                                   static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }
 
+void ProjectSession::gatePluginStates (std::function<void (bool)> run)
+{
+    // Once those that said they changed have given their states, as a save asks them, the progress window showing a wait
+    // of more than a second with Go On Without Them and Cancel, which drops what waits (known bug 166); not if another
+    // project opened meanwhile. While it waits, the window takes no input, as it takes none once the progress window
+    // shows: no mouse edit changes the song under it. What waits for the wait to be over (a close as the computer's session
+    // ends) comes after it.
+    const auto finish = [this, session = std::weak_ptr<bool> (alive)]
+    {
+        if (session.expired() || --gatesWaiting > 0)
+            return;
+
+        for (const auto& then : std::exchange (afterGates, {}))
+            then();
+    };
+
+    if (project == nullptr)
+    {
+        run (true);
+        return;
+    }
+
+    ++gatesWaiting;
+    auto done = std::make_shared<bool> (false);
+    auto hold = std::make_shared<std::unique_ptr<InputHold>>();
+    withPluginStates (
+        [run, done, hold, finish] (bool go)
+        {
+            *done = true;
+
+            if (*hold != nullptr)
+                (*hold)->release();
+
+            hold->reset();
+            run (go);
+            finish();
+        },
+        false, true);
+
+    if (! *done)
+    {
+        *hold = std::make_unique<InputHold>();
+        inputHold = hold->get();
+    }
+}
+
+bool ProjectSession::isHoldingInput (const juce::Component* modal) const noexcept
+{
+    return gatesWaiting > 0 && modal != nullptr && modal == inputHold.getComponent();
+}
+
+void ProjectSession::afterPluginStatesGate (std::function<void()> then)
+{
+    if (gatesWaiting > 0)
+        afterGates.push_back (std::move (then));
+    else
+        then();
+}
+
 void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& host)
 {
     renders = &host;
+
+    // A command that reads the plug-ins' states runs once they are in, as everything does that reads them (the context's
+    // gate: gatePluginStates()).
+    registry.setPluginStatesGate ([this] (std::function<void (bool)> run) { context.withPluginStates (std::move (run)); });
 
     // Help > Example Songs, each as a new untitled project.
     for (const auto& song : getExampleSongs())
@@ -1205,7 +1346,8 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
                                    "The original keeps its last saved version.",
                     .synonyms = { "copy", "duplicate", "rename", "version" },
                     .perform = [this] { saveProjectAs(); },
-                    .isEnabled = [this] { return project != nullptr; } });
+                    .isEnabled = [this] { return project != nullptr; },
+                    .needsPluginStates = true });
 
     registry.add ({ .id = "project.save",
                     .name = "Save Project",
@@ -1289,14 +1431,23 @@ void ProjectSession::importDawProject (const juce::File& file)
     if (read->fromVersion.isNotEmpty() && project != nullptr
         && std::any_of (versions.begin(), versions.end(), [&read] (const VersionInfo& version) { return version.id == read->fromVersion; }))
     {
-        juce::StringArray said;
+        // Once the plug-ins that said they changed have given their states, which the branch left keeps (known bug 166).
+        context.withPluginStates (
+            [this, session = std::weak_ptr<bool> (alive), read, file] (bool go)
+            {
+                if (! go || session.expired())
+                    return;
 
-        if (importDawProjectAsBranch (context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
-            showNotice ("Imported " + file.getFileName(),
-                        "It came back as a new branch from the commit it was exported from."
-                            + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
-        else
-            showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
+                juce::StringArray said;
+
+                if (importDawProjectAsBranch (
+                        context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
+                    showNotice ("Imported " + file.getFileName(),
+                                "It came back as a new branch from the commit it was exported from."
+                                    + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
+                else
+                    showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
+            });
 
         return;
     }

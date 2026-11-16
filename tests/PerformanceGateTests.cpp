@@ -631,8 +631,12 @@ TEST_CASE (
     }
 
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
+
+    // Committed as Source Control's Commit is (version.save's gate): once the plug-ins that said they changed, the one just
+    // added among them, have given their states.
     std::optional<juce::Result> result;
-    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    s.context.withPluginStates ([&s, &result] (bool)
+                                { REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; })); });
     REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
     REQUIRE (phazite::countChanges (s.context) == 0);

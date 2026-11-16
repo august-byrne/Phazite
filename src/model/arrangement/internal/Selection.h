@@ -67,7 +67,11 @@ void toggleSelectionMuted (const Selection&);
 bool isSelectionMuted (const Selection&);
 
 // When the commands can act.
-bool canDeleteSelection (const Selection&, const RangeSelection&);      // and duplicate it
+bool canDeleteSelection (const Selection&, const RangeSelection&); // and duplicate it
+// Whether Delete or Duplicate would act on tracks (nothing it comes to first is selected) of which one, or a track in a
+// folder among them, holds a plug-in (in a container too): what it then reads of the plug-ins' states, which it gets first
+// (Command::readsPluginStates).
+bool doesDeleteReadPlugins (const Selection&, const RangeSelection&);
 bool hasSelectedRangeOrClips (const Selection&, const RangeSelection&); // close a gap, split
 bool canDuplicateAsAliases (const Selection&);                          // sections or clips
 bool canMuteSelection (const Selection&);                               // notes or clips

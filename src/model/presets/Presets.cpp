@@ -1348,7 +1348,27 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
     if (saved.hasProperty (keys::mix))
         setMix (*song, id, (float) saved[keys::mix]);
 
+    // Given to the plug-in though the song's element may have held the same already: the store above wrote the state the
+    // plug-in gave last, which needn't be its own (it doesn't wait for the plug-in: known bug 166).
+    if (auto* session = getSession (context))
+        session->getPlugins().giveSongState (id);
+
     return true;
+}
+
+void loadPresetWithPluginStates (ProjectContext& context, DeviceID id, const juce::File& file, std::function<void (bool)> then)
+{
+    context.withPluginStates (
+        [&context, id, file, then] (bool go)
+        {
+            if (! go)
+                return;
+
+            const auto loaded = loadPresetInto (context, id, file);
+
+            if (then != nullptr)
+                then (loaded);
+        });
 }
 
 bool isPresetFor (const Song& song, DeviceID id, const juce::File& file)

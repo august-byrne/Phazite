@@ -1104,8 +1104,10 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
         if (branch.id == version->branch)
             preview.otherBranch = branch.name;
 
-    // What it changed, by line, and what of it clashes with what the song changed: a merge of every line, tried on copies.
+    // What it changed, by line, and what of it clashes with what the song changed: a merge of every line, tried on copies,
+    // the song's plug-ins' states in it as they gave them last (version.merge's gate asked them: known bug 166).
     preview.lines = findChanges (preview.base, preview.theirs);
+    song->storeDeviceStates();
     auto next = juce::jmax (findNextID (song->getState()), findNextID (preview.theirs));
     MergeLines everything;
 
@@ -2422,7 +2424,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                           "staged, with the message typed, to go back to, hear and compare later.",
            .synonyms = { "save version", "snapshot", "checkpoint", "history", "version" },
            .perform = [&context, saveProjectThen, &renders] { saveProjectAndVersion (context, saveProjectThen, renders); },
-           .isEnabled = [&context] { return canSaveVersion (context); } });
+           .isEnabled = [&context] { return canSaveVersion (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.undoCommit",
            .name = "Undo Last Commit",
@@ -2438,7 +2441,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .description = "Stages the selected line of the changes, as it is now, for the next commit.",
            .synonyms = { "add", "git add", "index" },
            .perform = [&context] { stageSelectedChange (context); },
-           .isEnabled = [&context] { return canStageSelected (context); } });
+           .isEnabled = [&context] { return canStageSelected (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.unstage",
            .name = "Unstage Changes",
@@ -2452,7 +2456,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .description = "Stages every change, as the song is now, for the next commit.",
            .synonyms = { "add all", "git add", "index" },
            .perform = [&context] { stageAllChanges (context); },
-           .isEnabled = [&context] { return canStageAll (context); } });
+           .isEnabled = [&context] { return canStageAll (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.unstageAll",
            .name = "Unstage All Changes",
@@ -2466,7 +2471,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .description = "Makes the song what is staged again, or the last commit while nothing is, as one undo step.",
            .synonyms = { "restore", "revert", "reset", "throw away", "git restore" },
            .perform = [&context] { discardAllChanges (context); },
-           .isEnabled = [&context] { return ! getChangesSinceLastVersion (context).empty(); } });
+           .isEnabled = [&context] { return ! getChangesSinceLastVersion (context).empty(); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.putBack",
            .name = "Discard Changes",
@@ -2475,7 +2481,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "revert", "restore", "undo change", "git restore" },
            .perform = [&context] { putBackSelectedChange (context); },
            .isEnabled = [&context] { return canPutBack (context); },
-           .currentName = [&context] { return describePutBack (context); } });
+           .currentName = [&context] { return describePutBack (context); },
+           .needsPluginStates = true });
 
     // On the commit selected in the graph; each a change of its own, which names its undo step after what it restores.
     add ({ .id = "version.checkout",
@@ -2485,7 +2492,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                           "changes there.",
            .synonyms = { "checkout", "detach", "detached head", "go to commit", "view commit", "look at", "visit", "git switch" },
            .perform = [&context, saveProjectThen] { checkoutSelectedVersion (context, saveProjectThen); },
-           .isEnabled = [&context] { return canCheckoutSelected (context); } });
+           .isEnabled = [&context] { return canCheckoutSelected (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.backToBranch",
            .name = "Back to Branch",
@@ -2494,7 +2502,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "back", "return", "leave detached", "reattach", "go back to branch", "head" },
            .perform = [&context, saveProjectThen] { backToBranch (context, saveProjectThen); },
            .isEnabled = [&context] { return canGoBackToBranch (context); },
-           .currentName = [&context] { return describeBackToBranch (context); } });
+           .currentName = [&context] { return describeBackToBranch (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.bringBack",
            .name = "Restore from This Commit",
@@ -2503,7 +2512,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "revert", "go back", "roll back", "bring back", "reset" },
            .perform = [&context] { bringBackSelectedVersion (context); },
            .isEnabled = [&context] { return canBringBack (context); },
-           .currentName = [&context] { return describeBringBack (context); } });
+           .currentName = [&context] { return describeBringBack (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.takeFrom",
            .name = "Compare with Working Tree",
@@ -2520,7 +2530,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "restore track", "revert track", "bring back", "take", "git restore" },
            .perform = [&context] { restoreSelectedChange (context); },
            .isEnabled = [&context] { return canRestoreSelectedChange (context); },
-           .currentName = [&context] { return describeRestoreChange (context); } });
+           .currentName = [&context] { return describeRestoreChange (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.showChanges",
            .name = "Close the Comparison",
@@ -2536,7 +2547,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                           "or from the current one, the song going on there with its changes. The branch left keeps its own.",
            .synonyms = { "branch", "fork", "idea", "alternative", "new branch" },
            .perform = [&context, saveProjectThen] { newBranchFromSelection (context, saveProjectThen); },
-           .isEnabled = [&context] { return canMakeBranch (context); } });
+           .isEnabled = [&context] { return canMakeBranch (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.switchBranch",
            .name = "Checkout Branch",
@@ -2544,7 +2556,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                           "leaves keeps it as it is now, its changes too. It goes on playing.",
            .synonyms = { "switch", "branch", "go to", "git checkout", "git switch" },
            .perform = [&context, saveProjectThen] { switchToSelectedBranch (context, saveProjectThen); },
-           .isEnabled = [&context] { return canSwitchBranch (context); } });
+           .isEnabled = [&context] { return canSwitchBranch (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.merge",
            .name = "Merge into Current Branch...",
@@ -2553,14 +2566,16 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "merge", "combine", "join", "pull", "git merge" },
            .perform = [&context] { mergeSelectedVersion (context); },
            .isEnabled = [&context] { return canMerge (context); },
-           .currentName = [&context] { return describeMergeInto (context); } });
+           .currentName = [&context] { return describeMergeInto (context); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.finishMerge",
            .name = "Merge",
            .description = "Takes the lines ticked in the merge's list into the song, as one undo step; commit to finish the merge.",
            .synonyms = { "merge", "apply", "take" },
            .perform = [&context] { finishTickedMerge (context); },
-           .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
+           .isEnabled = [&context] { return ! getMergeLines (context).empty(); },
+           .needsPluginStates = true });
 
     add ({ .id = "version.cancelMerge",
            .name = "Abort Merge",
@@ -2568,7 +2583,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                           "waits for its commit, makes the song what it was before it, as one undo step.",
            .synonyms = { "cancel", "close", "back", "abort", "undo merge" },
            .perform = [&context] { cancelMerge (context); },
-           .isEnabled = [&context] { return canCancelMerge (context); } });
+           .isEnabled = [&context] { return canCancelMerge (context); },
+           .needsPluginStates = true });
 
     // Bounces, and hearing them: not undo steps, as they change the history and what is heard, not the song.
     add ({ .id = "version.hear",
@@ -2612,7 +2628,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "share", "collaborate", "interchange" },
            .perform = [&context, &renders] { exportDawProject (context, renders); },
            .isEnabled = [&context] { return canExportDawProject (context); },
-           .currentName = [&context] { return describeDawProjectExport (context); } });
+           .currentName = [&context] { return describeDawProjectExport (context); },
+           .needsPluginStates = true });
 
     // Local History.
     add ({ .id = "version.restoreSnapshot",
@@ -2622,7 +2639,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "local history", "auto save", "backup", "snapshot", "timeline", "go back", "recover" },
            .perform = [&context] { restoreSelectedSnapshot (context); },
            .isEnabled = [&context] { return canRestoreSelectedSnapshot (context); },
-           .currentName = [&context] { return describeRestoreSnapshot (context); } });
+           .currentName = [&context] { return describeRestoreSnapshot (context); },
+           .needsPluginStates = true });
 
     // Keeping the history whole.
     add ({ .id = "version.verify",

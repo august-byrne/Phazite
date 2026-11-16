@@ -89,6 +89,29 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     startThread (setup.background ? juce::Thread::Priority::low : juce::Thread::Priority::normal);
 }
 
+std::optional<OfflineRender::Wait> OfflineRender::findWait() const
+{
+    // Its plug-ins' blocks or channels it waits for (any thread: each plug-in's clock is an atomic; the jobs don't change
+    // while it lives).
+    std::optional<Wait> longest;
+    const auto now = sandbox::getNanoseconds();
+
+    for (const auto& job : jobs)
+    {
+        for (const auto* plugin : job.plugins)
+        {
+            const auto since = plugin->getRenderWaitSince();
+            auto& helper = plugin->getInstance().getRemote().getHelper();
+            const auto seconds = since != 0 ? (double) (now - since) * 1.0e-9 : 0.0;
+
+            if (since != 0 && seconds * 1000.0 > helper.getAudioHangMilliseconds() && (! longest.has_value() || seconds > longest->seconds))
+                longest = Wait { plugin->getInstance().getDescription().name, seconds };
+        }
+    }
+
+    return longest;
+}
+
 OfflineRender::~OfflineRender()
 {
     JUCE_ASSERT_MESSAGE_THREAD

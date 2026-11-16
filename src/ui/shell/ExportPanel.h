@@ -91,6 +91,7 @@ private:
     NumberField targetField, ceilingField;
     juce::TextButton changeFileButton { "Change..." }, showButton, closeButton { "Cancel" }, exportButton { "Export" };
     juce::ProgressBar progressBar { progress };
+    juce::String shownWait; // what the bar says of a plug-in the export waits for (RenderPanel::showWait())
 
     // Escape in its window, which the window would close on.
     struct EscapeKeys : public juce::KeyListener

@@ -1035,6 +1035,10 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     if (outermost.empty())
         return;
 
+    // What their devices hold of their own stored first (a plug-in's own settings), so that an undo brings it back as it is.
+    for (const auto track : outermost)
+        song.storeDeviceStates (track.getRaw());
+
     const auto all = getTrackIDs (song);
     const auto row = (int) (std::find (all.begin(), all.end(), outermost.front()) - all.begin());
     forgetSidechainSources (song, outermost);

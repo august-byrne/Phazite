@@ -24,6 +24,8 @@ Run **Scan for Plug-ins**, in the menu of the gear at the bottom left, after ins
 
 Each plug-in plays in a process of its own. One that crashes or hangs says so in its slot, with **Reload**, and the song plays on. The Project view, down the left, lists the project's plug-ins, with a crashed one to reload.
 
+An export, a freeze or a bounce waits for a slow plug-in for as long as it takes. If the progress bar says **Waiting for** a plug-in, that plug-in hasn't answered for a while: wait, or click **Cancel** to stop the render.
+
 ## Part of a recording was lost
 
 Phazite writes what you record as it comes in, with 8 seconds to spare. If the drive stalls for longer, the sound in between is lost: the take has silence there, so that everything after it stays in time, and Phazite says which track, where and how long. Record that part again with Punch In, and keep projects on a fast internal drive.

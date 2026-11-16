@@ -373,7 +373,7 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     CHECK (levelNow() == doctest::Approx (quarter).epsilon (0.002));
 
     // Saved: the song holds its state as a .vstpreset of its class, with its trim, and its program.
-    REQUIRE (song.getProject().save().wasOk());
+    song.saveWithPluginStates();
     const auto getStored = [&song, effect]
     {
         const auto bytes = phazite::readBytes (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString());

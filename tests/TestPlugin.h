@@ -37,7 +37,8 @@ public:
     void setVersion (int);
 
     // Its gain as the plug-in itself has it (in its helper), and set as its editor sets it: its instance's value follows
-    // once the helper has told, which this waits for. Through the song's session.
+    // once the helper has told, and Phazite has its state as it is then (asked once the plug-in is quiet), which this waits
+    // for. Through the song's session.
     static float getGain (const Song&, DeviceID);
     static void setGain (const Song&, DeviceID, float);
 

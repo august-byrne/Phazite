@@ -155,7 +155,8 @@ void walkControls (juce::Component& c, const juce::String& path, Unexplained& fo
 constexpr const char* aboutTheAppCatalogue =
     "# The commands Phazite registers before the main window's own (app.quit, options.*, input.computerKeyboard, the keymaps "
     "and themes, view.interface*, view.fullScreen, view.hoverHelp, help.welcome and help.phaziteSounds, which come after these), "
-    "in order, with their keys as Windows and Linux write them. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
+    "in order, with their keys as Windows and Linux write them, and whether they get the plug-ins' states first (plugin-states, "
+    "or plugin-states-when for what is selected). Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).";
 } // namespace
 
 TEST_CASE ("The window's content works without a screen: a project opens, the panels and layouts change, and commands are found")
@@ -645,6 +646,12 @@ TEST_SUITE ("golden")
 
             if (const auto keys = screen.commands.getShortcutDescriptions (command->id); ! keys.isEmpty())
                 line << " | " << keys.joinIntoString (", ");
+
+            // Whether it gets the plug-ins' states first (known bug 166): a flag dropped fails this.
+            if (command->needsPluginStates)
+                line << " | plugin-states";
+            else if (command->readsPluginStates != nullptr)
+                line << " | plugin-states-when";
 
             lines.add (line);
         }

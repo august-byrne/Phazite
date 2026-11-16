@@ -45,7 +45,12 @@ public:
     Project& getProject() const;
     juce::File getSoundsFolder() const; // for the test's sound files, outside the project
 
-    // Saves the project, closes it and opens it again from its file in the same context, as the app opens one, waiting for
+    // Saves the project as the app does: every plug-in asked for its state first, and waited for
+    // while the message loop turns (a save writes the states they gave last, and those that come after are unsaved
+    // changes).
+    void saveWithPluginStates();
+
+    // Saves the project as the app does (saveWithPluginStates()), closes it and opens it again from its file in the same context, as the app opens one, waiting for
     // its plug-ins to load unless asked not to. And closes it and opens another song, written into its file in its place.
     void reopen (bool waitForPlugins = true);
     void openSong (const juce::ValueTree& song);

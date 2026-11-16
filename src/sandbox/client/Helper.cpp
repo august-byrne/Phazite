@@ -311,10 +311,11 @@ std::optional<juce::MemoryBlock> Helper::request (MessageWriter& message, int ti
     return reply->getReply();
 }
 
-std::shared_ptr<Helper::Reply> Helper::send (MessageWriter& message)
+std::shared_ptr<Helper::Reply> Helper::send (MessageWriter& message, bool holdsOffHang)
 {
     auto reply = std::make_shared<Reply>();
     reply->request = message.getRequest();
+    reply->holdsOffHang = holdsOffHang;
 
     {
         const juce::ScopedLock held (lock);
@@ -354,7 +355,7 @@ bool Helper::isWaiting()
                         [] (const auto& wanted)
                         {
                             const auto reply = wanted.lock();
-                            return reply != nullptr && ! reply->isDone();
+                            return reply != nullptr && ! reply->isDone() && reply->holdsOffHang;
                         });
 }
 

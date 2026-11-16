@@ -193,6 +193,10 @@ the [changelog](changelog.md).
 | G135 | Wavetable with Basic Shapes: sweep Osc 1's Warp Amount with Sync, Bend + and Pulse Width on a held low note, a scope on the master. Then a held chord on a new FM | The wave stays centred, with no thump as notes start or end; the FM shows no slow wobble around zero | |
 | G127 | In a song of 200 tracks (or 40): drag a fader and turn the wheel to scroll the mixer sideways in mid-drag; Tab past the last strip in view; drag the mixer's scroll bar quickly end to end; with three returns, turn R2's send to R1 while R1 sends to R3 | The fader keeps following and Undo puts it back; the mixer scrolls to the next strip; no stall, strips may appear over a frame or two; R3's send knob to R2 goes | |
 | G144 | In the same song: scroll the playlist down and up, and drag its scroll bar end to end; Tab through the headers' mute switches past the bottom; drag a header below the bottom; add notes in the piano roll; drag a clip from a muted red track to a blue one | Headers appear with no flicker or gap; the rows scroll with the focus; the tracks scroll and the header drops at the end; only that clip redraws; the clip turns blue and stops looking faded during the drag | |
+| G165 | Open a few real VST3 windows (one docked), close them and close the project. Press Space and a note key with a plug-in's window focused | Each closes at once, and no plug-in crashes or leaves a window behind; Space plays and the note sounds | |
+| G166 | Turn a knob in a VST3's window and press Ctrl+D on its track, or Commit, at once; do the same with a plug-in that is busy (a sampler loading) | The copy or the commit holds the turned value; with the busy plug-in the window holds still and a progress window shows after a second, whose Cancel changes nothing | |
+| G168 | With unsaved changes and a plug-in's window open, start a Windows restart; then a sign-out; then cancel a shutdown at its "apps preventing shutdown" screen and save; then run the installer's update while Phazite runs | "Save changes?" shows before Windows ends Phazite, each time; after the cancelled shutdown the save asks the plug-ins again; the installer's request asks to save as Quit does | |
+| G42 | Freeze a track with a very heavy plug-in | The bar reads "Waiting for <name> (N s)", and Cancel stops it at once | |
 
 ## Known bugs that need an ear or a real plug-in
 
@@ -201,7 +205,6 @@ Numbers are those of [known-bugs.md](known-bugs.md).
 | # | Check | Proves | Checked on |
 |---|---|---|---|
 | K36 | In a song with an audio file of several minutes, click far ahead in the ruler while it plays | How long the silence before the sound is | |
-| K42 | Export a song with the slowest plug-in you own | That no real plug-in keeps one block for 30 seconds, which would end its helper | |
 
 ## Performance on other machines
 

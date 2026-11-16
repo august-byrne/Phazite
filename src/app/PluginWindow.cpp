@@ -147,17 +147,42 @@ namespace
                                           if (! isInOpenProject())
                                               return;
 
-                                          // A save that failed says why itself (PresetModel.h: saveDevicePreset()).
-                                          if (saveDevicePreset (services->context, id, file))
-                                              services->library.notePresetSaved(); // the browser shows it
+                                          // Once the plug-in's state is in (known bug 166); a save that failed says why itself
+                                          // (PresetModel.h: saveDevicePreset()).
+                                          services->context.withPluginStates (
+                                              [context = &services->context, library = &services->library, device = id, file] (bool go)
+                                              {
+                                                  if (go && saveDevicePreset (*context, device, file))
+                                                      library->notePresetSaved(); // the browser shows it
+                                              });
                                       });
         }
 
         void loadPreset (const juce::File& file)
         {
-            if (isInOpenProject() && ! loadPresetInto (services->context, id, file))
-                showProblem ("Phazite couldn't load " + file.getFileNameWithoutExtension() + " into " + name
-                             + ": the preset is another device's, or Phazite can't read it.");
+            if (! isInOpenProject())
+                return;
+
+            // Once the plug-in's state is in, so that an undo brings back what it has now (known bug 166).
+            loadPresetWithPluginStates (services->context, id, file,
+                                        [file, plugin = name] (bool loaded)
+                                        {
+                                            if (! loaded)
+                                                showProblem (plugin, "Phazite couldn't load " + file.getFileNameWithoutExtension()
+                                                                         + " into " + plugin
+                                                                         + ": the preset is another device's, or Phazite can't read it.");
+                                        });
+        }
+
+        // One that comes after its window may have gone (a load that waited for the plug-in's state).
+        static void showProblem (const juce::String& title, const juce::String& message)
+        {
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                              .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                              .withTitle (title)
+                                              .withMessage (message)
+                                              .withButton ("OK", 0),
+                                          nullptr);
         }
 
         void showProblem (const juce::String& message)

@@ -1614,11 +1614,20 @@ void Browser::saveSelectedTrackPreset()
 
 void Browser::choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save)
 {
+    // Saved once the plug-ins that said they changed have given their states, where it is chosen (known bug 166).
     askWhereToSavePreset (presetChooser, library.getPresetsFolder().getChildFile (folder), name,
                           [safeThis = juce::Component::SafePointer<Browser> (this), onChosen = std::move (save)] (const juce::File& file)
                           {
-                              if (safeThis != nullptr && onChosen (file))
-                                  safeThis->presetSaved (file);
+                              if (safeThis == nullptr || file == juce::File())
+                                  return;
+
+                              const_cast<ProjectContext&> (safeThis->projectContext)
+                                  .withPluginStates (
+                                      [safeThis, onChosen, file] (bool go)
+                                      {
+                                          if (go && safeThis != nullptr && onChosen (file))
+                                              safeThis->presetSaved (file);
+                                      });
                           });
 }
 
@@ -1631,8 +1640,8 @@ void Browser::showDevicePresetMenu (DeviceID device, const juce::String& name, j
 
     auto& context = const_cast<ProjectContext&> (projectContext); // loading into the device changes the open project
     const juce::Component::SafePointer<Browser> safeThis (this);
-    auto presets = makeDevicePresetMenu (library, folder, name,
-                                         [&context, device] (const juce::File& file) { loadPresetInto (context, device, file); });
+    auto presets = makeDevicePresetMenu (library, folder, name, [&context, device] (const juce::File& file)
+                                         { loadPresetWithPluginStates (context, device, file); });
 
     // First, one of Phazite's own devices' presets tried in place from the browser, each heard as the browser moves to it.
     juce::PopupMenu menu;
@@ -1730,22 +1739,28 @@ void askWhereToSavePreset (std::unique_ptr<juce::FileChooser>& chooser, const ju
                           });
 }
 
-juce::File Browser::saveTrackPreset (TrackID track)
+void Browser::saveTrackPreset (TrackID track)
 {
     const auto channel = getChannel (projectContext, track);
 
     if (! channel.has_value() || channel->kind != ChannelKind::track)
-        return {};
+        return;
 
-    const auto folder = library.getPresetsFolder().getChildFile (trackPresetsFolder);
-    folder.createDirectory();
-    const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (channel->name), presetExtension, true);
+    // Once the plug-ins that said they changed have given their states, where the track is dropped (known bug 166).
+    const_cast<ProjectContext&> (projectContext)
+        .withPluginStates (
+            [safeThis = juce::Component::SafePointer<Browser> (this), track, name = channel->name] (bool go)
+            {
+                if (! go || safeThis == nullptr)
+                    return;
 
-    if (! phazite::saveTrackPreset (projectContext, track, file))
-        return {};
+                const auto folder = safeThis->library.getPresetsFolder().getChildFile (trackPresetsFolder);
+                folder.createDirectory();
+                const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), presetExtension, true);
 
-    presetSaved (file);
-    return file;
+                if (phazite::saveTrackPreset (safeThis->projectContext, track, file))
+                    safeThis->presetSaved (file);
+            });
 }
 
 void Browser::presetSaved (const juce::File& file)
