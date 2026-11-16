@@ -655,6 +655,34 @@ TEST_CASE ("A note ends in the instrument container's chain it started in, whate
     CHECK (audio.getSample (0, audio.getNumSamples() - 1) == doctest::Approx (0.0f));
 }
 
+TEST_CASE ("An instrument container's chain unmuted in the middle of a note plays it at once as its instrument played on meanwhile")
+{
+    // A chain's switch silences its sound as a track's does, its devices playing on (known bug 78: the chain threw its notes
+    // away while muted, and stayed silent until its next note). At every condition, the note held through a loop's wrap too.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            TestSong song;
+            song.setTempo (condition.getTempo());
+            auto& context = song.context;
+            addTestDevice (song, song.firstTrack, TestTone::typeID);
+            const auto container = phazite::addInstrumentContainer (context, song.firstTrack);
+            const auto chain = phazite::getChains (context, container)[0].id;
+            song.addNote (song.addMidiClip (song.firstTrack, 0.0, 16.0), 60, 0.0, 16.0, 100);
+            EnginePlayback playback (condition);
+            const auto held = juce::Decibels::decibelsToGain (phazite::defaultMasterVolume) * 100.0f / 127.0f;
+            const auto last = [] (const juce::AudioBuffer<float>& audio) { return audio.getSample (0, audio.getNumSamples() - 1); };
+
+            song.run ("transport.playStop");
+            CHECK (last (playback.play (0.5)) == doctest::Approx (held).epsilon (0.001));
+            phazite::toggleChainMute (context, chain);
+            CHECK (last (playback.play (0.5)) == 0.0f);
+            phazite::toggleChainMute (context, chain);
+            CHECK (last (playback.play (0.5)) == doctest::Approx (held).epsilon (0.001));
+            song.run ("transport.playStop");
+        });
+}
+
 TEST_CASE ("A track's instrument and effects group into an instrument container in its place, which ungroups while it has one chain")
 {
     TestSong song;

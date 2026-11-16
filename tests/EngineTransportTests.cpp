@@ -7,7 +7,9 @@
 #include "TestAudioDevice.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UiTestHelpers.h"
 #include "engine/audio/AudioRegion.h"
+#include "engine/audio/FileReader.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Workers.h"
 #include "engine/nodes/DeviceNode.h"
@@ -18,10 +20,12 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -824,4 +828,243 @@ TEST_CASE ("A render takes the project's plug-ins only once a block that stalls 
     letGo.join();
     audioThread.join();
     session->lendToRender (false);
+}
+
+namespace
+{
+// A file of silence, mono at the tests' rate, a minute long, longer than is read whole, which notes the chunks it reads, in
+// the order it reads them, by their first samples.
+struct NotingReader final : engine::SampleReader
+{
+    int getNumChannels() const override { return 1; }
+    double getSampleRate() const override { return rate; }
+    std::int64_t getLength() const override { return 60 * (std::int64_t) rate; }
+
+    bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int) override
+    {
+        buffer.clear();
+        starts.push_back (start);
+        return true;
+    }
+
+    bool hasRead (std::int64_t sample) const
+    {
+        const auto chunk = sample / engine::AudioFile::chunkSamples * engine::AudioFile::chunkSamples;
+        return std::find (starts.begin(), starts.end(), chunk) != starts.end();
+    }
+
+    std::vector<std::int64_t> starts;
+};
+
+// The chunk a sample of a file is in, by its first sample.
+std::int64_t chunkOf (std::int64_t sample)
+{
+    return sample / engine::AudioFile::chunkSamples * engine::AudioFile::chunkSamples;
+}
+
+// Reads all that a file wants read, as its reading thread would.
+void readAllWanted (engine::AudioFile& file)
+{
+    while (file.readNext())
+    {
+    }
+}
+} // namespace
+
+TEST_CASE ("A jump into a part of a long file not read yet has that part read first ahead of all else the file wants")
+{
+    // Known bug 36: the reading thread learnt where a jump lands only once the engine played there, after the jump's fade,
+    // and then read it after the chunks it reads ahead elsewhere (the nearest of every place it plays first). A jump asked
+    // for tells the files there at once, and the next chunk read is the one it lands in.
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    auto reader = std::make_unique<NotingReader>();
+    auto& noted = *reader;
+    auto file = std::make_shared<engine::AudioFile> (std::move (reader), &player.getBlocksPlayed());
+    engine::AudioRegion region;
+    region.file = file;
+    region.state = std::make_shared<engine::RegionState> (*file, rate);
+    region.length = file->getLength();
+    auto plan = makePlan();
+    addTrack (*plan, nullptr, {}, { region });
+    player.setPlan (std::move (plan));
+
+    // Playing from the start, read ahead of as it plays; then a jump to 40 s in (beat 80 at 120 BPM), not read yet.
+    player.play();
+
+    for (int block = 0; block < 20; ++block)
+    {
+        playBlocks (player, blockSize);
+        readAllWanted (*file);
+    }
+
+    const auto landing = 40 * (std::int64_t) rate;
+    REQUIRE_FALSE (noted.hasRead (landing));
+    playBlocks (player, blockSize);
+    player.locate (80.0);
+    CHECK (file->readNext());
+    CHECK (noted.starts.back() == chunkOf (landing));
+}
+
+TEST_CASE ("A version's bounce compared with the song is read ahead at the loop's start and first where a jump lands")
+{
+    // Known bug 39: the song's audio clips were read ahead at the loop's start, and where playback will start, but a
+    // version's bounce heard against the song (A/B) only where it played: each time round the loop, and after a jump, it
+    // was silent until it was read. A loop from 40 s to 42 s in (beats 80 to 84 at 120 BPM), the version's tempo the same.
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    auto reader = std::make_unique<NotingReader>();
+    auto& noted = *reader;
+    auto file = std::make_shared<engine::AudioFile> (std::move (reader), &player.getBlocksPlayed());
+    auto plan = makePlan();
+    plan->loop = engine::Plan::BeatRange { 80.0, 84.0 };
+    addTrack (*plan, nullptr);
+    engine::Plan::Comparison comparison;
+    comparison.bounce.file = file;
+    comparison.bounce.state = std::make_shared<engine::RegionState> (*file, rate);
+    comparison.bounce.length = file->getLength();
+    comparison.tempo = plan->tempo;
+    comparison.state = std::make_shared<engine::ComparisonState>();
+    comparison.state->prepare (rate, blockSize);
+    plan->comparison = std::move (comparison);
+    player.setPlan (std::move (plan));
+
+    // Stopped at the start, the loop's start is read ahead of, with where playback will start.
+    playBlocks (player, blockSize);
+    readAllWanted (*file);
+    CHECK (noted.hasRead (0));
+    CHECK (noted.hasRead (40 * (std::int64_t) rate));
+
+    // A jump to 50 s in (beat 100) is read first.
+    player.locate (100.0);
+    CHECK (file->readNext());
+    CHECK (noted.starts.back() == chunkOf (50 * (std::int64_t) rate));
+}
+
+namespace
+{
+// A file of one level a minute long, read on the reading thread, which notes when it read each chunk (milliseconds by
+// juce::Time::getMillisecondCounterHiRes(), by its first sample), for the test's thread to look at.
+struct TimedReader final : engine::SampleReader
+{
+    int getNumChannels() const override { return 1; }
+    double getSampleRate() const override { return rate; }
+    std::int64_t getLength() const override { return 60 * (std::int64_t) rate; }
+
+    bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+    {
+        juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.5f, numSamples);
+        const std::lock_guard lock (mutex);
+        reads.emplace_back (start, juce::Time::getMillisecondCounterHiRes());
+        return true;
+    }
+
+    int countReads() const
+    {
+        const std::lock_guard lock (mutex);
+        return (int) reads.size();
+    }
+
+    std::optional<double> findReadTime (std::int64_t chunkStart) const
+    {
+        const std::lock_guard lock (mutex);
+
+        for (const auto& [start, at] : reads)
+            if (start == chunkStart)
+                return at;
+
+        return {};
+    }
+
+    mutable std::mutex mutex;
+    std::vector<std::pair<std::int64_t, double>> reads;
+};
+} // namespace
+
+TEST_CASE ("A jump while the reading thread waits has the place it lands in read at once and not when the thread next looks")
+{
+    // The reading thread, done with what it reads ahead, looks again every 20 ms; it learnt of a jump into a part of a long
+    // file not read yet only as the engine landed there, after the jump's fade, and read it when it next looked (known bug
+    // 36: up to 20 ms of silence more than the read takes). The jump asked for now wakes it, with the place to read first.
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    engine::FileReader reading;
+    auto timed = std::make_unique<TimedReader>();
+    auto& reads = *timed;
+    auto file = std::make_shared<engine::AudioFile> (std::move (timed), &player.getBlocksPlayed());
+    engine::AudioRegion region;
+    region.file = file;
+    region.state = std::make_shared<engine::RegionState> (*file, rate);
+    region.length = file->getLength();
+    auto plan = makePlan();
+    addTrack (*plan, nullptr, {}, { region });
+    player.setPlan (std::move (plan));
+    reading.add (file);
+    player.play();
+    playBlocks (player, blockSize);
+
+    // Until it has read ahead (10 s, in 15 chunks) and waits.
+    const auto ahead = (int) std::ceil (10.0 * rate / engine::AudioFile::chunkSamples);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&reads, ahead] { return reads.countReads() >= ahead; }));
+
+    // The jump, 40 s in (beat 80), asked for with no block played meanwhile: the place it lands in is read at once, ahead of
+    // the engine's landing there. The old reading thread learnt of it only from a block played there, so it waited for ever
+    // (here for the limit, a second: how soon is what is tested).
+    const auto landing = chunkOf (40 * (std::int64_t) rate);
+    const auto asked = juce::Time::getMillisecondCounterHiRes();
+    player.locate (80.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&reads, landing] { return reads.findReadTime (landing).has_value(); }, 1000));
+    MESSAGE ("the reading thread read where a jump lands " << *reads.findReadTime (landing) - asked << " ms after it was asked for");
+
+    // Then the clip is silent for the jump's fade alone: from where the jump is taken, its fade in (3 ms) at most, never a
+    // block of silence while its file is read.
+    while (player.getLocatesTaken().load() != player.getLocatesAsked())
+        playBlocks (player, 64);
+
+    const auto played = playBlocks (player, 8 * blockSize);
+    auto silent = 0;
+
+    for (int i = 0; i < played.getNumSamples(); ++i)
+        silent += std::abs (played.getSample (0, i)) < 1.0e-6f ? 1 : 0;
+
+    CAPTURE (silent);
+    CHECK (silent <= (int) std::lround (engine::Engine::fadeSeconds * rate) + 64);
+}
+
+TEST_CASE ("A delay made longer than its ring reads the past from the ring before and its work in the block of the switch is the block's")
+{
+    // The review of known bug 167 (B): the ring of a delay made longer than its ring copied what the ring before held, all
+    // of it, on the audio thread as it first played, one for every path into a sum that grew, in one block (50 tracks at
+    // 48 kHz from 8192 to 16,384 samples: about 4.9 MB). Now it copies nothing: it reads the part of its reach that predates
+    // it from the ring before, so a block's work is the block's, however much the rings hold. A count played through a
+    // delay of 8192 samples for a while, then through one of 16,384 on a new ring that takes that one's place.
+    auto first = std::make_shared<engine::DelayLine> (8192 + 16384);
+    engine::Delay before (first, 8192, 144);
+    first->reset(); // as a start from a stop makes it: silence, all its room heard
+    juce::AudioBuffer<float> in (2, 64), out (2, 64);
+    std::int64_t count = 0;
+
+    const auto playBlock = [&] (engine::Delay& delay)
+    {
+        for (int i = 0; i < 64; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                in.setSample (channel, i, (float) (count + i + 1));
+
+        out.clear();
+        delay.addDelayed (in.getArrayOfReadPointers(), out.getArrayOfWritePointers(), 64);
+        count += 64;
+    };
+
+    for (int block = 0; block < 600; ++block)
+        playBlock (before);
+
+    engine::Delay after (std::make_shared<engine::DelayLine> (16384 + 16384, first), 16384, 144);
+    const auto from = count;
+    playBlock (after);
+
+    // At most the block read and the block written, on each side; and what it played the count 16,384 samples before.
+    CAPTURE (after.getSamplesTouched());
+    CHECK (after.getSamplesTouched() <= 2 * 64);
+    CHECK (out.getSample (0, 0) == doctest::Approx ((double) (from + 1 - 16384)));
+    CHECK (out.getSample (1, 63) == doctest::Approx ((double) (from + 64 - 16384)));
 }

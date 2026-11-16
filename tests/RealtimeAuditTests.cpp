@@ -14,6 +14,7 @@
 #include "SandboxedPlugins.h"
 #include "TestAudioDevice.h"
 #include "TestClips.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -192,6 +193,7 @@ struct Measurement
     float peakLevel = 0.0f;
     int assertions = 0;                      // JUCE assertions that fired on the audio thread, which fail the test
     AudioThreadMonitor::Counts ofAssertions; // what JUCE allocated for their messages after the warm-up, left out of steady
+    float lastLevel = 0.0f;                  // the peak of the last 16 blocks
 };
 
 // How many threads the engine plays a block on, the audio thread one of them: the others are its workers
@@ -328,6 +330,10 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const Playi
                 countsAfter[(size_t) block] = AudioThreadMonitor::getCounts();
                 m.blocksPlayed = block + 1;
                 m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
+
+                if (block >= totalBlocks - 16)
+                    m.lastLevel = std::max (m.lastLevel, buffer.getMagnitude (0, auditBlockSize));
+
                 std::this_thread::sleep_until (blockEnd);
             }
 
@@ -2096,6 +2102,112 @@ TEST_SUITE ("realtime-audit")
         report ("Edited while it plays: the loop and the playhead", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         CHECK_FALSE (phazite::isLoopOn (played));
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: a track muted and soloed out in the middle of its notes and heard again, and a "
+               "device with latency added and removed, the mix faded across the delays it changes")
+    {
+        // A muted track plays on, its channel silencing it (known bug 78), so that its held chord, and its reverb's tail, are
+        // heard at once as it is heard again. A limiter (its look-ahead a latency) on one track changes the delays that line
+        // the others up with it: the engine keeps the plan before playing while what goes out fades out, then is silent while
+        // the new delays fill, and fades in (known bug 167).
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        song.addEffect (keys, phazite::devices::Reverb::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int bar = 0; bar < 4; ++bar)
+            song.addChord (chords, { 60 + bar % 3, 64, 67 }, bar * 4.0, 3.5);
+
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        const auto line = song.addMidiClip (bass, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addNote (line, 36 + beat % 2 * 7, beat, 0.9);
+
+        auto& played = getSong (song);
+        phazite::DeviceID limiter, latency, send;
+
+        // For the everyday edits: a return, a bus of a track of its own, and a third track to delete.
+        const auto reverb = phazite::addReturnTrack (played, "Reverb", nullptr);
+        const auto member = song.addTrack ("Member");
+        const auto bus = song.addBus ("Bus", { member });
+        const auto spare = song.addTrack ("Spare");
+        song.setInstrument (spare, phazite::devices::Synth::typeID);
+        song.addNote (song.addMidiClip (spare, 0.0, 16.0), 48, 0.0, 16.0);
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing {
+                .edits = {
+                    { 20, "the chords' track muted as a chord sounds", [&] { phazite::toggleMute (song.context, keys); } },
+                    { 40, "heard again in the middle of the chord", [&] { phazite::toggleMute (song.context, keys); } },
+                    { 60, "the bass soloed, the chords silenced", [&] { phazite::toggleSolo (song.context, bass); } },
+                    { 80, "the solo ended", [&] { phazite::toggleSolo (song.context, bass); } },
+                    { 100, "a limiter added to the bass, the chords delayed to line up with it",
+                      [&] { limiter = song.addEffect (bass, phazite::devices::Limiter::typeID); } },
+                    { 140, "the limiter removed, the delays as they were", [&] { phazite::removeDevice (song.context, limiter); } },
+                    { 180, "undone: the limiter back", [&] { phazite::undo (played); } },
+                    { 220, "a latency of 1000 samples on the chords' track, the bass's path delayed within its ring",
+                      [&]
+                      {
+                          latency = phazite::test::addTestDevice (played, keys, phazite::test::TestLatency::typeID);
+                          phazite::setValueSetByHand (played, phazite::ParameterRef { latency, "samples" }, 1000.0f);
+                      } },
+                    { 260, "made 30,000: the bass's path past its ring, on a longer one that reads the past from it",
+                      [&] { song.setParameter (latency, "samples", 30000.0f); } },
+                    { 300, "a send added from the chords to the return (a path that comes)",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Add Send");
+                          send = phazite::addSend (played, keys, reverb, false);
+                      } },
+                    { 320, "the send switched before the fader (a path goes, another comes)",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Change Send");
+                          phazite::setPreFader (played, send, true);
+                      } },
+                    { 340, "the send taken away (a path goes)",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Remove Send");
+                          phazite::removeSend (played, send);
+                      } },
+                    { 360, "the bass moved into the bus",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Move");
+                          phazite::moveTrackIntoFolder (played, bass, bus);
+                      } },
+                    { 380, "a track deleted as it plays a note",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Delete Track");
+                          phazite::deleteTracks (played, { spare }, nullptr);
+                      } },
+                    { 400, "undone: the track back (paths that come)", [&] { phazite::undo (played); } },
+                    { 420,
+                      "the track deleted and the chords' latency made 4,000 samples longer (over 15 blocks) at once: the mix dipped until the "
+                      "paths that grew read nothing again from before the leaving paths' fades ended, and back after",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Delete Track");
+                          phazite::deleteTracks (played, { spare }, nullptr);
+                          phazite::setValueSetByHand (played, phazite::ParameterRef { latency, "samples" }, 34000.0f);
+                      } },
+                    // (The return's path grew by 30,000 samples as the send to it went at block 340, its sound holding the
+                    // send's: the mix is held silent about that long after it and the edits that come within it (each moving the
+                    // leave on), and the plan's new devices start then, each after its own latency: back by block 680.)
+                    { 700, "nothing: the mix back after the holds", [] {} },
+                } });
+        report ("Edited while it plays: mute and solo in the middle of notes, a latency added and removed, and grown past a ring", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (phazite::getEffects (song.context, bass).size() == 1);
+        CHECK (m.lastLevel > 0.01f); // the mix back after the holds (each track after its own latency)
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 

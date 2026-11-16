@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ClipRenders.h"
+#include "devices/core/Processor.h"
 #include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "model/base/internal/Schema.h"
@@ -7,6 +8,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 
 #include <algorithm>
+#include <span>
 #include <utility>
 
 namespace phazite
@@ -65,9 +67,17 @@ bool renderClipAudio (const juce::File& source, const stretch::Settings& setting
     if (reader == nullptr || reader->numChannels == 0 || reader->lengthInSamples <= 0)
         return false;
 
+    // What isn't sound in a file of floats (NaN, an infinity) read as silence, sample by sample, as the engine reads it
+    // (engine/audio/AudioFile.h): the stretcher would spread it over the whole render.
     const stretch::Source in { (int) reader->numChannels, reader->sampleRate, reader->lengthInSamples,
                                [&reader] (juce::AudioBuffer<float>& buffer, juce::int64 start, int frames)
-                               { reader->read (&buffer, 0, frames, start, true, true); } };
+                               {
+                                   reader->read (&buffer, 0, frames, start, true, true);
+
+                                   for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                                       for (auto& sample : std::span (buffer.getWritePointer (channel), (size_t) frames))
+                                           sample = devices::soundOf (sample);
+                               } };
 
     render.getParentDirectory().createDirectory();
     const auto part = render.getSiblingFile (render.getFileNameWithoutExtension() + "_"

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace phazite::engine
@@ -49,9 +50,11 @@ public:
     // The transport, as the message thread asks for it (one thread: the message thread, or a render's): the audio thread
     // takes the state last asked for as its next block with a plan starts, however much was asked meanwhile. A stop before a
     // jump, a jump before a start. A jump while the song plays fades what sounds out over fadeSeconds first, and what
-    // follows in; a stop fades the audio clips out (their sound would end in a step), and lets the rest ring on as notes
-    // end; the loop's end fades out the audio clips it cuts. Nothing else fades: a song played without a jump, a stop or
-    // the loop plays as its render does.
+    // follows in (a stop asked meanwhile waits for that fade, and is taken where the jump lands); a stop fades the audio
+    // clips out (their sound would end in a step), and lets the rest ring on as notes end; the loop's end fades out the
+    // audio clips it cuts; and a plan whose delay compensation changed (Plan::alignment) fades what goes out down and up
+    // again across it. Nothing else fades: a song played without a jump, a stop, the loop or such a plan plays as its
+    // render does. A locate tells the audio files of the plan given last to read where it lands first.
     void play (bool countIn = false);                   // from where the playhead is (after a count-in: below)
     void stop();                                        // where the playhead is
     void locate (double beat);                          // the playhead there, playing on from there if it plays
@@ -246,21 +249,75 @@ private:
         double beat = 0.0;
         std::uint32_t count = 0; // of locates asked, when it is taken
         int left = 0;
+        bool thenStop = false; // a stop asked meanwhile, taken where the jump lands
     } jump;
 
     int fadingIn = 0;
+
+    // A new plan whose delay compensation changed (Plan::alignment), given while the song plays: what goes out fades out
+    // over the samples left on the plan it played, which the engine keeps playing meanwhile (Handover::Block::keep()); then
+    // the new plan plays, fading in. Its paths' delays play on from what came in before (nodes/Strip.h: DelayLine), each
+    // that doesn't hold enough of the past yet (one made longer, or new) silent until it does and fading in then. Known bug
+    // 167: the paths' delays changed in one step, a click or a skip. A plan that comes during the fade in fades out again
+    // from where it is, so that plans in a row make one dip.
+    //
+    // Across a leave too (Leave, below), the plan played is kept, silent, until the new plan's paths that read what a
+    // leaving path went into (Delay::markReadsLeaving()), where their delays grew, read nothing again from before the
+    // leaving paths' fades ended (Delay::getGrowth()): a stretch it plays again after the dip, which would hold what those
+    // paths still added to a sum (a return's sound) as they faded. Worked out once for each plan that changes the
+    // alignment or the departures, it counts down from there; a jump ends it.
+    struct Realign
+    {
+        int left = 0;        // of the fade out, on the plan played
+        bool dipped = false; // what goes out faded out (and stays so while the plan played is kept): it fades in on the new plan
+        int hold = 0;        // the samples the plan played is kept for, silent, across a leave
+
+        // The given plan the hold was last worked out for, by its alignment and departures (holdAcrossLeave()).
+        bool walked = false;
+        std::uint64_t walkedAlignment = 0, walkedDepartures = 0;
+    } realign;
+
+    // A new plan in which paths of the plan played have gone (Plan::departures: a track deleted, a send taken away or
+    // switched before or after its fader, a track moved to another bus), given while the song plays: the engine keeps
+    // playing the plan it played, each leaving path (its delay marked with a departure later than the plan played's, up to
+    // the latest the engine has taken: Delay::getDeparture()) fading out over 3 ms from the first stretch it is heard to
+    // leave in, and silent after while that plan plays, everything else as it is; then it plays the new plan, sample for
+    // sample on where the two have the same (an everyday edit while the loop plays touches nothing else). Paths that go in
+    // a plan taken during a leave start their own fade then, which the leave lasts for. New paths fade in themselves
+    // (nodes/Strip.h: Delay).
+    struct Leave
+    {
+        bool active = false;
+        int left = 0;                      // the samples the plan played is kept for its leaving paths' fades
+        std::uint64_t after = 0, upTo = 0; // the departures of the plan played, and the latest taken
+    } leave;
+
+    bool switching = false; // the fades on the plan played done: the new plan from the next part
+
+    // The alignment and departures of the plan it played (Plan::alignment, departures), kept with it so that they are never
+    // read from a plan let go of; and how many times the plans were dropped (dropPlans(), the message thread's), and how
+    // many the audio thread has seen: a plan it played before is never looked at again after a drop.
+    std::uint64_t playedAlignment = 0, playedDepartures = 0;
+    std::atomic<std::uint32_t> drops { 0 };
+    std::uint32_t dropsSeen = 0;
 
     struct StopFade
     {
         std::int64_t sample = 0, end = 0;
     } stopFade;
 
-    void takeTransport (const Plan&) noexcept; // the state asked for, as each part with a plan starts
-    void stopTransport (const Plan&) noexcept; // a stop: any jump fading out taken at once
+    const Plan* choosePlan (const Plan* given) noexcept; // the plan a part plays: the given one, or one kept while it fades out
+    void takeTransport (const Plan&) noexcept;           // the state asked for, as each part with a plan starts
+    void stopTransport (bool fadedOut) noexcept;         // a stop (one asked while a jump fades out waits for it to end)
     void startTransport (const Plan&, bool countIn) noexcept;
     void takeJump (const Plan&, double beat, std::uint32_t count) noexcept;
-    void fadeMaster (float* const* sides, int numSamples) noexcept; // a jump's fade out, and what follows it fading in
+    void fadeMaster (float* const* sides, int offset, int numSamples) noexcept; // around a jump and a plan realigned
+    bool isFading() const noexcept;
     void expectAudio (const Plan&) noexcept; // tells the audio clips' files where they play next (AudioRegion::expect())
+    void startRealign() noexcept;
+    void startLeave (std::uint64_t upTo) noexcept;
+    void holdAcrossLeave (const Plan& given) noexcept; // Realign::hold, for the plan given
+    bool isKeeping() const noexcept { return realign.left > 0 || leave.left > 0 || realign.hold > 0; }
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
 
@@ -284,6 +341,13 @@ private:
         std::int64_t audioSample = 0;
         AudioRegion::Cut cut {};
         bool playsAudio = false;
+
+        // While paths leave (Leave): the departures of the plan played and the latest taken, between which a path leaves.
+        bool leaving = false;
+        std::uint64_t leavesAfter = 0, leavesUpTo = 0;
+
+        // The gains of a path for the stretch, which a leaving one fades out over (its send's, if it is one, given).
+        std::pair<float, float> getPathGains (Delay*, std::pair<float, float> gains) const noexcept;
     };
 
     Workers workers;
@@ -292,7 +356,6 @@ private:
     void startStrip (const Span&, size_t index) noexcept;
     void playStrip (const Span&, size_t index) noexcept;
     void takeEvents (const Span&, const Plan::Strip&) noexcept; // its instrument's notes and live notes, then its modulators
-    bool isSilent (const Plan::Strip&) noexcept;                // and its devices reset as it is heard again
     static void flushStrip (const Plan::Strip&) noexcept;       // its devices reset, and the delays that line it up
     static void resetContainers (const Plan::Strip&) noexcept;  // nothing its containers kept, nor their chains
     DeviceRunner::Block getDeviceBlock (const Span&, const Plan::Strip&, size_t device) noexcept; // without its notes

@@ -73,7 +73,6 @@ void ChainState::prepare (double rate, int maximumBlockSize)
     fader.prepare (rate);
     crossoverRange = devices::getRange (crossoverInfo);
     madeFor = -1.0f;
-    wasSilenced = false;
     reset();
 }
 

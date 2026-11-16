@@ -95,7 +95,38 @@ r8brain-free-src and Phazite's devices only.
   at its frames' own times, from a clock smoothed over the last blocks.
 - **Fades at Stop, at a jump and at the loop's end,** as other DAWs make them: a jump while playing fades what sounds
   out over 3 ms, then in after it; a stop and the loop's end fade out the audio clips they cut, the rest ringing on as
-  its notes end. A song played without them plays as its render does, to the last bit.
+  its notes end. A stop asked while a jump fades out waits for the fade to end, and stops where the jump lands. A song
+  played without them plays as its render does, to the last bit.
+- **A change of delay compensation while playing** (a plug-in with latency that loads or joins, a device switched
+  that has one: the alignment of what goes on playing moved) fades what goes out over 3 ms on the plan before, which
+  the engine keeps playing meanwhile, and in over 3 ms on the new one: plans that come during the fade make one dip.
+  Every such change dips, whether or not the channel it comes from is heard: what listens to a channel that isn't
+  heard (a send before a muted track's fader, a soloed return, a sidechain) would hear its delay jump, and a 6 ms dip
+  nobody hears is the lesser fault. Everyday edits touch nothing else: a path that goes (a track deleted or moved to
+  another bus, a send taken away or switched before or after its fader) fades out alone over 3 ms on the plan before,
+  everything else playing through it sample for sample, and a path that comes (a send added, a track moved into a bus)
+  fades in alone. The plan before plays in place of the new one for those samples, never beside it. Each leaving path
+  starts its own fade as the engine takes the plan it left in (one deleted during another's fade fades from full level),
+  stays silent after it while the plan before is kept, and when the compensation moves during a leave the mix stays
+  dipped until the new plan's paths that read what a leaving path went into (a return, a bus, and what they go into),
+  where their delays grew, read nothing again from before the leaving paths' fades ended (a return's sound held what
+  they still sent it as they faded): the leave's fade, the growth and the fade in at most after the last such edit,
+  and a jump ends it at once. Live, every path into a sum reads a ring of
+  what came into it, delayed or not, kept from plan to plan, with room for a third of a second more than its delay
+  (16,384 samples at 48 kHz, 65,536 at 192 kHz), so that a delay that grows or shrinks within that plays on from the
+  past it holds. The paths from one point of a strip share one, its tap, which the strip writes once a block (a
+  track's sends after its fader and the sidechains that listen to it read its sound before its mute; its way to its
+  bus or the master its output; a pad's track its sampler's part): 200 tracks sending to 8 returns keep about 400
+  rings, not 1,800. One that grows past its ring gets a longer one, which copies nothing: it reads what predates it
+  from the ring before until it holds as much itself, so a block's work is bounded by its length. What a ring can't
+  hold yet (a new path, a send added; or past a ring's reach) plays nothing and then fades in by itself, the rest of
+  the mix playing on. A render (an export, a stem, a bounce, a freeze) plays the song once as it is: a path with no
+  delay has no ring, one with a delay a tap as long as the longest delay from there and a block, and nothing is made
+  for what it leaves out.
+- **Mute silences a channel's output only,** fading over 5 ms: its sends before the fader go on; its instruments and
+  effects play on, as in Ableton Live and most DAWs, so that a note held, a reverb's tail and a delay's echoes are
+  heard at once as the channel is heard again ([mixer.md](mixer.md#mute-and-solo)). A muted track costs the CPU it
+  costs unmuted live; Freeze frees it, and a render leaves out what it can't hear.
 - **Control points.** Automation and modulation move what they move on the song's control points, one every 32
   samples from its start. So a song plays the same at any buffer size
   ([automation-and-modulation.md](automation-and-modulation.md)).
@@ -103,7 +134,13 @@ r8brain-free-src and Phazite's devices only.
   switch leaves it off for what is played live ([performance.md](performance.md)).
 - **Worker threads** help play each block, each strip a task, at the audio thread's priority.
 - **Audio files** are read ahead of where they play by a reading thread, so the audio thread never waits for the
-  disk. A file at another rate than the engine's is resampled as it plays.
+  disk: ahead of where they play, of where playback will start and of the loop's start, a version's bounce compared
+  with the song too. A jump into a part of a long file not read yet can't be read ahead of: as other DAWs do, playback
+  goes on and the clip fades in when its file is read there. The jump asks for that part first, ahead of everything
+  else, and wakes the reading thread at once, so the silence lasts as long as the read (a fraction of a millisecond
+  from the system's cache, a disk's seek and read from a cold file). A file at another rate than the engine's is
+  resampled as it plays. What a file of floats holds that isn't a number (NaN, an infinity) plays as silence, sample by
+  sample.
 - **Live notes** come from any thread through a lock-free queue. The engine keeps the notes played live in the last
   30 seconds, for Capture.
 - **Recording** is the engine's too: it knows the sample a take started on, and copies the armed inputs into buffers
@@ -130,7 +167,8 @@ surroundings:
   ones on the control points;
 - it applies an effect's mix, with the sound coming in delayed as much as the effect delays its own;
 - it plays a mono channel in stereo;
-- it lets a device sleep on silence, but never an instrument while it holds a note or its sustain pedal.
+- it lets a device sleep on silence, but never an instrument while it holds a note or its sustain pedal; asleep, its
+  parameters still play their modulation, so that what shows them moves.
 
 A container of devices plays as one device, its chains each in a buffer of its own. A part of a device's sound can
 play on a mixer channel of its own: a drum sampler's pad on a track of its own.

@@ -56,7 +56,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Mute and solo silence a strip's output only, its instruments and effects playing on (which also ends known bug 78) | `src/engine/core/Engine.cpp` | M | 4 | plan |
+| A muted track's send knobs look the same whether the send still goes on (before the fader) or is silent with the track (after it): show which sends still sound | `src/ui/mixer/ChannelStrip.cpp` | S | 6 | known bug 78's fix |
 | Wider notes: a MIDI channel, pitch bend, controllers, aftertouch and poly pressure, program change | `src/devices/core/Processor.h` | L | 5 | engine 12, plugin-hosting 7 |
 | Stretched, pitched and reversed clips heard at once, stretched as they play, instead of silent until their render is done | `src/model/arrangement/ClipRenders.cpp` | L | 5 | model-arrangement 4, product-gaps 3 |
 | Time-signature changes along the song | `src/model/transport/Tempo.cpp` | M | 5 | model-playback 12, product-gaps 14 |

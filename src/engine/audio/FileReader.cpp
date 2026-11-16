@@ -16,7 +16,7 @@ FileReader::~FileReader()
     // Woken, and waited for however long the chunk it reads takes: never ended by force, which can leave a lock it held
     // held for ever.
     signalThreadShouldExit();
-    added.signal();
+    added->signal();
     stopThread (-1);
 }
 
@@ -30,7 +30,8 @@ void FileReader::add (const std::shared_ptr<AudioFile>& file)
             files.push_back (file);
     }
 
-    added.signal();
+    file->setWake (added);
+    added->signal();
 }
 
 void FileReader::run()
@@ -48,17 +49,22 @@ void FileReader::run()
                     reading.push_back (std::move (held));
         }
 
-        // A chunk of each file at a time, round them all, until none has anything to read; then a look every 20 ms (where
-        // a longer file plays moves on), or at once when a file comes.
+        // What a jump landed in, in every file, ahead of all else (known bug 36: it waited for a chunk of each other file);
+        // then a chunk of each file at a time, round them all, until none has anything to read; then a look every 20 ms
+        // (where a longer file plays moves on), or at once when a file comes or a jump wants one read.
         auto readAny = false;
 
         for (const auto& file : reading)
-            readAny = file->readNext() || readAny;
+            readAny = file->readWanted() || readAny;
+
+        if (! readAny)
+            for (const auto& file : reading)
+                readAny = file->readNext() || readAny;
 
         reading.clear(); // the last hold on a file a plan has let go of goes here, off the audio thread
 
         if (! readAny)
-            added.wait (20);
+            added->wait (20);
     }
 }
 } // namespace phazite::engine

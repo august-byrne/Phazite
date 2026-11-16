@@ -31,6 +31,17 @@ struct Plan
     // parts this long until it is handed the plan made for them.
     int maximumBlockSize = 0;
 
+    // Its delay compensation, numbered by whoever builds the plans: a plan whose number isn't that of the plan before lines
+    // its paths up otherwise (a delay that lines up two paths changed its length, as a device's latency did): while the song
+    // plays, the engine fades what goes out down and up again across it (Engine.h), as it does around a jump.
+    std::uint64_t alignment = 0;
+
+    // Its paths' departures, numbered the same way: a plan whose number isn't that of the plan before has paths of that
+    // one no more (a track deleted, a send taken away, a track moved to another bus), each marked by its delay with the
+    // number of the plan it went with (nodes/Strip.h: Delay::getDeparture()), which the engine fades out alone across
+    // it, everything else playing on as it was (Engine.h: Leave).
+    std::uint64_t departures = 0;
+
     // What plays over and over while the loop is on, in beats; none while it is off.
     struct BeatRange
     {
@@ -46,7 +57,7 @@ struct Plan
     // as it is); lined up with the others there by a delay (none when it needs none). Or one of its devices' parts, which
     // that device plays into an output of its own (a drum sampler's pad on a track of its own), from where the device is.
     // A send after the fader takes the strip's sound before its mute (beforeMute), so that its level's cut alone says
-    // whether it sends (SendLevel): a strip that isn't heard can still send to one that is (Channel::setPlaysOnUnheard()).
+    // whether it sends (SendLevel): a strip that isn't heard can still send to one that is (a soloed return).
     struct Input
     {
         int strip = 0;
@@ -137,11 +148,30 @@ struct Plan
         std::vector<Container> containers; // in their order among its devices
 
         // Whether another strip takes its sound before its fader (a send), or after its fader and before its mute (a
-        // sidechain), which it then plays even while it is muted; and whether another adds up one of its devices' parts
-        // (Input::part), which it then plays while it is muted too, so that the part follows its own channel's mute. And
-        // whether another takes its sound after its fader and before its mute without making it play on (a send after the
-        // fader, Input::beforeMute): kept while it plays, silence while it doesn't.
-        bool feedsBeforeFader = false, feedsSidechain = false, feedsParts = false, feedsBeforeMute = false;
+        // sidechain, or a send after the fader, Input::beforeMute), which it keeps for them. A muted strip plays on, its
+        // channel silencing what comes out, so these hear it, as do the tracks that add up its devices' parts (Input::part),
+        // each by its own mute.
+        bool feedsBeforeFader = false, feedsSidechain = false, feedsBeforeMute = false;
+
+        // Its taps: rings it writes what comes out of it at a point into, once a stretch, which the paths from it read
+        // through their delays (Input::delay, Device::sidechainDelay, tapped: nodes/Strip.h): its output after its mute,
+        // its sound before its fader, its sound after its fader and before its mute, or a device's part.
+        enum class TapPoint
+        {
+            output,
+            beforeFader,
+            beforeMute,
+            part
+        };
+
+        struct Tap
+        {
+            std::shared_ptr<DelayLine> ring;
+            TapPoint point = TapPoint::output;
+            std::shared_ptr<PartOutput> part {};
+        };
+
+        std::vector<Tap> taps;
 
         // Whether its instrument is handed its blocks early (devices::Processor::startsEarly(), without a sidechain), its
         // notes and modulators taken first: the engine's, as it is given the plan.

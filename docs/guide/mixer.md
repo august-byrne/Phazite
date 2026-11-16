@@ -65,6 +65,11 @@ the mute switches, soloing a folder solos its tracks, and returns stay audible w
 soloed. Neither mute nor solo is an undo step. **Mute Track** and **Solo Track** are in the track's right-click menu
 too.
 
+Mute silences a track's output only: its sends before the fader go on, those after it are silent, and its instrument
+and effects play on underneath, as in other DAWs, so a note it holds, a reverb's tail and a delay's echoes are heard at
+once when you unmute it. A track silenced by another's solo sends nothing, but to a soloed return. A muted track still
+uses its CPU: **Freeze Track** frees it.
+
 ## Sends and returns
 
 A return holds effects that several tracks share, such as a reverb.
@@ -164,7 +169,9 @@ another. Click a device in a chain to show it; the line over it leads back to th
   to play the track live again. Changing what it froze (its clips or a frozen device) unfreezes it. Freezing is not an
   undo step.
 - **Bounce in Place** (in the track's right-click menu) renders the track through its instrument and effects onto a
-  new audio track under it, and mutes the original. It is one undo step.
+  new audio track under it, and mutes the original. A muted track goes on playing underneath, so the original is
+  frozen too where it can be (unless a device of it listens to another track's sidechain), and costs no CPU. It is one
+  undo step: Undo plays the original live again.
 - **Consolidate** joins clips into one ([Audio clips](audio-clips.md#consolidating)).
 
 ## Not yet

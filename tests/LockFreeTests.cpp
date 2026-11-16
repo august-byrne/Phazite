@@ -16,6 +16,7 @@
 #include "engine/core/Handover.h"
 #include "engine/core/PlayheadClock.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -263,6 +264,276 @@ TEST_CASE ("The handover raced: the audio thread's blocks never hold what was fr
 
     CHECK (notFreed == 0);
     CHECK (twice == 0);
+}
+
+TEST_CASE ("The handover raced with keeps: what the audio thread keeps playing past what was given since is never freed under it")
+{
+    // As the engine keeps a plan while what goes out fades out across a plan whose delay compensation changed: every so
+    // many blocks, the audio thread keeps what it took for the next few blocks, saying so in each, while the giver goes on.
+    static constexpr std::uint64_t gives = 20000;
+    std::vector<std::atomic<std::uint8_t>> states (gives + 1);
+    engine::Handover<Given> handover;
+    std::atomic<bool> allGiven { false };
+    std::atomic<int> started { 0 };
+
+    std::thread giver (
+        [&]
+        {
+            ++started;
+
+            while (started.load() < 2)
+                std::this_thread::yield();
+
+            for (std::uint64_t n = 1; n <= gives; ++n)
+                handover.give (std::make_unique<Given> (n, states));
+
+            allGiven = true;
+        });
+
+    int freedWhileKept = 0, keeps = 0;
+    std::uint64_t latest = 0, blocks = 0, keptNumber = 0;
+    const Given* kept = nullptr;
+    int keeping = 0; // blocks left to keep it for
+    ++started;
+
+    for (;;)
+    {
+        const auto lastGiven = allGiven.load();
+
+        {
+            const engine::Handover<Given>::Block block { handover };
+            ++blocks;
+
+            // As the engine does, what it kept before is looked at before this block says what it keeps (choosePlan()
+            // reads the plan it played, then keep()): it must be there still.
+            if (keeping > 0 && states[(size_t) keptNumber].load() != Given::alive)
+                ++freedWhileKept;
+
+            const auto* playing = keeping > 0 ? kept : block.get();
+            block.keep (playing);
+
+            if (playing != nullptr)
+            {
+                const auto number = keeping > 0 ? keptNumber : playing->number;
+                latest = std::max (latest, block.get() != nullptr ? block.get()->number : 0);
+
+                for (int i = 0; i < 50; ++i)
+                    if (states[(size_t) number].load() != Given::alive)
+                        ++freedWhileKept;
+
+                if (keeping > 0)
+                {
+                    --keeping;
+                }
+                else if (blocks % 7 == 0)
+                {
+                    kept = playing;
+                    keptNumber = number;
+                    keeping = 5;
+                    ++keeps;
+                }
+            }
+        }
+
+        if (lastGiven && latest == gives && keeping == 0)
+            break;
+    }
+
+    giver.join();
+    CHECK (freedWhileKept == 0);
+    CHECK (keeps > 0);
+
+    // Nothing kept any more: the others were freed once each, and nothing twice.
+    handover.give (nullptr);
+    handover.freeReplaced();
+    int notFreed = 0, twice = 0;
+
+    for (std::uint64_t n = 1; n <= gives; ++n)
+    {
+        const auto state = states[(size_t) n].load();
+        notFreed += state != Given::freed ? 1 : 0;
+        twice += state == Given::freedTwice ? 1 : 0;
+    }
+
+    CHECK (notFreed == 0);
+    CHECK (twice == 0);
+}
+
+namespace
+{
+// A plan at 48 kHz of a track and the master, its delay compensation numbered, for the engine raced below.
+std::unique_ptr<engine::Plan> makeRacedPlan (std::uint64_t alignment, const std::shared_ptr<engine::StripState>& track,
+                                             const std::shared_ptr<engine::StripState>& master)
+{
+    auto plan = std::make_unique<engine::Plan>();
+    plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, 48000.0);
+    plan->maximumBlockSize = 64;
+    plan->alignment = alignment;
+    engine::Plan::Strip first, last;
+    first.id = 1;
+    first.state = track;
+    last.state = master;
+    last.inputs.push_back ({ 0, std::make_shared<engine::Delay> ((int) alignment % 300) });
+    plan->strips.push_back (std::move (first));
+    plan->strips.push_back (std::move (last));
+    return plan;
+}
+} // namespace
+
+TEST_CASE ("The engine raced: plans that realign given and dropped while blocks play, as the playback host lets go of them")
+{
+    // The message thread gives plan after plan, each lining its paths up otherwise (which the engine fades across, keeping
+    // the plan before meanwhile), and now and then lets go of them all as the playback host does (no plan, two blocks, then
+    // dropPlans()); the audio thread plays meanwhile. dropPlans() wrote what the audio thread reads and writes (the plan it
+    // played, the fade): ThreadSanitizer saw the race (the review of known bug 167); now it only counts the drop.
+    static constexpr int gives = 3000;
+    engine::Engine player;
+    player.prepare (48000.0, 64);
+    auto track = std::make_shared<engine::StripState>(), master = std::make_shared<engine::StripState>();
+    track->prepare (48000.0, 64);
+    master->prepare (48000.0, 64);
+    player.setPlan (makeRacedPlan (0, track, master));
+    player.play();
+    std::atomic<bool> done { false };
+
+    std::thread audio (
+        [&]
+        {
+            juce::AudioBuffer<float> block (2, 64);
+
+            while (! done.load())
+                player.process (block.getArrayOfWritePointers(), 2, 64);
+        });
+
+    for (int n = 1; n <= gives; ++n)
+    {
+        if (n % 100 == 0)
+        {
+            player.setPlan (nullptr);
+            const auto from = player.getBlocksPlayed().load();
+
+            while (player.getBlocksPlayed().load() < from + 2)
+                std::this_thread::yield();
+
+            player.dropPlans();
+        }
+
+        player.setPlan (makeRacedPlan ((std::uint64_t) n, track, master));
+
+        // A few blocks now and then, so that some fades run out and some plans come during them.
+        if (n % 7 == 0)
+            for (const auto from = player.getBlocksPlayed().load(); player.getBlocksPlayed().load() < from + 3;)
+                std::this_thread::yield();
+    }
+
+    done = true;
+    audio.join();
+    player.dropPlans();
+    CHECK (player.getBlocksPlayed().load() > 0);
+}
+
+namespace
+{
+// What the audio thread plays below: a delay, as long as it is.
+struct RacedDelay
+{
+    std::shared_ptr<engine::Delay> delay;
+    int length = 0;
+};
+} // namespace
+
+TEST_CASE (
+    "A delay's ring raced: one made in place of a shorter one reads the past from that one until it holds its own, and is let go of meanwhile")
+{
+    // The message thread makes delay after delay, each on a ring of its own that takes the place of the one before (as a
+    // delay compensation that grows makes one), half of them fading in, and lets go of the old rings once they are done
+    // with; the audio thread plays a count through whichever it was given last, reading what predates each ring from the
+    // rings before it, and now and then starts it from silence (a reset, as a jump makes, of a ring not yet done with the
+    // one before). Each sample that comes out is the count so many samples before, or nothing (while a ring doesn't hold
+    // that much of the past, or after a reset), or the count faded in: never a sample of another, or one torn; and a
+    // block's work is no more than the block, whatever the rings hold. Each delay holds the one it takes the place of until
+    // it has played, and the message thread lets go of it then: before a delay plays, how much further back it reads than
+    // the one played last (the engine's hold across a leave) is exactly that, however many were given meanwhile.
+    static constexpr int gives = 5000;
+    engine::Handover<RacedDelay> handover;
+    std::atomic<bool> allGiven { false };
+    int wrong = 0, exact = 0, overworked = 0, wrongGrowth = 0;
+
+    std::thread giver (
+        [&]
+        {
+            std::shared_ptr<engine::DelayLine> line;
+            std::shared_ptr<engine::Delay> delay;
+
+            for (int n = 1; n <= gives; ++n)
+            {
+                if (line != nullptr)
+                    line->letGoOfTheOld(); // the one before, once done with, as each plan compiled does
+
+                if (delay != nullptr)
+                    delay->letGoOfThePrevious();
+
+                const auto length = 64 + (n % 9) * 40;
+                line = std::make_shared<engine::DelayLine> (length + 16, std::move (line));
+                auto next = std::make_shared<engine::Delay> (line, length, n % 2 == 0 ? 50 : 0);
+                next->takePlaceOf (std::move (delay));
+                next->markReadsLeaving(); // (every one: what it plays again is what it grew by)
+                delay = next;
+                handover.give (std::make_unique<RacedDelay> (RacedDelay { std::move (next), length }));
+                line->letGoOfTheOld();
+            }
+
+            allGiven = true;
+        });
+
+    juce::AudioBuffer<float> in (2, 32), out (2, 32);
+    std::int64_t count = 0, blocks = 0;
+    const engine::Delay* last = nullptr;
+    auto lastLength = -1;
+
+    while (! allGiven.load() || count < 100000)
+    {
+        const engine::Handover<RacedDelay>::Block block { handover };
+        const auto* played = block.get();
+
+        if (played == nullptr)
+            continue;
+
+        if (played->delay.get() != last)
+        {
+            wrongGrowth += played->delay->getGrowth() != (lastLength < 0 ? 0 : std::max (0, played->length - lastLength)) ? 1 : 0;
+            last = played->delay.get();
+            lastLength = played->length;
+        }
+
+        for (int i = 0; i < 32; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                in.setSample (channel, i, (float) (count + i + 1));
+
+        if (++blocks % 37 == 0)
+            played->delay->reset();
+
+        out.clear();
+        played->delay->addDelayed (in.getArrayOfReadPointers(), out.getArrayOfWritePointers(), 32);
+        overworked += played->delay->getSamplesTouched() > 2 * 32 ? 1 : 0;
+        wrongGrowth += played->delay->getGrowth() != 0 ? 1 : 0; // (it played: none)
+
+        for (int i = 0; i < 32; ++i)
+        {
+            const auto got = out.getSample (0, i), expected = (float) (count + i + 1 - played->length);
+            exact += juce::exactlyEqual (got, expected) ? 1 : 0;
+            wrong += got < 0.0f || got > std::max (expected, 0.0f) ? 1 : 0; // nothing before the count began
+            wrong += juce::exactlyEqual (out.getSample (1, i), got) ? 0 : 1;
+        }
+
+        count += 32;
+    }
+
+    giver.join();
+    CHECK (wrong == 0);
+    CHECK (exact > 0);
+    CHECK (overworked == 0);
+    CHECK (wrongGrowth == 0);
 }
 
 TEST_CASE (

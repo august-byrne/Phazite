@@ -15,6 +15,7 @@
 #include "HostedDevice.h"
 #include "SandboxedPlugins.h"
 #include "TestClips.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "app/ClipWaveforms.h"
@@ -46,6 +47,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/ParameterHandle.h"
@@ -58,7 +60,9 @@
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/project/Export.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/internal/Export.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -85,6 +89,8 @@
 #include <functional>
 #include <memory>
 #include <numeric>
+#include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -548,6 +554,7 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
     {
         empty,
         synths,
+        mutedSynths,
         drums
     };
 
@@ -579,6 +586,10 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
 
                 continue;
             }
+
+            // Muted, a track plays on, its channel silencing it (known bug 78): it costs what it costs heard.
+            if (kind == Kind::mutedSynths)
+                phazite::setTrackMuted (*song, track, true);
 
             for (const auto* type : { dev::Synth::typeID, dev::Equalizer::typeID, dev::Compressor::typeID, dev::Reverb::typeID })
                 addDevice (*song, track, type);
@@ -624,7 +635,8 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
         return 100.0 * (phazite::test::getProcessCpuSeconds() - cpuBefore) / seconds;
     };
 
-    for (const auto& [numTracks, kind] : { std::pair (20, Kind::empty), std::pair (20, Kind::synths), std::pair (20, Kind::drums) })
+    for (const auto& [numTracks, kind] :
+         { std::pair (20, Kind::empty), std::pair (20, Kind::synths), std::pair (20, Kind::mutedSynths), std::pair (20, Kind::drums) })
     {
         for (const auto numThreads : { 1, 4 })
         {
@@ -641,10 +653,10 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
             const auto processCpu = processCpuInRealTime (400);
             phazite::stopAndReturn (*song);
             phazite::test::settle (300);
-            report << "| " << numTracks
-                   << (kind == Kind::synths  ? " tracks, each a synth, an EQ, a compressor and a reverb, chords"
-                       : kind == Kind::drums ? " tracks, each a drum sampler, a beat"
-                                             : " empty tracks")
+            report << "| " << numTracks << (kind == Kind::mutedSynths ? " muted" : "")
+                   << (kind == Kind::synths || kind == Kind::mutedSynths ? " tracks, each a synth, an EQ, a compressor and a reverb, chords"
+                       : kind == Kind::drums                             ? " tracks, each a drum sampler, a beat"
+                                                                         : " empty tracks")
                    << " | " << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | "
                    << juce::String (processCpu, 1) << " % |\n";
             phazite::setSong (context, nullptr);
@@ -778,6 +790,167 @@ TEST_CASE ("Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, 
     report << "| Save again, nothing changed | " << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1)
            << " |  |\n";
     report << "\nThe project's file: " << juce::String (s.getProject().getFile().getSize() / 1024) << " KB\n";
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: an everyday edit's block while its paths fade, on the benchmark song" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // A send taken away and given back as the song plays (known bug 167's review, round 4): the leaving path fades out on the
+    // plan played, which plays in place of the new one for those samples (never beside it), and the new one fades in
+    // itself. The block in which the edit's plan is taken, against the blocks around it, at 48 kHz in blocks of 480.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 100, 64.0);
+    auto& song = *phazite::findSong (s.context);
+    phazite::test::EnginePlayback device (phazite::test::EnginePlayback::Input::silence, phazite::test::EnginePlayback::Timing::realTime,
+                                          benchRate, 480);
+    phazite::playOrStop (song);
+    phazite::test::timeEngineBlocks (200, 480);
+    std::vector<double> steady, edited;
+
+    for (int i = 0; i < 40; ++i)
+    {
+        const auto track = built.tracks[(size_t) i];
+        const auto sends = phazite::getSends (s.context, track);
+        REQUIRE (! sends.empty());
+        const auto send = sends.front();
+
+        for (const auto time : phazite::test::timeEngineBlocks (10, 480))
+            steady.push_back (time);
+
+        {
+            const phazite::UndoStep step (song, "Remove Send");
+            phazite::removeSend (song, send.id);
+        }
+
+        edited.push_back (phazite::test::timeEngineBlocks (1, 480).front());
+        phazite::undo (song); // the send back: a path that comes
+        edited.push_back (phazite::test::timeEngineBlocks (1, 480).front());
+    }
+
+    phazite::stopAndReturn (song);
+    const auto length = 480 / benchRate;
+    MESSAGE ("\n| 100 tracks, 48 kHz, blocks of 480 | Mean | 99th percentile |\n|---|---|---|\n| Blocks around | "
+             << juce::String (100.0 * phazite::test::meanOf (steady) / length, 1) << " % | "
+             << juce::String (100.0 * phazite::test::percentileOf (steady, 0.99) / length, 1)
+             << " % |\n| A send taken away or given back | " << juce::String (100.0 * phazite::test::meanOf (edited) / length, 1) << " % | "
+             << juce::String (100.0 * phazite::test::percentileOf (edited, 0.99) / length, 1) << " % |\n");
+}
+
+TEST_CASE ("Benchmark: 200 tracks each sending to 8 returns, the rings' memory and a block's cost at 48 and 192 kHz"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Live, every path keeps a ring with a third of a second of room (known bug 167's review): one per path made 1,809
+    // rings for this song; the paths from one point of a strip share one now (a track's sends after its fader, its way to
+    // the master). 200 tracks, each a Synth holding a chord, sending after its fader to 8 returns (each an EQ); one track's
+    // 64 samples of latency lines the others up. The rings the plan's paths read, and its blocks of 10 ms played one after
+    // another on the calling thread, on one thread and on four.
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    std::vector<phazite::TrackID> tracks { s.firstTrack };
+
+    while (tracks.size() < 200)
+        tracks.push_back (s.addTrack ("Track " + juce::String (tracks.size() + 1)));
+
+    for (const auto track : tracks)
+    {
+        s.setInstrument (track, dev::Synth::typeID);
+        s.addChord (s.addMidiClip (track, 0.0, 64.0), { 48, 55, 64 }, 0.0, 64.0, 60);
+    }
+
+    for (int r = 0; r < 8; ++r)
+    {
+        const auto back = s.addReturn (tracks.front(), dev::Equalizer::typeID, -12.0f);
+
+        for (size_t t = 1; t < tracks.size(); ++t)
+            s.addSend (tracks[t], back, -12.0f);
+    }
+
+    s.setParameter (phazite::test::addTestDevice (song, tracks.front(), phazite::test::TestLatency::typeID), "samples", 64.0f);
+    phazite::test::dispatchPendingMessages();
+
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    const auto threads = engine.getNumThreads();
+    juce::String report ("\n| 200 tracks, 8 returns | Rings | Their memory | Threads | Playing: mean / 99th percentile (% of the block) |\n"
+                         "|---|---|---|---|---|\n");
+
+    for (const auto rate : { 48000.0, 192000.0 })
+    {
+        const auto block = (int) (rate / 100.0);
+        phazite::test::EnginePlayback device (phazite::test::EnginePlayback::Input::silence,
+                                              phazite::test::EnginePlayback::Timing::realTime, rate, block);
+        phazite::test::dispatchPendingMessages();
+        const auto* plan = engine.getPlan();
+        REQUIRE (plan != nullptr);
+
+        // Each ring the plan's paths read once: the strips' taps and the delays' own.
+        std::set<const phazite::engine::DelayLine*> rings;
+
+        for (const auto& strip : plan->strips)
+        {
+            for (const auto& tap : strip.taps)
+                rings.insert (tap.ring.get());
+
+            for (const auto& input : strip.inputs)
+                if (input.delay != nullptr && input.delay->getLine() != nullptr)
+                    rings.insert (input.delay->getLine().get());
+        }
+
+        std::int64_t bytes = 0;
+
+        for (const auto* ring : rings)
+            bytes += ring->isAllocated() ? (std::int64_t) ring->getCapacity() * 2 * (std::int64_t) sizeof (float) : 0;
+
+        for (const auto numThreads : { 1, 4 })
+        {
+            engine.setNumThreads (numThreads);
+            phazite::playOrStop (song);
+            phazite::test::timeEngineBlocks (100, block);
+            const auto playing = phazite::test::timeEngineBlocks ((int) (5.0 * rate / block), block);
+            phazite::stopAndReturn (song);
+            const auto length = block / rate;
+            report << "| " << juce::String (rate / 1000.0, 0) << " kHz, blocks of " << block << " | " << (int) rings.size() << " | "
+                   << juce::String ((double) bytes / (1024.0 * 1024.0), 1) << " MB | " << numThreads << " | "
+                   << juce::String (100.0 * phazite::test::meanOf (playing) / length, 1) << " / "
+                   << juce::String (100.0 * phazite::test::percentileOf (playing, 0.99) / length, 1) << " % |\n";
+        }
+    }
+
+    engine.setNumThreads (threads);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: the benchmark song's stems exported, as it is and with a quarter of its tracks muted"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Each stem a render of one channel as it reaches the master: a render leaves out what it can't hear (what doesn't reach
+    // that channel, and a muted track that feeds nothing heard), which it played whole before (known bug 78's review).
+    juce::String report ("\n| Stems of the benchmark song, 20 tracks of 16 beats, 48 kHz | Seconds |\n|---|---|\n");
+
+    for (const auto muted : { false, true })
+    {
+        phazite::test::TestSong s;
+        const auto built = phazite::test::buildBenchmarkSong (s, 20, 16.0);
+        auto& song = *phazite::findSong (s.context);
+
+        if (muted)
+            for (size_t i = 0; i < built.tracks.size(); i += 4)
+                phazite::setTrackMuted (song, built.tracks[i], true);
+
+        phazite::test::dispatchPendingMessages();
+        phazite::ExportSettings settings;
+        settings.stems = true;
+        settings.sampleRate = 48000.0;
+        std::optional<phazite::ExportReport> done;
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        const auto running = phazite::startExport (song, s.getSoundsFolder().getChildFile ("Song.wav"), settings,
+                                                   [&done] (const phazite::ExportReport& r) { done = r; });
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&done] { return done.has_value(); }, 3600000));
+        REQUIRE (done->result.wasOk());
+        report << "| " << (muted ? "A quarter of its tracks muted" : "As it is") << " (" << done->stems.size() << " stems) | "
+               << juce::String ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, 2) << " |\n";
+    }
+
     MESSAGE (report);
 }
 

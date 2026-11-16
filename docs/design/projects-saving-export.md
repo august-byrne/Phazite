@@ -274,8 +274,11 @@ before its fader, from the song's start to the end of its last clip and its tail
 - The file plays on a new audio track right under the original, named after it with "(Bounce)", in its colour, with
   its fader, pan, sends and output, and the automation and modulation of its fader and sends.
 - The original is muted, and shown as it was (its rows are view state, which no undo step holds, so the bounce leaves
-  them alone and Undo gives back exactly what was): nothing is lost, and nothing hidden plays.
-- It is one undo step, "Bounce in Place".
+  them alone and Undo gives back exactly what was): nothing is lost, and nothing hidden plays. A muted track plays on
+  underneath, its instrument and effects too ([mixer.md](mixer.md#mute-and-solo)), so the original is also frozen,
+  the bounce its frozen file, where all its devices can be (none listens to a sidechain): it then costs a file's read
+  at most.
+- It is one undo step, "Bounce in Place", which takes back the mute and the freeze with the new track.
 - A device that listens to a sidechain hears its source while bouncing.
 - Folders, buses and returns are not bounced: their sound is their tracks', and stems export it.
 
@@ -336,7 +339,11 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 - Normalize is one gain and never limits; a mix that can't reach its target is reported, not squashed.
 - Tails end by silence measured against the devices' own tail lengths, with a cap, rather than a fixed length.
 - A plug-in that crashes or hangs fails the render rather than leaving a silent part in the file.
-- Freeze is before the fader and is not an undo step; Bounce in Place is an undo step and keeps the original, muted.
+- Freeze is before the fader and is not an undo step; Bounce in Place is an undo step and keeps the original, muted
+  and frozen.
+- A render leaves out what it can't hear: a strip that is silenced and feeds nothing heard (no send that sends, no
+  sidechain that is heard, no pad's track) costs an export, a stem, a freeze or a bounce nothing, as nothing can
+  unmute during it; a stem plays only what reaches its channel.
 - `.phazite` stays Phazite's own format. DAWproject can't hold modulators, the chord lane, containers' macros or
   Phazite's devices, so it is for exchange, with a bounce beside what another DAW can't play.
 - No backward compatibility before the owner says it starts, so the format can still be made clearer.

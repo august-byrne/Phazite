@@ -60,6 +60,7 @@ struct Modulation
     std::vector<Source> sources;
     std::vector<Route> routes;
     std::vector<bool> isModulated; // by the parameter's index
+    std::vector<int> modulated;    // the parameters modulated, by their indices, each once
 };
 
 // A MIDI message as a device's event at a sample, or nothing for the messages devices don't use. The channel doesn't matter.

@@ -666,11 +666,16 @@ TEST_CASE ("A sidechain's key reaches its device while the device's track is sol
         const auto reverb = phazite::addReturnTrack (model, "Reverb", nullptr);
         REQUIRE (reverb.isValid());
 
+        phazite::DeviceID beforeFader;
+
         for (const auto preFader : { false, true })
         {
             const auto send = phazite::addSend (model, song.kick, reverb, preFader);
             REQUIRE (send.isValid());
             phazite::setSendLevel (model, send, 0.0f);
+
+            if (preFader)
+                beforeFader = send;
         }
 
         phazite::setSidechainSource (model, ducker, drums);
@@ -680,9 +685,13 @@ TEST_CASE ("A sidechain's key reaches its device while the device's track is sol
         phazite::setTrackSoloed (model, song.bass, true);
         CHECK (renderPeak (model) == doctest::Approx (kickAlone).epsilon (0.01));
 
-        // Muted, the kick is heard nowhere, its key and its sends silent too, as the bus's sound is.
+        // Muted, the kick is heard nowhere through the bus, its key and its send after the fader silent too, as the bus's
+        // sound is; but its send before the fader goes on (mute silences a track's output only: the owner's decision,
+        // roadmap S4.8), so the return hears it until that send comes after the fader.
         phazite::setTrackSoloed (model, song.bass, false);
         phazite::setTrackMuted (model, song.kick, true);
+        CHECK (renderPeak (model) > 0.1f);
+        phazite::setPreFader (model, beforeFader, false);
         CHECK (renderPeak (model) < 1.0e-4f);
     }
 }

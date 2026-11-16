@@ -57,8 +57,7 @@ that failed before its fix, and each part's changes read by a reviewer whose fin
 left is in [known-bugs.md](known-bugs.md), with why:
 
 - S1.4: a plug-in added once the project's plug-ins have loaded still opens while the message thread waits, as do
-  Reload, a plug-in's window opening and a parameter's text (known bug 166); a plug-in with latency that joins as a
-  project loads moves the other tracks' timing in one step (167).
+  Reload, a plug-in's window opening and a parameter's text (known bug 166).
 
 The numbered bugs still in [known-bugs.md](known-bugs.md) belong to the later steps that name their areas (the
 versions' to stage 4, recording's and the slow paths' to stage 5, the devices' and the editors' to stage 6), or wait
@@ -100,7 +99,6 @@ what they found is fixed or in known-bugs.md.
 | S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
 | S4.6 | S | Backups kept by age, not by count | A day's work leaves backups from an hour, a day and a week before |
 | S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
-| S4.8 | M | Mute and solo silence a track's output only: its sends before the fader, its sidechain and its tails go on | A muted track still feeds a compressor that listens to it |
 | S4.9 (rest) | S | Files from others are untrusted, the rest: casts of numbers that are not finite, DAWprojects past 4 GB (known bugs 106, 148). Built (2026-11-14): a song made consistent as it opens, values clamped, sound paths kept inside the project, a preset's sounds taken from its own folder only, only the channels handed to a helper read back, DAWproject unpacking capped, the readers fuzzed | Each of the two has its test |
 
 ### Stage 5. Wide: what a beat maker meets in the first week

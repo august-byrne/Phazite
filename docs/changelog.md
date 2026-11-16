@@ -180,6 +180,24 @@ too. A line names the bug's number in that list.
 - **42 Slow plug-ins in renders:** an export, a freeze or a bounce waits for a slow plug-in as long as it takes, its
   progress bar naming the plug-in after 5 seconds, and Cancel stops it at once; a plug-in that can't be prepared
   for the render's rate fails the render instead of leaving silence in it.
+- **78, S4.8 Mute and solo silence the output only:** a muted track's or chain's instrument and effects play on
+  underneath, so a note held, a reverb's tail and a delay's echoes are heard at once when it is heard again; its
+  sends before the fader go on, those after it are silent with it; a track silenced by another's solo sends
+  nothing but to a soloed return. A muted track costs what it costs heard: Freeze is what saves CPU, Bounce in
+  Place freezes the original it mutes, and renders leave out what they can't hear (a stems export of the benchmark
+  song: 28 s to 14 s).
+- **167 Delay compensation that changes while the song plays:** every path into a sum keeps a ring of what came
+  into it (one for all the paths from one point of a strip), so a plug-in with latency that joins, leaves or is
+  bypassed never silences a track: the mix dips for two 3 ms fades and plays on. An everyday edit (a track deleted
+  or moved into a bus, a send added, removed or switched before or after its fader) fades only the paths it ends or
+  starts; every other track plays through it sample for sample.
+- **162 A Stop during a jump's fade** waits for the fade to end and stops where the jump lands, without a step.
+- **36, 39 A jump into audio not read yet:** the landing is asked for first and the reading thread woken, so the
+  silence lasts only as long as the read (0.1 ms after the jump, where it was up to 20 ms); A/B's bounce is read
+  ahead at the loop's start and where playback starts.
+- **171 A device asleep on silence** still shows its modulation on its knobs and its graph's handles.
+- **Audio files with what isn't a number:** a clip of a float file plays silence where the file holds NaN or
+  infinity, stretched or not, and the rest of the song plays on (the whole mix went silent before).
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

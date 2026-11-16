@@ -176,6 +176,47 @@ on one thread and on four.
 | 20 drum samplers, each a beat of a kick, a snare and sixteenth hats | 0.68 % / 0.59 % | 1.81 % / 1.29 % | 18; playing on one thread, 19 |
 | 20 plug-in synths in one helper (the tests' stand-in), playing chords | 0.80 and 0.77 % / 0.79 and 0.81 % (two runs) | 1.11 and 1.10 % / 1.18 and 1.15 % | 10 |
 
+Muted tracks play on (their instruments and effects, for when they are heard again: known bug 78, 2026-11-15), so they
+cost what heard ones do; Freeze frees them. Measured side by side on 2026-11-15, `windows-profile`, while other builds
+ran on the machine (so the heard row is higher than above, and the two are to be compared with each other):
+
+| Song | Stopped: 1 thread / 4 | Playing: 1 thread / 4 |
+|---|---|---|
+| 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 11.49 % / 4.56 % | 72.39 % / 24.76 % |
+| The same, every track muted | 12.35 % / 4.08 % | 74.38 % / 22.34 % |
+
+Every path into a sum keeps a ring of what came into it since 2026-11-15, a delay of none too (each block written into
+it: two channels of the block's length). The same song heard, measured just before and after, `windows-profile`, while
+other builds ran: 44.89 % / 18.79 % playing without the rings, 48.34 % / 14.85 % with them: within what varies from
+one run to the next. The rings' memory: 128 KB a ring at 48 kHz (16,384 samples on two channels), 512 KB at 192 kHz.
+
+The paths from one point of a strip share one ring since 2026-11-15 (its tap: a track's sends after its fader read its
+sound before its mute, its way to the master its output), which the strip writes once a block; before, each path had
+its own. `Benchmark: 200 tracks each sending to 8 returns` (each track a Synth holding a chord, 8 returns with an EQ
+each, one track's 64 samples of latency lining the others up; blocks of 10 ms played back to back), two runs of each,
+the ring per path switched back on for the "before" runs, `windows-profile`, 2026-11-15:
+
+| | Rings | Their memory, 48 kHz / 192 kHz | Playing at 48 kHz, 1 thread / 4 (mean) | At 192 kHz, 1 thread / 4 (mean) |
+|---|---|---|---|---|
+| A ring per path | 1,808 | 226.9 MB / 904.9 MB | 139.2 and 140.1 % / 47.6 and 50.0 % | 561.0 and 551.1 % / 200.5 and 182.1 % |
+| A ring per tap | 408 | 52.7 MB / 210.2 MB | 145.7 and 131.0 % / 50.3 and 45.5 % | 517.9 and 635.3 % / 165.1 and 206.6 % |
+
+The block's cost is the synths' (within what varies from one run to the next either way); the memory falls by
+three quarters. A render keeps no room in its rings, and none for a path with no delay or for what it leaves out
+(`tests/PerformanceGateTests.cpp` counts its samples): the stems benchmark below peaked at 138.5 MB for the whole test
+process with a ring per path and room in renders, and at 130.8 MB now.
+
+### Benchmark: the benchmark song's stems exported
+
+The benchmark song (`tests/BenchmarkSong.h`) of 20 tracks and 16 beats, its 4 stems at 48 kHz, each a render of one
+channel as it reaches the master. A render leaves out what it can't hear (2026-11-15): what doesn't reach the channel,
+and a muted track that feeds nothing heard. Measured on 2026-11-15, `windows-profile`, while other builds ran.
+
+| Song | Each render playing the whole song | Leaving out what it can't hear |
+|---|---|---|
+| As it is | 28.32 s | 13.75 s |
+| A quarter of its tracks muted | 28.44 s | 10.59 s |
+
 The drum samplers' figures of section 18 were measured while another build ran, so they are high if anything. Section
 19 also records 0.38 % for the 20 empty tracks, without saying whether stopped or playing; and section 18's 1.39 % is
 what it records for "20 synths' tracks stopped", taken here for this song.

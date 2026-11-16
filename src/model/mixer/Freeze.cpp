@@ -278,7 +278,7 @@ juce::File getFrozenFile (const Song& song, TrackID track)
     return song.getCacheFolder().getChildFile (frozenFilePrefix + juce::String ((juce::int64) track.getRaw()) + ".wav");
 }
 
-void freezeFromFile (Song& song, TrackID track, const juce::File& rendered)
+void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce::UndoManager* undo)
 {
     auto state = findTrackState (song, track);
 
@@ -292,7 +292,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered)
     if (rendered != file && ! rendered.moveFileTo (file) && ! rendered.copyFileTo (file))
         return;
 
-    state.setProperty (schema::trackFrozen, true, nullptr);
+    state.setProperty (schema::trackFrozen, true, undo);
 }
 
 void unfreeze (Song& song, TrackID track)
@@ -408,8 +408,10 @@ bool FreezeKeeper::keepThrough (const std::function<bool()>& apply)
 
 void FreezeKeeper::compare (TrackID track)
 {
-    // What the freeze holds changed: the track plays it live again.
-    if (const auto known = frozen.find (track); known != frozen.end() && ! holdsWhatWasFrozen (song, track, known->second))
+    // What the freeze holds changed, or its file is gone (a Redo of Bounce in Place after the cache let go of it): the track
+    // plays it live again.
+    if (const auto known = frozen.find (track);
+        known != frozen.end() && (! getFrozenFile (song, track).existsAsFile() || ! holdsWhatWasFrozen (song, track, known->second)))
     {
         frozen.erase (known);
         unfreeze (song, track);
@@ -670,8 +672,18 @@ namespace
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
             // Muted in the step, and shown as it was: collapsing it, view state, would be outside the step, and Undo would
-            // leave it collapsed (as Live, Logic Pro and REAPER mute the original and leave its look alone).
+            // leave it collapsed (as Live, Logic Pro and REAPER mute the original and leave its look alone). A muted track
+            // plays on underneath (its instrument and effects, for when it is heard again), so it is frozen too, in the same
+            // step, where every device of its can be (none listens to another track): the bounce is what its freeze would
+            // render, and it then costs a file's read at most. Undo unmutes it and plays it live again.
             setTrackMuted (bouncedSong, track, true, &bouncedSong.getUndoManager());
+
+            if (const auto state = findTrackState (bouncedSong, track);
+                canRender (state) && getFrozenDevices (bouncedSong, track).size() == getDeviceStates (state).size())
+                if (const auto copy = getFrozenFile (bouncedSong, track).getSiblingFile ("Bounced.wav").getNonexistentSibling (false);
+                    copy.getParentDirectory().createDirectory().wasOk() && target.copyFileTo (copy))
+                    freezeFromFile (bouncedSong, track, copy, &bouncedSong.getUndoManager());
+
             getSelection (context).selectOnly (bounced);
             return juce::Result::ok();
         }

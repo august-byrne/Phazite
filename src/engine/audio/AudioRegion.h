@@ -98,5 +98,9 @@ struct AudioRegion
     // Audio thread: a sample of the song it will play from next if it plays there, though the song doesn't play there now
     // (where playback will start, the loop's start): its file reads ahead of there too (AudioFile::expect()).
     void expect (std::int64_t songSample, double engineRate) const noexcept;
+
+    // Message thread: a sample of the song it plays from at once if it plays there (where a jump lands), which its file
+    // reads first (AudioFile::want()).
+    void want (std::int64_t songSample, double engineRate) const;
 };
 } // namespace phazite::engine

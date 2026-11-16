@@ -26,8 +26,9 @@ std::vector<DeviceID> getFrozenDevices (const Song&, TrackID);
 juce::File getFrozenFile (const Song&, TrackID);
 
 // Freezes a track with a file rendered from it, before its fader, through its frozen devices, which becomes its frozen file:
-// the song's track is frozen (Schema.h: trackFrozen), and what plays the song plays the file. Not an undo step.
-void freezeFromFile (Song&, TrackID, const juce::File& rendered);
+// the song's track is frozen (Schema.h: trackFrozen), and what plays the song plays the file. Not an undo step, but where
+// it is a part of one that freezes the track as it does something else (Bounce in Place), through that undo manager.
+void freezeFromFile (Song&, TrackID, const juce::File& rendered, juce::UndoManager* = nullptr);
 
 // Plays a frozen track live again: the song's track isn't frozen. Not an undo step. Its frozen file stays until the cache
 // is purged.

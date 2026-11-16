@@ -19,13 +19,14 @@ public:
     FileReader();
     ~FileReader() override;
 
-    // Message thread: a file a plan plays, read from now on until nothing holds it any more.
+    // Message thread: a file a plan plays, read from now on until nothing holds it any more; it wakes this thread for what
+    // it wants read first (AudioFile::want()).
     void add (const std::shared_ptr<AudioFile>&);
 
 private:
     std::mutex mutex;
     std::vector<std::weak_ptr<AudioFile>> files;
-    juce::WaitableEvent added;
+    const std::shared_ptr<juce::WaitableEvent> added = std::make_shared<juce::WaitableEvent>(); // a file, or a want
 
     void run() override;
 };

@@ -211,6 +211,12 @@ void AudioRegion::expect (std::int64_t songSample, double engineRate) const noex
         file->expect ((std::int64_t) (fileStart + (double) (songSample - start) * file->getSampleRate() / engineRate));
 }
 
+void AudioRegion::want (std::int64_t songSample, double engineRate) const
+{
+    if (file != nullptr && songSample >= start && songSample < getEnd())
+        file->want ((std::int64_t) (fileStart + (double) (songSample - start) * file->getSampleRate() / engineRate));
+}
+
 void AudioRegion::play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
                         juce::AudioBuffer<float>& scratch, Cut cut) const noexcept
 {

@@ -50,11 +50,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   cast in `src/sandbox/core/PluginInfo.cpp` (about 47) and `RemoteInstance.cpp` (about 259). Fix: `std::isfinite`
   where each value comes in, and `readFloat()` (`src/model/base/Json.h`) for the texts. Seen while known bug 148
   was fixed.
-- **167. A plug-in with latency that joins a playing song moves the other tracks' delay compensation in one step.** As
-  a project's plug-ins load in the background, each comes in with a new plan and fades in over 5 ms, but the delays
-  that keep the other tracks in time with it change at once (`src/model/playback/SongPlayer.cpp`,
-  `src/engine/core/Engine.cpp`): a click or a skip on tracks that play meanwhile. Fix: fade the mix out and in across
-  a plan whose compensation changed, as a jump does. Left by S1.4; not measured.
 - **177. Over a plug-in's window, a shortcut on the digit row doesn't match on layouts where that row types other
   characters** (AZERTY, Czech): the keys sent to plug-in windows (`PluginKeys::getWantedKeys()`) are the keymaps' keys
   as written, not matched the three ways the window's own keys are (`KeyDispatcher::findMatches()`). Today only Space
@@ -63,14 +58,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Devices and playback
 
-- **36. A jump while playing into a part of a long audio file that isn't read yet is silent until it is read** (it fades
-  in then). Play from a stop and the loop's start are read ahead; a jump needs pre-roll.
-- **39. A/B's bounce file isn't read ahead at the loop's start or a new place,** and its own meters aren't guarded
-  against values that aren't numbers.
-- **78. A track unmuted, or no longer silenced by a solo, in the middle of a note stays silent until its next note.**
-  Why: a silenced strip throws its notes away but still counts them as sounding, so nothing starts them again
-  (`src/engine/core/Engine.cpp`). Fix: start held notes again as the strip is heard again; or, as planned, let mute and
-  solo silence a strip's output only, its instrument playing on. Not yet checked (engine 6).
 - **85. A loop's wrap and a jump put their work into one block, and the message thread can wait for the disk.** The
   wrap looks through every note before the playhead on every track, starts each resampled clip's resampler from
   nothing, and a jump resets every device, in one block (`src/engine/core/Engine.cpp`,
@@ -94,17 +81,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   ignores the CONTROL kinds `channelPressure` and `aftertouch` that a MIDI file's import already stores; so a take
   doesn't keep them either. Fix: the event types in the engine, handed to devices and plug-ins, then recorded as the
   other controllers are. Seen while known bug 93 was fixed.
-- **171. A device asleep on silence shows no modulation.** With nothing playing into it (an EQ on a silent track), a
-  knob's ring dot and a graph's handles stay at the value set by hand while an LFO runs, and move again only when
-  sound comes in. The sound is right: it is silent. Why: `DeviceRunner::begin()` (`src/engine/nodes/DeviceRunner.cpp`)
-  sets the values played to those set by hand before it returns for a sleeping device, and modulation is applied only
-  in the stretches a device processes, so `ParameterHandle::getValue()` equals `getBaseValue()`. Fix: on the sleeping
-  path, apply the modulators' values to the values kept as played, without processing the device. Found by the test
-  of drags under modulation (`tests/GraphDragTests.cpp`), which plays a synth into the EQ for that reason.
-- **162. A Stop that comes within the 3 ms in which a jump fades out makes one small step in the sound.** The stop's
-  fade begins at the old place, as it should, and the jump is then taken at once, without the rest of its own fade
-  (`src/engine/core/Engine.cpp`, `stopTransport()`). Fix: let the jump's fade run out before the stop is applied.
-  Left by the fix of the fades (S1.2); not measured.
 
 ## Saving
 

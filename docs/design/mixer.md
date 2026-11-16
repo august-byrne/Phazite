@@ -110,6 +110,18 @@ One small switch, a light, in a track's playlist header, its mixer strip and the
 
 - Lit green, the track plays. A soloed track's light is ringed, in the solo colour. A track that other tracks' solos
   silence shows its light faint. Shape tells the states apart as well as colour: filled, hollow, ringed, faint.
+- Mute silences the track's output only, fading over 5 ms: its sends before the fader go on, its sends after the
+  fader are silent with it, and its instrument and effects play on underneath, as in Ableton Live and most DAWs, so
+  that a note it holds, a reverb's tail and a delay's echoes are heard at once when it is heard again. A muted track
+  still feeds a sidechain that listens to it ([devices.md](devices.md)).
+- A track that another track's solo silences sends nothing, before the fader or after, but to a return that is
+  soloed; it plays on underneath too.
+- Muting a bus silences its output only: its tracks go on playing into it while something still listens to it (a
+  sidechain keyed from it, or a send of it that goes on), and what else they send, after their faders, is silent with
+  the bus. (A bus has no sends of its own in Phazite: Add Send refuses one, so in practice that is its key.)
+- A muted track still costs its CPU live: Freeze is what frees it (Bounce in Place freezes the original it mutes).
+  A render (an export, a stem, a freeze, a bounce) leaves out what it can't hear, so a muted track that feeds nothing
+  heard costs it nothing.
 - A solo never changes the mute switches.
 - Soloing a folder solos its tracks, and soloing a track in a bus keeps the bus audible.
 - Returns are solo-safe: soloing a track keeps its reverb audible.

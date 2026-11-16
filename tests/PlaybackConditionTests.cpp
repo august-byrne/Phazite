@@ -733,11 +733,15 @@ TEST_CASE ("At every condition a stop, the loop's end and a jump fade what plays
     // 3), and by a jump to beat 2.5 while it plays. They cut it in a step as large as the sine (the audit's engine finding
     // 10): now what sounds fades out over a few milliseconds and what follows fades in, as other DAWs do, so that no
     // sample steps further from the one before than twice the most a sine of its frequency moves.
+    // And a stop that comes while the jump fades out (known bug 162): it took the jump at once, cutting its fade short in a
+    // step from where the fade had got to (0.24 of full scale at 48 kHz, half way through the fade), as the fade in after it
+    // started from silence; now the stop waits for the fade's end and is taken where the jump lands.
     enum class Cut
     {
         stop,
         loop,
-        jump
+        jump,
+        stopInJump
     };
 
     atEveryCondition (
@@ -749,7 +753,7 @@ TEST_CASE ("At every condition a stop, the loop's end and a jump fade what plays
             const auto loopEnd = condition.getNearestSampleTo (3);
             const auto mostASineMoves = (float) (SineReader::amplitude * juce::MathConstants<double>::twoPi * SineReader::frequency / rate);
 
-            for (const auto cut : { Cut::stop, Cut::loop, Cut::jump })
+            for (const auto cut : { Cut::stop, Cut::loop, Cut::jump, Cut::stopInJump })
             {
                 CAPTURE ((int) cut);
                 engine::Engine player;
@@ -788,16 +792,26 @@ TEST_CASE ("At every condition a stop, the loop's end and a jump fade what plays
 
                 if (cut == Cut::stop)
                     player.stop();
-                else if (cut == Cut::jump)
+                else if (cut == Cut::jump || cut == Cut::stopInJump)
                     player.locate (2.5);
 
+                // Half way through the jump's fade, in a block of its own, the stop.
+                juce::AudioBuffer<float> inFade (2, 0);
+
+                if (cut == Cut::stopInJump)
+                {
+                    inFade = playBlocks (player, condition, (int) std::lround (engine::Engine::fadeSeconds * rate / 2.0));
+                    player.stop();
+                }
+
                 const auto after = playBlocks (player, condition, (int) (0.1 * rate));
-                juce::AudioBuffer<float> whole (2, before + after.getNumSamples());
+                juce::AudioBuffer<float> whole (2, before + inFade.getNumSamples() + after.getNumSamples());
 
                 for (int channel = 0; channel < 2; ++channel)
                 {
                     whole.copyFrom (channel, 0, played, channel, 0, before);
-                    whole.copyFrom (channel, before, after, channel, 0, after.getNumSamples());
+                    whole.copyFrom (channel, before, inFade, channel, 0, inFade.getNumSamples());
+                    whole.copyFrom (channel, before + inFade.getNumSamples(), after, channel, 0, after.getNumSamples());
                 }
 
                 const auto largest = findLargestStep (whole);
@@ -808,7 +822,7 @@ TEST_CASE ("At every condition a stop, the loop's end and a jump fade what plays
                 CHECK (step <= 2.0f * mostASineMoves);
 
                 // A stop ends it once it has faded out; the loop and the jump play on.
-                if (cut == Cut::stop)
+                if (cut == Cut::stop || cut == Cut::stopInJump)
                     CHECK (after.getMagnitude (0, after.getNumSamples() / 2, after.getNumSamples() / 2) < 1.0e-6f);
                 else
                     CHECK (after.getMagnitude (0, after.getNumSamples() / 2, after.getNumSamples() / 2) > 0.4f);

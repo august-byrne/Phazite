@@ -197,14 +197,10 @@ the [changelog](changelog.md).
 | G166 | Turn a knob in a VST3's window and press Ctrl+D on its track, or Commit, at once; do the same with a plug-in that is busy (a sampler loading) | The copy or the commit holds the turned value; with the busy plug-in the window holds still and a progress window shows after a second, whose Cancel changes nothing | |
 | G168 | With unsaved changes and a plug-in's window open, start a Windows restart; then a sign-out; then cancel a shutdown at its "apps preventing shutdown" screen and save; then run the installer's update while Phazite runs | "Save changes?" shows before Windows ends Phazite, each time; after the cancelled shutdown the save asks the plug-ins again; the installer's request asks to save as Quit does | |
 | G42 | Freeze a track with a very heavy plug-in | The bar reads "Waiting for <name> (N s)", and Cancel stops it at once | |
-
-## Known bugs that need an ear or a real plug-in
-
-Numbers are those of [known-bugs.md](known-bugs.md).
-
-| # | Check | Proves | Checked on |
-|---|---|---|---|
-| K36 | In a song with an audio file of several minutes, click far ahead in the ruler while it plays | How long the silence before the sound is | |
+| G78 | Play a long pad with a reverb; mute the track in mid-chord, then unmute. Mute a track with a send before its fader to a reverb return. Bounce a synth track in place | The chord and its tail come back at once; the reverb of the muted track goes on while the dry track is silent; the bounced original shows muted and frozen, and Undo brings it back live | |
+| G167 | While a loop plays: add a plug-in or a limiter with latency to one track, bypass it and switch it back; delete a track, take a send off, move a track into a bus | A short dip and no click for the latency; for the other edits the other tracks play on without any dip or click | |
+| G36 | With an audio clip of several minutes, click far ahead in the ruler while it plays | The clip comes in within a few milliseconds, faded, with no click | |
+| G171 | Put an LFO on the EQ of a silent track and open the EQ | The band's dot and the knob's ring move | |
 
 ## Performance on other machines
 

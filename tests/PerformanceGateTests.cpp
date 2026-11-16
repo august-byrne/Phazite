@@ -14,6 +14,7 @@
 #include "EditorScreens.h"
 #include "PerformanceCounts.h"
 #include "TestClips.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -32,6 +33,7 @@
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -43,7 +45,9 @@
 #include "ui/playlist/TrackHeader.h"
 
 #include <map>
+#include <set>
 #include <stdexcept>
+#include <vector>
 
 using phazite::test::at;
 using phazite::test::lasting;
@@ -181,6 +185,92 @@ TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's not
 
         // The devices sound on: the same as before, every one.
         CHECK (after.devices.at (id) == before.devices.at (id));
+    }
+}
+
+//==============================================================================
+namespace
+{
+// The samples a plan's rings keep, on one channel: each ring its paths read (a strip's taps, and the delays' own), once.
+std::int64_t countRingSamples (const phazite::engine::Plan& plan)
+{
+    std::set<const phazite::engine::DelayLine*> rings;
+    const auto add = [&rings] (const std::shared_ptr<phazite::engine::Delay>& delay)
+    {
+        if (delay != nullptr && delay->getLine() != nullptr)
+            rings.insert (delay->getLine().get());
+    };
+
+    for (const auto& strip : plan.strips)
+    {
+        for (const auto& tap : strip.taps)
+            rings.insert (tap.ring.get());
+
+        for (const auto& input : strip.inputs)
+            add (input.delay);
+
+        for (const auto& device : strip.devices)
+            add (device.sidechainDelay);
+
+        for (const auto& container : strip.containers)
+            for (const auto& chain : container.chains)
+                add (chain.delay);
+    }
+
+    std::int64_t samples = 0;
+
+    for (const auto* ring : rings)
+        samples += ring->isAllocated() ? ring->getCapacity() : 0;
+
+    return samples;
+}
+} // namespace
+
+TEST_CASE ("Performance gate: a render's rings grow with its delays, not with its paths, and a strip it leaves out has none")
+{
+    // The review of known bug 167, round 5: a render (an export, each stem, a bounce) gave every path a ring with a third of
+    // a second of room, which a song of many tracks and sends multiplied past memory. Now a render's path with no delay has
+    // none, one with a delay reads its source's tap, as long as the longest delay from there and a block; and nothing is
+    // made for what the render leaves out. Eight tracks, each sending after its fader to one return or to four; one has 64
+    // samples of latency: each other track's sound after its fader (to the master) and before its mute (to the returns) is
+    // kept 64 samples and a block, however many returns there are; a muted track (whose sends after its fader are cut)
+    // keeps none. Live, every path keeps a ring with room (as before), shared by the paths from one point of a strip.
+    constexpr int tracks = 8, block = 256, latency = 64;
+
+    for (const auto returns : { 1, 4 })
+    {
+        for (const auto muted : { false, true })
+        {
+            CAPTURE (returns);
+            CAPTURE (muted);
+            phazite::test::TestSong s;
+            auto& song = getSong (s);
+            std::vector<phazite::TrackID> ids { s.firstTrack };
+
+            while ((int) ids.size() < tracks)
+                ids.push_back (s.addTrack ("Track " + juce::String (ids.size() + 1)));
+
+            for (int r = 0; r < returns; ++r)
+            {
+                const auto back = s.addReturn (ids.front(), dev::Equalizer::typeID, 0.0f);
+
+                for (size_t t = 1; t < ids.size(); ++t)
+                    s.addSend (ids[t], back, 0.0f);
+            }
+
+            if (muted)
+                phazite::toggleMute (s.context, ids.back());
+
+            // With no latency, nothing.
+            const auto device = phazite::test::addTestDevice (song, ids.front(), phazite::test::TestLatency::typeID);
+            phazite::test::dispatchPendingMessages();
+            CHECK (countRingSamples (*phazite::SongPlayer (song).compile (48000.0, block, std::nullopt)) == 0);
+
+            s.setParameter (device, "samples", (float) latency);
+            phazite::test::dispatchPendingMessages();
+            const auto kept = muted ? tracks - 2 : tracks - 1;
+            CHECK (countRingSamples (*phazite::SongPlayer (song).compile (48000.0, block, std::nullopt)) == 2 * kept * (latency + block));
+        }
     }
 }
 

@@ -55,8 +55,11 @@ void Engine::prepare (double rate, int blockSize)
     // The fades at this rate. A jump fading out is taken again as the next block starts (it is still asked for), and fades
     // out afresh.
     fadeLength = std::max (1, (int) std::lround (fadeSeconds * sampleRate));
-    jump.pending = false;
+    jump.pending = jump.thenStop = false;
     fadingIn = 0;
+    realign = {};
+    leave = {};
+    switching = false;
     stopFade = {};
 
     // A stop asked while no audio thread took it (no device played the engine) is taken at once: nothing fades out after
@@ -105,8 +108,12 @@ void Engine::findEarlyStarts (Plan& plan)
 
 void Engine::dropPlans()
 {
+    // The plan it played goes too, which the audio thread may still point at (it is called while a device plays the
+    // engine, once two blocks have played none): counted, so that the audio thread never looks at it again
+    // (choosePlan()), writing nothing of the audio thread's here.
     plans.give (nullptr);
     plans.freeReplaced();
+    drops.fetch_add (1, std::memory_order_release);
 }
 
 void Engine::setRecording (std::unique_ptr<Recording> recording)
@@ -138,6 +145,23 @@ void Engine::locate (double beat)
     locateCount.fetch_add (1);
     requestedBeat.store (beat);
     locateCount.fetch_add (1);
+
+    // The audio files where it lands, read there first, ahead of everything else, at once (known bug 36: the reading thread
+    // learnt of it only as the engine landed, and read it when it next looked): its audio clips', and a version's bounce
+    // compared with the song, at the song's beat in the version's time. The plan given last, which this thread gave.
+    // At the plan's own rate, which the audio thread doesn't change (prepare() sets the engine's on the device's thread).
+    if (const auto* plan = plans.get())
+    {
+        const auto rate = plan->tempo.getSampleRate();
+        const auto sample = std::llround (plan->tempo.toSamples (beat));
+
+        for (const auto& strip : plan->strips)
+            for (const auto& region : strip.audio)
+                region.want (sample, rate);
+
+        if (plan->comparison.has_value())
+            plan->comparison->bounce.want (std::llround (plan->comparison->tempo.toSamples (beat)), rate);
+    }
 }
 
 double Engine::getPlayheadBeat() const noexcept
@@ -207,9 +231,16 @@ void Engine::takeTransport (const Plan& plan) noexcept
         break;
     }
 
-    // A stop first, then the jump, then a start: whatever their order was, from where the playhead was asked to be.
+    // A stop first, then the jump, then a start: whatever their order was, from where the playhead was asked to be. A stop
+    // that comes while a jump fades out waits for the fade's end, where the jump is taken, and stops there (known bug 162:
+    // the jump was taken at once, its fade cut short, in a step).
     if (transport.playing && isStopAsked (asked))
-        stopTransport (plan);
+    {
+        if (jump.pending)
+            jump.thenStop = true;
+        else
+            stopTransport (false);
+    }
 
     stopsTaken = asked >> stopsShift;
 
@@ -218,7 +249,8 @@ void Engine::takeTransport (const Plan& plan) noexcept
         // While the song plays (not counting in), what sounds fades out first; the latest beat asked for is taken then.
         if (transport.playing && transport.countIn.left == 0)
         {
-            // From where what follows a jump just before fades in, if it does, rather than from full level.
+            // From where what follows a jump just before fades in, if it does, rather than from full level (a fade out
+            // across a plan realigned, under way too, goes on: the lower of the two is heard).
             if (! jump.pending)
             {
                 jump = { true, 0.0, 0, fadingIn > 0 ? std::max (1, fadeLength - fadingIn + 1) : fadeLength };
@@ -265,16 +297,13 @@ void Engine::startTransport (const Plan& plan, bool countIn) noexcept
     stopFade = {};
 }
 
-void Engine::stopTransport (const Plan& plan) noexcept
+void Engine::stopTransport (bool fadedOut) noexcept
 {
     // The notes sounding end, and what they leave rings on; the audio clips that play, which would stop in a step, fade
-    // out from where the song is (a jump still fading out is taken at once, while the song plays, after it). The clicks to
-    // come don't, but the one sounding rings on.
-    if (transport.countIn.left == 0)
+    // out from where the song is, unless what goes out has faded out already (a jump's fade, which a stop waits for). The
+    // clicks to come don't, but the one sounding rings on.
+    if (transport.countIn.left == 0 && ! fadedOut)
         stopFade = { transport.sample, transport.sample + fadeLength };
-
-    if (jump.pending)
-        takeJump (plan, jump.beat, jump.count);
 
     transport.notesOff = true;
     transport.playing = false;
@@ -294,6 +323,9 @@ void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count) noexc
 
         if (jump.pending)
             fadingIn = fadeLength;
+
+        // What the paths held is gone with the flush: nothing is played again for a hold across a leave to keep out.
+        realign.hold = 0;
     }
 
     brokeTake = true;
@@ -301,36 +333,191 @@ void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count) noexc
     transport.beat = beat;
     transport.sample = std::llround (plan.tempo.toSamples (beat));
     numClickStarts = 0;
-    jump.pending = false;
+    jump.pending = jump.thenStop = false;
     locatesTaken.store (count);
 }
 
-void Engine::fadeMaster (float* const* sides, int numSamples) noexcept
+const Plan* Engine::choosePlan (const Plan* given) noexcept
 {
-    // Down to silence over what is left of a jump's fade out, and up from it after: each sample a step of fadeLength + 1.
+    // The plans dropped since the last part (dropPlans()): the one it played is gone, and nothing fades across it.
+    if (const auto dropped = drops.load (std::memory_order_acquire); dropped != dropsSeen)
+    {
+        dropsSeen = dropped;
+        transport.plan = nullptr;
+        realign = {};
+        leave = {};
+        switching = false;
+    }
+
+    // None given (a render has the song's plug-ins): nothing to fade across.
+    if (given == nullptr)
+    {
+        realign = {};
+        leave = {};
+        switching = false;
+        return nullptr;
+    }
+
+    // A new plan while the song plays (not counting in, nor jumping, which starts from silence anyway), at the engine's
+    // rate, as the plan played is (one for another is never played): nothing of that is read, but its alignment and its
+    // departures, kept with it.
+    const auto canFade = transport.plan != nullptr && given != transport.plan && transport.playing && transport.countIn.left == 0
+                         && ! jump.pending && juce::exactlyEqual (given->tempo.getSampleRate(), sampleRate);
+
+    // Fading on the plan it played (alive: kept in the part before, Handover::Block::keep()); a change of the delay
+    // compensation that comes meanwhile dips what goes out too, and paths that go in a plan that comes meanwhile start
+    // their own fades, which the plan played is kept for.
+    if (isKeeping())
+    {
+        if (! realign.dipped && canFade && given->alignment != playedAlignment)
+            startRealign();
+
+        if (canFade && given->departures != (leave.active ? leave.upTo : playedDepartures))
+            startLeave (given->departures);
+
+        // (Stopped, the hold counts down as it was: what the paths hold plays out after a stop, and would play again what
+        // the hold keeps out. A jump's landing ends it: takeJump().)
+        if (canFade)
+            holdAcrossLeave (*given);
+
+        return transport.plan;
+    }
+
+    // Faded: the new plan, fading in if what goes out dipped. (Whatever ended the keeping: a dip or a leave is never left
+    // behind once nothing keeps the plan played, a hold ended by a stop or a jump at a part's start too.)
+    if (std::exchange (switching, false) || realign.dipped || leave.active)
+    {
+        if (std::exchange (realign.dipped, false))
+            fadingIn = fadeLength;
+
+        realign.hold = 0;
+        realign.walked = false;
+        leave = {};
+        return given;
+    }
+
+    if (! canFade)
+        return given;
+
+    // Its delay compensation changed (a path's delay that goes on playing): what goes out fades out first, from where it
+    // is (fading in after another, which it joins). Paths gone: they alone fade out first.
+    const auto realigns = given->alignment != playedAlignment;
+    const auto departs = given->departures != playedDepartures;
+
+    if (! realigns && ! departs)
+        return given;
+
+    if (realigns)
+        startRealign();
+
+    if (departs)
+        startLeave (given->departures);
+
+    holdAcrossLeave (*given);
+    return transport.plan;
+}
+
+void Engine::holdAcrossLeave (const Plan& given) noexcept
+{
+    // A dip across a leave: kept as long as its leaving paths' fades last, and then as long as the given plan's paths read
+    // further back than those played did (none on most plans: the walk ends at each path's delay played). Once for each
+    // plan that brings a change of either (its alignment or its departures: a plan that brings neither has the same paths'
+    // lengths and leaves as the one walked), from where the fades are then; it counts down from there, so that it ends, at
+    // most the fade and the largest growth after the last such plan (rather than start again in each part while the
+    // given plan's delays, which play only after it, report the same growth). Ended sooner by a jump's landing (takeJump()), by the plans
+    // dropped and by none given (realign = {}); a stop lets it count down, as what the paths hold plays out after it.
+    if (! realign.dipped || ! leave.active)
+        return;
+
+    if (realign.walked && given.alignment == realign.walkedAlignment && given.departures == realign.walkedDepartures)
+        return;
+
+    realign.walked = true;
+    realign.walkedAlignment = given.alignment;
+    realign.walkedDepartures = given.departures;
+    auto growth = 0;
+    const auto take = [&growth] (const std::shared_ptr<Delay>& delay)
+    {
+        if (delay != nullptr)
+            growth = std::max (growth, delay->getGrowth());
+    };
+
+    for (const auto& strip : given.strips)
+    {
+        for (const auto& input : strip.inputs)
+            take (input.delay);
+
+        for (const auto& device : strip.devices)
+            take (device.sidechainDelay);
+
+        for (const auto& container : strip.containers)
+            for (const auto& chain : container.chains)
+                take (chain.delay);
+    }
+
+    realign.hold = std::max (realign.hold, leave.left + growth);
+}
+
+void Engine::startRealign() noexcept
+{
+    realign.left = fadingIn > 0 ? std::max (1, fadeLength - fadingIn + 1) : fadeLength;
+    realign.dipped = true;
+    fadingIn = 0;
+}
+
+void Engine::startLeave (std::uint64_t upTo) noexcept
+{
+    // The paths that go up to these departures each fade out from the next stretch played, the plan played kept as long.
+    if (! leave.active)
+        leave = { true, 0, playedDepartures, 0 };
+
+    leave.left = fadeLength;
+    leave.upTo = upTo;
+}
+
+std::pair<float, float> Engine::Span::getPathGains (Delay* delay, std::pair<float, float> gains) const noexcept
+{
+    if (! leaving || delay == nullptr)
+        return gains;
+
+    if (const auto departure = delay->getDeparture(); departure > leavesAfter && departure <= leavesUpTo)
+        return delay->leave (engine->fadeLength, numSamples, gains);
+
+    return gains;
+}
+
+bool Engine::isFading() const noexcept
+{
+    return jump.pending || fadingIn > 0 || realign.left > 0 || realign.dipped;
+}
+
+void Engine::fadeMaster (float* const* sides, int offset, int numSamples) noexcept
+{
+    // Down to silence over what is left of a jump's fade out, or of one across a plan realigned (from so far into the part,
+    // where it was as the part started), the lower of the two; and up from silence after: each sample a step of
+    // fadeLength + 1.
     const auto step = 1.0f / (float) (fadeLength + 1);
 
-    if (jump.pending)
+    for (int i = 0; i < numSamples; ++i)
     {
-        for (int i = 0; i < numSamples; ++i)
-        {
-            const auto gain = (float) std::max (0, jump.left - i) * step;
-            sides[0][i] *= gain;
-            sides[1][i] *= gain;
-        }
-    }
-    else if (fadingIn > 0)
-    {
-        const auto count = std::min (numSamples, fadingIn);
+        auto gain = 1.0f;
 
-        for (int i = 0; i < count; ++i)
+        if (jump.pending)
+            gain = (float) std::max (0, jump.left - i) * step;
+
+        // (Silent once faded out, while the plan played is kept.)
+        if (realign.left > 0 || realign.dipped)
         {
-            const auto gain = (float) (fadeLength - fadingIn + 1 + i) * step;
-            sides[0][i] *= gain;
-            sides[1][i] *= gain;
+            gain = std::min (gain, (float) std::max (0, realign.left - offset - i) * step);
+        }
+        else if (fadingIn > 0 && ! jump.pending)
+        {
+            gain = (float) (fadeLength - fadingIn + 1) * step;
+            --fadingIn;
         }
 
-        fadingIn -= count;
+        sides[0][i] *= gain;
+        sides[1][i] *= gain;
     }
 }
 
@@ -352,6 +539,12 @@ void Engine::expectAudio (const Plan& plan) noexcept
         for (const auto& region : strip.audio)
             for (size_t i = 0; i < numPlaces; ++i)
                 region.expect (places[i], sampleRate);
+
+    // A version's bounce compared with the song, the same, at the song's beats in the version's time (known bug 39).
+    if (plan.comparison.has_value())
+        for (size_t i = 0; i < numPlaces; ++i)
+            plan.comparison->bounce.expect (std::llround (plan.comparison->tempo.toSamples (plan.tempo.toBeats ((double) places[i]))),
+                                            sampleRate);
 }
 
 void Engine::playLive (std::int64_t track, devices::NoteEvent event, bool recordable) noexcept
@@ -575,11 +768,16 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 
     for (int done = 0; done < numSamples;)
     {
+        // The plan given last, or the one played before while what goes out fades out across a plan realigned, or paths
+        // that leave do (said before anything of it is used, so that it isn't freed meanwhile); a fade out ends where a
+        // part does.
         const Handover<Plan>::Block held { plans };
-        const auto* plan = held.get();
+        const auto* plan = choosePlan (held.get());
+        held.keep (plan);
         const auto longest =
             plan != nullptr && plan->maximumBlockSize > 0 ? std::min (maximumBlockSize, plan->maximumBlockSize) : maximumBlockSize;
-        const auto length = std::min (numSamples - done, longest);
+        const auto length = std::min ({ numSamples - done, longest, realign.left > 0 ? realign.left : longest,
+                                        leave.left > 0 ? leave.left : longest, realign.hold > 0 ? realign.hold : longest });
 
         for (int channel = 0; channel < numOutputs; ++channel)
             part[(size_t) channel] = outputs[channel] != nullptr ? outputs[channel] + done : nullptr;
@@ -601,6 +799,8 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             {
                 transport.sample = std::llround (plan->tempo.toSamples (transport.beat));
                 transport.plan = plan;
+                playedAlignment = plan->alignment;
+                playedDepartures = plan->departures;
             }
 
             takeTransport (*plan);
@@ -636,7 +836,9 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             }
             else
             {
-                for (int offset = counted; offset < length;)
+                auto offset = counted;
+
+                while (offset < length && transport.playing)
                 {
                     auto span = length - offset;
                     std::int64_t loopStart = 0, loopEnd = 0;
@@ -691,6 +893,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                     // this one's start, are where the song is from here.
                     if (jump.pending && (jump.left -= span) <= 0)
                     {
+                        const auto stops = jump.thenStop;
                         takeJump (*plan, jump.beat, jump.count);
 
                         if (recording != nullptr)
@@ -701,10 +904,18 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         startBeat = transport.beat;
                         startRound = loopRounds;
                         lastPart.sample = transport.sample - offset;
+
+                        // A stop that waited for the jump's fade: where it landed, with nothing left to fade out.
+                        if (stops)
+                            stopTransport (true);
                     }
                 }
 
                 transport.beat = plan->tempo.toBeats ((double) transport.sample);
+
+                // The rest of the part after such a stop, stopped.
+                if (offset < length)
+                    playSpan (*plan, part.data(), numOutputs, offset, length - offset);
             }
 
             // Where this part started, and when: the block's start on its smoothed clock and the samples before the part;
@@ -727,6 +938,15 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
         // The clicks that start in it, or ring on into it.
         playClicks (part.data(), numOutputs, length);
         done += length;
+
+        // The fades on the plan played (across a plan realigned, of paths that leave), done: the new plan from the next part.
+        const auto wasKeeping = isKeeping();
+        realign.left = std::max (0, realign.left - length);
+        leave.left = std::max (0, leave.left - length);
+        realign.hold = std::max (0, realign.hold - length);
+
+        if (wasKeeping && ! isKeeping())
+            switching = true;
     }
 
     // Its share of the block's time, eased over about a second of blocks.
@@ -768,11 +988,12 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
         // the two that is heard.
         auto& master = *plan.strips.back().state;
 
-        // Around a jump while playing, what goes out fades out and in (the meters before it don't see it).
-        if (jump.pending || fadingIn > 0)
+        // Around a jump while playing, and a plan realigned, what goes out fades out and in (the meters before it don't see
+        // it).
+        if (isFading())
         {
             float* sides[] = { master.buffer.getWritePointer (0, offset), master.buffer.getWritePointer (1, offset) };
-            fadeMaster (sides, numSamples);
+            fadeMaster (sides, offset, numSamples);
         }
 
         // The last line of defence: a stretch with a sample that is no finite number (a device gone wrong, a plug-in's bad
@@ -868,6 +1089,11 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     span.pass = ++passes;
     span.flush = transport.flush;
 
+    // Paths that leave fade out alone (Leave), each from the first stretch it is heard to leave in.
+    span.leaving = leave.active;
+    span.leavesAfter = leave.after;
+    span.leavesUpTo = leave.upTo;
+
     // The audio clips: while the song plays, faded out before the loop's end, which cuts them (as much as half the loop);
     // after a stop, for as long as they fade out from where it stopped.
     if (transport.playing)
@@ -920,8 +1146,8 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
 
 void Engine::startStrip (const Span& span, size_t index) noexcept
 {
-    // Its notes, what is played live into it and its modulators, then its instrument handed the block, unless it plays
-    // nothing in it; its own task takes what it played (playStrip()).
+    // Its notes, what is played live into it and its modulators, then its instrument handed the block (muted too: its
+    // channel silences what comes out); its own task takes what it played (playStrip()).
     const auto& strip = span.plan->strips[index];
     auto& state = *strip.state;
 
@@ -929,16 +1155,10 @@ void Engine::startStrip (const Span& span, size_t index) noexcept
         flushStrip (strip);
 
     takeEvents (span, strip);
-    state.startedSilent = isSilent (strip);
-
-    if (! state.startedSilent)
-    {
-        const auto& instrument = strip.devices.front();
-        auto block = getDeviceBlock (span, strip, 0);
-        block.events = std::span (state.events.data(), (size_t) state.numEvents);
-        instrument.node->start (state.buffer, span.offset, span.numSamples, block, instrument.automation);
-    }
-
+    const auto& instrument = strip.devices.front();
+    auto block = getDeviceBlock (span, strip, 0);
+    block.events = std::span (state.events.data(), (size_t) state.numEvents);
+    instrument.node->start (state.buffer, span.offset, span.numSamples, block, instrument.automation);
     state.startedPass.store (span.pass, std::memory_order_release);
 }
 
@@ -963,32 +1183,6 @@ void Engine::takeEvents (const Span& span, const Plan::Strip& strip) noexcept
 
     state.sortEvents();
     playModulators (strip);
-}
-
-bool Engine::isSilent (const Plan::Strip& strip) noexcept
-{
-    // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one a
-    // sidechain listens to plays on, which hears it before its mute, and so does one whose devices' parts other channels add
-    // up, each of which follows its own mute, and one whose send is heard without it (Channel::setPlaysOnUnheard()).
-    auto& state = *strip.state;
-
-    if (state.getChannel().isSilenced() && ! state.getChannel().isPlayingOnUnheard() && ! strip.feedsSidechain && ! strip.feedsParts)
-    {
-        state.wasSilenced = true;
-        return true;
-    }
-
-    if (state.wasSilenced)
-    {
-        for (const auto& device : strip.devices)
-            device.node->getRunner().reset();
-
-        // Nor do its containers keep what came in before.
-        resetContainers (strip);
-        state.wasSilenced = false;
-    }
-
-    return false;
 }
 
 void Engine::resetContainers (const Plan::Strip& strip) noexcept
@@ -1022,6 +1216,10 @@ void Engine::flushStrip (const Plan::Strip& strip) noexcept
     for (const auto& input : strip.inputs)
         if (input.delay != nullptr)
             input.delay->reset();
+
+    // What it writes into its taps, which the paths from it read: from silence too.
+    for (const auto& tap : strip.taps)
+        tap.ring->reset();
 
     resetContainers (strip);
 }
@@ -1087,7 +1285,8 @@ void Engine::playDevice (const Span& span, const Plan::Strip& strip, size_t inde
         float* into[] = { buffer.getWritePointer (2, offset), buffer.getWritePointer (3, offset) };
         juce::FloatVectorOperations::clear (into[0], numSamples);
         juce::FloatVectorOperations::clear (into[1], numSamples);
-        (device.sidechainDelay != nullptr ? *device.sidechainDelay : noDelay).addDelayed (from, into, numSamples);
+        const auto [startGain, endGain] = span.getPathGains (device.sidechainDelay.get(), { 1.0f, 1.0f });
+        (device.sidechainDelay != nullptr ? *device.sidechainDelay : noDelay).addDelayed (from, into, numSamples, startGain, endGain);
         block.hasSidechain = true;
     }
 
@@ -1132,8 +1331,8 @@ void Engine::playContainer (const Span& span, const Plan::Strip& strip, const Pl
         splitIntoParts (container.split, channels, offset, numSamples, std::span (parts.data(), count),
                         { span.beat, span.beatsPerSample, span.gridSample });
 
-    // Each through its devices and its fader, lined up with the latest and added up. One muted (or soloed out) plays
-    // nothing once it has faded out, and its devices start from silence when it is heard again.
+    // Each through its devices and its fader, lined up with the latest and added up. One muted (or soloed out) is silenced
+    // by its fader, its devices playing on, as a track's are (known bug 78).
     juce::FloatVectorOperations::clear (channels[0], numSamples);
     juce::FloatVectorOperations::clear (channels[1], numSamples);
 
@@ -1142,21 +1341,6 @@ void Engine::playContainer (const Span& span, const Plan::Strip& strip, const Pl
         const auto& chain = container.chains[c];
         auto& state = *chain.state;
         auto& fader = state.getFader();
-
-        if (fader.isSilenced())
-        {
-            state.wasSilenced = true;
-            continue;
-        }
-
-        if (std::exchange (state.wasSilenced, false))
-        {
-            for (int d = chain.first; d < chain.first + chain.count; ++d)
-                strip.devices[(size_t) d].node->getRunner().reset();
-
-            if (chain.delay != nullptr)
-                chain.delay->reset();
-        }
 
         for (int d = chain.first; d < chain.first + chain.count; ++d)
         {
@@ -1179,7 +1363,8 @@ void Engine::playContainer (const Span& span, const Plan::Strip& strip, const Pl
         automation.volumeModulation = getFaderModulation (strip, chain.volumeModulation, state.volumeModulation);
         automation.panModulation = getFaderModulation (strip, chain.panModulation, state.panModulation);
         fader.process (sides, 2, numSamples, automation);
-        (chain.delay != nullptr ? *chain.delay : noDelay).addDelayed (sides, channels, numSamples);
+        const auto [startGain, endGain] = span.getPathGains (chain.delay.get(), { 1.0f, 1.0f });
+        (chain.delay != nullptr ? *chain.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
     }
 
     if (! container.instrument)
@@ -1192,8 +1377,8 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
     const auto& strip = plan.strips[index];
     const auto offset = span.offset, numSamples = span.numSamples;
 
-    // Its devices' parts' own outputs, silent until they play into them: a device that doesn't play in a block (asleep,
-    // muted, in a chain that is muted) would leave what it played before for a part's track to add again.
+    // Its devices' parts' own outputs, silent until they play into them: a device that doesn't play in a block (asleep)
+    // would leave what it played before for a part's track to add again.
     for (const auto& device : strip.devices)
         for (const auto& part : device.partOutputs)
             part->clear (offset, numSamples);
@@ -1236,7 +1421,8 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             const auto& sound = input.beforeFader ? from.beforeFader : (input.beforeMute ? from.beforeMute : from.buffer);
             const float* sides[] = { input.part != nullptr ? input.part->getChannel (0) + offset : sound.getReadPointer (0, offset),
                                      input.part != nullptr ? input.part->getChannel (1) + offset : sound.getReadPointer (1, offset) };
-            const auto [startGain, endGain] = input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f);
+            const auto [startGain, endGain] =
+                span.getPathGains (input.delay.get(), input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f));
             (input.delay != nullptr ? *input.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
         }
 
@@ -1244,9 +1430,9 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         if (! startedEarly)
             takeEvents (span, strip);
 
-        const auto silent = startedEarly ? state.startedSilent : isSilent (strip);
-
-        if (! silent)
+        // What it plays, muted (or soloed out) too: its channel silences what comes out, and its instrument and effects play
+        // on, as in Ableton Live and most DAWs, so that a note held, a reverb's tail and a delay's echoes are heard at once as
+        // it is heard again (known bug 78: it stopped playing, and the notes it held stayed silent until its next).
         {
             // Its audio clips play into it before its effects, beside its instrument (after it, which plays into a cleared
             // buffer).
@@ -1303,17 +1489,10 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
                 playAudio();
         }
 
-        // What it sends before its fader (nothing while it is muted, unless a send of it is heard without it).
+        // What it sends before its fader, muted too (its sends' cuts say whether each sends: SendLevel).
         if (strip.feedsBeforeFader)
             for (int channel = 0; channel < 2; ++channel)
-            {
-                auto* kept = state.beforeFader.getWritePointer (channel, offset);
-
-                if (state.getChannel().isSilenced() && ! state.getChannel().isPlayingOnUnheard())
-                    juce::FloatVectorOperations::clear (kept, numSamples);
-                else
-                    juce::FloatVectorOperations::copy (kept, channels[channel], numSamples);
-            }
+                juce::FloatVectorOperations::copy (state.beforeFader.getWritePointer (channel, offset), channels[channel], numSamples);
 
         Channel::Automation faderAutomation;
         faderAutomation.volume = strip.volume.get();
@@ -1323,15 +1502,25 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         faderAutomation.beat = strip.volume != nullptr || strip.pan != nullptr ? getAutomationBeat (strip.latency) : beat;
         faderAutomation.volumeModulation = getFaderModulation (strip, strip.volumeModulation, state.volumeModulation);
         faderAutomation.panModulation = getFaderModulation (strip, strip.panModulation, state.panModulation);
-        // Its sound before its mute, for a sidechain and for its sends after the fader: silence for those while it plays
-        // nothing (what it adds up, without its devices, is no sound of its).
+        // Its sound before its mute, for a sidechain (which hears a muted track, as its design says) and for its sends after
+        // the fader (whose cut says whether they send: SendLevel).
         float* beforeMute[] = { state.beforeMute.getWritePointer (0, offset), state.beforeMute.getWritePointer (1, offset) };
-        const auto keepsBeforeMute = strip.feedsSidechain || (strip.feedsBeforeMute && ! silent);
+        const auto keepsBeforeMute = strip.feedsSidechain || strip.feedsBeforeMute;
         state.getChannel().process (channels, 2, numSamples, faderAutomation, keepsBeforeMute ? beforeMute : nullptr);
 
-        if (strip.feedsBeforeMute && ! keepsBeforeMute)
-            for (auto* side : beforeMute)
-                juce::FloatVectorOperations::clear (side, numSamples);
+        // What comes out of it at each tap, into the tap's ring, for the paths from there, which read it once this pass is
+        // done (each waits for it): once, however many paths read it.
+        for (const auto& tap : strip.taps)
+        {
+            using Point = Plan::Strip::TapPoint;
+            const auto& from = tap.point == Point::beforeFader  ? state.beforeFader
+                               : tap.point == Point::beforeMute ? state.beforeMute
+                                                                : state.buffer;
+            const float* sides[] = { tap.part != nullptr ? tap.part->getChannel (0) + offset : from.getReadPointer (0, offset),
+                                     tap.part != nullptr ? tap.part->getChannel (1) + offset : from.getReadPointer (1, offset) };
+            tap.ring->start();
+            tap.ring->write (sides, numSamples);
+        }
 
         // An envelope follower listens to its track after the fader, for the next block.
         for (const auto& modulator : strip.modulators)

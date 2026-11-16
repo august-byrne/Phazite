@@ -137,6 +137,18 @@ namespace
         return values;
     }
 
+    // The room a path's ring has besides its delay: a third of a second at a rate, as a power of two (16,384 samples at 44.1
+    // and 48 kHz, 65,536 at 192 kHz).
+    int getRingRoom (double sampleRate)
+    {
+        auto room = 1;
+
+        while (room < (int) std::ceil (sampleRate / 3.0))
+            room *= 2;
+
+        return room;
+    }
+
     // Whether these values set by hand would make a device's sound come later or sooner than the latency it was prepared
     // with (the compressor looks ahead only while it ducks: devices/core/Processor.h).
     bool changesLatency (const engine::DeviceNode& node, std::span<const float> values)
@@ -251,6 +263,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         devices.clear();
         strips.clear();
         delays.clear();
+        pathLengths.clear();
+        pathDestinations.clear();
+        leftInto.clear();
+        taps.clear();
         modulators.clear();
         containers.clear();
         chains.clear();
@@ -287,6 +303,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // The song's channels, each a strip: its tracks, its buses (folders with faders of their own: a plain folder's VCA
     // turns its tracks) and its returns, in an order in which each comes after what it takes in.
     usedDelays.clear();
+    tappedPaths.clear();
+    tapParts.clear();
+    compilingAfresh = pathLengths.empty(); // the first plan, or the first for another rate or block size: no path is new
+    compilingLive = live.has_value();
     const auto channels = getChannels();
     std::map<std::int64_t, int> places; // each channel's strip, by its ID
 
@@ -336,17 +356,12 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             }
         }
 
-        // A pad track adds up its sampler's pad, as the sampler plays it into an output of its own; the sampler's track then
-        // plays while it is muted, so that the pad follows its own track's mute.
+        // A pad track adds up its sampler's pad, as the sampler plays it into an output of its own (whose track plays while it
+        // is muted, as every track does), so that the pad follows its own track's mute.
         if (channel.pad >= 0 && places.contains (channel.padSource) && ! channel.refuses (channel.padSource))
-        {
             if (const auto output = partOutputs.find ({ channel.padDevice, channel.pad });
                 output != partOutputs.end() && usedPartOutputs.contains (output->first))
-            {
                 inputs.push_back ({ places[channel.padSource], nullptr, false, nullptr, output->second });
-                plan->strips[(size_t) places[channel.padSource]].feedsParts = true;
-            }
-        }
 
         addInputs (*plan, strip, std::move (inputs));
 
@@ -435,7 +450,53 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (notes, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
     notesChanged.clear(); // those of tracks it played were compiled again, and the others' notes are let go
     std::erase_if (strips, [&tracks] (const auto& strip) { return tracks.count (strip.first) == 0; });
+    // A path gone (a track deleted or moved to another bus, a send taken away or switched before or after its fader): its
+    // delay marked as going with this plan, which the engine fades it out alone across, nothing else changing (a path that
+    // comes fades in itself); with the plans' departures, numbered (engine::Plan::departures). (A render's path with no
+    // delay has none, and a render's plans don't fade.)
+    auto departs = false;
+
+    for (const auto& [key, delay] : delays)
+    {
+        if (usedDelays.count (key) == 0 && delay != nullptr)
+        {
+            delay->setDeparture (departures + 1);
+            departs = true;
+
+            // What it went into holds what it added as it faded (markWhatReadsLeaving()).
+            if (const auto into = pathDestinations.find (key); into != pathDestinations.end())
+                leftInto[into->second] = juce::Time::getMillisecondCounter();
+        }
+    }
+
+    if (departs)
+        ++departures;
+
+    plan->departures = departures;
     std::erase_if (delays, [this] (const auto& delay) { return usedDelays.count (delay.first) == 0; });
+    std::erase_if (pathLengths, [this] (const auto& path) { return usedDelays.count (path.first) == 0; });
+    std::erase_if (pathDestinations, [this] (const auto& path) { return usedDelays.count (path.first) == 0; });
+
+    // Its delay compensation, numbered (engine::Plan::alignment): it moves on when a path that plays on was lined up
+    // otherwise in the plan before (the compensation really moved), and the engine fades what goes out across it. Any such
+    // path: whether its sound is heard can't be told here for sure (a track unmuted between this and the audio thread
+    // taking the plan), and a path from a channel that isn't heard can be through what listens to it (a send before a muted
+    // track's fader, a soloed return, a sidechain), where its read point's jump would be heard; a 6 ms dip for a change
+    // nobody hears is the lesser fault (the review of known bug 167).
+    if (std::exchange (realigned, false))
+        ++alignment;
+
+    plan->alignment = alignment;
+
+    // A render leaves out what it can't hear; then the rings what is left reads are made, on the strips that write them.
+    if (! live.has_value())
+        leaveOutWhatIsNotHeard (*plan);
+
+    finishRings (*plan);
+
+    if (live.has_value())
+        markWhatReadsLeaving (*plan);
+
     std::erase_if (sendLevels, [this] (const auto& level) { return usedSends.count (level.first) == 0; });
     std::erase_if (containers, [this] (const auto& container) { return usedContainers.count (container.first) == 0; });
     std::erase_if (chains, [this] (const auto& chain) { return usedChains.count (chain.first) == 0; });
@@ -592,7 +653,8 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
             auto& heard = plan.strips[(size_t) places.at (source)];
             heard.feedsSidechain = true;
             device.sidechain = places.at (source);
-            device.sidechainDelay = getDelay ({ (std::int64_t) id, source }, strip.latency - heard.latency);
+            device.sidechainDelay = getDelay ({ (std::int64_t) id, source }, strip.latency - heard.latency,
+                                              TapKey { source, engine::Plan::Strip::TapPoint::beforeMute });
         }
 
         // Its pads on mixer channels of their own, each played into an output of its own, as late as the device's sound comes.
@@ -682,7 +744,10 @@ void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree
     }
 
     for (auto& chain : container.chains)
+    {
         chain.delay = getDelay ({ chain.id, 0 }, latencyBefore + latest - chain.latency);
+        pathDestinations[{ chain.id, 0 }] = strip.id;
+    }
 
     strip.latency = latencyBefore + latest;
     container.count = (int) strip.devices.size() - container.first;
@@ -874,25 +939,312 @@ void SongPlayer::addInputs (engine::Plan& plan, engine::Plan::Strip& strip, std:
     for (auto& input : inputs)
     {
         const auto& from = plan.strips[(size_t) input.strip];
-        const auto key = input.part != nullptr ? std::pair (strip.id, -1 - (from.id * engine::maximumParts + input.part->getPart()))
-                                               : std::pair (strip.id, from.id * 2 + (input.beforeFader ? 1 : 0));
-        input.delay = getDelay (key, strip.latency - getLatency (input));
+        using Point = engine::Plan::Strip::TapPoint;
+        const auto part = input.part != nullptr ? -1 - (from.id * engine::maximumParts + input.part->getPart()) : 0;
+        const auto key =
+            input.part != nullptr ? std::pair (strip.id, part) : std::pair (strip.id, from.id * 2 + (input.beforeFader ? 1 : 0));
+        const auto point = input.part != nullptr ? Point::part
+                           : input.beforeFader   ? Point::beforeFader
+                           : input.beforeMute    ? Point::beforeMute
+                                                 : Point::output;
+        input.delay = getDelay (key, strip.latency - getLatency (input), TapKey { from.id, point, part }, input.part);
+        pathDestinations[key] = strip.id;
         strip.inputs.push_back (std::move (input));
     }
 }
 
-std::shared_ptr<engine::Delay> SongPlayer::getDelay (std::pair<std::int64_t, std::int64_t> key, int length)
+std::shared_ptr<engine::Delay> SongPlayer::getDelay (std::pair<std::int64_t, std::int64_t> key, int length, std::optional<TapKey> tap,
+                                                     std::shared_ptr<engine::PartOutput> part)
 {
-    if (length <= 0)
-        return nullptr;
+    // A path the last plan lined up otherwise (a device's latency changed, or one with latency came or went): the plans'
+    // alignment moves on (compile()). A new path isn't one: its delay plays nothing until it holds as much of the past as it
+    // reaches back, and fades in then.
+    const auto samples = std::max (0, length);
 
+    const auto found = pathLengths.find (key);
+    const auto isNew = found == pathLengths.end() && ! compilingAfresh;
+
+    if (found != pathLengths.end() && found->second != samples)
+        realigned = true;
+
+    pathLengths[key] = samples;
+    usedDelays.insert (key);
     auto& kept = delays[key];
 
-    if (kept == nullptr || kept->getLength() != length)
-        kept = std::make_shared<engine::Delay> (length);
+    // A render plays the song once, as it is: a path with no delay needs none, and one with a delay a ring as long and no
+    // longer (finishRings()), so that what a render keeps is what its delays reach back, however many paths it has.
+    if (! compilingLive && samples == 0)
+    {
+        kept = nullptr;
+        return nullptr;
+    }
 
-    usedDelays.insert (key);
+    // Live, every path keeps a ring, delayed or not, and keeps it when its delay goes back to none, so that one that comes
+    // to need a delay has its past (known bug 167: the first latency on a sum silenced every other path for as long): room
+    // for a third of a second more than its delay at the device's rate (16,384 samples at 48 kHz), so that a change within
+    // that never goes silent; past it, a longer ring that reads the past from this one. The paths from one point of a strip
+    // (a track's sends to its returns, a sidechain listening to it) share one, its tap, which it writes once a stretch, as
+    // long as the longest of them needs and the stretch it writes; the others' (a container's chains) have their own.
+    // Made empty: a render's plan may leave out the path (finishRings() makes the room of those it plays).
+    const auto room = compilingLive ? getRingRoom (preparedRate) : 0;
+    const auto fade = std::max (1, (int) std::lround (engine::Engine::fadeSeconds * preparedRate));
+
+    if (tap.has_value())
+    {
+        tappedPaths[key] = { *tap, isNew };
+
+        if (part != nullptr)
+            tapParts[*tap] = std::move (part);
+
+        auto& ring = taps[*tap];
+        const auto needed = samples + preparedBlockSize;
+
+        if (ring == nullptr || ring->getCapacity() < needed)
+            ring = std::make_shared<engine::DelayLine> (needed + room, ring, false);
+
+        if (kept == nullptr || ! kept->isTapped() || kept->getLength() != samples || kept->getLine() != ring)
+            replace (kept, std::make_shared<engine::Delay> (ring, samples, fade, isNew, true));
+
+        return kept;
+    }
+
+    if (kept == nullptr || kept->isTapped() || kept->getLength() != samples)
+    {
+        auto line = kept != nullptr && ! kept->isTapped() ? kept->getLine() : nullptr;
+
+        if (line == nullptr || line->getCapacity() < samples || (! compilingLive && line->getCapacity() != samples))
+            line = std::make_shared<engine::DelayLine> (samples + room, std::move (line), false);
+
+        replace (kept, std::make_shared<engine::Delay> (std::move (line), samples, fade, isNew));
+    }
+
     return kept;
+}
+
+void SongPlayer::replace (std::shared_ptr<engine::Delay>& kept, std::shared_ptr<engine::Delay> by) const
+{
+    // Live, the delay it takes the place of is held for the engine to see how much further back it reads, while that one
+    // hasn't played (engine/core/Engine.h: Realign::hold); a render's plans don't fade.
+    if (compilingLive)
+        by->takePlaceOf (std::move (kept));
+
+    kept = std::move (by);
+}
+
+void SongPlayer::finishRings (engine::Plan& plan)
+{
+    // The delays the plan plays (a render's, those of what it doesn't leave out).
+    std::set<const engine::Delay*> played;
+
+    const auto forEachDelay = [&plan] (auto&& take)
+    {
+        for (auto& strip : plan.strips)
+        {
+            for (auto& input : strip.inputs)
+                take (input.delay);
+
+            for (auto& device : strip.devices)
+                take (device.sidechainDelay);
+
+            for (auto& container : strip.containers)
+                for (auto& chain : container.chains)
+                    take (chain.delay);
+        }
+    };
+
+    forEachDelay (
+        [&played] (const std::shared_ptr<engine::Delay>& delay)
+        {
+            if (delay != nullptr)
+                played.insert (delay.get());
+        });
+
+    // Each tap as long as the longest path it plays needs and the stretch its strip writes (a render's no longer: one that
+    // was made longer for a path the render left out is made again, holding nothing yet); one nothing the plan plays reads
+    // let go of.
+    std::map<TapKey, int> needed;
+
+    for (const auto& [key, path] : tappedPaths)
+        if (const auto& delay = delays[key]; delay != nullptr && played.contains (delay.get()))
+            needed[path.tap] = std::max (needed[path.tap], delay->getLength() + preparedBlockSize);
+
+    std::erase_if (taps, [&needed] (const auto& tap) { return ! needed.contains (tap.first); });
+
+    for (auto& [tap, ring] : taps)
+        if (! compilingLive && ring->getCapacity() != needed[tap])
+            ring = std::make_shared<engine::DelayLine> (needed[tap], ring, false);
+
+    // The paths that read a tap made again since their delays were (a longer path from the same point came after them):
+    // each a delay of the same length reading the new one.
+    std::map<const engine::Delay*, std::shared_ptr<engine::Delay>> repointed;
+    const auto fade = std::max (1, (int) std::lround (engine::Engine::fadeSeconds * preparedRate));
+
+    for (const auto& [key, path] : tappedPaths)
+    {
+        auto& delay = delays[key];
+
+        if (delay != nullptr && played.contains (delay.get()) && delay->getLine() != taps.at (path.tap))
+        {
+            const auto* was = delay.get();
+            replace (delay, std::make_shared<engine::Delay> (taps.at (path.tap), delay->getLength(), fade, path.isNew, true));
+            repointed[was] = delay;
+        }
+    }
+
+    forEachDelay (
+        [&repointed] (std::shared_ptr<engine::Delay>& delay)
+        {
+            if (delay != nullptr)
+            {
+                if (const auto found = repointed.find (delay.get()); found != repointed.end())
+                    delay = found->second;
+
+                delay->getLine()->allocate();
+            }
+        });
+
+    // Each tap on the strip that writes it, its room made.
+    std::map<std::int64_t, engine::Plan::Strip*> byID;
+
+    for (auto& strip : plan.strips)
+        byID[strip.id] = &strip;
+
+    for (const auto& [tap, ring] : taps)
+    {
+        const auto strip = byID.find (tap.strip);
+
+        if (strip == byID.end())
+        {
+            jassertfalse; // a path the plan plays comes from a strip it plays
+            continue;
+        }
+
+        ring->allocate();
+        const auto part = tapParts.find (tap);
+        strip->second->taps.push_back ({ ring, tap.point, part != tapParts.end() ? part->second : nullptr });
+    }
+
+    // The rings the rings took the place of, and the delays the delays did, let go of once they are done with them.
+    for (const auto& [tap, ring] : taps)
+        ring->letGoOfTheOld();
+
+    for (const auto& [key, delay] : delays)
+    {
+        if (delay != nullptr)
+        {
+            delay->letGoOfThePrevious();
+
+            if (delay->getLine() != nullptr)
+                delay->getLine()->letGoOfTheOld();
+        }
+    }
+}
+
+void SongPlayer::markWhatReadsLeaving (engine::Plan& plan)
+{
+    // The strips a path that left went into (a return a send went to, a bus, a strip a container's chain was in) hold what
+    // it added as it faded, and so does what they go into: a path that reads one of them, its delay grown, would play
+    // that again after the engine's dip, which it holds the mix silent across for as long (engine/core/Engine.h:
+    // Realign::hold). The others' growth plays again only what is there now, as any change of the compensation does, under
+    // the dip. A second after such a path left, the engine has taken its plan long since: what it went into is no longer
+    // counted (whose rings hold a third of a second more than their delays).
+    const auto now = juce::Time::getMillisecondCounter();
+    std::erase_if (leftInto, [now] (const auto& into) { return now - into.second > 1000; });
+
+    if (leftInto.empty())
+        return;
+
+    std::set<std::int64_t> holding;
+
+    for (const auto& [id, when] : leftInto)
+        holding.insert (id);
+
+    // In the plan's order, each after what it takes in.
+    for (auto& strip : plan.strips)
+    {
+        for (auto& input : strip.inputs)
+        {
+            if (holding.contains (plan.strips[(size_t) input.strip].id))
+            {
+                if (input.delay != nullptr)
+                    input.delay->markReadsLeaving();
+
+                holding.insert (strip.id);
+            }
+        }
+
+        for (auto& device : strip.devices)
+            if (device.sidechain >= 0 && device.sidechainDelay != nullptr && holding.contains (plan.strips[(size_t) device.sidechain].id))
+                device.sidechainDelay->markReadsLeaving();
+
+        if (holding.contains (strip.id))
+            for (auto& container : strip.containers)
+                for (auto& chain : container.chains)
+                    if (chain.delay != nullptr)
+                        chain.delay->markReadsLeaving();
+    }
+}
+
+void SongPlayer::leaveOutWhatIsNotHeard (engine::Plan& plan)
+{
+    // A render plays the song as it is, once, nothing unmuted meanwhile: what it can't hear is left out, so that it costs
+    // nothing (a muted track's instrument plays on live, for when it is heard again). From the master back, in the plan's
+    // order reversed (each strip after what it takes in), a strip is heard if one heard takes it in: after its fader while
+    // its channel is heard, through a send that sends (a muted track's sends before its fader go on), as a sidechain one
+    // listens to, or as the sampler a pad's track adds a part of.
+    if (plan.strips.empty())
+        return;
+
+    std::vector<bool> heard (plan.strips.size(), false);
+    heard.back() = true;
+
+    for (auto i = plan.strips.size(); i-- > 0;)
+    {
+        if (! heard[i])
+            continue;
+
+        const auto& strip = plan.strips[i];
+
+        for (const auto& input : strip.inputs)
+        {
+            auto& from = *plan.strips[(size_t) input.strip].state;
+            const auto sends = input.level != nullptr ? ! input.level->isCut()
+                                                      : input.part != nullptr || input.beforeFader || from.getChannel().isAudible();
+            if (sends)
+                heard[(size_t) input.strip] = true;
+        }
+
+        for (const auto& device : strip.devices)
+            if (device.sidechain >= 0)
+                heard[(size_t) device.sidechain] = true;
+    }
+
+    // The others left out, what they fed with them, and what points at a strip by its place moved with it.
+    std::vector<int> places (plan.strips.size(), -1);
+    std::vector<engine::Plan::Strip> kept;
+
+    for (size_t i = 0; i < plan.strips.size(); ++i)
+    {
+        if (heard[i])
+        {
+            places[i] = (int) kept.size();
+            kept.push_back (std::move (plan.strips[i]));
+        }
+    }
+
+    for (auto& strip : kept)
+    {
+        std::erase_if (strip.inputs, [&places] (const auto& input) { return places[(size_t) input.strip] < 0; });
+
+        for (auto& input : strip.inputs)
+            input.strip = places[(size_t) input.strip];
+
+        for (auto& device : strip.devices)
+            if (device.sidechain >= 0)
+                device.sidechain = places[(size_t) device.sidechain];
+    }
+
+    plan.strips = std::move (kept);
 }
 
 std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const juce::ValueTree& sendState)
@@ -1042,7 +1394,12 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
             }
 
             entry.modulation->routes.push_back ({ index, (int) source, amount });
-            entry.modulation->isModulated[(size_t) index] = true;
+
+            if (! entry.modulation->isModulated[(size_t) index])
+            {
+                entry.modulation->isModulated[(size_t) index] = true;
+                entry.modulation->modulated.push_back (index);
+            }
         }
     }
 }
@@ -1319,13 +1676,15 @@ void SongPlayer::updateAudibility()
         return switches;
     };
 
-    const auto isHeard = [&] (const juce::ValueTree& state)
+    const auto isRendered = [&] (const juce::ValueTree& state)
+    { return beforeFader && getID (state, schema::trackID) == rendered->channel; };
+    const auto isSoloedOut = [&] (const juce::ValueTree& state)
     {
-        const auto [muted, soloedItself] = getSwitches (state);
-        const auto soloed = soloedItself || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
-        const auto isRendered = beforeFader && getID (state, schema::trackID) == rendered->channel;
-        return isRendered || (! muted && (! anySoloed || soloed || isReturnState (state)));
+        const auto soloed = getSwitches (state).soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
+        return ! isRendered (state) && anySoloed && ! soloed && ! isReturnState (state);
     };
+    const auto isHeard = [&] (const juce::ValueTree& state)
+    { return isRendered (state) || (! getSwitches (state).muted && ! isSoloedOut (state)); };
 
     // A return that is soloed hears what is sent to it, from tracks its solo silences too, as a soloed return does in
     // Ableton Live, Logic Pro and Cubase: else soloing a return, to hear an effect alone, would play silence.
@@ -1345,15 +1704,41 @@ void SongPlayer::updateAudibility()
         return false;
     };
 
-    // A track that isn't heard plays on into a bus that is a key while that bus isn't heard either (soloed out, or muted: a
-    // muted bus feeds its key, as a muted track does), unless it is muted below the bus, a pad on a track of its own by its
-    // sampler's track too (known bug 18): the bus's own mute or solo silences it after the key is taken, and it sends
-    // nothing meanwhile. A bus that is heard plays its tracks as they are heard, so a track soloed in it plays alone (the
-    // owner, 2026-11-13: soloing a drum in the Drums bus played the bus's other drums).
-    const auto playsForKey = [&] (const juce::ValueTree& state)
+    // Whether a send of a channel goes on. Mute silences a channel's output only (the owner's decision;
+    // docs/design/decisions.md): its sends before its fader go on, and those after it are silent with it. What another
+    // track's solo silences sends nothing; but a track that only a solo silences (not its mute) still sends to a return
+    // that is soloed.
+    const auto sendGoesOn = [&] (const juce::ValueTree& state, const juce::ValueTree& send)
+    {
+        const auto heard = isHeard (state);
+        return heard || ((bool) send[schema::sendPreFader] && ! isSoloedOut (state))
+               || (! heard && ! getSwitches (state).muted && isSoloedReturn (getID (send, schema::sendTo)));
+    };
+
+    // Whether something still listens to a bus that isn't heard: a sidechain keyed from it, or a send of it that goes on
+    // (one before its fader, while it is muted).
+    const auto isListenedTo = [&] (const juce::ValueTree& bus)
+    {
+        if (keys.contains (getID (bus, schema::trackID)))
+            return true;
+
+        for (const auto& child : bus)
+            if (child.hasType (schema::SEND) && sendGoesOn (bus, child))
+                return true;
+
+        return false;
+    };
+
+    // A track that isn't heard plays on into a bus that something still listens to while that bus isn't heard either
+    // (soloed out, or muted: a muted bus feeds its key, as a muted track does, and its sends before its fader), unless it is
+    // muted below the bus, a pad on a track of its own by its sampler's track too (known bug 18): the bus's own mute or solo
+    // silences it after the bus has taken it in, and what else it sends, after its fader, is silent meanwhile. A bus that
+    // is heard plays its tracks as they are heard, so a track soloed in it plays alone (the owner, 2026-11-13: soloing a
+    // drum in the Drums bus played the bus's other drums).
+    const auto playsForListener = [&] (const juce::ValueTree& state)
     {
         for (auto bus = state.getParent(); bus.hasType (schema::TRACK); bus = bus.getParent())
-            if (keys.contains (getID (bus, schema::trackID)) && ! isHeard (bus))
+            if (! isHeard (bus) && isListenedTo (bus))
                 return ! isMutedBelow (state, bus)
                        && ! (state.hasProperty (schema::trackPad) && isMutedBelow (getSamplerTrack (state), bus));
 
@@ -1367,28 +1752,13 @@ void SongPlayer::updateAudibility()
         if (strip == nullptr)
             continue;
 
-        const auto heard = isHeard (state);
-
-        // What isn't heard sends nothing, also while it plays on for a sidechain; but a track that only a solo silences
-        // (not its mute) still sends to a return that is soloed, and plays on for that send, itself unheard.
-        const auto soloedOut = ! heard && ! getSwitches (state).muted;
-        auto sendsUnheard = false;
-
+        // A track plays on, its devices too, whether it is heard or not; each of its sends as it goes on.
         for (const auto& child : state)
-        {
-            if (! child.hasType (schema::SEND))
-                continue;
+            if (child.hasType (schema::SEND))
+                if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
+                    found->second->setCut (! sendGoesOn (state, child));
 
-            const auto reachesSoloedReturn = soloedOut && isSoloedReturn (getID (child, schema::sendTo));
-            sendsUnheard = sendsUnheard || reachesSoloedReturn;
-
-            if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
-                found->second->setCut (! heard && ! reachesSoloedReturn);
-        }
-
-        // Last, so that the audio thread never finds the track silenced while it doesn't yet know to play on for a send.
-        strip->getChannel().setPlaysOnUnheard (sendsUnheard);
-        strip->getChannel().setAudible (heard || playsForKey (state));
+        strip->getChannel().setAudible (isHeard (state) || playsForListener (state));
     }
 }
 

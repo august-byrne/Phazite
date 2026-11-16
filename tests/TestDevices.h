@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Devices made for tests, which songs hold and Phazite's engine plays as its own (registered as such:
 // model/devices/internal/Devices.h): an effect (a gain), an instrument that plays the velocity of the note it holds, an
-// effect with latency and a mix (a delay), an effect that plays its sidechain, and one that takes a share of the time.
+// effect with latency and a mix (a delay), an effect of any latency, an effect that plays its sidechain, and one that takes
+// a share of the time.
 #pragma once
 
 #include "TestHelpers.h"
@@ -11,7 +12,9 @@
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <algorithm>
 #include <array>
+#include <span>
 #include <vector>
 
 namespace phazite::test
@@ -152,6 +155,57 @@ struct TestDelay final : devices::Processor
     std::array<devices::dsp::DelayLine, 2> lines;
 };
 
+inline constexpr devices::ParameterInfo testLatencyParameters[] = {
+    { .id = "samples", .name = "Samples", .minimum = 0.0f, .maximum = 65536.0f, .defaultValue = 0.0f, .unit = devices::Unit::none },
+};
+
+// Puts out what comes in so many samples late (its parameter, as it is prepared: a change makes it anew, as a plug-in whose
+// latency changes is), as it says: a device of any latency, for delay compensation.
+struct TestLatency final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestLatency";
+    static constexpr devices::DeviceInfo info { .typeID = typeID,
+                                                .name = "Test Latency",
+                                                .kind = devices::DeviceKind::effect,
+                                                .parameters = testLatencyParameters };
+
+    void takeValuesBeforePrepare (std::span<const float> values) override { latency = values.empty() ? 0 : (int) values[0]; }
+
+    void prepare (double, int) override
+    {
+        for (auto& line : lines)
+            line.prepare (std::max (1, latency));
+    }
+
+    void reset() override
+    {
+        for (auto& line : lines)
+            line.reset();
+    }
+
+    void process (const devices::ProcessContext& block) override
+    {
+        if (latency == 0)
+            return;
+
+        for (int channel = 0; channel < block.numChannels; ++channel)
+        {
+            for (int i = 0; i < block.numSamples; ++i)
+            {
+                lines[(size_t) channel].push (block.channels[channel][i]);
+                block.channels[channel][i] = lines[(size_t) channel].read (latency);
+            }
+        }
+    }
+
+    int getLatencySamples() const override { return latency; }
+    int getLatencySamplesFor (std::span<const float> values) const override { return values.empty() ? 0 : (int) values[0]; }
+    bool sleepsOnSilence() const noexcept override { return false; }
+
+    int latency = 0;
+    std::array<devices::dsp::DelayLine, 2> lines;
+};
+
 // Puts out its sidechain's sound in place of what comes in (silence without one), so a render shows what reaches it.
 struct TestSidechain final : devices::Processor
 {
@@ -219,6 +273,7 @@ inline void registerTestDevices()
         add (TestDelay::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestDelay>(); });
         add (TestSidechain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestSidechain>(); });
         add (TestBusy::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestBusy>(); });
+        add (TestLatency::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestLatency>(); });
         return true;
     }();
 }

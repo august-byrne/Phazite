@@ -8,6 +8,7 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_core/juce_core.h>
 
 #include <atomic>
 #include <cstdint>
@@ -50,14 +51,32 @@ public:
     // sets to how many there are), or nullptr if the chunk isn't read yet. Says where it plays, for what is read ahead.
     const float* getSamples (int channel, std::int64_t start, int& numSamples) noexcept;
 
+    // Any thread: whether the chunk a sample is in is read now, without saying that the file plays there.
+    bool isRead (std::int64_t sample) const noexcept
+    {
+        return sample >= 0 && sample < length && chunks[(size_t) (sample / chunkSamples)].load (std::memory_order_acquire) != nullptr;
+    }
+
     // Audio thread: a sample it will play from next though it doesn't play there now (where playback will start, the
     // start of a loop that plays further on): read ahead of as where it plays is, for as long as it is said in each block.
     void expect (std::int64_t sample) noexcept;
 
+    // Message thread: a sample it plays from at once, though nothing has read it there yet (where a jump lands): read
+    // before anything else of this file or another (known bug 36), its reading thread woken for it. The audio thread asks
+    // for a chunk so itself as it finds it not read, without waking anyone (which it mustn't).
+    void want (std::int64_t sample);
+
+    // Message thread: what wakes its reading thread (FileReader.h), which want() signals.
+    void setWake (std::shared_ptr<juce::WaitableEvent> event) { wake = std::move (event); }
+
     // Message thread: a sample to keep read whatever plays, as a clip's start in the file is.
     void keep (std::int64_t sample);
 
-    // The reading thread: reads the next chunk wanted, and lets go of those long played; whether there was one to read.
+    // The reading thread: reads the chunk wanted first, if it isn't read yet; whether it read it.
+    bool readWanted();
+
+    // The reading thread: reads the next chunk wanted (the one asked for first), and lets go of those long played; whether
+    // there was one to read.
     bool readNext();
 
     // A render's thread: reads every chunk of a range now, if not read yet.
@@ -84,12 +103,17 @@ private:
     // its last few blocks are where the file plays now, one place for each clip that plays it.
     std::unique_ptr<std::atomic<std::uint64_t>[]> playedIn;
 
+    // The chunk asked for first (want()), or -1; and what wakes the reading thread for it.
+    std::atomic<int> wanted { -1 };
+    std::shared_ptr<juce::WaitableEvent> wake;
+
     std::mutex mutex; // between the reading thread, a render's and the message thread; never the audio thread
     std::set<int> kept;
     std::vector<std::pair<std::unique_ptr<Chunk>, std::uint64_t>> letGo; // each with the block count it can go after
     std::vector<int> playingAt;                                          // the reading thread's: where it plays now
 
     bool readChunk (int index); // under the mutex
+    bool readWantedChunk();     // under the mutex
     void findWherePlaying();    // into playingAt, under the mutex
 };
 } // namespace phazite::engine

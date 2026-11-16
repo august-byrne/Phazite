@@ -10,6 +10,7 @@
 #include "NoteSequence.h"
 #include "engine/modulation/ModulatorNode.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bitset>
@@ -38,7 +39,6 @@ public:
     std::size_t nextEvent = 0;
     std::bitset<128> sounding;
     bool mustChase = true;
-    bool wasSilenced = false;
 
     // What its instrument plays in a stretch of a block, in time order.
     std::array<devices::NoteEvent, DeviceRunner::maximumEvents> events {};
@@ -52,44 +52,177 @@ public:
     std::vector<float> volumeModulation, panModulation;
 
     // The engine's pass it has played last (Engine.h), which the strips that take it in wait for; and for one whose
-    // instrument is handed its blocks early, the pass whose block it was last handed, which the strip's own task waits for,
-    // and whether it plays nothing in it.
+    // instrument is handed its blocks early, the pass whose block it was last handed, which the strip's own task waits for.
     std::atomic<std::uint64_t> donePass { 0 }, startedPass { 0 };
-    bool startedSilent = false;
 
 private:
     Channel channel;
 };
 
-// A delay of a fixed length on two channels.
+// What came out of a strip at a point (its output, its sound before its fader or before its mute, a device's part), or
+// into one path that a delay lines up with a later one, on two channels: a ring of so many samples, kept from plan to plan
+// while it is long enough for what reads it, so that a delay made longer or shorter (a device's latency changed) plays on
+// from what came in before, rather than from silence (known bug 167). Every path into a sum reads one, delayed or not,
+// so that one that comes to need a delay has its past; the paths from one point of a strip (the sends of a track to its
+// returns) share one, which that strip writes once a block (a tap: Plan::Strip::taps). One made in place of a ring too
+// short copies nothing: it reads the part of the past from before it started from the ring it takes the place of (the
+// latest that played), which stays as it was, until it holds as much of the past as it has room for itself, and is then
+// done with it; so the work of a block is bounded by its length, whatever the rings' sizes. The ring it takes the place
+// of stays alive as long as this one needs it, through the chain of rings each holding the one before, which the message
+// thread lets go of once this one is done with it.
+class DelayLine
+{
+public:
+    // Message thread: room for so many samples, holding nothing yet; or with what the ring it takes the place of holds. Its
+    // room is made at once, or later (allocate()) for one made as a plan is built, of which the plan may need none.
+    explicit DelayLine (int capacity, std::shared_ptr<DelayLine> takesFrom = {}, bool allocateNow = true);
+    ~DelayLine(); // the message thread's: the rings it holds let go of one after another
+
+    int getCapacity() const noexcept { return capacity; }
+
+    // Message thread, before a plan points at it: its room made, silent, if it wasn't.
+    void allocate();
+    bool isAllocated() const noexcept { return samples.getNumSamples() == capacity; }
+
+    // Message thread: the ring it takes the place of let go of, once it is done with it.
+    void letGoOfTheOld() noexcept;
+
+    // Audio thread: as it is first played, it takes the latest ring before it that played (one that never played holds
+    // nothing of its own) as what it reads the past from, as far as that holds it.
+    void start() noexcept;
+
+    // Audio thread: silence in it, all of it heard (as after a reset, which starts the song from silence); done with the
+    // ring before.
+    void reset() noexcept;
+
+    // Audio thread: how many samples of the past it holds, its own and what it reads from the ring before.
+    int getReach() const noexcept { return written + (done.load (std::memory_order_relaxed) ? 0 : inherited); }
+
+    // Audio thread: what came in, kept, so many samples.
+    void write (const float* const* inputs, int numSamples) noexcept;
+
+    // Audio thread: what it holds of so many samples, the first so many samples back from where the next goes (ago, at
+    // least count), each run of them handed to a function with where it is among them: (offset, left, right, length). What
+    // it doesn't hold (further back than it reaches) is handed to none. Its own samples first, then the older ones from the
+    // ring before, then that one's, as far as each reaches: never more samples than asked, wherever they are.
+    template <typename Take>
+    void forEachHeld (int ago, int count, Take&& take) const noexcept
+    {
+        for (const auto* ring = this; ring != nullptr && count > 0;
+             ring = ring->done.load (std::memory_order_relaxed) ? nullptr : ring->source)
+        {
+            const auto ownFrom = std::clamp (ago - ring->written, 0, count); // the first it holds itself
+
+            for (int at = ownFrom; at < count;)
+            {
+                const auto from = ((ring->position - (ago - at)) % ring->capacity + ring->capacity) % ring->capacity;
+                const auto part = std::min (count - at, ring->capacity - from);
+                take (at, ring->samples.getReadPointer (0, from), ring->samples.getReadPointer (1, from), part);
+                at += part;
+            }
+
+            // What is older than its own, from the ring before.
+            ago -= ring->written;
+            count = ownFrom;
+        }
+    }
+
+private:
+    juce::AudioBuffer<float> samples; // the audio thread's
+    const int capacity;
+    int position = 0, written = 0; // where the next sample goes, and how many it has kept itself (up to its capacity)
+
+    // The ring it takes the place of, until it is done with it; and the latest before it that played, which it reads the
+    // past from (alive through old: each ring holds the one before until it is done with it), with how much of the past
+    // that one held as this one started.
+    std::shared_ptr<DelayLine> old;
+    const DelayLine* source = nullptr;
+    int inherited = 0;
+
+    // The audio thread's: started once played; done once it holds as much as it has room for itself, or after a reset, when
+    // the message thread lets go of the old.
+    std::atomic<bool> started { false }, done { false };
+};
+
+// A delay of a fixed length on two channels, reading a ring (DelayLine) so many samples back: one of its own, which it
+// writes what comes in into itself; or a strip's tap, which that strip has written the stretch into before (tapped), read
+// from as far back from its end. Until the ring holds that much of the past (a new path, or one made longer than what its
+// ring held), it plays nothing, and then fades in over so many samples, rather than cut in mid-sound; a path new to a song
+// that plays fades in from its first sample, though it has no delay.
 class Delay
 {
 public:
-    explicit Delay (int samples);
+    explicit Delay (int samples); // a ring of its own, as long, holding silence
+    Delay (std::shared_ptr<DelayLine>, int samples, int fadeSamples, bool newPath = false, bool tapped = false);
+    ~Delay(); // the message thread's: the delays before it let go of one after another
 
     int getLength() const noexcept { return length; }
+    const std::shared_ptr<DelayLine>& getLine() const noexcept { return line; }
+    bool isTapped() const noexcept { return tapped; }
+
+    // Message thread, before a plan points at it: the delay it takes the place of on its path (one of another length), held
+    // until it has played; and let go of once it has.
+    void takePlaceOf (std::shared_ptr<Delay> before) noexcept { previous = std::move (before); }
+    void letGoOfThePrevious() noexcept;
+
+    // Message thread, before a plan points at it: what it reads held what a path that left added to a sum (it reads a
+    // return or a bus such a path went into, or what that one went into), so that what it would play again holds that.
+    void markReadsLeaving() noexcept { readsLeaving.store (true, std::memory_order_relaxed); }
+
+    // Audio thread, before it plays: how much further back it reads than the latest delay before it on its path that
+    // played, where it or one of the delays before it that didn't play was marked as reading what left (0 otherwise, for
+    // one that played itself, or a path new to the song): what a plan that takes its place plays again of what left.
+    int getGrowth() const noexcept;
 
     // Audio thread: adds what came in so many samples ago to the outputs, at a gain going in a straight line from one to
-    // another over the block, and keeps what comes in now.
+    // another over the block; and keeps what comes in now, in its own ring (a tapped one's is written by its strip, and
+    // what comes in isn't read).
     void addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain = 1.0f,
                      float endGain = 1.0f) noexcept;
-    void reset() noexcept; // audio thread: silence in it, as when it was made
+    void reset() noexcept; // audio thread: silence in it, as when it was made (a tapped one's ring is its strip's to reset)
+
+    // Message thread: the path goes with the plan of these departures (engine/core/Plan.h: departures); any thread: which,
+    // 0 for none.
+    void setDeparture (std::uint64_t departures) noexcept { departure.store (departures, std::memory_order_relaxed); }
+    std::uint64_t getDeparture() const noexcept { return departure.load (std::memory_order_relaxed); }
+
+    // Audio thread, on the plan it leaves from (Engine.h: Leave): its gains for a stretch of so many samples, fading out
+    // over so many from the first stretch the engine heard it leave in (it starts its fade then, whenever its mark came),
+    // and silent after, as long as that plan plays.
+    std::pair<float, float> leave (int fadeLength, int numSamples, std::pair<float, float> gains) noexcept;
+
+    // How many samples its last block read from rings and wrote into its own, on one channel: its work, which a test holds
+    // to the block's length.
+    int getSamplesTouched() const noexcept { return touched; }
 
 private:
-    int length = 0, position = 0;
-    juce::AudioBuffer<float> line;
+    int length = 0, fadeSamples = 0;
+    std::shared_ptr<DelayLine> line;
+    bool tapped = false;
+    std::atomic<std::uint64_t> departure { 0 };
+
+    // The delay it took the place of, until it has played (set by the audio thread as it first plays, which alone reads the
+    // delays before through it, and only while it hasn't).
+    std::shared_ptr<Delay> previous;
+    std::atomic<bool> played { false }, readsLeaving { false };
+
+    // The audio thread's: how far into its fade in it is (-1: none to make, or done), whether it is a path new to the song
+    // and has played, what is left of its fade out as it leaves (-1 before it does), and its last block's work.
+    int fadedIn = -1;
+    bool newPath = false, started = false;
+    int leaving = -1;
+    int touched = 0;
 };
 
 // A send's level, which the message thread sets and the audio thread glides to over a block. Kept by the send's ID. Cut, it
-// sends nothing whatever its level, gliding there over a block too: a send's track that isn't heard (muted, or soloed
-// out) sends nothing, also while it plays on for a sidechain that listens to it or to a bus it is in; but for a send to
-// what is heard without it (a soloed return), which isn't cut, and which its track plays on for
-// (Channel::setPlaysOnUnheard()).
+// sends nothing whatever its level, gliding there over a block too (the model says when: a muted track's sends after its
+// fader, and every send of a track another's solo silences but one to a return that is soloed).
 class SendLevel
 {
 public:
     void setDecibels (float decibels) noexcept;
     void setCut (bool shouldCut) noexcept { cut.store (shouldCut, std::memory_order_relaxed); }
+    bool isCut() const noexcept { return cut.load (std::memory_order_relaxed); }
 
     // Audio thread: the gain as the last block ended, and as this one does.
     std::pair<float, float> moveOn() noexcept;

@@ -257,6 +257,19 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
         for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
             buffer.clear (channel, start, numSamples);
 
+        // Asleep, it plays nothing, but its parameters play on as they would, for what shows them (a knob's ring, a graph's
+        // handles): moved by their modulation, at the block's last control point, as its last stretch would leave them
+        // (known bug 171: they stood at their values set by hand).
+        if (plan != nullptr && ! plan->routes.empty())
+        {
+            const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
+            const auto toControlPoint = smoothingStep - sinceControlPoint;
+            const auto stretch = numSamples > toControlPoint ? 1 + (numSamples - toControlPoint - 1) / smoothingStep : 0;
+            const auto done = stretch > 0 ? toControlPoint + (stretch - 1) * smoothingStep : 0;
+            setStretchValues (in, begun.automationMoves, done == 0 ? -sinceControlPoint : done, stretch, done, numSamples - done,
+                              numSamples, &plan->modulated); // those alone: the others are at their values already
+        }
+
         if (! begun.settled)
             keepValues();
 

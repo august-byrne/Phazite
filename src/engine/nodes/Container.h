@@ -110,13 +110,11 @@ public:
 
     // The audio thread's: what it plays, on two channels (two more for a sidechain, which a device in a container has not);
     // the events of its instrument in a stretch of a block, in time order; its fader's modulation on each of the block's
-    // control points, and its crossover's; and whether it was silent, so that its devices start from silence when it is
-    // heard again.
+    // control points, and its crossover's.
     juce::AudioBuffer<float> buffer;
     std::array<devices::NoteEvent, DeviceRunner::maximumEvents> events {};
     int numEvents = 0;
     std::vector<float> volumeModulation, panModulation, crossoverModulation;
-    bool wasSilenced = false;
 
     // Its band's split, the audio thread's: the sections of its crossover, made for the frequency they were made for last;
     // the filters that split each channel there into what is below and above it (two sections each way); and those that keep

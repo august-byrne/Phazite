@@ -44,18 +44,8 @@ public:
     float getPan() const noexcept { return pan.load (std::memory_order_relaxed); }
     bool isAudible() const noexcept { return audible.load (std::memory_order_relaxed); }
 
-    // Message thread: whether the channel plays on while it isn't heard, for what takes its sound without its mute and is
-    // heard without it: a send to a return that is soloed while the channel is soloed out (the model works it out, and cuts
-    // its other sends: SendLevel). Any thread reads it.
-    void setPlaysOnUnheard (bool playsOn) noexcept { playsOnUnheard.store (playsOn, std::memory_order_relaxed); }
-    bool isPlayingOnUnheard() const noexcept { return playsOnUnheard.load (std::memory_order_relaxed); }
-
     // Before playback (it may allocate nothing, but must be told the rate).
     void prepare (double sampleRate) noexcept;
-
-    // Audio thread: whether the channel plays nothing now, muted (or soloed out) and faded out, so that what feeds it
-    // needn't play.
-    bool isSilenced() const noexcept { return started && fading == 0 && juce::exactlyEqual (heard, 0.0f) && ! isAudible(); }
 
     // Message thread: whether the volume or the pan is written by hand now (automation's touch, latch and write modes), so
     // that it plays its value set by hand rather than its automation.
@@ -99,7 +89,7 @@ public:
 private:
     std::atomic<float> volume { 0.0f }, pan { 0.0f }, playedVolume { 0.0f }, playedPan { 0.0f }, playedBaseVolume { 0.0f },
         playedBasePan { 0.0f };
-    std::atomic<bool> audible { true }, playsOnUnheard { false }, volumeWriting { false }, panWriting { false };
+    std::atomic<bool> audible { true }, volumeWriting { false }, panWriting { false };
 
     // The audio thread's: each side's gain now and where it eases to, how many samples are left to get there and how much it
     // moves in each; and the mute's fade, likewise.

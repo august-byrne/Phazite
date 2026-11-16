@@ -138,8 +138,43 @@ private:
     std::map<std::int64_t, std::shared_ptr<engine::SendLevel>> sendLevels;
     std::map<std::int64_t, std::shared_ptr<engine::ContainerState>> containers;
     std::map<std::int64_t, std::shared_ptr<engine::ChainState>> chains; // each container's chain's, by its ID
-    std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;
+    std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;         // every path's, those that need no delay too
     std::set<std::int64_t> usedSends, usedContainers, usedChains;
+
+    // How long each path's delay was in the plan compiled last, by the same keys (0 for none), and the plans' delay
+    // compensation, numbered (engine::Plan::alignment), which moves on when a path changes its delay.
+    std::map<std::pair<std::int64_t, std::int64_t>, int> pathLengths;
+    std::uint64_t alignment = 0, departures = 0; // and the paths gone, numbered (engine::Plan::departures)
+    bool compilingAfresh = false;                // no path the plan being compiled has is new to a song that plays
+    bool realigned = false;                      // a path of the plan being compiled was lined up otherwise in the last
+    bool compilingLive = false;                  // the plan being compiled plays live, not in a render
+
+    // The strip each path adds its sound into, by the same keys (an input's strip, a container's chain's); and the strips
+    // paths that left went into, each with when (juce::Time::getMillisecondCounter()), for a second (markWhatReadsLeaving()).
+    std::map<std::pair<std::int64_t, std::int64_t>, std::int64_t> pathDestinations;
+    std::map<std::int64_t, std::uint32_t> leftInto;
+
+    // The strips' taps (engine::Plan::Strip::taps), by the strip's ID, the point and, for a device's part, the part
+    // (-1 - the sampler's ID times engine::maximumParts plus its pad; 0 otherwise): each ring, which the paths from there
+    // share, and its part's output. And the plan being compiled's paths that read one: each its tap, and whether it is new.
+    struct TapKey
+    {
+        std::int64_t strip = 0;
+        engine::Plan::Strip::TapPoint point = engine::Plan::Strip::TapPoint::output;
+        std::int64_t part = 0;
+
+        auto operator<=> (const TapKey&) const = default;
+    };
+
+    struct TappedPath
+    {
+        TapKey tap;
+        bool isNew = false;
+    };
+
+    std::map<TapKey, std::shared_ptr<engine::DelayLine>> taps;
+    std::map<TapKey, std::shared_ptr<engine::PartOutput>> tapParts;
+    std::map<std::pair<std::int64_t, std::int64_t>, TappedPath> tappedPaths;
 
     // The outputs of pads on mixer channels of their own (engine/nodes/PartOutput.h), by their samplers' IDs and their pads:
     // those of this plan, by their samplers, and how late each comes out of its sampler (for its channel's delay).
@@ -225,7 +260,13 @@ private:
 
     std::vector<ChannelInfo> getChannels() const; // in an order in which each comes after what it takes in
     void addInputs (engine::Plan&, engine::Plan::Strip&, std::vector<engine::Plan::Input>);
-    std::shared_ptr<engine::Delay> getDelay (std::pair<std::int64_t, std::int64_t> key, int length); // none for none
+    // One for every path (none for a render's that needs none): reading a strip's tap, or with a ring of its own.
+    std::shared_ptr<engine::Delay> getDelay (std::pair<std::int64_t, std::int64_t> key, int length,
+                                             std::optional<TapKey> tap = std::nullopt, std::shared_ptr<engine::PartOutput> part = {});
+    void leaveOutWhatIsNotHeard (engine::Plan&); // a render's
+    void finishRings (engine::Plan&);            // the taps the plan's paths read, on their strips, and the rings made
+    void markWhatReadsLeaving (engine::Plan&);   // the delays whose growth would play again what paths that left added (live)
+    void replace (std::shared_ptr<engine::Delay>& kept, std::shared_ptr<engine::Delay> by) const; // a path's delay
     std::shared_ptr<engine::SendLevel> getSendLevel (const juce::ValueTree& sendState);
     std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
                                           engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false,

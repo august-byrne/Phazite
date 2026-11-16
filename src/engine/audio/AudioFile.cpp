@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioFile.h"
+#include "devices/core/Processor.h"
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace phazite::engine
 {
@@ -53,8 +55,14 @@ const float* AudioFile::getSamples (int channel, std::int64_t start, int& numSam
     const auto inChunk = (int) std::min<std::int64_t> (chunkSamples - offset, length - start);
     numSamples = std::min (numSamples, inChunk);
 
+    // Not read yet: read first, when the reading thread next looks, unless another is asked for first already (a jump's
+    // landing, which the message thread asked for while this one still played where it wasn't read).
     if (chunk == nullptr)
+    {
+        auto none = -1;
+        wanted.compare_exchange_strong (none, index, std::memory_order_relaxed);
         return nullptr;
+    }
 
     return chunk->samples.getReadPointer (std::min (channel, numChannels - 1), offset);
 }
@@ -64,6 +72,32 @@ void AudioFile::expect (std::int64_t sample) noexcept
     if (sample >= 0 && sample < length)
         playedIn[(size_t) (sample / chunkSamples)].store ((blocks != nullptr ? blocks->load (std::memory_order_relaxed) : 0) + 1,
                                                           std::memory_order_relaxed);
+}
+
+void AudioFile::want (std::int64_t sample)
+{
+    if (sample < 0 || sample >= length)
+        return;
+
+    // Stamped as where it plays too, so that what follows it is read ahead of next.
+    const auto index = (int) (sample / chunkSamples);
+    playedIn[(size_t) index].store ((blocks != nullptr ? blocks->load (std::memory_order_relaxed) : 0) + 1, std::memory_order_relaxed);
+    wanted.store (index, std::memory_order_relaxed);
+
+    if (wake != nullptr)
+        wake->signal();
+}
+
+bool AudioFile::readWanted()
+{
+    const std::lock_guard lock (mutex);
+    return readWantedChunk();
+}
+
+bool AudioFile::readWantedChunk()
+{
+    const auto index = wanted.exchange (-1, std::memory_order_relaxed);
+    return index >= 0 && index < numChunks && read[(size_t) index] == nullptr && readChunk (index);
 }
 
 void AudioFile::keep (std::int64_t sample)
@@ -81,9 +115,15 @@ bool AudioFile::readChunk (int index)
     const auto size = (int) std::min<std::int64_t> (chunkSamples, length - start);
     chunk->samples.setSize (numChannels, size);
 
-    // A part that can't be read plays as silence rather than stopping what is around it.
+    // A part that can't be read plays as silence rather than stopping what is around it; and so does what isn't sound in a
+    // file of floats (NaN, an infinity), sample by sample, which the mix would carry to its master, whose last guard then
+    // silences the whole song (devices::soundOf()).
     if (! reader->read (chunk->samples, start, size))
         chunk->samples.clear();
+
+    for (int channel = 0; channel < numChannels; ++channel)
+        for (auto& sample : std::span (chunk->samples.getWritePointer (channel), (size_t) size))
+            sample = devices::soundOf (sample);
 
     chunks[(size_t) index].store (chunk.get(), std::memory_order_release);
     read[(size_t) index] = std::move (chunk);
@@ -100,6 +140,10 @@ bool AudioFile::readNext()
         const auto now = blocks->load (std::memory_order_acquire);
         std::erase_if (letGo, [now] (const auto& chunk) { return now >= chunk.second; });
     }
+
+    // What was asked for first (want()).
+    if (readWantedChunk())
+        return true;
 
     // A short file is read whole, from its start.
     if (whole)

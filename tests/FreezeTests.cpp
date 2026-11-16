@@ -13,11 +13,13 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/ContainerModel.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -381,7 +383,7 @@ TEST_CASE ("A track frozen while it is muted, or while another track is soloed, 
     }
 }
 
-TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio track under it, and mutes the original")
+TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio track under it, and mutes and freezes the original")
 {
     Song song;
     auto& model = song.getSong();
@@ -423,14 +425,92 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (phazite::isTrackMuted (model, song.bass, false));
     CHECK_FALSE (phazite::isCollapsed (model, song.bass));
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Bounce in Place"));
+
+    // And frozen in the same step, the bounce its frozen file: a muted track plays on underneath, and so would cost its
+    // devices for nothing (the review of known bug 78). The frozen file is the bounce, sample for sample.
+    CHECK (phazite::isFrozen (song.context, song.bass));
+    REQUIRE (song.frozenFile().existsAsFile());
+    CHECK (getLevel (song.frozenFile(), 0.1, 1.4) == doctest::Approx (getLevel (file, 0.1, 1.4)));
+    phazite::test::dispatchPendingMessages(); // what keeps frozen tracks honest has heard the step: it stays frozen
+    CHECK (phazite::isFrozen (song.context, song.bass));
+
     phazite::undo (model);
     CHECK (phazite::getTrackIDs (model).size() == 2);
     CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
     CHECK_FALSE (phazite::isCollapsed (model, song.bass));
     REQUIRE (phazite::canRedo (model));
     phazite::redo (model);
     CHECK (phazite::getTrackIDs (model).size() == 3);
     CHECK (phazite::isTrackMuted (model, song.bass, false));
+    CHECK (phazite::isFrozen (song.context, song.bass));
+}
+
+namespace
+{
+// Bounces Bass in place with its command's function, as the app does, and waits for it.
+void bounce (Song& song)
+{
+    song.host.finished.clear();
+    phazite::bounceSelectedTrack (song.context, song.host);
+    REQUIRE (song.host.render != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }, 60000));
+    REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
+    phazite::test::dispatchPendingMessages();
+}
+
+// What the engine plays of a track: whether it plays a file (its frozen file, in place of its clips) and how many devices.
+std::pair<bool, size_t> getPlayed (phazite::Song& song, TrackID track)
+{
+    phazite::SongPlayer player (song);
+    const auto plan = player.compile (48000.0, 256, phazite::SongPlayer::Live {});
+
+    for (const auto& strip : plan->strips)
+        if (strip.id == (std::int64_t) track.getRaw())
+            return { ! strip.audio.empty() && strip.audio.front().file != nullptr, strip.devices.size() };
+
+    return { false, 0 };
+}
+} // namespace
+
+TEST_CASE ("Bounce in Place's freeze is kept across a save, holds a track's containers, and isn't brought back without its file")
+{
+    // The review of known bug 78 (E): what the freeze that Bounce in Place leaves the original with does where it was not
+    // looked at.
+    SUBCASE ("Saved and opened again: still frozen, playing its file")
+    {
+        Song song;
+        bounce (song);
+        REQUIRE (song.project->save().wasOk());
+        song.reopen();
+        CHECK (phazite::isFrozen (song.context, song.bass));
+        CHECK (song.frozenFile().existsAsFile());
+        CHECK (getPlayed (song.getSong(), song.bass) == std::pair<bool, size_t> { true, 0 });
+    }
+
+    SUBCASE ("A track holding a container: frozen too, the container in its file")
+    {
+        Song song;
+        REQUIRE (phazite::groupIntoContainer (song.context, { song.expander }).isValid());
+        bounce (song);
+        CHECK (phazite::isFrozen (song.context, song.bass));
+        CHECK (getPlayed (song.getSong(), song.bass) == std::pair<bool, size_t> { true, 0 });
+    }
+
+    SUBCASE ("Undone, its file let go of, and redone: not frozen without the file, which would play nothing")
+    {
+        Song song;
+        auto& model = song.getSong();
+        bounce (song);
+        phazite::undo (model);
+        phazite::purgeCache (model); // as a project closing does: the file of a track that isn't frozen goes
+        REQUIRE_FALSE (song.frozenFile().existsAsFile());
+        phazite::redo (model);
+        phazite::test::dispatchPendingMessages();
+        CHECK (phazite::isTrackMuted (model, song.bass, false));
+        CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+        CHECK (getPlayed (model, song.bass).second == 1); // its devices play live, for when it is unmuted
+    }
 }
 
 TEST_CASE ("Bounce in Place takes the automation and the modulation of the track's fader and sends along to the new track")
