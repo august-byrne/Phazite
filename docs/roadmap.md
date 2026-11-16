@@ -43,7 +43,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Since then (from 2026-11-15) the known bugs are being fixed before stage 3's hand checks, on the branch `known-bugs`: the [changelog](changelog.md) has a line for each, and with them stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8) are built. Stages 3 to 8 otherwise not started. |
+| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16, on the branch `known-bugs`, not yet pushed, so CI and Linux have not built it): every entry but three that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -54,14 +54,8 @@ stage 8: from it on, a project opens in every later version.
 
 Built on Windows (2026-11-14): every step, S1.1 to S1.17, each in the [changelog](changelog.md), each bug with a test
 that failed before its fix, and each part's changes read by a reviewer whose findings are fixed too. What the steps
-left is in [known-bugs.md](known-bugs.md), with why:
-
-- S1.4: a plug-in added once the project's plug-ins have loaded still opens while the message thread waits, as do
-  Reload, a plug-in's window opening and a parameter's text (known bug 166).
-
-The numbered bugs still in [known-bugs.md](known-bugs.md) belong to the later steps that name their areas (the
-versions' to stage 4, recording's and the slow paths' to stage 5, the devices' and the editors' to stage 6), or wait
-for the owner's answer.
+left, and the numbered bugs of the audit and of the stages' own tests, were fixed in the round that followed
+(2026-11-15 and 16); the three entries still in [known-bugs.md](known-bugs.md) say why they stay.
 
 ### Stage 2. Caught: the tests that would have found those bugs, and the docs
 
@@ -105,7 +99,7 @@ what they found is fixed or in known-bugs.md.
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S5.1 | L | Stretched, pitched and reversed clips heard at once; then stretch modes and a formant switch | A warp marker dragged is heard on the next play, before any render finishes |
-| S5.2 | L | Wider notes: MIDI channel, pitch bend, controllers, pressure and program change, in the song and to plug-ins | A plug-in receives a pitch bend played live and one played from a clip |
+| S5.2 | L | Wider notes: MIDI channel and program change, in the song and to plug-ins (the bend, controllers and pressure are built, and chased where playback starts) | A plug-in receives a pitch bend played live and one played from a clip |
 | S5.3 | L | Controllers recorded, played and edited in lanes beside the velocity lane | A sustain pedal recorded with a part shows in a lane, plays and can be deleted |
 | S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
 | S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
@@ -140,7 +134,7 @@ what they found is fixed or in known-bugs.md.
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S7.1 | XL | Mono tracks, more than one output pair, a cue mix | A performer hears a mix of their own on a second output pair |
-| S7.2 | XL | Scale: a scheduler that does not spin, read-ahead before a jump, the benchmarks on a laptop. The 100-track benchmark is built, its numbers in [performance.md](performance.md) | 100 busy tracks play at 128 samples on four threads with room to spare |
+| S7.2 | XL | Scale: a scheduler that does not spin, the benchmarks on a laptop (read-ahead before a jump is built). The 100-track benchmark is built, its numbers in [performance.md](performance.md) | 100 busy tracks play at 128 samples on four threads with room to spare |
 | S7.3 | L | Multi-out plug-ins and MIDI channels | A multi-out drum plug-in plays each output on a strip of its own |
 | S7.4 | L | Routing: buses send to returns, sidechains inside containers, macros automated, any track or bus as an output | Each has a model test and plays in a golden render |
 | S7.5 | L | Note effects, and MIDI from plug-ins | An arpeggiator before an instrument plays in time, live and rendered |

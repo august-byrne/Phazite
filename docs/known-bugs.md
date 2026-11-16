@@ -5,22 +5,12 @@ the owner says otherwise. Add a bug here when it can't be fixed in the change th
 commit that fixes it. Races and allocations on the audio thread in code Phazite can't change (JUCE's) are in
 [realtime-audit.md](realtime-audit.md) instead.
 
-The file holds two kinds of entries, under the same headings:
-
-- **Entries 19 to 43** are bugs seen in the code while the quality audit's 16 priorities were fixed, each by the session
-  that fixed its neighbour, none yet reproduced by a test. Some are notes still to be traced: where an entry gives no
-  cause or no fix, that is the first step.
-- **Entries 44 to 133** are the open faults of the whole-project quality audit: its bugs, and those of its real-time,
-  security and performance findings that are faults rather than wishes. The audit read the code and ran nothing, so each
-  entry ends with whether its second reader confirmed it ("confirmed by a second reading", "partly confirmed") or it is
-  "not yet checked": check an entry against the code, and reproduce it with a test, before fixing it. Each names the
-  audit's area and finding number, by which the audit's own files hold it in full. Timings in them are estimates unless
-  they say "measured".
-- **Entries from 134 on** were found by the tests of the plan's stage 2, or seen while they were built; each says how.
-- **Entries from 160 on** were found while the rest of stage 1 was built, by its tests and by the reviews of its
-  changes (2026-11-14).
-- **Entries from 171 on** were found while the known bugs were fixed (2026-11-15 on), by the fixes' tests and by the
-  reviews of their changes.
+The entries keep the numbers they were given, so that the changelog, the tests and the commits that name them stay
+right: 19 to 43 were seen while the quality audit's priorities were fixed, 44 to 133 came from the audit itself, 134
+to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on were found while the known bugs were
+fixed (2026-11-15 and 16). That round fixed every entry but the three below, each of which says why it stays: one is
+the written reason of a test's exception, one waits for the owner's answer, and one can only be built and tried on
+Linux. Each fix has a line in the [changelog](changelog.md), under "The known bugs".
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
