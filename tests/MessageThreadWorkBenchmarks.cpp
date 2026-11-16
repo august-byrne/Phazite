@@ -199,6 +199,90 @@ TEST_CASE ("Benchmark: the browser's filters' counts and its filtered places, in
     MESSAGE (report);
 }
 
+TEST_CASE ("Benchmark: a folder of 20,000 sounds opened in the browser" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    phazite::test::TemporaryFolder temp;
+    const auto folder = temp.folder.getChildFile ("Samples");
+    folder.createDirectory();
+    constexpr int sounds = 20000;
+
+    for (int i = 0; i < sounds; ++i)
+        folder.getChildFile ("Sound " + juce::String (i) + ".wav").create();
+
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
+    library.addUserFolder (folder);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+    const phazite::SoundPack pack { temp.folder.getChildFile ("No Packs") };
+    const phazite::BrowserModel model { library, pack };
+    const phazite::BrowserPlace place { phazite::BrowserPlace::Kind::folder, "Samples", folder };
+
+    // Before: read from the disk on the message thread as the folder opened.
+    auto started = now();
+    const auto read = library.listFolder (folder);
+    const auto before = now() - started;
+    REQUIRE ((int) read.size() == sounds);
+
+    // Now: from the index, at once; and where the index doesn't hold it whole, read on a listing thread.
+    juce::String report (
+        "\n| How | The message thread (ms) | The rows there after (ms) |\n|---|---|---|\n| Before: read on the message thread | "
+        + juce::String (before, 1) + " | the same |\n");
+
+    for (const auto fromIndex : { true, false })
+    {
+        library.setListsFromIndex (fromIndex);
+        std::optional<phazite::BrowserContents> opened;
+        started = now();
+        const auto listing = model.open (place, [&opened] (phazite::BrowserContents contents) { opened = std::move (contents); });
+        const auto call = now() - started;
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return opened.has_value(); }));
+        const auto there = now() - started;
+        REQUIRE ((int) opened->items.size() == sounds);
+        report << "| Now: " << (fromIndex ? "from the index" : "read on a listing thread") << " | " << juce::String (call, 2) << " | "
+               << juce::String (there, 1) << " |\n";
+
+        // From the index, the folder read all the same, in case it changed outside: on its listing thread.
+        if (fromIndex)
+        {
+            REQUIRE (phazite::test::dispatchMessagesUntil ([&library] { return ! library.isReadingFolders(); }));
+            report << "| Now: the same folder read again in the background, to see whether it changed | none | "
+                   << juce::String (now() - started, 1) << " (nothing differs: the rows stay) |\n";
+        }
+    }
+
+    library.setListsFromIndex (true);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a folder of 1,000 presets the index doesn't hold, read on a listing thread" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // Each preset's header read for its row (what it is: a device's, a container's, a track's), as the folder is listed.
+    phazite::test::TemporaryFolder temp;
+    const auto folder = temp.folder.getChildFile ("Presets");
+    REQUIRE (folder.createDirectory());
+    constexpr int presets = 1000;
+
+    for (int i = 0; i < presets; ++i)
+        REQUIRE (folder.getChildFile ("Preset " + juce::String (i) + ".phazitepreset")
+                     .replaceWithText (R"({ "kind": "device", "device": { "type": "phaziteEq", "name": "EQ", "instrument": false,)"
+                                       R"( "parameters": { "band2Gain": 1.5, "band3Gain": -2.0, "band4Gain": 0.5 } } })"));
+
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+
+    std::optional<std::vector<phazite::LibraryItem>> listed;
+    const auto started = now();
+    const auto listing = library.checkListing (folder, [&listed] (std::optional<std::vector<phazite::LibraryItem>> items)
+                                               { listed = items.value_or (std::vector<phazite::LibraryItem>()); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&listed] { return listed.has_value(); }));
+    REQUIRE ((int) listed->size() == presets);
+    MESSAGE ("\n| A folder of 1,000 presets, each one's header read for its row | The rows there after (ms) |\n|---|---|\n| Read on a "
+             "listing thread | "
+             << juce::String (now() - started, 1) << " |\n");
+}
+
 TEST_CASE ("Benchmark: a ten-minute recording imported, normalized and quantized, on the message thread" * doctest::test_suite ("benchmark")
            * doctest::skip())
 {

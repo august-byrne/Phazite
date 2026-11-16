@@ -65,7 +65,9 @@ juce::Rectangle<int> getRow (phazite::ui::Browser& browser, const juce::String& 
 // placed.
 struct BrowserScreen
 {
-    BrowserScreen()
+    // With folders of the user's too, as the settings give them as Phazite starts, if any.
+    explicit BrowserScreen (juce::StringArray userFolders = {})
+        : foldersGiven ((settings.set (phazite::Settings::browserFolders, userFolders), true))
     {
         setSong (context, song.get());
         browser.onPlace = [this] (const phazite::LibraryItem& item)
@@ -88,6 +90,7 @@ struct BrowserScreen
     phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the song open
     phazite::Settings settings;
+    const bool foldersGiven;
     phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
     std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
     phazite::Previewer& previewer = *previewerOwner;
@@ -303,6 +306,878 @@ TEST_CASE ("Performance gate: a key typed in the browser's search looks through 
 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Break 120 BPM, 120 BPM"); }));
     CHECK (phazite::Library::getItemsSearchedOnMessageThread() == before);
+}
+
+namespace
+{
+// How many rows are called so.
+int countOf (const juce::StringArray& rows, const juce::String& name)
+{
+    return (int) std::count (rows.begin(), rows.end(), name);
+}
+
+// How many folders say they are being read: those whose drive hasn't answered for a few seconds say so instead.
+int countReading (const juce::StringArray& rows)
+{
+    return countOf (rows, "Reading this folder...") + countOf (rows, "This drive isn't answering...");
+}
+
+// Until the folders being read for the browser are read, and what came of them is shown.
+void waitForFolders (BrowserScreen& screen)
+{
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&screen]
+        { return ! screen.library.isReadingFolders() && ! screen.browser.isReadingFolders() && ! screen.browser.isWaitingForRows(); }));
+    phazite::test::dispatchPendingMessages(); // what a read posted as it ended
+}
+
+// A hold on the reads of some folders (all of them, with none named), as a drive asleep holds them: let go of as it goes, and
+// waited for until no read of the library's is under way, so that nothing reads its flag after it (a shared flag).
+struct HeldReads
+{
+    HeldReads (const phazite::Library& l, juce::Array<juce::File> heldFolders = {})
+        : library (l)
+    {
+        library.setBeforeListing (
+            [going = goOn, folders = std::move (heldFolders), inHold = holding, heldReads = held] (const juce::File& folder)
+            {
+                if (! folders.isEmpty() && ! folders.contains (folder))
+                    return;
+
+                ++*inHold;
+                ++*heldReads;
+
+                while (! going->load())
+                    juce::Thread::sleep (1);
+
+                --*inHold;
+            });
+    }
+
+    ~HeldReads()
+    {
+        letGo();
+        phazite::test::dispatchMessagesUntil ([this] { return ! library.isReadingFolders(); });
+        library.setBeforeListing (nullptr);
+    }
+
+    void letGo() { *goOn = true; }
+    int countHolding() const { return holding->load(); } // reads inside the hold now: in their system call, as it were
+    int countHeldReads() const { return held->load(); }  // reads of the folders held, ever
+
+    const phazite::Library& library;
+    const std::shared_ptr<std::atomic<bool>> goOn = std::make_shared<std::atomic<bool>> (false);
+    const std::shared_ptr<std::atomic<int>> holding = std::make_shared<std::atomic<int>> (0);
+    const std::shared_ptr<std::atomic<int>> held = std::make_shared<std::atomic<int>> (0);
+};
+} // namespace
+
+TEST_CASE ("Performance gate: a folder opened in the browser reads no folder from the disk on the message thread")
+{
+    // Opening a place or a folder read it from the disk on the message thread (Library::listFolder()): a folder of tens of
+    // thousands of files, or one on a network drive slow to wake, held the window. A folder of a place the index walked
+    // whole comes from the index; any other is read on a listing thread.
+    BrowserScreen screen;
+    const auto before = phazite::Library::getFileQueriesOnMessageThread();
+
+    for (const auto fromIndex : { true, false })
+    {
+        CAPTURE (fromIndex);
+        screen.library.setListsFromIndex (fromIndex);
+        auto& tree = screen.browser.getTree();
+        phazite::test::Mouse mouse (tree);
+
+        // Phazite Sounds, open at first: closed and opened again; then its Drums folder.
+        mouse.click (screen.getRow ("Phazite Sounds").getCentre());
+        phazite::test::dispatchPendingMessages();
+        mouse.click (screen.getRow ("Phazite Sounds").getCentre());
+        waitForFolders (screen);
+        REQUIRE (screen.getRows().contains ("Drums"));
+        mouse.click (screen.getRow ("Drums").getCentre());
+        waitForFolders (screen);
+        CHECK (screen.getRows().contains ("Kick"));
+        CHECK (screen.getRows().contains ("Snare"));
+
+        mouse.click (screen.getRow ("Drums").getCentre()); // closed again, for the next round
+        phazite::test::dispatchPendingMessages();
+    }
+
+    CHECK (phazite::Library::getFileQueriesOnMessageThread() == before); // the folders opened: none
+
+    // Favorites, Recent and a collection: each member asked of the disk once, whether it is there (the user's own lists,
+    // bounded by them); what it is, from the index.
+    const auto kick = screen.library.findItem (screen.soundPack.getFolder().getChildFile ("Drums/Kick.wav").getFullPathName());
+    REQUIRE (kick.has_value());
+    screen.library.setFavorite (*kick, true);
+    screen.library.noteUsed (*kick);
+    screen.library.setInCollection (*kick, screen.library.addCollection ("Mine"), true);
+    const phazite::BrowserModel model { screen.library, screen.soundPack };
+    const auto queries = phazite::Library::getFileQueriesOnMessageThread();
+    CHECK (model.getContents ({ phazite::BrowserPlace::Kind::favorites, "Favorites", {} }).items.size() == 1);
+    CHECK (model.getContents ({ phazite::BrowserPlace::Kind::recent, "Recent", {} }).items.size() == 1);
+    CHECK (model.getContents ({ phazite::BrowserPlace::Kind::collection, "Mine", {} }).items.size() == 1);
+    CHECK (phazite::Library::getFileQueriesOnMessageThread() - queries == 3);
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE (
+    "A folder whose drive doesn't answer says it is being read, holds up neither the search nor its keys, and a key waits for its rows alone")
+{
+    // Its read held on its listing thread, as a network drive that is slow to wake holds it.
+    BrowserScreen screen;
+    screen.library.setListsFromIndex (false);
+    const auto drums = screen.soundPack.getFolder().getChildFile ("Drums");
+    const phazite::test::HeldClock clock;
+    HeldReads held (screen.library, { drums });
+
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getRows().contains ("Reading this folder..."));
+    CHECK (screen.browser.isReadingFolders());
+    CHECK_FALSE (screen.browser.isWaitingForRows()); // the search's and the filters' rows: none to come
+
+    // Down from the search field acts at once, on the search's rows, as the folder's read is held.
+    auto& search = screen.browser.getSearchField();
+    search.grabKeyboardFocus();
+    search.setText ("snare", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Snare"); }));
+    screen.window.pressKey (downKey);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.browser.getSelectedItem().has_value());
+    CHECK (screen.browser.getSelectedItem()->name == juce::String ("Snare"));
+    search.setText ({}, true);
+    phazite::test::dispatchPendingMessages();
+
+    // Enter on the folder being read waits for its rows; a click elsewhere first drops it: it never acts on what is
+    // selected then.
+    mouse.click (screen.getRow ("Drums").getCentre()); // closed
+    mouse.click (screen.getRow ("Drums").getCentre()); // opened: read again, held
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.browser.isReadingFolders());
+    tree.grabKeyboardFocus();
+    screen.window.pressKey (returnKey);
+    mouse.click (screen.getRow ("Recent").getCentre()); // something else first
+    held.letGo();
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Kick"));                                  // Drums open
+    CHECK (screen.getRows().contains ("What you put into the song shows here")); // Recent open still: no Enter closed it
+}
+
+TEST_CASE ("A key waits for the rows of a folder being read only a moment: later, it is dropped")
+{
+    BrowserScreen screen;
+    screen.library.setListsFromIndex (false);
+    const auto drums = screen.soundPack.getFolder().getChildFile ("Drums");
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, { drums });
+
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    phazite::test::dispatchPendingMessages();
+    tree.grabKeyboardFocus();
+    screen.window.pressKey (downKey); // on Drums, being read
+
+    clock.advance (5000.0); // a drive that took five seconds to wake
+    held.letGo();
+    waitForFolders (screen);
+    REQUIRE (screen.browser.getSelectedItem().has_value());
+    CHECK (screen.browser.getSelectedItem()->name == juce::String ("Drums")); // not moved on by a key five seconds old
+}
+
+TEST_CASE (
+    "A folder whose drive doesn't answer takes one listing thread: reopened and looked at again, it joins its read, and other folders open")
+{
+    // A dead drive's folder opened again and again, and looked at again, each joining the one read in flight; four user
+    // folders, each a root of its own, open meanwhile.
+    phazite::test::TemporaryFolder others;
+    juce::StringArray folders;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto folder = others.folder.getChildFile ("Other " + juce::String (i));
+        phazite::test::writeSound (folder.getChildFile ("Hat " + juce::String (i) + ".wav"), 0.1);
+        folders.add (folder.getFullPathName());
+    }
+
+    BrowserScreen screen (folders);
+    screen.library.setListsFromIndex (false);
+    const auto drums = screen.soundPack.getFolder().getChildFile ("Drums");
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, { drums });
+
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    phazite::test::dispatchPendingMessages();
+
+    for (int i = 0; i < 10; ++i)
+    {
+        mouse.click (screen.getRow ("Drums").getCentre()); // closed
+        mouse.click (screen.getRow ("Drums").getCentre()); // opened again
+        clock.advance (6000.0);
+        screen.browser.lookAgainAtOpenFolders (false);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        CAPTURE (i);
+        mouse.click (screen.getRow ("Other " + juce::String (i)).getCentre());
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen, i] { return screen.getRows().contains ("Hat " + juce::String (i)); }));
+    }
+
+    CHECK (held.countHeldReads() == 1); // Drums once: the others joined it (the root's other folders read beside it, once it was stuck)
+    CHECK (countReading (screen.getRows()) == 1);
+}
+
+TEST_CASE ("Folders open within a folder still being read open again once it is in: as the browser is made again, and through a filter")
+{
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, soundPack.getFolder());
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
+    const auto rowsOf = [] (phazite::ui::Browser& browser) { return ::getRows (browser); };
+
+    // Drums opened within Phazite Sounds; the browser goes, keeping what is open.
+    {
+        phazite::ui::Browser browser { library, *previewer, soundPack, settings, context };
+        phazite::test::TestWindow window { browser, 320, 700 };
+        phazite::test::dispatchPendingMessages();
+        phazite::test::Mouse mouse (browser.getTree());
+        mouse.click (getRow (browser, "Drums").getCentre());
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (rowsOf (browser).contains ("Kick"));
+    }
+
+    // Made again, every folder read held: Phazite Sounds says it is being read; once let go, Drums is open within it.
+    library.setListsFromIndex (false);
+    HeldReads held (library);
+    phazite::ui::Browser browser { library, *previewer, soundPack, settings, context };
+    phazite::test::TestWindow window { browser, 320, 700 };
+    phazite::test::dispatchPendingMessages();
+    CHECK (rowsOf (browser).contains ("Reading this folder..."));
+    held.letGo();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! browser.isReadingFolders() && rowsOf (browser).contains ("Kick"); }));
+
+    // A filter set and taken away, the reads held again: the folders open before it open again once read.
+    std::optional<juce::PopupMenu> menu;
+    browser.getFilterBar().askMenu (phazite::ui::FilterBar::Filter::loops, [&menu] (juce::PopupMenu made) { menu = std::move (made); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&menu] { return menu.has_value(); }));
+    REQUIRE (phazite::test::runMenuItem (*menu, { "Loops" }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! browser.isWaitingForRows(); }));
+
+    HeldReads heldAgain (library);
+    phazite::test::Mouse clear (browser.getFilterBar().getClearButton());
+    clear.click (browser.getFilterBar().getClearButton().getLocalBounds().getCentre());
+    phazite::test::dispatchPendingMessages();
+    heldAgain.letGo();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! browser.isReadingFolders() && rowsOf (browser).contains ("Kick"); }));
+    library.setListsFromIndex (true);
+}
+
+TEST_CASE ("A file added to an indexed folder from outside shows as the folder opens, and search and the filters find it; one removed goes")
+{
+    // An indexed folder opens from the index at once, and is read from the disk all the same: what changed outside Phazite
+    // (Explorer, another program bouncing a sample into the folder) shows, and the index is patched for search and filters.
+    BrowserScreen screen;
+    const auto before = phazite::Library::getFileQueriesOnMessageThread();
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    const auto drums = screen.soundPack.getFolder().getChildFile ("Drums");
+
+    // Nothing changed: the folder's rows, made once, and none made again as its read finds the same.
+    auto made = phazite::ui::Browser::countRowsMade();
+    mouse.click (screen.getRow ("Drums").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getRows().contains ("Kick")); // from the index, at once
+    waitForFolders (screen);
+    CHECK (phazite::ui::Browser::countRowsMade() - made == 2); // Kick and Snare
+    mouse.click (screen.getRow ("Drums").getCentre());         // closed
+    phazite::test::dispatchPendingMessages();
+
+    // A clap added, a snare removed, outside: opened again, the index's rows first, then what the folder holds now.
+    phazite::test::writeSound (drums.getChildFile ("Clap.wav"), 0.2);
+    REQUIRE (drums.getChildFile ("Snare.wav").deleteFile());
+    mouse.click (screen.getRow ("Drums").getCentre());
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Clap"));
+    CHECK_FALSE (screen.getRows().contains ("Snare"));
+    CHECK (screen.getRows().contains ("Kick"));
+
+    // Search finds it, and the Type filter counts it; the snare is gone from both.
+    const phazite::BrowserModel model { screen.library, screen.soundPack };
+    CHECK (model.countSoundsOfType ("Clap") == 1);
+    CHECK (model.countSoundsOfType ("Snare") == 0);
+    screen.browser.getSearchField().setText ("clap", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Clap"); }));
+    screen.browser.getSearchField().setText ("snare", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.browser.isWaitingForRows(); }));
+    CHECK_FALSE (screen.getRows().contains ("Snare"));
+    screen.browser.getSearchField().setText ({}, true);
+    phazite::test::dispatchPendingMessages();
+
+    CHECK (phazite::Library::getFileQueriesOnMessageThread() == before);
+}
+
+TEST_CASE ("Two folders changed outside at once are both found by search: neither patch is lost to the other")
+{
+    BrowserScreen screen;
+    phazite::test::HeldClock clock;
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    mouse.click (screen.getRow ("Loops").getCentre());
+    waitForFolders (screen);
+
+    const auto pack = screen.soundPack.getFolder();
+    phazite::test::writeSound (pack.getChildFile ("Drums/Clap.wav"), 0.2);
+    phazite::test::writeSound (pack.getChildFile ("Loops/Groove 100 BPM.wav"), 0.5);
+    clock.advance (6000.0);
+    screen.browser.lookAgainAtOpenFolders (false);
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Clap"));
+    CHECK (screen.getRows().contains ("Groove 100 BPM, 100 BPM"));
+
+    for (const auto* word : { "clap", "groove" })
+    {
+        CAPTURE (word);
+        screen.browser.getSearchField().setText (word, true);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.browser.isWaitingForRows(); }));
+        CHECK (screen.getRows().size() >= 1);
+        CHECK_FALSE (screen.getRows()[0].startsWith ("Nothing matches"));
+    }
+}
+
+TEST_CASE ("Open folders looked at again keep their selection and their open folders, show what came, and make no row where nothing did")
+{
+    // As the browser takes the keys again, or Phazite comes to the front: the open folders read again, what changed brought
+    // up to date in place; at most once in a few seconds.
+    BrowserScreen screen;
+    phazite::test::HeldClock clock;
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    waitForFolders (screen);
+    mouse.click (screen.getRow ("Kick").getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.browser.getSelectedItem().has_value());
+    REQUIRE (screen.browser.getSelectedItem()->name == juce::String ("Kick"));
+
+    // Nothing changed: nothing made, and nothing read again so soon.
+    const auto made = phazite::ui::Browser::countRowsMade();
+    screen.browser.lookAgainAtOpenFolders (false);
+    CHECK_FALSE (screen.library.isReadingFolders());
+    clock.advance (6000.0);
+    screen.browser.lookAgainAtOpenFolders (false);
+    waitForFolders (screen);
+    CHECK (phazite::ui::Browser::countRowsMade() == made);
+
+    // A sound added beside Drums, and one named as the kick in another format: their rows alone, each once, in place; Drums
+    // open still, Kick selected still.
+    phazite::test::writeSound (screen.soundPack.getFolder().getChildFile ("Zap.wav"), 0.2);
+    REQUIRE (screen.soundPack.getFolder()
+                 .getChildFile ("Drums/Kick.wav")
+                 .copyFileTo (screen.soundPack.getFolder().getChildFile ("Drums/Kick.flac")));
+    clock.advance (6000.0);
+    screen.browser.lookAgainAtOpenFolders (false);
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Zap"));
+    CHECK (phazite::ui::Browser::countRowsMade() - made == 2);
+    CHECK (screen.getRows().contains ("Kick"));
+    REQUIRE (screen.browser.getSelectedItem().has_value());
+    CHECK (screen.browser.getSelectedItem()->name == juce::String ("Kick"));
+
+    // Again, with nothing new: the two kicks stay as they are, none made twice.
+    clock.advance (6000.0);
+    screen.browser.lookAgainAtOpenFolders (false);
+    waitForFolders (screen);
+    CHECK (phazite::ui::Browser::countRowsMade() - made == 2);
+    CHECK (countOf (screen.getRows(), "Kick") == 2);
+}
+
+TEST_CASE ("Performance gate: the open folders looked at again make no row and read no folder on the message thread")
+{
+    // Fifty open folders: a focus change reads at most mostLookedAgain of them, each on a listing thread, and makes nothing.
+    phazite::test::TemporaryFolder temp;
+    const auto many = temp.folder.getChildFile ("Many");
+
+    for (int i = 0; i < 50; ++i)
+        phazite::test::writeSound (many.getChildFile ("Folder " + juce::String (i) + "/Sound " + juce::String (i) + ".wav"), 0.05);
+
+    BrowserScreen screen (juce::StringArray { many.getFullPathName() });
+    phazite::test::HeldClock clock;
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Many").getCentre());
+    waitForFolders (screen);
+
+    std::function<void (juce::TreeViewItem*)> openAll = [&openAll] (juce::TreeViewItem* item)
+    {
+        for (int i = 0; i < item->getNumSubItems(); ++i)
+            if (auto* sub = item->getSubItem (i); sub->mightContainSubItems() && sub->getUniqueName().contains ("Folder "))
+                sub->setOpen (true);
+    };
+
+    for (int i = 0; i < tree.getRootItem()->getNumSubItems(); ++i)
+        if (tree.getRootItem()->getSubItem (i)->getUniqueName().contains ("Many"))
+            openAll (tree.getRootItem()->getSubItem (i));
+
+    waitForFolders (screen);
+    REQUIRE (screen.getRows().contains ("Sound 49"));
+
+    const HeldReads counted (screen.library);
+    counted.goOn->store (true);
+    const auto made = phazite::ui::Browser::countRowsMade();
+    const auto queries = phazite::Library::getFileQueriesOnMessageThread();
+    clock.advance (6000.0);
+    const auto looked = screen.browser.lookAgainAtOpenFolders (false);
+    CHECK (phazite::Library::getFileQueriesOnMessageThread() == queries);
+    waitForFolders (screen);
+    CHECK (phazite::ui::Browser::countRowsMade() == made);
+    CHECK (looked > 0);
+    CHECK (looked <= 16); // Browser::mostLookedAgain: the timer's own looks (a focus change under load) aren't counted here
+}
+
+TEST_CASE ("A folder that links back to one it is in opens, and is looked at again, without the patch following it")
+{
+    // A junction inside Drums to Phazite Sounds itself: the walk meets it inside itself and lists nothing under it; opened,
+    // it is read from the disk, and the index isn't patched through it (which followed it to the path's limit).
+    BrowserScreen screen;
+    const auto pack = screen.soundPack.getFolder();
+
+    if (! phazite::test::linkFolder (pack.getChildFile ("Drums/Back"), pack))
+    {
+        MESSAGE ("No link could be made here: nothing to follow.");
+        return;
+    }
+
+    screen.library.refresh();
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }));
+    phazite::test::dispatchPendingMessages();
+    const auto filesBefore = screen.library.getWholeIndex()->files.size();
+
+    phazite::test::HeldClock clock;
+    auto& tree = screen.browser.getTree();
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre());
+    waitForFolders (screen);
+    mouse.click (screen.getRow ("Back").getCentre());
+    waitForFolders (screen);
+    CHECK (countOf (screen.getRows(), "Loops") == 2); // what it leads to, from the disk
+
+    clock.advance (6000.0);
+    screen.browser.lookAgainAtOpenFolders (false);
+    waitForFolders (screen);
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }));
+    CHECK (screen.library.getWholeIndex()->files.size() == filesBefore);
+}
+
+TEST_CASE ("A user's folder within another is indexed once: search finds each sound in it once")
+{
+    BrowserScreen screen;
+    screen.library.addUserFolder (screen.soundPack.getFolder().getChildFile ("Drums")); // within Phazite Sounds
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }));
+    phazite::test::dispatchPendingMessages();
+
+    screen.browser.getSearchField().setText ("kick", true);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.browser.isWaitingForRows(); }));
+    const auto rows = screen.getRows();
+    CHECK (countOf (rows, "Kick") == 1);
+}
+
+TEST_CASE ("Performance gate: a folder's listing reads no sound's header for its rows; a patch of the index reads its new files' alone")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): a folder's read opened every new WAV to read its loop data before its
+    // rows came, and the library's going waited for it. Its rows come from what is known of its files (the index, the facts
+    // read before, their names); a folder the index holds whole and that changed reads what is new in it, as it patches.
+    BrowserScreen screen;
+    waitForFolders (screen);
+    phazite::test::TemporaryFolder others;
+    const auto outside = others.folder.getChildFile ("Outside"); // no place's: the index holds nothing of it
+
+    for (int i = 0; i < 20; ++i)
+        phazite::test::writeSound (outside.getChildFile ("Hit " + juce::String (i) + ".wav"), 0.05);
+
+    auto headers = phazite::Library::getHeadersReadByListings();
+    std::optional<std::vector<phazite::LibraryItem>> listed;
+    const auto listing = screen.library.checkListing (outside, [&listed] (std::optional<std::vector<phazite::LibraryItem>> items)
+                                                      { listed = items.value_or (std::vector<phazite::LibraryItem>()); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return listed.has_value() && ! screen.library.isReadingFolders(); }));
+    CHECK (listed->size() == 20);
+    CHECK (phazite::Library::getHeadersReadByListings() == headers);
+
+    // A clap saved into Drums from outside: its header alone, as the index takes it in.
+    const auto clap = screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav");
+    phazite::test::writeSound (clap, 0.2);
+    headers = phazite::Library::getHeadersReadByListings();
+    const auto patching = screen.library.checkListing (clap.getParentDirectory(), [] (std::optional<std::vector<phazite::LibraryItem>>) {});
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! screen.library.isReadingFolders() && screen.library.getWholeIndex()->find (clap.getFullPathName()).has_value(); }));
+    CHECK (phazite::Library::getHeadersReadByListings() - headers == 1);
+}
+
+TEST_CASE ("The library goes at once while a patch of its index reads a new sound's header: the read is left behind")
+{
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
+    phazite::Settings settings;
+    auto library = std::make_unique<phazite::Library> (phazite::test::getEngineContext(), settings, soundPack.getFolder());
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library->isIndexing(); }));
+
+    // The header's read held, as a drive that stops answering holds it; given up only by a library that waited for it, so
+    // that the test fails rather than hangs.
+    const auto entered = std::make_shared<std::atomic<bool>> (false), going = std::make_shared<std::atomic<bool>> (false),
+               done = std::make_shared<std::atomic<bool>> (false);
+    library->setBeforeHeader (
+        [entered, going, done] (const juce::File&)
+        {
+            *entered = true;
+            const auto until = juce::Time::getMillisecondCounterHiRes() + phazite::test::hangTimeout;
+
+            while (! going->load() && juce::Time::getMillisecondCounterHiRes() < until)
+                juce::Thread::sleep (1);
+
+            *done = true;
+        });
+
+    const auto drums = soundPack.getFolder().getChildFile ("Drums");
+    phazite::test::writeSound (drums.getChildFile ("Clap.wav"), 0.2);
+    const auto listing = library->checkListing (drums, [] (std::optional<std::vector<phazite::LibraryItem>>) {});
+    REQUIRE (phazite::test::dispatchMessagesUntil ([entered] { return entered->load(); }));
+
+    library = nullptr;
+    CHECK_FALSE (done->load()); // gone without waiting for it
+
+    *going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([done] { return done->load(); }));
+}
+
+TEST_CASE ("Phazite coming to the front looks again at the open folders in view, however soon: the user back from Explorer in two seconds")
+{
+    BrowserScreen screen;
+    phazite::test::HeldClock clock;
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    mouse.click (screen.getRow ("Drums").getCentre());
+    waitForFolders (screen);
+
+    // A clap saved into Drums in Explorer two seconds after it opened: the browser taking the keys again waits for its few
+    // seconds; Phazite coming to the front doesn't.
+    phazite::test::writeSound (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav"), 0.2);
+    clock.advance (2000.0);
+    CHECK (screen.browser.lookAgainAtOpenFolders (false) == 0);
+    CHECK (screen.browser.lookAgainAtOpenFolders (true) >= 1);
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Clap"));
+}
+
+TEST_CASE ("A folder whose drive stopped answering gives its root's turn on after a few seconds: another folder of that root opens")
+{
+    BrowserScreen screen;
+    waitForFolders (screen);
+    screen.library.setListsFromIndex (false);
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, { screen.soundPack.getFolder().getChildFile ("Drums") });
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    mouse.click (screen.getRow ("Drums").getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held.countHolding() == 1; })); // inside its system call
+
+    // Loops, of the same root, waits its turn: Drums's read may yet answer.
+    mouse.click (screen.getRow ("Loops").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (countOf (screen.getRows(), "Reading this folder...") == 2);
+
+    // Drums's read inside the system for longer than a few seconds: Loops is read, with nothing more done.
+    clock.advance (4000.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Break 120 BPM, 120 BPM"); }));
+    // Drums's line, which says its drive isn't answering.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("This drive isn't answering..."); }));
+    CHECK (countReading (screen.getRows()) == 1);
+
+    held.letGo();
+    waitForFolders (screen);
+    CHECK (screen.getRows().contains ("Kick"));
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE ("Four roots whose drives stopped answering leave a fifth root's folder a thread of its own")
+{
+    phazite::test::TemporaryFolder others;
+    juce::StringArray folders;
+    juce::Array<juce::File> dead;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto folder = others.folder.getChildFile ("Other " + juce::String (i));
+        phazite::test::writeSound (folder.getChildFile ("Hat " + juce::String (i) + ".wav"), 0.1);
+        folders.add (folder.getFullPathName());
+
+        if (i < 4)
+            dead.add (folder);
+    }
+
+    BrowserScreen screen (folders);
+    waitForFolders (screen);
+    screen.library.setListsFromIndex (false);
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, dead);
+    phazite::test::Mouse mouse (screen.browser.getTree());
+
+    for (int i = 0; i < 4; ++i)
+        mouse.click (screen.getRow ("Other " + juce::String (i)).getCentre());
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held.countHolding() == 4; })); // every listing thread
+
+    clock.advance (4000.0);
+    mouse.click (screen.getRow ("Other 4").getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Hat 4"); }));
+    CHECK (countReading (screen.getRows()) == 4);
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE (
+    "A file deleted after a folder's read patched the index, and before the walk listed that folder, doesn't come back with the walk")
+{
+    BrowserScreen screen;
+    waitForFolders (screen);
+    const auto drums = screen.soundPack.getFolder().getChildFile ("Drums");
+    const auto clap = drums.getChildFile ("Clap.wav");
+    phazite::test::writeSound (clap, 0.2);
+
+    // A walk held as it comes to Drums.
+    const auto atDrums = std::make_shared<std::atomic<bool>> (false), going = std::make_shared<std::atomic<bool>> (false);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    screen.library.setBeforeWalkListing (
+        [drums, atDrums, going] (const juce::File& folder)
+        {
+            if (folder != drums)
+                return;
+
+            *atDrums = true;
+
+            while (! going->load())
+                juce::Thread::sleep (1);
+        });
+
+    screen.library.refresh();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([atDrums] { return atDrums->load(); }));
+
+    // Drums read meanwhile: the clap patched into the index.
+    const auto listing = screen.library.checkListing (drums, [] (std::optional<std::vector<phazite::LibraryItem>>) {});
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! screen.library.isReadingFolders() && screen.library.getWholeIndex()->find (clap.getFullPathName()).has_value(); }));
+
+    // Deleted; then the walk lists Drums, and publishes what it found: no clap.
+    REQUIRE (clap.deleteFile());
+    *going = true;
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }));
+    phazite::test::dispatchPendingMessages();
+    screen.library.setBeforeWalkListing (nullptr);
+    CHECK_FALSE (screen.library.getWholeIndex()->find (clap.getFullPathName()).has_value());
+    const phazite::BrowserModel model { screen.library, screen.soundPack };
+    CHECK (model.countSoundsOfType ("Clap") == 0);
+}
+
+TEST_CASE ("A folder patched within a user's folder that is inside another gets the outer folder's tags, as the walk gives them")
+{
+    phazite::test::TemporaryFolder others;
+    const auto mine = others.folder.getChildFile ("Mine"), claps = mine.getChildFile ("Claps");
+    phazite::test::writeSound (claps.getChildFile ("Hit A.wav"), 0.1);
+    BrowserScreen screen (juce::StringArray { claps.getFullPathName(), mine.getFullPathName() }); // the inner one first
+    waitForFolders (screen);
+    const phazite::BrowserModel model { screen.library, screen.soundPack };
+    REQUIRE (model.countSoundsOfType ("Clap") == 1); // its folder's word, from the outer folder
+
+    phazite::test::writeSound (claps.getChildFile ("Hit B.wav"), 0.1);
+    const auto listing = screen.library.checkListing (claps, [] (std::optional<std::vector<phazite::LibraryItem>>) {});
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            return ! screen.library.isReadingFolders()
+                   && screen.library.getWholeIndex()->find (claps.getChildFile ("Hit B.wav").getFullPathName()).has_value();
+        }));
+    CHECK (model.countSoundsOfType ("Clap") == 2);
+}
+
+TEST_CASE ("Four roots whose drives stopped answering, opened with a fifth root's folder at the same moment, leave the fifth a thread")
+{
+    // As the browser restores every open folder as Phazite starts: the fifth's read was put in the four's queue before any of
+    // them had been stuck for long, and stayed there.
+    phazite::test::TemporaryFolder others;
+    juce::StringArray folders;
+    juce::Array<juce::File> dead;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto folder = others.folder.getChildFile ("Other " + juce::String (i));
+        phazite::test::writeSound (folder.getChildFile ("Hat " + juce::String (i) + ".wav"), 0.1);
+        folders.add (folder.getFullPathName());
+
+        if (i < 4)
+            dead.add (folder);
+    }
+
+    BrowserScreen screen (folders);
+    waitForFolders (screen);
+    screen.library.setListsFromIndex (false);
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, dead);
+    phazite::test::Mouse mouse (screen.browser.getTree());
+
+    for (int i = 0; i < 5; ++i)
+        mouse.click (screen.getRow ("Other " + juce::String (i)).getCentre());
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&held] { return held.countHolding() == 4; }));
+    clock.advance (4000.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Hat 4"); }));
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE ("Past the spare threads, a folder whose read has waited a few seconds says its drive isn't answering")
+{
+    // One user's folder, every folder in it on a drive that doesn't answer: the four listing threads, then spare ones up to
+    // the roots of the reads out and one (two here), each taken as the one before has been stuck for a few seconds. The next
+    // waits, and its listing, once late, says so; as does each stuck one.
+    phazite::test::TemporaryFolder others;
+    const auto dead = others.folder.getChildFile ("Dead");
+    juce::Array<juce::File> subfolders;
+
+    for (int i = 0; i < 7; ++i)
+    {
+        subfolders.add (dead.getChildFile ("Folder " + juce::String (i)));
+        phazite::test::writeSound (subfolders.getLast().getChildFile ("Sound.wav"), 0.05);
+    }
+
+    BrowserScreen screen (juce::StringArray { dead.getFullPathName() });
+    waitForFolders (screen);
+    phazite::test::HeldClock clock;
+    HeldReads held (screen.library, subfolders);
+    std::vector<std::unique_ptr<phazite::Library::FolderListing>> listings;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        CAPTURE (i);
+        listings.push_back (screen.library.checkListing (subfolders[i], [] (std::optional<std::vector<phazite::LibraryItem>>) {}));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&held, i] { return held.countHolding() == i + 1; }));
+        clock.advance (4000.0);
+    }
+
+    // The seventh: no thread for it; late after a few seconds.
+    listings.push_back (screen.library.checkListing (subfolders[6], [] (std::optional<std::vector<phazite::LibraryItem>>) {}));
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (listings.back()->isLate());
+    clock.advance (4000.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&listings] { return listings.back()->isLate(); }));
+    CHECK (held.countHolding() == 6);
+    CHECK (listings.front()->isLate());
+}
+
+TEST_CASE ("A folder's rows come while a new sound's header is read for the index")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): a few thousand sounds bounced into a folder held its rows back until
+    // each one's header had been read.
+    BrowserScreen screen;
+    waitForFolders (screen);
+    const auto entered = std::make_shared<std::atomic<bool>> (false), going = std::make_shared<std::atomic<bool>> (false);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    screen.library.setBeforeHeader (
+        [entered, going] (const juce::File&)
+        {
+            *entered = true;
+
+            while (! going->load())
+                juce::Thread::sleep (1);
+        });
+
+    phazite::test::writeSound (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav"), 0.2);
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    mouse.click (screen.getRow ("Drums").getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Clap"); }));
+    CHECK (entered->load()); // its header being read still
+    CHECK_FALSE (
+        screen.library.getWholeIndex()->find (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav").getFullPathName()).has_value());
+
+    *going = true;
+    waitForFolders (screen);
+    screen.library.setBeforeHeader (nullptr);
+    CHECK (
+        screen.library.getWholeIndex()->find (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav").getFullPathName()).has_value());
+}
+
+TEST_CASE ("A new sound's header that doesn't answer counts as stuck: its root's next folder is read after a few seconds")
+{
+    // A drive whose folders answer from a cache while its files hang: the patch's header read held its root's turn for ever.
+    BrowserScreen screen;
+    waitForFolders (screen);
+    screen.library.setListsFromIndex (false);
+    phazite::test::HeldClock clock;
+    const auto entered = std::make_shared<std::atomic<bool>> (false), going = std::make_shared<std::atomic<bool>> (false);
+    const juce::ScopeGuard letGo { [going] { *going = true; } };
+    screen.library.setBeforeHeader (
+        [entered, going] (const juce::File&)
+        {
+            *entered = true;
+
+            while (! going->load())
+                juce::Thread::sleep (1);
+        });
+
+    phazite::test::writeSound (screen.soundPack.getFolder().getChildFile ("Drums/Clap.wav"), 0.2);
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    mouse.click (screen.getRow ("Drums").getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([entered] { return entered->load(); }));
+
+    // Loops, of the same root, waits; once the header's read has been held a few seconds, it is read.
+    mouse.click (screen.getRow ("Loops").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (screen.getRows().contains ("Break 120 BPM, 120 BPM"));
+    clock.advance (4000.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return screen.getRows().contains ("Break 120 BPM, 120 BPM"); }));
+
+    *going = true;
+    waitForFolders (screen);
+    screen.library.setBeforeHeader (nullptr);
+    screen.library.setListsFromIndex (true);
+}
+
+TEST_CASE ("Presets in a folder the index doesn't hold show what each is, and a file that isn't a preset doesn't show")
+{
+    // As in a library larger than the index holds, and in the first seconds of every start: the rows were made without the
+    // presets' headers, so a track's showed as an effect's, without its tag, and a file that wasn't one was listed.
+    BrowserScreen screen;
+    waitForFolders (screen);
+    phazite::test::TemporaryFolder others;
+    const auto folder = others.folder.getChildFile ("Presets");
+    REQUIRE (folder.createDirectory());
+    REQUIRE (folder.getChildFile ("Warm.phazitepreset")
+                 .replaceWithText (
+                     R"({ "kind": "device", "device": { "type": "phaziteEq", "name": "EQ", "instrument": false, "parameters": {} } })"));
+    REQUIRE (folder.getChildFile ("Lead Track.phazitepreset").replaceWithText (R"({ "kind": "track", "track": { "name": "Lead" } })"));
+    REQUIRE (folder.getChildFile ("Broken.phazitepreset").replaceWithText ("not a preset"));
+
+    std::optional<std::vector<phazite::LibraryItem>> listed;
+    const auto listing = screen.library.checkListing (folder, [&listed] (std::optional<std::vector<phazite::LibraryItem>> items)
+                                                      { listed = items.value_or (std::vector<phazite::LibraryItem>()); });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return listed.has_value() && ! screen.library.isReadingFolders(); }));
+
+    juce::StringArray names;
+
+    for (const auto& item : *listed)
+    {
+        names.add (item.name);
+        CAPTURE (item.name);
+        REQUIRE (item.preset.has_value());
+        CHECK (item.tags.contains (item.name == juce::String ("Warm") ? "EQ" : "Track"));
+    }
+
+    CHECK (names == juce::StringArray { "Lead Track", "Warm" });
 }
 
 TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter adds it")

@@ -86,6 +86,14 @@ void BackgroundJobs::removeAll (bool stopRunning)
     finished.wait (held, [this] { return running.empty(); });
 }
 
+void BackgroundJobs::dropWaiting()
+{
+    std::deque<Job> dropped; // what they hold goes once the lock is let go
+
+    const std::scoped_lock held (lock);
+    dropped.swap (waiting);
+}
+
 bool BackgroundJobs::runNext (const juce::Thread& thread)
 {
     Job job;

@@ -322,6 +322,14 @@ too. A line names the bug's number in that list.
 - **With a filter set, the browser lists the places it leaves on the library's thread**, the newest filters' alone:
   the tree keeps the places it showed until they are in, and a key pressed meanwhile acts on them once they arrive
   (0.02 ms of the message thread instead of 18 ms in a library of 50,000 sounds).
+- **Opening a folder in the browser no longer waits for the disk, and shows what the folder holds now.** A folder of
+  an indexed place opens at once from the index and is read again on a listing thread, its rows brought up to date
+  in place: a file added, removed or changed outside Phazite shows, and the search and the filters find it. Open
+  folders in view are read again whenever Phazite comes to the front. A drive that stops answering, on a folder or a
+  file, holds up only its own folder: its root moves on after three seconds, spare threads take reads while every
+  thread is stuck, and the folder says "This drive isn't answering..."; a key pressed on a folder being read waits
+  only a moment and gives way to whatever the user does next (10 to 17 ms of the message thread instead of 420 to
+  440 ms for a folder of 20,000 sounds).
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

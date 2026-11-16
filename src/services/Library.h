@@ -12,6 +12,8 @@
 #include "model/presets/PresetModel.h"
 
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -68,7 +70,8 @@ struct LibraryItem
     std::optional<DeviceType> device {}; // instruments and effects
     std::optional<PresetInfo> preset {}; // presets
     juce::StringArray tags {};
-    std::optional<SoundKey> key {}; // a sound's or a MIDI file's, as its tags name it
+    std::optional<SoundKey> key {};      // a sound's or a MIDI file's, as its tags name it
+    juce::int64 size = -1, modified = 0; // a file's, as the index or a listing read it: what tells a file changed in place
 
     bool isFile() const noexcept { return kind == Kind::folder || kind == Kind::sound || kind == Kind::midi || kind == Kind::preset; }
 
@@ -87,6 +90,10 @@ struct SearchKey
 
 SearchKey makeSearchKey (const LibraryItem&, const juce::File& root);
 
+// The order a folder's rows go in: by name as people read them (Library::listFolder()), then by full path, so that two
+// whose names compare the same ("Kick.wav" and "Kick.flac", "kick" and "Kick") always come in the same order.
+bool isListedBefore (const LibraryItem&, const LibraryItem&);
+
 // The index, as it was built last: the sounds, MIDI files and presets found, the folders they are in, and each one's search
 // key, in the same order. Shared, never changed: the next one is another. full: the walk stopped at Library::maxIndexed files.
 struct LibraryIndex
@@ -96,8 +103,44 @@ struct LibraryIndex
     std::map<juce::String, int> soundTags; // how many of the sounds and MIDI files have each tag ("Kick": 412)
     bool full = false;
 
+    // The roots it walked to the end (none once it stopped at Library::maxIndexed), and each folder's own folders and files
+    // there, by their places in folders and files, each by name, as Library::listFolder() lists them: what a folder of
+    // theirs holds, found without the disk (listChildren(): none for a folder outside them).
+    juce::Array<juce::File> wholeRoots;
+    struct Children
+    {
+        std::vector<size_t> folders, files;
+    };
+    std::map<juce::String, Children> children;
+    std::set<juce::String> loops; // folders the walk met inside themselves (a link to a folder it was in): nothing under them
+
+    // When each folder was listed for it, by the walk or a patch, among every listing of the library's (Library::Read): a
+    // listing that came before that tells nothing new of it. For a folder none listed, its nearest listed folder's.
+    std::map<juce::String, std::int64_t> listedAt;
+    std::int64_t getListedAt (const juce::File& folder) const;
+    std::optional<std::vector<LibraryItem>> listChildren (const juce::File& folder) const;
+    bool holdsWhole (const juce::File& folder) const; // within a whole root, and not within a loop
+    void makeChildren();                              // once every file and folder is in, each once (roots may overlap)
+
+    // A file or a folder by its full path, without the disk: none for one the index hasn't.
+    std::optional<LibraryItem> find (const juce::String& path) const;
+    std::map<juce::String, std::pair<bool, size_t>> byPath; // makeChildren()'s: a folder (true) or a file, and its place
+
+    // How many files with an extension (".phazitepreset") a folder of a whole root holds, within its folders too; none if it
+    // doesn't hold the folder whole.
+    std::optional<int> countFilesWithin (const juce::File& folder, const juce::String& extension) const;
+
+    // The same index with a folder's own files and folders as a listing read them now: those it held there and are gone,
+    // with everything within those folders, taken away; the others put in or brought up to date, each with its search key
+    // and its tags counted again. More than Library::maxIndexed, it holds no root whole any more. Whether a folder in the
+    // listing is new (what it holds unknown: a walk is wanted).
+    std::shared_ptr<const LibraryIndex> withListing (const juce::File& folder, const std::vector<LibraryItem>& listed,
+                                                     const juce::File& root, bool& hasNewFolders) const;
+
     void addFile (LibraryItem, const juce::File& root);
     void addFolder (LibraryItem, const juce::File& root);
+    void addFileWithKey (LibraryItem, SearchKey); // its search key made already
+    void addFolderWithKey (LibraryItem, SearchKey);
     void countTags (const LibraryItem&); // a file's, into soundTags, as addFile() does
 };
 
@@ -142,8 +185,78 @@ public:
     void addUserFolder (const juce::File&);
     void removeUserFolder (const juce::File&);
 
-    // What a folder holds: its folders, then its sounds, MIDI files and presets, each by name.
+    // What a folder holds: its folders, then its sounds, MIDI files and presets, each by name. Read from the disk, on the
+    // calling thread.
     std::vector<LibraryItem> listFolder (const juce::File&) const;
+
+    // The same as the browser opens a folder, without the message thread touching the disk, and showing what the folder holds
+    // now. Where the index holds the folder whole (a folder of a root it walked to the end), listed gets the index's rows at
+    // once, before this returns; and the folder is read from the disk all the same, on a thread of the listings' own (not
+    // the search's, which a drive that doesn't answer would hold up too): where that differs from the index (a file added,
+    // removed, renamed or changed in place from outside Phazite), listed gets it again, on the message thread, and the
+    // index is patched for that folder by its own rules (LibraryIndex::withListing()), so that search and the filters find
+    // what is there; where it doesn't, nothing more comes. Elsewhere listed gets the disk's rows alone, once read, or none
+    // for a folder that isn't there. The rows come from what is known of the files (the index, the loop data read before,
+    // their names, and a preset's header, which is read for its rows: a file that isn't a preset Phazite reads is left out);
+    // where the index is patched, the new sounds' headers are read after the rows are given, and listed gets the rows again
+    // if what they read changes them (a loop, its tempo, its key). Nothing comes once what this returns has gone (or was
+    // cancelled).
+    //
+    // The reads in flight are kept by folder: a listing of a folder already being read (or waiting to be) joins that read.
+    // And a root (Phazite Sounds, a user's folder, a presets folder) has one read in flight at a time, the others of it
+    // waiting for it until it has been inside the system for a few seconds (stuckMilliseconds: a link within the root to a
+    // drive asleep), when the next goes on beside it: a drive that doesn't answer (a sleeping network drive) holds one of the
+    // listings' threads, and no more, until it returns; the index's rows stay meanwhile; other roots' folders go on, on a
+    // spare thread while every thread is held so (no more spare ones than roots, and one). A listing whose read has been
+    // inside the system, or waited to start, for those few seconds says so (FolderListing::isLate()). As the library goes, what waits is
+    // dropped, and a read stuck in the system is left behind, never waited for, doing nothing more once it returns.
+    // Message thread.
+    using Listed = std::function<void (std::optional<std::vector<LibraryItem>>)>;
+
+    class FolderListing
+    {
+    public:
+        ~FolderListing() { cancel(); }
+        void cancel();
+        bool isLate() const; // its read inside the system, or waiting to start, for a few seconds: the drive isn't answering
+
+        struct State;
+        explicit FolderListing (std::shared_ptr<State> s)
+            : state (std::move (s))
+        {
+        }
+
+    private:
+        std::shared_ptr<State> state;
+        JUCE_DECLARE_NON_COPYABLE (FolderListing)
+    };
+
+    std::unique_ptr<FolderListing> startListing (const juce::File& folder, Listed) const;
+
+    // A folder open already looked at again: read from the disk on a listing thread alone (nothing from the index here),
+    // compared on that thread with what the index holds of it; listed gets it, and the index is patched, only where it
+    // differs (where the index doesn't hold the folder whole, listed gets every read). Joins a read in flight, as above.
+    std::unique_ptr<FolderListing> checkListing (const juce::File& folder, Listed) const;
+
+    // Whether a folder is being read for a listing, or waits to be (tests). Message thread.
+    bool isReadingFolders() const;
+
+    // How many times the library asked the disk about a file or a folder (whether it is there, is a folder, its listing, a
+    // preset's header) on the message thread, since the program started (the speed gates). Any thread. And for what else
+    // asks it there for the browser (BrowserModel: whether Phazite Sounds are installed).
+    static juce::int64 getFileQueriesOnMessageThread() noexcept { return fileQueriesOnMessageThread.load(); }
+    static void noteFileQuery() noexcept;
+
+    // Tests: what a listing's thread does before it reads the disk (held until let go, as a drive that is slow to wake), and
+    // whether the folders the index holds whole are listed from it (as Phazite does) or read from the disk as the others are.
+    void setBeforeListing (std::function<void (const juce::File&)> before) const;
+    void setListsFromIndex (bool fromIndex) const;
+
+    // Tests: what a patch's thread does before it reads a new file's header, and what the index's walk does before it lists a
+    // folder (both held until let go); and how many headers the listings read, since the program started (the gates).
+    void setBeforeHeader (std::function<void (const juce::File&)> before) const;
+    void setBeforeWalkListing (std::function<void (const juce::File&)> before) const;
+    static juce::int64 getHeadersReadByListings() noexcept { return headersReadByListings.load(); }
 
     // The devices that can be added: instruments or effects.
     std::vector<LibraryItem> listDevices (LibraryItem::Kind) const;
@@ -298,7 +411,8 @@ private:
     // again went (their keys before and after), guarded by indexLock.
     mutable juce::CriticalSection indexLock;
     std::shared_ptr<const LibraryIndex> index;
-    std::map<juce::String, SoundFacts> facts;
+    using Facts = std::map<juce::String, SoundFacts>;
+    std::shared_ptr<const Facts> facts = std::make_shared<const Facts>(); // shared, never changed: the next is another
     std::set<juce::String> lookedFor;
     std::map<juce::String, juce::String> movedTo;
 
@@ -313,6 +427,24 @@ private:
     static bool isPreset (const juce::File&); // a preset file Phazite can read
     bool isMidiFile (const juce::File&) const;
     juce::File findRoot (const juce::File&) const;
+    juce::File findRootByPath (const juce::File&) const; // the same by paths alone, without asking the disk
+
+    // A folder read from the disk, as listFolder() lists it, in two steps: what it holds, by the system's call alone (none
+    // for a folder that isn't there), then the items made of them, with the facts given. Any thread.
+    struct Entry
+    {
+        juce::File file;
+        bool isFolder = false;
+        juce::int64 size = 0, modified = 0;
+    };
+
+    static std::optional<std::vector<Entry>> readEntries (const juce::File& folder);
+    static std::vector<LibraryItem> makeItems (const std::vector<Entry>&, const juce::File& root, const juce::StringArray& audioExtensions,
+                                               const Facts&);
+    static std::optional<std::vector<LibraryItem>> readFolder (const juce::File& folder, const juce::File& root,
+                                                               const juce::StringArray& audioExtensions, const Facts&);
+    static LibraryItem makeItemOf (const juce::File&, const juce::File& root, const SoundFacts*, bool knownFile);
+    std::shared_ptr<const Facts> getFacts() const;
     void reindex(); // the index built again on its thread, the one before stopped
     void handleAsyncUpdate() override;
 
@@ -355,6 +487,99 @@ private:
     mutable SearchDelivery searchDelivery { *this };
     static inline std::atomic<juce::int64> searchedOnMessageThread { 0 };
     mutable BackgroundJobs searches { "Phazite browser search", 1, juce::Thread::Priority::normal };
+
+    // The folders' listings (startListing()): what their jobs share with the library, which they may outlive (a read stuck in
+    // the system as it goes): whether it is still there, the patches under way (which its going waits for: memory work
+    // alone), the reads in flight or waiting by folder, the read holding each root's turn and those waiting for it, the
+    // reads inside the system's call (and since when), the audio formats a patch reads new files' headers with (its own, so
+    // that a thread left behind touches none of the program's), the order the listings and the walk listed folders in, and
+    // the tests' hooks. Guarded by its lock.
+    struct Waiter
+    {
+        std::weak_ptr<FolderListing::State> listing;
+        std::optional<std::vector<LibraryItem>> shown; // what it compares the read with: the index's rows it gave
+        bool againstIndex = false;                     // or the index as it is then (checkListing())
+    };
+
+    struct Read
+    {
+        juce::File folder, root;
+        std::vector<Waiter> waiters;
+        std::optional<double> inCallSince; // devices::Clock, while inside the system's call (its listing, a header)
+        double createdAt = 0.0;            // devices::Clock: asked for
+        bool started = false;              // taken by a thread
+        std::int64_t sequence = 0;         // when it listed the folder, among the walk's and the other reads' listings
+    };
+
+    struct Listings
+    {
+        std::mutex lock;
+        std::condition_variable idle; // working down to none
+        Library* library = nullptr;
+        int working = 0;
+        std::map<juce::String, std::shared_ptr<Read>> reads;
+        std::map<juce::String, std::deque<std::shared_ptr<Read>>> waiting;
+        std::map<juce::String, std::shared_ptr<Read>> turns; // by root: the read whose turn it is
+        std::set<std::shared_ptr<Read>> inFlight;            // their root's turn given: ready, or taken by a thread
+        std::deque<std::shared_ptr<Read>> ready;             // to be taken by the next thread free (takeRead())
+        int spareOffered = 0, spareRunning = 0;              // spare threads asked for, and reading
+        std::function<void (const juce::File&)> before, beforeHeader, beforeWalk;
+        bool fromIndex = true;
+        std::atomic<int> delivering { 0 }; // rows read, on their way to the message thread
+        std::atomic<std::int64_t> sequence { 0 };
+        juce::AudioFormatManager formats;
+    };
+
+    const std::shared_ptr<Listings> listingsShared = std::make_shared<Listings>();
+    mutable std::unique_ptr<BackgroundJobs> listings =
+        std::make_unique<BackgroundJobs> ("Phazite folder listing", 4, juce::Thread::Priority::normal);
+    mutable std::unique_ptr<BackgroundJobs> spareListings = // while every listing thread is stuck: one more, up to the roots + 1
+        std::make_unique<BackgroundJobs> ("Phazite folder listing (spare)", 16, juce::Thread::Priority::normal);
+    static inline std::atomic<juce::int64> fileQueriesOnMessageThread { 0 }, headersReadByListings { 0 };
+    static void leaveBehind (std::unique_ptr<BackgroundJobs>); // never destroyed while a job of theirs still runs
+    static constexpr double stuckMilliseconds = 3000.0;        // inside the system's call this long: its root's turn goes on
+
+    std::unique_ptr<FolderListing> listFolderOf (const juce::File& folder, Listed, std::optional<std::vector<LibraryItem>> shown,
+                                                 bool againstIndex) const;
+    void queueRead (const std::shared_ptr<Read>&) const; // under listingsShared->lock
+    void startRead (const std::shared_ptr<Read>&) const; // the same: on a listing thread, or a spare one while all are stuck
+    void moveOnFromStuck() const;                        // the same: roots whose read is stuck give their turn to the next
+
+    // While any read is out: whether one has been stuck long enough (its root's turn moved on, a spare thread offered, its
+    // listings told they are late), looked at once a second on the message thread, so that a read waiting needs no other
+    // listing to move on. Stopped once none is out.
+    struct StuckCheck final : public juce::Timer
+    {
+        explicit StuckCheck (const Library& l)
+            : library (l)
+        {
+        }
+        void timerCallback() override;
+        const Library& library;
+    };
+
+    mutable StuckCheck stuckCheck { *this };
+    void offerSpare() const; // under listingsShared->lock: a spare thread for a read ready while every thread busy is stuck
+    void markLate() const;   // the same: each listing told whether its read is late
+    static void takeRead (const std::shared_ptr<Listings>&, bool spare); // a listing thread's job: the next read ready
+    static void runRead (const std::shared_ptr<Listings>&, const std::shared_ptr<Read>&);
+    static void endRead (Listings&, const std::shared_ptr<Read>&); // under its lock: its root's next read, if it held the turn
+
+    // Patches of the index, one at a time (patchLock), each from the index as it is then, each only where it listed the
+    // folder after the walk did (LibraryIndex::listedAt), so that neither puts back what the other found gone; kept by folder
+    // until the walk under way has published its last, which takes in those newer than its own listings. And a walk wanted,
+    // for a folder that came from outside (what it holds unknown).
+    std::mutex patchLock;
+    struct Patch
+    {
+        juce::File folder, root;
+        std::vector<LibraryItem> listed;
+        std::int64_t sequence = 0;
+    };
+    std::map<juce::String, Patch> patches; // guarded by patchLock
+    std::atomic<bool> walkWanted { false };
+    void patch (const Patch&, const Facts& fresh);
+    std::shared_ptr<const LibraryIndex> withPatches (std::shared_ptr<const LibraryIndex>) const; // under patchLock
 
     void deliverSearch() const;
 };

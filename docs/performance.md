@@ -661,6 +661,24 @@ library): before, listed on the message thread at each filter set and each chang
 each place, 17.4 to 18.3 ms; now listed on the search's thread in one walk, the call 0.02 ms, the places there after
 22.5 ms, the tree showing the places it showed until then.
 
+A folder of 20,000 sounds (empty WAV files) opened in the browser (`a folder of 20,000 sounds opened in the browser`,
+measured 2026-11-16 in `windows-profile` on a local SSD, while other builds ran): before, read from the disk on the
+message thread as it opened; now, from the index where it holds the folder whole (the rows made from it on the message
+thread), and read again on a listing thread all the same, to show what changed outside since; else read on a listing
+thread alone.
+
+| How | The message thread (ms) | The rows there after (ms) |
+|---|---|---|
+| Before: read on the message thread | 418.5 to 437.0 | the same |
+| Now: from the index | 9.6 to 16.6 | 9.6 to 16.8 |
+| Now: the same folder read again in the background, whether it changed | none | 516.9 (nothing differs: the rows stay) |
+| Now: read on a listing thread alone | 0.11 to 0.14 | 438.9 to 488.5 |
+
+A folder of 1,000 presets the index doesn't hold (a library larger than it holds, or the first seconds of a start), each
+preset's header read for its row on the listing thread (`a folder of 1,000 presets the index doesn't hold`, measured
+2026-11-16 in `windows-debug`, a ceiling for Release, on a local SSD while other builds ran): 308 to 312 ms until the rows
+are there, the message thread free meanwhile. So the rows come once with each preset's kind, not twice.
+
 A ten-minute stereo recording at 48 kHz, 24-bit (173 MB), with a file of the same name in the project already:
 
 | Command | Before: the message thread | After: the call | After: the message thread in all | After: done after |

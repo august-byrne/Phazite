@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
+#include "devices/core/Clock.h"
 #include "model/base/Json.h"
 #include "model/base/WholeFile.h"
 #include "model/engine/AppInfo.h"
@@ -250,6 +251,200 @@ void LibraryIndex::addFile (LibraryItem item, const juce::File& root)
     files.push_back (std::move (item));
 }
 
+void LibraryIndex::addFileWithKey (LibraryItem item, SearchKey key)
+{
+    countTags (item);
+    fileKeys.push_back (std::move (key));
+    files.push_back (std::move (item));
+}
+
+void LibraryIndex::addFolderWithKey (LibraryItem item, SearchKey key)
+{
+    folderKeys.push_back (std::move (key));
+    folders.push_back (std::move (item));
+}
+
+bool isListedBefore (const LibraryItem& a, const LibraryItem& b)
+{
+    if (const auto byName = a.name.compareNatural (b.name); byName != 0)
+        return byName < 0;
+
+    return a.file.getFullPathName() < b.file.getFullPathName();
+}
+
+void LibraryIndex::makeChildren()
+{
+    children.clear();
+    byPath.clear();
+
+    for (size_t i = 0; i < folders.size(); ++i)
+        if (byPath.emplace (folders[i].file.getFullPathName(), std::pair { true, i }).second)
+            children[folders[i].file.getParentDirectory().getFullPathName()].folders.push_back (i);
+
+    for (size_t i = 0; i < files.size(); ++i)
+        if (byPath.emplace (files[i].file.getFullPathName(), std::pair { false, i }).second)
+            children[files[i].file.getParentDirectory().getFullPathName()].files.push_back (i);
+
+    const auto inOrder = [] (const std::vector<LibraryItem>& items)
+    { return [&items] (size_t a, size_t b) { return isListedBefore (items[a], items[b]); }; };
+
+    for (auto& [path, each] : children)
+    {
+        std::sort (each.folders.begin(), each.folders.end(), inOrder (folders));
+        std::sort (each.files.begin(), each.files.end(), inOrder (files));
+    }
+}
+
+bool LibraryIndex::holdsWhole (const juce::File& folder) const
+{
+    // Within a root walked whole, and not under a folder the walk met inside itself: elsewhere, what isn't in the index may
+    // be on the disk.
+    if (std::none_of (wholeRoots.begin(), wholeRoots.end(),
+                      [&folder] (const juce::File& root) { return folder == root || folder.isAChildOf (root); }))
+        return false;
+
+    for (auto parent = folder; parent != juce::File(); parent = parent.getParentDirectory())
+    {
+        if (loops.count (parent.getFullPathName()))
+            return false;
+
+        if (parent.getParentDirectory() == parent)
+            break;
+    }
+
+    return true;
+}
+
+std::int64_t LibraryIndex::getListedAt (const juce::File& folder) const
+{
+    for (auto at = folder;; at = at.getParentDirectory())
+    {
+        if (const auto found = listedAt.find (at.getFullPathName()); found != listedAt.end())
+            return found->second;
+
+        if (at.getParentDirectory() == at)
+            return 0;
+    }
+}
+
+std::optional<LibraryItem> LibraryIndex::find (const juce::String& path) const
+{
+    const auto found = byPath.find (path);
+
+    if (found == byPath.end())
+        return std::nullopt;
+
+    return found->second.first ? folders[found->second.second] : files[found->second.second];
+}
+
+std::optional<int> LibraryIndex::countFilesWithin (const juce::File& folder, const juce::String& extension) const
+{
+    if (! holdsWhole (folder))
+        return std::nullopt;
+
+    auto count = 0;
+    std::vector<juce::String> toCount { folder.getFullPathName() };
+
+    for (size_t next = 0; next < toCount.size(); ++next)
+    {
+        const auto found = children.find (toCount[next]);
+
+        if (found == children.end())
+            continue;
+
+        for (const auto i : found->second.files)
+            count += files[i].file.hasFileExtension (extension) ? 1 : 0;
+
+        for (const auto i : found->second.folders)
+            toCount.push_back (folders[i].file.getFullPathName());
+    }
+
+    return count;
+}
+
+std::shared_ptr<const LibraryIndex> LibraryIndex::withListing (const juce::File& folder, const std::vector<LibraryItem>& listed,
+                                                               const juce::File& root, bool& hasNewFolders) const
+{
+    // What the folder holds now, by path; and its folders that went, with all within them.
+    std::set<juce::String> listedPaths;
+
+    for (const auto& item : listed)
+        listedPaths.insert (item.file.getFullPathName());
+
+    const auto isReplaced = [&] (const juce::File& file)
+    {
+        if (file.getParentDirectory() == folder)
+            return true; // the listing's
+
+        for (auto parent = file.getParentDirectory(); parent.isAChildOf (folder); parent = parent.getParentDirectory())
+            if (parent.getParentDirectory() == folder && ! listedPaths.count (parent.getFullPathName()))
+                return true; // within a folder of it that went
+
+        return false;
+    };
+
+    auto made = std::make_shared<LibraryIndex>();
+    made->full = full;
+    made->wholeRoots = wholeRoots;
+    made->loops = loops;
+    made->listedAt = listedAt;
+    hasNewFolders = false;
+
+    for (size_t i = 0; i < folders.size(); ++i)
+        if (! isReplaced (folders[i].file))
+            made->addFolderWithKey (folders[i], folderKeys[i]);
+
+    for (size_t i = 0; i < files.size(); ++i)
+        if (! isReplaced (files[i].file))
+            made->addFileWithKey (files[i], fileKeys[i]);
+
+    for (const auto& item : listed)
+    {
+        if (item.kind != LibraryItem::Kind::folder)
+        {
+            made->addFile (item, root);
+            continue;
+        }
+
+        if (! byPath.count (item.file.getFullPathName()))
+            hasNewFolders = true; // what it holds is unknown here: a walk finds it
+
+        made->addFolder (item, root);
+    }
+
+    // Past what the index holds, no root is whole any more: what isn't in it may be on the disk.
+    if ((int) made->files.size() > Library::maxIndexed)
+    {
+        made->full = true;
+        made->wholeRoots.clear();
+    }
+
+    made->makeChildren();
+    return made;
+}
+
+std::optional<std::vector<LibraryItem>> LibraryIndex::listChildren (const juce::File& folder) const
+{
+    if (! holdsWhole (folder))
+        return std::nullopt;
+
+    std::vector<LibraryItem> listed;
+    const auto found = children.find (folder.getFullPathName());
+
+    if (found == children.end())
+        return listed; // nothing in it
+
+    listed.reserve (found->second.folders.size() + found->second.files.size());
+
+    for (const auto i : found->second.folders)
+        listed.push_back (folders[i]);
+
+    for (const auto i : found->second.files)
+        listed.push_back (files[i]);
+
+    return listed;
+}
+
 void LibraryIndex::addFolder (LibraryItem item, const juce::File& root)
 {
     folderKeys.push_back (makeSearchKey (item, root));
@@ -338,11 +533,11 @@ namespace
         return file.hasFileExtension ("wav;wave;aif;aiff;aifc");
     }
 
-    SoundFacts readFacts (const juce::File& file, juce::int64 size, juce::int64 modified)
+    SoundFacts readFacts (juce::AudioFormatManager& formats, const juce::File& file, juce::int64 size, juce::int64 modified)
     {
         SoundFacts facts { size, modified };
 
-        if (const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file)); reader != nullptr)
+        if (const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr)
         {
             const auto info = readAudioFileInfo (*reader, {}); // its loop data alone, not its name's tempo
             facts.loopData = info.loopData;
@@ -489,9 +684,28 @@ struct Library::Indexer : public juce::Thread
         const auto id = folder.getFileIdentifier();
 
         if (id != 0 && std::find (inside.begin(), inside.end(), id) != inside.end())
+        {
+            loops.insert (folder.getFullPathName()); // nothing under it in the index: it is never held whole
             return;
+        }
 
         inside.push_back (id);
+
+        // When it lists the folder, among the library's listings (a patch newer than this is kept on what it publishes).
+        std::function<void (const juce::File&)> before;
+
+        {
+            const std::scoped_lock held (owner.listingsShared->lock);
+            before = owner.listingsShared->beforeWalk;
+        }
+
+        if (before != nullptr)
+            before (folder);
+
+        {
+            const std::scoped_lock held (owner.listingsShared->lock);
+            listedAt[folder.getFullPathName()] = ++owner.listingsShared->sequence;
+        }
 
         for (const auto& entry :
              juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles))
@@ -532,7 +746,7 @@ struct Library::Indexer : public juce::Thread
 
         {
             const juce::ScopedLock lock (owner.indexLock);
-            known = owner.facts;
+            known = *owner.facts;
         }
 
         if (known.empty() && owner.factsFile.existsAsFile())
@@ -567,6 +781,8 @@ struct Library::Indexer : public juce::Thread
             }
 
             items.push_back (owner.makeFileItem (found.file, found.root, fact, true));
+            items.back().size = found.size;
+            items.back().modified = found.modified;
         }
 
         // The folders, and the search keys of both, made here once rather than at each key typed (known bug 128).
@@ -581,7 +797,7 @@ struct Library::Indexer : public juce::Thread
         }
 
         full = (int) files.size() >= maxIndexed;
-        publish (files, items, read);
+        publish (files, items, read, unread.empty());
 
         // The members of the sets that went since, looked for among the files found.
         findMovedMembers (files);
@@ -594,19 +810,22 @@ struct Library::Indexer : public juce::Thread
 
             const auto& found = files[i];
             auto& fact = read[found.file.getFullPathName()];
-            fact = readFacts (found.file, found.size, found.modified);
+            fact = readFacts (getAudioFormats(), found.file, found.size, found.modified);
             items[i] = owner.makeFileItem (found.file, found.root, &fact, true);
+            items[i].size = found.size;
+            items[i].modified = found.modified;
         }
 
         if (! unread.empty())
-            publish (files, items, read);
+            publish (files, items, read, true);
 
         // Kept for the next start, when anything changed.
         if (owner.factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
             writeFactsFile (owner.factsFile, read);
     }
 
-    void publish (const std::vector<Found>& files, const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read)
+    void publish (const std::vector<Found>& files, const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read,
+                  bool last)
     {
         auto made = std::make_shared<LibraryIndex>();
         made->files = items;
@@ -621,16 +840,35 @@ struct Library::Indexer : public juce::Thread
         made->folders = folderItems;
         made->folderKeys = folderKeys;
         made->full = full;
-        std::shared_ptr<const LibraryIndex> built = std::move (made);
+
+        // What each folder holds, for the browser to open it without the disk: every root's, while the walk went to its end.
+        if (! full && (int) folders.size() < maxIndexed)
+            made->wholeRoots = roots;
+
+        made->loops = loops;
+        made->listedAt = listedAt;
+        made->makeChildren();
+
+        // With each folder patched after this walk listed it (changed outside, read again since), made again on it: one patch
+        // at a time, none between this and its taking the index's place. Once the walk's last is in, the patches it took in
+        // (or listed after) are forgotten.
+        const std::scoped_lock patching (owner.patchLock);
+        auto built = owner.withPatches (std::move (made));
+
+        if (last)
+            owner.patches.clear();
 
         {
             const juce::ScopedLock lock (owner.indexLock);
             owner.index = std::move (built);
-            owner.facts = read;
+            owner.facts = std::make_shared<const Facts> (read);
         }
 
         owner.triggerAsyncUpdate();
     }
+
+    std::set<juce::String> loops;                  // the folders the walk met inside themselves
+    std::map<juce::String, std::int64_t> listedAt; // when it listed each folder, among the library's listings
 
     // Each member of the sets that isn't where it was found last, looked for where it moved: among the files of its size in
     // the folder it was in (renamed there), then among those of the index, anywhere in the library; the one that starts as
@@ -704,15 +942,37 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
       audioExtensions (engine.getAudioFileExtensions()), // which the index can check on its own thread
       index (std::make_shared<const LibraryIndex>())
 {
+    listingsShared->library = this;
+    listingsShared->formats.registerBasicFormats(); // the listings' own: a read left behind needs nothing of the program's
     readSets();
     reindex();
 }
 
 Library::~Library()
 {
+    stuckCheck.stopTimer();
+
+    // The folders' listings: nothing more of the library's from now on. What waits is dropped; what is past its system
+    // call (making items, a patch: no folder's listing) is waited for; a read stuck in the system is left behind.
+    {
+        const std::scoped_lock held (listingsShared->lock);
+        listingsShared->library = nullptr;
+    }
+
+    listings->dropWaiting();
+    spareListings->dropWaiting();
+
+    {
+        std::unique_lock held (listingsShared->lock);
+        listingsShared->idle.wait (held, [this] { return listingsShared->working == 0; });
+    }
+
     cancelSearch();
     searches.removeAll (true); // a search looks at whether it should stop between thousands of items
     searchDelivery.cancelPendingUpdate();
+
+    leaveBehind (std::move (listings));
+    leaveBehind (std::move (spareListings));
     indexer = nullptr;
     cancelPendingUpdate();
 }
@@ -729,7 +989,11 @@ bool Library::isMidiFile (const juce::File& file) const
 
 bool Library::isPreset (const juce::File& file)
 {
-    return isPresetFile (file) && readPresetInfo (file).has_value();
+    if (! isPresetFile (file))
+        return false;
+
+    noteFileQuery();
+    return readPresetInfo (file).has_value();
 }
 
 juce::File Library::getDefaultPresetsFolder()
@@ -795,34 +1059,57 @@ juce::Array<juce::File> Library::getRoots() const
 
 juce::File Library::findRoot (const juce::File& file) const
 {
-    for (const auto& root : getRoots())
-        if (file == root || file.isAChildOf (root))
-            return root;
+    return findRootByPath (file); // by paths alone: asking the disk whether each root is there, for each item, adds nothing
+}
 
-    return file.getParentDirectory();
+juce::File Library::findRootByPath (const juce::File& file) const
+{
+    juce::Array<juce::File> candidates { factorySounds };
+    candidates.addArray (getUserFolders());
+    candidates.add (presetsFolder);
+    candidates.add (factoryPresetsFolder);
+
+    // The outermost root that holds the file, as reindex() keeps it: a root inside another is
+    // walked as part of the outer one, so its sounds are the outer root's.
+    juce::File found;
+
+    for (const auto& root : candidates)
+        if (root != juce::File() && (file == root || file.isAChildOf (root)))
+            if (found == juce::File() || found.isAChildOf (root))
+                found = root;
+
+    return found != juce::File() ? found : file.getParentDirectory();
+}
+
+std::shared_ptr<const Library::Facts> Library::getFacts() const
+{
+    const juce::ScopedLock lock (indexLock);
+    return facts;
 }
 
 LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& root) const
 {
-    std::optional<SoundFacts> known;
+    const SoundFacts* known = nullptr;
+    const auto held = getFacts(); // shared, never changed
 
     if (mayHaveLoopData (file))
-    {
-        const juce::ScopedLock lock (indexLock);
+        if (const auto found = held->find (file.getFullPathName()); found != held->end())
+            known = &found->second;
 
-        if (const auto found = facts.find (file.getFullPathName()); found != facts.end())
-            known = found->second;
-    }
-
-    return makeFileItem (file, root, known.has_value() ? &*known : nullptr, false);
+    return makeItemOf (file, root, known, false);
 }
 
 LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& root, const SoundFacts* known, bool knownFile) const
 {
+    return makeItemOf (file, root, known, knownFile);
+}
+
+LibraryItem Library::makeItemOf (const juce::File& file, const juce::File& root, const SoundFacts* known, bool knownFile)
+{
     LibraryItem item;
     item.file = file;
 
-    if (! knownFile && file.isDirectory())
+    if (! knownFile && (noteFileQuery(), file.isDirectory()))
     {
         item.kind = LibraryItem::Kind::folder;
         item.name = file.getFileName();
@@ -834,6 +1121,7 @@ LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& roo
     {
         item.kind = LibraryItem::Kind::preset;
         item.name = file.getFileNameWithoutExtension();
+        noteFileQuery();
         item.preset = readPresetInfo (file);
         item.tags.add ("Preset");
 
@@ -845,7 +1133,7 @@ LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& roo
         return item;
     }
 
-    item.kind = isMidiFile (file) ? LibraryItem::Kind::midi : LibraryItem::Kind::sound;
+    item.kind = file.hasFileExtension (".mid;.midi") ? LibraryItem::Kind::midi : LibraryItem::Kind::sound;
     item.name = file.getFileNameWithoutExtension();
     auto description = describeSound (file, root, known);
     item.tags = std::move (description.tags);
@@ -853,27 +1141,814 @@ LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& roo
     return item;
 }
 
+void Library::noteFileQuery() noexcept
+{
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        ++fileQueriesOnMessageThread;
+}
+
 std::vector<LibraryItem> Library::listFolder (const juce::File& folder) const
 {
-    std::vector<LibraryItem> folders, files;
-    const auto root = findRoot (folder);
+    return readFolder (folder, findRootByPath (folder), audioExtensions, *getFacts()).value_or (std::vector<LibraryItem>());
+}
+
+std::optional<std::vector<Library::Entry>> Library::readEntries (const juce::File& folder)
+{
+    noteFileQuery();
+
+    if (! folder.isDirectory())
+        return std::nullopt;
+
+    std::vector<Entry> entries;
 
     for (const auto& entry :
          juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles))
-    {
-        const auto& file = entry.getFile();
+        entries.push_back ({ entry.getFile(), entry.isDirectory(), entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
 
-        if (entry.isDirectory())
-            folders.push_back (makeFileItem (file, root));
-        else if (isSoundFile (file) || isMidiFile (file) || isPreset (file))
-            files.push_back (makeFileItem (file, root));
+    return entries;
+}
+
+std::vector<LibraryItem> Library::makeItems (const std::vector<Entry>& entries, const juce::File& root,
+                                             const juce::StringArray& audioExtensions, const Facts& facts)
+{
+    std::vector<LibraryItem> folders, files;
+
+    for (const auto& entry : entries)
+    {
+        const auto& file = entry.file;
+
+        if (entry.isFolder)
+        {
+            LibraryItem item;
+            item.kind = LibraryItem::Kind::folder;
+            item.name = file.getFileName();
+            item.file = file;
+            folders.push_back (std::move (item));
+        }
+        else if (audioExtensions.contains (file.getFileExtension().toLowerCase()) || file.hasFileExtension (".mid;.midi")
+                 || isPreset (file))
+        {
+            // What was read of its loop data, while the file is as it was then.
+            const SoundFacts* known = nullptr;
+
+            if (mayHaveLoopData (file))
+                if (const auto found = facts.find (file.getFullPathName());
+                    found != facts.end() && found->second.size == entry.size && found->second.modified == entry.modified)
+                    known = &found->second;
+
+            auto item = makeItemOf (file, root, known, true);
+            item.size = entry.size;
+            item.modified = entry.modified;
+            files.push_back (std::move (item));
+        }
     }
 
-    const auto byName = [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; };
-    std::sort (folders.begin(), folders.end(), byName);
-    std::sort (files.begin(), files.end(), byName);
+    std::sort (folders.begin(), folders.end(), isListedBefore);
+    std::sort (files.begin(), files.end(), isListedBefore);
     folders.insert (folders.end(), files.begin(), files.end());
     return folders;
+}
+
+std::optional<std::vector<LibraryItem>> Library::readFolder (const juce::File& folder, const juce::File& root,
+                                                             const juce::StringArray& audioExtensions, const Facts& facts)
+{
+    if (const auto entries = readEntries (folder))
+        return makeItems (*entries, root, audioExtensions, facts);
+
+    return std::nullopt;
+}
+
+// A listing's: whether it was cancelled (any thread), and what it calls once read (message thread).
+struct Library::FolderListing::State
+{
+    std::atomic<bool> cancelled { false };
+    std::atomic<bool> late { false }; // its read inside the system, or waiting to start, for a few seconds (markLate())
+    Listed listed;
+};
+
+void Library::FolderListing::cancel()
+{
+    state->cancelled = true;
+    state->listed = nullptr;
+}
+
+bool Library::FolderListing::isLate() const
+{
+    return state->late.load();
+}
+
+namespace
+{
+    // Whether two listings of a folder hold the same files and folders: the same paths, and each file of the same size and
+    // time of change (one changed in place is read again).
+    bool isSameListing (const std::vector<LibraryItem>& a, const std::vector<LibraryItem>& b)
+    {
+        if (a.size() != b.size())
+            return false;
+
+        std::map<juce::String, std::pair<juce::int64, juce::int64>> files;
+
+        for (const auto& item : a)
+            files[item.file.getFullPathName()] = { item.size, item.modified };
+
+        return std::all_of (b.begin(), b.end(),
+                            [&files] (const LibraryItem& item)
+                            {
+                                const auto found = files.find (item.file.getFullPathName());
+                                return found != files.end() && found->second == std::pair { item.size, item.modified };
+                            });
+    }
+} // namespace
+
+std::unique_ptr<Library::FolderListing> Library::startListing (const juce::File& folder, Listed listed) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // What the index holds whole, at once: no disk.
+    auto fromIndexAllowed = true;
+
+    {
+        const std::scoped_lock held (listingsShared->lock);
+        fromIndexAllowed = listingsShared->fromIndex;
+    }
+
+    auto fromIndex = fromIndexAllowed ? getWholeIndex()->listChildren (folder) : std::nullopt;
+
+    if (fromIndex.has_value())
+        listed (*fromIndex);
+
+    // And from the disk, on a listing thread, all the same, in case it changed: compared with what was given.
+    return listFolderOf (folder, std::move (listed), std::move (fromIndex), false);
+}
+
+std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::File& folder, Listed listed) const
+{
+    // Compared with the index as it is when it is read, not with anything an opening gave.
+    JUCE_ASSERT_MESSAGE_THREAD
+    return listFolderOf (folder, std::move (listed), std::nullopt, true);
+}
+
+std::unique_ptr<Library::FolderListing> Library::listFolderOf (const juce::File& folder, Listed listed,
+                                                               std::optional<std::vector<LibraryItem>> shown, bool againstIndex) const
+{
+    auto state = std::make_shared<FolderListing::State>();
+    state->listed = std::move (listed);
+
+    const std::scoped_lock held (listingsShared->lock);
+    auto& read = listingsShared->reads[folder.getFullPathName()];
+
+    // A read of it in flight or waiting: this joins it (those that left it let go of first, so that a read stuck in the
+    // system gathers no more than the rows of those still waiting). Else one more, which waits while its root has one in
+    // flight that answers.
+    if (read == nullptr)
+    {
+        read = std::make_shared<Read>();
+        read->folder = folder;
+        read->root = findRootByPath (folder);
+        read->createdAt = devices::Clock::getMilliseconds();
+        queueRead (read);
+    }
+
+    std::erase_if (read->waiters,
+                   [] (const Waiter& each)
+                   {
+                       const auto other = each.listing.lock();
+                       return other == nullptr || other->cancelled.load();
+                   });
+
+    read->waiters.push_back ({ state, std::move (shown), againstIndex });
+
+    // A root whose read is stuck lets this one go on, as may a spare thread; while any read is out, looked at each second.
+    moveOnFromStuck();
+    offerSpare();
+
+    if (! stuckCheck.isTimerRunning())
+        stuckCheck.startTimer (1000);
+
+    return std::make_unique<FolderListing> (std::move (state));
+}
+
+void Library::StuckCheck::timerCallback()
+{
+    auto& all = *library.listingsShared;
+    const std::scoped_lock held (all.lock);
+
+    if (all.library != nullptr)
+    {
+        library.moveOnFromStuck();
+        library.offerSpare();
+        library.markLate();
+    }
+
+    if (all.library == nullptr || all.reads.empty())
+        stopTimer();
+}
+
+void Library::queueRead (const std::shared_ptr<Read>& read) const
+{
+    auto& all = *listingsShared;
+    const auto root = read->root.getFullPathName();
+
+    if (all.turns.count (root))
+    {
+        all.waiting[root].push_back (read);
+        return;
+    }
+
+    all.turns[root] = read;
+    startRead (read);
+}
+
+void Library::startRead (const std::shared_ptr<Read>& read) const
+{
+    // Into the queue the listing threads take reads from: the next of the four free takes it, or, while every thread busy
+    // is stuck in the system, a spare one (offerSpare()), whichever comes first. The thread is chosen as it takes the read,
+    // not as the read is added: four dead drives opened at once don't keep a fifth root's read in the four's queue.
+    auto& all = *listingsShared;
+    all.inFlight.insert (read);
+    all.ready.push_back (read);
+    listings->add ([shared = listingsShared] (const BackgroundJobs::ShouldStop&) { takeRead (shared, false); });
+    offerSpare();
+}
+
+void Library::offerSpare() const
+{
+    // While the reads taken are all inside a system call that hasn't answered for a while (four at least: the listing threads
+    // all held), each read ready gets a spare thread: no more spare ones than the roots of the reads out, and one.
+    auto& all = *listingsShared;
+    const auto now = devices::Clock::getMilliseconds();
+    std::set<juce::String> roots;
+    auto stuck = 0;
+
+    for (const auto& each : all.inFlight)
+    {
+        roots.insert (each->root.getFullPathName());
+
+        if (each->inCallSince.has_value() && now - *each->inCallSince > stuckMilliseconds)
+            ++stuck;
+    }
+
+    const auto taken = (int) all.inFlight.size() - (int) all.ready.size();
+
+    while ((int) all.ready.size() > all.spareOffered && stuck >= 4 && stuck >= taken
+           && all.spareRunning + all.spareOffered < (int) roots.size() + 1)
+    {
+        ++all.spareOffered;
+        spareListings->add ([shared = listingsShared] (const BackgroundJobs::ShouldStop&) { takeRead (shared, true); });
+    }
+}
+
+void Library::markLate() const
+{
+    // A read inside the system's call, or not yet taken, for a few seconds: its listings say the drive isn't answering.
+    auto& all = *listingsShared;
+    const auto now = devices::Clock::getMilliseconds();
+
+    for (const auto& [path, read] : all.reads)
+    {
+        const auto late = read->inCallSince.has_value() ? now - *read->inCallSince > stuckMilliseconds
+                                                        : ! read->started && now - read->createdAt > stuckMilliseconds;
+
+        for (const auto& waiter : read->waiters)
+            if (const auto state = waiter.listing.lock())
+                state->late = late;
+    }
+}
+
+void Library::takeRead (const std::shared_ptr<Listings>& shared, bool spare)
+{
+    // The next read ready, if another thread hasn't taken it (each read is offered to a listing thread, and maybe a spare one).
+    std::shared_ptr<Read> read;
+
+    {
+        const std::scoped_lock held (shared->lock);
+
+        if (spare)
+            --shared->spareOffered;
+
+        if (shared->ready.empty() || shared->library == nullptr)
+            return;
+
+        read = shared->ready.front();
+        shared->ready.pop_front();
+
+        if (spare)
+            ++shared->spareRunning;
+    }
+
+    runRead (shared, read);
+
+    if (spare)
+    {
+        const std::scoped_lock held (shared->lock);
+        --shared->spareRunning;
+    }
+}
+
+void Library::moveOnFromStuck() const
+{
+    // A root whose read has been inside the system's call for a while (a link within it to a drive asleep): its turn goes to
+    // the next read waiting for it; the stuck one keeps its read, which a later listing of that folder still joins.
+    auto& all = *listingsShared;
+    const auto now = devices::Clock::getMilliseconds();
+
+    for (auto& [root, read] : all.turns)
+    {
+        if (! read->inCallSince.has_value() || now - *read->inCallSince <= stuckMilliseconds)
+            continue;
+
+        auto& queued = all.waiting[root];
+
+        if (queued.empty())
+            continue;
+
+        read = queued.front();
+        queued.pop_front();
+        startRead (read);
+    }
+}
+
+void Library::endRead (Listings& shared, const std::shared_ptr<Read>& read)
+{
+    // Its root's next read, if this one held the root's turn (one stuck may have given it on).
+    shared.inFlight.erase (read);
+    shared.reads.erase (read->folder.getFullPathName());
+
+    const auto root = read->root.getFullPathName();
+    const auto turn = shared.turns.find (root);
+
+    if (turn == shared.turns.end() || turn->second != read)
+        return;
+
+    auto& queued = shared.waiting[root];
+
+    if (queued.empty() || shared.library == nullptr)
+    {
+        shared.turns.erase (turn);
+        shared.waiting.erase (root);
+        return;
+    }
+
+    turn->second = queued.front();
+    queued.pop_front();
+    shared.library->startRead (turn->second);
+}
+
+namespace
+{
+    // A preset's item from what was read of it, as makeItemOf() makes it.
+    LibraryItem makePresetItem (const juce::File& file, PresetInfo info)
+    {
+        LibraryItem item;
+        item.kind = LibraryItem::Kind::preset;
+        item.file = file;
+        item.name = file.getFileNameWithoutExtension();
+        item.preset = std::move (info);
+        item.tags.add ("Preset");
+        item.tags.add (item.preset->kind == PresetKind::track       ? juce::String ("Track")
+                       : item.preset->kind == PresetKind::container ? juce::String ("Container")
+                                                                    : item.preset->device);
+        return item;
+    }
+
+    // Whether the index holds this file as it is now.
+    std::optional<LibraryItem> findKnown (const LibraryIndex& index, const juce::File& file, juce::int64 size, juce::int64 modified)
+    {
+        if (auto known = index.find (file.getFullPathName()); known.has_value() && known->size == size && known->modified == modified)
+            return known;
+
+        return std::nullopt;
+    }
+} // namespace
+
+void Library::runRead (const std::shared_ptr<Listings>& shared, const std::shared_ptr<Read>& read)
+{
+    const auto isWaitedFor = [] (const Waiter& each)
+    {
+        const auto state = each.listing.lock();
+        return state != nullptr && ! state->cancelled.load();
+    };
+
+    std::function<void (const juce::File&)> before;
+    auto wanted = true;
+
+    {
+        // Nothing once the library has gone, nor for none still waiting for it.
+        const std::scoped_lock held (shared->lock);
+
+        if (shared->library == nullptr)
+            return;
+
+        before = shared->before;
+        wanted = std::any_of (read->waiters.begin(), read->waiters.end(), isWaitedFor);
+        read->started = true;
+        read->sequence = ++shared->sequence; // listed from now: after what the walk listed before this
+        read->inCallSince = devices::Clock::getMilliseconds();
+    }
+
+    // The system's call, which a drive that doesn't answer holds: then nothing more of the library's, once it has gone.
+    if (wanted && before != nullptr)
+        before (read->folder);
+
+    const auto entries = wanted ? readEntries (read->folder) : std::nullopt;
+
+    std::shared_ptr<const LibraryIndex> index;
+    std::shared_ptr<const Facts> facts;
+    juce::StringArray extensions;
+    std::function<void (const juce::File&)> beforeHeader;
+
+    {
+        const std::scoped_lock held (shared->lock);
+        read->inCallSince.reset();
+
+        if (shared->library == nullptr)
+            return;
+
+        // Not read, as none waited: one that joined since is given a read of its own.
+        if (! wanted)
+        {
+            auto waiters = std::move (read->waiters);
+            endRead (*shared, read);
+            std::erase_if (waiters, [&isWaitedFor] (const Waiter& each) { return ! isWaitedFor (each); });
+
+            if (! waiters.empty())
+            {
+                auto again = std::make_shared<Read>();
+                again->folder = read->folder;
+                again->root = read->root;
+                again->createdAt = devices::Clock::getMilliseconds();
+                again->waiters = std::move (waiters);
+                shared->reads[read->folder.getFullPathName()] = again;
+                shared->library->queueRead (again);
+            }
+
+            return;
+        }
+
+        index = shared->library->getWholeIndex();
+        facts = shared->library->getFacts();
+        extensions = shared->library->audioExtensions;
+        beforeHeader = shared->beforeHeader;
+    }
+
+    // A file's header read (a preset's kind, a WAV's loop data), outside `working`, so that the library's going waits for
+    // none: each only while the library is there and someone waits (else the read ends here), and inside the system's call
+    // as far as the root's turn and the late listings go (a drive whose folders answer from a cache while its files hang).
+    const auto readHeader = [&] (const juce::File& file, const std::function<void()>& readIt)
+    {
+        {
+            const std::scoped_lock held (shared->lock);
+
+            if (shared->library == nullptr)
+                return false;
+
+            if (! std::any_of (read->waiters.begin(), read->waiters.end(), isWaitedFor))
+            {
+                endRead (*shared, read); // none waits: the index is patched by whoever reads it next
+                return false;
+            }
+
+            read->inCallSince = devices::Clock::getMilliseconds();
+        }
+
+        if (beforeHeader != nullptr)
+            beforeHeader (file);
+
+        ++headersReadByListings;
+        readIt();
+
+        const std::scoped_lock held (shared->lock);
+        read->inCallSince.reset();
+        return true;
+    };
+
+    // The presets the index hasn't as they are: their headers read for their rows (small files), so that each shows what it
+    // is, and a file that isn't a preset Phazite reads is left out, as the walk leaves it out.
+    std::map<juce::String, std::optional<PresetInfo>> presets;
+
+    if (entries.has_value())
+    {
+        for (const auto& entry : *entries)
+        {
+            if (entry.isFolder || ! isPresetFile (entry.file) || findKnown (*index, entry.file, entry.size, entry.modified).has_value())
+                continue;
+
+            auto& info = presets[entry.file.getFullPathName()];
+
+            if (! readHeader (entry.file, [&info, &entry] { info = readPresetInfo (entry.file); }))
+                return;
+        }
+    }
+
+    // The rows, from what is known of the files: the index's items, the loop data read before, their names. Under `working`,
+    // which the library's going waits for: memory work alone.
+    Library* library = nullptr;
+
+    const auto beginWorking = [&shared, &library]
+    {
+        const std::scoped_lock held (shared->lock);
+        library = shared->library;
+
+        if (library != nullptr)
+            ++shared->working;
+
+        return library != nullptr;
+    };
+
+    const auto doneWorking = [&shared]
+    {
+        const std::scoped_lock held (shared->lock);
+        --shared->working;
+        shared->idle.notify_all();
+    };
+
+    if (! beginWorking())
+        return;
+
+    std::optional<std::vector<LibraryItem>> items, indexedBefore; // what it read, and what the index held of it before
+    std::vector<LibraryItem> folders, files;
+    std::set<juce::String> unread; // the WAV and AIFF files whose loop data aren't known
+    auto patching = false;
+
+    if (entries.has_value())
+    {
+        for (const auto& entry : *entries)
+        {
+            const auto& file = entry.file;
+
+            if (entry.isFolder)
+            {
+                LibraryItem item;
+                item.kind = LibraryItem::Kind::folder;
+                item.name = file.getFileName();
+                item.file = file;
+                folders.push_back (std::move (item));
+                continue;
+            }
+
+            const auto presetFile = isPresetFile (file);
+
+            if (! presetFile && ! extensions.contains (file.getFileExtension().toLowerCase()) && ! file.hasFileExtension (".mid;.midi"))
+                continue;
+
+            // The index's item, while the file is as it was then.
+            if (auto known = findKnown (*index, file, entry.size, entry.modified))
+            {
+                files.push_back (std::move (*known));
+                continue;
+            }
+
+            LibraryItem item;
+
+            if (presetFile)
+            {
+                const auto& info = presets[file.getFullPathName()];
+
+                if (! info.has_value())
+                    continue; // not a preset Phazite reads
+
+                item = makePresetItem (file, *info);
+            }
+            else
+            {
+                const SoundFacts* fact = nullptr;
+
+                if (mayHaveLoopData (file))
+                {
+                    if (const auto found = facts->find (file.getFullPathName());
+                        found != facts->end() && found->second.size == entry.size && found->second.modified == entry.modified)
+                        fact = &found->second;
+                    else
+                        unread.insert (file.getFullPathName());
+                }
+
+                item = makeItemOf (file, read->root, fact, true);
+            }
+
+            item.size = entry.size;
+            item.modified = entry.modified;
+            files.push_back (std::move (item));
+        }
+
+        std::sort (folders.begin(), folders.end(), isListedBefore);
+        std::sort (files.begin(), files.end(), isListedBefore);
+        indexedBefore = index->listChildren (read->folder);
+
+        auto listed = folders;
+        listed.insert (listed.end(), files.begin(), files.end());
+        patching = indexedBefore.has_value() && ! isSameListing (*indexedBefore, listed);
+        items = std::move (listed);
+    }
+
+    doneWorking();
+
+    // Given at once to those waiting, each told only what differs from what it was given, or from the index then (looked at
+    // again); a folder the index doesn't hold whole is told every read (its rows keep what is the same). Again later only if
+    // the headers read for the patch change a row, to those told now; and to any that joined meanwhile, as they would be now.
+    const auto deliver = [&shared] (const std::vector<Waiter>& to, const std::optional<std::vector<LibraryItem>>& rows,
+                                    const std::optional<std::vector<LibraryItem>>& indexed, bool always)
+    {
+        const auto told = std::make_shared<std::optional<std::vector<LibraryItem>>> (rows);
+
+        for (const auto& waiter : to)
+        {
+            const auto state = waiter.listing.lock();
+
+            if (state == nullptr || state->cancelled.load())
+                continue;
+
+            const auto* base =
+                waiter.shown.has_value() ? &*waiter.shown : (waiter.againstIndex && indexed.has_value() ? &*indexed : nullptr);
+
+            if (! always && base != nullptr && told->has_value() && isSameListing (*base, **told))
+                continue;
+
+            // Counted while on its way, as isReadingFolders() says: and not, if it can't be posted (the program quitting).
+            ++shared->delivering;
+
+            if (! juce::MessageManager::callAsync (
+                    [state, told, shared]
+                    {
+                        // A copy: what it calls may cancel the listing, which lets go of its own.
+                        if (! state->cancelled.load())
+                            if (auto listed = state->listed)
+                                listed (*told);
+
+                        --shared->delivering;
+                    }))
+                --shared->delivering;
+        }
+    };
+
+    std::vector<Waiter> first;
+
+    {
+        const std::scoped_lock held (shared->lock);
+        first = read->waiters;
+
+        if (! patching)
+            endRead (*shared, read); // nothing more of it: the root's next read goes on
+    }
+
+    deliver (first, items, indexedBefore, false);
+
+    if (! patching)
+        return;
+
+    // The patch: the new sounds' headers read (a WAV's loop data), their rows made again, and the index patched.
+    Facts fresh;
+
+    for (const auto& item : files)
+    {
+        if (! unread.count (item.file.getFullPathName()))
+            continue;
+
+        if (! readHeader (item.file, [&fresh, &shared, &item]
+                          { fresh[item.file.getFullPathName()] = readFacts (shared->formats, item.file, item.size, item.modified); }))
+            return;
+    }
+
+    if (! beginWorking())
+        return;
+
+    auto changed = false;
+
+    for (auto& item : files)
+    {
+        const auto found = fresh.find (item.file.getFullPathName());
+
+        if (found == fresh.end())
+            continue;
+
+        auto made = makeItemOf (item.file, read->root, &found->second, true);
+        made.size = item.size;
+        made.modified = item.modified;
+        changed = changed || made.tags != item.tags;
+        item = std::move (made);
+    }
+
+    auto listed = folders;
+    listed.insert (listed.end(), files.begin(), files.end());
+    library->patch ({ read->folder, read->root, listed, read->sequence }, fresh);
+    doneWorking();
+
+    // Told again: those told before where a row changed; those that joined since, as they would have been.
+    std::vector<Waiter> since, again;
+
+    {
+        const std::scoped_lock held (shared->lock);
+
+        for (auto& waiter : read->waiters)
+        {
+            const auto wasTold =
+                std::any_of (first.begin(), first.end(), [&waiter] (const Waiter& each)
+                             { return ! each.listing.owner_before (waiter.listing) && ! waiter.listing.owner_before (each.listing); });
+            (wasTold ? again : since).push_back (waiter);
+        }
+
+        endRead (*shared, read);
+    }
+
+    const std::optional<std::vector<LibraryItem>> remade (std::move (listed));
+    deliver (since, remade, indexedBefore, false);
+
+    if (changed)
+        deliver (again, remade, indexedBefore, true);
+}
+
+void Library::patch (const Patch& made, const Facts& fresh)
+{
+    // One at a time, from the index as it is now: none lost to another. Only where it listed the folder after the walk did
+    // (or a patch before it): an older listing would put back what was found gone since.
+    const std::scoped_lock patching (patchLock);
+
+    if (made.sequence <= getWholeIndex()->getListedAt (made.folder))
+        return;
+
+    auto& kept = patches[made.folder.getFullPathName()];
+
+    if (made.sequence > kept.sequence)
+        kept = made;
+
+    auto hasNewFolders = false;
+    auto patched = getWholeIndex()->withListing (made.folder, made.listed, made.root, hasNewFolders);
+    std::const_pointer_cast<LibraryIndex> (patched)->listedAt[made.folder.getFullPathName()] = made.sequence;
+
+    {
+        const juce::ScopedLock lock (indexLock);
+        auto withFresh = std::make_shared<Facts> (*facts);
+
+        for (const auto& [path, fact] : fresh)
+            (*withFresh)[path] = fact;
+
+        index = std::move (patched);
+        facts = std::move (withFresh);
+    }
+
+    if (hasNewFolders)
+        walkWanted = true; // what a folder that came holds: the walk lists it, a loop and all, as far as maxIndexed
+
+    triggerAsyncUpdate();
+}
+
+std::shared_ptr<const LibraryIndex> Library::withPatches (std::shared_ptr<const LibraryIndex> made) const
+{
+    // Each patch newer than the walk's own listing of its folder (or of the nearest folder it listed above it).
+    for (const auto& [path, each] : patches)
+    {
+        if (each.sequence <= made->getListedAt (each.folder))
+            continue;
+
+        auto ignored = false;
+        auto patched = made->withListing (each.folder, each.listed, each.root, ignored);
+        std::const_pointer_cast<LibraryIndex> (patched)->listedAt[path] = each.sequence;
+        made = std::move (patched);
+    }
+
+    return made;
+}
+
+bool Library::isReadingFolders() const
+{
+    const std::scoped_lock held (listingsShared->lock);
+    return ! listingsShared->reads.empty() || listingsShared->delivering.load() > 0;
+}
+
+void Library::setBeforeListing (std::function<void (const juce::File&)> before) const
+{
+    const std::scoped_lock held (listingsShared->lock);
+    listingsShared->before = std::move (before);
+}
+
+void Library::setBeforeHeader (std::function<void (const juce::File&)> before) const
+{
+    const std::scoped_lock held (listingsShared->lock);
+    listingsShared->beforeHeader = std::move (before);
+}
+
+void Library::setBeforeWalkListing (std::function<void (const juce::File&)> before) const
+{
+    const std::scoped_lock held (listingsShared->lock);
+    listingsShared->beforeWalk = std::move (before);
+}
+
+void Library::setListsFromIndex (bool fromIndex) const
+{
+    const std::scoped_lock held (listingsShared->lock);
+    listingsShared->fromIndex = fromIndex;
+}
+
+void Library::leaveBehind (std::unique_ptr<BackgroundJobs> jobs)
+{
+    // Never destroyed, so that nothing of it goes at the process's end under a thread still in it; each freed once its jobs
+    // are done, as the next is left behind. A read still stuck in the system as the program ends holds the listings' shared
+    // state, its AudioFormatManager with it, to the end: JUCE's leak detector says so once, in a Debug build. Nothing to do:
+    // the read can't be ended by force, and nothing of it runs after the library has gone.
+    static auto& left = *new std::vector<std::unique_ptr<BackgroundJobs>>();
+    std::erase_if (left, [] (const std::unique_ptr<BackgroundJobs>& each) { return each->getNumJobs() == 0; });
+
+    if (jobs != nullptr && jobs->getNumJobs() > 0)
+        left.push_back (std::move (jobs));
 }
 
 std::vector<LibraryItem> Library::listDevices (LibraryItem::Kind kind) const
@@ -1209,12 +2284,26 @@ juce::StringArray Library::getSoundTypes()
 void Library::reindex()
 {
     indexer = nullptr; // stops the one before
-    indexer = std::make_unique<Indexer> (*this, getRoots(), getAllMembers());
+
+    // A root inside another (a user's folder that holds the presets' folder, a folder and one of its own both added) is
+    // walked once, with the root it is in: its files would be in the index twice.
+    const auto all = getRoots();
+    juce::Array<juce::File> roots;
+
+    for (const auto& root : all)
+        if (std::none_of (all.begin(), all.end(), [&root] (const juce::File& other) { return root.isAChildOf (other); }))
+            roots.addIfNotAlreadyThere (root);
+
+    indexer = std::make_unique<Indexer> (*this, roots, getAllMembers());
     indexer->startThread (juce::Thread::Priority::low);
 }
 
 void Library::handleAsyncUpdate()
 {
+    // A folder that came from outside, which a patch put in without what it holds: a walk finds it.
+    if (walkWanted.exchange (false))
+        reindex();
+
     // Members of the sets renamed or moved since, found again, before the browser lists them.
     takeMovedMembers();
 
@@ -1327,6 +2416,7 @@ bool Library::isStillThere (const Member& member)
     if (member.key.startsWith (devicePrefix) || ! juce::File::isAbsolutePath (member.key))
         return true; // a device, found by findItem()
 
+    noteFileQuery();
     const juce::File file (member.key);
     return member.size < 0 ? file.exists() : file.existsAsFile() && file.getSize() == member.size;
 }
@@ -1567,8 +2657,16 @@ std::optional<LibraryItem> Library::findItem (const juce::String& key) const
 
     const juce::File file (key);
 
+    // Whether it is there, asked of the disk (a member of the user's own list: one check each, bounded by the list, which
+    // sees a file moved or deleted outside at once); what it is, from the index where it holds it (no folder asked, no
+    // preset's header read), else from the file.
+    noteFileQuery();
+
     if (! file.exists())
         return std::nullopt;
+
+    if (auto indexed = getWholeIndex()->find (key))
+        return indexed;
 
     return makeFileItem (file, findRoot (file));
 }

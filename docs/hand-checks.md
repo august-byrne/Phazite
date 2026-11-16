@@ -226,6 +226,8 @@ the [changelog](changelog.md).
 | G166b | Type a value into a plug-in's knob while its helper is busy; then type one while recording, and with a track in Write | After a second a window says Phazite is waiting for the plug-in, and Esc or its Cancel shows the old value; while recording or writing the typed value lands | |
 | G181 | Scan a shell plug-in file (Waves' WaveShell) | All its plug-ins are listed | |
 | G165L | Linux: open a plug-in's window and close it | It closes at once, the plug-in keeps running, and it opens again | |
+| G-folder | Add a folder of 20,000 or more sounds as a browser folder, wait for indexing, open it and its subfolders; with it open, add a WAV to it in Explorer and switch back to Phazite within 2 s; delete a sample in Explorer and open its folder again | The folders open at once and the window never stalls; the new sound shows in place without reopening, the selected row and open subfolders stay, the search finds it and the Type filter counts it; the deleted one's row goes | |
+| G-drive | With a user folder on a network drive that is asleep or unplugged, open it; open other folders, search and press Down in the search field; press Enter on the slow folder, then click another row; quit with nested folders open inside it and start again | After about 3 s its line says "This drive isn't answering..."; everything else works at once, and the folder fills in when the drive answers; the Enter is dropped; the same folders are open again once the drive answers | |
 
 ## Performance on other machines
 

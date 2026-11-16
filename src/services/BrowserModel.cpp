@@ -39,7 +39,7 @@ namespace
         return item.tags.contains ("Loop");
     }
 
-    const auto byName = [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; };
+    const auto byName = isListedBefore; // by name, then by path: ties always in the same order
 
     // A count as the browser writes it: "3,412".
     juce::String withThousands (int number)
@@ -305,10 +305,21 @@ std::vector<BrowserPlace> BrowserModel::getPresetPlaces (const juce::String& fol
         place.folder = place.folder.getChildFile (folderName);
         place.count = 0;
 
-        if (place.folder.isDirectory())
-            for ([[maybe_unused]] const auto& entry :
-                 juce::RangedDirectoryIterator (place.folder, true, juce::String ("*") + presetExtension, juce::File::findFiles))
-                ++place.count;
+        // From the index, which holds the presets' folders whole once walked: no disk. Else counted on the disk (the index
+        // first being made): the device's presets alone.
+        if (const auto counted = library.getWholeIndex()->countFilesWithin (place.folder, presetExtension))
+        {
+            place.count = *counted;
+        }
+        else
+        {
+            Library::noteFileQuery();
+
+            if (place.folder.isDirectory())
+                for ([[maybe_unused]] const auto& entry :
+                     juce::RangedDirectoryIterator (place.folder, true, juce::String ("*") + presetExtension, juce::File::findFiles))
+                    ++place.count;
+        }
 
         if (place.count > 0)
             found.push_back (std::move (place));
@@ -377,7 +388,6 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
 {
     using Kind = BrowserPlace::Kind;
     BrowserContents contents;
-    juce::String hint;
 
     // With filters set: the place's sounds with their values, as one list; the collections with any, each with how many.
     if (! filters.isEmpty())
@@ -405,6 +415,26 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
         return describeFiltered (place, std::move (listed));
     }
 
+    // A folder's, read here.
+    if (listsFolder (place))
+        return describePlace (place, place.folder.isDirectory() ? std::optional (library.listFolder (place.folder)) : std::nullopt);
+
+    return describePlace (place, std::nullopt);
+}
+
+bool BrowserModel::listsFolder (const BrowserPlace& place) const
+{
+    using Kind = BrowserPlace::Kind;
+    return place.kind == Kind::folder || place.kind == Kind::factoryPresets || place.kind == Kind::presets
+           || (place.kind == Kind::sounds && isSoundPackInstalled());
+}
+
+BrowserContents BrowserModel::describePlace (const BrowserPlace& place, std::optional<std::vector<LibraryItem>> listed) const
+{
+    using Kind = BrowserPlace::Kind;
+    BrowserContents contents;
+    juce::String hint;
+
     switch (place.kind)
     {
         case Kind::favorites:
@@ -430,21 +460,19 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
             hint = "Empty: right-click a sound or a device, then Add to Collection";
             break;
         case Kind::sounds:
-            if (! soundPack.isInstalled())
+            if (! isSoundPackInstalled())
             {
                 contents.offersSoundPack = true;
                 contents.messages.add ("Free drums, loops and effects to start with");
                 return contents;
             }
 
-            contents.items = library.listFolder (place.folder);
+            contents.items = listed.value_or (std::vector<LibraryItem>());
             hint = "No sounds here";
             break;
         case Kind::folder:
-            if (place.folder.isDirectory())
-                contents.items = library.listFolder (place.folder);
-
-            hint = place.folder.isDirectory() ? "No sounds here" : "This folder isn't there any more";
+            contents.items = listed.value_or (std::vector<LibraryItem>());
+            hint = listed.has_value() ? "No sounds here" : "This folder isn't there any more";
             break;
         case Kind::instruments:
         case Kind::effects:
@@ -453,15 +481,11 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
             hint = "Your plug-ins show here once Scan for Plug-ins, in the gear's menu at the bottom left, has found them";
             break;
         case Kind::factoryPresets:
-            if (place.folder.isDirectory())
-                contents.items = library.listFolder (place.folder);
-
+            contents.items = listed.value_or (std::vector<LibraryItem>());
             hint = "None here";
             break;
         case Kind::presets:
-            if (place.folder.isDirectory())
-                contents.items = library.listFolder (place.folder);
-
+            contents.items = listed.value_or (std::vector<LibraryItem>());
             hint = "None yet: right-click a device or a track to save its settings, or drag a track here";
             break;
         case Kind::addFolder:
@@ -491,6 +515,63 @@ BrowserContents BrowserModel::getContents (const LibraryItem& folder) const
         contents.messages.add ("No sounds here");
 
     return contents;
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::open (const BrowserPlace& place, std::function<void (BrowserContents)> opened) const
+{
+    if (! listsFolder (place))
+    {
+        opened (describePlace (place, std::nullopt));
+        return {};
+    }
+
+    return library.startListing (place.folder, [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+                                 { opened (describePlace (place, std::move (listed))); });
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::open (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const
+{
+    return library.startListing (folder.file, describeFolder (std::move (opened)));
+}
+
+Library::Listed BrowserModel::describeFolder (std::function<void (BrowserContents)> opened)
+{
+    return [opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+    {
+        BrowserContents contents;
+        contents.items = listed.value_or (std::vector<LibraryItem>());
+
+        if (contents.items.empty())
+            contents.messages.add ("No sounds here");
+
+        opened (std::move (contents));
+    };
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::check (const BrowserPlace& place, std::function<void (BrowserContents)> opened) const
+{
+    if (! listsFolder (place))
+        return {};
+
+    return library.checkListing (place.folder, [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+                                 { opened (describePlace (place, std::move (listed))); });
+}
+
+std::unique_ptr<Library::FolderListing> BrowserModel::check (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const
+{
+    return library.checkListing (folder.file, describeFolder (std::move (opened)));
+}
+
+bool BrowserModel::isSoundPackInstalled() const
+{
+    // Asked of the disk once, and again only once the pack changed (soundPackChanged()): not at each opening.
+    if (! installed.has_value())
+    {
+        Library::noteFileQuery();
+        installed = soundPack.isInstalled();
+    }
+
+    return *installed;
 }
 
 BrowserContents BrowserModel::search (const juce::String& query, const BrowserFilters& filters) const

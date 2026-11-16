@@ -128,6 +128,32 @@ TEST_CASE ("Removing background jobs drops those that wait, and waits for those 
     CHECK (ran);
 }
 
+TEST_CASE ("Dropping the waiting background jobs leaves the one running running, unwaited for, and the others never run")
+{
+    // As a library goes while a folder's read is stuck in the system: what waits is dropped, what runs isn't waited for.
+    BackgroundJobs jobs ("Phazite test jobs", 1, juce::Thread::Priority::normal);
+    std::atomic<bool> started { false }, letGo { false }, finished { false }, laterRan { false };
+
+    jobs.add (
+        [&] (const BackgroundJobs::ShouldStop&)
+        {
+            started = true;
+            waitFor (letGo);
+            finished = true;
+        });
+    jobs.add ([&] (const BackgroundJobs::ShouldStop&) { laterRan = true; });
+
+    waitFor (started);
+    jobs.dropWaiting(); // returns with the first still running
+    CHECK (jobs.getNumJobs() == 1);
+    CHECK_FALSE (finished.load());
+
+    letGo = true;
+    jobs.waitForAll();
+    CHECK (finished.load());
+    CHECK_FALSE (laterRan.load());
+}
+
 TEST_CASE ("A background job far slower to stop than JUCE's thread pool allows is waited for as its jobs go, never ended by force")
 {
     // juce::ThreadPool ends a thread that hasn't stopped within half a second, which can leave a lock it held held for

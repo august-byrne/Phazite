@@ -102,6 +102,26 @@ public:
     BrowserContents getContents (const BrowserPlace&, const BrowserFilters& = {}) const;
     BrowserContents getContents (const LibraryItem& folder) const;
 
+    // The same as the browser opens a place (without filters) or a folder, without the message thread touching the disk:
+    // what comes from no folder (favorites, recent items, collections, devices) and what the index holds whole, given to
+    // opened at once, returning nothing; else read on a listing thread (Library::startListing()), given to opened on the
+    // message thread, unless what this returns has gone first (or was cancelled). Phazite Sounds, the user's folders and
+    // the presets' folders are the index's roots: their folders come from the index once it has walked them whole (not
+    // while it is first built, nor in a library larger than Library::maxIndexed), else from the disk.
+    std::unique_ptr<Library::FolderListing> open (const BrowserPlace&, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> open (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const;
+
+    // A place or a folder shown open, looked at again (Library::checkListing()): read on a listing thread alone, opened called
+    // only where it differs from the index (every read for a folder the index doesn't hold whole). Nothing for a place that
+    // lists no folder.
+    std::unique_ptr<Library::FolderListing> check (const BrowserPlace&, std::function<void (BrowserContents)> opened) const;
+    std::unique_ptr<Library::FolderListing> check (const LibraryItem& folder, std::function<void (BrowserContents)> opened) const;
+
+    // Whether Phazite Sounds are installed: asked of the disk once, and again after soundPackChanged() (its download or
+    // install told).
+    bool isSoundPackInstalled() const;
+    void soundPackChanged() const { installed.reset(); }
+
     // The places with filters set and what each lists, as getPlaces() and getContents() give them, by each place's key
     // (BrowserPlace::getKey()); the collections' own under Collections aren't among them (getContents() lists one, a list of
     // the user's own).
@@ -177,6 +197,8 @@ private:
     const Library& library;
     const SoundPack& soundPack;
     mutable Library::IndexWork counts { library }, listings { library }; // the filters' counts; the filtered places
+    mutable std::optional<bool> installed;                               // isSoundPackInstalled()'s
+    static Library::Listed describeFolder (std::function<void (BrowserContents)> opened);
 
     // What a place lists while filters are set: its sounds with their values, by name, as many as maxListed; and how many
     // it has in all. And what the places of the index list, in one walk through it, any thread (none, once shouldStop says).
@@ -190,6 +212,11 @@ private:
     static std::optional<std::vector<Listed>> listIndexed (const LibraryIndex&, const std::vector<BrowserPlace>&, const BrowserFilters&,
                                                            const std::function<bool()>& shouldStop = nullptr);
     BrowserContents describeFiltered (const BrowserPlace&, Listed) const;
+
+    // Whether a place without filters lists a folder (Phazite Sounds once installed, a folder, the presets); what it holds,
+    // given what the folder holds (none: the folder isn't there).
+    bool listsFolder (const BrowserPlace&) const;
+    BrowserContents describePlace (const BrowserPlace&, std::optional<std::vector<LibraryItem>> listed) const;
     FilteredPlaces assemble (const BrowserFilters&, std::vector<BrowserPlace> places, std::vector<Listed> ofIndex) const;
     BrowserContents describeSearch (const juce::String& query, const BrowserFilters&, SearchResults) const;
 };

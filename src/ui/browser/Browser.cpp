@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
+#include "devices/core/Clock.h"
 #include "model/base/WholeFile.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/notes/NoteValues.h"
@@ -27,6 +28,24 @@ namespace
             ++depth;
 
         return juce::jmax (0, depth);
+    }
+
+    // A row by its identifier string (juce::TreeViewItem::getItemIdentifierString()), under a row, or none.
+    juce::TreeViewItem* findRow (juce::TreeViewItem& under, const juce::String& id)
+    {
+        const auto own = under.getItemIdentifierString();
+
+        if (own == id)
+            return &under;
+
+        if (! id.startsWith (own + "/"))
+            return nullptr;
+
+        for (int i = 0; i < under.getNumSubItems(); ++i)
+            if (auto* found = findRow (*under.getSubItem (i), id))
+                return found;
+
+        return nullptr;
     }
 
     // Opens a row, and each folder in it and in those, as their rows are made.
@@ -72,7 +91,10 @@ struct Browser::Node : public juce::TreeViewItem
         : browser (b)
     {
         setDrawsInLeftMargin (true); // its row's wash, and its levels' guides, from the tree's left edge
+        ++rowsMade;
     }
+
+    static inline std::atomic<juce::int64> rowsMade { 0 }; // Browser::countRowsMade()
 
     virtual juce::String getText() const = 0;
     virtual juce::String getDetail() const { return {}; } // after its name, muted: a sound's key and tempo, a place's count
@@ -86,14 +108,55 @@ struct Browser::Node : public juce::TreeViewItem
     bool mightContainSubItems() override { return false; }
     int getItemHeight() const override { return rowHeight; }
 
+    ~Node() override
+    {
+        // What waits for its rows goes with it: a key pressed on it, a reveal.
+        if (reading)
+            browser.openingRows.erase (this);
+
+        if (browser.queuedKey.row == this)
+            browser.dropQueuedKey();
+    }
+
     void itemOpennessChanged (bool isNowOpen) override
     {
-        // Filled each time it opens, so that it shows what is there now.
+        // Filled each time it opens, so that it shows what is there now; a listing still under way stops as it closes, and
+        // what waited for it is dropped.
+        stopOpening();
+        checker = nullptr;
+        wantedOpenness = nullptr;
+        afterFill.clear();
         clearSubItems();
 
         if (isNowOpen)
             populate();
     }
+
+    // Its rows as the model opens it (BrowserModel::open()): at once (the index's), then brought up to date in place if its
+    // folder, read on a listing thread, holds something else now; or once its folder is read, a line saying so meanwhile.
+    // And, shown open, its folder looked at again (BrowserModel::check()): read on a listing thread alone, nothing taken from
+    // the index here, its rows brought up to date in place only where the folder differs; at most once in a few seconds.
+    using Opening = std::function<std::unique_ptr<Library::FolderListing> (std::function<void (BrowserContents)>)>;
+    void openWith (const Opening& open, Opening check);
+    void lookAgain (bool whateverItsLastLook = false);
+    void sayIfLate();                         // its folder still being read, its drive not answering for a few seconds: its line says so
+    void filledWith (const BrowserContents&); // its first rows, and what waited for them (openness asked meanwhile, a reveal)
+
+    void stopOpening() // never runs what waits: it may be in the middle of a change of the tree
+    {
+        listing = nullptr;
+
+        if (std::exchange (reading, false))
+            browser.openingRows.erase (this);
+    }
+
+    Opening checker;                                  // how it is looked at again, while it is open
+    std::unique_ptr<Library::FolderListing> listing;  // while its folder is read
+    bool filled = false, reading = false;             // its rows shown; its first rows still to come
+    std::unique_ptr<juce::XmlElement> wantedOpenness; // asked of it while it read (Browser::restoreOpenness())
+    std::vector<std::function<void()>> afterFill;     // what waits for its first rows (a reveal)
+    double checkedAt = 0.0;                           // when it was last looked at again (devices::Clock)
+    bool saidLate = false;                            // its line says its drive isn't answering
 
     void itemSelectionChanged (bool isNowSelected) override
     {
@@ -108,6 +171,9 @@ struct Browser::Node : public juce::TreeViewItem
         if (! isNowSelected)
             return;
 
+        if (! browser.restoringRows)
+            browser.userActed(); // the selection moved: a key or a selection waiting for rows was for another
+
         // Until the click that selected it, if a click did, has been handled.
         browser.justSelected = this;
         juce::MessageManager::callAsync (
@@ -120,6 +186,8 @@ struct Browser::Node : public juce::TreeViewItem
 
     void itemClicked (const juce::MouseEvent& e) override
     {
+        browser.userActed(); // a key or a selection waiting for rows: the user did something else first
+
         if (e.mods.isPopupMenu())
         {
             showMenu();
@@ -308,6 +376,74 @@ struct Browser::MessageNode : public Node
     const juce::String text;
 };
 
+void Browser::Node::openWith (const Opening& open, Opening check)
+{
+    checker = std::move (check);
+    filled = false;
+    saidLate = false;
+    checkedAt = devices::Clock::getMilliseconds(); // read as it opens: not again at once
+    listing = open (
+        [this] (BrowserContents contents)
+        {
+            if (filled)
+                browser.updateRows (*this, contents); // what changed since the index's rows, in place
+            else
+                filledWith (contents);
+        });
+
+    // Its first rows still to come: a line says so.
+    if (! filled && listing != nullptr)
+    {
+        reading = true;
+        browser.openingRows.insert (this);
+        addSubItem (new MessageNode (browser, "Reading this folder..."));
+    }
+}
+
+void Browser::Node::sayIfLate()
+{
+    if (! reading || saidLate || listing == nullptr || ! listing->isLate())
+        return;
+
+    saidLate = true;
+    clearSubItems();
+    addSubItem (new MessageNode (browser, "This drive isn't answering..."));
+}
+
+void Browser::Node::filledWith (const BrowserContents& contents)
+{
+    filled = true;
+    clearSubItems();
+    browser.addRows (*this, contents);
+
+    if (std::exchange (reading, false))
+        browser.openingRows.erase (this);
+
+    // The folders asked to be open within it while it read, opened now, and their selection.
+    if (auto wanted = std::move (wantedOpenness))
+        browser.restoreOpenness (*this, *wanted);
+
+    browser.selectWanted();
+
+    // What waited for it (a key pressed on it, a reveal): later, once nothing is changing the tree.
+    if (browser.queuedKey.row == this)
+        browser.replayQueuedKey();
+
+    for (auto& then : std::exchange (afterFill, {}))
+        juce::MessageManager::callAsync (std::move (then));
+}
+
+void Browser::Node::lookAgain (bool whateverItsLastLook)
+{
+    const auto now = devices::Clock::getMilliseconds();
+
+    if (checker == nullptr || ! filled || (! whateverItsLastLook && now - checkedAt < lookAgainMilliseconds))
+        return;
+
+    checkedAt = now;
+    listing = checker ([this] (BrowserContents contents) { browser.updateRows (*this, contents); });
+}
+
 //==============================================================================
 // Phazite Sounds, until they are installed: a row that downloads them, then shows how far the download is.
 struct Browser::SoundPackNode : public Node
@@ -353,7 +489,11 @@ struct Browser::ItemNode : public Node
     const LibraryItem* getItem() const override { return &item; }
     bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder; }
     juce::String getUniqueName() const override { return item.getKey(); }
-    void populate() override { browser.addRows (*this, browser.model.getContents (item)); }
+    void populate() override
+    {
+        openWith ([this] (std::function<void (BrowserContents)> opened) { return browser.model.open (item, std::move (opened)); },
+                  [this] (std::function<void (BrowserContents)> opened) { return browser.model.check (item, std::move (opened)); });
+    }
     void clicked() override { browser.togglePreview (item); }
 
     void activate() override
@@ -412,7 +552,15 @@ struct Browser::PlaceNode : public Node
 
     bool mightContainSubItems() override { return place.holdsItems(); }
     juce::String getUniqueName() const override { return "place:" + place.getKey(); }
-    void populate() override { browser.addRows (*this, browser.getPlaceContents (place)); }
+    void populate() override
+    {
+        // With filters, as the places were listed; without, as its folder holds it now.
+        if (! browser.listedPlaces.filters.isEmpty())
+            browser.addRows (*this, browser.getPlaceContents (place));
+        else
+            openWith ([this] (std::function<void (BrowserContents)> opened) { return browser.model.open (place, std::move (opened)); },
+                      [this] (std::function<void (BrowserContents)> opened) { return browser.model.check (place, std::move (opened)); });
+    }
 
     void clicked() override
     {
@@ -466,21 +614,28 @@ struct Browser::Tree : public juce::TreeView
         if (! std::exchange (browser.keysMovedSelection, true))
             repaint();
 
-        // Moving or Enter while the rows to come aren't in (a swap's first places, the newest text's results): on those, once
-        // they are, never on the rows they replace.
+        // Moving or Enter on a folder whose rows are still being read, or while the rows to come aren't in (a swap's first
+        // places, the newest text's results): on those, once they are, never on the rows they replace; and only if nothing
+        // else was done first and they came within a moment (Browser::queueKey()).
         const auto moves =
             key.isKeyCode (juce::KeyPress::downKey) || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::returnKey);
 
-        if (moves && browser.isWaitingForRows())
+        if (moves)
         {
-            browser.afterSearch (
-                [safeThis = juce::Component::SafePointer<Tree> (this), key]
-                {
-                    if (safeThis != nullptr)
-                        safeThis->keyPressed (key);
-                });
-            return true;
+            if (auto* selected = dynamic_cast<Node*> (getSelectedItem (0)); selected != nullptr && selected->reading)
+            {
+                browser.queueKey (key, selected);
+                return true;
+            }
+
+            if (browser.isWaitingForRows())
+            {
+                browser.queueKey (key, nullptr);
+                return true;
+            }
         }
+
+        browser.userActed(); // another key acts at once: one waiting is dropped, as is a selection waiting for rows
 
         auto* before = dynamic_cast<Node*> (getSelectedItem (0));
 
@@ -791,6 +946,34 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
 
         if (searchField.getText().trim().isNotEmpty())
             updateSearch (true);
+
+        // A folder being read from the disk, opened again: from this index, if it holds the folder whole now.
+        // Each still among them as its turn comes (one opened before may have taken another away), with what waited for it
+        // kept; nothing that waited run here, in the middle of the change.
+        for (auto* row : std::vector<Node*> (openingRows.begin(), openingRows.end()))
+        {
+            if (! openingRows.count (row))
+                continue;
+
+            auto wanted = std::move (row->wantedOpenness);
+            auto waiting = std::move (row->afterFill);
+            row->setOpen (false);
+            row->setOpen (true);
+
+            if (wanted != nullptr)
+                restoreOpenness (*row, *wanted);
+
+            for (auto& then : waiting)
+                row->afterFill.push_back (std::move (then));
+        }
+
+        // A preset just saved, shown in Presets, selected, once the index has it (another change of it, a folder patched,
+        // may come first).
+        if (revealWhenIndexed.has_value() && library.getWholeIndex()->find (revealWhenIndexed->second.getFullPathName()).has_value())
+        {
+            const auto toReveal = *std::exchange (revealWhenIndexed, std::nullopt);
+            reveal (toReveal.first, toReveal.second);
+        }
     };
 
     soundPack.addChangeListener (this);
@@ -811,7 +994,7 @@ Browser::~Browser()
         swap->keep();
 
     // The folders open now open again next time: as they were without the filters, if any are set.
-    if (const auto openness = opennessUnfiltered != nullptr ? std::move (opennessUnfiltered) : placesRoot->getOpennessState())
+    if (const auto openness = opennessUnfiltered != nullptr ? std::move (opennessUnfiltered) : getOpenness (*placesRoot))
         settings.set (Settings::browserOpenness, openness->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()));
 
     if (nameField != nullptr)
@@ -839,6 +1022,314 @@ void Browser::addRows (juce::TreeViewItem& parent, const BrowserContents& conten
 
     for (const auto& message : contents.messages)
         parent.addSubItem (new MessageNode (*this, message));
+}
+
+void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& contents)
+{
+    // The rows it should have, in addRows()' order, by their unique names (the nodes' getUniqueName()): those that went,
+    // gone; those that stay, kept as they are (selected, open), moved where they go now; those that came, made where they
+    // go. Nothing made, moved or taken away where nothing differs.
+    enum class Kind
+    {
+        soundPack,
+        place,
+        item,
+        message
+    };
+
+    struct Wanted
+    {
+        juce::String name;
+        Kind kind;
+        size_t index;
+    };
+
+    std::vector<Wanted> wanted;
+    wanted.reserve (contents.places.size() + contents.items.size() + contents.messages.size() + 1);
+
+    if (contents.offersSoundPack)
+        wanted.push_back ({ "soundPack", Kind::soundPack, 0 });
+
+    for (size_t i = 0; i < contents.places.size(); ++i)
+        wanted.push_back ({ "place:" + contents.places[i].getKey(), Kind::place, i });
+
+    for (size_t i = 0; i < contents.items.size(); ++i)
+        wanted.push_back ({ contents.items[i].getKey(), Kind::item, i });
+
+    for (int i = 0; i < contents.messages.size(); ++i)
+        wanted.push_back ({ "message:" + contents.messages[i], Kind::message, (size_t) i });
+
+    std::set<juce::String> wantedNames;
+
+    for (const auto& each : wanted)
+        wantedNames.insert (each.name);
+
+    for (int i = parent.getNumSubItems(); --i >= 0;)
+        if (! wantedNames.count (parent.getSubItem (i)->getUniqueName()))
+            parent.removeSubItem (i);
+
+    for (int i = 0; i < (int) wanted.size(); ++i)
+    {
+        const auto& each = wanted[(size_t) i];
+
+        if (i < parent.getNumSubItems() && parent.getSubItem (i)->getUniqueName() == each.name)
+            continue;
+
+        // One that stays, further down: moved here, as it is.
+        auto moved = false;
+
+        for (int j = i + 1; j < parent.getNumSubItems() && ! moved; ++j)
+        {
+            if (auto* row = parent.getSubItem (j); row->getUniqueName() == each.name)
+            {
+                parent.removeSubItem (j, false);
+                parent.addSubItem (row, i);
+                moved = true;
+            }
+        }
+
+        if (moved)
+            continue;
+
+        juce::TreeViewItem* made = nullptr;
+
+        switch (each.kind)
+        {
+            case Kind::soundPack:
+                made = new SoundPackNode (*this);
+                break;
+            case Kind::place:
+                made = new PlaceNode (*this, contents.places[each.index]);
+                break;
+            case Kind::item:
+                made = new ItemNode (*this, contents.items[each.index]);
+                break;
+            case Kind::message:
+                made = new MessageNode (*this, contents.messages[(int) each.index]);
+                break;
+        }
+
+        parent.addSubItem (made, i);
+    }
+}
+
+juce::int64 Browser::countRowsMade() noexcept
+{
+    return Node::rowsMade.load();
+}
+
+int Browser::lookAgainAtOpenFolders (bool cameToFront)
+{
+    // Every open folder of the rows shown, those in view first, as many as mostLookedAgain, each at most once in
+    // lookAgainMilliseconds: what changed in it outside Phazite since, brought up to date in place. Phazite come to the
+    // front (the user back from Explorer, where they may have just changed it), those in view whatever their last look.
+    // Nothing read here: each is read on a listing thread.
+    std::vector<Node*> open;
+    std::function<void (juce::TreeViewItem*)> collect = [&collect, &open] (juce::TreeViewItem* item)
+    {
+        if (item == nullptr || ! item->isOpen())
+            return;
+
+        if (auto* node = dynamic_cast<Node*> (item); node != nullptr && node->filled && node->checker != nullptr)
+            open.push_back (node);
+
+        for (int i = 0; i < item->getNumSubItems(); ++i)
+            collect (item->getSubItem (i));
+    };
+
+    collect (tree->getRootItem());
+
+    const auto* viewport = tree->getViewport();
+    const auto top = viewport->getViewPositionY(), bottom = top + viewport->getViewHeight();
+    const auto inView = [top, bottom] (const Node* node)
+    {
+        const auto area = const_cast<Node*> (node)->getItemPosition (false);
+        return area.getBottom() >= top && area.getY() <= bottom;
+    };
+
+    std::stable_partition (open.begin(), open.end(), inView);
+
+    auto looked = 0;
+    const auto now = devices::Clock::getMilliseconds();
+
+    for (auto* node : open)
+    {
+        if (looked >= mostLookedAgain)
+            break;
+
+        const auto always = cameToFront && inView (node);
+
+        if (! always && now - node->checkedAt < lookAgainMilliseconds)
+            continue;
+
+        node->lookAgain (always);
+        ++looked;
+    }
+
+    return looked;
+}
+
+void Browser::queueKey (const juce::KeyPress& key, Node* row)
+{
+    queuedKey = { key, row, devices::Clock::getMilliseconds() };
+}
+
+void Browser::dropQueuedKey()
+{
+    queuedKey = {};
+    ++keyGeneration;
+}
+
+void Browser::userActed()
+{
+    // What waited for rows to come is for what the user looked at before: dropped.
+    dropQueuedKey();
+    wantedSelection.clear();
+}
+
+void Browser::replayQueuedKey()
+{
+    const auto queued = std::exchange (queuedKey, {});
+
+    if (! queued.key.has_value() || devices::Clock::getMilliseconds() - queued.at > keyWaitMilliseconds)
+        return; // none, or waited for too long: it would act on what the user no longer looks at
+
+    juce::MessageManager::callAsync (
+        [safeThis = juce::Component::SafePointer<Browser> (this), key = *queued.key, generation = keyGeneration]
+        {
+            if (safeThis != nullptr && safeThis->keyGeneration == generation)
+                safeThis->tree->keyPressed (key);
+        });
+}
+
+std::unique_ptr<juce::XmlElement> Browser::getOpenness (const juce::TreeViewItem& item) const
+{
+    // As JUCE's: an open row as OPEN with what is open within it, a closed one as nothing; the root always open.
+    const auto isRoot = dynamic_cast<const RootNode*> (&item) != nullptr;
+
+    if (! isRoot && ! item.isOpen())
+        return nullptr;
+
+    auto element = std::make_unique<juce::XmlElement> ("OPEN");
+    element->setAttribute ("id", item.getUniqueName());
+
+    // A folder still being read: what was asked of what it holds, kept.
+    if (const auto* node = dynamic_cast<const Node*> (&item); node != nullptr && node->reading && node->wantedOpenness != nullptr)
+    {
+        for (const auto* child : node->wantedOpenness->getChildIterator())
+            element->addChildElement (new juce::XmlElement (*child));
+
+        return element;
+    }
+
+    for (int i = 0; i < item.getNumSubItems(); ++i)
+        if (auto child = getOpenness (*item.getSubItem (i)))
+            element->addChildElement (child.release());
+
+    return element;
+}
+
+void Browser::restoreOpenness (juce::TreeViewItem& item, const juce::XmlElement& state)
+{
+    // As JUCE's TreeViewItem::restoreOpennessState(), but a folder still being read keeps what is asked of its rows until
+    // they are in.
+    if (state.hasTagName ("CLOSED"))
+    {
+        item.setOpen (false);
+        return;
+    }
+
+    if (! state.hasTagName ("OPEN"))
+        return;
+
+    if (dynamic_cast<RootNode*> (&item) == nullptr)
+        item.setOpen (true);
+
+    if (auto* node = dynamic_cast<Node*> (&item); node != nullptr && node->reading)
+    {
+        node->wantedOpenness = std::make_unique<juce::XmlElement> (state);
+        return;
+    }
+
+    juce::Array<juce::TreeViewItem*> rows;
+
+    for (int i = 0; i < item.getNumSubItems(); ++i)
+        rows.add (item.getSubItem (i));
+
+    for (const auto* child : state.getChildIterator())
+    {
+        const auto id = child->getStringAttribute ("id");
+
+        for (int i = 0; i < rows.size(); ++i)
+        {
+            if (rows[i]->getUniqueName() == id)
+            {
+                restoreOpenness (*rows[i], *child);
+                rows.remove (i);
+                break;
+            }
+        }
+    }
+
+    // What wasn't mentioned, closed (JUCE's default openness).
+    for (auto* row : rows)
+        if (row->isOpen())
+            row->setOpen (false);
+}
+
+std::unique_ptr<juce::XmlElement> Browser::getTreeState() const
+{
+    auto* root = tree->getRootItem();
+
+    if (root == nullptr)
+        return nullptr;
+
+    auto state = getOpenness (*root);
+
+    for (int i = 0; i < tree->getNumSelectedItems(); ++i)
+        if (auto* selected = tree->getSelectedItem (i))
+            state->createNewChildElement ("SELECTED")->setAttribute ("id", selected->getItemIdentifierString());
+
+    for (const auto& id : wantedSelection)
+        state->createNewChildElement ("SELECTED")->setAttribute ("id", id);
+
+    return state;
+}
+
+void Browser::restoreTreeState (const juce::XmlElement& state)
+{
+    auto* root = tree->getRootItem();
+
+    if (root == nullptr)
+        return;
+
+    wantedSelection.clear();
+    tree->clearSelectedItems();
+
+    for (const auto* selected : state.getChildWithTagNameIterator ("SELECTED"))
+        wantedSelection.addIfNotAlreadyThere (selected->getStringAttribute ("id"));
+
+    restoreOpenness (*root, state);
+    selectWanted();
+}
+
+void Browser::selectWanted()
+{
+    const juce::ScopedValueSetter<bool> restoring (restoringRows, true); // no key waiting is dropped for it
+    // The rows asked to be selected that are in now: selected (a folder being read keeps the others until its rows come).
+    auto* root = tree->getRootItem();
+
+    if (root == nullptr)
+        return;
+
+    for (int i = wantedSelection.size(); --i >= 0;)
+    {
+        if (auto* row = findRow (*root, wantedSelection[i]))
+        {
+            row->setSelected (true, true); // one row at a time: nothing else selected meanwhile stays
+            wantedSelection.remove (i);
+        }
+    }
 }
 
 void Browser::rebuildPlaces()
@@ -869,11 +1360,8 @@ void Browser::rebuildPlaces()
 
 BrowserContents Browser::getPlaceContents (const BrowserPlace& place) const
 {
-    // As listed with the places the tree shows: without filters, what the place holds; with them, what they were listed with,
-    // or for a collection under Collections (a list of the user's own), its sounds with those filters' values.
-    if (listedPlaces.filters.isEmpty())
-        return model.getContents (place);
-
+    // As listed with the filters of the places the tree shows: what they were listed with, or for a collection under
+    // Collections (a list of the user's own), its sounds with those filters' values.
     if (const auto found = listedPlaces.contents.find (place.getKey()); found != listedPlaces.contents.end())
         return found->second;
 
@@ -886,7 +1374,7 @@ void Browser::showPlaces (std::vector<BrowserPlace> places)
     std::unique_ptr<juce::XmlElement> openness;
 
     if (placesRoot != nullptr)
-        openness = placesRoot->getOpennessState();
+        openness = getOpenness (*placesRoot);
     else
         openness = juce::parseXML (settings.get (Settings::browserOpenness));
 
@@ -911,7 +1399,7 @@ void Browser::showPlaces (std::vector<BrowserPlace> places)
     placesRoot = std::move (root);
 
     if (openness != nullptr)
-        placesRoot->restoreOpennessState (*openness);
+        restoreOpenness (*placesRoot, *openness);
     else if (sounds != nullptr)
         sounds->setOpen (true);
 
@@ -936,16 +1424,16 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
             }
 
             // Its folders open now stay open.
-            const auto reopen = [kind] (juce::TreeViewItem* item)
+            const auto reopen = [kind, &browser = *safeThis] (juce::TreeViewItem* item)
             {
                 if (auto* place = dynamic_cast<PlaceNode*> (item); place != nullptr && place->place.kind == kind && place->isOpen())
                 {
-                    const auto openness = place->getOpennessState();
+                    const auto openness = browser.getOpenness (*place);
                     place->setOpen (false);
                     place->setOpen (true);
 
                     if (openness != nullptr)
-                        place->restoreOpennessState (*openness);
+                        browser.restoreOpenness (*place, *openness);
                 }
             };
 
@@ -970,6 +1458,7 @@ void Browser::textEditorTextChanged (juce::TextEditor&)
     // Typed on after Enter or Down: the field keeps the keys, and the results to come don't take them. A filter's menu still
     // waiting for its counts doesn't open: they were of the words before.
     focusWhenShown = false;
+    userActed(); // text typed: a key or a selection waiting for rows is dropped
     model.cancelFilterOptions();
     updateSearch();
     showFilters(); // Clear, while the search has words
@@ -991,7 +1480,7 @@ void Browser::setFilters (const BrowserFilters& changed)
 
     // The folders open without filters, kept while they are set, open again once they are all taken away.
     if (filters.isEmpty() && ! changed.isEmpty() && placesRoot != nullptr)
-        opennessUnfiltered = placesRoot->getOpennessState();
+        opennessUnfiltered = getOpenness (*placesRoot);
 
     model.cancelFilterOptions(); // counted for the filters before
     filters = changed;
@@ -1000,7 +1489,7 @@ void Browser::setFilters (const BrowserFilters& changed)
 
     if (filters.isEmpty() && opennessUnfiltered != nullptr)
     {
-        placesRoot->restoreOpennessState (*opennessUnfiltered);
+        restoreOpenness (*placesRoot, *opennessUnfiltered);
         opennessUnfiltered = nullptr;
     }
 
@@ -1085,6 +1574,10 @@ void Browser::runWhenSearchShown()
 
     if (std::exchange (focusWhenShown, false))
         focusTree();
+
+    // A key pressed while they came: on them now (later, on the message loop), if it is still wanted.
+    if (queuedKey.key.has_value() && queuedKey.row == nullptr)
+        replayQueuedKey();
 }
 
 void Browser::focusTreeAfterSearch()
@@ -1159,8 +1652,15 @@ void Browser::textEditorEscapeKeyPressed (juce::TextEditor&)
 
 void Browser::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Once Phazite Sounds are installed, their place lists them, and search and the filters find them.
-    if (const auto installed = soundPack.isInstalled(); installed != soundPackInstalled)
+    // Once Phazite Sounds are installed, their place lists them, and search and the filters find them. Asked of the disk
+    // only as the download's state changes, not at each of its progress's messages.
+    if (const auto state = soundPack.getState(); state != packState)
+    {
+        packState = state;
+        model.soundPackChanged();
+    }
+
+    if (const auto installed = model.isSoundPackInstalled(); installed != soundPackInstalled)
     {
         soundPackInstalled = installed;
         library.refresh();
@@ -1565,7 +2065,7 @@ void Browser::startSwap (DeviceID device, int pad)
     }
 
     previewer.stop();
-    treeBeforeSwap = tree->getOpennessState (false); // with the row selected
+    treeBeforeSwap = getTreeState(); // with the row selected
     scrollBeforeSwap = tree->getViewport()->getViewPositionY();
     searchBeforeSwap = searchField.getText();
     filtersBeforeSwap = filters;
@@ -1646,8 +2146,10 @@ void Browser::endSwap()
         [this, before = std::shared_ptr<juce::XmlElement> (std::move (treeBeforeSwap)), scroll = scrollBeforeSwap]
         {
             if (before != nullptr)
-                tree->restoreOpennessState (*before, true);
+                restoreTreeState (*before);
 
+            // At once, though a folder still being read has fewer rows than it will: the scroll can fall short of where it
+            // was, and isn't made again as its rows come (docs/backlog.md: "The browser's scroll after a Swap ...").
             scrollTreeTo (scroll);
             selectionMoved();
         });
@@ -1922,15 +2424,9 @@ void Browser::saveTrackPreset (TrackID track)
 
 void Browser::presetSaved (const juce::File& file)
 {
-    // Search finds it, and Presets shows it, selected.
+    // Search finds it, and Presets shows it, selected, once the index has it (Presets lists what the index holds).
+    revealWhenIndexed = std::pair { BrowserPlace::Kind::presets, file };
     library.notePresetSaved();
-
-    juce::MessageManager::callAsync (
-        [safeThis = juce::Component::SafePointer<Browser> (this), file]
-        {
-            if (safeThis != nullptr)
-                safeThis->reveal (BrowserPlace::Kind::presets, file);
-        });
 }
 
 void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
@@ -1946,12 +2442,58 @@ void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
         if (place == nullptr || place->place.kind != kind)
             continue;
 
-        const auto openness = place->getOpennessState();
+        const auto openness = getOpenness (*place);
         place->setOpen (false);
         place->setOpen (true);
 
         if (openness != nullptr)
-            place->restoreOpennessState (*openness);
+            restoreOpenness (*place, *openness);
+
+        revealIn (kind, file);
+        return;
+    }
+}
+
+void Browser::revealIn (BrowserPlace::Kind kind, const juce::File& file)
+{
+    // Down to the file, a folder at a time, each once its rows are in (a folder read on a listing thread).
+    if (isWaitingForRows())
+    {
+        afterSearch (
+            [safeThis = juce::Component::SafePointer<Browser> (this), kind, file]
+            {
+                if (safeThis != nullptr)
+                    safeThis->revealIn (kind, file);
+            });
+        return;
+    }
+
+    if (placesRoot == nullptr)
+        return;
+
+    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+    {
+        auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
+
+        if (place == nullptr || place->place.kind != kind || ! place->isOpen())
+            continue;
+
+        // On once a folder being read has its rows (dropped if it closes or goes first).
+        const auto onceFilled = [this, kind, file] (Node& reading)
+        {
+            reading.afterFill.push_back (
+                [safeThis = juce::Component::SafePointer<Browser> (this), kind, file]
+                {
+                    if (safeThis != nullptr)
+                        safeThis->revealIn (kind, file);
+                });
+        };
+
+        if (place->reading)
+        {
+            onceFilled (*place);
+            return;
+        }
 
         for (juce::TreeViewItem* parent = place; parent != nullptr;)
         {
@@ -1973,12 +2515,22 @@ void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
                     return;
                 }
 
-                node->setOpen (true);
+                if (! node->isOpen())
+                    node->setOpen (true);
+
+                if (node->reading)
+                {
+                    onceFilled (*node);
+                    return;
+                }
+
                 next = node;
             }
 
             parent = next;
         }
+
+        return;
     }
 }
 
@@ -2118,6 +2670,9 @@ void Browser::visibilityChanged()
     // A hidden browser plays nothing, and swaps nothing: what a swap tried stays, as anything else leaves it.
     if (isVisible())
     {
+        // Its open folders were read as they opened: looked at again only once the keys or the front are taken again.
+        wasFocused = hasKeyboardFocus (true);
+        wasInFront = juce::Process::isForegroundProcess();
         startTimerHz (10);
     }
     else
@@ -2168,6 +2723,23 @@ void Browser::timerCallback()
     }
 
     previewer.keepInTime (projectContext);
+
+    // A folder whose read has waited on its drive for a few seconds: its line says the drive isn't answering.
+    for (auto* node : openingRows)
+        node->sayIfLate();
+
+    // The browser taking the keys again, or Phazite coming to the front (the user back from Explorer or another program):
+    // its open folders looked at again, what changed in them outside brought up to date. No folder is watched meanwhile.
+    const auto focused = hasKeyboardFocus (true);
+    const auto inFront = juce::Process::isForegroundProcess();
+
+    if (inFront && ! wasInFront)
+        lookAgainAtOpenFolders (true);
+    else if (focused && ! wasFocused)
+        lookAgainAtOpenFolders (false);
+
+    wasFocused = focused;
+    wasInFront = inFront;
 
     // A one-shot ends by itself.
     if (const auto playing = previewer.isPlaying(); playing != wasPlaying)

@@ -982,3 +982,62 @@ TEST_CASE ("A Swap asked for while the Keep before it still copies its sound in 
     phazite::test::waitForAudioWork (song.context);
     CHECK (phazite::getDeviceHandle (song.context, drums).getPadName (36) == juce::String ("Kick One"));
 }
+
+TEST_CASE ("A row to be selected again as a Swap ends, its folder still being read, isn't once the user has selected another")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): the row selected before a Swap was selected once its folder's rows came,
+    // beside what the user had selected meanwhile.
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
+    const auto pack = song.getSoundsFolder().getChildFile ("Pack");
+    phazite::test::writeSound (pack.getChildFile ("Kick One.wav"), 0.2);
+    phazite::test::writeSound (pack.getChildFile ("Kick Two.wav"), 0.3);
+
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack sounds { temp.folder.getChildFile ("Packs") };
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings);
+    library.addUserFolder (pack);
+    REQUIRE (waitForIndex (library));
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
+    phazite::test::TestWindow window (browser, 320, 700);
+    phazite::test::dispatchPendingMessages(); // the tree makes its rows' components
+
+    // Kick Two selected in the pack; a Swap on the kick's pad.
+    phazite::test::Mouse mouse (browser.getTree());
+    mouse.click (getRow (browser, "Pack").getCentre());
+    phazite::test::dispatchPendingMessages();
+    mouse.click (getRow (browser, "Kick Two").getCentre());
+    phazite::test::dispatchPendingMessages();
+    browser.startSwap (drums, 36);
+    waitForRows (browser);
+    REQUIRE (browser.isSwapping());
+
+    // Esc, the pack's read held as a drive asleep holds it: the pack open again, Kick Two to be selected once its rows are in.
+    library.setListsFromIndex (false);
+    const auto going = std::make_shared<std::atomic<bool>> (false);
+    library.setBeforeListing (
+        [going, pack] (const juce::File& folder)
+        {
+            while (folder == pack && ! going->load())
+                juce::Thread::sleep (1);
+        });
+
+    window.pressKey (escapeKey);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Reading this folder..."); }));
+
+    // Recent selected by the user meanwhile: it stays the one selected.
+    mouse.click (getRow (browser, "Recent").getCentre());
+    phazite::test::dispatchPendingMessages();
+    *going = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! library.isReadingFolders() && ! browser.isReadingFolders() && getRows (browser).contains ("Kick Two"); }));
+    phazite::test::dispatchPendingMessages();
+    library.setBeforeListing (nullptr);
+    library.setListsFromIndex (true);
+
+    auto& tree = browser.getTree();
+    REQUIRE (tree.getNumSelectedItems() == 1);
+    CHECK (tree.getSelectedItem (0)->getAccessibilityName().startsWith ("Recent"));
+}

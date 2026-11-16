@@ -27,7 +27,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <map>
+#include <optional>
+#include <set>
 #include <tuple>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -128,6 +131,14 @@ public:
     // places the newest filters leave (the tree shows what it showed meanwhile).
     bool isWaitingForRows() const noexcept { return searchPending || placesPending; }
 
+    // Whether a folder of the tree is being read, its rows still to come (tests).
+    bool isReadingFolders() const noexcept { return ! openingRows.empty(); }
+
+    // How many rows the tree has made since the program started (the gates: a folder looked at again that hasn't changed
+    // makes none). And its open folders looked at again, as when it takes the keys again or Phazite comes to the front.
+    static juce::int64 countRowsMade() noexcept;
+    int lookAgainAtOpenFolders (bool cameToFront); // how many it looked at again
+
     // A row's menu, as a right-click shows it: an item's (into the song, favorites, collections, its folder), or a place's
     // (a collection's: rename or delete it). And the field that names a collection, while it shows.
     juce::PopupMenu getItemMenu (const LibraryItem&, bool canRemoveFolder);
@@ -153,14 +164,16 @@ private:
     SoundPack& soundPack;
     Settings& settings;
     const ProjectContext& projectContext;
-    BrowserModel model;              // what the tree shows
-    bool soundPackInstalled = false; // when the tree last showed it
+    BrowserModel model;                        // what the tree shows
+    bool soundPackInstalled = false;           // when the tree last showed it
+    std::optional<SoundPack::State> packState; // the download's, as last told
 
     ViewTitle title { "Browser" };
     SearchField searchField;
     FilterBar filterBar;
     BrowserFilters filters;
     std::unique_ptr<juce::XmlElement> opennessUnfiltered; // the places' folders open before filters were set
+    std::set<Node*> openingRows;                          // whose folders are being read (Node::openWith())
     std::unique_ptr<Tree> tree;
     std::unique_ptr<RootNode> placesRoot, searchRoot;
     std::unique_ptr<RootNode> swapRoot;      // while a device's presets are swapped, they alone (makeSwapRoot())
@@ -212,8 +225,44 @@ private:
     void saveSelectedTrackPreset();
     void choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save);
     void presetSaved (const juce::File&);
-    void reveal (BrowserPlace::Kind, const juce::File&); // a file in a place: its folders opened, and it selected
+    void reveal (BrowserPlace::Kind, const juce::File&);   // a file in a place: its folders opened, and it selected
+    void revealIn (BrowserPlace::Kind, const juce::File&); // the place's folders opened down to it, each once its rows are in
+    std::optional<std::pair<BrowserPlace::Kind, juce::File>> revealWhenIndexed; // a preset saved: once the index has it
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);
+    void updateRows (juce::TreeViewItem& parent, const BrowserContents&); // in place: only what differs added, moved or taken away
+    bool wasFocused = false, wasInFront = false;                          // at the timer's last look
+    static constexpr double lookAgainMilliseconds = 5000.0;               // a folder looked at again at most once in so long
+    static constexpr int mostLookedAgain = 16;                            // open folders looked at again at once, those in view first
+
+    // A key that moves or Enter, pressed while the rows it is for are to come: the folder selected being read (row), or the
+    // newest search's results or filters' places (none). Run on them once they are in, if they come within a moment of it
+    // and nothing else was done first (a click, another key, the selection moved, text typed): else dropped. Never run in the
+    // middle of a change of the tree: later, on the message loop.
+    struct QueuedKey
+    {
+        std::optional<juce::KeyPress> key;
+        Node* row = nullptr;
+        double at = 0.0; // devices::Clock
+    };
+
+    QueuedKey queuedKey;
+    int keyGeneration = 0; // one more at each drop: a replay on its way sees it
+    static constexpr double keyWaitMilliseconds = 1000.0;
+    void queueKey (const juce::KeyPress&, Node* row);
+    void dropQueuedKey();
+    void userActed(); // a click, a key, the selection moved, text typed: what waited for rows (a key, a selection) dropped
+    void replayQueuedKey();
+
+    // The tree's openness, as JUCE's TreeViewItem::getOpennessState() and restoreOpennessState() keep it, but for a folder
+    // still being read: the openness asked of what it holds is kept on its row and given to its rows once they are in
+    // (Node::filledWith()), as is the selection (selectWanted()), so that nothing open within it comes back closed.
+    std::unique_ptr<juce::XmlElement> getOpenness (const juce::TreeViewItem&) const;
+    void restoreOpenness (juce::TreeViewItem&, const juce::XmlElement&);
+    std::unique_ptr<juce::XmlElement> getTreeState() const; // the root's, and the rows selected, as TreeView::getOpennessState (false)
+    void restoreTreeState (const juce::XmlElement&);
+    juce::StringArray wantedSelection; // rows to select once they are in, by their identifier strings
+    void selectWanted();
+    bool restoringRows = false; // selecting what was asked for, not the user
     // What search finds for the text in the field, found in the background (BrowserModel::startSearch()): the tree shows the
     // rows it showed until the newest text's arrive. Again, to look again for the same (the index changed).
     void updateSearch (bool again = false);

@@ -102,6 +102,48 @@ beats and length. The index reads loop data on its own thread, after it has list
 what it read in `Library facts.txt` beside the settings, by each file's path, size and time, so that a later start
 reads only what is new or changed.
 
+**Opening a folder.** The window never waits for the disk as a place or a folder opens, and a folder shows what it holds
+now, as every DAW's browser does. Phazite Sounds, the user's folders and the presets' folders are what the index walks:
+once it has walked them to the end, their folders open from the index, at once, and are read from the disk all the
+same, on a thread of their own. Where the folder differs (a file added, removed or renamed from Explorer, or bounced
+into it by another program), its rows are brought up to date in place (what is selected, what is open and where the
+list is scrolled stay; nothing is remade where nothing differs), and the index is patched for that folder by its own
+rules, so that search and the filters find what is there. While the index is first made, or in a library larger than
+it holds (50,000 sounds), a folder is read on a thread of its own alone: its row says "Reading this folder..." until its
+rows are in. Down, Up or Enter pressed on that folder meanwhile act on its rows once they are in, if they come within a
+moment and nothing else was done first (a click, another key, text typed); else the key is dropped, never run later on
+what is selected then. Nothing else waits for it: the search, the filters, other folders and their keys go on.
+
+A drive that doesn't answer (a network drive asleep) takes one read thread and no more: a folder's reads are joined
+(opened again, looked at again, it waits for the read in flight), and each root (Phazite Sounds, each of the user's
+folders, each presets' folder) has one read in flight at a time, until that read has waited on the system for three
+seconds: then the root's next folder is read beside it (a link within the root to a drive asleep holds up only its own
+folder; a file's header that hangs counts the same). While every read thread busy waits on the system that long (the
+four at least), a spare thread takes the next read, up to one for each root of the reads out and one more; a folder
+whose read has waited on the system, or to start, for those three seconds says "This drive isn't answering..." in place
+of "Reading this folder...". An indexed folder keeps showing the index's rows meanwhile; closing it lets go of what it
+would have read. A folder's rows come from what is known of its files (the index, the loop data read before, their
+names) and its presets' headers (small files: a file that isn't a preset Phazite reads is left out); where the index
+holds the folder and it changed, the new sounds' headers (their loop data) are read after the rows are shown, one at a
+time, as the index is patched, and the rows change again only if those make a difference. The library's going waits for
+none of them.
+Folders that were open within a folder still being read (as the browser restores what was open at the start, after a
+swap or a filter) open again once its rows are in, as does the row that was selected, unless the user selected another
+meanwhile.
+
+A folder already open when what it holds changes is read again as the browser takes the keys again, or as Phazite comes
+back to the front (from Explorer, or the program that wrote into the folder), no more than 16 at a time (those in view
+first), and the next time it opens. Coming back to the front reads again those in view whatever their last read (the
+user may have changed the folder seconds after looking at it); the keys taken again within Phazite, and folders out of
+view, at most once in five seconds. The index takes a read's patch only where it listed the folder after the walk did,
+so that a walk's older listing doesn't bring back a file deleted since, nor a patch's older listing the walk's.
+No folder is watched: a change from outside comes from the user working outside Phazite, who looks at the browser
+again by coming back to it, which is when it is read; and watching every folder of a large library, network drives
+among them, costs a handle for each and isn't reliable on network shares. A folder that came from outside (a new folder
+of samples) is walked by the index as a whole; a folder that leads back to one it is in (a link) is never patched
+through. A root inside another (a user's folder within Phazite Sounds) is walked once, with the root it is in, whose
+folders' words its sounds' tags take, read again or walked.
+
 ## Filters
 
 Under the search field is a chip for each of **Type**, **Loop**, **Tempo** and **Key**.

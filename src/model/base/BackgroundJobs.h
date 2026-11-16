@@ -44,6 +44,10 @@ public:
     // stopRunning. Not on one of its own threads.
     void removeAll (bool stopRunning);
 
+    // Drops the jobs that wait, without waiting for those that run (one stuck in the system, which is left to end when it
+    // returns). Any thread.
+    void dropWaiting();
+
     BackgroundJobs (const BackgroundJobs&) = delete;
     BackgroundJobs& operator= (const BackgroundJobs&) = delete;
 

@@ -210,6 +210,7 @@ and nothing is listed in both.
 | Updates and the installer signed: the update file's signature checked with a key built into Phazite, the installer's with Windows, and the file held from its check to its start | `src/services/Updates.cpp` | M | 8 | model-project-services 7, tests-model 14, product-gaps 15 |
 | The rescan of the MIDI inputs every four seconds taken off the message thread; what the autosave costs on the message thread measured apart | `src/model/engine/AudioIO.cpp` | — | — | performance audit |
 | The browser library's loop check keyed by volume and file identifier: an inode or an NTFS file index alone can be shared by folders on different volumes, so a linked folder can be skipped | `src/services/Library.cpp` | S | — | plan |
+| The browser's small leftovers of folders read in the background: a key held while a folder's rows are read moves one row (queue a count of moves, dropped after the moment); the scroll after a Swap ends is set before a folder still being read has its rows (scroll again as they come, unless the user scrolled); the details of a selected sound stay as the index's first publish had them until the row is looked at again (refresh them when the second lands); a subfolder deleted outside shows "No sounds here" until its parent is read again (remove its row and read the parent); and the name field of a new collection isn't placed again when rows come in above it | `src/ui/browser/Browser.cpp` | S | 6 | the known-bugs round's reviews |
 
 ## Tests
 
