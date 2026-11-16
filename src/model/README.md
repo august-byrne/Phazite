@@ -31,8 +31,9 @@ What every area builds on.
 | `internal/SongIndex.h` | Where a song's tracks, clips and notes are by their IDs, and its alias groups (`Song::getIndex()`): what the model's functions that take IDs find elements by, made from the song's tree as it is first asked and kept exact by the tree's notifications; the tree stays the only truth. In the tests each answer is compared with a walk through the song. |
 | `Toggles.h` | Switches that act on several things: `toggleAll()`, `areAllOn()`. |
 | `BackgroundJobs.h` | Jobs run in the background on threads of their own, never ended by force. |
-| `Json.h` | JSON read from text (`parseJson()`), wherever Phazite reads it, without the numbers JUCE's parser can't count. |
-| `WholeFile.h` | A file written whole or not at all, which the project file, the autosave, the versions' files and presets are written with; and the file of a full path that such a file holds (`makeFileOfFullPath()`). |
+| `Json.h` | JSON read from text (`parseJson()`), wherever Phazite reads it, without the numbers JUCE's parser can't count; and a number in any text with an exponent JUCE's reader of numbers would overflow, told and made one it reads (`hasExponentTooLongToRead()`, `makeExponentReadable()`, `readDouble()`, `readFloat()`). |
+| `Numbers.h` | Whole numbers made of numbers that may be no finite number (from a plug-in, a file, a device, a division), without a cast that is undefined: `toWhole()`, `roundToWhole()`, `roundToNearestInt()`, `keepFinite()`. |
+| `WholeFile.h` | A file written whole or not at all, which the project file, the autosave, the versions' files and presets are written with, and the tests' hook that makes such a write fail or slow (`WholeFileHook`); and the file of a full path that such a file holds (`makeFileOfFullPath()`). |
 
 ## commands/
 

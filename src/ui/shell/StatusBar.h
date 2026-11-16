@@ -21,6 +21,7 @@ namespace phazite::ui
 {
 class StatusBar : public juce::Component,
                   private ProjectContext::Listener,
+                  private CommandRegistry::Listener,
                   private juce::ChangeListener,
                   private juce::Timer
 {
@@ -84,6 +85,8 @@ private:
     void projectChanged() override;
     void songChanged (const SongChanges&) override;
     void versionsChanged() override { showBranch(); }
+    void commandAdded (const Command&) override {}
+    void commandInvoked (const Command&) override;                   // what it made that its name doesn't say, in the hint bar
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection, or the range selected
     void timerCallback() override;                                   // a few times a second
 };

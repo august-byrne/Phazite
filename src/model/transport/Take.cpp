@@ -6,6 +6,7 @@
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
@@ -443,7 +444,7 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, Take* goesOnFrom)
         }
 
         bytesPerFrame += 3 * (std::int64_t) channels.size();
-        auto input = std::make_unique<engine::Recording::Input> (std::move (channels), (int) (bufferSeconds * rate));
+        auto input = std::make_unique<engine::Recording::Input> (std::move (channels), toWhole<int> (bufferSeconds * rate));
         audio->input = input.get();
         inputs.push_back (std::move (input));
         take->audio.push_back (std::move (audio));
@@ -474,14 +475,14 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session, Take* goesOnFrom)
     const auto compensation = engine::Engine::getOutputLatency (*plan);
     const auto correction = session.getAudioIO().getRecordingCorrection(); // milliseconds
     take->midiShift = session.getOutputLatency() + compensation;
-    take->audioShift = session.getInputLatency() + take->midiShift + std::llround (correction * rate / 1000.0);
+    take->audioShift = session.getInputLatency() + take->midiShift + roundToWhole<std::int64_t> (correction * rate / 1000.0);
 
     // Given to the engine at once. One that goes on after a jump starts where the playhead lands, the jump the message
     // thread asks for next, once this is given (only it asks for locates); a block that still plays the take before hands
     // it on to it. It keeps the notes played once the one before is finished, which needs those played since it started.
     auto recording = std::make_unique<engine::Recording> (std::move (inputs));
     take->recording = recording.get();
-    take->keepFrom = engine.getClock() - (goesOnFrom != nullptr ? 0 : (std::int64_t) std::llround (earlyNoteSeconds * rate));
+    take->keepFrom = engine.getClock() - (goesOnFrom != nullptr ? 0 : roundToWhole<std::int64_t> (earlyNoteSeconds * rate));
 
     if (goesOnFrom != nullptr)
     {
@@ -713,12 +714,12 @@ std::vector<Take::PlayedNotes> Take::collectNotes (std::int64_t startSample, std
     std::vector<Played> notes;
     std::vector<PlayedControl> controls;               // every one played, before the take's start too
     const auto end = startSample + length - midiShift; // what was heard last, as if nothing looped
-    const auto early = afterJump ? (std::int64_t) 0 : (std::int64_t) std::llround (earlyNoteSeconds * rate);
+    const auto early = afterJump ? (std::int64_t) 0 : roundToWhole<std::int64_t> (earlyNoteSeconds * rate);
     std::array<int, 129> lastValue; // each controller's, and the bend's (128), as played last
     lastValue.fill (-1);
     std::array<std::ptrdiff_t, 129> lastIndex; // and where its last one kept is in controls
     lastIndex.fill (-1);
-    const auto millisecond = (std::int64_t) std::llround (rate / 1000.0);
+    const auto millisecond = roundToWhole<std::int64_t> (rate / 1000.0);
 
     // Each note played into the track, from where it was heard to where it ended, as if nothing looped; one still held
     // ends where the take does. One played a moment before the take started (a downbeat played early after the count-in,

@@ -3,6 +3,7 @@
 // curve, under its track's clips, which the tools edit through the model (model/automation/AutomationModel.h).
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
+#include "model/base/Numbers.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/components/ParameterText.h"
 #include "ui/components/ValueText.h"
@@ -302,7 +303,7 @@ void Playlist::AutomationLaneView::typeValue (int index)
 
     const auto indices = songSelection.getSelectedAutomationPoints().indices;
     const auto point = points[(size_t) index];
-    const auto centre = juce::Point<int> (juce::roundToInt (beatToX (point.beat)), juce::roundToInt (valueToY (point.value)));
+    const auto centre = juce::Point<int> (roundToNearestInt (beatToX (point.beat)), roundToNearestInt (valueToY (point.value)));
 
     // Over the point, as wide as the parameter's texts, following the lane as it scrolls. One that has finished, hidden, goes
     // now.

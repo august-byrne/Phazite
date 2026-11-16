@@ -325,6 +325,7 @@ target_sources(phazite_core PRIVATE
     src/model/base/IDs.h
     src/model/base/Json.cpp
     src/model/base/Json.h
+    src/model/base/Numbers.h
     src/model/base/Selection.cpp
     src/model/base/Schema.cpp
     src/model/base/Song.cpp
@@ -1337,6 +1338,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NoteTests.cpp
         tests/NoticesTests.cpp
         tests/NotesModelTests.cpp
+        tests/NumbersTests.cpp
         tests/PaintCheck.cpp
         tests/PaintCheck.h
         tests/PaintTests.cpp
@@ -1446,6 +1448,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
         tests/VersionsCheckoutTests.cpp
+        tests/VersionsFolderCopyTests.cpp
         tests/VersionsGoingBackTests.cpp
         tests/VersionsHearingTests.cpp
         tests/VersionsKeptWholeTests.cpp

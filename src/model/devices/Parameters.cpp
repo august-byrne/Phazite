@@ -383,6 +383,11 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 
 void setValueSetByHand (Song& song, const FoundParameter& parameter, float value)
 {
+    // A value typed, or a plug-in's, that is no finite number changes nothing: juce::jlimit() would pass a NaN on (known
+    // bug 148).
+    if (! std::isfinite (value))
+        return;
+
     const auto& ref = parameter.ref;
     auto* undo = &song.getUndoManager();
     auto state = parameter.state;

@@ -234,7 +234,9 @@ Each item says more under the pointer. In a narrow window the items leave the hi
 first.
 
 **The hint bar** says what clicking, dragging and the modifier keys do under the pointer, shows the guide's next step,
-and shows alerts such as no audio output. While a drag moves something it says where that is now: a clip's start
+and shows alerts such as no audio output. For six seconds after a command made less than its name says (Duplicate or
+Paste of notes, some of which would land past a clip that the next clip keeps from growing), it says so ("2 notes of 3
+weren't made..."), the undo step named for what was made ("Duplicate Note"). While a drag moves something it says where that is now: a clip's start
 ("Starts at 17.3.1", and its track once it moves to another), a trimmed edge with the clip's length ("Ends at 19.1.1,
 2 bars long"), a note's pitch and place ("E4 at 3.2.1", counted from its clip), an automation point's value and place
 ("-6.0 dB at 9.1.1").

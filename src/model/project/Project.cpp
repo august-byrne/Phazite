@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/BackgroundJobs.h"
+#include "model/base/Json.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -15,6 +16,7 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
@@ -29,6 +31,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -175,56 +178,121 @@ namespace
         }
     }
 
-    FoldersToCopy listFoldersToCopy (const juce::File& projectFolder)
+    // Which of those a list holds: all of them; or, for a first save, which copies the versions last (copyVersions()), what
+    // its history writes, the versions but their bounces; or all else, the bounces with it, which a render writes, each on a
+    // thread of its own (mayLeaveBehind()), and which can be as large as the audio.
+    enum class FoldersListed
+    {
+        all,
+        versions,
+        allButVersions
+    };
+
+    FoldersToCopy listFoldersToCopy (const juce::File& projectFolder, FoldersListed listed = FoldersListed::all)
     {
         FoldersToCopy list;
+        const auto versions = projectFolder.getChildFile ("Versions");
+        const auto bounces = versions.getChildFile ("bounces");
 
-        for (const auto* name : foldersCopied)
+        const auto add = [&list] (const juce::File& folder)
         {
-            const auto folder = projectFolder.getChildFile (name);
-
             if (folder.isDirectory() && ! (folder.isSymbolicLink() && isLinkElsewhere (folder, true, folder.getLinkedTarget())))
             {
                 list.folders.push_back (folder);
                 listFolder (folder, list);
             }
+        };
+
+        for (const auto* name : foldersCopied)
+        {
+            const auto folder = projectFolder.getChildFile (name);
+
+            if (listed == FoldersListed::all || (listed == FoldersListed::allButVersions) == (folder != versions))
+                add (folder);
+        }
+
+        if (listed == FoldersListed::allButVersions)
+            add (bounces);
+
+        if (listed == FoldersListed::versions)
+        {
+            std::erase_if (list.folders, [&bounces] (const juce::File& each) { return each == bounces || each.isAChildOf (bounces); });
+            std::erase_if (list.files,
+                           [&] (const ListedFile& each)
+                           {
+                               const auto isBounce = each.file.isAChildOf (bounces);
+                               list.bytes -= isBounce ? each.size : 0;
+                               return isBounce;
+                           });
         }
 
         return list;
     }
 
     // Whether a file the copy couldn't copy may be left behind: a render of an audio clip in the Cache folder, which Phazite
-    // renders again from the clip as it plays, that went or changed since it was listed (closing the project tidied it up, or
-    // a clip rendered it again). Nothing else: a frozen track's file there may be all that is left of a plug-in this
-    // computer hasn't, so it is never left behind, and any other failure (a full disk, a file another program holds) fails
-    // the copy.
-    bool mayLeaveBehind (const ListedFile& listed, const juce::File& cacheFolder)
+    // renders again from the clip as it plays, or a commit's bounce in the versions' bounces folder, which Phazite bounces
+    // again as it is asked for, that went or changed since it was listed (closing the project tidied it up, a clip rendered it
+    // again, or a bounce was being written on a thread of its own). Nothing else: a frozen track's file there may be all that
+    // is left of a plug-in this computer hasn't, so it is never left behind, and any other failure (a full disk, a file
+    // another program holds longer than copyFile() tries) fails the copy.
+    bool mayLeaveBehind (const ListedFile& listed, const juce::File& projectFolder)
     {
-        if (! listed.file.isAChildOf (cacheFolder) || ! listed.file.getFileName().startsWith (renderFilePrefix))
+        const auto isRender =
+            listed.file.isAChildOf (projectFolder.getChildFile ("Cache")) && listed.file.getFileName().startsWith (renderFilePrefix);
+        const auto isBounce = listed.file.getParentDirectory() == projectFolder.getChildFile ("Versions").getChildFile ("bounces")
+                              && listed.file.hasFileExtension (".flac");
+
+        if (! isRender && ! isBounce)
             return false;
 
         return ! listed.file.existsAsFile() || listed.file.getSize() != listed.size
                || listed.file.getLastModificationTime() != listed.modified;
     }
 
+    // Tries something again while it fails, for a second or so, as another program (an antivirus, the indexer, a backup
+    // tool) may hold a file a moment just as it is made or changed: on Windows such a hold refuses what asks for more
+    // sharing than it gives. Whether it worked in the end; it stops trying once shouldStop says so. Never on the message
+    // thread, which no sleep may hold up: there, it tries once.
+    bool tryAgainBriefly (const std::function<bool()>& attempt, const std::function<bool()>& shouldStop)
+    {
+        const auto mayWait = ! juce::MessageManager::existsAndIsCurrentThread();
+
+        for (int tries = 0;; ++tries)
+        {
+            if (attempt())
+                return true;
+
+            if (! mayWait || tries >= 50 || shouldStop())
+                return false;
+
+            juce::Thread::sleep (20);
+        }
+    }
+
     // A file copied into a new one, a piece at a time, so that a copy can stop between pieces, with its time of change kept
     // (a frozen track's file is known by it); counts what it copied. What kept it from being copied, if it stopped or
-    // anything couldn't be read or written.
+    // anything couldn't be read or written; a file another program holds a moment is tried again (tryAgainBriefly()).
     juce::Result copyFile (const juce::File& from, const juce::File& to, const std::function<bool()>& shouldStop,
                            std::atomic<juce::int64>& copied)
     {
-        juce::FileInputStream in (from);
+        std::unique_ptr<juce::FileInputStream> in;
 
-        if (! in.openedOk())
-            return juce::Result::fail ("it couldn't be read (" + in.getStatus().getErrorMessage().trim() + ")");
+        // One that went is no hold to wait out.
+        tryAgainBriefly ([&] { return (in = std::make_unique<juce::FileInputStream> (from))->openedOk() || ! from.existsAsFile(); },
+                         shouldStop);
+
+        if (! in->openedOk())
+            return juce::Result::fail ("it couldn't be read (" + in->getStatus().getErrorMessage().trim() + ")");
 
         juce::int64 total = 0;
 
         {
-            juce::FileOutputStream out (to);
+            std::unique_ptr<juce::FileOutputStream> stream;
 
-            if (! out.openedOk())
-                return juce::Result::fail ("its copy couldn't be made (" + out.getStatus().getErrorMessage().trim() + ")");
+            if (! tryAgainBriefly ([&] { return (stream = std::make_unique<juce::FileOutputStream> (to))->openedOk(); }, shouldStop))
+                return juce::Result::fail ("its copy couldn't be made (" + stream->getStatus().getErrorMessage().trim() + ")");
+
+            auto& out = *stream;
 
             constexpr int pieceBytes = 1 << 20;
             juce::HeapBlock<char> piece (pieceBytes);
@@ -234,10 +302,10 @@ namespace
                 if (shouldStop())
                     return juce::Result::fail ("the copy was cancelled");
 
-                const auto read = in.read (piece, pieceBytes);
+                const auto read = in->read (piece, pieceBytes);
 
                 if (read < 0)
-                    return juce::Result::fail ("it couldn't be read to its end (" + in.getStatus().getErrorMessage().trim() + ")");
+                    return juce::Result::fail ("it couldn't be read to its end (" + in->getStatus().getErrorMessage().trim() + ")");
 
                 if (read == 0)
                     break;
@@ -263,7 +331,8 @@ namespace
             return juce::Result::fail ("it changed while it was copied (" + juce::String (total) + " bytes read, " + juce::String (now)
                                        + " there now)");
 
-        if (const auto changed = from.getLastModificationTime(); changed != juce::Time() && ! to.setLastModificationTime (changed))
+        if (const auto changed = from.getLastModificationTime();
+            changed != juce::Time() && ! tryAgainBriefly ([&] { return to.setLastModificationTime (changed); }, shouldStop))
             return juce::Result::fail ("its copy's time of change couldn't be set");
 
         return juce::Result::ok();
@@ -277,8 +346,6 @@ namespace
         for (const auto& folder : list.folders)
             if (! to.getChildFile (folder.getRelativePathFrom (from)).createDirectory())
                 return juce::Result::fail ("Phazite couldn't make the folder " + folder.getRelativePathFrom (from) + " of the copy.");
-
-        const auto cache = from.getChildFile ("Cache");
 
         for (const auto& listed : list.files)
         {
@@ -296,8 +363,9 @@ namespace
             if (shouldStop())
                 return juce::Result::fail ("The copy was cancelled.");
 
-            // A clip's render that went or changed while the copy ran is left behind, as if it hadn't been made yet.
-            if (mayLeaveBehind (listed, cache))
+            // A clip's render or a commit's bounce that went or changed while the copy ran is left behind, as if it hadn't been
+            // made yet.
+            if (mayLeaveBehind (listed, from))
             {
                 target.deleteFile();
                 continue;
@@ -312,6 +380,14 @@ namespace
                 return juce::Result::fail ("Phazite couldn't make the project's " + juce::String (name) + " folder.");
 
         return juce::Result::ok();
+    }
+
+    // A first save's copy of the project's versions, last, listed as it starts: what their history writes is all written by
+    // then (Project::VersionsCopier; known bug 169).
+    juce::Result copyVersions (const juce::File& from, const juce::File& to, const std::function<bool()>& shouldStop,
+                               std::atomic<juce::int64>& copied)
+    {
+        return copyFolders (from, to, listFoldersToCopy (from, FoldersListed::versions), shouldStop, copied);
     }
 
     // When this Phazite started: a copy marked before then was left by another run, which can't be writing it any more (one
@@ -618,6 +694,189 @@ namespace
                 element.setProperty (property, value, nullptr);
         }
 
+        // Whether a property holds a number Schema.h writes down, which a reader takes as a double: one the loader's table
+        // gives a range (getRanges()), a device's or a modulator's value set by hand (VALUES), a point's value; or numbers
+        // separated by spaces (inList): a step sequencer's steps, the sampler's slices.
+        bool holdsNumbers (const juce::ValueTree& element, const juce::Identifier& property, bool& inList)
+        {
+            inList =
+                (element.hasType (schema::MODULATOR) && property == schema::modulatorSteps)
+                || (element.hasType (schema::SOUNDS) && (property == schema::samplerSlices || property == schema::samplerSlicesRemoved));
+
+            if (inList || element.hasType (schema::VALUES) || (element.hasType (schema::POINT) && property == schema::pointValue))
+                return true;
+
+            const auto& ranges = getRanges();
+            return std::any_of (ranges.begin(), ranges.end(),
+                                [&] (const Range& range) { return element.hasType (*range.type) && property == *range.property; });
+        }
+
+        // Whether Phazite knows an element's type, by its name's pooled text (juce::Identifier keeps one of each): what isKnown()
+        // says, without looking a text up, for the walks that go through every element of a song as it opens.
+        bool isKnownType (const juce::Identifier& type)
+        {
+            static const auto known = []
+            {
+                std::unordered_set<const void*> types { schema::PHAZITE.getCharPointer().getAddress() };
+
+                for (const auto& [parent, children] : getPlaces())
+                {
+                    types.insert (juce::Identifier (parent).getCharPointer().getAddress());
+
+                    for (const auto& child : children)
+                        types.insert (juce::Identifier (child).getCharPointer().getAddress());
+                }
+
+                return types;
+            }();
+
+            return known.count (type.getCharPointer().getAddress()) > 0;
+        }
+
+        // The names of the properties that hold or name an ID of the song's (schema::holdsID(), namesID()), which their
+        // elements' types then tell apart.
+        bool mayHoldID (const juce::Identifier& property)
+        {
+            for (const auto* name :
+                 { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink, &schema::sendTo,
+                   &schema::deviceSidechain, &schema::laneDevice, &schema::curveDevice, &schema::modulatesDevice, &schema::trackPadDevice })
+                if (property == *name)
+                    return true;
+
+            return false;
+        }
+
+        // An ID as Phazite writes one: its whole number, its digits alone, the first not 0.
+        bool isWrittenAsPhazitesID (const juce::String& text)
+        {
+            return text.isNotEmpty() && text.length() <= 19 && text[0] != '0' && text.containsOnly ("0123456789");
+        }
+
+        // A number of a list within its range (Schema.h): a step sequencer's steps from -1 to 1, 0 for what is no finite
+        // number; the sampler's slices from 0 to 1, without what is none. One within it stays as it is written.
+        void keepListInRange (juce::ValueTree element, const juce::Identifier& property, double low, double high,
+                              std::optional<double> none)
+        {
+            if (! element.hasProperty (property))
+                return;
+
+            auto numbers = juce::StringArray::fromTokens (element[property].toString(), " ", {});
+            auto changed = false;
+
+            for (auto i = numbers.size(); --i >= 0;)
+            {
+                if (numbers[i].isEmpty())
+                    continue;
+
+                const auto number = readNumber (numbers[i]);
+                const auto finite = number.has_value() && std::isfinite (*number);
+
+                if (finite && *number >= low && *number <= high)
+                    continue;
+
+                changed = true;
+
+                if (! finite && ! none.has_value())
+                    numbers.remove (i);
+                else
+                    numbers.set (i, juce::String (finite ? juce::jlimit (low, high, *number) : *none));
+            }
+
+            if (changed)
+                element.setProperty (property, numbers.joinIntoString (" "), nullptr);
+        }
+
+        // One walk through the song's elements, before anything reads a number of it, with what other tools write in forms of
+        // their own: each number whose exponent JUCE's reader would overflow (Json.h: hasExponentTooLongToRead(); known bug
+        // 170) the same number in a text it reads, past every double's or 0, which the ranges then take as no finite number
+        // (a name that reads as such a number stays); and, but for a version's pieces (exponentsOnly), each switch and ID as
+        // Phazite writes it, where another tool wrote it otherwise ("true", "false", "12.0"), as the song plays it (a switch as
+        // juce::var reads it, an ID as readID() does), so that the versions, which compare text, see no change where there is
+        // none (known bug 179); and each list's numbers within their range. What Phazite wrote stays as it is.
+        void keepTexts (juce::ValueTree element, bool exponentsOnly)
+        {
+            const auto type = element.getType();
+
+            for (auto i = element.getNumProperties(); --i >= 0;)
+            {
+                const auto property = element.getPropertyName (i);
+                const auto& value = element[property];
+
+                if (! value.isString())
+                    continue;
+
+                const auto text = value.toString();
+                auto inList = false;
+
+                // An exponent needs its e: the cheap test first.
+                if (text.containsAnyOf ("eE") && holdsNumbers (element, property, inList))
+                {
+                    auto kept = text;
+
+                    if (inList)
+                    {
+                        auto numbers = juce::StringArray::fromTokens (text, " ", {});
+                        auto changed = false;
+
+                        for (auto& number : numbers)
+                            if (const auto readable = makeExponentReadable (number); readable != number)
+                            {
+                                number = readable;
+                                changed = true;
+                            }
+
+                        if (changed)
+                            kept = numbers.joinIntoString (" ");
+                    }
+                    else
+                    {
+                        kept = makeExponentReadable (text);
+                    }
+
+                    if (kept != text)
+                        element.setProperty (property, kept, nullptr);
+                }
+                else if (! exponentsOnly && mayHoldID (property) && ! isWrittenAsPhazitesID (text)
+                         && (schema::holdsID (element, property) || schema::namesID (element, property)
+                             || (type == schema::NOTE && property == schema::noteID)))
+                {
+                    if (const auto id = readID (value); id > 0 && id < maxID)
+                        element.setProperty (property, juce::String ((juce::int64) id), nullptr);
+                }
+            }
+
+            if (! exponentsOnly)
+            {
+                for (const auto& each : getSwitchProperties())
+                {
+                    if (type != *each.type || ! element.hasProperty (*each.property))
+                        continue;
+
+                    const auto& value = element[*each.property];
+
+                    if (value.isBool() || (value.isString() && (value.toString() == "1" || value.toString() == "0")))
+                        continue;
+
+                    if ((bool) value)
+                        element.setProperty (*each.property, true, nullptr);
+                    else if (each.offIsNone)
+                        element.removeProperty (*each.property, nullptr);
+                    else
+                        element.setProperty (*each.property, false, nullptr);
+                }
+
+                if (type == schema::MODULATOR)
+                    keepListInRange (element, schema::modulatorSteps, -1.0, 1.0, 0.0);
+
+                if (type == schema::SOUNDS)
+                    for (const auto* slices : { &schema::samplerSlices, &schema::samplerSlicesRemoved })
+                        keepListInRange (element, *slices, 0.0, 1.0, std::nullopt);
+            }
+
+            for (auto child : element)
+                if (isKnownType (child.getType()))
+                    keepTexts (child, exponentsOnly);
+        }
         // A full path on any system: this one's, one from the root ("/home/...", "\..."), or a Windows drive's ("C:..."). A
         // ':' anywhere else is part of a file's name, which Linux allows ("Audio/Loop 1:2.wav").
         bool isFullPath (const juce::String& path)
@@ -1035,6 +1294,7 @@ namespace
             void keep()
             {
                 auto state = song.getState();
+                keepTexts (state, false); // first: before anything reads a number
                 keepPlaces (state);
                 keepDevices (state);
                 keepNumbers (state);
@@ -1047,6 +1307,7 @@ namespace
                 countIDs (song);
                 keepSends (state, items);
                 keepNames (state, items);
+                forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
                 keepCurves();
                 keepPaths (state);
@@ -1063,6 +1324,56 @@ bool isLeftoverCopy (const juce::File& folder)
 void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal)
 {
     leftoverCopyRemoval = std::move (removal);
+}
+
+void makeExponentsReadable (juce::ValueTree song)
+{
+    consistent::keepTexts (std::move (song), true);
+}
+
+const std::vector<SwitchProperty>& getSwitchProperties()
+{
+    using namespace schema;
+
+    // clang-format off
+    static const std::vector<SwitchProperty> switches {
+        { &PHAZITE,   &loopFollowsSong,        false, true },
+        { &PHAZITE,   &loop,                   true,  false },
+        { &PHAZITE,   &metronome,              true,  false },
+        { &PHAZITE,   &patternsKeepTheirSpeed, true,  false },
+        { &PHAZITE,   &punch,                  false, false },
+        { &PHAZITE,   &gridSnap,               false, true },
+        { &PHAZITE,   &gridAdaptive,           false, true },
+        { &PHAZITE,   &gridTriplets,           false, false },
+        { &PIANOROLL, &gridSnap,               false, true },
+        { &PIANOROLL, &gridAdaptive,           false, true },
+        { &PIANOROLL, &gridTriplets,           false, false },
+        { &TRACK,     &trackMute,              true,  false },
+        { &TRACK,     &trackSolo,              true,  false },
+        { &TRACK,     &folderBus,              true,  false },
+        { &TRACK,     &trackFrozen,            true,  false },
+        { &TRACK,     &trackCollapsed,         false, false },
+        { &TRACK,     &trackPinned,            false, false },
+        { &TRACK,     &drumMode,               false, false },
+        { &MASTER,    &trackCollapsed,         false, false },
+        { &LANE,      &laneCollapsed,          true,  false },
+        { &DEVICE,    &deviceOff,              true,  false },
+        { &DEVICE,    &pluginInstrument,       true,  false },
+        { &CONTAINER, &deviceOff,              true,  false },
+        { &CONTAINER, &containerInstrument,    true,  false },
+        { &CHAIN,     &chainMute,              true,  false },
+        { &CHAIN,     &chainSolo,              true,  false },
+        { &SEND,      &sendPreFader,           true,  false },
+        { &MODULATOR, &deviceOff,              true,  false },
+        { &CLIP,      &clipMute,               true,  false },
+        { &CLIP,      &clipReversed,           true,  false },
+        { &NOTE,      &noteMute,               true,  false },
+        { &NOTE,      &noteSlide,              true,  false },
+        { &NOTE,      &notePortamento,         true,  false },
+    };
+    // clang-format on
+
+    return switches;
 }
 
 void makeConsistent (Song& song)
@@ -1141,9 +1452,13 @@ std::unique_ptr<Project> Project::create (const juce::File& parentFolder, const 
          { project->getAudioFolder(), project->getGeneratedFolder(), project->getRendersFolder(), project->getBackupsFolder() })
         subfolder.createDirectory();
 
+    // A first save that fails takes the folder made for it along, the project first, so that the name can be tried again:
+    // nothing else was there, as makeProjectFolder() makes only a folder that wasn't.
     if (const auto result = project->save(); result.failed())
     {
         error = result.getErrorMessage();
+        project.reset();
+        folder.deleteRecursively();
         return {};
     }
 
@@ -1519,24 +1834,33 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
 }
 
 //==============================================================================
-// A first save's copy of the project's folders on a background thread, as its progress window shows it; then, on the message
-// thread, the project moved into it (finishMoveTo()). Deleted before then, it stops the copy and deletes what was copied.
+// A first save's copy of the project's folders on a background thread, as its progress window shows it: all but the
+// versions on a thread of its own, then the versions by what writes them (VersionsCopier: the history's thread), each piece
+// counted and Cancel stopping either; then, on the message thread, the project moved into it (finishMoveTo()). Deleted
+// before then, it stops the copy and deletes what was copied.
 class Project::FolderCopy final : public TrackRender::Impl,
                                   private juce::Timer
 {
 public:
-    FolderCopy (Project& p, juce::File into, juce::File becomes, FoldersToCopy what, std::function<void (const juce::Result&)> callback)
+    FolderCopy (Project& p, juce::File into, juce::File becomes, FoldersToCopy what, juce::int64 versionsBytes,
+                std::function<void (const juce::Result&)> callback)
         : project (p),
           copy (std::move (into)),
           folder (std::move (becomes)),
           list (std::move (what)),
+          bytes (list.bytes + versionsBytes),
           onFinished (std::move (callback))
     {
         const auto from = project.getFolder();
+        const auto versionsWithTheRest = project.versionsCopier.copy == nullptr;
         jobs.add (
-            [this, from] (const BackgroundJobs::ShouldStop& shouldStop)
+            [this, from, versionsWithTheRest] (const BackgroundJobs::ShouldStop& shouldStop)
             {
-                result = copyFolders (from, copy, list, shouldStop, copied);
+                result = copyFolders (from, copy, list, shouldStop, state->copied);
+
+                if (result.wasOk() && versionsWithTheRest)
+                    result = copyVersions (from, copy, shouldStop, state->copied);
+
                 done = true;
             });
 
@@ -1546,28 +1870,47 @@ public:
     ~FolderCopy() override
     {
         stopTimer();
+        *alive = false;
         jobs.removeAll (true); // asked to stop between pieces, and waited for
+
+        // The versions' copy on the history's thread, asked to stop and waited for while it runs (no more than a piece).
+        state->stop = true;
+
+        if (state->running.load())
+            state->finished.wait (-1);
 
         if (! finished)
             copy.deleteRecursively();
+
+        endVersionsCopy();
     }
 
     float getProgress() const override
     {
-        return list.bytes > 0 ? juce::jlimit (0.0f, 1.0f, (float) ((double) copied.load() / (double) list.bytes)) : 1.0f;
+        return bytes > 0 ? juce::jlimit (0.0f, 1.0f, (float) ((double) state->copied.load() / (double) bytes)) : 1.0f;
     }
 
     juce::String getTitle() const override { return "Saving " + folder.getFileName(); }
 
 private:
+    // What the versions' copy on another thread shares with this, which may go first.
+    struct State
+    {
+        std::atomic<juce::int64> copied { 0 };
+        std::atomic<bool> stop { false }, running { false };
+        juce::WaitableEvent finished { true };
+    };
+
     Project& project;
     const juce::File copy, folder;
     const FoldersToCopy list;
+    const juce::int64 bytes; // the versions' too
     const std::function<void (const juce::Result&)> onFinished;
-    std::atomic<juce::int64> copied { 0 };
+    const std::shared_ptr<State> state = std::make_shared<State>();
+    const std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     std::atomic<bool> done { false };
     juce::Result result = juce::Result::ok(); // the job's, read once done is set
-    bool finished = false;
+    bool finished = false, versionsCopying = false;
     BackgroundJobs jobs { "Phazite first save", 1, juce::Thread::Priority::normal };
 
     void timerCallback() override
@@ -1576,15 +1919,53 @@ private:
             return;
 
         stopTimer();
+
+        if (result.failed() || project.versionsCopier.copy == nullptr)
+        {
+            finish (result);
+            return;
+        }
+
+        // The versions, by the history's thread, after every write it was given; what it is asked for from now waits.
+        versionsCopying = true;
+        project.versionsCopier.copy (
+            [state = state, from = project.getFolder(), to = copy] (const BackgroundJobs::ShouldStop& shouldStop)
+            {
+                // Running, then the stop looked at: this sees a stop asked for first, or ~FolderCopy() sees it running.
+                state->running = true;
+                const auto stopped = [&state, &shouldStop] { return state->stop.load() || shouldStop(); };
+                const auto copied =
+                    stopped() ? juce::Result::fail ("The copy was cancelled.") : copyVersions (from, to, stopped, state->copied);
+                state->running = false;
+                state->finished.signal();
+                return copied;
+            },
+            [this, alive = alive] (const juce::Result& copied)
+            {
+                if (*alive)
+                    finish (copied);
+            });
+    }
+
+    void finish (const juce::Result& copied)
+    {
         finished = true;
-        const auto moved = result.wasOk() ? project.finishMoveTo (copy, folder) : result;
+        auto moved = copied.wasOk() ? project.finishMoveTo (copy, folder) : copied;
 
         if (moved.failed())
             copy.deleteRecursively();
 
+        endVersionsCopy(); // the history follows the project, wherever it is now, and what waited goes on
+
         // Last, through a copy: the progress window may delete this, and the function with it, as it is told.
         if (const auto callback = onFinished; callback != nullptr)
             callback (moved);
+    }
+
+    void endVersionsCopy()
+    {
+        if (std::exchange (versionsCopying, false) && project.versionsCopier.end != nullptr)
+            project.versionsCopier.end();
     }
 };
 
@@ -1604,13 +1985,25 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
         return {};
     }
 
-    auto list = listFoldersToCopy (getFolder());
+    // The versions last (copyVersions()), counted with the rest.
+    auto list = listFoldersToCopy (getFolder(), FoldersListed::allButVersions);
+    const auto versionsBytes = listFoldersToCopy (getFolder(), FoldersListed::versions).bytes;
 
-    if (list.bytes > copyAtOnceBytes)
-        return std::make_unique<TrackRender> (std::make_unique<FolderCopy> (*this, copy, folder, std::move (list), std::move (onFinished)));
+    if (list.bytes + versionsBytes > copyAtOnceBytes)
+        return std::make_unique<TrackRender> (
+            std::make_unique<FolderCopy> (*this, copy, folder, std::move (list), versionsBytes, std::move (onFinished)));
 
+    // Small: at once, on the message thread, which starts no write meanwhile; the versions once what writes them is done.
     std::atomic<juce::int64> copied { 0 };
     auto result = copyFolders (getFolder(), copy, list, [] { return false; }, copied);
+
+    if (result.wasOk())
+    {
+        if (versionsCopier.wait != nullptr)
+            versionsCopier.wait();
+
+        result = copyVersions (getFolder(), copy, [] { return false; }, copied);
+    }
 
     if (result.wasOk())
         result = finishMoveTo (copy, folder);
@@ -1621,7 +2014,6 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
     onFinished (result);
     return {};
 }
-
 juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& folder)
 {
     JUCE_ASSERT_MESSAGE_THREAD

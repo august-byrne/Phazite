@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Grid.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 
 #include <algorithm>
@@ -45,8 +46,11 @@ namespace
 
         if (level >= barLevel)
         {
+            // Steps counted within the bars a time line has, before they are multiplied back into bars, which would overflow.
             const auto barsPerStep = getBarsPerStep (level);
-            return bars.getBarStart (barsPerStep * (int) rounding (bars.getBarsAt (beat) / barsPerStep));
+            const auto maxSteps = Bars::maxBars / barsPerStep;
+            return bars.getBarStart (barsPerStep
+                                     * juce::jlimit (-maxSteps, maxSteps, toWhole<int> (rounding (bars.getBarsAt (beat) / barsPerStep))));
         }
 
         const auto barStart = bars.getBarStart (bars.getBarAt (beat));

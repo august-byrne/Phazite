@@ -5,6 +5,7 @@
 #include "internal/Parameters.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -71,7 +72,7 @@ namespace
 
         for (const auto& word : juce::StringArray::fromTokens (text, " ", ""))
             if (word.isNotEmpty())
-                positions.push_back (juce::jlimit (0.0f, 1.0f, word.getFloatValue()));
+                positions.push_back (juce::jlimit (0.0f, 1.0f, readFloat (word)));
 
         std::sort (positions.begin(), positions.end());
         return positions;

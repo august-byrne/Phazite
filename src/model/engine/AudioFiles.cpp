@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioFiles.h"
 #include "devices/core/Processor.h"
+#include "model/base/Json.h"
 
 #include <cmath>
 #include <map>
@@ -439,7 +440,7 @@ AudioFileInfo readAudioFileInfo (const juce::AudioFormatReader& reader, const ju
         {
             info.loopData = AudioFileInfo::LoopData::oneShot;
         }
-        else if (const auto beats = data[keys.beats].getDoubleValue(); beats > 0.0)
+        else if (const auto beats = readDouble (data[keys.beats]); beats > 0.0)
         {
             info.loopData = AudioFileInfo::LoopData::loop;
             info.loopBeats = beats;

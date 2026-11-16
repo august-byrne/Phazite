@@ -5,10 +5,15 @@
 #include "AppScreen.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
+#include "TestClips.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
 #include "ui/shell/StatusBar.h"
 #include "ui/theme/DesignTokens.h"
@@ -155,6 +160,39 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
     screen.shell.setSize (700, screen.shell.getHeight());
     CHECK (status.getHintBar().getWidth() >= phazite::ui::Shell::statusHintsMinimumWidth);
     phazite::test::checkChildrenApart (status);
+}
+
+TEST_CASE ("The hint bar says what a command made that its name doesn't: Duplicate's copies that didn't fit")
+{
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& context = screen.session.getContext();
+    auto* song = phazite::findSong (context);
+    REQUIRE (song != nullptr);
+
+    // A clip from beat 0 to 4 that the next keeps from growing, with notes from beat 2 to its end: their copies, from beat 4,
+    // don't fit.
+    const auto track = phazite::addTrackAtEnd (*song, false, nullptr);
+    REQUIRE (track.isValid());
+    const auto clip = phazite::insertMidiClip (*song, track, { phazite::test::at (0.0), phazite::test::at (4.0) }, nullptr);
+    REQUIRE (phazite::insertMidiClip (*song, track, { phazite::test::at (4.0), phazite::test::at (8.0) }, nullptr).isValid());
+    phazite::addNote (*song, clip, 60, phazite::test::at (2.0), phazite::test::lasting (0.5), 100);
+    phazite::addNote (*song, clip, 62, phazite::test::at (3.0), phazite::test::lasting (1.0), 100);
+    auto& selection = context.getSongSelection();
+    selection.setNoteClips ({ clip });
+    selection.selectNotes (phazite::getRefs (phazite::getClipNotes (*song, clip)));
+    phazite::test::dispatchPendingMessages();
+
+    auto& hints = screen.shell.getStatusBar().getHintBar();
+    REQUIRE (screen.registry.invoke ("edit.duplicate"));
+    CHECK (hints.getHint().startsWith ("2 notes of 2 weren't made"));
+    CHECK (phazite::getClipNotes (*song, clip).size() == 2);
+
+    // A command that made all it says says nothing more, and the outcome stays for a while, whatever else is under the
+    // pointer.
+    REQUIRE (screen.registry.invoke ("edit.selectAll"));
+    CHECK (hints.getHint().startsWith ("2 notes of 2 weren't made"));
 }
 
 TEST_CASE ("The status bar shows the song's delay compensation, while it has some")

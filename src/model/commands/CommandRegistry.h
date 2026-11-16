@@ -60,6 +60,11 @@ struct Command
 // The command's name as menus and the palette show it now (its currentName, if it has one).
 juce::String getCurrentName (const Command&);
 
+// What the command that changed a project last made that its name doesn't say ("4 copies didn't fit..."), told as it ran
+// (UndoStep::tellOutcome(), internal/Undo.h), for the hint bar to say once a registry's listener hears it ran; empty if it
+// said nothing. Taking it clears it. Message thread only.
+juce::String takeCommandOutcome();
+
 //==============================================================================
 class CommandRegistry
 {

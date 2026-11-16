@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongPieces.h"
+#include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/project/internal/Project.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -291,7 +293,7 @@ namespace
             for (const auto* parameter : xml->getChildWithTagNameIterator (versions::PARAMETER.toString()))
                 values.push_back ({ parameter->getStringAttribute (versions::parameterID),
                                     parameter->getStringAttribute (versions::parameterName),
-                                    (float) parameter->getDoubleAttribute (versions::parameterValue) });
+                                    readFloat (parameter->getStringAttribute (versions::parameterValue)) });
         }
 
         juce::ValueTree convert (const juce::XmlElement& xml, juce::StringArray path)
@@ -402,7 +404,12 @@ juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, Plugi
     }
 
     auto tree = joiner.convert (*xml, {});
-    return joiner.failed ? juce::ValueTree() : tree;
+
+    if (joiner.failed)
+        return {};
+
+    makeExponentsReadable (tree); // before anything reads a number of it, as a project file's (known bug 170)
+    return tree;
 }
 
 std::vector<PieceReference> findReferences (const juce::MemoryBlock& piece)

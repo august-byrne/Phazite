@@ -37,16 +37,40 @@ inline constexpr double maxSongBeats = 1.0e6;
 
 // What makeSong() does first, for a song whose file anyone could have written (Phazite takes in projects from others): it
 // repairs only what no Phazite could have written, and changes nothing in a song Phazite saved, whichever build or
-// computer saved it. Each element of a type Phazite knows where Schema.h puts it (one somewhere else goes), and one of a type
+// computer saved it. First, before any number of the song is read, a number whose exponent JUCE's reader would overflow
+// made one it reads (makeExponentsReadable()); and each switch and ID another tool wrote in another form ("true", "false",
+// "12.0") written as Phazite writes it, as it plays, so that the versions see no change where there is none. Each element
+// of a type Phazite knows where Schema.h puts it (one somewhere else goes), and one of a type
 // it doesn't know left as it is, with everything in it, to be written back (docs/project-format.md); a device or modulator
 // of a type Phazite has; every number Schema.h gives a range brought within it (a channel's volume, a tempo, a note's
 // pitch, places in beats up to a million), and every parameter's value set by hand and automation point within its
 // parameter's range; every item's ID its own and below 2^62; a lane, a curve or a modulation of something the song hasn't
-// left out, as a sidechain or a pad's sampler that isn't there; no two elements of a parent with one key (Schema.h:
+// left out, as a sidechain or a pad's sampler that isn't there, and a sidechain the model would refuse, a device hearing
+// its own track's sound round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()); no two elements of a parent with one key (Schema.h:
 // getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder
 // with "..", looked for by its name in the project's Audio folder (a full path of a computer's stays: Phazite writes one
 // where a file couldn't be copied in). No undo steps.
 void makeConsistent (Song&);
+
+// The properties makeConsistent() takes as switches, by their element's type (Schema.h: "bool", or "true, or none"):
+// whether Phazite leaves one that is off out (none), as their setters do, rather than writing it false; and what one that
+// is none means, as Schema.h gives its default (a switch that is on unless it says otherwise can't be left out when off).
+// A switch written in another form ("true", "false") is written as Phazite writes it, its value the same.
+struct SwitchProperty
+{
+    const juce::Identifier* type;
+    const juce::Identifier* property;
+    bool offIsNone, noneIsOn;
+};
+
+const std::vector<SwitchProperty>& getSwitchProperties();
+
+// Each number a song's element holds whose exponent JUCE's reader of numbers would overflow as it reads it (an int's worth
+// of digits or more: model/base/Json.h, hasExponentTooLongToRead(); known bug 170) made the same number in a text it reads,
+// one past every double's or 0, which the ranges then take as no finite number: of the properties Schema.h says hold
+// numbers (those it gives ranges, values set by hand, points' values, steps and slices), nothing else, so that a name
+// stays as it is. What makeConsistent() does first; and what the versions' pieces get as they are joined into a song.
+void makeExponentsReadable (juce::ValueTree song);
 
 // Whether an entry of a project's folders is a link that leads elsewhere, which a copy of the project leaves out with what
 // it leads to (a symbolic link or a junction: anywhere, or round to the project itself), given what its isSymbolicLink() and
@@ -196,8 +220,28 @@ public:
     // track's file may be all that is left of a plug-in). Its "(saving)" folder holds a marker file (copyMarkerName), which
     // proves it Phazite's: the next first save or Save As into that folder moves one a run that crashed left there (marked
     // before this run started, with no project file in it) to the system's trash, in the background, and nothing else.
+    // Its versions are copied last, by what writes them (setVersionsCopier()), so that nothing is written into the folder
+    // the project leaves after they were copied (known bug 169); their bytes count with the rest's, in what is copied at
+    // once and in the progress, and Cancel stops their copy too. A file another program holds a moment is tried again for a
+    // second or so, off the message thread.
     std::unique_ptr<TrackRender> moveTo (const juce::File& parentFolder, const juce::String& name,
                                          std::function<void (const juce::Result&)> onFinished);
+
+    // How a first save copies the project's Versions folder, given by what writes into it, its song's history
+    // (model/versions/internal/VersionHistory.h: makeVersionsCopier()). wait() returns once every write it was given is
+    // done, for a copy made at once on the message thread, which starts none meanwhile. copy() runs what it is given on the
+    // writer's own thread, after every write it was given before, holding every write asked for after until end(), and calls
+    // back on the message thread with what came of it. end(), once the move is over, moved or not. Without one, the folder is
+    // copied with the rest.
+    struct VersionsCopier
+    {
+        std::function<void()> wait;
+        std::function<void (std::function<juce::Result (const BackgroundJobs::ShouldStop&)>, std::function<void (const juce::Result&)>)>
+            copy;
+        std::function<void()> end;
+    };
+
+    void setVersionsCopier (VersionsCopier copier) { versionsCopier = std::move (copier); }
     static constexpr juce::int64 copyAtOnceBytes = (juce::int64) 8 << 20;
     static constexpr const char* copyMarkerName = ".phazite-saving";
 
@@ -211,6 +255,7 @@ private:
 
     class BackgroundWriter; // one file at a time; its destructor waits for the one under way
     std::unique_ptr<BackgroundWriter> autosaveWriter;
+    VersionsCopier versionsCopier; // setVersionsCopier()'s
 
     // The copies a save that never finished left beside one, moved to the trash in the background as the next first save or
     // Save As goes there (Project.cpp: removeLeftoverCopies()).

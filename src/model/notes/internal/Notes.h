@@ -121,8 +121,15 @@ void toggleNotesPortamento (Song&, const std::vector<NoteRef>&);
 void changeNoteVelocities (Song&, const std::vector<NoteRef>&, int change);
 
 // Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
-// addNote() says; a copy that wouldn't play, past its clip where the clip can't grow, isn't made. Returns the copies.
-std::vector<NoteRef> duplicateNotes (Song&, const std::vector<NoteRef>&);
+// addNote() says; a copy that wouldn't play, past its clip where the clip can't grow, isn't made, and then the step named
+// stepName is named for the copies made (tellNotesMade()). Returns the copies.
+std::vector<NoteRef> duplicateNotes (Song&, const std::vector<NoteRef>&, const juce::String& stepName = {});
+
+// Where fewer notes were made than were asked for (copies or pasted notes that would land past a clip which the next clip
+// on its track keeps from growing), the undo step in progress, begun as `asked` for all of them, is named for those made
+// ("Duplicate 2 Notes" for "Duplicate 6 Notes"), and the hint bar says how many didn't fit (UndoStep::tellOutcome(),
+// model/commands/internal/Undo.h). Nothing when every one was made.
+void tellNotesMade (Song&, const juce::String& asked, const juce::String& verb, size_t wanted, size_t made);
 
 // Puts these notes in a clip, and in its aliases, in place of all it holds, without growing it: the notes the chord lane
 // makes for a part. Each gets a new ID.

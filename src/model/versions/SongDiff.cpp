@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongDiff.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
@@ -257,7 +258,7 @@ namespace
 
     juce::String describeValue (float value)
     {
-        return juce::String (juce::roundToInt (value * 100.0f)) + "%";
+        return juce::String (roundToNearestInt (value * 100.0f)) + "%"; // a plug-in's value, which may be no number
     }
 
     // The knobs of a plug-in that moved, by their names: "Cutoff 40% → 55%", and how many more; nothing for none, or

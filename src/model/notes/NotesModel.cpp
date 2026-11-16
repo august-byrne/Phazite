@@ -3,6 +3,7 @@
 #include "internal/Notes.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -314,10 +315,10 @@ namespace
                     note.length = std::max (getMinimumNoteLength(), BeatDuration::fromBeats (value)); // as a drag's
                     break;
                 case NoteProperty::pitch:
-                    note.pitch = juce::jlimit (0, 127, (int) std::lround (value));
+                    note.pitch = juce::jlimit (0, 127, roundToWhole<int> (value, note.pitch)); // a value typed: no number keeps it
                     break;
                 case NoteProperty::velocity:
-                    note.velocity = juce::jlimit (1, 127, (int) std::lround (value));
+                    note.velocity = juce::jlimit (1, 127, roundToWhole<int> (value, note.velocity));
                     break;
             }
         }
@@ -335,6 +336,10 @@ namespace
 
 void changeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property, double amount)
 {
+    // What is no finite number (typed: "1e999") changes nothing (known bug 148).
+    if (! std::isfinite (amount))
+        return;
+
     // Starts and pitches together, as far as the earliest, the lowest and the highest can go.
     const auto together = property == NoteProperty::start || property == NoteProperty::pitch;
     const auto top = property == NoteProperty::pitch ? 127.0 : std::numeric_limits<double>::max();
@@ -345,6 +350,9 @@ void changeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, Not
 
 void setNotesTo (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property, double value)
 {
+    if (! std::isfinite (value)) // typed: "1e999" changes nothing (known bug 148)
+        return;
+
     const auto each = property == NoteProperty::length || property == NoteProperty::velocity;
     setEach (context, refs, property, [each, value] (Range range, double own) { return each ? value : own + value - range.first; });
 }

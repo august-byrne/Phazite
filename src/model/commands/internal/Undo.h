@@ -42,10 +42,23 @@ public:
     UndoStep (juce::UndoManager&, const juce::String& name); // a song's history, as a command's undo target names it
     ~UndoStep();
 
+    // What a change made that the name its step was given before it ran doesn't say: the step is named for what was made
+    // ("Duplicate 2 Notes" where it was "Duplicate 6 Notes"), and what the user should know of it ("4 copies didn't fit")
+    // is given out as the step ends, for the hint bar (CommandRegistry.h, takeCommandOutcome()). Only a step begun under
+    // the name asked is renamed: a command's own, not a macro's, a drag's or another step's that the change joins.
+    // Nothing outside a step for the song.
+    static void tellOutcome (Song&, const juce::String& asked, const juce::String& made, const juce::String& outcome);
+
 private:
     juce::UndoManager& undoManager;
     UndoStep* const outer;
+    const juce::String name;
+    bool begun = false;                        // whether it began the history's transaction, rather than join one
+    juce::String outcome;                      // what tellOutcome() said, given out as it ends
     static inline UndoStep* current = nullptr; // the innermost step in progress
+
+    // The outermost of the steps in progress from this one out that is for the history, or none.
+    static UndoStep* findOutermostStep (juce::UndoManager&, UndoStep* from);
 
     JUCE_DECLARE_NON_COPYABLE (UndoStep)
 };

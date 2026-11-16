@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Updates.h"
 #include "model/base/Json.h"
+#include "model/base/Numbers.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -340,7 +341,7 @@ std::optional<Updates::Release> Updates::parseUpdateFile (const juce::String& js
     }
 
     release.installer = juce::URL (installer);
-    release.size = (juce::int64) windows["size"];
+    release.size = toWhole<juce::int64> (windows["size"]); // a download's: "1e300" is no size
 
     if (release.size <= 0 || release.size > maxInstallerSize)
     {

@@ -53,33 +53,20 @@ juce::MemoryBlock toBlock (const juce::String& text)
 
 juce::String Mutator::makeExtremeNumber()
 {
-    static const char* const numbers[] = { "0",
-                                           "-1",
-                                           "-0",
-                                           "1e308",
-                                           "-1e308",
-                                           "1e-320",
-                                           "1e999",
-                                           "nan",
-                                           "inf",
-                                           "-inf",
-                                           "NaN",
-                                           "Infinity",
-                                           "2147483647",
-                                           "2147483648",
-                                           "-2147483649",
-                                           "4294967296",
-                                           "9223372036854775807",
-                                           "-9223372036854775808",
-                                           "18446744073709551615",
-                                           "99999999999999999999999999",
-                                           "1e15",
-                                           "0.5",
-                                           "127.5",
-                                           "128",
-                                           "300.01",
-                                           "19.99",
-                                           "0x10" };
+    static const char* const numbers[] = { "0", "-1", "-0", "1e308", "-1e308", "1e-320", "1e999", "nan", "inf", "-inf", "NaN", "Infinity",
+                                           "2147483647", "2147483648", "-2147483649", "4294967296", "9223372036854775807",
+                                           "-9223372036854775808", "18446744073709551615", "99999999999999999999999999", "1e15", "0.5",
+                                           "127.5", "128", "300.01", "19.99", "0x10",
+                                           // Exponents JUCE's reader of numbers counts into an int past its end (known bug
+                                           // 170; model/base/Json.h: hasExponentTooLongToRead()).
+                                           "1e12345678901", "-2.5E-98765432109", "1e0000000002147483648", "7e+9999999999 1",
+                                           // Switches and IDs as other tools write them (known bug 179).
+                                           "true", "false", "TRUE", "yes", "no", "12.0", "007", "+12", "1.50" };
+    static const auto unicodeDigit = juce::String ("1e") + juce::String::charToString ((juce::juce_wchar) 0x0669); // an Arabic-Indic nine
+
+    if (random.nextInt ((int) std::size (numbers) + 1) == 0)
+        return unicodeDigit;
+
     return numbers[random.nextInt ((int) std::size (numbers))];
 }
 
@@ -298,7 +285,7 @@ juce::String Mutator::mutateJson (const juce::String& text)
         switch (random.nextInt (7))
         {
             case 0:
-                return makeExtremeNumber().getDoubleValue();
+                return makeExponentReadable (makeExtremeNumber()).getDoubleValue(); // read as JUCE can read it
             case 1:
                 return makeAwkwardText();
             case 2:

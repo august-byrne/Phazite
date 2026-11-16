@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ValueText.h"
+#include "model/base/Json.h"
+#include "model/base/Numbers.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -18,7 +20,8 @@ namespace
         if (t.isEmpty() || ! t.containsOnly ("+-.0123456789") || ! t.containsAnyOf ("0123456789"))
             return {};
 
-        return t.getDoubleValue();
+        const auto value = t.getDoubleValue(); // no exponent: none that JUCE's reader could overflow
+        return std::isfinite (value) ? std::optional (value) : std::nullopt;
     }
 
     juce::String toString (std::string_view text)
@@ -36,7 +39,7 @@ namespace
     // To a tenth, and "0.0" rather than "-0.0".
     juce::String withOneDecimal (double value)
     {
-        return juce::String (juce::roundToInt (value * 10.0) / 10.0, 1);
+        return juce::String (roundToNearestInt (value * 10.0) / 10.0, 1); // a loudness a plug-in's infinite samples made
     }
 
     // "+7", "-15", and "0" without a sign, with the decimals given.
@@ -135,10 +138,13 @@ namespace
 
 juce::String formatDecibels (double dB)
 {
-    if (dB <= silenceDb)
+    if (std::isnan (dB) || dB <= silenceDb)
         return "-inf dB";
 
-    const auto tenths = juce::roundToInt (dB * 10.0);
+    if (std::isinf (dB)) // a peak a plug-in's infinite samples made
+        return "+inf dB";
+
+    const auto tenths = roundToNearestInt (dB * 10.0);
 
     if (tenths == 0)
         return "0.0 dB"; // not "-0.0 dB"
@@ -239,7 +245,7 @@ std::optional<double> parseSongTime (const juce::String& text)
         if (part.isEmpty() || part.indexOfChar ('.') != part.lastIndexOfChar ('.'))
             return {};
 
-        seconds = seconds * 60.0 + part.getDoubleValue();
+        seconds = seconds * 60.0 + readDouble (part);
     }
 
     return seconds;
@@ -271,7 +277,7 @@ std::optional<double> parseTruePeak (const juce::String& text)
 
 juce::String formatDuration (double seconds)
 {
-    const auto whole = juce::jmax (0, juce::roundToInt (seconds));
+    const auto whole = juce::jmax (0, roundToNearestInt (seconds)); // a file's header says how long it is
     return juce::String (whole / 60) + ":" + juce::String (whole % 60).paddedLeft ('0', 2);
 }
 

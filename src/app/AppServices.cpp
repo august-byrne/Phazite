@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppServices.h"
+#include "model/base/Numbers.h"
 #include "model/base/Song.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
@@ -113,7 +114,7 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
     setThisComputer (computer);
 
     // The undo history's depth, for every song made from now on.
-    Song::setUndoSteps (juce::roundToInt (settings.get (Settings::undoSteps)));
+    Song::setUndoSteps (roundToNearestInt (settings.get (Settings::undoSteps))); // a setting's file may say 1e300
 }
 
 void AppServices::openAudioDevices()

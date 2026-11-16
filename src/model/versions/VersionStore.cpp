@@ -323,6 +323,8 @@ bool VersionStore::writeCurrentBranch (const juce::String& id)
 //==============================================================================
 bool VersionStore::logBranchMove (const juce::String& branchID, const juce::String& from, const juce::String& to, const juce::String& why)
 {
+    jassert (! isInHeldFolder (folder)); // a first save copies it (WholeFile.h: holdFolder())
+
     const auto file = getLocalFolder().getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID));
 
     if (! file.getParentDirectory().createDirectory())

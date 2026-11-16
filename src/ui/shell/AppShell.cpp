@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppShell.h"
 #include "CommandPalette.h"
+#include "model/base/Numbers.h"
 #include "model/mixer/MixerModel.h"
 #include "model/presets/PresetModel.h"
 #include "ui/browser/PluginPicker.h"
@@ -283,10 +284,10 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     // How the editors follow playback, as it was left; the panels as they were left, or every panel, and the views where
     // they were left.
     playlist.setScrollingContinuously (settings.get (Settings::scrollContinuously));
-    playlist.setHeaderWidth (juce::roundToInt (settings.get (Settings::playlistHeaderWidth)));
+    playlist.setHeaderWidth (roundToNearestInt (settings.get (Settings::playlistHeaderWidth)));
     playlist.onHeaderWidthChanged = [this] (int width) { settings.set (Settings::playlistHeaderWidth, (double) width); };
     pianoRoll.setScrollingContinuously (settings.get (Settings::scrollContinuously));
-    pianoRoll.setVelocityLane (juce::roundToInt (settings.get (Settings::pianoRollVelocityHeight)),
+    pianoRoll.setVelocityLane (roundToNearestInt (settings.get (Settings::pianoRollVelocityHeight)),
                                settings.get (Settings::pianoRollVelocityFolded));
     pianoRoll.onVelocityLaneChanged = [this] (int height, bool folded)
     {

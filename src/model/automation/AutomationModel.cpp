@@ -287,6 +287,10 @@ int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, 
 BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices,
                                    BeatDuration distance, float valueChange)
 {
+    // Typed: what is no finite number moves nothing (known bug 148).
+    if (! std::isfinite (distance.inBeats()) || ! std::isfinite (valueChange))
+        return {};
+
     auto* song = findSong (context);
 
     if (song == nullptr || ! locateParameter (*song, parameter).has_value())
@@ -298,6 +302,9 @@ BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& 
 
 void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter, int index, float bend)
 {
+    if (! std::isfinite (bend))
+        return;
+
     if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
         const UndoStep step (*song, "Bend Automation");
@@ -307,6 +314,9 @@ void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter,
 
 void setAutomationPointValues (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float value)
 {
+    if (! std::isfinite (value)) // typed: what is no finite number changes nothing (known bug 148)
+        return;
+
     auto* song = findSong (context);
 
     if (song == nullptr || ! locateParameter (*song, parameter).has_value())
@@ -322,6 +332,9 @@ void setAutomationPointValues (ProjectContext& context, const ParameterRef& para
 
 void setAutomationCurves (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float bend)
 {
+    if (! std::isfinite (bend)) // typed: what is no finite number changes nothing (known bug 148)
+        return;
+
     if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
         const UndoStep step (*song, "Bend Automation");

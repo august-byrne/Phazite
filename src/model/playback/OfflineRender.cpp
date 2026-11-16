@@ -2,6 +2,7 @@
 #include "internal/OfflineRender.h"
 #include "engine/core/Engine.h"
 #include "internal/PlaybackSession.h"
+#include "model/base/Numbers.h"
 #include "model/plugins/internal/SandboxedProcessor.h"
 
 #include <algorithm>
@@ -171,7 +172,7 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
         return failed;
 
     // From the song's time it starts at: its samples from there are what it counts.
-    const auto firstSample = (std::int64_t) std::llround (std::max (0.0, job.startSeconds) * setup.sampleRate);
+    const auto firstSample = roundToWhole<std::int64_t> (std::max (0.0, job.startSeconds) * setup.sampleRate);
     const auto firstBeat = compiled.plan->tempo.toBeats ((double) firstSample);
 
     engine::Engine engine;
@@ -183,7 +184,7 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     engine::LoudnessMeter meter;
     meter.prepare (setup.sampleRate, partSamples);
     juce::AudioBuffer<float> part (2, partSamples);
-    const auto endSample = std::max<std::int64_t> (0, (std::int64_t) std::llround (job.endSeconds * setup.sampleRate) - firstSample);
+    const auto endSample = std::max<std::int64_t> (0, roundToWhole<std::int64_t> (job.endSeconds * setup.sampleRate) - firstSample);
     const auto lastSample = endSample + (std::int64_t) std::llround (job.tailSeconds * setup.sampleRate);
     std::int64_t done = 0;
     engine.beginRender();

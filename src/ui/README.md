@@ -203,7 +203,7 @@ The window's content and everything around the views.
 | `TopBar.*` | The transport bar, with the playhead's place and time as fields that move it, and A/B, which hears the last commit in place of the song and back. |
 | `TempoStretchPanel.*` | What a tempo change stretches, under the transport bar's tempo field while the tempo changes. |
 | `StatusBar.*` | The status bar: the save state, the audio output, the CPU, and between them the hint bar. |
-| `HintBar.*` | The hint bar, which shows a drag's readout while one moves something, and otherwise the guide's next step. |
+| `HintBar.*` | The hint bar, which shows a drag's readout while one moves something, for a few seconds what a command made that its name doesn't say (copies that didn't fit), and otherwise the guide's next step. |
 | `Guide.*` | The guide whose next step the hint bar shows. |
 | `Lessons.*` | The lessons of Help > Lessons. |
 | `LessonCard.*` | The card that shows a lesson's step, with a ring around the control it is about. |

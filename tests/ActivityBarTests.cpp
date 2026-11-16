@@ -992,3 +992,36 @@ TEST_CASE ("A double-click on a commit checks it out: the view says so under the
     CHECK_FALSE (view.showsCheckout());
     CHECK (view.getBranchButton().getButtonText() == juce::String ("main"));
 }
+
+TEST_CASE ("While a first save copies the versions, the Source Control view says the project is being saved, not committed")
+{
+    // A reviewer, of known bug 169's fix: the copy made the view say "Committing..." with nothing committed.
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    auto& view = screen.getVersionsView();
+    auto* history = phazite::getVersionHistory (context);
+    REQUIRE (history != nullptr);
+
+    std::atomic<bool> letGo { false };
+    std::optional<juce::Result> copied;
+    const juce::ScopeGuard alwaysLetGo { [&letGo] { letGo = true; } };
+    history->copyFolder (
+        [&letGo] (const auto&)
+        {
+            while (! letGo.load())
+                juce::Thread::sleep (1);
+
+            return juce::Result::ok();
+        },
+        [&copied] (const juce::Result& result) { copied = result; });
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getSaveButton().getButtonText() == "Saving the project..."; }));
+    CHECK_FALSE (view.getSaveButton().isEnabled());
+
+    letGo = true;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&copied] { return copied.has_value(); }));
+    history->endFolderCopy();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getSaveButton().getButtonText() == "Commit"; }));
+}

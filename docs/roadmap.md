@@ -43,7 +43,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Stage 4's untrusted files (S4.9) mostly built. Stages 3 to 8 otherwise not started. |
+| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Since then (from 2026-11-15) the known bugs are being fixed before stage 3's hand checks, on the branch `known-bugs`: the [changelog](changelog.md) has a line for each, and with them stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8) are built. Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -99,7 +99,6 @@ what they found is fixed or in known-bugs.md.
 | S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
 | S4.6 | S | Backups kept by age, not by count | A day's work leaves backups from an hour, a day and a week before |
 | S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
-| S4.9 (rest) | S | Files from others are untrusted, the rest: casts of numbers that are not finite, DAWprojects past 4 GB (known bugs 106, 148). Built (2026-11-14): a song made consistent as it opens, values clamped, sound paths kept inside the project, a preset's sounds taken from its own folder only, only the channels handed to a helper read back, DAWproject unpacking capped, the readers fuzzed | Each of the two has its test |
 
 ### Stage 5. Wide: what a beat maker meets in the first week
 

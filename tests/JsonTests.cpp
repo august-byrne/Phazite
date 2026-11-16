@@ -5,6 +5,8 @@
 #include "TestHelpers.h"
 #include "model/base/Json.h"
 
+#include <cmath>
+
 TEST_CASE ("JSON is read as JUCE reads it, the largest whole number of 64 bits too")
 {
     const auto json = phazite::parseJson (R"({"name": "Lead", "largest": 9223372036854775807, "least": -9223372036854775807,
@@ -63,4 +65,35 @@ TEST_CASE ("Long runs of digits that are no number, or that a number doesn't cou
     REQUIRE (fitting.size() == 2);
     CHECK ((juce::int64) fitting[0] == 999999999999999999);
     CHECK ((double) fitting[1] == doctest::Approx (1.0e308));
+}
+
+TEST_CASE ("A number whose exponent JUCE's reader would overflow is told, and made the same number in a text it reads")
+{
+    // Known bug 170: CharacterFunctions::readDoubleValue(), which every number read from XML goes through, counts an
+    // exponent's digits into an int. What it would read as a number's exponent, and nothing else.
+    for (const auto* text : { "1e12345678901", "-2.5E-98765432109", " +7e+9999999999", "1e0000000002147483648", ".5e12345678901 1" })
+    {
+        CAPTURE (text);
+        CHECK (phazite::hasExponentTooLongToRead (text));
+    }
+
+    // A digit of another script is none to the reader, which looks at a juce::String's UTF-8 bytes (CharPointer_UTF8::isDigit()):
+    // no exponent at all.
+    CHECK_FALSE (phazite::hasExponentTooLongToRead (juce::String ("1e") + juce::String::charToString ((juce::juce_wchar) 0x0669)));
+
+    for (const auto* text : { "1e999999999", "1e0000000000000308", "Take e12345678901", "e12345678901", "-.e12345678901", "12345678901",
+                              "0.1234567890123", "1e", "" })
+    {
+        CAPTURE (text);
+        CHECK_FALSE (phazite::hasExponentTooLongToRead (text));
+    }
+
+    // The same number as a double holds it, which JUCE then reads without overflowing; what follows it stays.
+    CHECK (phazite::makeExponentReadable ("1e12345678901") == juce::String ("1e999"));
+    CHECK (phazite::makeExponentReadable ("-3.5e12345678901") == juce::String ("-1e999"));
+    CHECK (phazite::makeExponentReadable ("2e-12345678901") == juce::String ("0"));
+    CHECK (phazite::makeExponentReadable ("-2e-12345678901 4") == juce::String ("-0 4"));
+    CHECK (phazite::makeExponentReadable ("Lead") == juce::String ("Lead"));
+    CHECK (std::isinf (phazite::makeExponentReadable ("1e12345678901").getDoubleValue()));
+    CHECK (phazite::makeExponentReadable ("2e-12345678901").getDoubleValue() == 0.0);
 }

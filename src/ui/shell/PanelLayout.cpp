@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PanelLayout.h"
+#include "model/base/Json.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -297,12 +298,12 @@ void PanelLayout::setFromText (const juce::String& text)
         }
         else if (key == "editor")
         {
-            if (const auto share = value.getDoubleValue(); share >= Shell::minimumEditorShare && share <= Shell::maximumEditorShare)
+            if (const auto share = readDouble (value); share >= Shell::minimumEditorShare && share <= Shell::maximumEditorShare)
                 editorShare = share;
         }
         else if (key == "upperSplit" || key == "lowerSplit")
         {
-            if (const auto share = value.getDoubleValue(); share > 0.0 && share < 1.0)
+            if (const auto share = readDouble (value); share > 0.0 && share < 1.0)
                 rowShares[key == "upperSplit" ? 0 : 1] = share;
         }
     }

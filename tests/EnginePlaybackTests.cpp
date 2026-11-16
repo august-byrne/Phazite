@@ -5,6 +5,7 @@
 #include "TestDevices.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/delay/Delay.h"
 #include "devices/dsp/NoteValues.h"
 #include "devices/eq/Equalizer.h"
@@ -725,6 +726,87 @@ TEST_CASE ("A control grabbed before playback starts, in Write, is taken back by
                         [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value + 1.0f) < 0.001f; }));
 }
 
+TEST_CASE ("A control held as Play is pressed, in Write, goes back by Escape to the value its pass writes, which is what plays")
+{
+    // Known bug 174: the punch-in as playback started set the value by hand to the lane's within the drag's step, so Escape
+    // put it back to where it was before the drag, 0, while the pass went on writing the lane's value, -1: what played (the
+    // value set by hand, while the pass writes) wasn't what was written. Escape takes back the drag alone.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition(), -1.0f }, { phazite::BeatPosition::fromBeats (16.0), -1.0f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+    EnginePlayback playback;
+    auto pan = phazite::getPan (song.context, track);
+    auto& player = phazite::getSession (song.context)->getPlayer();
+
+    pan.beginGesture(); // stopped, at 0
+    pan.setValue (0.25f);
+    song.run ("transport.playStop");
+    playback.play (0.25);
+    pan.setValue (0.75f);
+    playback.play (0.25);
+    pan.cancelGesture();
+    CHECK (phazite::getValueSetByHand (*phazite::findSong (song.context), lane) == doctest::Approx (-1.0f));
+    playback.play (0.25);
+    CHECK (pan.getValue() == doctest::Approx (-1.0f));
+    CHECK (player.getPlayedValue (lane, false).value_or (0.0f) == doctest::Approx (-1.0f));
+    playback.play (0.25); // to beat 2
+    song.run ("transport.playStop");
+
+    // What was written, the pass from playback's start at -1, is what played; the drag's values went with it.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value + 1.0f) < 0.001f; }));
+    CHECK (pan.getValue() == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("Undo straight after Escape on a control held as Play was pressed, in Write: what plays is still what is written")
+{
+    // A reviewer, of known bug 174's fix: the value Escape gives back is a step, "Record Automation", and an Undo of it
+    // while playing set the value back to the rolled-back one while the pass went on writing the lane's. Now the pass writes
+    // what an undo or a redo sets, from then. The whole history walked back and forth after it.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    song.addAutomation (lane, { { phazite::BeatPosition(), -1.0f }, { phazite::BeatPosition::fromBeats (16.0), -1.0f } });
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+    EnginePlayback playback;
+    auto& songState = *phazite::findSong (song.context);
+    phazite::test::UndoCheck check (song.context);
+    auto pan = phazite::getPan (song.context, track);
+    auto& player = phazite::getSession (song.context)->getPlayer();
+
+    pan.beginGesture(); // stopped, at 0
+    pan.setValue (0.25f);
+    song.run ("transport.playStop");
+    playback.play (0.25);
+    pan.setValue (0.75f);
+    playback.play (0.25);
+    pan.cancelGesture();
+    REQUIRE (phazite::getValueSetByHand (songState, lane) == doctest::Approx (-1.0f));
+
+    // Undo at once, still playing: the value set by hand goes back, and that is what plays and what the pass writes.
+    phazite::undo (songState);
+    const auto undone = phazite::getValueSetByHand (songState, lane);
+    playback.play (0.25);
+    CHECK (player.getPlayedValue (lane, false).value_or (99.0f) == doctest::Approx (undone));
+    playback.play (0.25); // to beat 2
+    song.run ("transport.playStop");
+
+    // Written as it played: the lane's value up to the undo, and the value it set from then to where playback stopped.
+    const auto points = phazite::getAutomationPoints (song.context, lane);
+    CHECK (std::any_of (points.begin(), points.end(), [undone] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value - undone) < 0.001f; }));
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
+    check.walkBackAndForth();
+}
+
 namespace
 {
 bool hasPoint (const std::vector<phazite::AutomationPoint>& points, double beat, float value, double near = 0.05)
@@ -733,6 +815,48 @@ bool hasPoint (const std::vector<phazite::AutomationPoint>& points, double beat,
                         [=] (const auto& p) { return std::abs (p.beat.inBeats() - beat) < near && std::abs (p.value - value) < 0.001f; });
 }
 } // namespace
+
+TEST_CASE ("Undo or Redo with the loop gone round since a pass's last move: the round is kept, written after it as a step of its own")
+{
+    // A reviewer, of known bug 174's fix: the pass followed the value an undo set at once, and with the loop gone round since
+    // its last move it wrote the round through the song's history inside the undo, which JUCE's UndoManager refuses (it
+    // asserts, and the round was lost). Latch writes the pan; beats 0 to 2 are looped.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto lane = song.getPanParameter (track);
+    phazite::setAutomationMode (song.context, track, phazite::AutomationMode::latch);
+    phazite::loopRange (song.context, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) });
+    EnginePlayback playback;
+    auto& songState = *phazite::findSong (song.context);
+    auto& history = songState.getUndoManager();
+    auto pan = phazite::getPan (song.context, track);
+
+    song.run ("transport.playStop");
+    playback.play (0.25);      // to beat 0.5
+    pan.setValue (-0.5f);      // a step of its own, which latch punches in at
+    playback.play (1.0);       // round the loop, to beat 0.5 again
+    phazite::undo (songState); // the pan back to 0, which the pass follows: the round before is finished
+    CHECK (phazite::getValueSetByHand (songState, lane) == doctest::Approx (0.0f));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return hasPoint (phazite::getAutomationPoints (song.context, lane), 2.0, -0.5f, 0.001); }));
+    CHECK (history.getUndoDescription() == "Record Automation");
+
+    // Redo, the loop gone round again since an undo that finished nothing: the same.
+    pan.setValue (0.5f);
+    playback.play (0.25); // to beat 1
+    phazite::undo (songState);
+    REQUIRE (history.canRedo());
+    playback.play (0.75); // round the loop, to beat 0.5
+    phazite::redo (songState);
+    CHECK (phazite::getValueSetByHand (songState, lane) == doctest::Approx (0.5f));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return hasPoint (phazite::getAutomationPoints (song.context, lane), 2.0, 0.0f, 0.001); }));
+    CHECK (history.getUndoDescription() == "Record Automation");
+    playback.play (0.25);
+    song.run ("transport.playStop");
+}
 
 TEST_CASE ("Stop during a control's drag, then Escape: what was written as playback stopped stays, a step of its own; the drag alone goes")
 {

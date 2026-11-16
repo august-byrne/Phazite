@@ -62,6 +62,7 @@
 #include "model/transport/internal/Tempo.h"
 #include "ui/pianoroll/DrumRows.h"
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <vector>
@@ -903,6 +904,72 @@ struct Coverage
 };
 
 // A list of the song's rules (schema::describeSongRules()), which must be one.
+// Each switch makeConsistent() writes as Phazite does (Project.h: getSwitchProperties()), from its table, so that a row
+// added later is checked without anyone remembering: a song in which another tool wrote it "false", and then "true",
+// wherever the representative project holds it, opens with the value read back that its readers read before (their
+// default where it is none, as the table gives it). A switch on unless it says otherwise ("noneIsOn") that the rewrite left
+// out as it was off would turn on (known bug 179).
+void checkSwitchesReadBack (const juce::XmlElement& saved, const juce::File& projectFile)
+{
+    using Path = std::vector<int>; // an element's place: its parents' indices among their children, from the song down
+
+    std::function<void (const juce::XmlElement&, const juce::String&, const juce::String&, Path&, std::vector<Path>&)> find;
+    find = [&find] (const juce::XmlElement& element, const juce::String& type, const juce::String& property, Path& path,
+                    std::vector<Path>& found)
+    {
+        if (element.getTagName() == type && element.hasAttribute (property))
+            found.push_back (path);
+
+        for (int i = 0; i < element.getNumChildElements(); ++i)
+        {
+            path.push_back (i);
+            find (*element.getChildElement (i), type, property, path, found);
+            path.pop_back();
+        }
+    };
+
+    for (const auto& row : phazite::getSwitchProperties())
+    {
+        const auto type = row.type->toString(), property = row.property->toString();
+        Path path;
+        std::vector<Path> paths;
+        find (saved, type, property, path, paths);
+        CAPTURE (type);
+        CAPTURE (property);
+        CHECK_MESSAGE (! paths.empty(), "the representative project holds this switch on no element of its type");
+
+        for (const auto* text : { "false", "true" })
+        {
+            INFO ("written as " << text);
+            juce::XmlElement written (saved);
+
+            for (const auto& place : paths)
+            {
+                auto* element = &written;
+
+                for (const auto index : place)
+                    element = element->getChildElement (index);
+
+                element->setAttribute (property, text);
+            }
+
+            const auto song =
+                phazite::makeSong (juce::ValueTree::fromXml (written), projectFile, phazite::Project::getCacheFolder (projectFile));
+            REQUIRE (song != nullptr);
+
+            for (const auto& place : paths)
+            {
+                auto element = song->getState();
+
+                for (const auto index : place)
+                    element = element.getChild (index);
+
+                REQUIRE (element.hasType (*row.type));
+                CHECK ((bool) element.getProperty (*row.property, row.noneIsOn) == (juce::String (text) == "true"));
+            }
+        }
+    }
+}
 juce::Array<juce::var> getRuleList (const juce::var& rules, const juce::String& name)
 {
     const auto* list = rules[juce::Identifier (name)].getArray();
@@ -1165,6 +1232,7 @@ TEST_SUITE ("golden")
         REQUIRE_MESSAGE (copyFile.existsAsFile(), error.toStdString());
         const auto copy = phazite::test::readNormalisedProject (copyFile);
 
+        const auto projectFile = project->getFile(); // its frozen tracks' files beside it, which the switches' check finds
         const auto saves = saveReopenAndSaveAgain (std::move (project), "representative",
                                                    "A project with one of each kind of track and every piece of Phazite's data, saved, "
                                                    "reopened and saved again: addRepresentativeContent in tests/GoldenProjectTests.cpp",
@@ -1178,6 +1246,9 @@ TEST_SUITE ("golden")
 
         // It holds every name a saved song can have.
         checkHoldsEverySavedName (*saves.rawSecond);
+
+        // Its switches, written in another form, open as they were.
+        checkSwitchesReadBack (*saves.rawSecond, projectFile);
     }
 
     TEST_CASE ("Golden project: the check of every saved name reads Schema.h's names, and knows which elements hold each")

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "WholeFile.h"
 
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <vector>
+
 namespace phazite
 {
 namespace
@@ -10,10 +15,61 @@ namespace
     {
         return juce::Result::fail (stream.getStatus().getErrorMessage().trim());
     }
+
+    // The tests' hook in force (WholeFileHook), taken under its lock, as writes come from any thread, and asked outside it.
+    std::mutex hookLock;
+    std::shared_ptr<const std::function<bool (const juce::File&)>> hookInForce;
+
+    bool isLetThrough (const juce::File& file)
+    {
+        std::shared_ptr<const std::function<bool (const juce::File&)>> hook;
+
+        {
+            const std::scoped_lock lock (hookLock);
+            hook = hookInForce;
+        }
+
+        return hook == nullptr || (*hook) (file);
+    }
+
+    // The folders held (holdFolder()), once for each hold.
+    std::mutex heldLock;
+    std::vector<juce::File> heldFolders;
 } // namespace
+
+void holdFolder (const juce::File& folder, bool held)
+{
+    const std::scoped_lock lock (heldLock);
+
+    if (held)
+        heldFolders.push_back (folder);
+    else if (const auto found = std::find (heldFolders.begin(), heldFolders.end(), folder); found != heldFolders.end())
+        heldFolders.erase (found);
+}
+
+bool isInHeldFolder (const juce::File& file)
+{
+    const std::scoped_lock lock (heldLock);
+    return std::any_of (heldFolders.begin(), heldFolders.end(), [&file] (const auto& folder) { return file.isAChildOf (folder); });
+}
+
+WholeFileHook::WholeFileHook (std::function<bool (const juce::File&)> asked)
+{
+    const std::scoped_lock lock (hookLock);
+    jassert (hookInForce == nullptr); // one at a time
+    hookInForce = std::make_shared<const std::function<bool (const juce::File&)>> (std::move (asked));
+}
+
+WholeFileHook::~WholeFileHook()
+{
+    const std::scoped_lock lock (hookLock);
+    hookInForce = nullptr;
+}
 
 juce::Result writeWholeFile (const juce::File& file, const std::function<bool (juce::OutputStream&)>& write)
 {
+    jassert (! isInHeldFolder (file)); // a first save copies its folder (holdFolder())
+
     // Beside the file, so that taking its place is a rename on the same drive; deleted as this returns, unless it did.
     const juce::TemporaryFile temporary (file);
     juce::int64 size = 0;
@@ -39,6 +95,9 @@ juce::Result writeWholeFile (const juce::File& file, const std::function<bool (j
     // A write that took fewer bytes than it was given, without an error.
     if (temporary.getFile().getSize() != size)
         return juce::Result::fail ("Not all of it could be written.");
+
+    if (! isLetThrough (file))
+        return juce::Result::fail ("There is not enough space on the disk."); // as a full disk fails it, for a test
 
     if (! temporary.overwriteTargetFileWithTemporary())
         return juce::Result::fail ("The file couldn't be replaced.");

@@ -6,6 +6,8 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -29,6 +31,7 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -629,7 +632,7 @@ namespace
 
             auto* audio = element->createNewChildElement ("Audio");
             audio->setAttribute ("channels", (int) reader->numChannels);
-            audio->setAttribute ("sampleRate", (int) reader->sampleRate);
+            audio->setAttribute ("sampleRate", toWhole<int> (reader->sampleRate)); // a file's header says it
             audio->setAttribute ("duration", number ((double) reader->lengthInSamples / reader->sampleRate));
             audio->setAttribute ("id", "a" + clip[schema::clipID].toString());
             audio->createNewChildElement ("File")->setAttribute ("path", addAudioFile (file));
@@ -746,22 +749,34 @@ juce::Result writeDawProject (DawProjectContent& content, const juce::File& boun
         content.files.emplace_back ("bounces/" + bounce.getFileName(), bounce);
     }
 
-    // project.xml and metadata.xml, the files (stored: audio barely compresses) and the presets.
+    // project.xml and metadata.xml, the files (stored: audio barely compresses) and the presets; refused at once if the archive
+    // wouldn't fit what the zip writer holds. JUCE workaround W41 (docs/juce-workarounds.md).
     const auto now = juce::Time::getCurrentTime();
     juce::ZipFile::Builder zip;
+    std::vector<ArchiveEntry> entries;
 
     for (const auto& [xml, path] :
          { std::pair { content.project.get(), "project.xml" }, std::pair { content.metadata.get(), "metadata.xml" } })
     {
         const auto text = xml->toString();
+        entries.push_back ({ path, (juce::int64) text.getNumBytesAsUTF8(), true });
         zip.addEntry (std::make_unique<juce::MemoryInputStream> (text.toRawUTF8(), text.getNumBytesAsUTF8(), true), 9, path, now);
     }
 
     for (const auto& [path, source] : content.files)
+    {
+        entries.push_back ({ path, source.getSize(), false });
         zip.addFile (source, 0, path);
+    }
 
     for (const auto& [path, blob] : content.blobs)
+    {
+        entries.push_back ({ path, (juce::int64) blob.getSize(), true });
         zip.addEntry (std::make_unique<juce::MemoryInputStream> (blob, true), 9, path, now);
+    }
+
+    if (const auto fits = checkArchiveFits (entries); fits.failed())
+        return fits;
 
     // Into a temporary file next to it, which takes its place once complete.
     const auto failed = juce::Result::fail ("Phazite couldn't write " + file.getFileName() + ".");
@@ -775,8 +790,66 @@ juce::Result writeDawProject (DawProjectContent& content, const juce::File& boun
             return failed;
     }
 
+    // A file that grew while it was packed could still take it past: never one that says it worked.
+    if (temporary.getFile().getSize() > maxArchiveBytes)
+        return checkArchiveFits ({ { "the archive", temporary.getFile().getSize(), false } });
+
     if (! temporary.overwriteTargetFileWithTemporary())
         return juce::Result::fail ("Phazite couldn't replace " + file.getFileName() + ". Is it open in another app?");
+
+    return juce::Result::ok();
+}
+
+juce::Result checkDawProjectFits (const DawProjectContent& content, double bounceSeconds)
+{
+    std::vector<ArchiveEntry> entries;
+
+    for (const auto& [xml, path] :
+         { std::pair { content.project.get(), "project.xml" }, std::pair { content.metadata.get(), "metadata.xml" } })
+        entries.push_back ({ path, xml != nullptr ? (juce::int64) xml->toString().getNumBytesAsUTF8() : 0, true });
+
+    for (const auto& [path, source] : content.files)
+        entries.push_back ({ path, source.getSize(), false });
+
+    for (const auto& [path, blob] : content.blobs)
+        entries.push_back ({ path, (juce::int64) blob.getSize(), true });
+
+    // A bounce's WAV file: its header and its samples, two channels of four bytes, at most.
+    const auto bounceBytes = (juce::int64) 4096 + (juce::int64) std::ceil (std::max (0.0, bounceSeconds) * bounceRate) * 2 * 4;
+
+    for (const auto& [track, clip] : content.bounces)
+        entries.push_back ({ "bounces/" + juce::String ((juce::int64) track.getRaw()) + ".wav", bounceBytes, false });
+
+    return checkArchiveFits (entries);
+}
+
+juce::Result checkArchiveFits (const std::vector<ArchiveEntry>& entries)
+{
+    // What the writer writes for each entry: its local header (30 bytes and its path), what it holds, packed at most as large
+    // as deflate's bound (zlib's deflateBound()), and its place in the central directory (46 bytes and its path again); and
+    // the directory's end, 22 bytes.
+    juce::int64 total = 22;
+
+    for (const auto& entry : entries)
+    {
+        const auto bytes = std::max ((juce::int64) 0, entry.bytes);
+        const auto held = entry.packed ? bytes + (bytes >> 12) + (bytes >> 14) + (bytes >> 25) + 13 : bytes;
+        total += 30 + 46 + 2 * (juce::int64) entry.path.getNumBytesAsUTF8() + held;
+    }
+
+    const auto gigabytes = [] (juce::int64 bytes) { return juce::String ((double) bytes / (1024.0 * 1024.0 * 1024.0), 1) + " GB"; };
+    const auto instead = juce::String (" Export the song's audio beside it instead (Export Song, its stems), or export a version "
+                                       "with fewer tracks or shorter audio.");
+
+    if ((int) entries.size() > maxArchiveEntries)
+        return juce::Result::fail ("The DAWproject would hold " + juce::String ((int) entries.size()) + " files, more than the "
+                                   + juce::String (maxArchiveEntries) + " Phazite can write into one." + instead);
+
+    if (total > maxArchiveBytes)
+        return juce::Result::fail ("The DAWproject would be " + gigabytes (total)
+                                   + ", more than the 4 GB Phazite can write into one "
+                                     "for now."
+                                   + instead);
 
     return juce::Result::ok();
 }
@@ -827,6 +900,18 @@ namespace
             content = describeDawProject (song, title, comment);
             std::vector<OfflineRender::Job> jobs;
             const auto end = toSeconds (song, getSongEnd (song));
+
+            // Refused before anything is rendered, where it wouldn't fit what the zip writer holds (JUCE workaround W41).
+            if (const auto fits = checkDawProjectFits (content, end + tailSeconds); fits.failed())
+            {
+                juce::MessageManager::callAsync (
+                    [weakAlive = std::weak_ptr<DawProjectExport*> (alive), fits]
+                    {
+                        if (const auto locked = weakAlive.lock())
+                            (*locked)->finish (fits);
+                    });
+                return;
+            }
 
             for (const auto& [track, clip] : content.bounces)
                 jobs.push_back ({ bouncesFolder.getChildFile (juce::String ((juce::int64) track.getRaw()) + ".wav"), end, tailSeconds,
@@ -889,6 +974,28 @@ namespace
                 callback (result); // last: it may delete this
         }
     };
+
+    // The attributes the reader below reads as numbers (readNumber(), readValue(), getDoubleAttribute(), getIntAttribute()),
+    // and nothing else: a device's ID, a path or a name can look like such a number ("5E12345678901...").
+    bool isReadAsNumber (const juce::String& attribute)
+    {
+        static const juce::StringArray names { "time",        "duration",   "value",       "vel",       "playStart",   "playStop",
+                                               "contentTime", "fadeInTime", "fadeOutTime", "numerator", "denominator", "key" };
+        return names.contains (attribute);
+    }
+
+    // Each of those whose exponent JUCE's reader would overflow (model/base/Json.h: hasExponentTooLongToRead()) made the same
+    // number in a text it reads.
+    void makeExponentsReadable (juce::XmlElement& element)
+    {
+        for (int i = element.getNumAttributes(); --i >= 0;)
+            if (const auto& value = element.getAttributeValue (i);
+                isReadAsNumber (element.getAttributeName (i)) && hasExponentTooLongToRead (value))
+                element.setAttribute (element.getAttributeName (i), makeExponentReadable (value));
+
+        for (auto* child : element.getChildIterator())
+            makeExponentsReadable (*child);
+    }
 } // namespace
 
 std::unique_ptr<TrackRender> startDawProjectExport (Song& song, PluginHost* pluginHost, const juce::File& file, const juce::String& title,
@@ -926,8 +1033,14 @@ DawProjectFile readDawProject (const juce::File& file)
         if (! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (text.getData()), (int) text.getSize()))
             return nullptr;
 
-        // As readEntireStreamAsString() reads it: without a byte order mark at its start.
-        return juce::parseXML (juce::String::createStringFromData (text.getData(), (int) text.getSize()));
+        // As readEntireStreamAsString() reads it: without a byte order mark at its start; and with each number whose
+        // exponent JUCE's reader would overflow made one it reads, before any is read (known bug 170).
+        auto xml = juce::parseXML (juce::String::createStringFromData (text.getData(), (int) text.getSize()));
+
+        if (xml != nullptr)
+            makeExponentsReadable (*xml);
+
+        return xml;
     };
 
     read.project = parse ("project.xml");
@@ -1270,7 +1383,7 @@ namespace
                                                  && isClose ((double) ours[schema::noteStart], note->getDoubleAttribute ("time"))
                                                  && isClose ((double) ours[schema::noteLength], note->getDoubleAttribute ("duration"))
                                                  && std::abs ((int) ours.getProperty (schema::noteVelocity, 100)
-                                                              - juce::roundToInt (note->getDoubleAttribute ("vel", 0.8) * 127.0))
+                                                              - roundToNearestInt (note->getDoubleAttribute ("vel", 0.8) * 127.0))
                                                         <= 1;
                                       });
 

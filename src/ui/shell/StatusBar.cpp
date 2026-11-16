@@ -235,6 +235,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
     context.addListener (this);
     context.getSongSelection().addChangeListener (this);
     context.getSongRange().addChangeListener (this);
+    commands.getRegistry().addListener (this);
 
     showAudioOutput (engine.getAudioOutput());
     showSelection();
@@ -245,9 +246,20 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
 
 StatusBar::~StatusBar()
 {
+    commands.getRegistry().removeListener (this);
     context.getSongRange().removeChangeListener (this);
     context.getSongSelection().removeChangeListener (this);
     context.removeListener (this);
+}
+
+void StatusBar::commandInvoked (const Command& command)
+{
+    // What a command that changed the project made that its name doesn't say, in the hint bar.
+    if (command.undoTarget == nullptr)
+        return;
+
+    if (const auto outcome = takeCommandOutcome(); outcome.isNotEmpty())
+        hintBar.showOutcome (outcome);
 }
 
 void StatusBar::showSaveState (SaveState state, std::optional<juce::Time> lastAutosave, bool autosaveFailed)

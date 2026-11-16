@@ -416,6 +416,8 @@ int PieceStore::getNumPacks() const
 
 bool PieceStore::joinPacks (const std::function<bool()>& shouldStop)
 {
+    jassert (! isInHeldFolder (folder)); // a first save copies the Versions folder (WholeFile.h: holdFolder())
+
     const juce::ScopedLock sl (lock);
 
     if (packs.size() < 2)

@@ -202,6 +202,9 @@ the [changelog](changelog.md).
 | G36 | With an audio clip of several minutes, click far ahead in the ruler while it plays | The clip comes in within a few milliseconds, faded, with no click | |
 | G171 | Put an LFO on the EQ of a silent track and open the EQ | The band's dot and the knob's ring move | |
 | G122 | In a clip of a few thousand notes (and in several clips of one alias group): drag 500 selected notes, hover over notes and empty rows, draw a selection rectangle across the clip, Select All, then Transpose, Quantize, Duplicate and Delete, each with its Undo | Each answers at once, and the right notes move, in every alias | |
+| G20 | In the piano roll, with a clip right before another, select notes that run to its end and press Ctrl+D | Only the copies that fit are made, the hint bar says how many weren't for about six seconds, and Edit > Undo names the step for the copies made | |
+| G174 | Set a track to Write, hold its pan knob, press Space, move the knob, press Escape while still holding | The knob goes to the lane's value and that is what plays | |
+| G169 | Make a new project, commit a few times, press Save; open Source Control while it saves | The progress window shows and Cancel works; the button reads "Saving the project...", Merge is greyed, and a bounce under way starts again once the save is done | |
 
 ## Performance on other machines
 

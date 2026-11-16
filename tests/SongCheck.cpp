@@ -335,6 +335,27 @@ namespace
             for (const auto& range : getRanges())
                 if (element.getType().toString() == range.type && element.hasProperty (range.property))
                     checkNumber (element, range.property, range.low, range.high, range.whole, range.property);
+
+            // Numbers between spaces: a step sequencer's steps, -1 to 1; the sampler's slices, parts of its sound, 0 to 1.
+            const auto checkList = [this, &element] (const juce::Identifier& property, double low, double high)
+            {
+                for (const auto& token : juce::StringArray::fromTokens (element[property].toString(), " ", {}))
+                {
+                    if (token.isEmpty())
+                        continue;
+
+                    juce::ValueTree one ("NUMBER");
+                    one.setProperty (property, token, nullptr);
+                    checkNumber (one, property, low, high, false, element.getType().toString() + " " + property.toString());
+                }
+            };
+
+            if (element.hasType (schema::MODULATOR))
+                checkList (schema::modulatorSteps, -1.0, 1.0);
+
+            if (element.hasType (schema::SOUNDS))
+                for (const auto* slices : { &schema::samplerSlices, &schema::samplerSlicesRemoved })
+                    checkList (*slices, 0.0, 1.0);
         }
 
         // Every item with an ID of its own, and one the song can count on from.

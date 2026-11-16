@@ -1567,13 +1567,17 @@ void VersionsView::refresh()
     if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
         setBounceWithVersion (context, bounces);
 
-    // What needs saying first: a bounce or a restore that failed in part, a merge that waits otherwise than it was taken,
-    // what Verify History found, a line that went its own way on another computer; else the room the history takes.
+    // What needs saying first: a first save copying the versions (why committing, merging and switching are greyed), a
+    // branch whose last commit can't be read, a bounce or a restore that failed in part, a merge that waits otherwise than it was taken, what Verify History found, a line that
+    // went its own way on another computer; else the room the history takes.
     const auto room = getVersionsRoom (context);
+    const auto savingProject = isSavingProjectFolder (context);
     juce::String notice;
 
-    for (const auto& text : { getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
-                              describeHistoryCheck (context), describeDivergence (context) })
+    for (const auto& text :
+         { savingProject ? juce::String ("Saving the project: committing, merging and switching wait until it is saved.") : juce::String(),
+           getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
+           describeHistoryCheck (context), describeDivergence (context) })
         if (notice.isEmpty())
             notice = text;
 
@@ -1681,7 +1685,8 @@ void VersionsView::refresh()
 
     saveButton.setEnabled (canSaveVersion (context));
     saveMenuButton.setEnabled (keeps);
-    saveButton.setButtonText (isSavingVersion (context)        ? "Committing..."
+    saveButton.setButtonText (savingProject                    ? "Saving the project..."
+                              : isSavingVersion (context)      ? "Committing..."
                               : getBounceWithVersion (context) ? "Commit and Bounce"
                                                                : "Commit");
 

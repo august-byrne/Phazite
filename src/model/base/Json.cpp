@@ -1,15 +1,74 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Json.h"
 
+#include <cmath>
+#include <limits>
 #include <string_view>
 
 namespace phazite
 {
 namespace
 {
+    // The most digits of an exponent that always fit an int as JUCE counts them (CharacterFunctions::readDoubleValue(),
+    // JSONParser::parseNumber()).
+    constexpr int maxExponentDigits = 9;
+
     bool isExponentMark (juce::juce_wchar character)
     {
         return character == 'e' || character == 'E';
+    }
+
+    // A number at the text's start as CharacterFunctions::readDoubleValue() reads it: its sign, and whether it has an
+    // exponent that reader would overflow (hasExponentTooLongToRead()), with the exponent's sign and where it ends.
+    struct ReadExponent
+    {
+        bool tooLong = false, negative = false, exponentNegative = false;
+        juce::String::CharPointerType end;
+    };
+
+    ReadExponent readExponent (const juce::String& text)
+    {
+        ReadExponent read { false, false, false, text.getCharPointer() };
+        auto t = text.getCharPointer().findEndOfWhitespace();
+
+        if (*t == '-' || *t == '+')
+            read.negative = t.getAndAdvance() == '-';
+
+        // Its digits, with a point among them, as the reader's isDigit() takes them: a juce::String's UTF-8 bytes, the ten alone.
+        auto digits = false, point = false;
+
+        for (;;)
+        {
+            if (t.isDigit())
+                digits = true;
+            else if (*t == '.' && ! point)
+                point = true;
+            else
+                break;
+
+            ++t;
+        }
+
+        if (! digits || ! isExponentMark (*t))
+            return read;
+
+        ++t;
+
+        if (*t == '-' || *t == '+')
+            read.exponentNegative = t.getAndAdvance() == '-';
+
+        // The reader leaves out the zeros it starts with, and counts each other digit in.
+        auto significant = 0;
+
+        while (t.isDigit())
+        {
+            if (t.getAndAdvance() != '0' || significant > 0)
+                ++significant;
+        }
+
+        read.tooLong = read.tooLong || significant > maxExponentDigits;
+        read.end = t;
+        return read;
     }
 
     // Whether the text has, outside its strings, a number JUCE's parser would overflow as it counts its digits: the digits
@@ -20,7 +79,6 @@ namespace
     bool hasNumberTooLongToCount (const juce::String& text)
     {
         constexpr std::string_view largest = "9223372036854775807";
-        constexpr int maxExponentDigits = 9;
 
         enum class Part
         {
@@ -107,5 +165,38 @@ juce::var parseJson (const juce::String& text)
 juce::var parseJson (const juce::File& file)
 {
     return parseJson (file.loadFileAsString());
+}
+
+bool hasExponentTooLongToRead (const juce::String& text)
+{
+    return readExponent (text).tooLong;
+}
+
+juce::String makeExponentReadable (const juce::String& text)
+{
+    const auto read = readExponent (text);
+
+    if (! read.tooLong)
+        return text;
+
+    return juce::String (read.negative ? "-" : "") + (read.exponentNegative ? "0" : "1e999") + juce::String (read.end);
+}
+
+std::optional<double> readFiniteDouble (const juce::String& text)
+{
+    const auto value = makeExponentReadable (text).getDoubleValue();
+    return std::isfinite (value) ? std::optional (value) : std::nullopt;
+}
+
+double readDouble (const juce::String& text, double otherwise)
+{
+    return readFiniteDouble (text).value_or (otherwise);
+}
+
+float readFloat (const juce::String& text, float otherwise)
+{
+    constexpr auto largest = (double) std::numeric_limits<float>::max();
+    const auto value = readFiniteDouble (text);
+    return value.has_value() ? (float) juce::jlimit (-largest, largest, *value) : otherwise;
 }
 } // namespace phazite

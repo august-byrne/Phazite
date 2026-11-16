@@ -4,6 +4,7 @@
 #include "internal/ParameterHandle.h"
 #include "internal/Parameters.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/modulation/internal/Modulation.h"
@@ -26,7 +27,8 @@ namespace
         if (! t.containsOnly ("+-.0123456789") || ! t.containsAnyOf ("0123456789"))
             return {};
 
-        return t.getFloatValue();
+        // Typed, or a plug-in's text; four hundred digits are no number.
+        return readFiniteDouble (t).has_value() ? std::optional (readFloat (t)) : std::nullopt;
     }
 
     // The text without the first of these endings that it has, trimmed, and whether it had one.

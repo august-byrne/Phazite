@@ -59,12 +59,40 @@ std::string openProject (const juce::File& file, const juce::MemoryBlock& input)
 {
     file.replaceWithData (input.getData(), input.getSize());
     juce::String error;
-    const auto project = phazite::Project::open (file, false, error);
+    auto project = phazite::Project::open (file, false, error);
 
     if (project == nullptr)
         return error.isNotEmpty() ? std::string() : "refused without saying why";
 
-    return fuzz::joinProblems (findSongProblems (project->getSong()));
+    if (const auto problems = fuzz::joinProblems (findSongProblems (project->getSong())); ! problems.empty())
+        return problems;
+
+    // What Phazite saved of it is Phazite's own: opened again and saved, the same bytes (makeConsistent() changes nothing in
+    // a project Phazite can save; known bugs 179 and 25).
+    if (project->save().failed())
+        return "it opened, and couldn't be saved";
+
+    const auto saved = file.loadFileAsString();
+    project = nullptr;
+    project = phazite::Project::open (file, false, error);
+
+    if (project == nullptr || project->save().failed())
+        return "what it saved doesn't open and save again: " + error.toStdString();
+
+    if (const auto again = file.loadFileAsString(); again != saved)
+    {
+        auto before = juce::StringArray::fromLines (saved), after = juce::StringArray::fromLines (again);
+        int line = 0;
+
+        while (line < before.size() && line < after.size() && before[line] == after[line])
+            ++line;
+
+        return ("saved, opened again and saved, it changed at line " + juce::String (line + 1) + ": \"" + before[line].trim() + "\" to \""
+                + after[line].trim() + "\"")
+            .toStdString();
+    }
+
+    return {};
 }
 
 // Every file in a folder and below is one whose name says it is audio.

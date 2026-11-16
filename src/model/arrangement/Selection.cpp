@@ -156,7 +156,7 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
     // Notes: the copies go right after them, and are selected instead.
     if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
     {
-        selectNotes (selection, duplicateNotes (*song, notes));
+        selectNotes (selection, duplicateNotes (*song, notes, describeSelection (selection, range, "Duplicate")));
         return;
     }
 

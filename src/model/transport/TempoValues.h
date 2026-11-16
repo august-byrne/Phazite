@@ -69,7 +69,11 @@ public:
     Bars(); // 4/4 throughout
     explicit Bars (const std::vector<TimeSignatureChange>&);
 
-    int getBarAt (BeatPosition) const;
+    int getBarAt (BeatPosition) const; // within maxBars either way
+
+    // Far more bars than a song holds (a million beats in sixteenths' bars, four million), so few that counting on from one
+    // (+1, or times a grid's bars) never overflows an int.
+    static constexpr int maxBars = 1 << 26;
     BeatPosition getBarStart (int bar) const;
 
     // How long the bar that is there is, and its time signature's beat, in quarter notes (TimeSignature's lengths).

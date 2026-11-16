@@ -25,12 +25,6 @@ The file holds two kinds of entries, under the same headings:
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
 
-## Editing
-
-- **20. Duplicate and Paste make fewer notes than they say** where some would land past a clip that the next clip keeps
-  from growing: no note is made where it wouldn't play, but the undo step is still named for all of them ("Duplicate 6
-  Notes" for 2). Fix: name the step for what was made, or say in the hint bar that some didn't fit.
-
 ## Plug-ins
 
 - **166. What is left of the message thread waiting for plug-ins.** A plug-in added, or brought back by an undo once
@@ -82,31 +76,8 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   doesn't keep them either. Fix: the event types in the engine, handed to devices and plug-ins, then recorded as the
   other controllers are. Seen while known bug 93 was fixed.
 
-## Saving
-
-- **160. A new project whose first save fails leaves its folder behind, and the same name is refused when tried again.**
-  `Project::create()` (`src/model/project/Project.cpp`) makes the project's folder and its subfolders, then saves; if
-  that save fails (a full disk, a folder another program holds) it returns nothing with the error, but the folder stays,
-  and `makeProjectFolder()` refuses a name whose folder exists. Found by reading (2026-11-14, tests-model 8); no test
-  reaches it, as nothing a test can arrange makes that save fail once the folder could be made. Fix: delete the folder
-  when the first save fails, as `saveCopyAs()` and `finishMoveTo()` do; test it with a write that fails (a seam in
-  `writeWholeFile()`, or `tests/HeldFile.h` on a file the save writes, if one can be held before it is made).
-
-- **169. A first save, seldom, says it couldn't copy a file of the project's Versions folder.** CI met it twice on
-  loaded machines (2026-11-14): linux-debug in `tests/ProjectViewTests.cpp` ("couldn't copy
-  Versions/branches/.../....xml into the project's new folder") and windows-debug in `tests/AppTests.cpp` (a first save
-  with leftover copies beside it, whose message the test didn't keep). The first save waits for the history's thread
-  before it copies (`waitForVersionsWritten()`, `src/app/ProjectSession.cpp`), and nothing else is known to write there
-  meanwhile, so what gets in its way isn't known. Since then the message says why a file couldn't be copied
-  (`copyFile()`, `src/model/project/Project.cpp`: not read, not written, or changed while it was copied), the removal
-  of leftover copies doesn't look into the copy being made, and the AppTests case prints the save's errors. Fix: read
-  the reason the next time it happens.
-
 ## Mixer and automation
 
-- **174. In Write, a control held while Play is pressed:** the punch-in sets the value to the lane's within the held
-  control's drag step, so Escape puts the value set by hand back to where it was before the drag while the pass goes
-  on writing the lane's value (`src/model/playback/AutomationWriter.cpp`). Minor; seen while known bug 163 was fixed.
 - **175. A take after a jump that lands exactly where the take before ended lets go of a held pedal for one tick at
   the seam.** The take before is placed before the next exists, so it writes its pedal-up at its end; between the
   parts of one take (a loop's wrap) nothing is let go of. Rare. Fix: place the takes of one recording together.
@@ -115,40 +86,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   vanishes from the playlist until the mouse goes up,** when its clip is placed: the clip shown while recording needs
   the engine's recording, which the take lets go of as it ends (`getInProgress()`,
   `src/model/playback/PlaybackSession.cpp`). Cosmetic. Left while known bug 163 was fixed.
-
-- **164. A project that already holds a device on a drum sampler's track listening to one of its own pads' tracks**
-  isn't put right as it opens: the model refuses the choice now (`isFedBy()`, `src/model/mixer/Sidechain.cpp`), but
-  `makeConsistent()` doesn't clear one a file brings. Fix: clear a sidechain that the model would refuse, with the
-  case in `tests/InconsistentProjectTests.cpp`. Seen while known bug 101 was fixed.
-
-## Files from others, and privacy
-
-- **106. A DAWproject written with 4 GB of audio or more is damaged,** and the export says it worked: JUCE's zip
-  writer keeps sizes in 32 bits (`src/model/project/DawProject.cpp`). Reading one is capped since 2026-11-14:
-  `project.xml` and `metadata.xml` at 256 MB each, and what it unpacks at what an archive of its size can hold
-  (`getUnpackLimit()`, `src/model/project/internal/DawProject.h`). Fix: refuse the export past 4 GB, or warn, until
-  JUCE writes ZIP64. Not yet checked (model-project-services 12).
-- **148. Casts of a number that is not finite to `int` remain in the model outside the file readers.** A value that is
-  infinite or not a number reaching such a cast (from a plug-in's parameter, or a calculation that divides by nothing)
-  is undefined behaviour in C++. The readers keep what a file says finite (`makeConsistent()`, `setTempo()`, the
-  settings and the helper's messages), but nothing checks each cast's other sources. Seen while the readers were
-  fuzzed. Fix:
-  find the casts (`(int)` and `static_cast<int>` of a float or a double in `src/model/`) and make each safe, or keep its
-  input finite where it comes from; UBSan in `linux-asan` reports one that runs.
-- **170. A number in a project file with an exponent of ten digits or more overflows an `int` as it is read**
-  ("1e12345678901" as a clip's length, say): undefined behaviour in C++, in practice a wrong exponent, after which the
-  loader puts the value within its range. JUCE reads an exponent's digits into an `int` without a check
-  (`CharacterFunctions::readDoubleValue()`, which `String::getDoubleValue()` and so every number read from a song's
-  XML uses). JSON is guarded (`parseJson()`, JUCE workaround W38); the fuzzer hasn't made such an attribute yet. Fix:
-  as the song loads, before any number is read from it, take a property whose text has an exponent that long for one
-  out of its range (`makeConsistent()`, `src/model/project/Project.cpp`), the same for the versions' pieces and a
-  DAWproject's attributes; and have the fuzzer write such exponents (`makeExtremeNumber()`, `tests/Fuzzer.cpp`).
-- **179. A project another tool wrote with booleans as "true" and "false", or an ID as "12.0", opens as changed.**
-  Phazite writes "1" and "0" and whole IDs; both forms play alike, but the versions compare the text, so such a file
-  equal to its last commit shows changes and takes an "As opened" snapshot (numbers with a range are put into
-  Phazite's form since known bug 25's fix; `keepInRange()`, `src/model/project/Project.cpp`). Fix: as the song
-  loads, write each boolean and ID property as Phazite writes it, from one table of them. Seen while known bug 25
-  was fixed.
 
 ## Slow on the message thread
 
@@ -190,11 +127,11 @@ its fix.
 
 ## Tests
 
-- **182. The test program can crash as it exits, after every case has passed.** Seen once (2026-11-15,
-  `SandboxedPluginTests`, "SEGFAULT" after "Status: SUCCESS!"): the main thread was in `ExitProcess`, past every static
-  destructor, when a Windows thread-pool worker started (the graphics stack's, under JUCE's Direct2D windows) and ran
+- **182. The test program can crash as it exits, after every case has passed.** Seen three times in two days
+  (2026-11-15 and 16, each time `SandboxedPluginTests` under a loaded machine, "SEGFAULT" after "Status: SUCCESS!"): the main thread was in `ExitProcess`, past every static
+  destructor, when a thread started by the graphics driver (NVIDIA's `nvppex.dll`, under JUCE's Direct2D windows) and ran
   the program's thread-local initialiser, doctest's `g_oss`, which allocated after the C runtime's lock was gone. No
-  code of Phazite's was on its stack, and it didn't happen again in five runs. Fix, if it comes back: end the test
+  code of Phazite's was on its stack, and the file passes when run again. Fix, if it comes back: end the test
   program without tearing the runtime down (`_exit` after the last check), which gives up the check of JUCE's leak
   detector after `main` (`tests/TestMain.cpp`), or make that check before leaving `main`.
 

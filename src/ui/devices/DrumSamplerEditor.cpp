@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSamplerEditor.h"
 #include "GraphDot.h"
+#include "model/base/Numbers.h"
 #include "model/notes/NoteValues.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/Icons.h"
@@ -318,7 +319,8 @@ private:
     int getFirstShownAt (float y) const
     {
         const auto area = getLocalBounds().toFloat().reduced (1.0f);
-        const auto row = (int) std::floor ((area.getBottom() - y) / (area.getHeight() / (float) rows));
+        // Shown no taller than its edge, the division is by nothing: no number.
+        const auto row = juce::jlimit (0, rows, toWhole<int> (std::floor ((area.getBottom() - y) / (area.getHeight() / (float) rows))));
         return getFirstShown ((row - 1) * columns);
     }
 

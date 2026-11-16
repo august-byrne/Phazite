@@ -18,6 +18,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
@@ -1291,6 +1292,149 @@ struct FirstSave
     juce::StringArray errors;
 };
 } // namespace
+
+TEST_CASE ("A first save copies the project's versions last, with the commit its history wrote while the rest was copied")
+{
+    // Known bug 169: the versions were copied with the rest, in the background, while the message thread went on; the
+    // history's initial commit, which a new project makes once its versions are read, was written into the folder the
+    // project left meanwhile, after its versions were listed, so that the saved project lost it (or, as CI met it, a file
+    // being written there couldn't be copied). The history's writes made slow, so that every write is still under way as
+    // the copy of the rest ends.
+    std::atomic<int> writesToVersions { 0 };
+    const phazite::WholeFileHook slow (
+        [&writesToVersions] (const juce::File& file)
+        {
+            if (file.getFullPathName().contains ("Versions"))
+            {
+                ++writesToVersions;
+                juce::Thread::sleep (200);
+            }
+
+            return true;
+        });
+
+    FirstSave s;
+    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr); // in the background, the message thread going on
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
+    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    CHECK (s.errors.isEmpty());
+    CHECK (writesToVersions.load() > 0);
+
+    // The initial commit, in the project's own folder: its branch, the commit's pieces, and the history that says so.
+    REQUIRE (phazite::test::waitForVersionHistory (s.session.getContext()));
+    const auto versions = s.projects.getChildFile ("Beat").getChildFile ("Versions");
+    CHECK (versions.getChildFile ("branches").findChildFiles (juce::File::findFiles, true, "*.xml").size() == 1);
+    CHECK (versions.getChildFile ("current").existsAsFile());
+    CHECK (phazite::getVersions (s.session.getContext()).size() == 1);
+}
+
+namespace
+{
+// A file of so many bytes in the untitled project's Versions folder, where its history keeps nothing of its own.
+juce::File addToVersions (FirstSave& s, juce::int64 bytes)
+{
+    const auto file = s.session.getProject()->getFolder().getChildFile ("Versions").getChildFile ("local").getChildFile ("big.bin");
+    REQUIRE (file.getParentDirectory().createDirectory());
+    juce::MemoryBlock block ((size_t) bytes, true);
+    REQUIRE (file.replaceWithData (block.getData(), block.getSize()));
+    return file;
+}
+} // namespace
+
+TEST_CASE ("A first save counts its versions with the rest: a small project with a large history copies in the background")
+{
+    // A reviewer, of known bug 169's fix: only the files but the versions were counted, so a project of a little audio and a
+    // long history was copied at once, the window waiting for the whole of its history.
+    FirstSave s;
+    REQUIRE (phazite::test::waitForVersionHistory (s.session.getContext()));
+    addToVersions (s, phazite::Project::copyAtOnceBytes + 4096);
+    s.addRecording (1024);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr); // in its progress window
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
+    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    CHECK (s.projects.getChildFile ("Beat/Versions/local/big.bin").getSize() == phazite::Project::copyAtOnceBytes + 4096);
+    REQUIRE (phazite::test::waitForVersionHistory (s.session.getContext()));
+    CHECK (phazite::getVersions (s.session.getContext()).size() == 1);
+}
+
+TEST_CASE ("A first save's versions are copied by their history's thread, after its writes: none starts meanwhile, and Cancel stops it")
+{
+    // A reviewer, of known bug 169's fix: the versions were copied on the message thread, without progress or Cancel. Now
+    // they are copied by the history's thread after what it was given to write; a commit asked for meanwhile is refused.
+    // Here the history's commit is held while the save reaches its versions, so that their copy waits for it.
+    std::atomic<bool> holding { true };
+    const phazite::WholeFileHook held (
+        [&holding] (const juce::File& file)
+        {
+            while (holding.load() && file.getFullPathName().contains ("Versions"))
+                juce::Thread::sleep (1);
+
+            return true;
+        });
+
+    FirstSave s;
+    auto& context = s.session.getContext();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
+    auto* history = phazite::getVersionHistory (context);
+    REQUIRE (history != nullptr);
+    addToVersions (s, phazite::Project::copyAtOnceBytes + 4096);
+    s.addRecording (1024);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr);
+
+    // Once the rest is copied, the history holds every write: a commit is refused for the save.
+    juce::String refused;
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            history->saveVersion ("Meanwhile", {}, [&refused] (juce::Result r) { refused = r.getErrorMessage(); });
+            return refused.contains ("into its folder");
+        }));
+
+    // Cancelled while its copy waits behind the commit: nothing is left of it, the project stays where it was, and the
+    // history writes again once the commit it held is done.
+    s.renders.render = nullptr;
+    holding = false;
+    CHECK (s.listProjects().isEmpty());
+    CHECK (s.session.isUntitled());
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    CHECK_FALSE (phazite::isSavingVersion (context));
+    CHECK (phazite::getVersions (context).size() >= 1);
+}
+
+TEST_CASE ("A commit's bounce made while a first save copies, after its folder was listed, isn't taken for one the project has")
+{
+    // A reviewer, of known bug 169's fix: such a bounce is in no list the save copies, and the history, which read the
+    // bounces in the folder the project left, went on saying it had one: that commit couldn't be bounced again.
+    FirstSave s;
+    auto& context = s.session.getContext();
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    auto* history = phazite::getVersionHistory (context);
+    const auto versions = phazite::getVersions (context);
+    REQUIRE (versions.size() == 1);
+    const auto id = versions.front().id;
+    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr);
+
+    // Its bounce, finished as the rest is copied: in the folder the project leaves.
+    const auto bounce = history->getBounceFile (id);
+    REQUIRE (bounce.getParentDirectory().createDirectory());
+    REQUIRE (bounce.replaceWithText ("flac"));
+    history->readBounces();
+    REQUIRE (history->hasBounce (id));
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
+    REQUIRE (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    CHECK (history->hasBounce (id) == history->getBounceFile (id).existsAsFile());
+    CHECK (history->getBounceFile (id).isAChildOf (s.projects.getChildFile ("Beat")));
+}
 
 TEST_CASE ("A first save whose background copy fails says why in its progress window, and the project stays untitled")
 {

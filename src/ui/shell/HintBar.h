@@ -26,6 +26,12 @@ public:
     void setAlert (const juce::String& text, std::function<void()> fix);
     juce::String getAlert() const { return alert; }
 
+    // What a command just made that its name doesn't say, such as copies that didn't fit (CommandRegistry.h,
+    // takeCommandOutcome()): shown in place of the hints, whatever is under the pointer, for outcomeSeconds, and said by
+    // screen readers as it comes.
+    void showOutcome (const juce::String&);
+    static constexpr double outcomeSeconds = 6.0;
+
     // A click while no alert shows: the lesson's next step (AppShell, Lessons.h).
     std::function<void()> onClick;
 
@@ -36,7 +42,8 @@ private:
     static constexpr int hintHz = 10, dragReadoutHz = 30;
 
     std::function<juce::String()> defaultHint;
-    juce::String hint, alert;
+    juce::String hint, alert, outcome;
+    double outcomeUntil = 0.0; // when the outcome goes, in milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::function<void()> fixAlert;
 
     void timerCallback() override; // checks the component under the pointer; repaints only on change

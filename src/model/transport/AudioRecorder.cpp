@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/AudioIO.h"
@@ -302,7 +303,8 @@ std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, con
         {
             setClipFade (song, clip, true, crossfadeSeconds);
             setClipFade (song, clip, false, crossfadeSeconds);
-            return { juce::Range<std::int64_t> (std::llround (clipStart * rate), std::llround (clipEnd * rate)) };
+            return { juce::Range<std::int64_t> (roundToWhole<std::int64_t> (clipStart * rate),
+                                                roundToWhole<std::int64_t> (clipEnd * rate)) };
         }
 
         return {};

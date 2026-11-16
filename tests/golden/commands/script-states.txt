@@ -615,8 +615,8 @@ after edit.mute:
 after edit.mute:
   edit.mute: on "Mute"
 after edit.duplicate:
-  edit.undo: on "Undo Duplicate 6 Notes"
-  edit.undoOrRedo: on "Undo Duplicate 6 Notes"
+  edit.undo: on "Undo Duplicate 2 Notes"
+  edit.undoOrRedo: on "Undo Duplicate 2 Notes"
   edit.delete: on "Delete 2 Notes"
   edit.duplicate: on "Duplicate 2 Notes"
   edit.cut: on "Cut 2 Notes"
@@ -664,8 +664,8 @@ after select the clip's notes again, and put the playhead at beat 1:
 after edit.copy:
   edit.paste: on "Paste 6 Notes"
 after edit.paste:
-  edit.undo: on "Undo Paste 6 Notes"
-  edit.undoOrRedo: on "Undo Paste 6 Notes"
+  edit.undo: on "Undo Paste 4 Notes"
+  edit.undoOrRedo: on "Undo Paste 4 Notes"
   edit.delete: on "Delete 4 Notes"
   edit.duplicate: on "Duplicate 4 Notes"
   edit.cut: on "Cut 4 Notes"

@@ -23,6 +23,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/presets/PresetModel.h"
@@ -162,6 +163,70 @@ TEST_CASE ("A container saved as a preset loads into another project with its ma
     phazite::undo (second.getSong());
     phazite::undo (second.getSong());
     CHECK (phazite::getEffects (second.context, track).size() == 1);
+}
+
+TEST_CASE ("A container's preset with a chain's volume and pan past any float's loads them at the ends of their ranges")
+{
+    // A reviewer, of known bug 148's fix: a JSON double such as 1e300 was cast to a float, which is undefined behaviour
+    // (MSVC makes an infinity of it, which the chain's volume then took for no number, 0 dB).
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Loud" + juce::String (phazite::presetExtension));
+
+    {
+        Song first (temp.folder, "First");
+        const auto eq = first.addEffect (first.track (0), "phaziteEq");
+        const auto container = phazite::groupIntoContainer (first.context, { eq });
+        REQUIRE (phazite::saveDevicePreset (first.context, container, file));
+    }
+
+    auto preset = phazite::readPreset (file);
+    auto* chains = preset[keys::container][keys::chains].getArray();
+    REQUIRE (chains != nullptr);
+    REQUIRE (! chains->isEmpty());
+    chains->getReference (0).getDynamicObject()->setProperty (keys::volume, 1.0e300);
+    chains->getReference (0).getDynamicObject()->setProperty (keys::pan, -1.0e300);
+    REQUIRE (phazite::writePreset (preset, file));
+
+    Song second (temp.folder, "Second");
+    REQUIRE (phazite::loadPreset (second.context, file, second.track (0)));
+    const auto effects = phazite::getEffects (second.context, second.track (0));
+    REQUIRE (! effects.empty());
+    const auto chain = phazite::getChains (second.getSong(), effects.back().id).front();
+    CHECK (phazite::getChainVolume (second.getSong(), chain) == doctest::Approx (6.0f));
+    CHECK (phazite::getChainPan (second.getSong(), chain) == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("A track's preset whose volume and pan are no finite number leaves the track's as they are")
+{
+    // A reviewer, of known bug 148's fix: such a volume became 0 dB, set on the track as if the preset gave it (and a pan
+    // the middle): a guess, rather than the track as it is.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Lead" + juce::String (phazite::presetExtension));
+
+    {
+        Song first (temp.folder, "First");
+        REQUIRE (phazite::saveTrackPreset (first.context, first.track (0), file));
+    }
+
+    auto preset = phazite::readPreset (file);
+    auto* track = preset[keys::track].getDynamicObject();
+    REQUIRE (track != nullptr);
+    track->setProperty (keys::volume, "1e999");
+    track->setProperty (keys::pan, "nan");
+    REQUIRE (phazite::writePreset (preset, file));
+
+    Song second (temp.folder, "Second");
+    const auto before = phazite::getTrackIDs (second.getSong());
+    REQUIRE (phazite::loadPreset (second.context, file, second.track (0)));
+    juce::ValueTree added;
+
+    for (const auto id : phazite::getTrackIDs (second.getSong()))
+        if (std::find (before.begin(), before.end(), id) == before.end())
+            added = phazite::findTrackState (second.getSong(), id);
+
+    REQUIRE (added.isValid());
+    CHECK_FALSE (added.hasProperty (phazite::schema::channelVolume));
+    CHECK_FALSE (added.hasProperty (phazite::schema::channelPan));
 }
 
 TEST_CASE ("A device's preset holds its settings and mix, not its automation, outside modulation, sidechain or switch")

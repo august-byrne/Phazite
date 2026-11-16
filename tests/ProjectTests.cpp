@@ -22,6 +22,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -117,6 +118,44 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
     juce::String error;
     CHECK (phazite::Project::create (temp.folder, "My Song", error) == nullptr);
     CHECK (error.isNotEmpty());
+}
+
+TEST_CASE ("A new project whose first save fails leaves no folder behind, and its name can be tried again")
+{
+    TemporaryFolder temp;
+    const auto folder = temp.folder.getChildFile ("Full Disk");
+    juce::String error;
+
+    {
+        // The project file's write fails, as on a full disk, once its folder and subfolders are made.
+        const phazite::WholeFileHook failure ([] (const juce::File& file) { return ! file.hasFileExtension (".phazite"); });
+        CHECK (phazite::Project::create (temp.folder, "Full Disk", error) == nullptr);
+    }
+
+    CHECK (error.contains ("not enough space"));
+    CHECK_FALSE (folder.exists());
+
+    // Tried again, it is made; and a failure never takes a folder that was there before.
+    error.clear();
+    auto project = phazite::Project::create (temp.folder, "Full Disk", error);
+    REQUIRE (project != nullptr);
+    CHECK (error.isEmpty());
+    CHECK (project->getFile().existsAsFile());
+    project.reset();
+
+    // Another project failing beside it: its own folder goes (the deletion is reached: the folder was made, the save failed),
+    // the one made before it stays whole.
+    error.clear();
+
+    {
+        const phazite::WholeFileHook failure ([] (const juce::File&) { return false; });
+        CHECK (phazite::Project::create (temp.folder, "Second", error) == nullptr);
+    }
+
+    CHECK (error.contains ("not enough space"));
+    CHECK_FALSE (temp.folder.getChildFile ("Second").exists());
+    CHECK (folder.getChildFile ("Full Disk.phazite").existsAsFile());
+    CHECK (folder.getChildFile ("Audio").isDirectory());
 }
 
 TEST_CASE ("A project saves and reopens with Phazite's own data")

@@ -12,6 +12,7 @@
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
+#include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -604,4 +605,56 @@ TEST_CASE ("Notes pasted where they run past the clip's end are pasted whole, an
     CHECK (notes[3].start.inBeats() == doctest::Approx (4.25));
     CHECK (songSelection.getNotes().size() == 2);
     CHECK (phazite::test::findIDProblems (song.getSong().getState()).empty());
+}
+
+TEST_CASE ("Paste and Duplicate name their step for the notes made where some wouldn't fit before the next clip, and say so")
+{
+    // The clip, from beat 0 to 4, with the next clip right after it, so that it can't grow; a third note at beat 3.
+    Song song;
+    phazite::addSelectionCommands (song.registry, getSelection (song.context), getRangeSelection (song.context));
+    REQUIRE (phazite::insertMidiClip (song.getSong(), song.tracks[0], { at (4.0), at (8.0) }, nullptr).isValid());
+    phazite::addNote (song.getSong(), song.clip, 67, at (3.0), lasting (0.5), 80);
+    song.getSong().getUndoManager().clearUndoHistory();
+    (void) phazite::takeCommandOutcome();
+
+    auto& songSelection = song.context.getSongSelection();
+    songSelection.setNoteClips ({ song.clip });
+    songSelection.selectNotes (phazite::getRefs (phazite::getClipNotes (song.getSong(), song.clip)));
+    REQUIRE (songSelection.getNotes().size() == 3);
+
+    // Duplicate puts the copies after the last note, from beat 3.5: only the first lands in the clip.
+    CHECK (phazite::getCurrentName (*song.registry.find ("edit.duplicate")) == juce::String ("Duplicate 3 Notes"));
+    {
+        phazite::test::UndoCheck check (song.getSong());
+        check.command (song.registry, "edit.duplicate");
+    }
+    CHECK (song.notesOf (song.clip).size() == 4);
+    CHECK (song.describeUndo() == juce::String ("Undo Duplicate Note"));
+    CHECK (phazite::takeCommandOutcome().startsWith ("2 notes of 3 weren't made"));
+    CHECK (phazite::takeCommandOutcome().isEmpty()); // taken once
+
+    // Paste of the first two at beat 3.75: the second would start at 4.25, in the next clip.
+    songSelection.selectNotes (phazite::getRefs ({ song.notesOf (song.clip)[0], song.notesOf (song.clip)[1] }));
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    song.playheadAt (3.75);
+    CHECK (phazite::getCurrentName (*song.registry.find ("edit.paste")) == juce::String ("Paste 2 Notes"));
+    {
+        phazite::test::UndoCheck check (song.getSong());
+        check.command (song.registry, "edit.paste");
+    }
+    CHECK (song.notesOf (song.clip).size() == 5);
+    CHECK (song.describeUndo() == juce::String ("Undo Paste Note"));
+    CHECK (phazite::takeCommandOutcome().startsWith ("1 note of 2 wasn't made"));
+
+    // Where all fit, the step keeps its name and nothing is said.
+    song.playheadAt (0.0);
+    REQUIRE (song.registry.invoke ("edit.paste"));
+    CHECK (song.describeUndo() == juce::String ("Undo Paste 2 Notes"));
+    CHECK (phazite::takeCommandOutcome().isEmpty());
+
+    // Within a macro, whose step is named for the macro, the step keeps the macro's name.
+    REQUIRE (song.registry.addMacro ("test.pasteTwice", "Paste Twice", { "edit.paste" }));
+    song.playheadAt (3.75);
+    REQUIRE (song.registry.invoke ("test.pasteTwice"));
+    CHECK (song.describeUndo() == juce::String ("Undo Paste Twice"));
 }

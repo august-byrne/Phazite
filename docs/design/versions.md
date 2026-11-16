@@ -334,5 +334,6 @@ the code now and are to be removed; this page is to be cut down when they are.
 - `src/engine/nodes/Comparison.h`: a bounce played after the master.
 - `src/ui/versions/VersionsView.h`, `BranchPicker.h`; `src/ui/shell/ActivityBar.h`, `StatusBar.h`, `TopBar.h` (A/B).
 - Tests: `tests/VersionsTests.cpp`, `VersionsBranchTests.cpp`, `VersionsMergeTests.cpp`,
-  `VersionsCheckoutTests.cpp`, `VersionsGoingBackTests.cpp`, `VersionsHearingTests.cpp`, `VersionStoreTests.cpp`,
+  `VersionsCheckoutTests.cpp`, `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
+  `VersionsHearingTests.cpp`, `VersionStoreTests.cpp`,
   `tests/golden/format/`.

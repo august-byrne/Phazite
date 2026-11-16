@@ -47,6 +47,18 @@ void HintBar::setAlert (const juce::String& text, std::function<void()> fix)
     repaint();
 }
 
+void HintBar::showOutcome (const juce::String& text)
+{
+    outcome = text;
+    outcomeUntil = juce::Time::getMillisecondCounterHiRes() + outcomeSeconds * 1000.0;
+
+    if (outcome.isNotEmpty())
+        if (auto* handler = getAccessibilityHandler())
+            handler->postAnnouncement (outcome, juce::AccessibilityHandler::AnnouncementPriority::medium);
+
+    timerCallback();
+}
+
 void HintBar::mouseUp (const juce::MouseEvent& e)
 {
     if (! e.mouseWasClicked())
@@ -76,6 +88,13 @@ void HintBar::timerCallback()
 
     if (const auto rate = text.isNotEmpty() ? dragReadoutHz : hintHz; getTimerInterval() != 1000 / rate)
         startTimerHz (rate);
+
+    // Else what a command just made, for a while.
+    if (outcome.isNotEmpty() && juce::Time::getMillisecondCounterHiRes() >= outcomeUntil)
+        outcome.clear();
+
+    if (text.isEmpty())
+        text = outcome;
 
     // The nearest component under the pointer that explains itself.
     for (auto* c = under; c != nullptr && text.isEmpty(); c = c->getParentComponent())

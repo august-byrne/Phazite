@@ -1127,3 +1127,68 @@ TEST_CASE ("Local History thins as it grows old: every snapshot of two hours, on
     CHECK (std::is_sorted (kept.begin(), kept.end(), [] (const auto& a, const auto& b) { return a.time < b.time; }));
     CHECK (kept.back().time == now);
 }
+
+TEST_CASE ("A song another tool wrote with switches as true and false and IDs as 12.0 opens as its last commit: no changes, no snapshot")
+{
+    // Known bug 179: such a file plays as Phazite's own does, but the versions compare the text, so a file equal to its last
+    // commit showed changes, and took an "As opened" snapshot.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto clip = s.addMidiClip (bass, 0.0, 4.0);
+    s.addNote (clip, 60, 0.0, 1.0);
+    auto& song = *phazite::findSong (s.context);
+    phazite::setTrackMuted (song, bass, true);
+    phazite::setCollapsed (song, bass, false); // a switch Phazite writes as 0
+    keepVersion (s.context, "First");
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+
+    // The same song, each switch and ID as another tool writes it.
+    auto written = song.getState().createCopy();
+    const std::function<void (juce::ValueTree)> rewrite = [&rewrite] (juce::ValueTree element)
+    {
+        for (auto i = element.getNumProperties(); --i >= 0;)
+        {
+            const auto name = element.getPropertyName (i);
+            const auto text = element[name].toString();
+
+            if (element.hasType (schema::TRACK) && name == schema::trackMute)
+                element.setProperty (name, "true", nullptr);
+            else if (element.hasType (schema::TRACK) && name == schema::trackCollapsed)
+                element.setProperty (name, "false", nullptr);
+            else if ((schema::holdsID (element, name) || (element.hasType (schema::NOTE) && name == schema::noteID))
+                     && text.containsOnly ("0123456789"))
+                element.setProperty (name, text + ".0", nullptr);
+        }
+
+        for (auto child : element)
+            rewrite (child);
+    };
+
+    rewrite (written);
+    written.getChildWithName (schema::TRACKS).getChild (0).setProperty (schema::trackSolo, "false", nullptr); // off, as none is
+
+    // Written into the project's file as Phazite writes the rest (each number in its one form), and opened from it.
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, written);
+    REQUIRE (s.getProject().getFile().replaceWithData (text.getData(), text.getDataSize()));
+    REQUIRE (s.getProject().getFile().loadFileAsString().contains ("mute=\"true\""));
+    REQUIRE (s.reopenAs (TestSong::Reopening::withoutSaving));
+    REQUIRE (waitForVersionHistory (s.context));
+    dispatchPendingMessages();
+    REQUIRE (waitForVersionHistory (s.context));
+
+    INFO (describeChanges (s.context).toStdString());
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::getSnapshots (s.context).empty());
+    const auto bassState = phazite::findTrackState (*phazite::findSong (s.context), bass);
+    REQUIRE (bassState.isValid());
+    CHECK (bassState[schema::trackMute].toString() == "1");
+    CHECK (bassState[schema::trackID].toString() == juce::String ((juce::int64) bass.getRaw()));
+
+    // What Phazite wrote opens as it was: saved again, byte for byte the same file.
+    REQUIRE (s.getProject().save().wasOk());
+    const auto once = s.getProject().getFile().loadFileAsString();
+    s.reopen();
+    REQUIRE (s.getProject().save().wasOk());
+    CHECK (s.getProject().getFile().loadFileAsString() == once);
+}

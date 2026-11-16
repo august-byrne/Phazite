@@ -47,6 +47,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
@@ -998,6 +999,59 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     MESSAGE (report);
 }
 
+TEST_CASE ("Benchmark: a song of 100,000 notes made consistent as it opens, and joined from a version's pieces"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // What opening a song costs before anything of it plays (model/project/internal/Project.h: makeConsistent()), and what
+    // joining a version's song costs (model/versions/internal/SongPieces.h: joinSong()): the reviewer of known bugs 170 and 179
+    // asked what their steps add. 40 tracks of 2,500 notes each, as a project file holds them (its properties text).
+    auto made = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*made, 40);
+
+    for (const auto track : tracks)
+    {
+        const auto clip =
+            phazite::test::addMidiClip (*made, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (640.0) }, "Notes");
+
+        for (int step = 0; step < 2500; ++step)
+            phazite::test::addMidiNote (*made, clip, 48 + step % 24, phazite::BeatPosition::fromBeats (step * 0.25),
+                                        phazite::BeatDuration::fromBeats (0.2), 100);
+    }
+
+    juce::MemoryOutputStream text;
+    phazite::writeProjectText (text, made->getState());
+    const auto xml = juce::parseXML (text.toString());
+    REQUIRE (xml != nullptr);
+    const auto asFile = juce::ValueTree::fromXml (*xml);
+
+    std::vector<double> times;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        phazite::Song song (asFile.createCopy());
+        times.push_back (millisecondsOf ([&] { phazite::makeConsistent (song); }));
+    }
+
+    std::sort (times.begin(), times.end());
+    juce::String report ("\n");
+    report << "makeConsistent() of 100,000 notes, the median of 5: " << milliseconds (times[2], 1) << "\n";
+
+    const auto pieces = phazite::splitSong (asFile);
+    const auto read = [&pieces] (const juce::String& name) -> std::optional<juce::MemoryBlock>
+    {
+        const auto found = pieces.pieces.find (name);
+        return found != pieces.pieces.end() ? std::optional (found->second) : std::nullopt;
+    };
+
+    times.clear();
+
+    for (int i = 0; i < 5; ++i)
+        times.push_back (millisecondsOf ([&] { REQUIRE (phazite::joinSong (pieces.song, read).isValid()); }));
+
+    std::sort (times.begin(), times.end());
+    report << "joinSong() of it, the median of 5: " << milliseconds (times[2], 1) << "\n";
+    MESSAGE (report);
+}
 TEST_CASE ("Benchmark: rendering audio clips stretched and pitched" * doctest::test_suite ("benchmark") * doctest::skip())
 {
     // What a clip that follows the tempo, or is pitched, waits for before it sounds (roadmap step 2.18): Rubber Band's R3

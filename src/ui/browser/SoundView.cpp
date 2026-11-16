@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SoundView.h"
+#include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "ui/components/ValueText.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -32,7 +34,7 @@ namespace
     {
         for (const auto& tag : item.tags)
             if (tag.endsWith (" BPM"))
-                return tag.upToFirstOccurrenceOf (" ", false, false).getDoubleValue();
+                return readDouble (tag.upToFirstOccurrenceOf (" ", false, false));
 
         return {};
     }
@@ -44,7 +46,7 @@ namespace
 
         if (std::abs (bars - std::round (bars)) < 0.05 && bars >= 0.95)
         {
-            const auto whole = (int) std::lround (bars);
+            const auto whole = roundToWhole<int> (bars); // a file's length, as its header says it
             return juce::String (whole) + (whole == 1 ? " bar" : " bars");
         }
 

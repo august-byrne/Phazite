@@ -6,6 +6,8 @@
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "model/chords/ChordModel.h"
 #include "model/commands/SongGesture.h"
 #include "model/mixer/MixerModel.h"
@@ -25,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -34,6 +37,9 @@ using namespace strip;
 
 namespace
 {
+    // What a value typed that is no finite number passes on as, which the model's setters refuse (known bug 148).
+    constexpr auto noNumber = std::numeric_limits<float>::quiet_NaN();
+
     constexpr int nameWidth = 84;         // a row's name, on its left
     constexpr int stackWidth = 140;       // a control needs this much beside its name, or the name goes above it
     constexpr int stackedNameHeight = 16; // a name above its control
@@ -196,10 +202,16 @@ namespace
         if (numbers.isEmpty() || numbers[0].isEmpty())
             return {};
 
+        // A beat that is no finite number ("1e999", four hundred digits) places nothing.
         const auto bar = std::max (1, numbers[0].getIntValue());
-        const auto beat = numbers.size() > 1 ? std::max (1.0, numbers[1].getDoubleValue()) : 1.0;
+        const auto beat = numbers.size() > 1 ? readFiniteDouble (numbers[1]) : std::optional (1.0);
+
+        if (! beat.has_value())
+            return {};
+
         const auto barStart = getBarStart (context, bar - 1);
-        return barStart + getBeatLength (context, barStart) * (beat - 1.0);
+        const auto place = barStart + getBeatLength (context, barStart) * (std::max (1.0, *beat) - 1.0);
+        return std::isfinite (place.inBeats()) ? std::optional (place) : std::nullopt;
     }
 
     // A length typed as describeLength() writes it ("1 bar, 2 beats", "3 beats"), as a note value ("1/16", of a whole note
@@ -208,25 +220,33 @@ namespace
     {
         const auto lower = text.toLowerCase();
 
+        // What is no finite number ("inf/inf", "1e999/1") is no length.
+        const auto finite = [] (BeatDuration length) { return std::isfinite (length.inBeats()) ? std::optional (length) : std::nullopt; };
+
         if (lower.containsChar ('/'))
         {
-            const auto over = lower.upToFirstOccurrenceOf ("/", false, false).getDoubleValue();
-            const auto under = lower.fromFirstOccurrenceOf ("/", false, false).getDoubleValue();
-            return over > 0.0 && under > 0.0 ? std::optional (BeatDuration::fromBeats (4.0 * over / under)) : std::nullopt;
+            const auto over = readFiniteDouble (lower.upToFirstOccurrenceOf ("/", false, false));
+            const auto under = readFiniteDouble (lower.fromFirstOccurrenceOf ("/", false, false));
+
+            if (! over.has_value() || ! under.has_value() || *over <= 0.0 || *under <= 0.0)
+                return {};
+
+            return finite (BeatDuration::fromBeats (4.0 * *over / *under));
         }
 
         const auto numbers = getNumbers (lower);
+        const auto first = numbers.isEmpty() ? std::nullopt : readFiniteDouble (numbers[0]);
+        const auto second = numbers.size() > 1 ? readFiniteDouble (numbers[1]) : std::optional (0.0);
 
-        if (numbers.isEmpty())
+        if (! first.has_value() || ! second.has_value())
             return {};
 
         const auto beat = getBeatLength (context, at);
 
         if (! lower.contains ("bar"))
-            return beat * numbers[0].getDoubleValue();
+            return finite (beat * *first);
 
-        const auto beats = numbers.size() > 1 ? numbers[1].getDoubleValue() : 0.0;
-        return getBarLength (context, at) * numbers[0].getDoubleValue() + beat * beats;
+        return finite (getBarLength (context, at) * *first + beat * *second);
     }
 
     // A note's name, with middle C as C4 (the keys' and the top bar's), and one typed so ("F#3", "Bb2") or as its number.
@@ -382,7 +402,7 @@ namespace
 
         std::function<juce::String (double)> format = [] (double value) { return juce::String (value); };
         std::function<std::optional<double> (const juce::String&)> parse = [] (const juce::String& text) -> std::optional<double>
-        { return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue()) : std::nullopt; };
+        { return text.containsAnyOf ("0123456789") ? readFiniteDouble (text) : std::nullopt; };
         std::function<void (double amount)> change = [] (double) {};
         std::function<void (double value)> set = [] (double) {};
 
@@ -1197,15 +1217,20 @@ namespace
             valueField.setTooltip ("The points' value: drag or scroll to move them all, or type one for all of them");
             valueField.format = [this] (double value) { return getValueText ((float) value); };
             valueField.parse = [this] (const juce::String& text) { return parseValue (text); };
-            valueField.change = [this] (double amount) { moveAutomationPoints (context, parameter, indices, {}, (float) amount); };
-            valueField.set = [this] (double value) { setAutomationPointValues (context, parameter, indices, (float) value); };
+            valueField.change = [this] (double amount)
+            { moveAutomationPoints (context, parameter, indices, {}, toFloat (amount, noNumber)); };
+            valueField.set = [this] (double value) { setAutomationPointValues (context, parameter, indices, toFloat (value, noNumber)); };
 
             curveField.setTooltip ("How the line after each point bends: 0% is straight, up to 100% either way");
             curveField.format = [] (double bend) { return juce::String (juce::roundToInt (bend * 100.0)) + "%"; };
             curveField.parse = [] (const juce::String& text) -> std::optional<double>
-            { return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue() / 100.0) : std::nullopt; };
-            curveField.change = [this] (double) { setAutomationCurves (context, parameter, indices, (float) curveField.getValue()); };
-            curveField.set = [this] (double value) { setAutomationCurves (context, parameter, indices, (float) value); };
+            {
+                const auto read = text.containsAnyOf ("0123456789") ? readFiniteDouble (text) : std::nullopt;
+                return read.has_value() ? std::optional (*read / 100.0) : std::nullopt;
+            };
+            curveField.change = [this] (double)
+            { setAutomationCurves (context, parameter, indices, toFloat (curveField.getValue(), noNumber)); };
+            curveField.set = [this] (double value) { setAutomationCurves (context, parameter, indices, toFloat (value, noNumber)); };
 
             addRow ("Parameter", &parameterLabel);
             addRow ("Position", &positionField);

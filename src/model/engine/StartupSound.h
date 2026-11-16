@@ -12,7 +12,7 @@ namespace phazite
 class Previewer;
 
 // The sound, in stereo at a sample rate: 1.5 seconds, peaking at -6 dBFS in its blip, ending in silence, and the same every
-// time.
+// time; none at a rate no audio device plays at (no number, below 1 kHz or above 1 MHz).
 juce::AudioBuffer<float> makeStartupSound (double sampleRate);
 
 // Plays it through the previewer, at the rate the previews play at, in place of what it plays.

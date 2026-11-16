@@ -111,10 +111,14 @@ juce::String getVersionDraftNote (const ProjectContext&);
 
 // Commits: the staged changes, or every change while none is staged, with the draft's name and note (which it then
 // clears), written in the background, and calls back once it is written, or not (why, then); false if it can't start (while
-// one is being made, while the commits are being read, or for a song that keeps none). Not an undo step: it changes the
-// history, not the song.
+// one is being made or the project's folder copied, while the commits are being read, or for a song that keeps none). Not an
+// undo step: it changes the history, not the song. isSavingVersion() is true while either is under way.
 bool saveVersion (ProjectContext&, std::function<void (juce::Result)> done = {});
 bool isSavingVersion (const ProjectContext&);
+
+// Whether a first save is copying the project's Versions folder as it moves (VersionHistory::copyFolder()): meanwhile nothing
+// is committed, merged or switched, and the view says why ("Saving the project...").
+bool isSavingProjectFolder (const ProjectContext&);
 
 // Whether a commit would record anything now (version.save is enabled while it would): changes, staged or not, or a merge
 // waiting for its commit; as git, which has "nothing to commit" otherwise. And what it would be named while no message is
@@ -320,8 +324,10 @@ bool canCancelMerge (const ProjectContext&);
 bool finishMerge (ProjectContext&, const std::vector<VersionChange>& lines);
 bool isMerging (const ProjectContext&); // made, until its version is saved
 
-// The merge window's ticks, and its Merge with the lines ticked (version.finishMerge).
+// The merge window's ticks, and its Merge with the lines ticked (version.finishMerge), which is enabled while the list shows,
+// but not while a first save copies the project's Versions folder (finishMerge() refuses then, saying why).
 void tickMergeLine (ProjectContext&, int line, bool ticked);
+bool canFinishMerge (const ProjectContext&);
 void finishTickedMerge (ProjectContext&);
 
 struct ClashInfo

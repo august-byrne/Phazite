@@ -5,6 +5,7 @@
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -62,7 +63,7 @@ namespace
             const auto nearest = std::round (place);
             fit.error += (place - nearest) * (place - nearest);
 
-            const auto inBeat = (static_cast<long long> (nearest) % 4 + 4) % 4;
+            const auto inBeat = (toWhole<long long> (nearest) % 4 + 4) % 4; // a device's rate of 0 makes it no number
             fit.offBeats += inBeat == 0 ? 0.0 : (inBeat == 2 ? 0.5 : 1.0);
         }
 

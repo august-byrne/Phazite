@@ -3,6 +3,7 @@
 #include "internal/Modulation.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
@@ -103,7 +104,7 @@ namespace
         constexpr auto kind = devices::ModulatorKind::steps;
         const auto index = devices::findModulatorParameter (kind, "numSteps");
         const auto value = readValueSetByHand (sequencer, devices::getModulatorParameters (kind)[(size_t) index]);
-        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (value));
+        return juce::jlimit (1, devices::Modulator::maxSteps, roundToNearestInt (value, 1));
     }
 
     // A handle's parameter in its song, while there is one, by the reference automation and modulation name it with.

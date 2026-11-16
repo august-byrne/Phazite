@@ -199,7 +199,9 @@ namespace
             note.start = at + (note.start - BeatPosition());
         }
 
-        context.getSongSelection().selectNotes (replaceNotes (*song, {}, notes));
+        const auto made = replaceNotes (*song, {}, notes);
+        tellNotesMade (*song, describePaste (clipboard), "Paste", notes.size(), made.size());
+        context.getSongSelection().selectNotes (made);
     }
 
     void pasteClips (const Clipboard& clipboard, ProjectContext& context)

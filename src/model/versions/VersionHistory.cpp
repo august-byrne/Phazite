@@ -2,6 +2,7 @@
 #include "internal/VersionHistory.h"
 #include "internal/ApplySong.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/FreezeModel.h"
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <utility>
 
 namespace phazite
 {
@@ -617,8 +619,9 @@ namespace
             jobs->add ([] (const BackgroundJobs::ShouldStop&) { juce::MessageManager::callAsync ([] { get().reap(); }); });
         }
 
-        // Waits until the writes into a folder are done (into every folder, for none).
-        void waitFor (const juce::File& folder)
+        // Waits until the writes into a folder are done (into every folder, for none); but for those of the jobs a job that
+        // waits runs on, once they are kept here (a history that went as its job waited), which it would wait for itself.
+        void waitFor (const juce::File& folder, const BackgroundJobs* own = nullptr)
         {
             std::vector<std::shared_ptr<BackgroundJobs>> waited;
 
@@ -626,7 +629,7 @@ namespace
                 const std::scoped_lock sl (lock);
 
                 for (const auto& each : kept)
-                    if (folder == juce::File() || each.folder == folder)
+                    if ((folder == juce::File() || each.folder == folder) && each.jobs.get() != own)
                         waited.push_back (each.jobs);
             }
 
@@ -736,6 +739,13 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
 
 VersionHistory::~VersionHistory()
 {
+    // A first save's copy of the folder is over: one that hasn't begun won't, and one under way stops at its next piece;
+    // either way its job, a write, which runs even as the history's thread is handed on below, tells it so (copyFolder()).
+    const auto copying = std::exchange (folderCopy, nullptr);
+
+    if (copying != nullptr)
+        endCopy (*copying, "The project closed before its versions were copied.");
+
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     state.removeListener (this);
@@ -748,6 +758,14 @@ VersionHistory::~VersionHistory()
 
     if (thread->getNumJobs() > 0)
         FinishingHistories::get().keep (folder, std::move (thread), writesLeft);
+}
+
+void VersionHistory::endCopy (FolderCopyState& copy, const juce::String& why)
+{
+    const std::scoped_lock lock (copy.lock);
+    copy.over = true;
+    copy.why = why;
+    holdFolder (copy.folder, false);
 }
 
 bool VersionHistory::keepsVersions() const
@@ -797,6 +815,116 @@ void VersionHistory::waitForThread() const
     // the same folder that went before it.
     FinishingHistories::get().waitFor (folder);
     thread->waitForAll();
+}
+
+void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJobs::ShouldStop&)> copy,
+                                 std::function<void (const juce::Result&)> copied, std::function<void (const juce::String&)> bounceAgain)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Nothing more is written meanwhile: a bounce under way, which renders on a thread of its own, stops, to be made again
+    // once the copy is over (bounceAgain); and the history gives its thread no write until endFolderCopy().
+    if (backgroundBounce != nullptr)
+    {
+        bounceWaiting = bouncingVersion;
+        backgroundBounce = nullptr;
+        bouncingVersion.clear();
+        bounceProblem.clear();
+    }
+
+    restartBounce = std::move (bounceAgain);
+    copyingFolder = true;
+    tellNow();
+
+    // What the copy job and the message thread share: whether the copy is over (its hold let go), whether the job has run,
+    // and what to call back, which a history that goes with the job still waiting calls with a failure (~VersionHistory()).
+    folderCopy = std::make_shared<FolderCopyState>();
+    folderCopy->folder = folder;
+    folderCopy->copied = std::move (copied);
+
+    // A write, which the history's thread runs even once it is handed on as the history goes (~VersionHistory()), so that its
+    // callback always comes: copied, or told why not.
+    run (
+        [copy = std::move (copy), state = folderCopy, weak = juce::WeakReference<VersionHistory> (this), own = thread.get()]() mutable
+        {
+            // After what a history of the same folder that went before still writes into it (FinishingHistories), as open()'s
+            // job reads it: those writes, queued before this copy on their own threads, are done before the folder is held.
+            FinishingHistories::get().waitFor (state->folder, own);
+
+            // The folder held from here, after every write given before this job (WholeFile.h: holdFolder()), until the copy is
+            // over; none, if it is over before it began (the project closed, or the save was cancelled).
+            juce::String over;
+
+            {
+                const std::scoped_lock lock (state->lock);
+
+                if (state->over)
+                    over = state->why;
+                else
+                    holdFolder (state->folder, true);
+            }
+
+            // Stopped between pieces once it is over: the project gone, its copy would be for nothing.
+            const auto result = over.isNotEmpty() ? juce::Result::fail (over) : copy ([&state] { return state->over.load(); });
+            auto outcome = result;
+
+            {
+                const std::scoped_lock lock (state->lock);
+
+                if (result.wasOk() && state->over.load())
+                    outcome = juce::Result::fail (state->why);
+            }
+
+            juce::MessageManager::callAsync (
+                [weak, state, outcome]
+                {
+                    if (auto* self = weak.get())
+                        --self->pendingJobs;
+
+                    if (const auto copied = std::exchange (state->copied, nullptr); copied != nullptr)
+                        copied (outcome);
+                });
+        },
+        Work::writes);
+}
+
+void VersionHistory::endFolderCopy()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! std::exchange (copyingFolder, false))
+        return;
+
+    if (const auto copy = std::exchange (folderCopy, nullptr))
+        endCopy (*copy, "The copy was cancelled.");
+
+    // Into the folder the project is in now; then, at the next turn of the message loop, what waited for the copy: unless the
+    // history goes first, as the project closes (a quit, another project opening), when it would write for nothing.
+    followFolder();
+    readBounces();
+    tellNow();
+
+    juce::MessageManager::callAsync (
+        [weak = juce::WeakReference<VersionHistory> (this)]
+        {
+            if (auto* self = weak.get())
+                self->startWhatWaitedForTheCopy();
+        });
+}
+
+void VersionHistory::startWhatWaitedForTheCopy()
+{
+    if (copyingFolder)
+        return; // another copy began meanwhile: once it is over
+
+    if (std::exchange (initialCommitWaiting, false) && branches.empty())
+        saveVersion ("Initial commit", {});
+
+    if (std::exchange (openSnapshotWaiting, false) && ! versions.empty() && hasChanges())
+        takeSnapshot ("open");
+
+    if (const auto bounce = std::exchange (bounceWaiting, {}); bounce.isNotEmpty() && restartBounce != nullptr)
+        restartBounce (bounce);
 }
 
 void VersionHistory::open()
@@ -984,11 +1112,16 @@ void VersionHistory::opened (int number, std::vector<BranchRecord> branchesRead,
     getMerging();  // the merge the song holds, as read already, or read now
     readBounces(); // and tells
 
-    // A project keeps versions from its start, as a repository from its first commit: the song as it is now, on main. Only
-    // where the Versions folder has no branch: one whose commits can't be read says so instead (getHeadProblem()).
+    // A project keeps versions from its start, as a repository from its first commit: the song as it is now, on main; once a
+    // first save's copy of the folder is over, if one is under way (copyFolder()). Only where the Versions folder has no
+    // branch: one whose commits can't be read says so instead (getHeadProblem()).
     if (branches.empty())
     {
-        saveVersion ("Initial commit", {});
+        if (copyingFolder)
+            initialCommitWaiting = true;
+        else
+            saveVersion ("Initial commit", {});
+
         return;
     }
 
@@ -1004,6 +1137,7 @@ void VersionHistory::followFolder()
     {
         folder = moved;
         store = std::make_shared<VersionStore> (folder, getThisComputer());
+        readBounces(); // those the copy took: a bounce that wasn't copied is none here (known bug 169)
     }
     else if (moved != folder)
     {
@@ -1068,7 +1202,7 @@ juce::ValueTree VersionHistory::readSong (const juce::String& versionID, PluginP
 
 bool VersionHistory::checkHistory (std::function<void()> done)
 {
-    if (store == nullptr || ! hasRead || saving || checking)
+    if (store == nullptr || ! hasRead || isSaving() || checking)
         return false;
 
     checking = true;
@@ -1160,7 +1294,7 @@ void VersionHistory::checked (int number, Check check)
 
 int VersionHistory::recoverLostVersions()
 {
-    if (store == nullptr || ! lastCheck.has_value() || lastCheck->lost.empty())
+    if (store == nullptr || copyingFolder || ! lastCheck.has_value() || lastCheck->lost.empty())
         return 0;
 
     // Taken into the history; then a branch at each line's newest commit, which no other lost one follows.
@@ -1257,7 +1391,7 @@ bool VersionHistory::canResetToReadable() const
 {
     const auto* branch = findCurrentBranch();
     const auto found = branch != nullptr ? unreadableHeads.find (branch->id) : unreadableHeads.end();
-    return store != nullptr && hasRead && ! saving && found != unreadableHeads.end() && findVersion (found->second.readable) != nullptr;
+    return store != nullptr && hasRead && ! isSaving() && found != unreadableHeads.end() && findVersion (found->second.readable) != nullptr;
 }
 
 bool VersionHistory::resetToReadable()
@@ -1338,6 +1472,9 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
 
     if (! hasRead)
         return refuse ("Phazite is still reading the project's commits.");
+
+    if (copyingFolder)
+        return refuse ("Phazite is saving the project into its folder.");
 
     if (saving)
         return refuse ("A commit is being made.");
@@ -2375,7 +2512,7 @@ void VersionHistory::timerCallback()
 
     // Local History: the song every few minutes while it changes, as long as it differs from its last commit; not while it
     // records (the take isn't in it yet), nor while a commit is being made.
-    if (editedSinceSnapshot && hasRead && store != nullptr && ! saving && ! isRecording (song)
+    if (editedSinceSnapshot && hasRead && store != nullptr && ! isSaving() && ! isRecording (song)
         && juce::Time::currentTimeMillis() - lastSnapshotTime >= (juce::int64) snapshotMinutes * 60 * 1000 && hasChanges())
         takeSnapshot ("auto");
 
@@ -2388,7 +2525,7 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
 {
     followFolder();
 
-    if (store == nullptr || ! hasRead || saving)
+    if (store == nullptr || ! hasRead || isSaving())
         return {};
 
     const auto* current = findCurrentBranch();
@@ -2482,7 +2619,7 @@ juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
     const auto current =
         std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
 
-    if (store == nullptr || ! hasRead || saving || found == branches.end() || current == branches.end() || branchID == currentBranch)
+    if (store == nullptr || ! hasRead || isSaving() || found == branches.end() || current == branches.end() || branchID == currentBranch)
         return {};
 
     // The song as it is now, its view state and unsaved changes too, its plug-ins' settings stored, on the branch it leaves; or,
@@ -2560,7 +2697,7 @@ bool VersionHistory::checkout (const juce::String& versionID)
     const auto current =
         std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
 
-    if (store == nullptr || ! hasRead || saving || findVersion (versionID) == nullptr || current == branches.end())
+    if (store == nullptr || ! hasRead || isSaving() || findVersion (versionID) == nullptr || current == branches.end())
         return false;
 
     // Checked out already: on to the other commit, in place, what changed here kept in Local History first.
@@ -2674,8 +2811,8 @@ bool VersionHistory::renameBranch (const juce::String& branchID, const juce::Str
                                     { return branch.id != branchID && branch.name.equalsIgnoreCase (newName); });
 
     // Not a commit checked out, which is no branch: Create Branch Here names one. Nor while a commit is being written, which
-    // writes the branch's record with the name it had as it began.
-    if (store == nullptr || ! hasRead || saving || found == branches.end() || newName.isEmpty() || taken
+    // writes the branch's record with the name it had as it began, or a first save copies the folder (copyFolder()).
+    if (store == nullptr || ! hasRead || isSaving() || found == branches.end() || newName.isEmpty() || taken
         || found->detachedFrom.isNotEmpty())
         return false;
 
@@ -2696,7 +2833,7 @@ bool VersionHistory::deleteBranch (const juce::String& branchID)
     followFolder();
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
 
-    if (store == nullptr || ! hasRead || saving || found == branches.end() || branchID == currentBranch || branchID == getDetachedFrom()
+    if (store == nullptr || ! hasRead || isSaving() || found == branches.end() || branchID == currentBranch || branchID == getDetachedFrom()
         || found->detachedFrom.isNotEmpty())
         return false;
 
@@ -2766,7 +2903,7 @@ bool VersionHistory::hasChangesLeftOn (const juce::String& branchID) const
 bool VersionHistory::canUndoLastCommit() const
 {
     const auto* last = findLastVersion();
-    return store != nullptr && hasRead && ! saving && ! getMerging().has_value() && ! preview.has_value() && last != nullptr
+    return store != nullptr && hasRead && ! isSaving() && ! getMerging().has_value() && ! preview.has_value() && last != nullptr
            && ! isDetached() && last->parents.size() == 1 && findVersion (last->parents[0]) != nullptr;
 }
 
@@ -2907,6 +3044,14 @@ void VersionHistory::takeSnapshot (const juce::String& reason)
     if (store == nullptr || ! hasRead)
         return;
 
+    // Not while a first save copies the folder (copyFolder()): once it is over, the song as it is then.
+    if (copyingFolder)
+    {
+        openSnapshotWaiting = openSnapshotWaiting || reason == "open";
+        editedSinceSnapshot = true;
+        return;
+    }
+
     // The song as a save stores it, its plug-ins' own settings included (as the project opens, as it was read: its plug-ins
     // may still be loading), and their knobs' values; split and written on the history's thread.
     if (reason != "open")
@@ -2998,7 +3143,7 @@ bool VersionHistory::editMessage (const juce::String& versionID, const juce::Str
     followFolder();
     const auto found = versions.find (versionID);
 
-    if (store == nullptr || ! hasRead || found == versions.end())
+    if (store == nullptr || ! hasRead || copyingFolder || found == versions.end())
         return false;
 
     const MessageEdit edit { name.trim(), note.trim(), juce::Time::currentTimeMillis() };

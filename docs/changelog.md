@@ -203,6 +203,30 @@ too. A line names the bug's number in that list.
   under the mouse among the notes it paints: a step of a drag of 500 notes in a clip of 5,000 takes 4.5 ms where it
   took 22; Select All 3 ms where it took 341; Transpose, Quantize, Duplicate and Delete of 5,000 notes take tens of
   milliseconds where they took seconds; a view's read of the clips of 200 tracks 6 ms where it took 253.
+- **20 Duplicate and Paste of notes** name their undo step for the notes made, and the hint bar says how many didn't
+  fit before the next clip.
+- **160 A new project whose first save fails** takes its folder away, so the name can be tried again.
+- **169 A first save and the project's versions:** the cause of the rare "couldn't copy a file of the Versions
+  folder" was a commit written into the old folder while the rest was being copied. The versions are now copied by
+  their history's own thread, after its writes, with progress and Cancel; commits, merges and branch changes wait
+  meanwhile (Source Control says "Saving the project..."), and every write into the versions asserts in a Debug
+  build if the folder is held.
+- **164 A sidechain that would hear its own track's sound round a loop** is cleared as a project opens.
+- **174 Escape on a control held as Play was pressed in Write** takes back the drag alone, the value going back to
+  what the pass writes; an Undo or Redo while a pass writes keeps what plays and what is written alike, and one
+  during loop recording no longer drops a round of automation.
+- **106 A DAWproject that would reach 4 GB or 65,535 files** is refused before anything is rendered, saying what to do
+  (JUCE workaround W41).
+- **148 Numbers that are not finite:** numbers from plug-ins, files, devices and typed text become whole numbers and
+  floats without undefined conversions (`src/model/base/Numbers.h`); a value typed that is no finite number changes
+  nothing; a MIDI file's far-off events import within a song's beats; a step sequencer's steps and a sound's slices
+  are kept within their ranges as a project opens.
+- **170 A number whose exponent JUCE's reader would overflow** is read as the number it is, in projects, the
+  versions' pieces, presets, settings and DAWprojects (JUCE workaround W38).
+- **179 Switches and IDs another tool wrote in other forms** ("true", "12.0") are written as Phazite writes them as a
+  project opens, so an unchanged file shows no changes; a project Phazite saved is the same, byte for byte, once
+  opened and saved again, which the fuzzer now checks at every round.
+- **S4.9 Files from others are untrusted** is built with 106 and 148.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

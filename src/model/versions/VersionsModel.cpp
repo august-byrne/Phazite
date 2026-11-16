@@ -61,6 +61,30 @@ bool isReadingVersions (const ProjectContext& context)
     return history != nullptr && history->isReading();
 }
 
+Project::VersionsCopier makeVersionsCopier (ProjectContext& context)
+{
+    return {
+        [&context] { waitForVersionsWritten (context); },
+        [&context] (std::function<juce::Result (const BackgroundJobs::ShouldStop&)> copy, std::function<void (const juce::Result&)> copied)
+        {
+            if (auto* history = findHistory (context))
+            {
+                history->copyFolder (std::move (copy), std::move (copied),
+                                     [&context] (const juce::String& versionID) { startBackgroundBounce (context, versionID); });
+                return;
+            }
+
+            const auto result = copy ([] { return false; });
+            juce::MessageManager::callAsync ([copied = std::move (copied), result] { copied (result); });
+        },
+        [&context]
+        {
+            if (auto* history = findHistory (context))
+                history->endFolderCopy();
+        },
+    };
+}
+
 void waitForVersionsWritten (const ProjectContext& context)
 {
     if (const auto* history = findHistory (context))
@@ -334,7 +358,13 @@ bool saveVersion (ProjectContext& context, std::function<void (juce::Result)> do
 bool isSavingVersion (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->isSaving();
+    return history != nullptr && history->isSaving(); // a commit, or a first save's copy (isSavingProjectFolder())
+}
+
+bool isSavingProjectFolder (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isCopyingFolder();
 }
 
 juce::int64 getVersionsSize (const ProjectContext& context)
@@ -1261,6 +1291,15 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
         return false;
 
+    // Not while a first save copies the Versions folder, into which the song before is kept: the list stays, and the view
+    // says why, as a commit's refusal does.
+    if (history->isCopyingFolder())
+    {
+        history->mergeFailure = "Nothing was merged: Phazite is saving the project into its folder. Merge again once it is saved.";
+        history->tellNow();
+        return false;
+    }
+
     // The song as it was, for Abort Merge: kept in the store first (where the song's element of the merge names it), and in
     // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why.
     auto merge = *history->preview;
@@ -1476,6 +1515,11 @@ void tickMergeLine (ProjectContext& context, int line, bool ticked)
         history->ticked[(size_t) line] = ticked;
         history->tellNow();
     }
+}
+
+bool canFinishMerge (const ProjectContext& context)
+{
+    return ! getMergeLines (context).empty() && ! isSavingProjectFolder (context);
 }
 
 void finishTickedMerge (ProjectContext& context)
@@ -2574,7 +2618,7 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .description = "Takes the lines ticked in the merge's list into the song, as one undo step; commit to finish the merge.",
            .synonyms = { "merge", "apply", "take" },
            .perform = [&context] { finishTickedMerge (context); },
-           .isEnabled = [&context] { return ! getMergeLines (context).empty(); },
+           .isEnabled = [&context] { return canFinishMerge (context); },
            .needsPluginStates = true });
 
     add ({ .id = "version.cancelMerge",

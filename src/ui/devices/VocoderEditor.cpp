@@ -4,6 +4,7 @@
 #include "DeviceTint.h"
 #include "SidechainMenus.h"
 #include "devices/vocoder/Vocoder.h"
+#include "model/base/Numbers.h"
 #include "model/project/ProjectContext.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -123,7 +124,8 @@ public:
 
             // Its column: every light, faint; those the voice reaches, lit.
             const auto decibels = juce::Decibels::gainToDecibels (shown[(size_t) band], quietest);
-            const auto lit = juce::roundToInt ((decibels - quietest) / -quietest * (float) numLights);
+            const auto lit =
+                roundToNearestInt ((decibels - quietest) / -quietest * (float) numLights); // a plug-in's sound may be no number
 
             for (int light = 0; light < numLights; ++light)
             {

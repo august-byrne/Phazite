@@ -2,6 +2,8 @@
 #include "internal/Modulation.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -34,7 +36,7 @@ namespace
     int getNumSteps (const juce::ValueTree& modulator)
     {
         return juce::jlimit (1, devices::Modulator::maxSteps,
-                             juce::roundToInt (getValue (modulator, devices::ModulatorKind::steps, "numSteps")));
+                             roundToNearestInt (getValue (modulator, devices::ModulatorKind::steps, "numSteps"), 1));
     }
 
     // Whether a channel's element can hold modulators: a track's, a folder's or the master's; and macros: a track's or a
@@ -173,7 +175,7 @@ std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState)
     std::vector<float> steps;
 
     for (const auto& value : juce::StringArray::fromTokens (modulatorState[schema::modulatorSteps].toString(), " ", {}))
-        steps.push_back (value.getFloatValue());
+        steps.push_back (juce::jlimit (-1.0f, 1.0f, readFloat (value))); // a version's are as anyone wrote them
 
     return steps;
 }

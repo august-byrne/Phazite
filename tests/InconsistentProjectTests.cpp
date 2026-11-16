@@ -15,6 +15,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceFiles.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
@@ -24,7 +25,9 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/internal/SongPieces.h"
 
+#include <algorithm>
 #include <functional>
 
 namespace
@@ -317,6 +320,119 @@ TEST_CASE ("A curve, a lane and a sidechain of what the song hasn't are left out
     const auto curves = findAll (project->getSong().getState(), schema::CURVE);
     REQUIRE (curves.size() == 1);
     CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("A device on a drum sampler's track listening to one of its own pads' tracks opens without that sidechain")
+{
+    // Known bug 164: the model refuses such a sidechain (its sound would come round to itself: Sidechain.h, isFedBy()), but
+    // makeConsistent() left one a file brought. The lead's compressor ducking under the drums, which is no loop, stays.
+    Edited edited;
+    auto& song = *phazite::findSong (edited.s.context);
+    const auto pad = phazite::givePadItsOwnTrack (song, edited.sampler, 36);
+    REQUIRE (pad.isValid());
+    const auto glue = edited.s.addEffect (edited.drums, phazite::devices::Compressor::typeID);
+    const auto sources = phazite::getSidechainSources (song, glue);
+    CHECK (std::find (sources.begin(), sources.end(), pad) == sources.end());
+    REQUIRE (edited.s.getProject().save().wasOk());
+
+    const auto project = edited.open (
+        [&] (juce::XmlElement& xml)
+        {
+            const std::function<void (juce::XmlElement&)> visit = [&] (juce::XmlElement& element)
+            {
+                for (auto* child : element.getChildIterator())
+                {
+                    if (child->hasTagName ("DEVICE") && child->getStringAttribute ("id") == juce::String ((juce::int64) glue.getRaw()))
+                        child->setAttribute ("sidechain", juce::String ((juce::int64) pad.getRaw()));
+
+                    visit (*child);
+                }
+            };
+
+            visit (xml);
+        });
+    REQUIRE (project != nullptr);
+    CHECK_FALSE (phazite::getSidechainSource (project->getSong(), glue).isValid());
+    const auto devices = findAll (project->getSong().getState(), schema::DEVICE);
+    CHECK (std::any_of (devices.begin(), devices.end(),
+                        [] (const juce::ValueTree& device) { return device.hasProperty (schema::deviceSidechain); }));
+}
+
+TEST_CASE ("A number with an exponent of ten digits or more opens as one past every number, before it is read; a name so stays")
+{
+    // Known bug 170: JUCE reads an exponent's digits into an int without a check (CharacterFunctions::readDoubleValue()),
+    // which every number read from a song's XML goes through. Such a clip's length opens at its fallback, as one too large to
+    // hold does; its start 0; the track named so keeps its name.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* lead = Edited::findTrack (song, "Lead");
+            lead->setAttribute ("name", "1e12345678901");
+            auto* clip = lead->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            clip->setAttribute ("length", "1e12345678901");
+            clip->setAttribute ("start", "-2.5E-98765432109");
+            lead->setAttribute ("volume", juce::String ("1e") + juce::String::charToString ((juce::juce_wchar) 0x0669));
+        });
+    REQUIRE (project != nullptr);
+    const auto tracks = findAll (project->getSong().getState(), schema::TRACK);
+    const auto lead = std::find_if (tracks.begin(), tracks.end(),
+                                    [] (const juce::ValueTree& track) { return track[schema::trackName].toString() == "1e12345678901"; });
+    REQUIRE (lead != tracks.end());
+    const auto clip = lead->getChildWithName (schema::CLIP);
+    CHECK ((double) clip[schema::clipLength] == doctest::Approx (4.0));
+    CHECK ((double) clip[schema::clipStart] == 0.0);
+    CHECK_FALSE (lead->hasProperty (schema::channelVolume)); // past every number: none, the fader's 0 dB
+
+    // A step sequencer's steps and the sampler's slices, numbers between spaces, each the same; nothing else changes.
+    juce::ValueTree modulator (schema::MODULATOR);
+    modulator.setProperty (schema::modulatorSteps, "0.5  1e12345678901 -1", nullptr);
+    modulator.setProperty (schema::modulatorType, "1e12345678901", nullptr);
+    juce::ValueTree song (schema::PHAZITE);
+    song.getOrCreateChildWithName (schema::TRACKS, nullptr).appendChild (juce::ValueTree (schema::TRACK), nullptr);
+    song.getChildWithName (schema::TRACKS).getChild (0).appendChild (modulator, nullptr);
+    phazite::makeExponentsReadable (song);
+    CHECK (modulator[schema::modulatorSteps].toString() == "0.5  1e999 -1");
+    CHECK (modulator[schema::modulatorType].toString() == "1e12345678901");
+    modulator.setProperty (schema::modulatorSteps, "0.5  1", nullptr);
+    phazite::makeExponentsReadable (song);
+    CHECK (modulator[schema::modulatorSteps].toString() == "0.5  1"); // as Phazite wrote it
+}
+
+TEST_CASE ("A step sequencer's steps open within -1 to 1, what is no finite number among them at 0; a Phazite file's as they are")
+{
+    // A reviewer, of known bug 170's fix: a step "1e12345678901" became "1e999", read as an infinity, which the engine took
+    // as the step's value. The steps had no range as the song loaded.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* modulator = Edited::findTrack (song, "Lead")->createNewChildElement ("MODULATOR");
+            modulator->setAttribute ("id", "999999");
+            modulator->setAttribute ("type", "steps");
+            modulator->setAttribute ("steps", "0.5 1e12345678901 -3 nan 0.25");
+        });
+    REQUIRE (project != nullptr);
+    const auto modulators = findAll (project->getSong().getState(), schema::MODULATOR);
+    REQUIRE (modulators.size() == 1);
+    // Those changed written as Phazite writes a step (juce::String of the number), the others as they were.
+    CHECK (modulators.front()[schema::modulatorSteps].toString()
+           == "0.5 " + juce::String (0.0) + " " + juce::String (-1.0) + " " + juce::String (0.0) + " 0.25");
+}
+
+TEST_CASE ("A version's piece with a number whose exponent JUCE's reader would overflow is joined with the same number readable")
+{
+    // Known bug 170, for the versions: a piece is anyone's, as a project file is.
+    const auto piece = juce::String (R"(<PHAZITE><TRACKS><TRACK id="5" kind="track" name="1e12345678901" volume="1e12345678901">)"
+                                     R"(<CLIP id="6" kind="midi" start="2" length="-3e-12345678901"/></TRACK></TRACKS></PHAZITE>)");
+    const auto song = phazite::joinSong ("song", [&piece] (const juce::String&) -> std::optional<juce::MemoryBlock>
+                                         { return juce::MemoryBlock (piece.toRawUTF8(), piece.getNumBytesAsUTF8()); });
+    REQUIRE (song.isValid());
+    const auto track = song.getChildWithName (schema::TRACKS).getChild (0);
+    CHECK (track[schema::channelVolume].toString() == "1e999");
+    CHECK (track[schema::trackName].toString() == "1e12345678901");
+    CHECK (track.getChild (0)[schema::clipLength].toString() == "-0");
 }
 
 TEST_CASE ("A send to a return the song hasn't is left out, with what modulated it")

@@ -3,6 +3,7 @@
 #include "PresetModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -80,7 +82,7 @@ namespace
             return toSavedValue (parameter, value);
 
         if (parameter.unit == devices::Unit::toggle)
-            return juce::roundToInt (value);
+            return roundToNearestInt (value);
 
         std::array<char, 32> text {};
         const auto [end, error] = std::to_chars (text.data(), text.data() + text.size(), value);
@@ -112,7 +114,8 @@ namespace
     {
         constexpr auto kind = devices::ModulatorKind::steps;
         const auto& info = devices::getModulatorParameters (kind)[(size_t) devices::findModulatorParameter (kind, "numSteps")];
-        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (readValueSetByHand (sequencer, info)));
+        return juce::jlimit (1, devices::Modulator::maxSteps,
+                             roundToNearestInt (readValueSetByHand (sequencer, info), juce::roundToInt (info.defaultValue)));
     }
 
     //==============================================================================
@@ -350,7 +353,7 @@ namespace
         if (saved.hasProperty (keys::program))
             state.setProperty (schema::pluginProgram, (int) saved[keys::program], nullptr);
 
-        if (const auto mix = juce::jlimit (0.0f, 1.0f, (float) saved.getProperty (keys::mix, 1.0f));
+        if (const auto mix = juce::jlimit (0.0f, 1.0f, toFloat (saved.getProperty (keys::mix, 1.0f), 1.0f));
             ! isInstrumentState (state) && mix < 1.0f)
             state.setProperty (schema::deviceMix, mix, nullptr);
 
@@ -438,7 +441,7 @@ namespace
 
         if (instrument)
             made.state.setProperty (schema::containerInstrument, true, nullptr);
-        else if (const auto mix = juce::jlimit (0.0f, 1.0f, (float) saved.getProperty (keys::mix, 1.0f)); mix < 1.0f)
+        else if (const auto mix = juce::jlimit (0.0f, 1.0f, toFloat (saved.getProperty (keys::mix, 1.0f), 1.0f)); mix < 1.0f)
             made.state.setProperty (schema::deviceMix, mix, nullptr);
 
         // Its chains, one at least, as many as a container holds.
@@ -453,10 +456,11 @@ namespace
             if (const auto chainName = chainPreset[keys::name].toString().trim(); chainName.isNotEmpty())
                 chain.setProperty (schema::chainName, chainName, nullptr);
 
-            if (const auto volume = keepVolumeInRange ((float) chainPreset.getProperty (keys::volume, 0.0f)); std::abs (volume) >= 1.0e-4f)
+            if (const auto volume = keepVolumeInRange (toFloat (chainPreset.getProperty (keys::volume, 0.0f)));
+                std::abs (volume) >= 1.0e-4f)
                 chain.setProperty (schema::channelVolume, volume, nullptr);
 
-            if (const auto pan = (float) chainPreset.getProperty (keys::pan, 0.0f); std::isfinite (pan) && std::abs (pan) >= 1.0e-4f)
+            if (const auto pan = toFloat (chainPreset.getProperty (keys::pan, 0.0f)); std::abs (pan) >= 1.0e-4f)
                 chain.setProperty (schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), nullptr);
 
             for (const auto& [property, key] :
@@ -465,8 +469,9 @@ namespace
                     chain.setProperty (*property, true, nullptr);
 
             if (chainPreset.hasProperty (keys::crossover))
-                chain.setProperty (schema::chainCrossover,
-                                   juce::jlimit (lowestCrossover, highestCrossover, (float) chainPreset[keys::crossover]), nullptr);
+                chain.setProperty (
+                    schema::chainCrossover,
+                    juce::jlimit (lowestCrossover, highestCrossover, toFloat (chainPreset[keys::crossover], lowestCrossover)), nullptr);
 
             setChainNumber (chain, schema::chainLowKey, chainPreset[keys::lowKey], allKeys, allKeys.low);
             setChainNumber (chain, schema::chainHighKey, chainPreset[keys::highKey], allKeys, allKeys.high);
@@ -514,7 +519,7 @@ namespace
             macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
             macro.setProperty (schema::macroName, macroName.isNotEmpty() ? macroName : "Macro " + juce::String (i + 1), nullptr);
 
-            if (const auto value = juce::jlimit (0.0f, 1.0f, (float) preset[keys::value]); value > 0.0f)
+            if (const auto value = juce::jlimit (0.0f, 1.0f, toFloat (preset[keys::value])); value > 0.0f)
                 macro.setProperty (schema::macroValue, value, nullptr);
 
             if (const auto* targets = preset[keys::modulates].getArray())
@@ -538,7 +543,7 @@ namespace
                     if (isChain ? (parameter.parameter == schema::chainVolumeParameter || parameter.parameter == schema::chainPanParameter
                                    || parameter.parameter == schema::crossoverParameter)
                                 : hasParameter (device, parameter.parameter))
-                        addModulates (macro, parameter, (float) target[keys::amount]);
+                        addModulates (macro, parameter, juce::jlimit (-1.0f, 1.0f, toFloat (target[keys::amount])));
                 }
             }
 
@@ -555,7 +560,7 @@ namespace
         if (const auto* targets = preset[keys::modulates].getArray())
             for (const auto& target : *targets)
                 if (const auto parameter = find (target); canModulate (song, modulator, parameter))
-                    setModulation (song, modulator, parameter, juce::jlimit (-1.0f, 1.0f, (float) target[keys::amount]));
+                    setModulation (song, modulator, parameter, juce::jlimit (-1.0f, 1.0f, toFloat (target[keys::amount])));
     }
 
     //==============================================================================
@@ -1078,11 +1083,14 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
         if (saved.hasProperty (*key))
             findTrackState (song, track).setProperty (*property, saved[*key], nullptr); // view state
 
-    if (saved.hasProperty (keys::volume))
-        setChannelVolume (song, track, (float) saved[keys::volume]);
+    // A volume or a pan that is no finite number leaves the track's as it is (as 0 it would be a guess: 0 dB, or the middle).
+    constexpr auto noNumber = std::numeric_limits<float>::quiet_NaN();
 
-    if (saved.hasProperty (keys::pan))
-        setChannelPan (song, track, (float) saved[keys::pan]);
+    if (const auto volume = toFloat (saved[keys::volume], noNumber); saved.hasProperty (keys::volume) && std::isfinite (volume))
+        setChannelVolume (song, track, volume);
+
+    if (const auto pan = toFloat (saved[keys::pan], noNumber); saved.hasProperty (keys::pan) && std::isfinite (pan))
+        setChannelPan (song, track, pan);
 
     // Its instrument, then its effects and containers in their order, each by its place in the preset (none for one that
     // couldn't be made, so that the others keep their places).
@@ -1198,7 +1206,7 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
 
             // A macro's value is its one parameter, by its ID (model/devices/internal/Parameters.h).
             setValueSetByHand (song, ParameterRef { DeviceID::fromRaw (added.getRaw()), juce::String (added.getRaw()) },
-                               juce::jlimit (0.0f, 1.0f, (float) macro[keys::value]));
+                               juce::jlimit (0.0f, 1.0f, toFloat (macro[keys::value])));
             applyModulations (song, added, macro, find);
         }
     }
@@ -1346,7 +1354,7 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
         device.removeProperty (schema::pluginState, undo);
 
     if (saved.hasProperty (keys::mix))
-        setMix (*song, id, (float) saved[keys::mix]);
+        setMix (*song, id, toFloat (saved[keys::mix], 1.0f));
 
     // Given to the plug-in though the song's element may have held the same already: the store above wrote the state the
     // plug-in gave last, which needn't be its own (it doesn't wait for the plug-in: known bug 166).

@@ -97,8 +97,11 @@ says, it can't crash Phazite or make it do anything but open a song.
   VST3's state, the helper's messages, the settings, keymaps and audio files' headers (`tests/FuzzTests.cpp`).
 
 A preset takes its sounds from its own folder only (a full path in one is not followed), and only the channels handed
-to a helper are read back from shared memory. Not built yet: a DAWproject written past 4 GB refused (known bug 106 in
-[known-bugs.md](../known-bugs.md)).
+to a helper are read back from shared memory. A DAWproject that would hold 4 GB or more, or more than 65,534 files, is
+refused before its bounces are rendered, its bounces counted as large as they can render: JUCE's zip writer keeps sizes
+and places in 32 bits and has no ZIP64, and readers take 0xFFFF files for ZIP64's marker (`checkDawProjectFits()`,
+`src/model/project/internal/DawProject.h`; JUCE workaround W41). The writer also holds each file in memory while it writes
+it, packed or stored, so that a large recording in a DAWproject takes as much memory as it is long.
 
 ## Saving
 
@@ -118,6 +121,10 @@ to a helper are read back from shared memory. Not built yet: a DAWproject writte
   it can't copy, a frozen track's among them, fails the save. A "(saving)" folder holds a marker of Phazite's; one that
   a crash left goes to the system's trash, in the background, at the next first save into that folder. A folder of that
   name without the marker, or with a project file in it, is never touched.
+- The `Versions` folder is copied last, by the history's own thread after what it was writing: meanwhile nothing is
+  written into it (a commit, a merge taken or a branch's change waits, and the Source Control view says the project
+  is being saved), and a bounce of a commit under way starts again once the copy is over, in the project's new folder.
+  A project that closes during the copy starts nothing more in the folder it leaves.
 - An untitled project is not in Open Recent, and Export Song offers `Documents/Phazite/Exports` for it.
 - A lock keeps a second Phazite running at the same time away from the folders the first one uses.
 - What a new project starts with (its tempo, key and outline) is part of its first save. It is not an undo step and

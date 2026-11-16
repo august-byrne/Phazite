@@ -310,7 +310,11 @@ void AutomationWriter::finishPart (const Pass& pass, std::vector<AutomationPoint
     part.points = std::move (points);
     waiting.push_back ({ std::move (part), end, ownStep });
 
-    if (! Gesture::isInProgress (song))
+    // Finished by an undo or a redo (followValuesSetByHand()), during which nothing may write through the song's history
+    // (JUCE's UndoManager refuses it): once it has returned.
+    if (song.getUndoManager().isPerformingUndoRedo())
+        triggerAsyncUpdate();
+    else if (! Gesture::isInProgress (song))
         writeWaiting();
     else if (intoDrag)
         writeWaiting (&pass.parameter);
@@ -356,6 +360,21 @@ void AutomationWriter::writeWaitingAfterDrag()
                             const RecordingStep step (song, "Record Automation");
                             writeWaiting();
                         });
+}
+
+void AutomationWriter::handleAsyncUpdate()
+{
+    if (waiting.empty()) // written meanwhile, as playback stopped or the playhead jumped
+        return;
+
+    if (Gesture::isInProgress (song))
+    {
+        writeWaitingAfterDrag();
+        return;
+    }
+
+    const RecordingStep step (song, "Record Automation");
+    writeWaiting();
 }
 
 void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> points, BeatPosition end)
@@ -468,6 +487,11 @@ void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
         }
     }
 
+    // The rollback takes the values set by hand back to where they were as the drag began, punch-ins of the passes made
+    // during it too (Play pressed with the control held, in Write): each pass's value set by hand is put back to what it
+    // writes, so that what is heard is what is written (known bug 174).
+    Gesture::whenEnded (song, this, [this] { keepPassesValues(); });
+
     if (pass == nullptr)
         return;
 
@@ -487,5 +511,41 @@ void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
         pass->points.resize (std::max<size_t> (1, grab.points));
 
     pass->held = false;
+}
+
+void AutomationWriter::followValuesSetByHand()
+{
+    // An undo or a redo while a pass writes, which set a value by hand another way than a control does (which parameterChanged()
+    // hears): what plays from then is what the pass writes. Not a drag's rollback, after which keepPassesValues() sets what
+    // the pass writes.
+    if (settingValue || Gesture::isInProgress (song))
+        return;
+
+    for (auto& pass : passes)
+        if (const auto value = getValueSetByHand (song, pass.parameter);
+            ! pass.points.empty() && ! juce::exactlyEqual (value, pass.points.back().value))
+            record (pass, value);
+}
+
+void AutomationWriter::keepPassesValues()
+{
+    // As a punch-in sets it (punchIn()), in a step of its own: Escape took back the drag alone. An Undo of it while the pass
+    // goes on sets the value back, which the pass then writes (followValuesSetByHand()): what plays is what is written.
+    std::optional<RecordingStep> step;
+
+    for (const auto& pass : passes)
+    {
+        if (pass.points.empty() || ! locateParameter (song, pass.parameter).has_value())
+            continue;
+
+        if (const auto writes = pass.points.back().value; ! juce::exactlyEqual (getValueSetByHand (song, pass.parameter), writes))
+        {
+            if (! step.has_value())
+                step.emplace (song, "Record Automation");
+
+            const juce::ScopedValueSetter<bool> setting (settingValue, true);
+            setValueSetByHand (song, pass.parameter, writes);
+        }
+    }
 }
 } // namespace phazite

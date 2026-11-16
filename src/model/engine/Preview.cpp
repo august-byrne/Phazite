@@ -5,6 +5,7 @@
 #include "internal/EngineContext.h"
 #include "internal/Preview.h"
 #include "internal/PreviewLoop.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/MixerModel.h"
@@ -300,7 +301,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
         else
         {
             lengthBeats = fileSeconds * bpm / 60.0;
-            region.length = (std::int64_t) std::llround (fileSeconds * rate);
+            region.length = roundToWhole<std::int64_t> (fileSeconds * rate); // a file's header says its length
             audio = std::make_shared<engine::AudioFile> (makeSampleReader (std::move (reader)), &previews.getBlocksPlayed());
         }
 

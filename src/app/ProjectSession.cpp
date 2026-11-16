@@ -723,8 +723,9 @@ void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<voi
     // Its folder moves, with the files a take writes.
     keepRecording();
 
-    // Its versions move with it, whole: the initial commit is written on the history's thread as a new project opens.
-    waitForVersionsWritten (context);
+    // Its versions move with it, whole, copied last by the history's thread, after what it was asked to write: the initial
+    // commit as a new project opens, which may come while the rest is copied (known bug 169).
+    project->setVersionsCopier (makeVersionsCopier (context));
 
     // A large copy runs in the host's progress window, which tells a failure itself.
     firstSave = nullptr;

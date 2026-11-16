@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Settings.h"
+#include "model/base/Json.h"
 #include "model/engine/AppInfo.h"
 
 #include <cmath>
@@ -38,14 +39,13 @@ bool Settings::get (const BoolSetting& setting) const
 // A number from the file, which anything could have written: its default for what is no finite number.
 double Settings::get (const NumberSetting& setting) const
 {
-    const auto value = storage->getDoubleValue (setting.key, setting.defaultValue);
-    return std::isfinite (value) ? value : setting.defaultValue;
+    // Read without the overflow of JUCE's reader of numbers ("1e12345678901"), as getDoubleValue() would read it.
+    return storage->containsKey (setting.key) ? readDouble (storage->getValue (setting.key), setting.defaultValue) : setting.defaultValue;
 }
 
 double Settings::get (const NumberSettingWithoutDefault& setting, double defaultValue) const
 {
-    const auto value = storage->getDoubleValue (setting.key, defaultValue);
-    return std::isfinite (value) ? value : defaultValue;
+    return storage->containsKey (setting.key) ? readDouble (storage->getValue (setting.key), defaultValue) : defaultValue;
 }
 
 juce::String Settings::get (const TextSetting& setting) const

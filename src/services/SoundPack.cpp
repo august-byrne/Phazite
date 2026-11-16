@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SoundPack.h"
 #include "model/base/Json.h"
+#include "model/base/Numbers.h"
 #include "model/engine/AppInfo.h"
 
 #include <juce_cryptography/juce_cryptography.h>
@@ -13,7 +14,7 @@ namespace
     int readVersion (const juce::File& folder, const juce::String& name)
     {
         const auto manifest = parseJson (folder.getChildFile ("sources.json"));
-        return manifest["pack"].toString() == name ? (int) manifest["version"] : 0;
+        return manifest["pack"].toString() == name ? toWhole<int> (manifest["version"]) : 0;
     }
 } // namespace
 

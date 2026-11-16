@@ -185,6 +185,9 @@ std::optional<ClipID> getAudioClipToEdit (const ProjectContext& context, BeatPos
 //==============================================================================
 void setClipGain (ProjectContext& context, ClipID id, float decibels)
 {
+    if (! std::isfinite (decibels)) // typed: what is no finite number changes nothing
+        return;
+
     changeClip (context, id, "Change Clip Gain", [id, decibels] (Song& song) { setClipGain (song, id, decibels); });
 }
 
@@ -422,6 +425,9 @@ namespace
 
 void changeClips (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property, double amount)
 {
+    if (! std::isfinite (amount)) // typed: what is no finite number changes nothing (known bug 148)
+        return;
+
     // Moved together, as far as the earliest can go.
     setEachClip (context, ids, property, [property, amount] (double earliest, double own)
                  { return own + (property == ClipProperty::start ? std::max (-earliest, amount) : amount); });
@@ -429,6 +435,9 @@ void changeClips (ProjectContext& context, const std::vector<ClipID>& ids, ClipP
 
 void setClipsTo (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property, double value)
 {
+    if (! std::isfinite (value)) // typed: what is no finite number changes nothing (known bug 148)
+        return;
+
     setEachClip (context, ids, property, [property, value] (double earliest, double own)
                  { return property == ClipProperty::start ? own + value - earliest : value; });
 }

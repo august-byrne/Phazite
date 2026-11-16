@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SandboxedInstance.h"
+#include "model/base/Json.h"
 #include "model/transport/TempoValues.h"
 
 #include <algorithm>
@@ -114,7 +115,7 @@ public:
         if (auto read = owner.remote->getParameterValue (index, text, textMilliseconds); read.has_value() && ! owner.hasCrashed())
             return juce::jlimit (0.0f, 1.0f, *read);
 
-        return juce::jlimit (0.0f, 1.0f, text.getFloatValue());
+        return juce::jlimit (0.0f, 1.0f, readFloat (text, getValue())); // "1e300" too; no finite number ("inf", "1e999"): as it is
     }
 
     // A value set while a block played, once (on the thread that plays the next).

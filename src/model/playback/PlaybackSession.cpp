@@ -86,9 +86,12 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
     if (tree == songState && property == schema::playStart)
         return;
 
-    // A value set by hand plays at once; anything else, in a new plan.
+    // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
+    // 174); anything else, in a new plan.
     if (! player.takeValue (tree, property))
         triggerAsyncUpdate();
+    else if (song->getUndoManager().isPerformingUndoRedo())
+        writer.followValuesSetByHand();
 }
 
 void PlaybackSession::valueSetByHand (const ParameterRef& parameter, float value, bool byPlugin)

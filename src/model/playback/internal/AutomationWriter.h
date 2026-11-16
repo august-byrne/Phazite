@@ -22,6 +22,8 @@
 #include "model/automation/AutomationValues.h"
 #include "model/base/Song.h"
 
+#include <juce_events/juce_events.h>
+
 #include <utility>
 #include <vector>
 
@@ -29,11 +31,11 @@ namespace phazite
 {
 class PlaybackSession;
 
-class AutomationWriter
+class AutomationWriter : private juce::AsyncUpdater
 {
 public:
     AutomationWriter (Song&, PlaybackSession&);
-    ~AutomationWriter();
+    ~AutomationWriter() override;
 
     // The session's transport, as it starts and before it stops; and as the playhead is put elsewhere, before the engine is
     // asked (PlaybackSession::locate()).
@@ -55,6 +57,12 @@ public:
     // playback started went with the rolled-back step (2026-11-14).
     void rememberGrab (const ParameterRef&);
     void gestureCancelled (const ParameterRef&);
+
+    // A value set by hand changed by an undo or a redo while the song plays: each pass writes what plays from then (known
+    // bug 174). What that finishes (the loop gone round since the pass's last move) is written once the undo or the redo has
+    // returned, in a "Record Automation" step, as nothing may write through the song's history while it undoes or redoes.
+    // Message thread.
+    void followValuesSetByHand();
 
     // The same by a plug-in's own window (the session tells it): what it writes as it is let go is one "Record
     // Automation" step, as no control's drag holds one; let go during a control's drag, once that drag has ended.
@@ -133,6 +141,8 @@ private:
     void finishPart (const Pass&, std::vector<AutomationPoint>, BeatPosition end, bool intoDrag = false, bool ownStep = false);
     void writeWaiting (const ParameterRef* only = nullptr); // one parameter's, those not of a step of their own
     void writeWaitingAfterDrag();
+    void handleAsyncUpdate() override; // what finished during an undo or a redo, written after it (finishPart())
+    void keepPassesValues();           // each pass's value set by hand what it writes, after a drag's rollback
     void write (const Pass&, std::vector<AutomationPoint>, BeatPosition end);
 
     JUCE_DECLARE_NON_COPYABLE (AutomationWriter)

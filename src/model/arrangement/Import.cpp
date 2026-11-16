@@ -7,6 +7,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/internal/Project.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -51,7 +52,10 @@ namespace
         if (ticks <= 0.0)
             midi.convertTimestampTicksToSeconds();
 
-        const auto toBeats = [ticks] (double time) { return ticks > 0.0 ? time / ticks : time * 2.0; };
+        // Within a song's beats (maxSongBeats), as a project's are kept as it loads: a file from others can time an event
+        // a hundred million million beats along, past what a bar's number holds (known bug 148).
+        const auto toBeats = [ticks] (double time)
+        { return juce::jlimit (-maxSongBeats, maxSongBeats, ticks > 0.0 ? time / ticks : time * 2.0); };
 
         // Its tempos, in a file timed in ticks: each held until the next, as MIDI's tempo changes are.
         std::vector<TempoChange> tempos;

@@ -60,10 +60,10 @@ note.portamento: Portamento
 note.portamento: Portamento
 edit.mute: Mute
 edit.mute: Mute
-edit.duplicate: Duplicate 6 Notes
+edit.duplicate: Duplicate 2 Notes
 edit.delete: Delete 2 Notes
 edit.copy: Delete 2 Notes
-edit.paste: Paste 6 Notes
+edit.paste: Paste 4 Notes
 edit.cut: Cut 4 Notes
 clip.fadeConvex: Convex Fades
 clip.fadeConcave: Concave Fades

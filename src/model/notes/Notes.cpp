@@ -3,6 +3,7 @@
 #include "devices/drums/DrumSampler.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/Numbers.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
@@ -832,7 +833,7 @@ void changeNoteVelocities (Song& song, const std::vector<NoteRef>& notes, int ch
         setNoteVelocities (song, { { note.clip, note.id } }, note.velocity + change);
 }
 
-std::vector<NoteRef> duplicateNotes (Song& song, const std::vector<NoteRef>& notes)
+std::vector<NoteRef> duplicateNotes (Song& song, const std::vector<NoteRef>& notes, const juce::String& stepName)
 {
     const auto unique = getNoteData (song, withoutAliasCopies (song, notes));
 
@@ -853,7 +854,24 @@ std::vector<NoteRef> duplicateNotes (Song& song, const std::vector<NoteRef>& not
     for (auto& copy : copies)
         copy.start = copy.start + (end - start);
 
-    return replaceNotes (song, {}, copies);
+    auto made = replaceNotes (song, {}, copies);
+    tellNotesMade (song, stepName, "Duplicate", copies.size(), made.size());
+    return made;
+}
+
+void tellNotesMade (Song& song, const juce::String& asked, const juce::String& verb, size_t wanted, size_t made)
+{
+    if (made >= wanted)
+        return;
+
+    const auto count = [] (size_t n) { return n == 1 ? juce::String ("1 note") : juce::String ((int) n) + " notes"; };
+    const auto name = made == 1 ? verb + " Note" : verb + " " + juce::String ((int) made) + " Notes";
+    const auto left = wanted - made;
+
+    UndoStep::tellOutcome (song, asked, name,
+                           count (left) + " of " + juce::String ((int) wanted) + (left == 1 ? " wasn't" : " weren't")
+                               + " made: " + (left == 1 ? "it" : "they")
+                               + " would land past the clip's end, where the next clip on its track keeps it from growing.");
 }
 
 void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
@@ -1198,7 +1216,7 @@ juce::String describeNoteLength (BeatDuration length)
         return trimmed (beats, 3) + " beat";
     }
 
-    if (const auto whole = juce::roundToInt (beats); std::abs (beats - whole) < 1.0e-6)
+    if (const auto whole = roundToNearestInt (beats); std::abs (beats - whole) < 1.0e-6)
         return juce::String (whole) + (whole == 1 ? " beat" : " beats");
 
     return trimmed (beats, 2) + " beats";

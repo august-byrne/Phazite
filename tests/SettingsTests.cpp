@@ -96,6 +96,24 @@ TEST_CASE ("Settings have their defaults, and are stored as plain values")
     CHECK (file->getValue (juce::String (Settings::keyChangesPrefix) + "Phazite") == "<KEYMAPPINGS/>");
 }
 
+TEST_CASE ("A setting's number with an exponent JUCE's reader would overflow, or that is no finite number, reads as its default")
+{
+    // A reviewer, of known bug 170's fix: the settings' numbers were read with getDoubleValue(), which counts such an
+    // exponent's digits into an int.
+    phazite::test::TemporaryFolder temp;
+    auto file = makeSettingsFile (temp.folder.getChildFile ("Settings.xml"));
+
+    for (const auto* text : { "1e12345678901", "-2e98765432109", "1e999", "nan" })
+    {
+        CAPTURE (text);
+        file->setValue (Settings::interfaceScale.key, text);
+        Settings settings (file.get());
+        CHECK (settings.get (Settings::interfaceScale) == doctest::Approx (Settings::interfaceScale.defaultValue));
+    }
+
+    file->setValue (Settings::interfaceScale.key, "1.5");
+    CHECK (Settings (file.get()).get (Settings::interfaceScale) == doctest::Approx (1.5));
+}
 TEST_CASE ("Settings that change often are saved within seconds, the others at once")
 {
     phazite::test::TemporaryFolder temp;

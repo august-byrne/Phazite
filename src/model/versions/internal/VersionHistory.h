@@ -11,6 +11,7 @@
 #include "VersionStore.h"
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
+#include "model/project/internal/Project.h"
 
 #include <juce_events/juce_events.h>
 
@@ -18,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 
@@ -64,6 +66,22 @@ public:
     // it, and before Save As copies it. What the thread did still reaches the message thread later. Message thread.
     void waitForThread() const;
 
+    // A first save's copy of the history's folder as the project moves (Project::moveTo(), VersionsCopier): run as a job of
+    // the history's own thread, which is serial, so that it copies after every write given before it; from now until
+    // endFolderCopy() the history writes nothing (isSaving() is true: a commit or a branch's change is refused, and what it
+    // starts itself, the initial commit and Local History's snapshots, waits), so that nothing is written into the folder the
+    // project leaves after it was copied: from the copy job's start, once what a history of the same folder that went before
+    // still writes is done (FinishingHistories), the folder is held (WholeFile.h: holdFolder()), which every write into the
+    // store checks. A write: it runs even on the thread the history hands on as it goes. Calls back on the message thread
+    // with what came of it; when the history goes first, a failure, and nothing more is copied for the project that went. A bounce stopped by the copy is made again after it (bounceAgain,
+    // given the version). endFolderCopy() after the move, moved or not: the folder let go of, the history follows the
+    // project's folder, and what waited goes on there at the next turn of the message loop, unless the history goes first,
+    // as the project closes. Message thread.
+    void copyFolder (std::function<juce::Result (const BackgroundJobs::ShouldStop&)> copy, std::function<void (const juce::Result&)> copied,
+                     std::function<void (const juce::String&)> bounceAgain = {});
+    void endFolderCopy();
+    bool isCopyingFolder() const noexcept { return copyingFolder; }
+
     // The branches, in the order they were made; the current one (none before the first version); every branch's versions,
     // newest first; one by its id; and the current branch's last.
     std::vector<BranchRecord> getBranches() const;
@@ -96,7 +114,7 @@ public:
     // being read: false then, with done told why. The first, made as soon as the history has read that it has none, is
     // "Initial commit", on main.
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
-    bool isSaving() const noexcept { return saving; }
+    bool isSaving() const noexcept { return saving || copyingFolder; } // a commit, or a first save's copy (copyFolder())
 
     // What the next commit would be named while it has no message of its own: what is staged, or every change while none
     // is ("Update Bass and Drums"), or the merge it finishes ("Merge branch 'idea-2'"); none while there is nothing to commit.
@@ -469,6 +487,25 @@ private:
                 ReportCounts committed);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
 
+    // While the folder is copied (copyFolder()), and what the history started meanwhile, to start once it is over: with the
+    // version whose bounce it stopped, and how to make it again. What the copy job and the message thread share.
+    bool copyingFolder = false, initialCommitWaiting = false, openSnapshotWaiting = false;
+    juce::String bounceWaiting;
+    std::function<void (const juce::String&)> restartBounce;
+
+    struct FolderCopyState
+    {
+        std::mutex lock;                  // over's change, why, and the hold taken or let go of
+        std::atomic<bool> over { false }; // the copy stops, or doesn't begin
+        juce::String why;                 // it is over: what its job says
+        juce::File folder;
+        std::function<void (const juce::Result&)> copied; // message thread only
+    };
+
+    std::shared_ptr<FolderCopyState> folderCopy;
+    static void endCopy (FolderCopyState&, const juce::String& why); // the hold let go of
+    void startWhatWaitedForTheCopy();
+
     // A job on the history's thread: one that writes (a commit, a snapshot), which is done before the history goes, or one
     // that reads, which is let go as it goes, a long one looking at closing between its steps.
     enum class Work
@@ -572,4 +609,9 @@ void nameKnobs (std::vector<MergeClash>&, const juce::ValueTree& ours, const juc
 // A local history thinned as it grows, as of a time (docs/design/versions.md: Local History): every snapshot of the last two hours,
 // then the newest of each hour for a day, then the newest of each day for 30 days, and none older; oldest first, as given.
 std::vector<Snapshot> thinSnapshots (const std::vector<Snapshot>& oldestFirst, juce::int64 now);
+// How a first save copies the open project's Versions folder (Project::VersionsCopier): by the history of the song the
+// context holds as each is called (copyFolder(), endFolderCopy(), waitForThread()); with none, the copy runs on the
+// message thread.
+class ProjectContext;
+Project::VersionsCopier makeVersionsCopier (ProjectContext&);
 } // namespace phazite

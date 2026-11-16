@@ -4,6 +4,7 @@
 // rows, each one undo step, several items at once.
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -24,6 +25,8 @@
 #include "ui/theme/DesignTokens.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace
 {
@@ -338,6 +341,81 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     CHECK (valueOf (0) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (valueOf (1) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Set Automation Value"));
+}
+
+TEST_CASE ("A value typed that is no finite number changes nothing: a clip's start and length, a point's value and place, a note's")
+{
+    // A reviewer, of known bug 148's fix: "inf/inf" read as a length of no number, "1e999/1" as an infinite one, and a beat of
+    // four hundred digits as an infinite place, which reached the model, which passed them on. Refused by the fields, and
+    // by the model's setters, which don't count on the view.
+    Screen screen;
+    auto& selection = screen.context.getSongSelection();
+    const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition::fromBeats (4.0));
+    const auto note =
+        phazite::addNote (screen.context, clip, 60, BeatPosition::fromBeats (4.0), phazite::BeatDuration::fromBeats (1.0), 64);
+    const auto clipOf = [&screen, clip] { return *phazite::getClip (screen.context, clip); };
+    const auto range = clipOf().range;
+    const auto manyDigits = "1 " + juce::String::repeatedString ("9", 400);
+
+    selection.selectOnly (clip);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Clip"));
+
+    for (const auto& text :
+         { juce::String ("inf/inf"), juce::String ("1e999/1"), juce::String ("1/0"), juce::String::repeatedString ("9", 400) })
+    {
+        CAPTURE (text);
+        type (findField (screen, "Length"), text);
+        CHECK (clipOf().range == range);
+    }
+
+    type (findField (screen, "Starts"), manyDigits); // its bar, then a beat of four hundred digits
+    CHECK (clipOf().range == range);
+
+    for (const auto value : { std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() })
+    {
+        for (const auto property : { phazite::ClipProperty::start, phazite::ClipProperty::length })
+        {
+            phazite::setClipsTo (screen.context, { clip }, property, value);
+            phazite::changeClips (screen.context, { clip }, property, value);
+        }
+
+        CHECK (clipOf().range == range);
+    }
+
+    // A point's value and place.
+    const auto volume = phazite::getVolume (screen.context, screen.track (0)).getRef();
+    phazite::addAutomationPoint (screen.context, volume, { BeatPosition::fromBeats (4.0), 0.5f });
+    const auto point = [&screen, &volume] { return phazite::getAutomationPoints (screen.context, volume).front(); };
+    selection.selectAutomationPoints (volume, { 0 });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Automation"));
+    type (findField (screen, "Position"), manyDigits);
+    type (findField (screen, "Value"), "1e999");
+
+    for (const auto value : { std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
+    {
+        phazite::setAutomationPointValues (screen.context, volume, { 0 }, value);
+        phazite::setAutomationCurves (screen.context, volume, { 0 }, value);
+        phazite::moveAutomationPoints (screen.context, volume, { 0 }, phazite::BeatDuration::fromBeats ((double) value), value);
+    }
+
+    CHECK (point().beat.inBeats() == doctest::Approx (4.0));
+    CHECK (point().value == doctest::Approx (0.5f));
+    CHECK (std::isfinite (point().curve));
+
+    // A note's, typed.
+    selection.setNoteClips ({ clip });
+    selection.selectNotes ({ note });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Note"));
+    type (findField (screen, "Velocity"), "1e999");
+    type (findField (screen, "Length"), "inf/inf");
+    type (findField (screen, "Starts"), manyDigits);
+    const auto after = *phazite::getNote (screen.context, note);
+    CHECK (after.velocity == 64);
+    CHECK (after.length.inBeats() == doctest::Approx (1.0));
+    CHECK (after.start.inBeats() == doctest::Approx (4.0));
 }
 
 TEST_CASE ("In 6/8 a clip's place and length read in bars and eighths, and are typed so")

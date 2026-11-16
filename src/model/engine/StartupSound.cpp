@@ -2,6 +2,7 @@
 #include "StartupSound.h"
 #include "Preview.h"
 #include "devices/delay/Delay.h"
+#include "model/base/Numbers.h"
 
 #include <algorithm>
 #include <array>
@@ -62,7 +63,11 @@ namespace
 
 juce::AudioBuffer<float> makeStartupSound (double sampleRate)
 {
-    const auto length = (int) std::ceil (lengthSeconds * sampleRate);
+    // At a rate an audio device plays at: none for what a broken driver says (no number, 0, a billion).
+    if (! std::isfinite (sampleRate) || sampleRate < 1000.0 || sampleRate > 1.0e6)
+        return {};
+
+    const auto length = toWhole<int> (std::ceil (lengthSeconds * sampleRate)); // the device's rate, which a driver gives
     juce::AudioBuffer<float> sound (2, std::max (0, length));
     sound.clear();
 
@@ -76,8 +81,8 @@ juce::AudioBuffer<float> makeStartupSound (double sampleRate)
 
     for (const auto& step : steps)
     {
-        const auto start = (int) std::lround (stepStart * sampleRate);
-        const auto count = std::min (length - start, (int) std::lround (step.seconds * sampleRate));
+        const auto start = roundToWhole<int> (stepStart * sampleRate);
+        const auto count = std::min (length - start, roundToWhole<int> (step.seconds * sampleRate));
         const auto level = juce::Decibels::decibelsToGain (step.decibels);
         const auto radiansPerSecond = juce::MathConstants<double>::twoPi * step.hz;
 
@@ -113,7 +118,7 @@ juce::AudioBuffer<float> makeStartupSound (double sampleRate)
     devices::Delay delay;
     process (delay, echoes, echo, sampleRate);
 
-    const auto fadeLength = std::min (length, (int) std::ceil (fadeOutSeconds * sampleRate));
+    const auto fadeLength = std::min (length, toWhole<int> (std::ceil (fadeOutSeconds * sampleRate)));
 
     for (int channel = 0; channel < 2; ++channel)
     {
@@ -130,6 +135,8 @@ juce::AudioBuffer<float> makeStartupSound (double sampleRate)
 void playStartupSound (Previewer& previewer)
 {
     const auto rate = previewer.getSampleRate();
-    previewer.playSound (makeStartupSound (rate), rate);
+
+    if (auto sound = makeStartupSound (rate); sound.getNumSamples() > 0)
+        previewer.playSound (std::move (sound), rate);
 }
 } // namespace phazite

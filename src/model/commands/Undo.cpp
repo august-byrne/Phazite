@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Undo.h"
+#include "CommandRegistry.h"
 #include "model/base/internal/Schema.h"
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -49,6 +51,14 @@ namespace
     {
         const auto& open = getOpenTrials();
         return std::find (open.begin(), open.end(), trial) != open.end();
+    }
+
+    // What the outermost step that ended last said of what it made (UndoStep::tellOutcome()), until it is taken or the next
+    // begins (message thread only).
+    juce::String& getStepOutcome()
+    {
+        static juce::String outcome;
+        return outcome;
     }
 
     // "Undo Change Volume": the verb with the name of the step, when there is a step and it is named.
@@ -118,9 +128,10 @@ UndoStep::UndoStep (Song& song, const juce::String& name)
 {
 }
 
-UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& name)
+UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& stepName)
     : undoManager (manager),
-      outer (current)
+      outer (current),
+      name (stepName)
 {
     // Within a gesture, a trial's change, or another step for the same song, it joins that one. Else what a trial tried is
     // kept first, as a step of its own.
@@ -136,7 +147,11 @@ UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& name)
     {
         Trial::keepOpenTrial (undoManager);
         undoManager.beginNewTransaction (name);
+        begun = true;
     }
+
+    if (findOutermostStep (undoManager, outer) == nullptr)
+        getStepOutcome().clear(); // what an earlier step said is no news of this one
 
     current = this;
 }
@@ -145,6 +160,38 @@ UndoStep::~UndoStep()
 {
     jassert (current == this); // steps end in the reverse order of their beginning, on the message thread
     current = outer;
+
+    if (findOutermostStep (undoManager, outer) == nullptr)
+        getStepOutcome() = outcome;
+}
+
+UndoStep* UndoStep::findOutermostStep (juce::UndoManager& manager, UndoStep* from)
+{
+    UndoStep* found = nullptr;
+
+    for (auto* step = from; step != nullptr; step = step->outer)
+        if (&step->undoManager == &manager)
+            found = step;
+
+    return found;
+}
+
+void UndoStep::tellOutcome (Song& song, const juce::String& asked, const juce::String& made, const juce::String& said)
+{
+    auto* step = findOutermostStep (song.getUndoManager(), current);
+
+    if (step == nullptr)
+        return;
+
+    if (step->begun && step->name == asked && made.isNotEmpty())
+        song.getUndoManager().setCurrentTransactionName (made);
+
+    step->outcome = said;
+}
+
+juce::String takeCommandOutcome()
+{
+    return std::exchange (getStepOutcome(), {});
 }
 
 //==============================================================================

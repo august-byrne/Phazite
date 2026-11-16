@@ -337,8 +337,8 @@ namespace
 
             SoundFacts facts { fields[0].getLargeIntValue(), fields[1].getLargeIntValue() };
             facts.loopData = (AudioFileInfo::LoopData) juce::jlimit (0, 2, fields[2].getIntValue());
-            facts.loopBeats = fields[3].getDoubleValue();
-            facts.seconds = fields[4].getDoubleValue();
+            facts.loopBeats = readDouble (fields[3]);
+            facts.seconds = readDouble (fields[4]);
 
             if (const auto root = fields[5].getIntValue(); juce::isPositiveAndBelow (root, 12))
                 facts.key = SoundKey { root, (SoundKey::Mode) juce::jlimit (0, 2, fields[6].getIntValue()) };

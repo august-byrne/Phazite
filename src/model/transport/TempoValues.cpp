@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TempoValues.h"
+#include "model/base/Numbers.h"
 
 #include <algorithm>
 #include <cmath>
@@ -86,13 +87,14 @@ double Bars::getBarsAt (BeatPosition beat) const
 
 int Bars::getBarAt (BeatPosition beat) const
 {
-    return (int) std::floor (getBarsAt (beat) + tiny);
+    // Within maxBars: a beat no song holds (from a MIDI file) is past an int's bars, and callers count on from the bar.
+    return juce::jlimit (-maxBars, maxBars, toWhole<int> (std::floor (getBarsAt (beat) + tiny)));
 }
 
 BeatPosition Bars::getBarStart (int bar) const
 {
     const auto& run = findRunOfBar (bar);
-    return BeatPosition::fromBeats (run.startBeat + (double) (bar - run.firstBar) * run.barLength);
+    return BeatPosition::fromBeats (run.startBeat + ((double) bar - (double) run.firstBar) * run.barLength);
 }
 
 BeatDuration Bars::getBarLength (BeatPosition beat) const

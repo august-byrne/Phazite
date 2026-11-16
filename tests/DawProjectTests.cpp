@@ -391,6 +391,103 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     CHECK (said.contains ("Bass: its sends"));
 }
 
+TEST_CASE ("A DAWproject past what the zip writer holds, 4 GB or 65,535 files, is refused before it is written, saying what to do")
+{
+    // Known bug 106: JUCE's zip writer keeps sizes and places in 32 bits and the count of files in 16, so such an archive came
+    // out damaged and the export said it worked. The sizes as the check is given them, rather than 4 GB of audio.
+    using phazite::ArchiveEntry;
+    constexpr auto gigabyte = (juce::int64) 1 << 30;
+    const ArchiveEntry xml { "project.xml", 1 << 20, true };
+
+    CHECK (phazite::checkArchiveFits ({ xml, { "audio/Long.wav", 3 * gigabyte, false } }).wasOk());
+    const auto tooLarge =
+        phazite::checkArchiveFits ({ xml, { "audio/A.wav", 2 * gigabyte, false }, { "audio/B.wav", 2 * gigabyte, false } });
+    CHECK (tooLarge.failed());
+    CHECK (tooLarge.getErrorMessage().contains ("4 GB"));
+    CHECK (tooLarge.getErrorMessage().contains ("Export"));
+
+    // One entry of 4 GB, with its headers; a packed one that deflate could grow past it; and just under.
+    CHECK (phazite::checkArchiveFits ({ { "audio/Huge.wav", phazite::maxArchiveBytes, false } }).failed());
+    CHECK (phazite::checkArchiveFits ({ { "project.xml", phazite::maxArchiveBytes - 1000, true } }).failed());
+    CHECK (phazite::checkArchiveFits ({ { "audio/Huge.wav", phazite::maxArchiveBytes - 1000, false } }).wasOk());
+
+    // Files counted: 65,535 at most.
+    std::vector<ArchiveEntry> many ((size_t) phazite::maxArchiveEntries, { "plugins/p.vstpreset", 10, true });
+    CHECK (phazite::checkArchiveFits (many).wasOk());
+    many.push_back ({ "plugins/q.vstpreset", 10, true });
+    CHECK (phazite::checkArchiveFits (many).failed());
+
+    // And the export checks before it writes anything: one with too many files leaves no file.
+    Song song;
+    auto content = song.describe();
+    content.bounces.clear();
+
+    for (int i = 0; i <= phazite::maxArchiveEntries; ++i)
+        content.blobs.emplace_back ("plugins/" + juce::String (i) + ".vstpreset", juce::MemoryBlock (4, true));
+
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Song.dawproject");
+    const auto written = phazite::writeDawProject (content, {}, file);
+    CHECK (written.failed());
+    CHECK (written.getErrorMessage().contains (juce::String (phazite::maxArchiveEntries)));
+    CHECK_FALSE (file.exists());
+    CHECK (folder.folder.findChildFiles (juce::File::findFiles, true).isEmpty());
+}
+
+TEST_CASE ("A DAWproject's counts that a reader takes for ZIP64's are refused too, and a song too large is refused before it renders")
+{
+    // A reviewer, of known bug 106's fix: 0xFFFF entries or 0xFFFFFFFF bytes are what readers (Java's, Bitwig Studio's) take
+    // for the marker of ZIP64; and the refusal came after minutes of rendering the bounces.
+    using phazite::ArchiveEntry;
+    std::vector<ArchiveEntry> entries ((size_t) 0xffff, { "plugins/p.vstpreset", 10, true });
+    CHECK (phazite::checkArchiveFits (entries).failed());
+    entries.pop_back();
+    CHECK (phazite::checkArchiveFits (entries).wasOk());
+    CHECK (phazite::checkArchiveFits ({ { "a.wav", 0xffffffffLL - 22 - 76 - 10, false } }).failed()); // 0xFFFFFFFF bytes in all
+
+    // The song's bounces, as long as they render: three hours of two channels of 32 bits pass 4 GB; ten seconds don't.
+    Song song;
+    auto content = song.describe();
+    REQUIRE_FALSE (content.bounces.empty()); // the lead's synth, which another DAW can't play
+    CHECK (phazite::checkDawProjectFits (content, 10.0).wasOk());
+    const auto tooLong = phazite::checkDawProjectFits (content, 3.0 * 3600.0);
+    CHECK (tooLong.failed());
+    CHECK (tooLong.getErrorMessage().contains ("4 GB"));
+
+    // And the export of such a song says so at once, rendering nothing.
+    song.s.addNote (song.s.addMidiClip (song.lead, 30000.0, 4.0), 60, 30000.0, 1.0); // four hours along at 120 BPM
+    phazite::CommandRegistry commands;
+    phazite::addVersionCommands (commands, song.s.context, [] (std::function<void (bool)> then) { then (true); }, song.s.renders);
+    REQUIRE (commands.invoke ("version.exportDawProject"));
+    REQUIRE (dispatchMessagesUntil ([&song] { return ! song.s.renders.finished.isEmpty(); }));
+    CHECK (song.s.renders.finished[0].contains ("4 GB"));
+    CHECK (song.s.renders.wrote.isEmpty());
+}
+
+TEST_CASE ("A DAWproject's long exponents are made readable only where a number is read: a device's ID that looks like one stays")
+{
+    // A reviewer, of known bug 170's fix: every attribute but a name was rewritten, a VST3's device ID of 32 hexadecimal
+    // digits starting "5E1234567890" among them.
+    Song song;
+    auto content = song.describe();
+    content.bounces.clear();
+    const juce::String deviceID ("5E123456789012345678901234567890");
+    auto* plugin = content.project->createNewChildElement ("Vst3Plugin");
+    plugin->setAttribute ("deviceID", deviceID);
+    plugin->setAttribute ("deviceName", "1e12345678901");
+    plugin->setAttribute ("time", "1e12345678901");
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Song.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+    const auto* readPlugin = read.project->getChildByName ("Vst3Plugin");
+    REQUIRE (readPlugin != nullptr);
+    CHECK (readPlugin->getStringAttribute ("deviceID") == deviceID);
+    CHECK (readPlugin->getStringAttribute ("deviceName") == "1e12345678901");
+    CHECK (readPlugin->getStringAttribute ("time") == "1e999");
+}
 TEST_CASE ("A DAWproject carries the tempo's changes both ways: steps held, ramps straight, and bent ones in straight pieces")
 {
     // From 128 BPM, a ramp down to 96 at beat 8, bent up to 140 at beat 16, held, and a step to 110 at beat 24.
