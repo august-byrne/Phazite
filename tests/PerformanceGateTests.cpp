@@ -21,12 +21,18 @@
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/synth/Synth.h"
 #include "engine/nodes/NoteSequence.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/GridSettings.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/AudioWork.h"
+#include "model/arrangement/internal/Grid.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
@@ -54,6 +60,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 using phazite::test::at;
@@ -103,6 +110,14 @@ Shared getShared (const phazite::engine::Plan& plan)
 std::int64_t idOf (phazite::TrackID track)
 {
     return (std::int64_t) track.getRaw();
+}
+
+// An editor's snap switched, as its grid menu does (view state).
+void toggleSnap (phazite::Song& song, phazite::GridOwner owner)
+{
+    auto grid = phazite::loadGridSettings (song, owner);
+    grid.snap = ! grid.snap;
+    phazite::saveGridSettings (song, owner, grid);
 }
 } // namespace
 
@@ -156,6 +171,13 @@ TEST_CASE ("Performance gate: each edit gives the engine one plan, however many 
         { "a clip selected", [&] { s.select (clip); }, 0 },
         { "the playhead moved", [&] { phazite::movePlayhead (song, at (8.0)); }, 0 },
         { "the project saved", [&] { REQUIRE (s.getProject().save().wasOk()); }, 0 },
+
+        // View state, which no plan holds (known bug 124): each gave a plan before.
+        { "the playlist's grid changed", [&] { toggleSnap (song, phazite::GridOwner::playlist); }, 0 },
+        { "the piano roll's grid changed, its first", [&] { toggleSnap (song, phazite::GridOwner::pianoRoll); }, 0 },
+        { "the piano roll's grid changed again", [&] { toggleSnap (song, phazite::GridOwner::pianoRoll); }, 0 },
+        { "a device's window moved", [&] { phazite::rememberWindowPosition (song, equalizer, { 40, 60 }); }, 0 },
+        { "an automation lane shown", [&] { phazite::showLane (song, track, { equalizer, output }); }, 0 },
     };
 
     for (const auto& edit : edits)
@@ -197,6 +219,165 @@ TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's not
     }
 
     CHECK (getSong (s).getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: an edit's plan reads the values of the devices on the channel it changed, and the curves it changed")
+{
+    // Known bug 145: every plan read every device's values from the song again, most of a big song's compile (0.4 ms a track,
+    // 40 ms an edit at 100 tracks); and known bug 124: every plan read all the automation again. Now a device's values are
+    // read for the first plan and once its channel changed, and a curve once its points changed: an edit of clips, the
+    // tempo or another channel reads none of them.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 12, 16.0);
+    auto& song = getSong (s);
+    phazite::test::PlanCounter plans (s.context);
+    const auto track = built.tracks[3];
+    auto devicesRead = phazite::SongPlayer::countDevicesRead();
+    auto curvesRead = phazite::SongPlayer::countCurvesRead();
+
+    struct Read
+    {
+        size_t devices = 0, curves = 0;
+    };
+
+    const auto take = [&]
+    {
+        const auto devicesNow = phazite::SongPlayer::countDevicesRead(), curvesNow = phazite::SongPlayer::countCurvesRead();
+        return Read { (size_t) (devicesNow - std::exchange (devicesRead, devicesNow)),
+                      (size_t) (curvesNow - std::exchange (curvesRead, curvesNow)) };
+    };
+
+    const auto check = [&] (const char* what, size_t devices, size_t curves)
+    {
+        INFO (std::string (what));
+        REQUIRE (plans.take() == 1);
+        const auto read = take();
+        CHECK (read.devices == devices);
+        CHECK (read.curves == curves);
+    };
+
+    phazite::addNote (s.context, built.clips[3], 72, at (2.5), lasting (0.25), 100);
+    check ("a note added", 0, 0);
+
+    phazite::moveClip (s.context, built.clips[5], at (1.0), built.tracks[5]);
+    check ("a clip moved", 0, 0);
+
+    s.setTempo (128.0);
+    check ("the tempo changed", 0, 0);
+
+    // An automation point added to the first Synth's cutoff: that curve alone.
+    phazite::addAutomationPoint (s.context, { built.instruments[0], "cutoff" }, { at (3.0), 2000.0f });
+    check ("an automation point added", 0, 1);
+
+    // A device added to one track: that track's devices, each once.
+    s.addEffect (track, dev::Delay::typeID);
+    check ("an effect added", phazite::getEffects (s.context, track).size() + 1, 0); // and its instrument
+
+    phazite::undo (song);
+    check ("Undo", phazite::getEffects (s.context, track).size() + 1, 0);
+
+    CHECK (song.getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: a change no device reads leaves the next edit's plan reading no device's values")
+{
+    // Known bug 145's review: every change under a track marked its channel, so that the next real edit read every device
+    // on it again: a track's height, its mute, a plug-in's state stored by a save (Song::storeDeviceStates(), at every
+    // save and auto-save). Now a channel is marked for a change at or under a device, a container, a chain or a modulator
+    // (but where a device's window was, and a plug-in's own state), or an element of it added, removed or moved.
+    const phazite::test::TestPlugin plugin;
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 12, 16.0);
+    auto& song = getSong (s);
+    const auto track = built.tracks[3];
+    phazite::DeviceID device;
+
+    {
+        const phazite::UndoStep step (song, "Add Device");
+        device = phazite::test::TestPlugin::add (song, track);
+    }
+
+    phazite::test::PlanCounter plans (s.context);
+    auto read = phazite::SongPlayer::countDevicesRead();
+
+    struct Change
+    {
+        const char* what;
+        std::function<void()> make;
+    };
+
+    const std::vector<Change> changes {
+        { "a track's height", [&] { phazite::setSavedTrackHeight (song, track, 120); } },
+        { "a track muted", [&] { phazite::toggleMute (s.context, track); } },
+        { "a device's window moved",
+          [&] { phazite::rememberWindowPosition (song, phazite::getEffects (s.context, track)[0].id, { 10, 20 }); } },
+        { "the plug-ins' states stored, as a save stores them", [&] { song.storeDeviceStates(); } },
+        { "a plug-in's state written, as a store writes it",
+          [&] { phazite::findDeviceState (song, device).setProperty (phazite::schema::pluginState, "c3RhdGU=", nullptr); } },
+    };
+
+    for (const auto& change : changes)
+    {
+        INFO (std::string (change.what));
+        change.make();
+        plans.take();
+        read = phazite::SongPlayer::countDevicesRead();
+
+        // The next note on that track: its notes compiled again, and no device's values read.
+        phazite::addNote (s.context, built.clips[3], 72, at (2.5), lasting (0.25), 100);
+        CHECK (plans.take() == 1);
+        CHECK (phazite::SongPlayer::countDevicesRead() == read);
+    }
+
+    CHECK (song.getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: an edit's plan asks the disk about the files of the track it changed, each once")
+{
+    // Known bug 124: every plan asked the disk about each audio clip's file twice, and made the tempo map several times for
+    // each clip. Now a track's audio is placed again only once its clips (or the tempo) changed, and the disk is asked
+    // about a file again only for a track whose clips changed, once however many of its clips play it. Four tracks of ten
+    // clips, each track's of a file of its own, beside the first track's MIDI clip.
+    phazite::test::TestSong s;
+    std::vector<phazite::TrackID> tracks;
+    std::vector<phazite::ClipID> clips;
+
+    for (int t = 0; t < 4; ++t)
+    {
+        tracks.push_back (s.addTrack ("Audio " + juce::String (t + 1)));
+        const auto file = phazite::test::writeSound (s.getSoundsFolder().getChildFile ("Loop " + juce::String (t + 1) + ".wav"), 1.0);
+
+        for (int c = 0; c < 10; ++c)
+            clips.push_back (s.addAudioClip (tracks.back(), file, c * 4.0));
+    }
+
+    s.setInstrument (s.firstTrack, dev::Synth::typeID);
+    const auto midi = s.addMidiClip (s.firstTrack, 0.0, 16.0);
+    phazite::test::dispatchPendingMessages();
+    phazite::test::PlanCounter plans (s.context);
+    auto asked = phazite::SongPlayer::countFilesAsked();
+
+    const auto take = [&asked]
+    {
+        const auto now = phazite::SongPlayer::countFilesAsked();
+        return now - std::exchange (asked, now);
+    };
+
+    s.addNote (midi, 60, 0.0, 1.0);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 0);
+
+    phazite::moveClip (s.context, clips[3], at (13.0), tracks[0]);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 1); // the first track's file, for its ten clips
+
+    s.setTempo (128.0);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 0); // every clip placed again, its file known
+
+    phazite::deleteClips (s.context, { clips[12] }, false);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 1); // the second track's file, for its nine clips left
 }
 
 //==============================================================================

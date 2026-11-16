@@ -3,8 +3,10 @@
 // (model/project/Export.h), a freeze's, a bounce's or a consolidation's (model/mixer/FreezeModel.h). Each job plays from the
 // song's start (or a time in it) to an end, and on until its tails are over (under -70 dB for as long as the longest tail
 // its devices report, a block at least: a delay is silent between its echoes; so many seconds at most, the silence at the
-// end left out), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
-// with the project's plug-ins, which it has alone while it lives (PlaybackSession::lendToRender()); deleting it, on the
+// end left out), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the
+// message thread as its turn comes (the first as this is made), from the song as it is then (the windows renders run under
+// are modal, so the song doesn't change meanwhile), with the project's plug-ins, which it has alone while it lives
+// (PlaybackSession::lendToRender()); deleting it, on the
 // message thread, cancels what is left, waits for its thread and gives them back. A plug-in that had crashed before a job
 // starts, or whose helper goes as it plays (a crash, or ended for a hang: SandboxedProcessor.h), fails the job, which says
 // so, naming it: nothing is written without it (one switched off isn't heard, and fails nothing). One that keeps a block
@@ -21,6 +23,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -73,11 +76,14 @@ public:
     void setProgress (int job, double ofJob) noexcept;
 
     // The plug-in it has waited for the longest, for a block or a channel for its rate, if that is longer than a hang takes
-    // live (its helper's audio hang limit), and for how long (any thread): what its window says it waits for.
+    // live (its helper's audio hang limit), and for how long (message thread): what its window says it waits for.
     using Wait = RenderWait;
     std::optional<Wait> findWait() const;
 
 private:
+    // A job, compiled as its turn comes, on the message thread (known bug 125: an export of stems compiled a player and a
+    // plan for each stem before the first started, and held them all): the first as this is made, each other as the one
+    // before it has played, which this thread waits for; and let go of as the next is compiled.
     struct Compiled
     {
         Job job;
@@ -91,10 +97,18 @@ private:
     const Setup setup;
     const Rendered rendered;
     const Finished finished;
-    std::vector<Compiled> jobs;
+    std::vector<Compiled> jobs; // made whole as this is, each compiled in its turn
     std::atomic<float> progress { 0.0f };
     juce::String whyNot; // a plug-in of the session's still loading as it began, which fails it at its start
 
+    // What plays the plug-ins the jobs played, kept until this goes, which tells them that they play live again; what a
+    // compile asked of the message thread finds (nothing once this has gone); and what wakes this thread once it is done.
+    std::vector<std::shared_ptr<engine::DeviceNode>> playedPlugins; // one for each plug-in's instance
+    const std::shared_ptr<OfflineRender*> alive;
+    juce::WaitableEvent jobCompiled;
+
+    void compile (size_t index);        // message thread
+    bool waitForCompile (size_t index); // this thread: whether it was compiled, and the render goes on
     void run() override;
     juce::Result play (Compiled&, int index);
 

@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/Numbers.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -99,6 +100,20 @@ namespace
         return std::make_shared<const engine::NoteSequence> (std::move (notes), std::move (controls));
     }
 
+    // Whether two tracks' notes play alike, event for event (a kept track's and its notes compiled again, while checking).
+    bool isSameSequence (const engine::NoteSequence* a, const engine::NoteSequence* b)
+    {
+        if (a == nullptr || b == nullptr)
+            return a == b;
+
+        const auto same = [] (const engine::NoteSequence::Event& x, const engine::NoteSequence::Event& y)
+        {
+            return juce::exactlyEqual (x.beat, y.beat) && x.type == y.type && x.number == y.number && juce::exactlyEqual (x.value, y.value);
+        };
+
+        return std::equal (a->getEvents().begin(), a->getEvents().end(), b->getEvents().begin(), b->getEvents().end(), same);
+    }
+
     // A file's samples as JUCE's formats read them, for the engine's reading thread (or a render's).
     class FormatReader final : public engine::SampleReader
     {
@@ -121,17 +136,8 @@ namespace
         std::unique_ptr<juce::AudioFormatReader> reader;
     };
 
-    // A device's values set by hand, in its description's order: as the song holds them, or as its node has them now.
-    std::vector<float> readValuesSetByHand (const devices::DeviceInfo& info, const juce::ValueTree& deviceState)
-    {
-        std::vector<float> values;
-
-        for (const auto& parameter : info.parameters)
-            values.push_back (readValueSetByHand (deviceState, parameter));
-
-        return values;
-    }
-
+    // A device's values set by hand, in its description's order, as its node has them now (SongPlayer::readValues() reads
+    // the song's).
     std::vector<float> readValuesSetByHand (const engine::DeviceNode& node)
     {
         std::vector<float> values;
@@ -148,7 +154,7 @@ namespace
     {
         auto room = 1;
 
-        while (room < (int) std::ceil (sampleRate / 3.0))
+        while (room < toWhole<int> (std::ceil (sampleRate / 3.0)))
             room *= 2;
 
         return room;
@@ -176,68 +182,214 @@ SongPlayer::~SongPlayer()
     songState.removeListener (this);
 }
 
+namespace
+{
+    std::atomic<bool> checking { false };
+    std::atomic<std::uint64_t> devicesRead { 0 }, curvesRead { 0 }, filesAsked { 0 };
+} // namespace
+
+void SongPlayer::setChecking (bool on) noexcept
+{
+    checking = on;
+}
+
+bool SongPlayer::isChecking() noexcept
+{
+    return checking;
+}
+
+std::uint64_t SongPlayer::countDevicesRead() noexcept
+{
+    return devicesRead;
+}
+
+std::uint64_t SongPlayer::countCurvesRead() noexcept
+{
+    return curvesRead;
+}
+
+std::uint64_t SongPlayer::countFilesAsked() noexcept
+{
+    return filesAsked;
+}
+
+bool SongPlayer::isCheckedPart (std::uint64_t part, std::uint64_t plan, std::uint64_t every) noexcept
+{
+    // Part j of plan p where j and p leave the same remainder: any `every` plans in a row check every part at least once,
+    // however many parts each keeps.
+    return every <= 1 || part % every == plan % every;
+}
+
+bool SongPlayer::shouldCheck()
+{
+    // Each kept part in a song of up to 64 devices; in a bigger one, one in every so many, its phase moving on each plan,
+    // so that the checks cost about as much as what they check would for 64 devices.
+    return checking && isCheckedPart (checkedParts++, plansCompiled, checkEvery);
+}
+
 //==============================================================================
 std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::ValueTree& trackState)
 {
     const auto id = getID (trackState, schema::trackID);
     usedNotes.insert (id);
 
-    if (const auto found = notes.find (id); found != notes.end() && ! notesChanged.contains (id))
+    if (const auto found = notes.find (id); found != notes.end() && ! compiling.hasNotes (id))
+    {
+        if (shouldCheck())
+        {
+            [[maybe_unused]] const auto same = isSameSequence (found->second.get(), compileNotes (trackState).get());
+            jassert (same); // the track's notes changed without the song saying so (markChange())
+        }
+
         return found->second;
+    }
 
     auto compiled = compileNotes (trackState);
     notes[id] = compiled;
-    notesChanged.erase (id);
     return compiled;
 }
 
-void SongPlayer::markNotes (const juce::ValueTree& changed)
+void SongPlayer::markChange (const juce::ValueTree& changed, bool structure)
 {
-    // A change in a clip, or to a clip: its track's notes (a tempo change moves none: they are in beats).
+    // A change in a clip, or to a clip: its track's notes and audio (a tempo change moves no note: they are in beats). In
+    // the tempo map: every track's audio, which plays in seconds. In the automation: a curve's points (by its parameter),
+    // or the curves themselves (every one). In a channel (a track, a folder, a return or the master), its devices' values
+    // are read again only for what can change them: a change at or under a device, a container, a chain or a modulator, or
+    // an element of the channel added, removed or moved; not the channel's own properties (its height, mute, solo, volume,
+    // pan), which no device reads, nor a plug-in's own values (VALUE), which the plug-in keeps, the engine reading none.
+    auto inDevice = structure;
+
     for (auto element = changed; element.isValid(); element = element.getParent())
+    {
         if (element.hasType (schema::CLIP))
-            return (void) notesChanged.insert (getID (element.getParent(), schema::trackID));
+            return (void) changes.notes.insert (getID (element.getParent(), schema::trackID));
+
+        if (element.hasType (schema::TEMPOMAP))
+            return (void) (changes.tempo = true);
+
+        if (element.hasType (schema::CURVE))
+        {
+            const auto parameter = getCurveParameter (element);
+            return (void) changes.curves.insert ({ parameter.device.getRaw(), parameter.parameter });
+        }
+
+        if (element.hasType (schema::AUTOMATION))
+            return (void) (changes.allCurves = true);
+
+        // A device's sounds (a pad's, an oscillator's table, a sampler's): loaded again by a kept node (getDevice()).
+        if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
+            changes.sounds.insert (getID (element.getParent(), schema::deviceID));
+
+        if (element.hasType (schema::VALUE) || schema::isUncountedElement (element.getParent(), element))
+            return; // a plug-in's value, or view state (a track's lanes)
+
+        if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN)
+            || element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO))
+            inDevice = true;
+
+        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
+        {
+            if (inDevice)
+                changes.channels.insert (element.hasType (schema::MASTER) ? 0 : getID (element, schema::trackID));
+
+            return;
+        }
+    }
+}
+
+void SongPlayer::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
+{
+    // A curve given to another parameter: its old one isn't known any more. A track's ID changed in place (a merge's
+    // renumbering): what the plan before kept under it may be another track's, and its own is under an ID no longer known.
+    if (tree.hasType (schema::CURVE) && (property == schema::curveDevice || property == schema::curveParameter))
+        changes.allCurves = true;
+
+    if (tree.hasType (schema::TRACK) && property == schema::trackID)
+        changes.allNotes = changes.allChannels = true;
+
+    // What a device's player doesn't read: where its window was, and a plug-in's own state, which every save stores
+    // (Song::storeDeviceStates()).
+    if (tree.hasType (schema::DEVICE)
+        && (schema::isDeviceViewProperty (property) || property == schema::pluginState || property == schema::pluginProgram))
+        return;
+
+    markChange (tree, false);
 }
 
 void SongPlayer::markTracksIn (const juce::ValueTree& element)
 {
     if (element.hasType (schema::TRACK))
-        notesChanged.insert (getID (element, schema::trackID));
+    {
+        changes.notes.insert (getID (element, schema::trackID));
+        changes.channels.insert (getID (element, schema::trackID));
+    }
+
+    if (element.hasType (schema::MASTER))
+        changes.channels.insert (0);
+
+    if (element.hasType (schema::TEMPOMAP))
+        changes.tempo = true;
+
+    if (element.hasType (schema::AUTOMATION) || element.hasType (schema::CURVE))
+        changes.allCurves = true;
 
     if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS) || element.hasType (schema::PHAZITE))
         for (const auto& child : element)
-            if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS))
+            if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS) || child.hasType (schema::MASTER)
+                || child.hasType (schema::TEMPOMAP) || child.hasType (schema::AUTOMATION))
                 markTracksIn (child);
+}
+
+void SongPlayer::markSoundsIn (const juce::ValueTree& element)
+{
+    // Sounds added whole, with what they hold (an undo, a song applied, a preset's element): no property of theirs changes.
+    if (element.hasType (schema::SOUNDS) && element.getParent().hasType (schema::DEVICE))
+        changes.sounds.insert (getID (element.getParent(), schema::deviceID));
+
+    if (element.hasType (schema::DEVICE))
+        changes.sounds.insert (getID (element, schema::deviceID));
+
+    for (const auto& child : element)
+        if (! child.hasType (schema::CLIP) && ! child.hasType (schema::AUTOMATION))
+            markSoundsIn (child);
 }
 
 void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
-    // A clip added to a track, or something to a clip; or tracks added, which may hold notes already (an undo).
+    // A clip added to a track, or something to a clip or a channel; or tracks added, which may hold notes and devices
+    // already (an undo), the master or the tempo map in place of another (a song applied). View state added (a track's
+    // lanes) changes nothing that plays.
     if (child.hasType (schema::CLIP))
-        markNotes (child);
-    else
-        markNotes (parent);
+        markChange (child, true);
+    else if (! schema::isUncountedElement (parent, child))
+        markChange (parent, true);
 
     markTracksIn (child);
+    markSoundsIn (child);
 }
 
 void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
 {
+    // A device's sounds taken away whole: its own again.
+    if (child.hasType (schema::SOUNDS) && parent.hasType (schema::DEVICE))
+        changes.sounds.insert (getID (parent, schema::deviceID));
+
     // A clip taken off its track (which it has no more: its old parent's).
     if (child.hasType (schema::CLIP) && parent.hasType (schema::TRACK))
-        notesChanged.insert (getID (parent, schema::trackID));
-    else
-        markNotes (parent);
+        changes.notes.insert (getID (parent, schema::trackID));
+    else if (! schema::isUncountedElement (parent, child))
+        markChange (parent, true);
 
     markTracksIn (child);
 }
 
 void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
 {
+    // A track's clips or devices, a chain's devices, a channel's modulators, tracks in a folder: reordered.
     if (parent.hasType (schema::TRACK))
-        notesChanged.insert (getID (parent, schema::trackID));
-    else
-        markNotes (parent);
+        changes.notes.insert (getID (parent, schema::trackID));
+
+    markChange (parent, true);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -262,6 +414,13 @@ void SongPlayer::makePluginsAnew()
 std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, const std::optional<Live>& live,
                                                    const std::optional<RenderOf>& of)
 {
+    // What changed since the plan before, taken whole as the compile starts: a change heard while it compiles is the next
+    // plan's. And the parts a check looks at, in turn (shouldCheck()).
+    compiling = std::exchange (changes, {});
+    ++plansCompiled;
+    checkedParts = 0;
+    checkEvery = std::max<std::uint64_t> (1, devices.size() / 64);
+
     // Another rate or block size: everything that plays is made anew for it.
     if (! juce::exactlyEqual (sampleRate, preparedRate) || maximumBlockSize != preparedBlockSize)
     {
@@ -275,9 +434,26 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         modulators.clear();
         containers.clear();
         chains.clear();
+        audio.clear();
         preparedRate = sampleRate;
         preparedBlockSize = maximumBlockSize;
     }
+
+    // The tracks' audio placed again, every one, for another tempo, or with its files found in other folders (the project
+    // saved somewhere else).
+    if (const auto folders = song.getFile().getFullPathName() + "|" + song.getCacheFolder().getFullPathName();
+        compiling.tempo || folders != audioFolders)
+    {
+        audio.clear();
+
+        if (folders != audioFolders)
+            fileKeys.clear();
+
+        audioFolders = folders;
+    }
+
+    askedForPlan.clear();
+    std::optional<ClipTempo> clipTempo; // read once, if a track's audio is placed again
 
     auto plan = std::make_unique<engine::Plan>();
     plan->maximumBlockSize = preparedBlockSize;
@@ -380,7 +556,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             if (! frozen)
             {
                 strip.notes = getNotes (channel.state);
-                addAudio (strip, channel.state);
+                addAudio (strip, channel.state, clipTempo);
             }
         }
 
@@ -451,9 +627,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (devices, [this] (const auto& device) { return used.count (device.first) == 0; });
     std::erase_if (modulators, [this] (const auto& modulator) { return usedModulators.count (modulator.first) == 0; });
     std::erase_if (files, [this] (const auto& file) { return usedFiles.count (file.first) == 0; });
+    std::erase_if (fileKeys, [this] (const auto& file) { return ! usedFiles.contains (file.second); }); // and those not there
     std::erase_if (regions, [this] (const auto& region) { return usedRegions.count (region.first) == 0; });
     std::erase_if (notes, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
-    notesChanged.clear(); // those of tracks it played were compiled again, and the others' notes are let go
+    std::erase_if (audio, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
     std::erase_if (strips, [&tracks] (const auto& strip) { return tracks.count (strip.first) == 0; });
     // A path gone (a track deleted or moved to another bus, a send taken away or switched before or after its fader): its
     // delay marked as going with this plan, which the engine fades it out alone across, nothing else changing (a path that
@@ -522,7 +699,7 @@ std::shared_ptr<engine::StripState> SongPlayer::getStrip (std::int64_t id)
     return strip;
 }
 
-std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState)
+std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState, bool channelChanged)
 {
     // A plug-in: its instance in its helper (model/plugins/internal/PluginInstances.h), which a render holds while it
     // plays a block, the engine skipping it then (SandboxedProcessor.h).
@@ -537,7 +714,21 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
 
     const auto id = getID (deviceState, schema::deviceID);
     auto& node = devices[id];
-    const auto values = readValuesSetByHand (*info, deviceState);
+    used.insert (id);
+
+    // One on a channel whose elements didn't change since the plan before plays on as it is: its values set by hand are
+    // the song's already (takeValue() takes each as it is set), and reading every device's again for each plan was most of a
+    // big song's compile (known bug 145).
+    if (node != nullptr && &node->getDeviceInfo() == info && ! channelChanged)
+    {
+        if (shouldCheck())
+            checkValues (*node, deviceState);
+
+        return node;
+    }
+
+    const auto values = readValues (*info, deviceState);
+    ++devicesRead;
 
     // Made anew for another kind of device, and for values set by hand that make its sound come later or sooner (the
     // compressor looks ahead only while it ducks): its runner takes the latency as it is prepared, as a plug-in's does.
@@ -549,10 +740,56 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
         node->getRunner().prepare (preparedRate, preparedBlockSize);
         loadSounds (*node, deviceState);
     }
+    else if (compiling.sounds.contains (id))
+    {
+        // Its sounds changed since the plan before: as the song holds them now. (A session loads one set by hand at once,
+        // takeValue(); not sounds that came whole, with an undo or a song applied, nor a player's without a session.)
+        loadSounds (*node, deviceState);
+    }
 
-    setValues (*node, deviceState);
-    used.insert (id);
+    // Those set by hand, the others at their defaults.
+    for (size_t i = 0; i < values.size(); ++i)
+        node->setValue ((int) i, values[i]);
+
+    node->setOn (! (bool) deviceState[schema::deviceOff]);
     return node;
+}
+
+std::vector<float> SongPlayer::readValues (const devices::DeviceInfo& info, const juce::ValueTree& deviceState)
+{
+    auto& names = parameterNames[&info];
+
+    if (names.size() != info.parameters.size())
+    {
+        names.clear();
+
+        for (const auto& parameter : info.parameters)
+            names.emplace_back (juce::String (parameter.id.data(), parameter.id.size()));
+    }
+
+    const auto saved = deviceState.getChildWithName (schema::VALUES);
+    std::vector<float> values;
+    values.reserve (info.parameters.size());
+
+    for (size_t i = 0; i < info.parameters.size(); ++i)
+        values.push_back (readSavedValue (info.parameters[i], saved.getProperty (names[i])));
+
+    return values;
+}
+
+void SongPlayer::checkValues (const engine::DeviceNode& node, const juce::ValueTree& deviceState)
+{
+    // As getDevice() would set them, each kept to its range: a difference is a change of the song's that its player didn't
+    // hear of (markChange()).
+    const auto& info = node.getDeviceInfo();
+    const auto values = readValues (info, deviceState);
+    auto same = node.isOn() == ! (bool) deviceState[schema::deviceOff];
+
+    for (size_t i = 0; i < values.size(); ++i)
+        same = same && juce::exactlyEqual (node.getValue ((int) i), devices::constrain (info.parameters[i], values[i]));
+
+    jassert (same);
+    juce::ignoreUnused (same);
 }
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::ValueTree& deviceState)
@@ -617,18 +854,20 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
     std::vector<std::int64_t> ids;
 
     // While Low Latency is on, a device that looks ahead lets the sound through as it comes (PlaybackHost.h).
-    const auto lowLatencyLimit = (int) (lowLatencyLimitSeconds * preparedRate);
+    const auto lowLatencyLimit = toWhole<int> (lowLatencyLimitSeconds * preparedRate);
 
     // A frozen track's devices before its freeze point are in its frozen file.
     const auto isFrozen = [this, skipFrozen] (const juce::ValueTree& state)
     { return skipFrozen && isFrozenDevice (song, getDeviceID (state)); };
+
+    const auto changed = compiling.hasChannel (channel.id); // the master's is 0
 
     const auto add = [&] (const juce::ValueTree& deviceState)
     {
         if (isFrozen (deviceState))
             return;
 
-        auto node = getDevice (deviceState);
+        auto node = getDevice (deviceState, changed);
 
         if (node == nullptr)
             return;
@@ -992,7 +1231,7 @@ std::shared_ptr<engine::Delay> SongPlayer::getDelay (std::pair<std::int64_t, std
     // long as the longest of them needs and the stretch it writes; the others' (a container's chains) have their own.
     // Made empty: a render's plan may leave out the path (finishRings() makes the room of those it plays).
     const auto room = compilingLive ? getRingRoom (preparedRate) : 0;
-    const auto fade = std::max (1, (int) std::lround (engine::Engine::fadeSeconds * preparedRate));
+    const auto fade = std::max (1, roundToWhole<int> (engine::Engine::fadeSeconds * preparedRate));
 
     if (tap.has_value())
     {
@@ -1082,7 +1321,7 @@ void SongPlayer::finishRings (engine::Plan& plan)
     // The paths that read a tap made again since their delays were (a longer path from the same point came after them):
     // each a delay of the same length reading the new one.
     std::map<const engine::Delay*, std::shared_ptr<engine::Delay>> repointed;
-    const auto fade = std::max (1, (int) std::lround (engine::Engine::fadeSeconds * preparedRate));
+    const auto fade = std::max (1, roundToWhole<int> (engine::Engine::fadeSeconds * preparedRate));
 
     for (const auto& [key, path] : tappedPaths)
     {
@@ -1268,7 +1507,8 @@ std::shared_ptr<engine::SendLevel> SongPlayer::getSendLevel (const juce::ValueTr
 //==============================================================================
 std::shared_ptr<engine::ModulatorNode> SongPlayer::getModulator (const juce::ValueTree& state)
 {
-    // A macro, or a modulator of one of the six kinds, kept by its ID.
+    // A macro, or a modulator of one of the six kinds, kept by its ID. (A song has few: their values are read again for
+    // each plan.)
     std::optional<devices::ModulatorKind> kind;
 
     if (state.hasType (schema::MODULATOR))
@@ -1476,20 +1716,77 @@ bool SongPlayer::isMoved (const ParameterRef& parameter) const
 
 void SongPlayer::readCurves()
 {
-    curves.clear();
-    faders.clear();
+    // Each parameter's curve kept from the plan before while nothing of it changed (known bug 124: every plan read all the
+    // song's automation again), the others read from the song. Should a song hold two curves for one parameter (a file
+    // from others, before it is made consistent), the last with points plays, kept or read alike.
+    using Points = std::vector<engine::CurvePoint>;
+
+    const auto read = [] (const std::vector<juce::ValueTree>& states)
+    {
+        Points last;
+
+        for (const auto& state : states)
+        {
+            Points points;
+
+            for (const auto& point : state)
+                if (point.hasType (schema::POINT))
+                    points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
+                                        (float) point.getProperty (schema::pointCurve, 0.0f) });
+
+            if (! points.empty())
+                last = std::move (points);
+        }
+
+        return last;
+    };
+
+    std::map<std::pair<std::uint64_t, juce::String>, std::vector<juce::ValueTree>> states; // by parameter, in the song's order
 
     for (const auto& state : getCurveStates (song))
     {
-        std::vector<engine::CurvePoint> points;
+        const auto parameter = getCurveParameter (state);
+        states[{ parameter.device.getRaw(), parameter.parameter }].push_back (state);
+    }
 
-        for (const auto& point : state)
-            if (point.hasType (schema::POINT))
-                points.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
-                                    (float) point.getProperty (schema::pointCurve, 0.0f) });
+    auto before = std::exchange (curves, {});
+    const auto emptyBefore = std::exchange (emptyCurves, {});
+    faders.clear();
 
-        if (const auto parameter = getCurveParameter (state); ! points.empty())
-            curves[{ parameter.device.getRaw(), parameter.parameter }] = std::make_shared<const engine::Curve> (std::move (points));
+    for (const auto& [key, ofKey] : states)
+    {
+        const auto kept = before.find (key);
+
+        if (! compiling.hasCurve (key) && (kept != before.end() || emptyBefore.contains (key)))
+        {
+            if (shouldCheck())
+            {
+                const auto points = read (ofKey);
+                const auto& keptPoints = kept != before.end() ? kept->second->getPoints() : Points();
+                [[maybe_unused]] const auto same = std::equal (points.begin(), points.end(), keptPoints.begin(), keptPoints.end(),
+                                                               [] (const engine::CurvePoint& a, const engine::CurvePoint& b)
+                                                               {
+                                                                   return juce::exactlyEqual (a.beat, b.beat)
+                                                                          && juce::exactlyEqual (a.value, b.value)
+                                                                          && juce::exactlyEqual (a.curve, b.curve);
+                                                               });
+                jassert (same); // the curve changed without the song saying so (markChange())
+            }
+
+            if (kept != before.end())
+                curves[key] = kept->second;
+            else
+                emptyCurves.insert (key);
+
+            continue;
+        }
+
+        ++curvesRead;
+
+        if (auto points = read (ofKey); ! points.empty())
+            curves[key] = std::make_shared<const engine::Curve> (std::move (points));
+        else
+            emptyCurves.insert (key);
     }
 }
 
@@ -1506,17 +1803,6 @@ void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const juce::Val
     faders[fader] = strip.id;
     strip.volume = findCurve (fader, isMaster ? "master volume" : "volume");
     strip.pan = findCurve (fader, isMaster ? "master pan" : "pan");
-}
-
-void SongPlayer::setValues (engine::DeviceNode& node, const juce::ValueTree& deviceState)
-{
-    // Those set by hand, the others at their defaults.
-    const auto& parameters = node.getDeviceInfo().parameters;
-
-    for (size_t i = 0; i < parameters.size(); ++i)
-        node.setValue ((int) i, readValueSetByHand (deviceState, parameters[i]));
-
-    node.setOn (! (bool) deviceState[schema::deviceOff]);
 }
 
 void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& deviceState)
@@ -1915,28 +2201,59 @@ void SongPlayer::readLive (engine::FileReader& fileReader, const std::atomic<std
     reader = &fileReader;
     blocks = &blocksPlayed;
     files.clear();
+    fileKeys.clear();
+    audio.clear(); // which plays them
 }
 
-std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& file)
+juce::String SongPlayer::describeFile (const juce::File& file)
 {
     // By its path, when it was written and how long it is: a file written again at the same path (a track frozen again) is
     // read again.
-    const auto path =
-        file.getFullPathName() + "|" + juce::String (file.getLastModificationTime().toMilliseconds()) + "|" + juce::String (file.getSize());
+    return file.getFullPathName() + "|" + juce::String (file.getLastModificationTime().toMilliseconds()) + "|"
+           + juce::String (file.getSize());
+}
+
+juce::String SongPlayer::getFileKey (const juce::File& file, bool askAgain)
+{
+    // The disk asked once for a plan at most, however many clips play the file, and not at all for a file a plan played
+    // already unless asked again (known bug 124: every plan asked about each clip's file).
+    const auto path = file.getFullPathName();
+    auto& key = fileKeys[path];
+
+    if (key.isEmpty() || (askAgain && ! askedForPlan.contains (path)))
+    {
+        key = describeFile (file);
+        askedForPlan.insert (path);
+        ++filesAsked;
+    }
+
+    return key;
+}
+
+std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& file, bool askAgain, juce::String* keyOut)
+{
+    const auto path = getFileKey (file, askAgain);
+
+    if (keyOut != nullptr)
+        *keyOut = path;
+
     auto& kept = files[path];
 
     if (kept == nullptr)
     {
-        // A file that can't be read (gone, or a render not made yet) plays nothing until a plan finds it.
+        // A file that can't be read (gone, or a render not made yet) plays nothing until a plan finds it; nor one that says
+        // it has no rate, or no length, as one from another program might (where it plays would be no number).
         auto formatReader = std::unique_ptr<juce::AudioFormatReader> (getAudioFormats().createReaderFor (file));
 
-        if (formatReader == nullptr)
+        if (formatReader == nullptr || ! std::isfinite (formatReader->sampleRate) || formatReader->sampleRate <= 0.0
+            || formatReader->lengthInSamples < 0)
         {
             files.erase (path);
             return nullptr;
         }
 
         kept = std::make_shared<engine::AudioFile> (makeSampleReader (std::move (formatReader)), blocks);
+        kept->setOrigin (path); // its path and what was known of it then (tests/PlanCheck.h)
 
         if (reader != nullptr)
             reader->add (kept);
@@ -1981,7 +2298,7 @@ void SongPlayer::prepareComparison (double sampleRate, int maximumBlockSize)
 
 void SongPlayer::addComparison (engine::Plan& plan, double sampleRate)
 {
-    auto file = getAudioFile (comparison->file);
+    auto file = getAudioFile (comparison->file, true);
 
     if (file == nullptr)
         return;
@@ -1995,7 +2312,7 @@ void SongPlayer::addComparison (engine::Plan& plan, double sampleRate)
     engine::AudioRegion bounce;
     bounce.file = file;
     bounce.state = comparisonRegion;
-    bounce.length = (std::int64_t) std::ceil ((double) file->getLength() * sampleRate / file->getSampleRate());
+    bounce.length = toWhole<std::int64_t> (std::ceil ((double) file->getLength() * sampleRate / file->getSampleRate()));
     plan.comparison = engine::Plan::Comparison { std::move (bounce), getTempoMap (comparison->song, sampleRate), comparisonState };
 }
 
@@ -2014,36 +2331,127 @@ engine::AudioRegion SongPlayer::makeRegion (std::int64_t id, std::shared_ptr<eng
     return region;
 }
 
-void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
+void SongPlayer::placeRegion (engine::AudioRegion& region, const juce::ValueTree& clipState, const PlayedClip& played) const
 {
+    // Where it plays in samples, from where in its file, at its gain, with its fades (fitted: scaled down together where
+    // they would overlap).
+    region.start = roundToWhole<std::int64_t> (played.position.start * preparedRate);
+    region.length = roundToWhole<std::int64_t> (played.position.end * preparedRate) - region.start;
+    region.fileStart = played.position.offset * region.file->getSampleRate();
+    region.gain = juce::Decibels::decibelsToGain ((float) clipState.getProperty (schema::clipGain, 0.0f));
+    region.fadeIn = roundToWhole<int> (played.fadeIn * preparedRate);
+    region.fadeOut = roundToWhole<int> (played.fadeOut * preparedRate);
+    region.fadeInCurve = toEngineFade (getClipFadeCurve (clipState, true));
+    region.fadeOutCurve = toEngineFade (getClipFadeCurve (clipState, false));
+}
+
+SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo, bool askAgain)
+{
+    TrackAudio made;
+
     for (const auto& clip : getClipStates (trackState))
     {
         if (! isAudioState (clip) || (bool) clip[schema::clipMute])
             continue;
 
-        // What plays for it: its file, or Phazite's render of it, where it plays in seconds.
-        auto file = getAudioFile (getPlayedFile (song, clip));
+        // What plays for it: its file, or Phazite's render of it, where it plays in seconds, the song's tempo read once for
+        // the plan (known bug 124).
+        if (! tempo.has_value())
+            tempo.emplace (song);
+
+        const auto played = getPlayedClip (song, clip, *tempo);
+        juce::String key;
+        auto file = getAudioFile (played.file, askAgain, &key);
 
         if (file == nullptr)
+        {
+            made.whole = false;
+            continue;
+        }
+
+        const auto id = getID (clip, schema::clipID);
+        auto region = makeRegion (id, file);
+        placeRegion (region, clip, played);
+        file->keep (toWhole<std::int64_t> (region.fileStart));
+        made.regions.push_back (std::move (region));
+        made.clips.push_back (id);
+        made.files.push_back (key);
+    }
+
+    return made;
+}
+
+void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
+{
+    // As the plan before played it, while nothing of its clips, the tempo, the rate or the song's folders changed; placed
+    // again otherwise, its files asked about again only if its clips changed.
+    const auto clipsChanged = compiling.hasNotes (strip.id);
+
+    if (const auto kept = audio.find (strip.id); kept != audio.end() && ! clipsChanged)
+    {
+        if (shouldCheck())
+            checkAudio (kept->second, trackState, tempo);
+
+        for (size_t i = 0; i < kept->second.regions.size(); ++i)
+        {
+            usedRegions.insert (kept->second.clips[i]);
+            usedFiles.insert (kept->second.files[i]);
+        }
+
+        strip.audio = kept->second.regions;
+        return;
+    }
+
+    auto made = makeAudio (trackState, tempo, clipsChanged);
+    strip.audio = made.regions;
+
+    if (made.whole)
+        audio[strip.id] = std::move (made);
+    else
+        audio.erase (strip.id);
+}
+
+void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
+{
+    // What makeAudio() would make of the track now, without making anything: the same clips, each the same file (as the disk
+    // knows it now), the same place in it and the same region, as the plan before placed them. A difference is a change of
+    // the song's that its player didn't hear of (markChange()), or a file that changed under the same name.
+    auto same = true;
+    size_t index = 0;
+
+    for (const auto& clip : getClipStates (trackState))
+    {
+        if (! isAudioState (clip) || (bool) clip[schema::clipMute])
             continue;
 
-        const auto position = getPlayedPosition (song, clip);
-        auto region = makeRegion (getID (clip, schema::clipID), file);
-        region.start = std::llround (position.start * preparedRate);
-        region.length = std::llround (position.end * preparedRate) - region.start;
-        region.fileStart = position.offset * file->getSampleRate();
-        region.gain = juce::Decibels::decibelsToGain ((float) clip.getProperty (schema::clipGain, 0.0f));
+        if (! tempo.has_value())
+            tempo.emplace (song);
 
-        // Its fades, scaled down together where they would overlap.
-        const auto [fadeIn, fadeOut] = getFittedFades (song, clip);
+        const auto played = getPlayedClip (song, clip, *tempo);
+        const auto file = files.find (describeFile (played.file));
+        const auto state = regions.find (getID (clip, schema::clipID));
 
-        region.fadeIn = (int) std::llround (fadeIn * preparedRate);
-        region.fadeOut = (int) std::llround (fadeOut * preparedRate);
-        region.fadeInCurve = toEngineFade (getClipFadeCurve (clip, true));
-        region.fadeOutCurve = toEngineFade (getClipFadeCurve (clip, false));
-        file->keep ((std::int64_t) region.fileStart);
-        strip.audio.push_back (std::move (region));
+        if (index >= kept.regions.size() || file == files.end() || state == regions.end())
+        {
+            same = false;
+            break;
+        }
+
+        const auto& region = kept.regions[index++];
+        auto placed = region;
+        placeRegion (placed, clip, played);
+        same = same && region.file == file->second && region.state == state->second && state->second->playsAt (*file->second, preparedRate)
+               && region.start == placed.start && region.length == placed.length && juce::exactlyEqual (region.fileStart, placed.fileStart)
+               && juce::exactlyEqual (region.gain, placed.gain) && region.fadeIn == placed.fadeIn && region.fadeOut == placed.fadeOut
+               && region.fadeInCurve.shape == placed.fadeInCurve.shape
+               && juce::exactlyEqual (region.fadeInCurve.bend, placed.fadeInCurve.bend)
+               && region.fadeOutCurve.shape == placed.fadeOutCurve.shape
+               && juce::exactlyEqual (region.fadeOutCurve.bend, placed.fadeOutCurve.bend);
     }
+
+    same = same && index == kept.regions.size();
+    jassert (same);
+    juce::ignoreUnused (same);
 }
 
 std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) const
@@ -2063,13 +2471,13 @@ bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTre
     if (! (bool) trackState[schema::trackFrozen])
         return false;
 
-    auto file = getAudioFile (getFrozenFile (song, getTrackID (trackState)));
+    auto file = getAudioFile (getFrozenFile (song, getTrackID (trackState)), true);
 
     if (file == nullptr)
         return false;
 
     auto region = makeRegion (strip.id, file);
-    region.length = std::llround ((double) file->getLength() / file->getSampleRate() * preparedRate);
+    region.length = roundToWhole<std::int64_t> ((double) file->getLength() / file->getSampleRate() * preparedRate);
     file->keep (0);
     strip.audio.push_back (std::move (region));
     return true;

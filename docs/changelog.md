@@ -279,6 +279,16 @@ too. A line names the bug's number in that list.
   meters and the engine's timing read a clock that tests hold still (`devices::Clock`) and that never goes back once
   let go; the engine is handed the song by message delivery rather than a settle; and every wait for a condition
   keeps only the hang limit.
+- **145 A plan compiles again only what an edit changed.** A device's values are read again once something of its
+  devices changes (not for its channel's height, a mute or a plug-in's stored state), and each parameter's name is
+  made once: an edit in a song of 100 tracks takes about 2 to 3 ms of the message thread where it took 45 to 90.
+- **124 A plan keeps what it knows.** A track's audio clips are placed again only once they or the tempo change, with
+  one tempo map; the disk is asked about a file only for a track whose clips changed; each automation curve is kept
+  until it changes; and view state makes no plan. A device's sounds that came back whole with a song applied (a
+  branch switch, a merge) played the old ones: they are loaded again.
+- **125 An export of stems compiles each stem as its turn comes** and lets go of the one before: 17 ms before the
+  first starts where it was 127, and a quarter of the memory.
+- **S5.7 The plan rebuilt only for what changed, notes and clips found by an index** is built with 122, 124 and 145.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

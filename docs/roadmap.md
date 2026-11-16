@@ -110,7 +110,6 @@ what they found is fixed or in known-bugs.md.
 | S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
 | S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
 | S5.6 | M | Arming never reopens the audio device; automation written where it is heard (held live notes end when the track changes: built in S1.1) | Arming a track during playback makes no gap in the sound |
-| S5.7 | M | The plan rebuilt only for what changed; notes and clips found by an index | An edit in a 100-track song costs the same as in a small one ([performance.md](performance.md)) |
 | S5.8 | M | MIDI import of every track of a file; MIDI export; range and loop export; project templates | A clip exported as a MIDI file and imported again holds the same notes |
 | S5.9 | M | Devices moved, copied, duplicated and deleted between tracks, by commands and by dragging | A device dragged to another strip keeps its automation and modulation |
 | S5.10 | M | The strip: trim, polarity, mono, pan law, track delay | Each is a parameter with a control, automation and a test |

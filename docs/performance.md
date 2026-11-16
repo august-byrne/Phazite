@@ -4,7 +4,8 @@ Phazite's performance targets, its benchmarks, and the latest number recorded fo
 that makes Phazite slower; and the long run.
 
 **The numbers on this page are the latest that the performance audit records, but those of the song of 100 tracks and
-of the long run, which were measured on 2026-11-14.**
+of the long run, which were measured on 2026-11-14, and the plan's compile, the song of 500 audio clips and the stems'
+compile, measured on 2026-11-16.**
 The audit ([archive/performance-audit.md](archive/performance-audit.md)) is a history of sessions, each of which
 measured what it changed; the "From" column of each table names the audit's section a number comes from, where the way
 it was measured and the numbers before it are. A benchmark, or a row of one, for which the audit records no number is
@@ -217,6 +218,18 @@ and a muted track that feeds nothing heard. Measured on 2026-11-15, `windows-pro
 | As it is | 28.32 s | 13.75 s |
 | A quarter of its tracks muted | 28.44 s | 10.59 s |
 
+Each stem compiled as its turn comes (known bug 125, 2026-11-16): the export compiled every stem's player and plan on
+the message thread before the first started, and held them all until it ended. The message thread's time in the call
+that starts the export, and the most the process's memory grew by while it ran, the two builds one after the other as
+for the song of 100 tracks below:
+
+| Song | Before the first stem starts: before / after | Memory's peak, above what it was: before / after | The export: before / after |
+|---|---|---|---|
+| As it is | 127 ms / 17 ms | 112.5 MB / 32.1 MB | 12.69 s / 10.43 s |
+| A quarter of its tracks muted | 104 ms / 20 ms | 112.5 MB / 28.7 MB | 8.32 s / 8.23 s |
+
+The song has 4 stems (its tracks are in buses): a song of more stems saved more.
+
 The drum samplers' figures of section 18 were measured while another build ran, so they are high if anything. Section
 19 also records 0.38 % for the 20 empty tracks, without saying whether stopped or playing; and section 18's 1.39 % is
 what it records for "20 synths' tracks stopped", taken here for this song.
@@ -257,13 +270,56 @@ the numbers are high if anything, the most a block took above all.
 | A clip moved, with its new plan | 39 to 43 ms | |
 | Save, for a project file of 3,115 KB | 106 to 113 ms | |
 
+A plan compiles again only what changed (known bug 145, 2026-11-16). Measured from `windows-profile` with the build
+before the change and the build after it run one after the other, while other builds and a ctest run loaded the
+machine (so both are high; compare them with each other):
+
+| The message thread, with 100 tracks | Before | After |
+|---|---|---|
+| A plan with nothing changed, given to the engine | 45.3 ms (most 54.4) | 1.95 ms (most 3.2) |
+| A note added, with its new plan | 45.5 ms | 2.04 ms |
+| A clip moved, with its new plan | 46.6 ms | 2.16 ms |
+| A whole compile, as a render's player makes it (every device made) | 219 ms | 114 ms |
+
+Where a compile's time went before, by temporary timers around its parts (a plan with nothing changed, another run under
+more load, 97.8 ms in all): reading every device's values from the song again, 93.1 ms, half of it to see whether the
+values changed the device's latency and half to set them, each value's parameter name made a `juce::Identifier` from a
+string (a lookup in JUCE's pool of names, under a lock); everything else 4.7 ms (the channels and their order 0.5, the
+inputs and their delays 1.0, the notes and audio 0.2, the faders, modulation and plug-ins told what moves 0.4,
+audibility 0.2, the rings 0.5, the automation 0.1). Now a device's values are read once its channel changed, each name
+made once for each kind of device (what made the whole compile twice as fast); a track's notes and audio once its clips
+changed; a curve once its points did. What joins the channels is worked out whole each time (2 ms at 100 tracks).
+
+Measured again after the change's review (the channel marked only for a change of its devices, not of its height, mute
+or a plug-in's stored state), the same two builds one after the other under heavier load: a plan with nothing changed
+88.5 ms before and 3.2 ms after, a note added 90.5 and 3.4 ms, a clip moved 90.4 and 3.4 ms; and a note added after
+every track's height changed, 4.3 ms (before the review it read every device of the song again, as a whole compile
+reads them).
+
 What it says of scale:
 - **One thread can't play 100 busy tracks:** it takes about twice each block's length, at either block size.
 - **Four threads use about half of each block,** and the worst block of a run went over its length once at 128
   samples. So the limit is near 100 busy tracks on four threads at 128 samples, and near 50 on one.
-- **Every edit costs a compile of the whole song,** about 0.4 ms a track: at 100 tracks a note added or each step of
-  a drag takes about 40 ms of the message thread, more than two frames (known bug 145 in
-  [known-bugs.md](known-bugs.md)). Roadmap step S5.7 compiles only what changed.
+- **An edit compiles what it changed** (2026-11-16): at 100 tracks a note added or each step of a drag takes about 2 ms
+  of the message thread, where it took 40 ms, more than two frames, compiling the whole song.
+
+### Benchmark: a song of 500 audio clips, its plan and an edit
+
+50 tracks of ten audio clips, each clip a file of its own (a song of recordings), half a second long, in the project's
+Audio folder: a clip moved and the tempo changed (which places every clip again), each with its new plan through the
+song's session, and a whole compile as a render's player makes it (every file opened). Known bug 124: every plan asked
+the disk about each clip's file and made the tempo map several times for each clip. Measured 2026-11-16 as the song of
+100 tracks above, the two builds one after the other:
+
+| The message thread, 500 clips of 500 files | Before | After |
+|---|---|---|
+| A clip moved, with its new plan | 52.6 ms | 4.0 ms |
+| The tempo changed, with its new plan | 61.8 ms | 7.5 ms |
+| A whole compile, as a render's | 291 ms | 237 ms |
+
+A track's audio is placed again only once its clips changed (or the tempo, for every track), with one tempo map for
+the plan; the disk is asked about a file again only for a track whose clips changed. A whole compile opens every file,
+which is most of its time.
 
 ### Benchmark: a loop's wrap and a jump on a song of 200 tracks
 
@@ -625,6 +681,12 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   by hand, a mute, a selection, the playhead moved or a save gives it none (`PlanCounter`);
 - a new plan keeps what didn't change: a note added on one track compiles that track's notes again and no other's,
   and every device sounds on;
+- an edit's plan reads the values of the devices on the channel it changed and no others, the automation curve it
+  changed and no others (none for a note, a clip moved or the tempo), and asks the disk about the files of the track
+  whose clips it changed, each once (none for the tempo); view state (a grid, a lane shown, a device's window moved)
+  gives no plan; a track's height, a mute, a device's window moved or a plug-in's state stored (as every save stores
+  it) leave the next note's plan reading no device's values; and an export of stems compiles its first stem alone
+  before it starts (`countDevicesRead()`, `countCurvesRead()`, `countFilesAsked()`; known bugs 124, 125 and 145);
 - the playlist of 200 tracks makes as many clip components, track headers and components in all as that of 20 (and
   with every track's automation lane shown, as many components), and the mixer of 200 tracks as many strips and
   components as that of 20;

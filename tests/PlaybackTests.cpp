@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HostedDevice.h"
+#include "PlanCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -17,12 +18,16 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+
+#include <algorithm>
+#include <vector>
 
 namespace
 {
@@ -469,4 +474,149 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
     // Driven, where the DC blocker on the synth's sum plays: what it still rings with fades out once the notes have (the
     // second review's finding 1, 2026-11-15: its fade after Stop is still needed there).
     CHECK (leftAfterStop (phazite::devices::Synth::typeID, 60, 4.0, 400.0f, 12.0f) < 1.0e-4f);
+}
+
+TEST_CASE ("The checks of what plans keep look at every part within as many plans as there are parts to each check")
+{
+    // Known bug 145's review: one part in every so many is checked in a big song, and the turn must move on from plan to
+    // plan, or a plan that keeps a multiple of so many parts checks the same parts each time.
+    for (std::uint64_t every = 1; every <= 7; ++every)
+    {
+        for (std::uint64_t parts = 1; parts <= 30; ++parts)
+        {
+            for (std::uint64_t first = 0; first < 3; ++first) // any plans in a row
+            {
+                CAPTURE (every);
+                CAPTURE (parts);
+                std::vector<bool> checked (parts, false);
+
+                for (auto plan = first; plan < first + every; ++plan)
+                    for (std::uint64_t part = 0; part < parts; ++part)
+                        if (phazite::SongPlayer::isCheckedPart (part, plan, every))
+                            checked[part] = true;
+
+                CHECK (std::all_of (checked.begin(), checked.end(), [] (bool each) { return each; }));
+            }
+        }
+    }
+}
+
+namespace
+{
+// A song of two tracks, each a Synth playing a clip of notes, its cutoff automated on the first.
+struct TwoSynths
+{
+    TwoSynths()
+    {
+        tracks = phazite::ensureTracks (*song, 2);
+
+        for (const auto track : tracks)
+        {
+            synths.push_back (
+                phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID)));
+            const auto clip = phazite::test::addMidiClip (*song, track, { beats (0.0), beats (8.0) });
+            phazite::test::addMidiNote (*song, clip, track == tracks[0] ? 60 : 67, phazite::test::at (0.0), phazite::test::lasting (4.0));
+        }
+    }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    std::vector<phazite::TrackID> tracks;
+    std::vector<phazite::DeviceID> synths;
+};
+
+juce::String comparePlans (phazite::SongPlayer& kept, phazite::Song& song)
+{
+    const auto plan = kept.compile (44100.0, 512, std::nullopt);
+    const auto whole = phazite::SongPlayer (song).compile (44100.0, 512, std::nullopt);
+    return phazite::test::describePlanDifferences (*plan, *whole).joinIntoString ("\n");
+}
+} // namespace
+
+TEST_CASE ("Two tracks whose IDs are swapped in place play as a whole compile of the song does, notes and devices")
+{
+    // Known bug 145's review: a track's notes and audio are kept by its ID; an ID that changes in place (as a merge's
+    // renumbering or a load's repair gives one) named another track at the plan before, whose kept notes the plan would
+    // have played on this one.
+    TwoSynths two;
+    phazite::SongPlayer kept (*two.song);
+    REQUIRE (comparePlans (kept, *two.song).isEmpty());
+
+    auto first = phazite::findTrackState (*two.song, two.tracks[0]);
+    auto second = phazite::findTrackState (*two.song, two.tracks[1]);
+    const auto a = first[phazite::schema::trackID], b = second[phazite::schema::trackID];
+    first.setProperty (phazite::schema::trackID, (juce::int64) two.song->makeID(), nullptr);
+    second.setProperty (phazite::schema::trackID, a, nullptr);
+    first.setProperty (phazite::schema::trackID, b, nullptr);
+
+    const auto differences = comparePlans (kept, *two.song);
+    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
+}
+
+TEST_CASE ("A song holding two curves of one parameter, the first without points, plays the second, kept or read afresh")
+{
+    // Known bug 124's review: a file from others can hold two curves for one parameter (loading keeps both); a plan that
+    // kept the first as empty skipped the second too, which a whole read plays.
+    TwoSynths two;
+    auto automation = two.song->getState().getOrCreateChildWithName (phazite::schema::AUTOMATION, nullptr);
+
+    for (const auto withPoints : { false, true })
+    {
+        juce::ValueTree curve (phazite::schema::CURVE);
+        curve.setProperty (phazite::schema::curveDevice, juce::String ((juce::int64) two.synths[0].getRaw()), nullptr);
+        curve.setProperty (phazite::schema::curveParameter, "cutoff", nullptr);
+
+        if (withPoints)
+            for (const auto beat : { 0.0, 8.0 })
+                curve.appendChild (juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, beat },
+                                                                              { phazite::schema::pointValue, 400.0 + 1000.0 * beat } }),
+                                   nullptr);
+
+        automation.appendChild (curve, nullptr);
+    }
+
+    phazite::SongPlayer kept (*two.song);
+    REQUIRE (comparePlans (kept, *two.song).isEmpty());
+
+    // An edit elsewhere: the curves are kept.
+    phazite::test::addMidiNote (*two.song,
+                                phazite::getClipID (phazite::getClipStates (phazite::findTrackState (*two.song, two.tracks[1]))[0]), 72,
+                                phazite::test::at (4.0), phazite::test::lasting (1.0));
+    const auto differences = comparePlans (kept, *two.song);
+    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
+}
+
+TEST_CASE ("A tempo change places every kept audio clip again, where the new tempo plays it, without asking about its file")
+{
+    // Known bug 124's review: a player keeps each track's audio from plan to plan, placed in seconds; a tempo change moves
+    // it, and the file it plays is the same.
+    phazite::test::TemporaryFolder temp;
+    const auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    const auto hit = phazite::test::writeSound (temp.folder.getChildFile ("Hit.wav"), 0.5);
+
+    for (const auto seconds : { 0.0, 2.0 }) // beats 0 and 4 at 120 BPM
+        REQUIRE (phazite::test::addAudioClip (*song, track, "Hit", hit, seconds, 0.5).isValid());
+
+    phazite::SongPlayer kept (*song);
+    const auto startsIn = [track] (const phazite::engine::Plan& plan)
+    {
+        std::vector<std::int64_t> starts;
+
+        for (const auto& strip : plan.strips)
+            if (strip.id == (std::int64_t) track.getRaw())
+                for (const auto& region : strip.audio)
+                    starts.push_back (region.start);
+
+        return starts;
+    };
+
+    CHECK (startsIn (*kept.compile (44100.0, 512, std::nullopt)) == std::vector<std::int64_t> { 0, 88200 });
+
+    phazite::setTempo (*song, 60.0);
+    const auto asked = phazite::SongPlayer::countFilesAsked();
+    const auto plan = kept.compile (44100.0, 512, std::nullopt);
+    CHECK (startsIn (*plan) == std::vector<std::int64_t> { 0, 176400 }); // beat 4 at 60 BPM
+    CHECK (phazite::SongPlayer::countFilesAsked() == asked);
+    const auto differences = comparePlans (kept, *song);
+    CHECK_MESSAGE (differences.isEmpty(), differences.toStdString());
 }

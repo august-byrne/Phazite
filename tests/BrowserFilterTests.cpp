@@ -547,9 +547,14 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
     CHECK (padName() == juce::String ("Kick One"));
     CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 36"));
 
+    // Its sound copied into the project in the background, then kept: a swap asked for meanwhile opens closed (SwapModel.h), so
+    // the next waits for the copy, as a user's next click comes after it.
+    phazite::test::waitForAudioWork (song.context);
+
     // Again, and Esc puts the one before back, adding no step.
     browser.startSwap (drums, 36);
     phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
     mouse.click (getRow (browser, "Pack").getCentre());
     phazite::test::dispatchPendingMessages();
     window.pressKey (downKey);

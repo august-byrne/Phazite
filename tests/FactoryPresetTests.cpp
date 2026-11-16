@@ -9,6 +9,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
@@ -48,6 +49,7 @@
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/internal/ApplySong.h"
 
 #include <array>
 #include <cmath>
@@ -561,6 +563,37 @@ TEST_CASE ("The Dark Synthwave Kit is balanced as a kit: its kick the loudest at
         CHECK (values[(size_t) devices::DrumSampler::getParameterIndex (pad, devices::DrumSampler::choke)] == doctest::Approx (1.0f));
 }
 
+TEST_CASE ("A drum kit's sounds that come whole with a song made like another play at once, as the song holds them")
+{
+    // Known bug 145's review: a node kept from plan to plan loaded its sounds only as it was made; a session loads a sound
+    // set by hand at once, but sounds that come whole (a version's song applied, as a branch switch or a merge makes it, an
+    // undo that brings their element back) changed no property, and played the kit before until the device was made anew.
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, devices::DrumSampler::typeID);
+    const auto device = phazite::getDeviceHandle (song.context, drums);
+    auto& s = *phazite::findSong (song.context);
+    const auto kitsFolder = getFactoryPresets().getChildFile ("Drum Sampler").getChildFile ("Kits");
+    const auto playedKick = [&song, &device]
+    {
+        phazite::getSession (song.context)->update();
+        auto* sampler = device.getProcessor<devices::DrumSampler>();
+        REQUIRE (sampler != nullptr);
+        return sampler->getPadSound (36);
+    };
+
+    const auto plain = s.getState().createCopy();
+    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("808 Kit.phazitepreset")));
+    const auto with808 = s.getState().createCopy();
+    const auto kick808 = devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")); // held: the factory keeps none
+    const auto kick = devices::getFactoryDrum (devices::findFactoryDrum ("Kick"));
+    CHECK (playedKick() == kick808.get());
+
+    phazite::makeSongLike (s, plain);
+    CHECK (playedKick() == kick.get());
+    phazite::makeSongLike (s, with808);
+    CHECK (playedKick() == kick808.get());
+}
+
 TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the song keeps, under any file put on a pad")
 {
     phazite::test::TestSong song;
@@ -589,8 +622,11 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     device.clearPadSound (36);
     CHECK (device.getPadName (36) == juce::String ("808 Kick"));
 
-    // Another kit in its place, and Undo step by step back to the default kit.
-    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("909 Kit.phazitepreset")));
+    // Another kit in its place (its Undo and Redo checked, and the plans compiled from what it changed: UndoCheck.h), and
+    // Undo step by step back to the default kit, which the sampler the engine plays plays again.
+    phazite::test::UndoCheck undo (song.context);
+    undo.check ("the 909 kit loaded",
+                [&] { REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("909 Kit.phazitepreset"))); });
     CHECK (device.getPadName (42) == juce::String ("909 Closed Hat"));
 
     for (const auto* expected : { "808 Kick", "Boom", "808 Kick", "Kick" })
@@ -598,6 +634,11 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
         song.run ("edit.undo");
         CHECK (device.getPadName (36) == juce::String (expected));
     }
+
+    phazite::getSession (song.context)->update();
+    sampler = device.getProcessor<devices::DrumSampler>();
+    REQUIRE (sampler != nullptr);
+    CHECK (sampler->getPadSound (36) == devices::getFactoryDrum (devices::findFactoryDrum ("Kick")).get());
 }
 
 TEST_SUITE ("golden")

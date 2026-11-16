@@ -12,6 +12,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/Export.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Export.h"
@@ -450,6 +451,28 @@ TEST_CASE ("Stems export into a folder, a file for each channel, each its own so
     // The mute switches are as they were.
     CHECK_FALSE (phazite::isTrackMuted (*band.song, band.bass, false));
     CHECK (phazite::isTrackMuted (*band.song, band.pad, false));
+}
+
+TEST_CASE ("An export of stems compiles each stem as its turn comes, not every one before the first starts")
+{
+    // Known bug 125: each stem's player and plan were compiled on the message thread before the first stem started, and all
+    // held at once until the export ended. Each stem's plan asks the disk about the song's sounds once, as any plan of the
+    // whole song does (SongPlayer::countFilesAsked()): as the export starts, the first stem's alone; by its end, each
+    // stem's in its turn.
+    Band band;
+    auto asked = phazite::SongPlayer::countFilesAsked();
+    phazite::SongPlayer (*band.song).compile (44100.0, 512, std::nullopt);
+    const auto perPlan = phazite::SongPlayer::countFilesAsked() - asked;
+    REQUIRE (perPlan > 0);
+
+    asked = phazite::SongPlayer::countFilesAsked();
+    std::optional<ExportReport> report;
+    const auto running = phazite::startExport (*band.song, band.folder, stems(), [&report] (const ExportReport& done) { report = done; });
+    CHECK (phazite::SongPlayer::countFilesAsked() - asked == perPlan);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }));
+    REQUIRE (report->result.wasOk());
+    CHECK (report->stems.size() == 4);
+    CHECK (phazite::SongPlayer::countFilesAsked() - asked == 4 * perPlan);
 }
 
 TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was there")

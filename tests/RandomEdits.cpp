@@ -2,6 +2,7 @@
 #include "RandomEdits.h"
 #include "TestClips.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/drums/FactoryDrums.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
@@ -13,11 +14,15 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/devices/internal/SamplerSound.h"
+#include "model/mixer/ContainerValues.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
+#include "model/presets/internal/Presets.h"
 #include "model/transport/internal/Tempo.h"
 
 namespace phazite::test
@@ -52,6 +57,18 @@ namespace
                     found.push_back (inside);
             }
         }
+
+        return found;
+    }
+
+    // Every container of the song's tracks and the master.
+    std::vector<DeviceID> getAllContainers (const Song& song)
+    {
+        std::vector<DeviceID> found;
+
+        for (const auto device : getAllDevices (song))
+            if (isContainer (song, device))
+                found.push_back (device);
 
         return found;
     }
@@ -123,7 +140,7 @@ void RandomEdits::edit()
     const auto track = pick (tracks);
     const auto other = pick (tracks);
     const auto plain = getPlainTracks (song);
-    const auto kind = draw (30);
+    const auto kind = draw (45);
 
     switch (kind)
     {
@@ -229,7 +246,10 @@ void RandomEdits::edit()
                 if (const auto clip = addAudioClip (song, on, "Sound", sound, start, 0.5); clip.isValid())
                 {
                     const auto gain = random.nextFloat() * 12.0f - 6.0f;
-                    const auto pitch = (float) (draw (13) - 6);
+                    // Most at their own pitch, which plays the file itself; the others pitched, which plays a render of it
+                    // (renderMissingClipAudio(), where a test makes them).
+                    const auto pitched = draw (4) == 0;
+                    const auto pitch = pitched ? (float) (draw (13) - 6) : 0.0f;
                     const auto fade = random.nextDouble() * 0.1;
                     setClipGain (song, clip, gain);
                     setClipPitch (song, clip, pitch);
@@ -430,6 +450,253 @@ void RandomEdits::edit()
             setTrackKey (song, track, Key { root, Scale::major });
             break;
         }
+
+        case 30: // a device switched off, or on again
+            if (const auto devices = getAllDevices (song); ! devices.empty())
+            {
+                const auto device = pick (devices);
+                const auto on = random.nextBool();
+                setDeviceOn (song, device, on);
+            }
+            break;
+
+        case 31: // a device deleted
+            if (const auto devices = getAllDevices (song); ! devices.empty())
+                removeDevice (song, pick (devices));
+            break;
+
+        case 32: // a track's device moved in its chain
+            if (const auto devices = getDevices (song, track); devices.size() > 1)
+            {
+                const auto device = pick (devices);
+                const auto index = draw ((int) devices.size());
+                moveDevice (song, device, index);
+            }
+            break;
+
+        case 33: // a device moved into a container's chain, or within one
+        {
+            const auto devices = getDevices (song, track);
+            const auto containers = getAllContainers (song);
+
+            if (containers.empty() || devices.empty())
+                break;
+
+            const auto chains = getChains (song, pick (containers));
+
+            if (chains.empty())
+                break;
+
+            const auto chain = pick (chains);
+            const auto device = pick (devices);
+
+            if (findDeviceState (song, device).hasType (schema::DEVICE) && device != getInstrument (song, track))
+                moveToChain (song, device, chain);
+            else if (const auto inside = getChainDevices (song, chain); inside.size() > 1)
+                moveInChain (song, pick (inside), draw ((int) inside.size()));
+            break;
+        }
+
+        case 34: // a factory preset loaded into a device, its values replaced as a whole (as Swap keeps one)
+            if (const auto devices = getAllDevices (song); ! devices.empty())
+            {
+                const auto device = pick (devices);
+
+                if (const auto* info = findOwnDevice (findDeviceState (song, device)[schema::deviceType].toString().toStdString()))
+                {
+                    const auto presets = getFactoryPresetsFolder()
+                                             .getChildFile (juce::String (info->name.data(), info->name.size()))
+                                             .findChildFiles (juce::File::findFiles, true, "*.phazitepreset");
+
+                    if (! presets.isEmpty())
+                        tryPresetIn (song, device, presets[draw (presets.size())]);
+                }
+            }
+            break;
+
+        case 35: // a drum sampler's pad, or a sampler, given another of its factory sounds
+            for (const auto device : getAllDevices (song))
+            {
+                if (isDrumSampler (song, device))
+                {
+                    const auto names = devices::getFactoryDrumNames();
+                    const auto name = names[(size_t) draw ((int) names.size())];
+                    const auto pad = 36 + draw (8);
+                    setDeviceSound (song, device, schema::getPadSound (pad, 0), juce::String (name.data(), name.size()));
+                    break;
+                }
+
+                if (isSampler (song, device))
+                {
+                    setFactorySample (song, device, draw (4));
+                    break;
+                }
+            }
+            break;
+
+        case 36: // a container's chain muted, soloed, given its keys or its crossover
+            if (const auto containers = getAllContainers (song); ! containers.empty())
+            {
+                const auto chains = getChains (song, pick (containers));
+
+                if (chains.empty())
+                    break;
+
+                const auto chain = pick (chains);
+                const auto which = draw (4);
+                const auto low = draw (64);
+                const auto span = 12 + draw (48);
+
+                if (which == 0)
+                    setChainMuted (song, chain, random.nextBool());
+                else if (which == 1)
+                    setChainSoloed (song, chain, random.nextBool());
+                else if (which == 2)
+                    setChainKeys (song, chain, { low, low + span });
+                else
+                    setChainCrossover (song, chain, 100.0f + (float) draw (5000));
+            }
+            break;
+
+        case 37: // a container split otherwise, or its mix
+            if (const auto containers = getAllContainers (song); ! containers.empty())
+            {
+                const auto container = pick (containers);
+
+                if (random.nextBool())
+                    setContainerSplit (song, container, (ContainerSplit) draw (4));
+                else
+                    setMix (song, container, random.nextFloat());
+            }
+            break;
+
+        case 38: // a modulation's amount changed, or the modulation taken away
+            for (const auto modulator : getModulators (song, track))
+            {
+                if (const auto modulations = getModulations (song, modulator); ! modulations.empty())
+                {
+                    const auto modulation = pick (modulations);
+
+                    if (random.nextBool())
+                    {
+                        const auto amount = random.nextFloat() * 2.0f - 1.0f;
+                        setModulation (song, modulator, modulation.parameter, amount);
+                    }
+                    else
+                    {
+                        removeModulation (song, modulator, modulation.parameter);
+                    }
+
+                    break;
+                }
+            }
+            break;
+
+        case 39: // a clip muted, resized or split
+            if (const auto clips = getAllClips (song, false); ! clips.empty())
+            {
+                const auto clip = pick (clips);
+                const auto range = getClipRange (findClipState (song, clip));
+                const auto which = draw (3);
+                const auto along = random.nextDouble();
+
+                if (which == 0)
+                    toggleClipsMuted (song, { clip });
+                else if (which == 1)
+                    trimClipEnd (song, clip, range.getStart() + lasting (0.25 + along * 4.0));
+                else
+                    splitClips (song, { clip }, range.getStart() + lasting (range.getLength().inBeats() * along));
+            }
+            break;
+
+        case 40: // an audio clip warped, played backwards, or at another tempo of its own
+        {
+            std::vector<ClipID> audio;
+
+            for (const auto clip : getAllClips (song, false))
+                if (isAudioState (findClipState (song, clip)))
+                    audio.push_back (clip);
+
+            if (audio.empty())
+                break;
+
+            const auto clip = pick (audio);
+            const auto which = draw (3);
+            const auto along = random.nextDouble();
+
+            if (which == 0)
+            {
+                setClipFollowsTempo (song, clip, true);
+                addWarpMarker (song, clip, 0.1 + along * 0.3);
+            }
+            else if (which == 1)
+            {
+                setClipReversed (song, clip, along < 0.5);
+            }
+            else
+            {
+                setClipTempo (song, clip, 90.0 + along * 60.0);
+            }
+            break;
+        }
+
+        case 41: // an automation point moved or taken away
+            if (const auto curves = getCurveStates (song); ! curves.empty())
+            {
+                const auto parameter = getCurveParameter (pick (curves));
+                const auto points = getPoints (song, parameter);
+
+                if (points.empty())
+                    break;
+
+                const auto index = draw ((int) points.size());
+                const auto by = draw (5) - 2;
+                const auto change = (random.nextFloat() - 0.5f) * 0.2f;
+
+                if (random.nextBool())
+                    movePoints (song, parameter, { index }, lasting (by), change);
+                else
+                    deletePoints (song, parameter, { index });
+            }
+            break;
+
+        case 42: // a track frozen from a file, or unfrozen (where asked: freezes)
+            if (freezes && song.getCacheFolder() != juce::File() && sound.existsAsFile() && ! isFolder (song, track))
+            {
+                if ((bool) findTrackState (song, track)[schema::trackFrozen])
+                {
+                    unfreeze (song, track);
+                }
+                else
+                {
+                    song.getCacheFolder().createDirectory();
+                    const auto rendered = song.getCacheFolder().getNonexistentChildFile ("Rendered", ".wav");
+
+                    if (sound.copyFileTo (rendered))
+                        freezeFromFile (song, track, rendered, &song.getUndoManager());
+                }
+            }
+            break;
+
+        case 43: // a sidechain taken away
+            for (const auto device : getAllDevices (song))
+            {
+                if ((juce::int64) findDeviceState (song, device)[schema::deviceSidechain] != 0)
+                {
+                    setSidechainSource (song, device, {});
+                    break;
+                }
+            }
+            break;
+
+        case 44: // a send's level changed after it was made
+            if (const auto sends = getSends (song, track); ! sends.empty())
+            {
+                const auto send = pick (sends);
+                const auto level = -random.nextFloat() * 30.0f;
+                setSendLevel (song, send, level);
+            }
+            break;
 
         default:
         {

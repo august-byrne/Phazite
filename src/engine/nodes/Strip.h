@@ -238,6 +238,7 @@ public:
     void setDecibels (float decibels) noexcept;
     void setCut (bool shouldCut) noexcept { cut.store (shouldCut, std::memory_order_relaxed); }
     bool isCut() const noexcept { return cut.load (std::memory_order_relaxed); }
+    float getGain() const noexcept { return gain.load (std::memory_order_relaxed); } // as set (the tests' comparisons)
 
     // Audio thread: the gain as the last block ended, and as this one does.
     std::pair<float, float> moveOn() noexcept;

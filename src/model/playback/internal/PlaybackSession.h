@@ -175,11 +175,12 @@ private:
     std::optional<BeatPosition> lastPlayhead; // while playing without a loop: where the playhead was last time
     void timerCallback() override;
 
-    void changed (const juce::ValueTree& tree);
+    // A change of the song, but of view state (how it shows), which no plan holds: a new plan.
+    void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { changed (parent); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { changed (parent); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
     void handleAsyncUpdate() override { update(); }
 
     // A value set by hand (a plug-in's, by a control or in its window, plays at once); a plug-in's own window's gestures;

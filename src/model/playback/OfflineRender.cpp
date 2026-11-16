@@ -53,7 +53,8 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     : juce::Thread ("Phazite render"),
       setup (std::move (s)),
       rendered (std::move (whenRendered)),
-      finished (std::move (whenFinished))
+      finished (std::move (whenFinished)),
+      alive (std::make_shared<OfflineRender*> (this))
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -68,33 +69,86 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
         setup.session->lendToRender (true);
     }
 
+    // Each job compiled as its turn comes (known bug 125: an export of stems compiled them all here, and held them all): the
+    // first now, so that it starts at once.
     for (const auto& job : toRender)
-    {
-        Compiled compiled { job, setup.makePlayer(), nullptr };
-        compiled.plan = compiled.player->compile (setup.sampleRate, setup.blockSize, std::nullopt, job.of);
-        compiled.pluginTailSeconds = getLongestTail (*compiled.plan, true);
+        jobs.push_back ({ job });
 
-        for (const auto& strip : compiled.plan->strips)
-            for (const auto& device : strip.devices)
-                if (auto* plugin = dynamic_cast<SandboxedProcessor*> (&device.node->getRunner().getProcessor()))
-                {
-                    compiled.plugins.push_back (plugin);
-
-                    if (device.node->isOn())
-                        compiled.heard.push_back (plugin);
-                }
-
-        jobs.push_back (std::move (compiled));
-    }
+    if (! jobs.empty())
+        compile (0);
 
     startThread (setup.background ? juce::Thread::Priority::low : juce::Thread::Priority::normal);
 }
 
+void OfflineRender::compile (size_t index)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // The job before let go of, with what its plan played (its player, on this thread), but its plug-ins, which are told
+    // that they play live again as this goes (~OfflineRender()).
+    if (index > 0)
+    {
+        auto& before = jobs[index - 1];
+        before.plugins.clear();
+        before.heard.clear();
+        before.plan = nullptr;
+        before.player = nullptr;
+    }
+
+    auto& compiled = jobs[index];
+    compiled.player = setup.makePlayer();
+    compiled.plan = compiled.player->compile (setup.sampleRate, setup.blockSize, std::nullopt, compiled.job.of);
+    compiled.pluginTailSeconds = getLongestTail (*compiled.plan, true);
+
+    for (const auto& strip : compiled.plan->strips)
+    {
+        for (const auto& device : strip.devices)
+        {
+            if (auto* plugin = dynamic_cast<SandboxedProcessor*> (&device.node->getRunner().getProcessor()))
+            {
+                compiled.plugins.push_back (plugin);
+                // One node for each instance, which ~OfflineRender() tells that it plays live again.
+                if (std::none_of (playedPlugins.begin(), playedPlugins.end(),
+                                  [plugin] (const auto& node)
+                                  {
+                                      return &static_cast<SandboxedProcessor&> (node->getRunner().getProcessor()).getInstance()
+                                             == &plugin->getInstance();
+                                  }))
+                    playedPlugins.push_back (device.node);
+
+                if (device.node->isOn())
+                    compiled.heard.push_back (plugin);
+            }
+        }
+    }
+}
+
+bool OfflineRender::waitForCompile (size_t index)
+{
+    // On the message thread, where a song is read, unless this has gone by then; this thread waits, woken by the compile or
+    // by its end (~OfflineRender()), never ended by force.
+    juce::MessageManager::callAsync (
+        [token = alive, index]
+        {
+            if (auto* render = *token)
+            {
+                render->compile (index);
+                render->jobCompiled.signal();
+            }
+        });
+
+    jobCompiled.wait (-1);
+    return ! threadShouldExit() && jobs[index].plan != nullptr;
+}
+
 std::optional<OfflineRender::Wait> OfflineRender::findWait() const
 {
-    // Its plug-ins' blocks or channels it waits for (any thread: each plug-in's clock is an atomic; the jobs don't change
-    // while it lives).
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Its plug-ins' blocks or channels it waits for (each plug-in's clock is an atomic; the jobs change on the message thread
+    // alone, as each is compiled).
     std::optional<Wait> longest;
+
     const auto now = sandbox::getNanoseconds();
 
     for (const auto& job : jobs)
@@ -116,9 +170,11 @@ std::optional<OfflineRender::Wait> OfflineRender::findWait() const
 OfflineRender::~OfflineRender()
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    // It looks at threadShouldExit() between blocks, and waits no longer for a plug-in to play the one it is in: never
-    // ended by force, which can leave a lock it held held for ever.
+    // It looks at threadShouldExit() between blocks, and waits no longer for a plug-in to play the one it is in, nor for a
+    // job's compile, which no longer comes: never ended by force, which can leave a lock it held held for ever.
     signalThreadShouldExit();
+    *alive = nullptr;
+    jobCompiled.signal();
 
     for (const auto& job : jobs)
         for (auto* plugin : job.plugins)
@@ -128,11 +184,11 @@ OfflineRender::~OfflineRender()
 
     // Its plug-ins told that they play live again now, not as the first live block comes (which their switch would make
     // late): a post, which waits for no helper.
-    for (const auto& job : jobs)
-        for (auto* plugin : job.plugins)
-            plugin->getInstance().playLive();
+    for (const auto& node : playedPlugins)
+        static_cast<SandboxedProcessor&> (node->getRunner().getProcessor()).getInstance().playLive();
 
     jobs.clear(); // what the renders played, before the project's engine plays the plug-ins again
+    playedPlugins.clear();
 
     if (setup.session != nullptr)
         setup.session->lendToRender (false);
@@ -148,7 +204,12 @@ void OfflineRender::run()
     auto result = whyNot.isEmpty() ? juce::Result::ok() : juce::Result::fail (whyNot);
 
     for (size_t i = 0; i < jobs.size() && result.wasOk() && ! threadShouldExit(); ++i)
+    {
+        if (i > 0 && ! waitForCompile (i))
+            break;
+
         result = play (jobs[i], (int) i);
+    }
 
     if (! threadShouldExit() && finished != nullptr)
         finished (result);

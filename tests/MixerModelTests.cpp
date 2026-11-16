@@ -5,6 +5,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UndoCheck.h"
 #include "devices/synth/Synth.h"
 #include "engine/nodes/Channel.h"
 #include "engine/nodes/DeviceNode.h"
@@ -195,10 +196,12 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK (phazite::getMix (context, eq.id).isValid());
     CHECK (phazite::getKeyControls (context, eq.id, 2).empty());
 
-    phazite::setDeviceOn (context, eq.id, false);
+    // Each change checked by its Undo and Redo, and by the plans a player compiles from what it changed (UndoCheck.h).
+    phazite::test::UndoCheck undo (context);
+    undo.check ("a device switched off", [&] { phazite::setDeviceOn (context, eq.id, false); });
     CHECK_FALSE (phazite::getEffects (context, a).front().isOn);
 
-    phazite::moveEffect (context, eq.id, 1);
+    undo.check ("a device moved", [&] { phazite::moveEffect (context, eq.id, 1); });
     CHECK (namesOf (phazite::getEffects (context, a)) == std::vector<juce::String> { "Compressor", "EQ" });
     phazite::moveEffect (context, eq.id, 1); // already last
     CHECK (namesOf (phazite::getEffects (context, a)) == std::vector<juce::String> { "Compressor", "EQ" });
@@ -206,7 +209,7 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK (namesOf (phazite::getEffects (context, a)) == std::vector<juce::String> { "EQ", "Compressor" });
     CHECK (phazite::getInstrument (context, a)->id == instrument->id); // effects move after the instrument only
 
-    phazite::removeDevice (context, eq.id);
+    undo.check ("a device removed", [&] { phazite::removeDevice (context, eq.id); });
     CHECK (namesOf (phazite::getEffects (context, a)) == std::vector<juce::String> { "Compressor" });
     CHECK_FALSE (phazite::getMix (context, eq.id).isValid()); // a device that is gone
 
@@ -333,7 +336,8 @@ TEST_CASE ("The values set by hand of Phazite's own devices are the song's, whic
     };
 
     const auto before = played();
-    cutoff.setValue (2000.0f);
+    phazite::test::UndoCheck undo (song);
+    undo.check ("a value set by hand", [&] { cutoff.setValue (2000.0f); });
     CHECK ((float) values()[juce::Identifier ("cutoff")] == doctest::Approx (2000.0f));
     CHECK (played() == doctest::Approx (2000.0f));
     phazite::undo (song);

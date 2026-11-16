@@ -76,7 +76,19 @@ sends, and the buses and the master they reach.
 - **What sounds, sounds on.** What plays from one plan to the next (each strip and channel, each device, each
   modulator) is kept by the song's IDs, so a note rings on through an edit.
 - **A value set by hand reaches what plays at once,** without a new plan: a device's parameter or switch, a
-  channel's volume, pan, mute and solo, and a plug-in's parameter.
+  channel's volume, pan, mute and solo, and a plug-in's parameter. View state (a track's height, the grids, a lane
+  shown, where a device's window was) makes no plan at all.
+- **A new plan compiles again only what changed.** The player listens to the song itself: each track's notes and
+  audio clips are kept until that track's clips change (its audio until the tempo changes too), and each of Phazite's
+  own devices keeps the values the plan before read until something of its devices changes (not the channel's own
+  height, mute or volume, nor a plug-in's stored state); what joins the channels (routing, delay compensation, sends,
+  audibility) is worked out whole each time, being cheap. The disk is asked about a file again only for a track whose
+  clips changed, once a plan however many clips play it, and the tempo map made once: a file another program writes
+  again in its place while no clip of its track changes plays as it was until one does or the project opens again
+  (Phazite's own renders, freezes and recordings are found). While the tests run, kept parts are compared with a read of
+  the song (`SongPlayer::setChecking()`), after every edit, Undo and Redo the undo check makes and every random edit. A
+  render compiles each of its jobs (an export's stems) as its turn comes, on the message thread, and lets go of the one
+  before.
 - **Each open project has a playback session.** It gives the engine the song again as it changes, owns the song's
   plug-in instances and its recorder, plays the transport, takes live MIDI into the song, and keeps the take it
   records.

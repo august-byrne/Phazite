@@ -23,6 +23,35 @@ namespace
         static std::vector<PlaybackSession*> sessions;
         return sessions;
     }
+
+    // View state (model/base/internal/Schema.h), how the song shows and no change to it, which no plan holds: a track's or
+    // the master's view properties (their heights, their lanes shown), a device's (where its window was), the editors'
+    // grids, and the elements of view state (a piano roll's, a track's lanes) with everything in them.
+    bool isInViewElement (juce::ValueTree element)
+    {
+        for (; element.isValid(); element = element.getParent())
+            if (schema::isUncountedElement (element.getParent(), element))
+                return true;
+
+        return false;
+    }
+
+    bool isViewState (const juce::ValueTree& tree, const juce::Identifier& property)
+    {
+        if ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER)) && schema::isTrackViewProperty (property))
+            return true;
+
+        if ((tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
+            || (tree.hasType (schema::PHAZITE) && schema::isGridProperty (property)))
+            return true;
+
+        return isInViewElement (tree);
+    }
+
+    bool isViewElement (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        return (child.isValid() && schema::isUncountedElement (parent, child)) || isInViewElement (parent);
+    }
 } // namespace
 
 PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
@@ -75,15 +104,18 @@ AudioIO& PlaybackSession::getAudioIO() const noexcept
     return host.getAudioIO();
 }
 
-void PlaybackSession::changed (const juce::ValueTree&)
+void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    triggerAsyncUpdate();
+    // An element of view state added, removed or moved (a piano roll's, a track's lanes), or one in it: no new plan.
+    if (! isViewElement (parent, child))
+        triggerAsyncUpdate();
 }
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // Where playback starts is the transport's (movePlayhead() locates the engine itself): nothing a plan holds.
-    if (tree == songState && property == schema::playStart)
+    // Where playback starts is the transport's (movePlayhead() locates the engine itself), and view state is how the song
+    // shows: nothing a plan holds.
+    if ((tree == songState && property == schema::playStart) || isViewState (tree, property))
         return;
 
     // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug

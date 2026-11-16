@@ -66,6 +66,7 @@
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/Export.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Export.h"
@@ -894,18 +895,102 @@ TEST_CASE ("Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, 
             }));
     }
 
+    // A whole compile, as a render's player makes it (every device made, and every value read).
+    std::vector<double> whole;
+
+    for (int i = 0; i < 5; ++i)
+        whole.push_back (millisecondsOf ([&song] { phazite::SongPlayer (song).compile (benchRate, 512, std::nullopt); }));
+
+    // A note added after every track's height changed (view state, which no plan holds): the note's plan reads no device's
+    // values (known bug 145's review: each such change marked its channel, whose devices the next edit read again).
+    std::vector<double> afterView;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        for (const auto track : built.tracks)
+            phazite::setSavedTrackHeight (song, track, 60 + 10 * (i % 2));
+
+        afterView.push_back (millisecondsOf (
+            [&]
+            {
+                phazite::addNote (s.context, built.clips[(size_t) i], 74, phazite::BeatPosition::fromBeats (3.5),
+                                  phazite::BeatDuration::fromBeats (0.25), 100);
+                phazite::test::dispatchPendingMessages();
+            }));
+    }
+
     report << "\n| 100 tracks, the message thread | Median | Most |\n|---|---|---|\n";
     report << "| The plan's compile, given to the engine | " << milliseconds (phazite::test::percentileOf (compiles, 0.5)) << " | "
            << milliseconds (phazite::test::percentileOf (compiles, 1.0)) << " |\n";
+    report << "| A whole compile, as a render's | " << milliseconds (phazite::test::percentileOf (whole, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (whole, 1.0)) << " |\n";
     report << "| A note added, with its new plan | " << milliseconds (phazite::test::percentileOf (notes, 0.5)) << " | "
            << milliseconds (phazite::test::percentileOf (notes, 1.0)) << " |\n";
     report << "| A clip moved, with its new plan | " << milliseconds (phazite::test::percentileOf (moves, 0.5)) << " | "
            << milliseconds (phazite::test::percentileOf (moves, 1.0)) << " |\n";
+    report << "| A note added after every track's height changed | " << milliseconds (phazite::test::percentileOf (afterView, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (afterView, 1.0)) << " |\n";
     report << "| Save, after the song played and was edited | "
            << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1) << " |  |\n";
     report << "| Save again, nothing changed | " << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1)
            << " |  |\n";
     report << "\nThe project's file: " << juce::String (s.getProject().getFile().getSize() / 1024) << " KB\n";
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a song of 500 audio clips, its plan and an edit" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 124: 50 tracks of ten audio clips, each clip a file of its own (a song of recordings), half a second long, in
+    // the project's Audio folder. A clip moved, and the tempo changed (which places every clip again), each with its new
+    // plan through the song's session; and a whole compile, as a render's player makes it (every file opened).
+    phazite::test::TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    std::vector<phazite::TrackID> tracks { s.firstTrack };
+    std::vector<phazite::ClipID> clips;
+
+    while (tracks.size() < 50)
+        tracks.push_back (s.addTrack ("Track " + juce::String (tracks.size() + 1)));
+
+    for (size_t t = 0; t < tracks.size(); ++t)
+    {
+        for (int c = 0; c < 10; ++c)
+        {
+            const auto name = "Take " + juce::String ((int) t + 1) + "-" + juce::String (c + 1) + ".wav";
+            const auto file = phazite::test::writeSound (s.getSoundsFolder().getChildFile (name), 0.5, 110.0 + 20.0 * c);
+            clips.push_back (s.addAudioClip (tracks[t], file, c * 2.0));
+        }
+    }
+
+    phazite::test::dispatchPendingMessages();
+    std::vector<double> moves, tempos, whole;
+
+    for (int i = 0; i < 20; ++i)
+    {
+        const auto t = (size_t) i % tracks.size();
+        moves.push_back (millisecondsOf (
+            [&]
+            {
+                phazite::moveClip (s.context, clips[t * 10], phazite::BeatPosition::fromBeats (i % 2 == 0 ? 0.5 : 0.0), tracks[t]);
+                phazite::test::dispatchPendingMessages();
+            }));
+        tempos.push_back (millisecondsOf (
+            [&]
+            {
+                s.setTempo (i % 2 == 0 ? 121.0 : 120.0);
+                phazite::test::dispatchPendingMessages();
+            }));
+    }
+
+    for (int i = 0; i < 5; ++i)
+        whole.push_back (millisecondsOf ([&song] { phazite::SongPlayer (song).compile (benchRate, 512, std::nullopt); }));
+
+    juce::String report ("\n| 500 audio clips of 500 files, the message thread | Median | Most |\n|---|---|---|\n");
+    report << "| A clip moved, with its new plan | " << milliseconds (phazite::test::percentileOf (moves, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (moves, 1.0)) << " |\n";
+    report << "| The tempo changed, with its new plan | " << milliseconds (phazite::test::percentileOf (tempos, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (tempos, 1.0)) << " |\n";
+    report << "| A whole compile, as a render's | " << milliseconds (phazite::test::percentileOf (whole, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (whole, 1.0)) << " |\n";
     MESSAGE (report);
 }
 
@@ -1413,8 +1498,11 @@ TEST_CASE ("Benchmark: the benchmark song's stems exported, as it is and with a 
            * doctest::test_suite ("benchmark") * doctest::skip())
 {
     // Each stem a render of one channel as it reaches the master: a render leaves out what it can't hear (what doesn't reach
-    // that channel, and a muted track that feeds nothing heard), which it played whole before (known bug 78's review).
-    juce::String report ("\n| Stems of the benchmark song, 20 tracks of 16 beats, 48 kHz | Seconds |\n|---|---|\n");
+    // that channel, and a muted track that feeds nothing heard), which it played whole before (known bug 78's review). And
+    // what the message thread spends before the first stem starts, with the most the process's memory grew by meanwhile
+    // (known bug 125: every stem's player and plan were compiled before the first started, and held until the end).
+    juce::String report ("\n| Stems of the benchmark song, 20 tracks of 16 beats, 48 kHz | Seconds | Before the first starts | "
+                         "Memory's peak, above what it was |\n|---|---|---|---|\n");
 
     for (const auto muted : { false, true })
     {
@@ -1431,13 +1519,23 @@ TEST_CASE ("Benchmark: the benchmark song's stems exported, as it is and with a 
         settings.stems = true;
         settings.sampleRate = 48000.0;
         std::optional<phazite::ExportReport> done;
+        const auto memoryBefore = phazite::test::getProcessMemoryBytes();
+        auto peak = memoryBefore;
         const auto started = juce::Time::getMillisecondCounterHiRes();
         const auto running = phazite::startExport (song, s.getSoundsFolder().getChildFile ("Song.wav"), settings,
                                                    [&done] (const phazite::ExportReport& r) { done = r; });
-        REQUIRE (phazite::test::dispatchMessagesUntil ([&done] { return done.has_value(); }, 3600000));
+        const auto beforeFirst = juce::Time::getMillisecondCounterHiRes() - started;
+        REQUIRE (phazite::test::dispatchMessagesUntil (
+            [&]
+            {
+                peak = std::max (peak, phazite::test::getProcessMemoryBytes());
+                return done.has_value();
+            },
+            3600000));
         REQUIRE (done->result.wasOk());
         report << "| " << (muted ? "A quarter of its tracks muted" : "As it is") << " (" << done->stems.size() << " stems) | "
-               << juce::String ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, 2) << " |\n";
+               << juce::String ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, 2) << " | " << milliseconds (beforeFirst)
+               << " | " << juce::String ((double) (peak - memoryBefore) / (1024.0 * 1024.0), 1) << " MB |\n";
     }
 
     MESSAGE (report);

@@ -68,21 +68,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
 its fix.
 
-- **124. Every new plan reads all the automation again, asks the disk about each audio clip's file twice and makes the
-  tempo map several times for each clip,** and changes of view state make a new plan too (moving the playhead no longer
-  does, since 2026-11-14) (`src/model/playback/SongPlayer.cpp`,
-  `src/model/arrangement/AudioClips.cpp`, `src/model/playback/PlaybackSession.cpp`). The benchmark's song has no audio
-  clips. Fix: one tempo map for each compile, what is known of a file kept until it changes, no plan for view state;
-  benchmark a song of 500 audio clips. Not yet checked (model-playback 10).
-- **125. An export of stems compiles a whole player and plan for every stem before it starts,** on the message thread,
-  and holds them all at once (`src/model/playback/OfflineRender.cpp`, `src/model/project/Export.cpp`). Fix: compile
-  each stem as its turn comes. Not yet checked (model-playback 11).
-- **145. A plan's compile costs about 0.4 ms a track, on every edit.** With 100 busy tracks every edit, and every step
-  of a drag, takes about 40 ms of the message thread, measured on 2026-11-14 ([performance.md](performance.md),
-  "a song of 100 tracks"), so a drag stutters in a large song. Why: every edit compiles the whole song again
-  (`src/model/playback/SongPlayer.cpp`; see also 124). Fix: compile again only what changed (roadmap step S5.7), with
-  the 100-track benchmark before and after.
-
 - **183. Loading a preset that holds sounds copies them into the project on the message thread.** A drum kit or a
   sampler preset whose sounds are outside the project has each copied, and compared in full with a file of the same
   name, in the call that loads it (`copyDeviceFilesInto()`, `src/model/devices/DeviceFiles.cpp`, from

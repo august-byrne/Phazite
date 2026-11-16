@@ -13,6 +13,9 @@
 //
 // A failure says what differs, by its place in the song: "PHAZITE/TRACKS/TRACK#1004/CLIP#1012: missing".
 //
+// It also keeps a player of the song and compiles its plan after each change, Undo and Redo, as a render does: while the
+// tests' checking is on, what a plan keeps from the plan before is compared with the song (SongPlayer::setChecking()).
+//
 // What the comparisons leave out, on purpose, is what no undo step keeps (model/base/internal/Schema.h says of each name
 // which kind it is):
 //   - view settings, how the song plays (the loop, the metronome, where playback starts, the punch, the input chosen last)
@@ -35,7 +38,13 @@
 #include "model/project/ProjectContext.h"
 
 #include <functional>
+#include <memory>
 #include <vector>
+
+namespace phazite
+{
+class SongPlayer;
+}
 
 namespace phazite::test
 {
@@ -62,6 +71,7 @@ public:
     // (more of the song built, something undone) are steps it walks through too, as the history has them at its next check.
     explicit UndoCheck (Song&);
     explicit UndoCheck (ProjectContext&);
+    ~UndoCheck();
 
     // A change as the UI makes one, a command or a model function that is a change of its own: it makes one undo step, or
     // none if it changes nothing that an undo step keeps (a switch, a view setting, the selection). Checks (CHECK) that
@@ -94,6 +104,12 @@ public:
 
 private:
     Song& song;
+
+    // A player of the song (model/playback/internal/SongPlayer.h), which compiles a plan after each change, Undo and Redo,
+    // so that, while checking is on, what each plan keeps from the plan before is compared with the song: a mark of a
+    // change missed shows here, where the edits are.
+    std::unique_ptr<SongPlayer> player;
+    void compilePlan();
     int base = 0;                      // the history's steps as the check began
     std::vector<juce::String> history; // the song (undoableWithoutSwitches) at each step since, the first as the check began
     int numSteps = 0;

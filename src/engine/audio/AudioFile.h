@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace phazite::engine
@@ -50,6 +51,11 @@ public:
     // A number no other file made in this run has had, nor will: what it is, where its address could be another's later
     // (a clip's render made again, at the same address as the one let go of).
     std::uint64_t getSerial() const noexcept { return serial; }
+
+    // What it was opened as, as whoever opened it names it (the song's player: the file's path and what was known of it
+    // then), for the tests' comparisons of plans (tests/PlanCheck.h). Message thread, before a plan plays it.
+    void setOrigin (juce::String text) { origin = std::move (text); }
+    const juce::String& getOrigin() const noexcept { return origin; }
 
     // Audio thread: the samples of a channel from a sample on, as far as their chunk goes (at most numSamples, which it
     // sets to how many there are), or nullptr if the chunk isn't read yet. Says where it plays, for what is read ahead.
@@ -87,6 +93,7 @@ public:
     void readNow (std::int64_t start, std::int64_t numSamples);
 
 private:
+    juce::String origin; // setOrigin()'s
     struct Chunk
     {
         juce::AudioBuffer<float> samples;

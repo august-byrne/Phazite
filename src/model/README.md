@@ -220,9 +220,9 @@ The song as Phazite's engine plays it.
 | File | What it holds |
 |---|---|
 | `internal/PlaybackHost.h` | The app's engine on the audio device Phazite opens, with the previews' engine beside it, which `EngineContext` owns; the device's inputs, the Low Latency switch, and the notes played live in the last 30 seconds. |
-| `internal/SongPlayer.h` | The song compiled into what the engine plays (plans), with what sounds on kept by the song's IDs and the values set by hand taken in at once. |
+| `internal/SongPlayer.h` | The song compiled into what the engine plays (plans), with what sounds on kept by the song's IDs and the values set by hand taken in at once; each plan compiles again only what the song's changes touched (a track's notes and audio, a channel's devices' values), which the tests compare with a read of the song (`setChecking()`). |
 | `internal/PlaybackSession.h` | Each open song's session, which the project context makes for it: it gives the engine the song again as it changes, owns the song's plug-in instances and its recorder, plays the transport, takes live MIDI and guide notes into it, and keeps the take it records. With `renderWithOwnEngine()`, the song rendered offline, which the session lends its plug-ins to while it plays them. |
-| `internal/OfflineRender.h` | The song or a part of it played offline on a thread of its own, for an export, a freeze or a bounce. |
+| `internal/OfflineRender.h` | The song or a part of it played offline on a thread of its own, for an export, a freeze or a bounce, each job (an export's stem) compiled on the message thread as its turn comes. |
 | `internal/AutomationWriter.h` | The automation written by hand while the engine plays, in touch, latch and write. |
 
 ## plugins/

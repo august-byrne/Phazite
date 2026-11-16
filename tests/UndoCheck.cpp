@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UndoCheck.h"
 #include "GoldenFiles.h"
+#include "PlanCheck.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/ProjectContext.h"
 
 #include <limits>
@@ -113,12 +115,14 @@ juce::StringArray describeSongDifferences (const juce::String& expected, const j
 
 //==============================================================================
 UndoCheck::UndoCheck (Song& songToFollow)
-    : song (songToFollow)
+    : song (songToFollow),
+      player (std::make_unique<SongPlayer> (songToFollow))
 {
     // Every step from here on stays in the history, whatever it holds.
     song.getUndoManager().setMaxNumberOfStoredUnits (std::numeric_limits<int>::max() / 2, 30);
     base = getDepth();
     history.push_back (writeSong (song, SongPart::undoableWithoutSwitches));
+    compilePlan(); // what the plans after each change keep from
 }
 
 namespace
@@ -130,6 +134,23 @@ namespace
         return *open;
     }
 } // namespace
+
+UndoCheck::~UndoCheck() = default;
+
+void UndoCheck::compilePlan()
+{
+    // As a render compiles it: while checking is on (tests/TestMain.cpp), what the plan keeps from the plan before is
+    // compared with the song (a stale part is a JUCE assertion, which fails the test); and the whole plan with a fresh
+    // player's whole compile of the song as it is now.
+    const auto plan = player->compile (44100.0, 512, std::nullopt);
+    const auto whole = SongPlayer (song).compile (44100.0, 512, std::nullopt);
+
+    if (const auto differences = describePlanDifferences (*plan, *whole); ! differences.isEmpty())
+        fail ("After \"" + song.getUndoManager().getUndoDescription()
+              + "\", the plan compiled from what changed doesn't play as a "
+                "whole compile does: "
+              + differences.joinIntoString ("; "));
+}
 
 UndoCheck::UndoCheck (ProjectContext& context)
     : UndoCheck (getOpenSong (context))
@@ -185,6 +206,7 @@ void UndoCheck::catchUp()
 
     for (;; --depth)
     {
+        compilePlan();
         const auto now = writeSong (song, SongPart::undoableWithoutSwitches);
 
         if (history[(size_t) depth] == now)
@@ -232,6 +254,7 @@ void UndoCheck::run (const juce::String& what, const std::function<void()>& chan
     const auto keptBefore = writeSong (song, SongPart::undoableWithoutSwitches);
 
     change();
+    compilePlan();
 
     const auto depthAfter = getDepth();
     const auto after = writeSong (song, SongPart::undoable);
@@ -272,11 +295,13 @@ void UndoCheck::run (const juce::String& what, const std::function<void()>& chan
         between.push_back (writeSong (song, SongPart::undoableWithoutSwitches));
     }
 
+    compilePlan();
     compare (what, "Undo doesn't give the song as it was before", before, writeSong (song, SongPart::undoable));
 
     for (int i = 0; i < steps; ++i)
         redo (song);
 
+    compilePlan();
     compare (what, "Redo doesn't give the song as it was after", after, writeSong (song, SongPart::undoable));
 
     if (getDepth() != depthAfter)
@@ -293,6 +318,7 @@ void UndoCheck::run (const juce::String& what, const std::function<void()>& chan
 void UndoCheck::stepBackOrForth (const juce::String& what, const std::function<void()>& undoOrRedo)
 {
     undoOrRedo();
+    compilePlan();
     const auto step = getDepth() - base;
 
     if (step < 0 || step >= (int) history.size())
@@ -321,6 +347,7 @@ void UndoCheck::walkBackAndForth()
     auto same = true;
     const auto compareStep = [this, &same] (int step, const char* direction)
     {
+        compilePlan();
         const auto now = writeSong (song, SongPart::undoableWithoutSwitches);
 
         if (same && now != history[(size_t) step])

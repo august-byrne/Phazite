@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
 #include "HeldFile.h"
+#include "PlanCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -29,6 +30,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
@@ -38,7 +40,9 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -612,6 +616,50 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
     REQUIRE (phazite::isAudioState (reopenedClip));
     CHECK (phazite::getClipFile (reopenedSong, reopenedClip) == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
+}
+
+TEST_CASE ("A plan after a first save plays the audio of the project's new folder, its file asked about again")
+{
+    // Known bug 124's review: a player keeps each track's audio from plan to plan; its files are found by paths within the
+    // project's folder, so a first save or Save As, which moves the project, makes every track's audio placed again.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder.getChildFile ("Unsaved"), "Untitled");
+    auto& song = project->getSong();
+    const auto track = phazite::ensureTracks (song, 1).front();
+    const auto kick = phazite::test::writeSound (temp.folder.getChildFile ("Samples").getChildFile ("Kick.wav"), 0.5);
+
+    for (const auto beat : { 0.0, 4.0, 8.0 })
+        REQUIRE (phazite::importFile (song, track, kick, beats (beat)).isValid());
+
+    phazite::SongPlayer kept (song);
+    const auto audioOf = [track] (const phazite::engine::Plan& plan)
+    {
+        for (const auto& strip : plan.strips)
+            if (strip.id == (std::int64_t) track.getRaw())
+                return strip.audio;
+
+        return std::vector<phazite::engine::AudioRegion>();
+    };
+
+    const auto before = kept.compile (44100.0, 512, std::nullopt);
+    REQUIRE (audioOf (*before).size() == 3);
+
+    std::optional<juce::Result> moved;
+    REQUIRE (project->moveTo (temp.folder.getChildFile ("Projects"), "Beat", [&moved] (const juce::Result& r) { moved = r; }) == nullptr);
+    REQUIRE (moved.has_value());
+    REQUIRE (moved->wasOk());
+
+    const auto asked = phazite::SongPlayer::countFilesAsked();
+    const auto after = kept.compile (44100.0, 512, std::nullopt);
+    CHECK (phazite::SongPlayer::countFilesAsked() - asked == 1); // the new folder's copy, once for its three clips
+
+    // What plays is the copy, opened anew, as a whole compile plays it.
+    const auto audio = audioOf (*after);
+    REQUIRE (audio.size() == 3);
+    CHECK (audio[0].file != audioOf (*before)[0].file);
+    const auto differences =
+        phazite::test::describePlanDifferences (*after, *phazite::SongPlayer (song).compile (44100.0, 512, std::nullopt));
+    CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n").toStdString());
 }
 
 TEST_CASE ("A project opens with the playhead at the song's start, where playback starts")

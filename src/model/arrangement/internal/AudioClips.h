@@ -9,10 +9,12 @@
 
 #include "devices/stretch/Stretch.h"
 #include "engine/audio/AudioRegion.h"
+#include "engine/core/TempoMap.h"
 #include "model/arrangement/PlaylistValues.h"
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/transport/TempoValues.h"
 
 #include <functional>
 #include <optional>
@@ -65,6 +67,26 @@ struct PlayedPosition
 
 juce::File getPlayedFile (const Song&, const juce::ValueTree& clipState);
 PlayedPosition getPlayedPosition (const Song&, const juce::ValueTree& clipState);
+
+// The song's tempo as audio clips' places need it, read once for many clips (a plan's compile reads it once for all the
+// song's: known bug 124): its map in seconds (getTempoMap()) and its changes.
+struct ClipTempo
+{
+    explicit ClipTempo (const Song&);
+
+    engine::TempoMap map;
+    std::vector<TempoChange> changes;
+};
+
+// What plays for a clip, each worked out once, as getPlayedFile(), getPlayedPosition() and getFittedFades() give them.
+struct PlayedClip
+{
+    juce::File file;
+    PlayedPosition position;
+    double fadeIn = 0.0, fadeOut = 0.0;
+};
+
+PlayedClip getPlayedClip (const Song&, const juce::ValueTree& clipState, const ClipTempo&);
 
 // Where it is in beats: from its start for as long as its part takes to play.
 BeatRange getAudioClipRange (const Song&, const juce::ValueTree& clipState);

@@ -1356,6 +1356,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/PerformanceCounts.h
         tests/PerformanceGateTests.cpp
         tests/PianoRollTests.cpp
+        tests/PlanCheck.cpp
+        tests/PlanCheck.h
         tests/PlaybackConditionTests.cpp
         tests/PlaybackConditions.h
         tests/PlaybackTests.cpp

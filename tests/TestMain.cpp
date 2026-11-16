@@ -10,6 +10,7 @@
 #include "model/base/internal/SongIndex.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginHost.h"
 
 #include <algorithm>
@@ -566,7 +567,14 @@ struct AssertionNetListener final : public doctest::IReporter
         // those compares its songs' whole indexes with a walk at its end instead (isExact()).
         const std::string suite = data.m_test_suite != nullptr ? data.m_test_suite : "";
         const auto isGate = std::string (data.m_name).rfind ("Performance gate:", 0) == 0;
-        phazite::SongIndex::setChecking (! isGate && suite != "benchmark" && suite != "benchmark-gate" && suite != "long-run");
+        const auto check = ! isGate && suite != "benchmark" && suite != "benchmark-gate" && suite != "long-run";
+        phazite::SongIndex::setChecking (check);
+
+        // And what each plan keeps from the plan before compared with the song (model/playback/internal/SongPlayer.h), so that
+        // every test that plays the song holds the plans it compiles from what changed to those a whole compile would give:
+        // in the long run too, whose edits over an hour of music are those likeliest to find a change a plan misses (its
+        // share of the checks bounds their cost), but not in the timings and the counts of work.
+        phazite::SongPlayer::setChecking (check || suite == "long-run");
     }
 
     // What audio threads noted, taken while the test case can still fail by it: at each check it makes, and as each run

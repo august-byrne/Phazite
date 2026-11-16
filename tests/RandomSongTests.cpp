@@ -2,15 +2,20 @@
 // What must hold for any song the model can make, checked on songs made by random edits from seeds (RandomEdits.h): its
 // text reads back as the same song, opens as the same song (makeSong() changes nothing in a song the model made), and
 // passes the consistency check (SongCheck.h); its version's pieces join into the same song; and making one song like
-// another leaves no difference between them. Each failure says its seed, which makes the same song again.
+// another leaves no difference between them; and a player that compiles a plan after each edit, from what the edit
+// changed, plays as a fresh player's whole compile does. Each failure says its seed, which makes the same song again.
 #include "GoldenFiles.h"
+#include "PlanCheck.h"
 #include "RandomEdits.h"
 #include "SongCheck.h"
 #include "SongIDs.h"
 #include "TestHelpers.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
+#include "model/commands/internal/Undo.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/Project.h"
 #include "model/versions/internal/ApplySong.h"
 #include "model/versions/internal/SongDiff.h"
@@ -177,5 +182,62 @@ TEST_CASE ("Random songs: a song made like another, which went on from it, has n
         INFO ("B made like A as it was: " << phazite::findChanges (before, b->getState()).size() << " differences left");
         CHECK (phazite::findChanges (before, b->getState()).empty());
         checkIDs (*b);
+    }
+}
+
+TEST_CASE ("Random songs: each edit's plan, compiled from what the edit changed, plays as a whole compile of the song does")
+{
+    // Known bugs 124 and 145's review: a player keeps a track's notes and audio, a channel's devices' values and a curve from
+    // plan to plan until the song says they changed (model/playback/internal/SongPlayer.h). A player that lives through
+    // random edits, their undos and redos, and the whole song made like an earlier one (as a merge or a branch switch makes
+    // it), compiled after each, against a fresh player's whole compile of the song then: the two plans play alike, and the
+    // checks of what the first kept (on in the tests) find nothing stale. A tenth of the songs: each edit compiles twice.
+    TemporaryFolder sounds, cache;
+
+    for (int i = 0; i < juce::jmax (1, getSongCount() / 10); ++i)
+    {
+        const auto seed = 20261116 + i;
+        INFO ("seed " << seed);
+        auto song = phazite::createSong();
+        song->setCacheFolder (cache.folder.getChildFile (juce::String (seed))); // for its frozen tracks' files and its renders
+        RandomEdits edits (*song, seed, sounds.folder);
+        edits.freezes = true;
+        phazite::SongPlayer kept (*song);
+        auto earlier = song->getState().createCopy();
+
+        for (int step = 0; step < editsPerSong; ++step)
+        {
+            INFO ("step " << step);
+            const auto kind = edits.random.nextInt (10);
+
+            if (kind == 0 && song->getUndoManager().canUndo())
+            {
+                phazite::undo (*song);
+            }
+            else if (kind == 1 && song->getUndoManager().canRedo())
+            {
+                phazite::redo (*song);
+            }
+            else if (kind == 2)
+            {
+                const auto now = song->getState().createCopy();
+                phazite::makeSongLike (*song, earlier);
+                earlier = now;
+            }
+            else
+            {
+                const phazite::UndoStep change (*song, "Random Edit");
+                edits.edit();
+            }
+
+            // The renders of the pitched clips made, as an export makes those that are missing, so that their audio plays and
+            // is kept.
+            phazite::renderMissingClipAudio (*song);
+
+            const auto plan = kept.compile (44100.0, 512, std::nullopt);
+            const auto whole = phazite::SongPlayer (*song).compile (44100.0, 512, std::nullopt);
+            const auto differences = describePlanDifferences (*plan, *whole);
+            CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n").toStdString());
+        }
     }
 }

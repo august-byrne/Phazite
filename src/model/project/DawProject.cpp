@@ -955,6 +955,7 @@ namespace
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
         juce::String getTitle() const override { return "Exporting " + title + " as DAWproject"; }
+        std::optional<RenderWait> getWait() const override { return render != nullptr ? render->findWait() : std::nullopt; }
 
     private:
         Song& song;

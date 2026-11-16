@@ -27,6 +27,8 @@
 namespace phazite
 {
 class PluginInstances;
+struct ClipTempo;
+struct PlayedClip;
 
 class SongPlayer : private juce::ValueTree::Listener
 {
@@ -119,6 +121,26 @@ public:
     void setComparison (std::optional<Comparison>);
     engine::ComparisonState* getComparisonState() const noexcept { return comparisonState.get(); }
 
+    // What a plan keeps from the plan before, unless the song changed there since (known bugs 124 and 145: every edit read
+    // the whole song again, its devices' values above all): each track's notes and audio clips, and the values set by hand
+    // of each of Phazite's own devices on a channel whose own elements didn't change. While checking is on (as the tests run
+    // it: tests/TestMain.cpp), each kept part is compared with what reading the song again gives, and a difference is a JUCE
+    // assertion, which fails the test it fires in: every part in a small song, a share of them in a big one. Off unless set;
+    // any thread.
+    static void setChecking (bool) noexcept;
+    static bool isChecking() noexcept;
+
+    // How many of Phazite's own devices had their values read from the song for a plan, how many automation curves were read,
+    // and how many times the disk was asked about an audio file, by every player since the program started (the gates run
+    // without checking): for the speed gates (tests/PerformanceGateTests.cpp), which count what an edit's plan reads.
+    static std::uint64_t countDevicesRead() noexcept;
+    static std::uint64_t countCurvesRead() noexcept;
+    static std::uint64_t countFilesAsked() noexcept;
+
+    // Whether the checks look at a part (by its place among those a plan keeps) of a plan (by its number), checking one part
+    // in every so many: any `every` plans in a row look at each part once. For the tests of the choice.
+    static bool isCheckedPart (std::uint64_t part, std::uint64_t plan, std::uint64_t every) noexcept;
+
 private:
     Song& song;
     PluginInstances* const plugins;
@@ -195,30 +217,83 @@ private:
     engine::FileReader* reader = nullptr;
     const std::atomic<std::uint64_t>* blocks = nullptr;
 
-    // The song's automation, each curve by its device's ID and its parameter's, read again for each plan.
-    std::map<std::pair<std::uint64_t, juce::String>, std::shared_ptr<const engine::Curve>> curves;
+    // The song's automation, each curve by its device's ID and its parameter's (those without points apart), read again
+    // only once something of it changed (or every one, after a change of the curves themselves).
+    using CurveKey = std::pair<std::uint64_t, juce::String>;
+    std::map<CurveKey, std::shared_ptr<const engine::Curve>> curves;
+    std::set<CurveKey> emptyCurves;
     std::map<std::uint64_t, std::int64_t> faders; // each fader's track, by the fader's ID (the master's under 0)
     void readCurves();
     std::shared_ptr<const engine::Curve> findCurve (std::uint64_t device, const juce::String& parameter) const;
     void addFaderAutomation (engine::Plan::Strip&, const juce::ValueTree& channelState, bool isMaster);
 
-    // Each track's notes as the plans play them, by its ID, compiled again only once something in its clips changed
-    // (the song tells the player, which listens to it itself, so that every player's plans follow it): in a big song a
-    // change is in one track, and its notes are many.
+    // What changed in the song since the plan compiled last, as the player hears it (it listens to the song itself, so that
+    // every player's plans follow it): the tracks whose clips changed (their notes and audio), the channels (by their
+    // tracks' IDs, the master's 0) whose devices' values may have changed, the curves whose points changed, and whether
+    // the tempo did; or all of a kind. Taken whole as a compile starts (compiling), so that a change heard meanwhile is
+    // the next plan's.
+    struct Changes
+    {
+        std::set<std::int64_t> notes, channels, sounds; // sounds: the devices whose SOUNDS changed, which a kept node loads again
+        std::set<CurveKey> curves;
+        bool allNotes = false, allChannels = false, allCurves = false, tempo = false;
+
+        bool hasNotes (std::int64_t track) const { return allNotes || notes.contains (track); }
+        bool hasChannel (std::int64_t channel) const { return allChannels || channels.contains (channel); }
+        bool hasCurve (const CurveKey& key) const { return allCurves || curves.contains (key); }
+    };
+
+    Changes changes, compiling;
+
+    // Each track's notes and audio clips as the plans play them, by its ID, compiled again only once something in its clips
+    // changed: in a big song a change is in one track, and its notes are many.
     std::map<std::int64_t, std::shared_ptr<const engine::NoteSequence>> notes;
-    std::set<std::int64_t> notesChanged, usedNotes;
+    std::set<std::int64_t> usedNotes;
     juce::ValueTree songState;
     std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
-    void markNotes (const juce::ValueTree& changed);    // the track of the clip it is, or is in
-    void markTracksIn (const juce::ValueTree& element); // it, if a track, and the tracks it holds
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { markNotes (tree); }
+    void markChange (const juce::ValueTree& changed, bool structure); // an element added, removed or moved in it
+    void markTracksIn (const juce::ValueTree& element);               // it, if a track or the master, and the tracks it holds
+    void markSoundsIn (const juce::ValueTree& element);               // the devices in it, as their sounds came with it
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
 
-    std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&);
+    // Whether a part kept from the plan before is checked against the song now (setChecking()): all of them while the
+    // player plays few devices, a share otherwise, one part in every so many, its phase moving on with each plan.
+    std::uint64_t plansCompiled = 0, checkedParts = 0, checkEvery = 1;
+    bool shouldCheck();
+
+    // A track's audio clips as its strip plays them, kept from plan to plan (above): their regions, each region's clip (by
+    // its ID) and file (by its key in files), and whether every clip's file was there (one that isn't, a render not made
+    // yet, is looked for again by the next plan). Made again for every track once the tempo, the rate, the song's folders
+    // or what reads the files changes. A frozen track's file isn't kept (it is written again in its place as the track is
+    // frozen again).
+    struct TrackAudio
+    {
+        std::vector<engine::AudioRegion> regions;
+        std::vector<std::int64_t> clips;
+        std::vector<juce::String> files;
+        bool whole = true;
+    };
+
+    std::map<std::int64_t, TrackAudio> audio;
+    juce::String audioFolders; // the song's folders the kept tracks' files were found in
+    // What is known of each file a plan played (getAudioFile()'s key, by its path), kept until it changes: asked of the
+    // disk again only for the clips of a track that changed (the file a clip plays may have been written again in its
+    // place), a frozen track's file and a version's bounce, once for a plan however many ask; a file that wasn't there
+    // isn't kept. Without asking again, a file another program writes again in its place, while no clip of its track
+    // changes, plays as it was until the project opens again.
+    std::map<juce::String, juce::String> fileKeys;
+    std::set<juce::String> askedForPlan;
+    static juce::String describeFile (const juce::File&); // its key, from the disk
+    juce::String getFileKey (const juce::File&, bool askAgain);
+    std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&, bool askAgain, juce::String* key = nullptr);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
-    void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState);
+    void placeRegion (engine::AudioRegion&, const juce::ValueTree& clipState, const PlayedClip&) const;
+    TrackAudio makeAudio (const juce::ValueTree& trackState, std::optional<ClipTempo>&, bool askAgain); // the tempo read once
+    void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState, std::optional<ClipTempo>&);
+    void checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>&);
     bool addFrozenFile (engine::Plan::Strip&, const juce::ValueTree& trackState);
 
     // The comparison, and what plays it from plan to plan: made anew for another rate or block size, still hearing what it
@@ -233,9 +308,17 @@ private:
     std::vector<int> getHeardInput (const juce::ValueTree& trackState) const;
 
     std::shared_ptr<engine::StripState> getStrip (std::int64_t id);
-    std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState);
+    // What plays a device, its values set by hand read again from the song if its channel changed (Changes::channels).
+    std::shared_ptr<engine::DeviceNode> getDevice (const juce::ValueTree& deviceState, bool channelChanged);
     std::shared_ptr<engine::DeviceNode> getPluginDevice (const juce::ValueTree& deviceState);
     static int findParameter (const engine::DeviceNode&, const juce::String& id); // its index, or -1
+
+    // A device's values set by hand, in its description's order, as the song holds them (readValueSetByHand()), each
+    // parameter's name made once for each kind of device: a juce::Identifier made from a string is looked up in JUCE's pool
+    // of names, under a lock, which was most of a big song's compile (known bug 145).
+    std::map<const devices::DeviceInfo*, std::vector<juce::Identifier>> parameterNames;
+    std::vector<float> readValues (const devices::DeviceInfo&, const juce::ValueTree& deviceState);
+    void checkValues (const engine::DeviceNode&, const juce::ValueTree& deviceState); // kept ones, while checking
 
     // A plug-in in a helper: the parameters whose values the engine sends it with each block, which the plan's automation
     // (but while written by hand) and modulation move.
@@ -284,7 +367,6 @@ private:
     std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
     void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
     void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);
-    void setValues (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSound (engine::DeviceNode&, const juce::ValueTree& deviceState, const juce::Identifier& property); // its pad's or oscillator's
     void setChannel (const juce::ValueTree& channelState, bool isMaster);
