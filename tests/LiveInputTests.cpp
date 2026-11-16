@@ -94,7 +94,7 @@ LiveNote playUntil (phazite::test::HostedDevice& device, const std::function<boo
 
     while (! wanted (note) && juce::Time::getMillisecondCounter() - start < (juce::uint32) phazite::test::hangTimeout)
     {
-        phazite::test::settle (250);
+        phazite::test::dispatchPendingMessages();
         note = playNote (device);
     }
 
@@ -239,7 +239,7 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     const auto& tracks = open.tracks;
     addInstrument (song, tracks[0]);
     phazite::routeLiveMidiInput (song);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
 
     // A note played between two blocks, as a MIDI input plays one, put as far into the next block as it came, and sounding
     // from there at once. Played until it sounds: the engine is given the song in the message loop's own time, which a
@@ -253,7 +253,7 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
 
     // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
     const auto limiter = addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     phazite::devices::Limiter itsDSP;
     itsDSP.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
     const auto latency = itsDSP.getLatencySamples();
@@ -264,7 +264,7 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
 
     // ...but not once it is switched off.
     phazite::setDeviceOn (song, limiter, false);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     const auto off = playUntil (device, [atOnce] (const LiveNote& note) { return isNear (note.toSound(), atOnce); });
     CHECK (off.isPlacedAsPlayed());
     CHECK (isNear (off.toSound(), atOnce));
@@ -281,21 +281,21 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     addInstrument (song, tracks[0]);
     addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
     phazite::routeLiveMidiInput (song);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
 
     const auto compensated = playUntil (device, [] (const LiveNote& note) { return note.toSound() > 90; }).toSound();
     CHECK (compensated > 90); // the limiter's look-ahead, about 99 samples
 
     auto& host = getPlaybackHost();
     host.setLowLatency (true);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     CHECK (host.isLowLatency());
     const auto low = playUntil (device, [] (const LiveNote& note) { return note.toSound() >= 0 && note.toSound() < 16; }).toSound();
     CHECK (low >= 0);
     CHECK (low < 16);
 
     host.setLowLatency (false);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     CHECK (isNear (playUntil (device, [compensated] (const LiveNote& note) { return isNear (note.toSound(), compensated); }).toSound(),
                    compensated));
 }
@@ -332,7 +332,7 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     }
 
     phazite::routeLiveMidiInput (song);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
 
     // Once the engine plays the note, in the block after it came, as far into it as it came, it sounds after the master's
     // look-ahead, and every note after it as soon. Each is measured by the engine's clock from where the engine put it,

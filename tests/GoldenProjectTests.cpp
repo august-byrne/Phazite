@@ -89,7 +89,7 @@ std::unique_ptr<phazite::Project> openProject (const juce::File& file)
     auto project = phazite::Project::open (file, false, error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     return project;
 }
 
@@ -447,7 +447,7 @@ void freeze (phazite::ProjectContext& context, phazite::TrackID track)
     std::optional<juce::Result> result;
     const auto render = phazite::startFreeze (context, track, [&result] (const juce::Result& r) { result = r; });
     REQUIRE (render != nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }));
     REQUIRE_MESSAGE (result->wasOk(), result->getErrorMessage().toStdString());
     REQUIRE (phazite::isFrozen (context, track));
 }
@@ -1204,7 +1204,7 @@ TEST_SUITE ("golden")
     {
         phazite::test::TemporaryFolder temp;
         auto project = createProject (temp.folder, "Empty");
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         saveReopenAndSaveAgain (std::move (project), "empty",
                                 "A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
@@ -1220,7 +1220,7 @@ TEST_SUITE ("golden")
         phazite::ProjectContext context { phazite::test::getEngineContext() }; // the project open, as the app has it
         setSong (context, &project->getSong());
         addRepresentativeContent (*project, context, temp.folder.getChildFile ("Sounds"));
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         // The autosave, and a copy saved as another project, are compared with the project's file below.
         REQUIRE (project->autosave().wasOk());

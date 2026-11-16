@@ -530,6 +530,7 @@ TEST_CASE ("Ducking, the compressor plays its key while its editor listens, thro
         return (float) (0.25 * std::sin (1000.0 * at) + 0.5 * std::sin (30.0 * at));
     };
 
+    phazite::test::HeldClock clock; // which moves only as the test says, however long the blocks take to play
     compressor.listenToKey();
     CHECK (compressor.isPlayingKey());
     const auto heard = play (compressor, values, 4800, sound, key);
@@ -541,9 +542,11 @@ TEST_CASE ("Ducking, the compressor plays its key while its editor listens, thro
 
     CHECK (loudest == doctest::Approx (0.25f).epsilon (0.1)); // the 1 kHz sine, and not the rumble
 
-    // Half a second on by the clock, unless asked again, it stops, whether it played meanwhile or not; and fades back to the
-    // sound.
-    juce::Thread::sleep (600);
+    // Half a second on by the clock, unless asked again, it stops, whether it played meanwhile or not, and not before; and
+    // fades back to the sound.
+    clock.advance (499.0);
+    CHECK (compressor.isPlayingKey());
+    clock.advance (2.0);
     CHECK_FALSE (compressor.isPlayingKey());
     play (compressor, values, 4800, sound, key);
     CHECK_FALSE (compressor.overridesMix());

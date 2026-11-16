@@ -133,12 +133,12 @@ public:
                 juce::AudioBuffer<float> buffer (2, blockSize);
                 buffer.clear();
                 note.blockStart = engine.getClock();
-                const auto blockStarted = juce::Time::getMillisecondCounterHiRes();
+                const auto blockStarted = phazite::devices::Clock::getMilliseconds();
                 device->process (buffer); // the engine reads the wall clock somewhere in here
-                const auto blockEnded = juce::Time::getMillisecondCounterHiRes();
-                const auto before = juce::Time::getMillisecondCounterHiRes();
+                const auto blockEnded = phazite::devices::Clock::getMilliseconds();
+                const auto before = phazite::devices::Clock::getMilliseconds();
                 playNote();
-                const auto after = juce::Time::getMillisecondCounterHiRes();
+                const auto after = phazite::devices::Clock::getMilliseconds();
 
                 // The engine's block started between blockStarted and blockEnded, the note came between before and after
                 // (and a sample more each way, for the engine's rounding).

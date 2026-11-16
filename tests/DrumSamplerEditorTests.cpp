@@ -306,7 +306,8 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its start and 
     CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 36 Start"));
     CHECK_FALSE (s.getUndoManager().canRedo());
 
-    // As it plays, its playhead moves along it.
+    // As it plays, its playhead moves along it (by a clock held still, so that the audition can't wait too long for its block).
+    const phazite::test::HeldClock clock;
     sampler->audition (36, 1.0f);
     playNext (*sampler);
     CHECK (sampler->getPlayhead (36).get() > 0.0f);
@@ -321,7 +322,8 @@ TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however l
     phazite::test::HostedDevice output;
     phazite::test::TestSong song;
     const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // the song, with the sampler, handed to the engine for its next block
+    const phazite::test::HeldClock clock;     // which a click can't wait too long for its block by
 
     phazite::ui::DrumSamplerEditor editor (phazite::getDeviceHandle (song.context, drums));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());

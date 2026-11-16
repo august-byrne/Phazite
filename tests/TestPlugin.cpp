@@ -23,7 +23,7 @@ namespace
     // background as it opens: model/plugins/internal/PluginInstances.h).
     SandboxedInstance& getInstance (const Song& song, DeviceID id)
     {
-        dispatchMessagesUntil ([&] { return getPluginStatus (song, id) != PluginInstances::Status::loading; }, 60000);
+        dispatchMessagesUntil ([&] { return getPluginStatus (song, id) != PluginInstances::Status::loading; });
         auto* instance = findPluginInstance (song, id);
         REQUIRE (instance != nullptr);
         return *instance;

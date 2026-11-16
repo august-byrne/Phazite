@@ -592,6 +592,7 @@ TEST_CASE ("The exciter's parameters move without a click, and Listen plays what
         CHECK_FALSE (exciter.overridesMix());
         CHECK (getTone (whole.data(), 4800, 4800, 200.0, rate).getLevel() == doctest::Approx (0.25).epsilon (0.01));
 
+        phazite::test::HeldClock clock; // which moves only as the test says, however long the blocks take to play
         exciter.listenToAdded();
         CHECK (exciter.isPlayingAdded());
         const auto added = run();
@@ -599,6 +600,14 @@ TEST_CASE ("The exciter's parameters move without a click, and Listen plays what
         CHECK (getTone (added.data(), 4800, 4800, 200.0, rate).getLevel() < 0.25 * 1.0e-4); // the low tone is gone
         CHECK (getTone (added.data(), 4800, 4800, 8000.0, rate).getLevel()
                == doctest::Approx (0.01 * Exciter::getBandGain (values, 8000.0, rate)).epsilon (0.02)); // the band, as much as is added
+
+        clock.advance (499.0);
+        CHECK (exciter.isPlayingAdded());
+        clock.advance (2.0);
+        CHECK_FALSE (exciter.isPlayingAdded());
+        const auto again = run();
+        CHECK_FALSE (exciter.overridesMix());
+        CHECK (getTone (again.data(), 4800, 4800, 200.0, rate).getLevel() == doctest::Approx (0.25).epsilon (0.01));
     }
 }
 

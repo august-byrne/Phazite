@@ -70,7 +70,7 @@ public:
     // a block and a half (any thread). Before the first block after a locate, where it was asked to be.
     double getPlayheadBeat() const noexcept;
 
-    // Where the playhead was, or is, at a moment in milliseconds by juce::Time::getMillisecondCounterHiRes() (any thread):
+    // Where the playhead was, or is, at a moment in milliseconds by devices::Clock (JUCE's getMillisecondCounterHiRes() unless a test holds it) (any thread):
     // in the block that was playing then, of the last few seconds' (PlayheadClock.h), each stamped as it started on a clock
     // smoothed over the blocks, so that the window's frames, each asking at its own time, see it move evenly however the
     // blocks come. Before the first block after a locate, where it was asked to be.

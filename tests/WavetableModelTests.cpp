@@ -4,6 +4,7 @@
 // writes them; and presets that carry them to another project.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -39,7 +40,7 @@ struct Song
         synth = phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, WavetableSynth::typeID));
         REQUIRE (synth.isValid());
         REQUIRE (phazite::isWavetableSynth (song, synth));
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         song.getUndoManager().clearUndoHistory();
     }
 

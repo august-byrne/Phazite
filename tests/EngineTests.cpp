@@ -1141,30 +1141,30 @@ TEST_CASE ("The engine tells of blocks that started more than two blocks' length
     juce::AudioBuffer<float> block (2, 480);
     float* channels[] = { block.getWritePointer (0), block.getWritePointer (1) };
 
-    // Back to back: none late, unless the machine kept this thread from running for longer than two blocks between them
-    // (a busy machine can), which the time measured around them tells.
-    const auto before = juce::Time::getMillisecondCounterHiRes();
+    // By a clock that moves only as the test says (devices/core/Clock.h), however late this thread runs. Back to back: none
+    // late, and no gap.
+    phazite::test::HeldClock clock;
     player.process (channels, 2, 480);
     player.process (channels, 2, 480);
-    const auto took = (juce::Time::getMillisecondCounterHiRes() - before) / 1000.0;
     auto times = player.takeBlockTimes();
     CHECK (times.blockLength == doctest::Approx (0.01));
-    CHECK (times.longestGap <= took + 0.001);
+    CHECK (times.longestGap == doctest::Approx (0.0));
+    CHECK (times.late == 0);
 
-    if (took < 0.02)
-        CHECK (times.late == 0);
-
-    // One 30 ms after the one before: late, and told of once.
-    juce::Thread::sleep (30);
+    // One just under two blocks' length after the one before isn't late; one 30 ms after is, and is told of once.
+    clock.advance (19.0);
+    player.process (channels, 2, 480);
+    CHECK (player.takeBlockTimes().late == 0);
+    clock.advance (30.0);
     player.process (channels, 2, 480);
     times = player.takeBlockTimes();
     CHECK (times.late == 1);
-    CHECK (times.longestGap >= 0.029);
+    CHECK (times.longestGap == doctest::Approx (0.03));
     CHECK (times.longestBlock < times.longestGap);
     CHECK (player.takeBlockTimes().late == 0);
 
     // A device started again (prepared): its first block is no gap.
-    juce::Thread::sleep (30);
+    clock.advance (30.0);
     player.prepare (rate, 480);
     player.process (channels, 2, 480);
     CHECK (player.takeBlockTimes().late == 0);
@@ -3537,8 +3537,9 @@ TEST_CASE ("The engine's workers run each task of a job once, on the audio threa
 
 TEST_CASE ("The engine's workers take a long job's tasks beside the thread that starts it, wherever real-time threads aren't allowed too")
 {
-    // Tasks of 20 microseconds each, long enough for a worker asleep to wake: some run on a worker. (On Linux without
-    // real-time rights, JUCE started no thread at all for a real-time one, and the audio thread took every task.)
+    // Tasks of 20 microseconds each, long enough for a worker asleep to wake, in jobs one after another until a worker has
+    // taken one, however late the workers wake on a busy machine (a hang's time at most): some run on a worker. (On Linux
+    // without real-time rights, JUCE started no thread at all for a real-time one, and the audio thread took every task.)
     engine::Workers workers;
     workers.setNumThreads (4);
 
@@ -3549,17 +3550,18 @@ TEST_CASE ("The engine's workers take a long job's tasks beside the thread that 
     } job;
 
     job.caller = std::this_thread::get_id();
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (phazite::test::hangTimeout);
 
-    for (int round = 0; round < 50; ++round)
+    while (job.elsewhere.load() == 0 && std::chrono::steady_clock::now() < until)
     {
         workers.run (
             64,
             [] (void* context, int) noexcept
             {
                 auto& running = *static_cast<Job*> (context);
-                const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds (20);
+                const auto taskEnd = std::chrono::steady_clock::now() + std::chrono::microseconds (20);
 
-                while (std::chrono::steady_clock::now() < until)
+                while (std::chrono::steady_clock::now() < taskEnd)
                 {
                 }
 

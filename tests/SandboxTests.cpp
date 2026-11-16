@@ -100,7 +100,7 @@ struct Told final : sandbox::RemoteInstance::Listener
     void editorKey (bool, int, int) override {}
 };
 
-bool waitFor (const std::function<bool()>& condition, int milliseconds = 5000)
+bool waitFor (const std::function<bool()>& condition, int milliseconds = phazite::test::hangTimeout)
 {
     return phazite::test::dispatchMessagesUntil (condition, milliseconds);
 }
@@ -264,15 +264,15 @@ TEST_CASE ("A plug-in opens in a helper from its description, with its parameter
 
     REQUIRE (playBlock (*effect, 128, 0.5f) == sandbox::BlockChannel::Played::done);
     CHECK (effect->getChannel().getChannel (1)[100] == doctest::Approx (0.5f));
-    CHECK (effect->getParameterText (0, 0.5f, 5000) == std::optional (juce::String ("50 %")));
+    CHECK (effect->getParameterText (0, 0.5f, phazite::test::hangTimeout) == std::optional (juce::String ("50 %")));
 
     // A plug-in it doesn't have: none, with why.
     juce::String error;
     auto missing = phazite::test::TestPlugins::getDescription (Kind::effect);
     missing.fileOrIdentifier = "PhaziteTestNothing";
-    CHECK (
-        sandbox::RemoteInstance::open (helper.get(), phazite::test::toXml (missing), {}, 48000.0, phazite::test::makeLimits(), error, 5000)
-        == nullptr);
+    CHECK (sandbox::RemoteInstance::open (helper.get(), phazite::test::toXml (missing), {}, 48000.0, phazite::test::makeLimits(), error,
+                                          phazite::test::hangTimeout)
+           == nullptr);
     CHECK (error.isNotEmpty());
     helper.forget (*effect);
 }
@@ -308,7 +308,7 @@ TEST_CASE ("A plug-in's state goes to Phazite and back, and opens a new instance
     addChange (*effect, indexOf (*effect, "1"), 0, 0.3f);
     REQUIRE (playBlock (*effect, 64, 1.0f) == sandbox::BlockChannel::Played::done);
 
-    const auto state = effect->getState (5000);
+    const auto state = effect->getState (phazite::test::hangTimeout);
     REQUIRE (state.has_value());
     CHECK (state->getSize() == 8); // its two values
 
@@ -321,7 +321,7 @@ TEST_CASE ("A plug-in's state goes to Phazite and back, and opens a new instance
     juce::MemoryBlock full;
     juce::MemoryOutputStream (full, false).writeFloat (1.0f);
     juce::MemoryOutputStream (full, true).writeFloat (0.5f);
-    REQUIRE (again->setState (full, 5000));
+    REQUIRE (again->setState (full, phazite::test::hangTimeout));
     REQUIRE (playBlock (*again, 64, 1.0f) == sandbox::BlockChannel::Played::done);
     CHECK (again->getChannel().getChannel (0)[10] == doctest::Approx (1.0f));
     helper.forget (*effect);
@@ -468,7 +468,7 @@ TEST_CASE ("A plug-in plays another channel at another sample rate, and two in o
     auto first = helper.open (Kind::effect);
     auto second = helper.open (Kind::effect);
 
-    REQUIRE (first->prepare (96000.0, phazite::test::makeLimits (1024), 5000));
+    REQUIRE (first->prepare (96000.0, phazite::test::makeLimits (1024), phazite::test::hangTimeout));
     REQUIRE (playBlock (*first, 1024, 0.5f) == sandbox::BlockChannel::Played::done);
     CHECK (first->getChannel().getChannel (1)[1000] == doctest::Approx (0.5f));
 
@@ -518,7 +518,7 @@ TEST_CASE ("A plug-in that crashes ends its helper alone, which Phazite hears of
         auto crashing = helper.open (Kind::crash);
         addChange (*crashing, indexOf (*crashing, "20"), 0, 1.0f);
         CHECK (playBlock (*crashing, 128, 0.5f, 2'000'000'000) == sandbox::BlockChannel::Played::late);
-        REQUIRE (waitFor ([&] { return helper.getLosses() > 0; }, 10000));
+        REQUIRE (waitFor ([&] { return helper.getLosses() > 0; }));
         CHECK_FALSE (helper.get().isRunning());
         CHECK (helper.getLosses() == 1);
         helper.forget (*crashing);
@@ -528,13 +528,13 @@ TEST_CASE ("A plug-in that crashes ends its helper alone, which Phazite hears of
     // a read that timed out once ended it).
     TestHelper helper;
     auto effect = helper.open (Kind::effect);
-    juce::Thread::sleep (6000);
+    juce::Thread::sleep (6000); // a lower bound only: at least six quiet seconds, however many more
     CHECK (helper.get().isRunning());
     REQUIRE (playBlock (*effect, 128, 0.5f) == sandbox::BlockChannel::Played::done);
 
     helper.get().kill();
     CHECK_FALSE (helper.get().isRunning());
-    REQUIRE (waitFor ([&] { return helper.getLosses() > 0; }, 10000));
+    REQUIRE (waitFor ([&] { return helper.getLosses() > 0; }));
     CHECK (helper.getLosses() == 1);
     helper.forget (*effect);
 }
@@ -542,19 +542,26 @@ TEST_CASE ("A plug-in that crashes ends its helper alone, which Phazite hears of
 TEST_CASE ("A helper that doesn't connect to its pipe as it starts is ended once its time is up, and lost at once if it ends")
 {
     // Phazite's hello is a write, which waits for the helper to connect to the pipe: neither may leave it waiting for ever.
-    const auto failsSoon = [] (const juce::File& program, int timeoutMilliseconds)
+    // How long start() took, which fails.
+    const auto fails = [] (const juce::File& program, int timeoutMilliseconds)
     {
         sandbox::Helper helper (program);
         const auto from = juce::Time::getMillisecondCounterHiRes();
         CHECK_FALSE (helper.start (timeoutMilliseconds));
-        CHECK (juce::Time::getMillisecondCounterHiRes() - from < timeoutMilliseconds + 5000.0);
+        const auto took = juce::Time::getMillisecondCounterHiRes() - from;
         CHECK_FALSE (helper.isRunning());
+        return took;
     };
 
+    // (A start() that waited for ever would hang here: a hang's limit, however busy the machine.)
     SUBCASE ("It hangs before it connects: ended once the time start() gives it is up")
     {
         const EnvironmentVariable hangs ("PHAZITE_TEST_HOST_HANGS_AT_START", "1");
-        failsSoon (phazite::test::getTestHost(), 2000);
+        // Not before its time (however busy the machine); after it, at a hang's limit at the most (start() says only that it
+        // failed, not why: the time is all there is to tell a wait for ever from it).
+        const auto took = fails (phazite::test::getTestHost(), 2000);
+        CHECK (took >= 2000.0);
+        CHECK (took < phazite::test::hangTimeout);
     }
 
     SUBCASE ("It ends before it connects, as a helper that can't start does: lost at once")
@@ -566,12 +573,12 @@ TEST_CASE ("A helper that doesn't connect to its pipe as it starts is ended once
         const juce::File program ("/bin/false");
 #endif
         REQUIRE (program.existsAsFile());
-        failsSoon (program, 60000);
+        CHECK (fails (program, phazite::test::hangTimeout) < phazite::test::hangTimeout); // before its time is up
     }
 
     // The tests' helper starts as before.
     sandbox::Helper helper (phazite::test::getTestHost());
-    CHECK (helper.start (30000));
+    CHECK (helper.start (phazite::test::hangTimeout));
 }
 
 namespace
@@ -648,7 +655,7 @@ TEST_CASE ("Phazite's side ended by force leaves neither a helper nor its shared
 
     const juce::ScopeGuard endedAnyway { [&side] { side.kill(); } }; // however the case ends
 
-    // Its line, read a byte at a time (a read of more waits for all of it), within a minute: past that, the side is ended,
+    // Its line, read a byte at a time (a read of more waits for all of it), within a hang's limit: past that, the side is ended,
     // which ends the read.
     juce::String line;
     std::atomic<bool> read { false };
@@ -656,7 +663,7 @@ TEST_CASE ("Phazite's side ended by force leaves neither a helper nor its shared
     JoinedThread minute (read,
                          [&]
                          {
-                             const auto until = juce::Time::getMillisecondCounterHiRes() + 60000.0;
+                             const auto until = juce::Time::getMillisecondCounterHiRes() + phazite::test::hangTimeout;
 
                              while (! read && juce::Time::getMillisecondCounterHiRes() < until)
                                  juce::Thread::sleep (20);
@@ -689,12 +696,12 @@ TEST_CASE ("Phazite's side ended by force leaves neither a helper nor its shared
 
     // Ended by force, as a crash ends it: its helper goes with it, and nothing is left of its channel.
     REQUIRE (side.kill());
-    const auto gone = waitFor ([helperID] { return ! isProcessRunning (helperID); }, 20000);
+    const auto gone = waitFor ([helperID] { return ! isProcessRunning (helperID); });
     CHECK (gone);
 
     // Once Phazite's side has gone too: ended by force, it keeps the memory until Windows has taken its process apart, which
     // the helper's end can come before (under MSVC's AddressSanitizer it did, the nightly run of 2026-11-15).
-    CHECK (waitFor ([&channelName] { return sandbox::SharedMemory::open (channelName, 64) == nullptr; }, 20000));
+    CHECK (waitFor ([&channelName] { return sandbox::SharedMemory::open (channelName, 64) == nullptr; }));
 
     if (! gone)
         endProcess (helperID);

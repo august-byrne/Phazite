@@ -547,7 +547,7 @@ juce::String keepAndBounce (TestSong& song, const juce::String& name)
 
     const auto version = phazite::getLastVersion (song.context)->id;
     phazite::bounceVersion (song.context, version, song.renders);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
     REQUIRE (song.renders.finished[0].endsWith (": ok"));
     return version;
 }
@@ -1852,7 +1852,7 @@ TEST_SUITE ("realtime-audit")
 
         song.context.getSongSelection().selectOnly (track);
         song.run ("track.freeze");
-        REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }, 60000));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
         REQUIRE (song.renders.finished[0].endsWith (": ok"));
         REQUIRE (phazite::isFrozen (song.context, track));
 
@@ -1969,14 +1969,13 @@ TEST_SUITE ("realtime-audit")
         const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
         auto& previews = phazite::getPlaybackHost (phazite::test::getEngineContext()).getPreviewEngine();
 
-        const auto m =
-            playProjectAndMeasure (song.context,
-                                   [&]
-                                   {
-                                       REQUIRE (previewer->play (loop, song.context));
-                                       REQUIRE (previewer->isInTime());
-                                       REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }, 60000));
-                                   });
+        const auto m = playProjectAndMeasure (song.context,
+                                              [&]
+                                              {
+                                                  REQUIRE (previewer->play (loop, song.context));
+                                                  REQUIRE (previewer->isInTime());
+                                                  REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }));
+                                              });
         previewer->stop();
         report ("A loop at 120 BPM previewed at 100 BPM, stretched by Phazite as it starts", m);
         CHECK (m.peakLevel > 0.01f);

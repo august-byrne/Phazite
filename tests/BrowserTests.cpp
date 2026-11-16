@@ -74,7 +74,7 @@ struct BrowserScreen
             return true;
         };
 
-        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }, 60000));
+        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }));
         phazite::test::dispatchPendingMessages();
     }
 
@@ -123,7 +123,7 @@ TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and s
 
     // One started while the song plays plays on, until the song stops.
     click ("Break 120 BPM");
-    phazite::test::runTimersUntil ([] { return false; }, 300);
+    phazite::test::runTimersUntil ([] { return false; }, 300); // an absence: the timers run, and a stop would come at their first tick
     CHECK (screen.previewer.isPlaying());
     phazite::playOrStop (*screen.song);
     CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }));
@@ -155,7 +155,7 @@ TEST_CASE ("A loop playing stops when what holds the browser hides it, though th
     // Its window hidden, as the left panel is: the browser's own flag doesn't change.
     screen.window.setVisible (false);
     CHECK (screen.browser.isVisible());
-    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }));
 }
 
 TEST_CASE ("The sound selected shows under the tree: its waveform, whether it is a loop, how long it lasts and its format")
@@ -470,7 +470,7 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     // The place lists them now (after the pack's change message, which its thread posts after it sets the state), and
     // search finds them once they are indexed.
     CHECK (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Drums"); }));
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
     CHECK_FALSE (library.search ("kick").empty());
 }
 
@@ -539,7 +539,7 @@ TEST_CASE ("A device's presets menu lists Phazite's for it by kind of sound, the
 
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, factory };
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
 
     juce::File loaded;
     const auto menu = phazite::ui::makeDevicePresetMenu (library, "EQ", "EQ", [&loaded] (const juce::File& file) { loaded = file; });

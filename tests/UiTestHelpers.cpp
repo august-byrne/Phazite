@@ -60,9 +60,9 @@ void dispatchPendingMessages()
             if (juce::detail::dispatchNextMessageOnSystemQueue (true))
                 continue;
 
-            if (juce::Time::getMillisecondCounter() - start > 5000u)
+            if (juce::Time::getMillisecondCounter() - start > (juce::uint32) hangTimeout)
             {
-                FAIL_CHECK ("A message waiting for the message thread wasn't delivered within 5 seconds");
+                FAIL_CHECK ("A message waiting for the message thread wasn't delivered (tests/TestHelpers.h: hangTimeout)");
                 return;
             }
 
@@ -491,7 +491,7 @@ std::jthread queueWithoutWakeUp (int delayMilliseconds)
 
     while (! PeekMessageW (&wakeUp, nullptr, jucesWakeUp, jucesWakeUp, PM_REMOVE))
     {
-        REQUIRE_MESSAGE (juce::Time::getMillisecondCounter() - start < 5000u,
+        REQUIRE_MESSAGE (juce::Time::getMillisecondCounter() - start < (juce::uint32) hangTimeout,
                          "no WM_USER + 123 for JUCE's queue: if juce_Messaging_windows.cpp changed it, change this");
         juce::Thread::sleep (1);
     }

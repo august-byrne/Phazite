@@ -178,7 +178,7 @@ struct PlayingSong
     void showFrameAt (phazite::ui::TimelineEditor& editor, double pixels)
     {
         session->locate (beats (pixels / editor.getView().pixelsPerBeat));
-        editor.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+        editor.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0);
     }
 
     phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // For tests of plug-ins in helpers (src/sandbox/, src/host/): the tests' helper program, the tests' stand-ins
-// opened in one (TestPlugins.h), the helper's notices handed to them, and a block played through one. Included after
-// TestHelpers.h, which brings doctest.
+// opened in one (TestPlugins.h), the helper's notices handed to them, and a block played through one.
 #pragma once
 
+#include "../TestHelpers.h"
 #include "TestPlugins.h"
 #include "sandbox/client/Helper.h"
 #include "sandbox/client/RemoteInstance.h"
@@ -47,7 +47,7 @@ public:
         };
 
         helper.onLost = [this] { ++losses; };
-        REQUIRE (helper.start (20000));
+        REQUIRE (helper.start (hangTimeout));
     }
 
     sandbox::Helper& get() noexcept { return helper; }
@@ -58,7 +58,7 @@ public:
     {
         juce::String error;
         auto instance = sandbox::RemoteInstance::open (helper, toXml (TestPlugins::getDescription (kind)), state, sampleRate,
-                                                       makeLimits (maxSamples), error, 20000);
+                                                       makeLimits (maxSamples), error, hangTimeout);
         REQUIRE_MESSAGE (instance != nullptr, error);
         const std::lock_guard held (lock);
         instances[instance->getID()] = instance.get();
@@ -81,7 +81,7 @@ private:
 
 // A block of numSamples on both sides at a value, played through an instance's channel with a deadline.
 inline sandbox::BlockChannel::Played playBlock (sandbox::RemoteInstance& instance, int numSamples, float value,
-                                                std::int64_t timeoutNanoseconds = 5'000'000'000)
+                                                std::int64_t timeoutNanoseconds = (std::int64_t) hangTimeout * 1'000'000)
 {
     auto& channel = instance.getChannel();
     auto& info = channel.getInfo();

@@ -843,7 +843,7 @@ TEST_CASE ("Fuzz: the settings file, and the library's facts file, are read into
         const auto index = [&]
         {
             phazite::Library library (getEngineContext(), settings, {}, {}, {}, facts);
-            REQUIRE (runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+            REQUIRE (runTimersUntil ([&library] { return ! library.isIndexing(); }));
             dispatchPendingMessages();
         };
 

@@ -328,7 +328,7 @@ private:
     std::shared_ptr<const ManualSlices> playingSlices;
     std::vector<Retired> retired;
 
-    // The notes the editor played and let go of, each with when (juce::Time::getMillisecondCounter()).
+    // The notes the editor played and let go of, each with when (Clock::getMillisecondCounter()).
     struct Audition
     {
         int note = -1;

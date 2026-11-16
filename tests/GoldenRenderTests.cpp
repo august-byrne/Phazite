@@ -643,7 +643,7 @@ void renders (void (*make) (TestSong&), const phazite::test::GoldenRender& rende
 {
     TestSong song;
     make (song);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     phazite::test::checkGoldenRender (song.context, render);
 }
 
@@ -835,7 +835,7 @@ TEST_SUITE ("golden")
     {
         TestSong song;
         addMix (song);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         phazite::test::checkGoldenRender (
             song.context,
             golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
@@ -844,7 +844,7 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden render: the Exodus example song's intro and the start of its theme")
     {
         TestSong song (TestSong::Start::exodus);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         phazite::test::checkGoldenRender (song.context, golden ("exodus",
                                                                 "the Exodus example song's intro (its notes from a MIDI file, its tempo "
                                                                 "ramping from 50 BPM to 114: the Dark Synthwave Kit with four pads on "
@@ -860,7 +860,7 @@ TEST_SUITE ("golden")
     {
         TestSong song;
         addWavetableSong (song);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         phazite::test::checkGoldenRender (song.context, golden ("wavetable",
                                                                 "two chords on Phazite's wavetable synth, its two oscillators in "
                                                                 "unison, an envelope sweeping each note's table.",

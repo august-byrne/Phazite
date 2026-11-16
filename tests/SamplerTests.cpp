@@ -1419,3 +1419,31 @@ TEST_CASE ("A sampler that plays nothing holds at most two of the sounds given i
     sampler->releaseUnused();
     CHECK (played.expired());
 }
+
+TEST_CASE ("The sampler's editor plays a note at the next block, and one that waited longer than a moment for it never")
+{
+    // By a clock that moves only as the test says (devices/core/Clock.h), however long the blocks take to play.
+    auto sampler = makeSampler (makeSine (220.0, 1.0));
+    const auto values = getPlainValues();
+    phazite::test::HeldClock clock;
+
+    // Played and let go of, waiting for the block after a moment of up to a quarter of a second: it sounds.
+    const auto audition = [&sampler, &values, &clock] (double waited)
+    {
+        sampler->audition (60, 0.8f);
+        CHECK (sampler->isWaitingToPlay());
+        clock.advance (waited);
+        const auto played = play (*sampler, values, 4800, {});
+        CHECK_FALSE (sampler->isWaitingToPlay());
+        sampler->stopAudition (60);
+        play (*sampler, values, 96000, {}); // its release, to the end
+        REQUIRE (sampler->getActiveVoices() == 0);
+        return peakOf (played, 0, 4800);
+    };
+
+    CHECK (audition (0.0) > 0.1f);
+    CHECK (audition (249.0) > 0.1f);
+
+    // Longer, as while the sampler was off: never, rather than late.
+    CHECK (audition (252.0) < 1.0e-6f);
+}

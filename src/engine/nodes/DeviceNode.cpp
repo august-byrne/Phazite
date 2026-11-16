@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceNode.h"
+#include "devices/core/Clock.h"
 
 #include <cmath>
 
@@ -110,13 +111,13 @@ bool DeviceNode::takeBlock (DeviceRunner::Block& block, std::span<const Paramete
 void DeviceNode::start (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
                         std::span<const ParameterCurve> automation) noexcept
 {
-    const auto began = juce::Time::getHighResolutionTicks();
+    const auto began = devices::Clock::getTicks();
     started = takeBlock (block, automation);
 
     if (started)
         runner.start (buffer, start, numSamples, block);
 
-    startTicks = juce::Time::getHighResolutionTicks() - began;
+    startTicks = devices::Clock::getTicks() - began;
 }
 
 void DeviceNode::measure (std::int64_t ticks, int numSamples) noexcept
@@ -137,7 +138,7 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
                           std::span<const ParameterCurve> automation) noexcept
 {
     // Started (start()), with the values and automation it took then; or as it is now.
-    const auto began = juce::Time::getHighResolutionTicks();
+    const auto began = devices::Clock::getTicks();
     const auto ticksBefore = std::exchange (startTicks, 0);
 
     if (std::exchange (started, false))
@@ -152,7 +153,7 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
     }
 
     runner.process (buffer, start, numSamples, block);
-    measure (ticksBefore + juce::Time::getHighResolutionTicks() - began, numSamples);
+    measure (ticksBefore + devices::Clock::getTicks() - began, numSamples);
 
     // What it played, for the controls, unless nothing moved since the last block, which stored it.
     if (runner.isSettled())

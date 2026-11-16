@@ -69,7 +69,7 @@ struct Song
         phazite::consolidateSelection (context, host);
 
         if (host.render != nullptr)
-            REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! host.finished.isEmpty(); }, 60000));
+            REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! host.finished.isEmpty(); }));
     }
 
     phazite::test::TemporaryFolder temp;

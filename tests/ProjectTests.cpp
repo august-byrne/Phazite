@@ -29,6 +29,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
@@ -81,11 +82,6 @@ juce::Array<juce::File> getBackups (const phazite::Project& project)
     files.removeAllInstancesOf (phazite::Project::getAutosaveFile (project.getFile()));
     return files;
 }
-
-// How long an autosave timer of these tests (AutosaveTimer (project, 120, 1): its first autosave a second after the first
-// change, then every 120 s) may take to write its first: half its interval, so that a busy machine's late timers don't
-// fail a test, while an autosave that waited for the interval still does. How soon is what these checks test.
-constexpr int soonerThanTheInterval = 60000;
 
 // The song's first track, which every new song has.
 phazite::TrackID getFirstTrack (const phazite::Song& song)
@@ -454,19 +450,36 @@ TEST_CASE ("Autosave comes soon after the first change, then waits its interval"
     auto project = createProject (temp.folder, "Timed");
     const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
 
-    // As the app has it, but the first autosave a second after the first change rather than 15 s.
+    // As the app has it, but the first autosave a second after the first change rather than 15 s; by a clock that moves
+    // only as the test says, and ticked by the test as it moves it.
+    phazite::test::HeldClock clock;
     phazite::AutosaveTimer timer (*project, 120, 1);
-    phazite::test::runTimersUntil ([] { return false; }, 1500);
-    CHECK_FALSE (autosaveFile.exists()); // nothing changed
+    clock.advance (1500.0);
+    timer.tickNow();
+    CHECK_FALSE (project->isAutosaving()); // nothing changed
 
+    // A second after the first change, and not before.
     project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
-    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, soonerThanTheInterval));
+    timer.tickNow(); // which sees the change
+    clock.advance (999.0);
+    timer.tickNow();
+    CHECK_FALSE (project->isAutosaving());
+    clock.advance (2.0);
+    timer.tickNow();
+    CHECK (phazite::test::runTimersUntil ([&] { return autosaveFile.existsAsFile() && ! project->isAutosaving(); }));
 
-    // The next change waits for the interval.
+    // The next change waits for the interval, and not longer.
     const auto first = autosaveFile.loadFileAsString();
+    timer.tickNow(); // which sees the autosave done
     project->getSong().getState().setProperty (phazite::schema::outline, "rock", nullptr);
-    phazite::test::runTimersUntil ([] { return false; }, 2500);
+    timer.tickNow();
+    clock.advance (119999.0);
+    timer.tickNow();
+    CHECK_FALSE (project->isAutosaving());
     CHECK (autosaveFile.loadFileAsString() == first);
+    clock.advance (2.0);
+    timer.tickNow();
+    CHECK (phazite::test::runTimersUntil ([&] { return autosaveFile.loadFileAsString() != first && ! project->isAutosaving(); }));
 }
 
 TEST_CASE ("Auto Save saves the project file a moment after the last change, in the background, and changes since wait for the next")
@@ -501,11 +514,15 @@ TEST_CASE ("Auto Save saves the project file a moment after the last change, in 
     REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }));
     CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "soul");
 
-    // Off, it autosaves for a crash again, the project file as it was.
+    // Off, it autosaves for a crash again, the project file as it was: its first a second after the change, not after its
+    // interval (by a clock that moves only as the test says).
+    phazite::test::HeldClock clock;
     timer.setAutoSave (false);
     project->getSong().getState().setProperty (phazite::schema::outline, "disco", nullptr);
-    CHECK (
-        phazite::test::runTimersUntil ([&file] { return phazite::Project::getAutosaveFile (file).existsAsFile(); }, soonerThanTheInterval));
+    timer.tickNow(); // which sees the change
+    clock.advance (1001.0);
+    timer.tickNow();
+    CHECK (phazite::test::runTimersUntil ([&file] { return phazite::Project::getAutosaveFile (file).existsAsFile(); }));
     CHECK (project->hasUnsavedChanges());
 }
 
@@ -664,7 +681,7 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
     // change.
     CHECK (project->getFile().existsAsFile());
     CHECK_FALSE (project->getSong().getUndoManager().canUndo());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
     CHECK_FALSE (project->getSong().getUndoManager().canUndo());
 }
@@ -684,14 +701,14 @@ TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes
     phazite::moveClip (song, aliases[0], beats (4.0), trackID);
 
     // As the app's message loop runs between edits.
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
     project = nullptr;
 
     // Once the message loop has run after it opened, nothing has changed.
     project = openProject (file);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
     REQUIRE (project->autosave().wasOk());
     CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
@@ -723,7 +740,7 @@ TEST_CASE ("A project forgets, as it opens, the automation of devices it hasn't 
     CHECK_FALSE (phazite::findCurveState (reopened, gainRef).isValid());
     REQUIRE (phazite::findCurveState (reopened, volumeRef).getNumChildren() == 1);
     CHECK (phazite::getPoints (reopened, volumeRef).size() == 1);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
 }
 
@@ -745,14 +762,14 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
         REQUIRE (aliases.size() == 1);
         phazite::moveClip (song, aliases[0], beats (4.0), trackID);
         phazite::setTrackKey (song, trackID, phazite::Key { 2, phazite::Scale::minor });
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         REQUIRE (project->save().wasOk());
     }
 
     const auto file = project->getFile();
     project = nullptr;
     project = openProject (file);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE_FALSE (project->hasUnsavedChanges());
 
     auto& song = project->getSong();
@@ -801,14 +818,14 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     REQUIRE (phazite::test::addMidiNote (song, clipID, 67, beats (3.0), phazite::BeatDuration::fromBeats (0.5), 100).isValid());
     CHECK (project->hasUnsavedChanges());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // With an undo step, as the editors make changes.
     REQUIRE (phazite::addNote (song, clipID, 69, beats (3.5), phazite::BeatDuration::fromBeats (0.25), 100).isValid());
     CHECK (project->hasUnsavedChanges());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
@@ -831,15 +848,15 @@ TEST_CASE ("A write mode, the master's too, is an unsaved change without an undo
     auto project = createProject (temp.folder, "Modes");
     auto& song = project->getSong();
     const auto master = phazite::getMasterID (song);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE_FALSE (project->hasUnsavedChanges());
 
     phazite::showLane (song, master, { phazite::getFader (song, master), phazite::getVolumeParameterID (song, master) });
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
 
     phazite::setAutomationMode (song, master, phazite::AutomationMode::latch);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK (project->hasUnsavedChanges());
     CHECK_FALSE (song.getUndoManager().canUndo());
     CHECK (phazite::isWritingAutomation (song));
@@ -860,12 +877,12 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     const auto folder = phazite::insertFolder (song, other, nullptr);
     REQUIRE (folder.isValid());
     const auto plugin = phazite::test::TestPlugin::add (song, track);
-    phazite::test::settle();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
 
     // Without undo steps, so that the view settings below can be seen to make none. The save stores the plug-in's
     // settings, but is no undo step.
     song.getUndoManager().clearUndoHistory();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
     REQUIRE_FALSE (song.getUndoManager().canUndo());
@@ -885,7 +902,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     phazite::saveGridSettings (song, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
     phazite::saveGridSettings (song, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
     phazite::rememberWindowPosition (song, plugin, { 140, 360 });
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // No unsaved change, nothing to undo, and nothing for autosave to write.
     CHECK_FALSE (project->hasUnsavedChanges());
@@ -927,7 +944,7 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
         REQUIRE (project->save().wasOk());
         REQUIRE_FALSE (project->hasUnsavedChanges());
         change();
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         return project->hasUnsavedChanges();
     };
 
@@ -963,7 +980,7 @@ TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
     const auto plugin = TestPlugin::add (song, track);
 
     // Saved without undo steps.
-    phazite::test::settle();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); })); // in its helper
     song.getUndoManager().clearUndoHistory();
     REQUIRE (project->save().wasOk());
     REQUIRE_FALSE (project->hasUnsavedChanges());
@@ -972,15 +989,14 @@ TEST_CASE ("Saving stores plug-ins' own settings, without an undo step")
     // Its gain turned in its window: it is an unsaved change. Saved, it is in the project, with nothing to undo and nothing
     // unsaved.
     TestPlugin::setGain (song, plugin, 0.25f);
-    phazite::test::settle (1000);
-    CHECK (project->hasUnsavedChanges());
+    CHECK (phazite::test::dispatchMessagesUntil ([&project] { return project->hasUnsavedChanges(); })); // as its helper tells
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (song.getUndoManager().canUndo());
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // Nor do autosave and saving a copy add an undo step.
     TestPlugin::setGain (song, plugin, 0.5f);
-    phazite::test::settle (1000);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&project] { return project->hasUnsavedChanges(); }));
     REQUIRE (project->autosave().wasOk());
     CHECK (phazite::Project::getAutosaveFile (project->getFile()).existsAsFile());
     juce::String error;
@@ -1009,13 +1025,13 @@ TEST_CASE ("Switching the loop on or off, or between the song and a range, is sa
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Loops");
     auto& song = project->getSong();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE_FALSE (project->hasUnsavedChanges());
 
     // It is about playing the song rather than the song (design question 18), as where the loop is.
     phazite::toggleLoop (song);
     phazite::loopBeats (song, { beats (2.0), beats (6.0) });
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (phazite::isLoopOn (song));
     REQUIRE_FALSE (phazite::doesLoopFollowSong (song));
     CHECK_FALSE (project->hasUnsavedChanges());
@@ -1067,16 +1083,23 @@ TEST_CASE ("Autosave waits while the song plays")
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // whose session plays the song
     phazite::setSong (context, &song);
     const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
+    phazite::test::HeldClock clock; // which moves only as the test says, and ticks the timer as it moves it
     phazite::AutosaveTimer timer (*project, 120, 1);
     phazite::playOrStop (song);
     REQUIRE (phazite::isSongPlaying (song));
 
+    // Past its first delay while the song plays: none.
     song.getState().setProperty (phazite::schema::outline, "pop", nullptr);
-    phazite::test::runTimersUntil ([] { return false; }, 2500);
+    timer.tickNow(); // which sees the change
+    clock.advance (2500.0);
+    timer.tickNow();
+    CHECK_FALSE (project->isAutosaving());
     CHECK_FALSE (autosaveFile.exists());
 
+    // Stopped: at once, not after its interval.
     phazite::stopPlaying (song);
-    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }, soonerThanTheInterval));
+    timer.tickNow();
+    CHECK (phazite::test::runTimersUntil ([&autosaveFile] { return autosaveFile.existsAsFile(); }));
 }
 
 TEST_CASE ("Each of Phazite's devices keeps its parameters' values through a save and a reopen, and its type with them")

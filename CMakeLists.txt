@@ -119,6 +119,7 @@ add_library(phazite_core STATIC)
 target_sources(phazite_core PRIVATE
     src/devices/core/AudioThreads.cpp
     src/devices/core/AudioThreads.h
+    src/devices/core/Clock.h
     src/devices/core/DeviceInfo.cpp
     src/devices/core/DeviceInfo.h
     src/devices/core/DeviceScope.h
@@ -1428,6 +1429,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestKeyboardLayouts.h
         tests/TestPlugin.cpp
         tests/TestPlugin.h
+        tests/TestProgramTests.cpp
         tests/TempoLaneTests.cpp
         tests/TempoTests.cpp
         tests/TestSong.cpp

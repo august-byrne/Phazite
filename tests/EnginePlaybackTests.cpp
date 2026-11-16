@@ -139,7 +139,7 @@ TEST_CASE ("The playhead heard is where the engine was as long before as its sou
 
     // At any moment, the playhead heard is the engine's that much earlier.
     const auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
-    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto now = phazite::devices::Clock::getMilliseconds(); // the engine's clock
     CHECK (phazite::getHeardPlayheadBeat (song.context, now).inBeats()
            == doctest::Approx (engine.getPlayheadBeatAt (now - session->getHeardDelay())));
     song.run ("transport.playStop");
@@ -606,6 +606,8 @@ TEST_CASE ("A control's moves are written where they were heard: earlier by the 
     const auto lane = song.getVolumeParameter (track);
     song.addAutomation (lane, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (16.0), 0.5f } });
     phazite::setAutomationMode (song.context, track, phazite::AutomationMode::touch);
+    // The engine's clock held: the playhead read and the place heard add the same time since the last block.
+    const phazite::test::HeldClock clock;
     EnginePlayback playback;
     auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
     host.prepare (EnginePlayback::sampleRate, EnginePlayback::blockSize, 0, 0, 4800);
@@ -1364,15 +1366,14 @@ TEST_CASE ("A jump into a long audio file where it isn't read yet is silent only
     REQUIRE (playback.play (0.5).getMagnitude (0, 12000, 12000) > 0.1f);
 
     // The jump read where it lands before the engine plays there: before, the reading thread learnt of it only as the engine
-    // landed, so this waited for ever (here the limit, a second, which is what is tested: a wait to the second for a part read
-    // in a fraction of a millisecond).
+    // landed, so this waited for ever (here until a hang's limit; read at once, it comes in a fraction of a millisecond).
     const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
     REQUIRE (plan != nullptr);
     const auto file = plan->strips.front().audio.at (0).file;
     const auto landing = (std::int64_t) (40.0 * file->getSampleRate());
     REQUIRE_FALSE (file->isRead (landing));
     phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (80.0));
-    CHECK (phazite::test::dispatchMessagesUntil ([&file, landing] { return file->isRead (landing); }, 1000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&file, landing] { return file->isRead (landing); }));
 
     // Then it is silent for the jump's fades alone (3 ms out, and its clip's 40 samples in), and while the clip, a 44.1 kHz
     // file in a 48 kHz engine, makes its resampling ready where the jump lands (whole blocks, 20 ms at most: Engine.h,

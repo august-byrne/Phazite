@@ -41,7 +41,7 @@ public:
                                              input == Input::loopback ? blockSize : 0)) // a loopback comes back a block late
     {
         REQUIRE (device != nullptr);
-        wait (settleMilliseconds); // the song for the device's rate
+        dispatchPendingMessages(); // the song for the device's rate, handed to the engine
 
         audioThread = std::make_unique<AudioThread> (
             [this, input] (const juce::Thread& thread)
@@ -97,19 +97,13 @@ public:
         return std::chrono::duration<double> (longest).count();
     }
 
-    // Lets some time pass on the message thread, which delivers its messages and runs its timers meanwhile.
-    static void wait (int milliseconds)
-    {
-        dispatchMessagesUntil ([] { return false; }, milliseconds);
-    }
-
     // How many blocks the device's thread has played so far (any thread).
     std::int64_t getBlocksPlayed() const noexcept { return blocksPlayed.load (std::memory_order_acquire); }
 
     // Delivers the message thread's messages until the device's thread has played so many more blocks: so much of the
     // song played, however long a busy machine takes to play it. False if it hadn't within the time limit, which only a
     // thread that stopped playing misses. Message thread.
-    bool waitForBlocks (std::int64_t count, int timeoutMilliseconds = 60000) const
+    bool waitForBlocks (std::int64_t count, int timeoutMilliseconds = hangTimeout) const
     {
         const auto until = getBlocksPlayed() + count;
         return dispatchMessagesUntil ([this, until] { return getBlocksPlayed() >= until; }, timeoutMilliseconds);
@@ -142,7 +136,6 @@ public:
 
 private:
     static constexpr int blockSize = 256;
-    static constexpr int settleMilliseconds = 200;
 
     // The device's thread, at the priority Phazite's own audio threads have (devices/core/AudioThreads.h), as an audio
     // device's own is: at the normal priority, a busy machine's other programs keep it from a core for tens of

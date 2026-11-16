@@ -272,6 +272,13 @@ too. A line names the bug's number in that list.
   typed: projects, recordings, presets, stems, freezes, bounces, exports and the versions' files get "_" added.
 - **An unsaved project closed right after a commit** no longer has its folder deleted under that commit's last
   write.
+- **182 The test program can't crash as it exits.** On Windows it ends as soon as its static objects have gone, with
+  its result and every leak still checked, so that a thread the graphics driver starts during the runtime's teardown
+  can no longer crash it after all tests passed (reproduced in 2 of 34 loaded runs before, none after).
+- **180 Tests no longer measure against the wall clock**, but for the plug-in tests: Phazite's timeouts, the CPU
+  meters and the engine's timing read a clock that tests hold still (`devices::Clock`) and that never goes back once
+  let go; the engine is handed the song by message delivery rather than a settle; and every wait for a condition
+  keeps only the hang limit.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

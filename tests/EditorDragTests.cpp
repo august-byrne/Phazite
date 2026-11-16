@@ -1531,8 +1531,7 @@ TEST_CASE ("While the mouse drags in the playlist or the piano roll, no command 
                 const auto before = projectFiles();
                 phazite::test::dispatchMessagesUntil ([] { return false; }, 1500);
                 return projectFiles() == before;
-            },
-            20000);
+            });
     };
 
     UndoCheck undo (song);

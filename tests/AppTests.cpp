@@ -86,7 +86,7 @@ TEST_CASE ("The session opens and saves a project")
         CHECK (getSession (session.getContext()) != nullptr); // what plays it
         CHECK (recent.getProjects() == juce::Array<juce::File> { file });
         CHECK (changes == 1);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         CHECK_FALSE (session.getProject()->hasUnsavedChanges());
 
         // Its commands save it.
@@ -151,7 +151,7 @@ TEST_CASE ("The first start makes an empty, untitled project, which its first sa
     CHECK (recent.getProjects().isEmpty());                               // until it is saved
 
     // It is what the project starts with: no unsaved changes, nothing to undo.
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (session.getProject()->getSong().getUndoManager().canUndo());
 }
@@ -191,7 +191,7 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     CHECK (phazite::getTrackRow (context, selected.front())->name == "Square");
 
     // The song is what the project starts with: no unsaved changes, nothing to undo.
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (findSong (context)->getUndoManager().canUndo());
 }
@@ -224,7 +224,7 @@ TEST_CASE ("A new project starts as the new-project window chooses, with no trac
     CHECK (phazite::getAllPlaylistTracks (context).empty());
 
     // What it starts with is in its first save: no unsaved changes, nothing to undo.
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK_FALSE (song->getUndoManager().canUndo());
 
@@ -377,7 +377,7 @@ TEST_CASE ("A DAWproject double-clicked imports as a new project, and the open o
     session.setAutoSave (true); // so the changes are saved without asking, as with Auto Save on
     session.openProject (project);
     REQUIRE (session.getProject() != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // A change not saved yet, then the DAWproject from Explorer: the change saved, the import open, untitled.
     session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
@@ -438,7 +438,7 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     plugins.setCrashedWhileLoading ({}); // the host is the engine context's, which the other tests share
 
     // The library indexes on its own thread; it is done before the services go.
-    CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 60000));
+    CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }));
 }
 
 TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a first project instead")
@@ -765,7 +765,7 @@ TEST_CASE ("A project restored after a crash asks before it closes, though nothi
     session.openAtStartup();
     REQUIRE (session.getProject() != nullptr);
     REQUIRE (session.getProject()->getFile() == crashed);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // Another project opened before anything else changed: what was restored is in no file the user chose, so Phazite
     // asks. Cancelled, the project stays open, with its folder and its autosave.
@@ -777,13 +777,17 @@ TEST_CASE ("A project restored after a crash asks before it closes, though nothi
     CHECK (phazite::Project::getAutosaveFile (crashed).existsAsFile());
     CHECK (session.getProject()->hasUnsavedChanges());
 
-    // Asked again the next time; "Don't save" is the user's word that it may go.
+    // Asked again the next time; "Don't save" is the user's word that it may go, once no write of it is under way (one
+    // that held a file open left the folder for a later start: seen once beside other builds).
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.getProject()->isAutosaving(); }));
     answer = Answer::discard;
     session.openProject (other);
     CHECK (asked.size() == 2);
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.getProject()->getFile() == other);
-    CHECK_FALSE (crashed.getParentDirectory().getParentDirectory().exists());
+
+    // Its folder goes once nothing of its versions is still being written into it (whenNoVersionsWriteInto()).
+    CHECK (phazite::test::dispatchMessagesUntil ([&crashed] { return ! crashed.getParentDirectory().getParentDirectory().exists(); }));
 }
 
 TEST_CASE ("A saved project restored after a crash saves what it restored as it closes with Auto Save, and asks without")
@@ -841,7 +845,7 @@ TEST_CASE ("A save that fails says so, and the project stays open with its chang
     session.setAutoSave (true);
     session.openProject (file);
     REQUIRE (session.getProject() != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
     REQUIRE (session.getProject()->hasUnsavedChanges());
@@ -984,8 +988,7 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
         auto session = openAfterCrash (AfterCrash::open, notices);
 
         // It loads in the background, as the project opened (model/plugins/internal/PluginInstances.h).
-        CHECK (phazite::test::dispatchMessagesUntil ([&] { return getStatus (*session) != phazite::PluginInstances::Status::loading; },
-                                                     60000));
+        CHECK (phazite::test::dispatchMessagesUntil ([&] { return getStatus (*session) != phazite::PluginInstances::Status::loading; }));
         CHECK (getStatus (*session) == phazite::PluginInstances::Status::playing);
         CHECK (phazite::findPluginInstance (session->getProject()->getSong(), plugin) != nullptr);
         CHECK (notices.isEmpty());
@@ -1085,7 +1088,7 @@ TEST_CASE ("An autosave that can't be read gives way to the project's own file, 
     CHECK (session.getProject()->getSong().getState()[phazite::schema::notes].toString() == "In the file");
     REQUIRE (errors.size() == 1);
     CHECK (errors[0].contains ("automatically"));
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges()); // it is the file, as saved
 }
 
@@ -1104,7 +1107,7 @@ TEST_CASE ("A backup that can't be made is told, and the save goes on")
     session.setAutoSave (false);
     session.openProject (file);
     REQUIRE (session.getProject() != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // A file where the Backups folder goes: no backup can go there.
     const auto backups = file.getSiblingFile ("Backups");
@@ -1447,7 +1450,7 @@ TEST_CASE ("A first save whose background copy fails says why in its progress wi
 
     // Its folder made meanwhile: the copy can't take its place.
     REQUIRE (s.projects.getChildFile ("Beat").createDirectory());
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }, 30000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
     REQUIRE (s.renders.finished.size() == 1);
     CHECK (s.renders.finished[0].startsWith ("Saving Beat: "));
     CHECK_FALSE (s.renders.finished[0].endsWith (": ok"));
@@ -1502,7 +1505,7 @@ TEST_CASE ("A first save goes on without a clip's render in the Cache folder tha
     REQUIRE (s.registry.invoke ("project.save"));
     REQUIRE (s.renders.render != nullptr);
     REQUIRE (cached.deleteFile()); // listed, then gone before the copy reaches it, behind the large recording
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }, 30000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
     CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
     CHECK_FALSE (s.session.isUntitled());
     CHECK (s.errors.isEmpty());

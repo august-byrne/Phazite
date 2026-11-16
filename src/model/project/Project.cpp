@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Project.h"
+#include "devices/core/Clock.h"
 #include "devices/modulation/Modulators.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -2318,7 +2319,7 @@ void AutosaveTimer::timerCallback()
     // Auto Save: a moment after the last change, as VS Code's afterDelay; while the song plays, at most every few seconds.
     if (autoSave)
     {
-        const auto now = juce::Time::getMillisecondCounter();
+        const auto now = devices::Clock::getMillisecondCounter();
 
         if (const auto changes = project.getChangeCount() + project.getSong().getChangesOutsideHistory(); changes != lastChangeCount)
         {
@@ -2353,7 +2354,7 @@ void AutosaveTimer::timerCallback()
         return;
     }
 
-    const auto now = juce::Time::getMillisecondCounter();
+    const auto now = devices::Clock::getMillisecondCounter();
 
     if (changedSince == 0)
         changedSince = now;

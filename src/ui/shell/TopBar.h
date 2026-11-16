@@ -35,6 +35,10 @@ public:
     // Puts the current shortcuts into the tooltips; call after adding commands or changing keymap.
     void refreshTooltips();
 
+    // What its timer does at each tick, done now: for tests, which hold the clock its tempo panel goes by
+    // (devices/core/Clock.h) and tick it as they move the clock on.
+    void tickNow() { timerCallback(); }
+
 private:
     CommandBridge& commands;
     ComputerKeyboard& computerKeyboard;

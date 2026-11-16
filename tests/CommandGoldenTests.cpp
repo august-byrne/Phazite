@@ -340,7 +340,7 @@ struct Script
         record (id,
                 [&renders]
                 {
-                    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.finished.isEmpty(); }, 60000));
+                    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.finished.isEmpty(); }));
                     CHECK (renders.finished[0].endsWith (": ok"));
                 });
     }
@@ -851,12 +851,12 @@ TEST_SUITE ("golden")
         s.range.clear();
         s.selection.deselectAll();
         s.selection.setNoteClips ({});
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         // Every command ran, and every step of the script undoes and redoes to the song as it was there.
         s.checkEveryCommandRan();
         s.undoCheck->walkBackAndForth();
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         REQUIRE (s.project->save().wasOk());
         phazite::test::checkProjectGolden ("commands/script.xml", *phazite::test::readNormalisedProject (s.project->getFile()),

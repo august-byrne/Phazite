@@ -3,6 +3,7 @@
 // keeps through edits, undo and redo, and saving and opening the project. A copy of a clip keeps its notes' IDs.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -151,7 +152,7 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
 
     // Editing the original edits its alias too: the alias's notes keep the same IDs.
     phazite::moveNote (song, { clip, phazite::NoteID::fromRaw (ids[0]) }, beats (0.5), 72);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     const auto alias = aliases.front();
     REQUIRE (phazite::isMidiState (phazite::findClipState (song, alias)));
     std::vector<std::uint64_t> aliasIDs = idsOf (song, alias), originalIDs = idsOf (song, clip);
@@ -197,7 +198,7 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
                                              });
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     const auto clipOf = [] (phazite::Project& p)
     {
@@ -236,7 +237,7 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
 
     project = phazite::Project::open (file, false, error);
     REQUIRE (project != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     REQUIRE (clipOf (*project).isValid());
     CHECK (idsOf (project->getSong(), clipOf (*project)) == saved);
     CHECK_FALSE (project->hasUnsavedChanges());

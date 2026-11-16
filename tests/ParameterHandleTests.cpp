@@ -125,7 +125,7 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     handle.beginGesture();
     CHECK (handle.isInGesture());
     handle.setValue (0.4f);
-    phazite::test::settle (500);
+    phazite::test::dispatchPendingMessages(); // turns of the message loop: nothing of a gesture reads the clock
     handle.setValue (0.6f);
     handle.setValue (0.8f);
     handle.endGesture();

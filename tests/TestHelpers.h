@@ -2,6 +2,7 @@
 // Shared includes and helpers for Phazite's tests.
 #pragma once
 
+#include "devices/core/Clock.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/internal/AudioWork.h"
 #include "model/mixer/FreezeModel.h"
@@ -39,6 +40,34 @@ inline constexpr int hangTimeout = 480000;
 #else
 inline constexpr int hangTimeout = 120000;
 #endif
+
+// While one lives, the clock that Phazite reads where a test must steer time (devices/core/Clock.h: the Listen keys, the
+// auditions' window, a meter's peak hold, a burst of typing, the tempo panel, Auto Save's waits, the CPU meters' measure,
+// the engine's block times and playhead stamps) stands still from where it was, and moves only as far as advance() moves
+// it (from any thread): a test shows that something happens at its time, and not before, however busy the machine is. As
+// it goes, the clock runs on from where it stood. One at a time. Never while a window's frames read the playhead heard:
+// they pass the time of the display's frame, JUCE's clock (TimelineEditor::showFrame(), TopBar), which a held clock no
+// longer matches.
+class HeldClock
+{
+public:
+    HeldClock()
+    {
+        jassert (! devices::Clock::isHeld());
+        devices::Clock::hold();
+    }
+
+    ~HeldClock() { devices::Clock::release(); }
+    void advance (double milliseconds)
+    {
+        [[maybe_unused]] const auto moved = devices::Clock::advance (milliseconds);
+        jassert (moved);
+    }
+
+private:
+    HeldClock (const HeldClock&) = delete;
+    HeldClock& operator= (const HeldClock&) = delete;
+};
 
 // The tests have no message loop, but some engine work happens on the message thread's timers (finding
 // MIDI devices, for example). This runs the timers that are due, as the loop would, until the
@@ -136,7 +165,7 @@ inline bool linkFolder (const juce::File& link, const juce::File& target)
 #if JUCE_WINDOWS
     juce::ChildProcess mklink;
     return mklink.start (juce::StringArray { "cmd", "/c", "mklink", "/J", link.getFullPathName(), target.getFullPathName() })
-           && mklink.waitForProcessToFinish (10000) && link.isDirectory();
+           && mklink.waitForProcessToFinish (hangTimeout) && link.isDirectory();
 #else
     return target.createSymbolicLink (link, false) && link.isDirectory();
 #endif

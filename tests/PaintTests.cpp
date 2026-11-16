@@ -42,7 +42,7 @@ TEST_CASE ("Every view of the window paints, in each theme, over a song with som
 
     phazite::test::addRepresentativeSong (*screen.session.getProject(), context, screen.temp.folder.getChildFile ("Sounds"));
     const auto devices = screen.addEveryOwnDevice();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     std::optional<phazite::ClipID> notes, audio;
 

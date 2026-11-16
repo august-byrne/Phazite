@@ -787,7 +787,7 @@ TEST_CASE ("A render takes the project's plug-ins only once a block that stalls 
     phazite::test::HostedDevice device;
     auto& songItself = song.getProject().getSong();
     REQUIRE (phazite::insertDeviceState (songItself, song.firstTrack, phazite::makeOwnDeviceState (songItself, Staller::typeID)).isValid());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto* session = phazite::findSession (songItself);
     REQUIRE (session != nullptr);
     auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
@@ -1009,11 +1009,11 @@ TEST_CASE ("A jump while the reading thread waits has the place it lands in read
 
     // The jump, 40 s in (beat 80), asked for with no block played meanwhile: the place it lands in is read at once, ahead of
     // the engine's landing there. The old reading thread learnt of it only from a block played there, so it waited for ever
-    // (here for the limit, a second: how soon is what is tested).
+    // (here until a hang's limit).
     const auto landing = chunkOf (40 * (std::int64_t) rate);
     const auto asked = juce::Time::getMillisecondCounterHiRes();
     player.locate (80.0);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&reads, landing] { return reads.findReadTime (landing).has_value(); }, 1000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&reads, landing] { return reads.findReadTime (landing).has_value(); }));
     MESSAGE ("the reading thread read where a jump lands " << *reads.findReadTime (landing) - asked << " ms after it was asked for");
 
     // Then the clip is silent for the jump's fade alone: from where the jump is taken, its fade in (3 ms) at most, never a

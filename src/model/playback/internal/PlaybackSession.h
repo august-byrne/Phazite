@@ -65,7 +65,7 @@ public:
 
     // What is heard at a moment left the engine this many milliseconds before: the delay compensation that lines up its
     // devices, and the audio output's latency as the device reports it (a Bluetooth output's radio adds more, which Windows
-    // doesn't report). The playhead heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()) is where
+    // doesn't report). The playhead heard at a moment (milliseconds by devices::Clock (JUCE's getMillisecondCounterHiRes() unless a test holds it)) is where
     // the engine was that much earlier: the window's frames show it while the song plays (docs/archive/performance-audit.md,
     // section 16).
     double getHeardDelay() const;

@@ -18,12 +18,12 @@ TEST_CASE ("PhaziteHost, the helper that ships beside Phazite, starts and answer
         helper.onLost = [&lost] { lost = true; };
 
         // Started, it answered the hello with this version's protocol (Helper::start()), and still runs.
-        REQUIRE (helper.start (30000));
+        REQUIRE (helper.start (phazite::test::hangTimeout));
         CHECK (helper.isRunning());
 
         // It answers a request as well: the heartbeat, which its message thread answers.
         auto beat = helper.makeRequest (phazite::sandbox::MessageType::heartbeat);
-        CHECK (helper.request (beat, 30000).has_value());
+        CHECK (helper.request (beat, phazite::test::hangTimeout).has_value());
         CHECK_FALSE (lost.load());
     } // asked to quit, and ended if it doesn't soon
 }

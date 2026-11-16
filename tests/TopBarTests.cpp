@@ -64,6 +64,7 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
 {
     TopBarScreen screen (300);
     phazite::addTempoCommands (screen.registry, getSelection (screen.context));
+    phazite::test::HeldClock clock; // which the panel goes by, and which moves only as the test says
 
     // A loop that follows the tempo, a sound that doesn't, and a pattern on a track of its own.
     phazite::test::TemporaryFolder temp;
@@ -131,6 +132,18 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     phazite::test::dispatchPendingMessages();
     CHECK (panel->isShowing());
     barMouse.click (elsewhere);
+    CHECK_FALSE (panel->isShowing());
+
+    // Shown by a drag, it goes by itself once the tempo has stayed as it is for four seconds.
+    mouse.press (centre);
+    mouse.dragTo (centre.translated (0, -4));
+    mouse.release();
+    barMouse.moveTo (elsewhere);
+    clock.advance (3999.0);
+    screen.topBar.tickNow();
+    CHECK (panel->isShowing());
+    clock.advance (2.0);
+    screen.topBar.tickNow();
     CHECK_FALSE (panel->isShowing());
 }
 

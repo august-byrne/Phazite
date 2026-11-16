@@ -239,7 +239,7 @@ namespace
 
             ProjectContext opened (getEngineContext());
             setSong (opened, copy.get());
-            settle();
+            dispatchPendingMessages();
             auto audio = renderSong (*copy, seconds, renderSampleRate, renderBlockSize);
             setSong (opened, nullptr);
             return audio;
@@ -736,10 +736,10 @@ void checkGoldenAudio (const juce::AudioBuffer<float>& audio, double sampleRate,
 void checkGoldenChange (ProjectContext& context, const std::function<void()>& change, GoldenRender golden, const ChangeCheck& check,
                         const juce::String& liveDiffers)
 {
-    settle();
+    dispatchPendingMessages();
     const auto before = renderFingerprint (context, golden.seconds);
     change();
-    settle();
+    dispatchPendingMessages();
     golden.check = [&before, &check] (const Fingerprint& after, const juce::AudioBuffer<float>&) { return check (before, after); };
     checkGoldenRender (context, golden, liveDiffers);
 }

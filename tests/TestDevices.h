@@ -6,6 +6,7 @@
 #pragma once
 
 #include "TestHelpers.h"
+#include "devices/core/Clock.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
@@ -227,15 +228,14 @@ struct TestSidechain final : devices::Processor
 };
 
 // Takes a fifth of the time of what it plays, as a device busy working out its sound would, and leaves the sound as it
-// is; it never sleeps on silence. For the CPU meters. It notes the longest share of a block's time one of its blocks
-// really took (longestShare, which a test sets to 0 first): more than a fifth when the system took its thread away while
-// it worked, which the engine's meter then measures too.
+// is; it never sleeps on silence. For the CPU meters: while a test holds the clock the engine measures devices by
+// (devices/core/Clock.h, HeldClock), it moves that clock on by a fifth of each block's time, exactly, and takes none of the
+// machine's; otherwise it works for that long by the wall clock.
 struct TestBusy final : devices::Processor
 {
     static constexpr const char* typeID = "phaziteTestBusy";
     static constexpr double share = 0.2;
     static constexpr devices::DeviceInfo info { .typeID = typeID, .name = "Test Busy", .kind = devices::DeviceKind::effect };
-    static inline std::atomic<double> longestShare { 0.0 };
 
     void prepare (double rate, int) override { sampleRate = rate; }
     void reset() override {}
@@ -243,16 +243,13 @@ struct TestBusy final : devices::Processor
     void process (const devices::ProcessContext& block) override
     {
         const auto blockSeconds = block.numSamples / sampleRate;
-        const auto began = juce::Time::getHighResolutionTicks();
-        const auto until = began + juce::Time::secondsToHighResolutionTicks (share * blockSeconds);
-        auto now = began;
 
-        while (now < until)
-            now = juce::Time::getHighResolutionTicks();
+        if (devices::Clock::advance (share * blockSeconds * 1000.0)) // held: moved on, by as long as it would take
+            return;
 
-        const auto taken = juce::Time::highResolutionTicksToSeconds (now - began) / blockSeconds;
+        const auto until = juce::Time::getHighResolutionTicks() + juce::Time::secondsToHighResolutionTicks (share * blockSeconds);
 
-        for (auto longest = longestShare.load(); taken > longest && ! longestShare.compare_exchange_weak (longest, taken);)
+        while (juce::Time::getHighResolutionTicks() < until)
         {
         }
     }

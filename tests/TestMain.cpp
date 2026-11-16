@@ -49,6 +49,11 @@
 namespace
 {
 phazite::EngineContext* testEngineContext = nullptr;
+
+#if JUCE_WINDOWS
+// Ends the program at once with a result, its output flushed, without the C runtime's teardown (below).
+[[noreturn]] void endProcessNow (int code) noexcept;
+#endif
 juce::File systemTemporaryFolder;
 
 // Makes a folder of this program's own in the system's temporary folder and makes it the temporary folder for the rest
@@ -350,7 +355,11 @@ private:
                           "names the class, as LeakedObjectDetector<class>)\n%s\n",
                           place.toRawUTF8(), onThread.c_str(), juce::SystemStats::getStackBacktrace().toRawUTF8());
             std::fflush (stderr);
+#if JUCE_WINDOWS
+            endProcessNow (EXIT_FAILURE);
+#else
             std::_Exit (EXIT_FAILURE);
+#endif
         }
 
         if (fromAudioThread.has_value() && (currentTest == nullptr || fromAudioThread->test != currentTest))
@@ -464,6 +473,76 @@ private:
     std::atomic<int> numClaimed { 0 }, numTaken { 0 }, numLost { 0 }, numLostTaken { 0 }, generation { 0 };
     static inline thread_local bool taking = false;
 };
+
+//==============================================================================
+// The program's end, on Windows (known bug 182). Every test passed, it crashed now and then as it exited, after doctest's
+// "Status: SUCCESS!": the main thread was in ExitProcess, past every static object's destructor and the C runtime's
+// teardown, when a thread that the graphics driver started (NVIDIA's, under the Direct2D windows) ran the program's
+// thread-local initialisers, as MSVC's runtime runs them on every new thread, and doctest's (g_oss) allocated without the
+// heap's lock, which was gone. So once main() has returned and every static object has gone (JUCE's leak detector checks
+// each class's count as its counter goes, and fails the run: AssertionNet), the program ends there with main()'s result,
+// its output flushed, without the runtime's teardown, which nothing of the tests needs (it would only write the debug
+// heap's leaks where a debugger reads them): no thread that starts then runs anything of the program's. Elsewhere the
+// program ends as ever, LeakSanitizer's check at exit (linux-asan) with it.
+#if JUCE_WINDOWS
+std::atomic<bool> mainReturned { false };
+std::atomic<int> mainResult { 0 };
+
+[[noreturn]] void endProcessNow (int code) noexcept
+{
+    std::fflush (nullptr);
+    TerminateProcess (GetCurrentProcess(), (UINT) code);
+    std::_Exit (code); // not reached
+}
+
+// Run by exit() after every static object's destructor (registered before any of them, below), but only as main() returns:
+// an exit() from elsewhere ends the program as it always did.
+void endAfterStaticObjects()
+{
+    if (mainReturned.load())
+        endProcessNow (mainResult.load());
+}
+
+void registerEndAfterStaticObjects()
+{
+    std::atexit (&endAfterStaticObjects);
+}
+
+// For TestProgramTests, which starts this program with PHAZITE_TEST_EXIT_MARKER set: a line written if exit() goes on past
+// endAfterStaticObjects(), registered before it (so run after it), to show that the program did end there.
+// PHAZITE_TEST_EXIT_AS_EVER ends it as the runtime would, to show that the line would come.
+bool markingExit = false;
+
+void markRuntimeWentOn()
+{
+    if (markingExit)
+    {
+        std::fputs ("PHAZITE: exit() went on past the end of the tests\n", stdout);
+        std::fflush (stdout);
+    }
+}
+
+void registerMarkRuntimeWentOn()
+{
+    markingExit = GetEnvironmentVariableA ("PHAZITE_TEST_EXIT_MARKER", nullptr, 0) > 0;
+    std::atexit (&markRuntimeWentOn);
+}
+} // namespace
+
+// The C runtime runs the functions in the sections .CRT$XCA to .CRT$XCZ, in their order, as the program starts: its own
+// first, the program's static objects' constructors in .CRT$XCU. One in .CRT$XCB registers its function with atexit()
+// before any static object registers its destructor, so that exit(), which runs them in reverse, runs it after them all.
+// The linker keeps it, though nothing names it. The exit marker's comes before it (.CRT$XCAA sorts before .CRT$XCB).
+#pragma section(".CRT$XCAA", read)
+extern "C" __declspec (allocate (".CRT$XCAA")) void (*const phaziteRegisterMarkRuntimeWentOn)() = &registerMarkRuntimeWentOn;
+#pragma comment(linker, "/include:phaziteRegisterMarkRuntimeWentOn")
+#pragma section(".CRT$XCB", read)
+extern "C" __declspec (allocate (".CRT$XCB")) void (*const phaziteRegisterEndAfterStaticObjects)() = &registerEndAfterStaticObjects;
+#pragma comment(linker, "/include:phaziteRegisterEndAfterStaticObjects")
+
+namespace
+{
+#endif
 
 // Says where a test case that takes too long is, where the environment asks (StallReport.h): main()'s, while it runs.
 phazite::test::StallReport* stallReport = nullptr;
@@ -643,5 +722,13 @@ int main (int argc, char** argv)
     assertions.runEnded();
     stallReport = nullptr;
     temporaryFolder.deleteRecursively();
+
+#if JUCE_WINDOWS
+    mainResult = result;
+
+    // The program ends once every static object has gone (endAfterStaticObjects()), unless TestProgramTests asks otherwise.
+    mainReturned = juce::SystemStats::getEnvironmentVariable ("PHAZITE_TEST_EXIT_AS_EVER", {}).isEmpty();
+#endif
+
     return result;
 }

@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -699,7 +700,7 @@ TEST_CASE (
     {
         ++readsDone;
 
-        for (const auto beat : { player.getPlayheadBeat(), player.getPlayheadBeatAt (juce::Time::getMillisecondCounterHiRes()) })
+        for (const auto beat : { player.getPlayheadBeat(), player.getPlayheadBeatAt (phazite::devices::Clock::getMilliseconds()) })
         {
             if (! isAsked (beat))
             {
@@ -747,11 +748,14 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
     // The audio thread pushes pairs, a count up the left and its negative on the right, in blocks, a fixed count of them; the
     // message thread starts listening once it has pushed some (the tap made then, and published to the audio thread through its
     // atomic pointer) and pulls until the audio thread has ended and nothing is left. What the audio thread pushed while
-    // nobody listened, and what didn't fit, are dropped; whatever is pulled is whole and in order.
+    // nobody listened, and what didn't fit, are dropped; whatever is pulled is whole and in order. The audio thread pushes on
+    // past its count until something was pulled, however late a busy machine let the message thread run (a hang's time at
+    // most): it once pushed them all before the message thread listened.
     constexpr int blocks = 20000, blockSize = 64;
     phazite::devices::SampleTap tap (4096);
     std::atomic<int> pushedBlocks { 0 };
-    std::atomic<bool> audioDone { false };
+    std::atomic<bool> audioDone { false }, pulledSome { false };
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (phazite::test::hangTimeout);
 
     std::thread audio (
         [&]
@@ -759,8 +763,18 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
             std::array<float, blockSize> lefts {}, rights {};
             auto next = 0;
 
-            for (int block = 0; block < blocks; ++block)
+            // Past its count, a block at a time, giving the core away between them, and no further than a float counts each
+            // sample exactly.
+            constexpr int mostBlocks = (1 << 24) / blockSize;
+
+            for (int block = 0;
+                 block < blocks
+                 || (block < mostBlocks && ! pulledSome.load (std::memory_order_acquire) && std::chrono::steady_clock::now() < until);
+                 ++block)
             {
+                if (block >= blocks)
+                    std::this_thread::yield();
+
                 for (int i = 0; i < blockSize; ++i, ++next)
                 {
                     lefts[(size_t) i] = (float) next;
@@ -801,6 +815,9 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
 
         pulled += n;
 
+        if (n > 0)
+            pulledSome.store (true, std::memory_order_release);
+
         if (done && n == 0)
             break;
 
@@ -812,7 +829,7 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
     CHECK (pulled > 0);
     CHECK (torn == 0);
     CHECK (outOfOrder == 0);
-    CHECK (last <= (float) (blocks * blockSize - 1));
+    CHECK (last <= (float) (pushedBlocks.load() * blockSize - 1));
 }
 
 namespace
@@ -1075,4 +1092,46 @@ TEST_CASE ("The tests' device types registered while another thread looks for th
 
     looker.join();
     CHECK (wrong.load() == 0);
+}
+
+TEST_CASE ("The clock a test holds raced: moved on as it is let go, it runs afterwards, never held again, and never goes back")
+{
+    // Review of known bug 180: an advance just after a release added to the release's mark and left the clock held, near
+    // the machine's start, for the rest of the run. An advance now adds only while the clock is held.
+    using phazite::devices::Clock;
+
+    for (int round = 0; round < 500; ++round)
+    {
+        Clock::hold();
+        const auto heldAt = Clock::getTicks();
+        std::atomic<bool> go { false };
+
+        std::thread mover (
+            [&go]
+            {
+                while (! go.load())
+                    std::this_thread::yield();
+
+                for (int i = 0; i < 200; ++i)
+                    Clock::advance (0.001);
+            });
+
+        go = true;
+        Clock::release();
+        mover.join();
+        REQUIRE_FALSE (Clock::isHeld());
+        CHECK (Clock::getTicks() >= heldAt);
+    }
+}
+
+TEST_CASE ("The clock a test held runs on from where it stood as it is let go, never back to where the machine's clock is")
+{
+    // Review of known bug 180: let go, it jumped back to JUCE's clock, by as far as a test had moved it on (two minutes, in
+    // Auto Save's), under the engine's stamps and the counters that take differences of it.
+    using phazite::devices::Clock;
+    Clock::hold();
+    const auto heldAt = Clock::getMilliseconds();
+    REQUIRE (Clock::advance (60000.0));
+    Clock::release();
+    CHECK (Clock::getMilliseconds() >= heldAt + 60000.0);
 }

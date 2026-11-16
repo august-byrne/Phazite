@@ -365,7 +365,7 @@ TEST_CASE ("Modulators and what they modulate are saved with the project, and pl
     juce::String error;
     auto project = phazite::Project::create (temp.folder, "Modulated", error);
     REQUIRE (project != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setSong (context, &project->getSong());
@@ -384,7 +384,7 @@ TEST_CASE ("Modulators and what they modulate are saved with the project, and pl
         phazite::stopAndReturn (project->getSong());
     }
 
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
 
     const auto file = project->getFile();

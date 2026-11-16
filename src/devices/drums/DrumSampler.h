@@ -207,7 +207,7 @@ private:
     PerLayer<bool> given {};
     std::vector<Retired> retired;
 
-    // The pads the editor played, each with when (juce::Time::getMillisecondCounter()).
+    // The pads the editor played, each with when (Clock::getMillisecondCounter()).
     struct Audition
     {
         int pad = -1;

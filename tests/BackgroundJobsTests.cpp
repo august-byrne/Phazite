@@ -140,7 +140,7 @@ TEST_CASE ("A background job far slower to stop than JUCE's thread pool allows i
             [&] (const BackgroundJobs::ShouldStop&)
             {
                 started = true;
-                std::this_thread::sleep_for (800ms);
+                std::this_thread::sleep_for (800ms); // a lower bound only: a job that outlasts the wait for it to start
                 finished = true;
             });
 

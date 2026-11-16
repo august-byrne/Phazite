@@ -102,7 +102,7 @@ struct Song
         host.finished.clear();
         phazite::toggleFreeze (context, host);
         REQUIRE (host.render != nullptr);
-        REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! host.finished.isEmpty(); }, 60000));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! host.finished.isEmpty(); }));
         REQUIRE (host.finished == juce::StringArray { "Freezing Bass: ok" });
         REQUIRE (phazite::isFrozen (context, bass));
     }
@@ -391,7 +391,7 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     phazite::bounceSelectedTrack (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
     CHECK (song.host.render->getTitle() == "Bouncing Bass");
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }));
     REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
 
     // A new track right under Bass, playing the file from the song's start, selected.
@@ -454,7 +454,7 @@ void bounce (Song& song)
     song.host.finished.clear();
     phazite::bounceSelectedTrack (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }));
     REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
     phazite::test::dispatchPendingMessages();
 }
@@ -546,7 +546,7 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
 
     phazite::bounceSelectedTrack (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }));
     REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
 
     const auto tracks = phazite::getTrackIDs (model);

@@ -228,7 +228,7 @@ TEST_CASE ("Export as DAWproject writes a zip of project.xml, metadata.xml, the 
         song.s.renders.finished.clear();
         song.s.renders.wrote.clear();
         REQUIRE (commands.invoke ("version.exportDawProject"));
-        REQUIRE (dispatchMessagesUntil ([&song] { return ! song.s.renders.finished.isEmpty(); }, 120000));
+        REQUIRE (dispatchMessagesUntil ([&song] { return ! song.s.renders.finished.isEmpty(); }));
         INFO (song.s.renders.finished.joinIntoString ("\n").toStdString());
         REQUIRE (song.s.renders.finished[0].endsWith (": ok"));
         REQUIRE (song.s.renders.wrote.size() == 1);

@@ -14,6 +14,7 @@ model saves and automation and modulation move.
 |---|---|
 | `DeviceInfo.h` | How a device and its parameters are described. |
 | `Processor.h` | What a device does with a block: what plays it prepares it, then hands it each block's audio, notes and parameter values. |
+| `Clock.h` | The clock Phazite reads where a test must steer time (the timeouts that something must not end before, the CPU meters' measure, the engine's block times and playhead stamps): JUCE's high-resolution clock, unless a test holds it. |
 | `AudioThreads.h` | How Phazite's own threads that play audio (the engine's workers, the helpers' threads that play plug-ins) get the audio device's priority, never raising the whole process's. |
 | `DeviceScope.h` | What goes into a device and what comes out of it, for its editor's displays, at no cost until an editor listens. |
 | `SampleTap.h` | What a device just played, each channel apart, for a display on the message thread (an EQ's analyzer); lock-free, one writer and one reader, holding a quarter of a second at 192 kHz. |

@@ -45,7 +45,7 @@ void addEchoSong (TestSong& song, bool secondHit)
     song.setParameter (delay, "time", 9.0f); // 1/4D
     song.setParameter (delay, "feedback", 0.6f);
     song.setParameter (delay, "mix", 0.5f);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 }
 
 // A hit in a block, nothing in the six after it, 0.6 s, and its first echo in the seventh.
@@ -142,7 +142,7 @@ TEST_SUITE ("golden")
         TestSong song;
         addEchoSong (song, false);
         song.setSwitch ("transport.loop", true);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         juce::AudioBuffer<float> played;
         {

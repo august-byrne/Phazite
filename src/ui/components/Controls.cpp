@@ -3,6 +3,7 @@
 #include "ModulatorDrag.h"
 #include "TypedField.h"
 #include "ValueText.h"
+#include "devices/core/Clock.h"
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
@@ -973,7 +974,7 @@ void LevelMeter::tick()
     source.refresh();
     const bool hasSource = source.isMeasuring();
     const bool mono = hasSource && source.getNumChannels() == 1;
-    const auto now = juce::Time::getMillisecondCounter();
+    const auto now = devices::Clock::getMillisecondCounter();
 
     for (size_t ch = 0; ch < (size_t) numChannels; ++ch)
     {

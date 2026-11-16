@@ -878,7 +878,7 @@ TEST_CASE ("The Devices view shows its track's modulators as chips, a macro with
     devicesPart = phazite::test::findComponentWithTitle (view, "Controls");
     REQUIRE (devicesPart != nullptr);
     CHECK (devicesPart->getBounds() == devicesBefore);
-    juce::Thread::sleep (250); // a call-out takes a click on what opened it only after a moment, as a touch screen still sends one
+    juce::Thread::sleep (250); // a lower bound only: a call-out takes a click on what opened it only after a moment
     mouse.click (lfo->getLocalBounds().getCentre());
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
     slots->updateValues(); // the view's timer does it

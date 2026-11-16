@@ -173,7 +173,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
     REQUIRE (findSong (screen.session.getContext()) != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
     // At the smallest size the window can be (MainWindow's resize limits), at a large screen's, and at the size it opens at.
@@ -241,7 +241,7 @@ TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel'
     Screen screen;
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     auto& browser = screen.shell.getPanel (Panel::left);
     auto& song = screen.shell.getPanel (Panel::song);
@@ -382,7 +382,7 @@ TEST_CASE ("A divider dragged far enough closes its panel, as VS Code's sashes d
     Screen screen;
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     auto& browser = screen.shell.getPanel (Panel::left);
     auto& song = screen.shell.getPanel (Panel::song);
@@ -776,7 +776,7 @@ TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name
     screen.session.openAtStartup();
     REQUIRE (screen.registry.invoke ("help.example.exodus"));
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // The view the keyboard went to: the focused component, or the view it is in, by its title.
     const auto focusedView = []
@@ -845,7 +845,7 @@ TEST_CASE ("Every control in the window has a name and a role for screen readers
     auto& context = screen.session.getContext();
     phazite::test::addRepresentativeSong (*screen.session.getProject(), context, screen.temp.folder.getChildFile ("Sounds"));
     const auto devices = screen.addEveryOwnDevice();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     // A MIDI clip and an audio clip, for the piano roll and the audio clip editor.
     std::optional<phazite::ClipID> notes, audio;

@@ -56,7 +56,7 @@ void movePlayhead (ProjectContext&, BeatPosition);
 BeatPosition getPlayStart (const ProjectContext&);
 void setPlayStart (ProjectContext&, BeatPosition);
 
-// Where the playhead is heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()), which a frame of the
+// Where the playhead is heard at a moment (milliseconds by devices::Clock (JUCE's getMillisecondCounterHiRes() unless a test holds it)), which a frame of the
 // display shows while the song plays: where playback was as long before as its sound takes to reach the speakers.
 BeatPosition getHeardPlayheadBeat (const ProjectContext&, double milliseconds);
 

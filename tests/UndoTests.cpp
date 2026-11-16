@@ -218,7 +218,7 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
         change (*song, "a", 1);
 
         // A gesture keeps its step whole however long it lasts, across turns of the message loop.
-        phazite::test::settle (500);
+        phazite::test::dispatchPendingMessages(); // nothing of a gesture reads the clock: the turns are what count
         change (*song, "a", 2);
 
         {

@@ -738,7 +738,7 @@ TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
     juce::String error;
     auto project = phazite::Project::create (temp.folder, "Automated", error);
     REQUIRE (project != nullptr);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     auto& song = project->getSong();
     const auto track = phazite::getTrackIDs (song)[0];
@@ -763,7 +763,7 @@ TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
     }
 
     phazite::showLane (song, track, volume);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // A value set by hand is (Schema.h: channelPan).

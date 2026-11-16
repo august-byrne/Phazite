@@ -30,6 +30,7 @@
 // parameter: a song can't be saved with it on).
 #pragma once
 
+#include "devices/core/Clock.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
@@ -78,12 +79,9 @@ public:
     // Message thread: plays what is added alone, instead of the sound with it, for the next half second by the clock; its
     // editor asks again each time it refreshes, so that the sound comes back when the editor no longer shows (as the
     // compressor's Listen). It fades between the two over a few milliseconds, and its runner plays it whole, whatever the mix.
-    void listenToAdded() noexcept
-    {
-        listenUntil.store (juce::Time::getMillisecondCounterHiRes() + listenMilliseconds, std::memory_order_relaxed);
-    }
+    void listenToAdded() noexcept { listenUntil.store (Clock::getMilliseconds() + listenMilliseconds, std::memory_order_relaxed); }
 
-    bool isPlayingAdded() const noexcept { return juce::Time::getMillisecondCounterHiRes() < listenUntil.load (std::memory_order_relaxed); }
+    bool isPlayingAdded() const noexcept { return Clock::getMilliseconds() < listenUntil.load (std::memory_order_relaxed); }
 
     bool overridesMix() const noexcept override { return addedShare > 0.0f; } // the block it last played
 

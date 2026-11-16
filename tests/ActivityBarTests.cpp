@@ -443,7 +443,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     CHECK (phazite::getBounceWithVersion (context));
 
     screen.saveVersion ("Bounced");
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.renders.finished.isEmpty(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.renders.finished.isEmpty(); }));
     CHECK (screen.renders.finished[0] == "Bouncing \"Bounced\": ok");
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (1).contains (", with a bounce"); }));
     CHECK (view.getRoomText().startsWith ("Commits take "));
@@ -485,7 +485,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     REQUIRE (screen.registry.invoke ("version.bounce"));
     REQUIRE (view.describeHistoryRow (2).startsWith ("Third"));
     CHECK (view.describeHistoryRow (2).contains (", bouncing"));
-    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (2).contains (", with a bounce"); }, 60000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (2).contains (", with a bounce"); }));
 }
 
 TEST_CASE ("The activity bar's icons are switches screen readers name, with tooltips that name their keys")

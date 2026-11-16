@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Engine.h"
 #include "devices/core/AudioThreads.h"
+#include "devices/core/Clock.h"
 #include "engine/transport/Click.h"
 
 #include <algorithm>
@@ -14,9 +15,10 @@ namespace
 {
     constexpr int maximumChannels = 64; // the most output channels a block plays into; any more stay silent
 
+    // The wall clock the playhead's stamps and the blocks' times are read by: devices::Clock, which a test can hold still.
     double getMilliseconds() noexcept
     {
-        return juce::Time::getMillisecondCounterHiRes();
+        return devices::Clock::getMilliseconds();
     }
 
     // What MIDI's Reset All Controllers (RP-015) sets a controller to, as a device takes it, or none for one it leaves as it
@@ -853,7 +855,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 {
     const juce::ScopedNoDenormals noDenormals;
     blockLength = std::max (1, numSamples);
-    const auto startTicks = juce::Time::getHighResolutionTicks();
+    const auto startTicks = devices::Clock::getTicks();
     const auto startMilliseconds = blockClock.stamp (getMilliseconds(), numSamples, sampleRate); // smoothed (PlayheadClock.h)
     numOutputs = std::min (numOutputs, maximumChannels);
     numInputs = inputs != nullptr ? std::clamp (numInputs, 0, maximumInputs) : 0;
@@ -1097,7 +1099,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
     }
 
     // Its share of the block's time, eased over about a second of blocks.
-    const auto tookTicks = juce::Time::getHighResolutionTicks() - startTicks;
+    const auto tookTicks = devices::Clock::getTicks() - startTicks;
     const auto seconds = juce::Time::highResolutionTicksToSeconds (tookTicks);
     const auto share = numSamples > 0 ? seconds * sampleRate / numSamples : 0.0;
     load.store (load.load (std::memory_order_relaxed) * 0.95 + share * 0.05, std::memory_order_relaxed);

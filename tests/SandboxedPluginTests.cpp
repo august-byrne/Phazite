@@ -457,7 +457,8 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     song.setVolume (track, -6.0f); // the parameter last touched until then
     phazite::test::dispatchPendingMessages();
     REQUIRE (phazite::getLastTouchedParameter (song.context) == song.getVolumeParameter (track));
-    EnginePlayback playback;
+    const phazite::test::HeldClock clock; // the engine's: where the song is read, and where the plug-in's grab is heard, alike
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
 
     // Played past the note's start, and held there until the helper tells what the plug-in did: grabbed where the song is
@@ -562,7 +563,7 @@ TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of it
     getSandboxed (song, effect).setCurrentProgram (1);
     auto gain = phazite::getParameter (song.context, { effect, effectGain });
     REQUIRE (phazite::test::dispatchMessagesUntil (
-        [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }, 20000));
+        [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }));
 }
 
 TEST_CASE ("What a plug-in in a helper tells of itself that changes nothing is no unsaved change: a VST3's restart, values again")
@@ -667,8 +668,7 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
         {
             child = findHelperWindow (parent);
             return child != nullptr;
-        },
-        20000));
+        }));
 
     // The plug-in makes its editor larger: Phazite's follows.
     song.setParameter (effect, "0", 1.0f); // its Tone
@@ -822,20 +822,20 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
     const auto hanging = song.addEffect (track, "PhaziteTestHang");
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender); // its level, however busy the machine
     song.run ("transport.playStop");
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 
     // Its Hang on: its blocks come late, silent (the tone faded out), until its helper is ended, a second of late blocks
     // after; silent after that too.
+    EnginePlayback::setTiming (EnginePlayback::Timing::realTime);
     song.setParameter (hanging, hangHang, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
             playback.play (0.05);
             return getSandboxed (song, hanging).hasCrashed();
-        },
-        20000));
+        }));
     CHECK (playback.play (0.4).getMagnitude (0, 0, 19200) == 0.0f);
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0);
     phazite::test::dispatchPendingMessages();
@@ -855,6 +855,7 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
     CHECK_FALSE (phazite::getEffects (song.context, track)[0].crashed);
     CHECK (phazite::getParameter (song.context, { hanging, hangHang }).getValue() == doctest::Approx (lastHang));
     song.setParameter (hanging, hangHang, 0.0f);
+    EnginePlayback::setTiming (EnginePlayback::Timing::asRender);
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 }
 
@@ -877,8 +878,7 @@ TEST_CASE ("A plug-in whose helper's message thread stops answering is ended for
         {
             playback.play (0.05);
             return getSandboxed (song, stalling).hasCrashed();
-        },
-        20000));
+        }));
     CHECK (juce::Time::getMillisecondCounterHiRes() - stalledAt >= SandboxedPlugins::messageHangMilliseconds);
     CHECK (playback.play (0.4).getMagnitude (0, 0, 19200) == 0.0f);
 }
@@ -945,8 +945,7 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
         {
             playback.play (0.05);
             return effectButton() != nullptr && effectButton()->getButtonText() == "Test Crash - Crashed";
-        },
-        20000));
+        }));
 
     // A click reloads it (its Crash off again, as the plug-in has it): its slot shows its name again.
     song.run ("transport.playStop");
@@ -976,7 +975,7 @@ TEST_CASE ("The plug-in scan finds what a file holds in a helper, and leaves out
     CHECK_FALSE (scanner->findPluginTypesFor (*format, found, TestPlugins::hangsScanned));
     const auto took = juce::Time::getMillisecondCounterHiRes() - hungAt;
     CHECK (took >= secondsEach * 1000.0);
-    CHECK (took < secondsEach * 4000.0);
+    CHECK (took < phazite::pluginScanSecondsEach * 1000.0 / 2); // its time, not the default's, however busy the machine
     CHECK (found.isEmpty());
 
     // One that crashes its helper, twice (once more in a fresh helper), is left out too.
@@ -996,9 +995,10 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto crashing = song.addEffect (track, "PhaziteTestCrash");
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender); // its level, however busy the machine
     song.run ("transport.playStop");
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+    EnginePlayback::setTiming (EnginePlayback::Timing::realTime);
 
     // It crashes as it plays (its Crash on), blocks coming meanwhile: Phazite plays on, the effect silent rather than dry
     // (a limiter or a fully wet reverb passed dry is worse than a gap).
@@ -1008,8 +1008,7 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
         {
             playback.play (0.05);
             return getSandboxed (song, crashing).hasCrashed();
-        },
-        20000));
+        }));
     CHECK (playback.play (0.4).getMagnitude (0, 0, 19200) == 0.0f);
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0); // its helper has gone
 
@@ -1133,8 +1132,9 @@ TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for 
 {
     SandboxedPlugins sandboxed;
 
-    // For the helper it starts: no block is taken for a hang within the case, however busy the machine.
-    SandboxedPlugins::getHost().setHangLimits (SandboxedPlugins::messageHangMilliseconds, 20000);
+    // For the helper it starts: no block is taken for a hang within the case (only a hang's limit on), however busy the
+    // machine.
+    SandboxedPlugins::getHost().setHangLimits (SandboxedPlugins::messageHangMilliseconds, phazite::test::hangTimeout);
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
@@ -1159,9 +1159,9 @@ TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for 
     // Cancelled, as its window's Cancel and quitting do: at once, not once the plug-in is taken for hung.
     const auto cancelledAt = juce::Time::getMillisecondCounterHiRes();
     host.render = nullptr;
-    // (the old wait was the prepare's ten seconds, and the plug-in is taken for hung only twenty seconds on: three tell
-    // them apart on a busy machine too)
-    CHECK (juce::Time::getMillisecondCounterHiRes() - cancelledAt < 3000.0);
+    // (a wait for the plug-in would last the prepare's minute at the least, and the plug-in is taken for hung only at a
+    // hang's limit: half a minute tells them apart however busy the machine is; it took 3 s once beside other builds)
+    CHECK (juce::Time::getMillisecondCounterHiRes() - cancelledAt < 30000.0);
     CHECK (host.finished.isEmpty());
     CHECK_FALSE (phazite::isFrozen (song.context, track));
 
@@ -2726,6 +2726,14 @@ TEST_CASE ("A plug-in that crashes again after a reload, before anything of it c
     // The review of known bug 166: a reload opens from the state the plug-in gave last, the user's latest settings, which
     // may be what it crashes for; reloaded again before anything changed, it opens from the song's.
     SandboxedPlugins sandboxed;
+
+    // The second crash comes soon after the reload, however busy the machine (it took more than the 5 s once beside others).
+    struct Soon
+    {
+        Soon() { phazite::PluginInstances::setSoonAfterReload (longWait); }
+        ~Soon() { phazite::PluginInstances::setSoonAfterReload (-1.0); }
+    } soon;
+
     TestSong song;
     const auto hanging = song.addEffect (song.firstTrack, "PhaziteTestHang");
     song.saveWithPluginStates(); // the song holds its state with its Hang off

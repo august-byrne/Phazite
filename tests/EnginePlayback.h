@@ -61,6 +61,13 @@ public:
     {
     }
 
+    // How its blocks keep time from now on: real time for what a late or hanging plug-in does, as a render's for the levels
+    // around it.
+    static void setTiming (Timing timing)
+    {
+        getPlaybackHost (getEngineContext()).getEngine().setPlayingAsRender (timing == Timing::asRender);
+    }
+
     double getSampleRate() const noexcept { return rate; }
     int getBlockSize() const noexcept { return block; }
 

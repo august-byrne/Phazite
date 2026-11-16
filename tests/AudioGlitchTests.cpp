@@ -342,7 +342,7 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
     const auto withSong = getVariable ("PHAZITE_GLITCH_SONG", "on") != "off"; // off: the pilot alone, to compare
     phazite::setSong (context, &project->getSong());
     phazite::getMasterVolume (context).setValue (0.0f);
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     if (withSong)
         phazite::playOrStop (project->getSong());
@@ -466,7 +466,7 @@ TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::setSong (context, &project->getSong());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     juce::AudioBuffer<float> block (2, 480);
     juce::String report ("\n");
@@ -525,7 +525,7 @@ TEST_CASE ("Device sound: House Groove's intro rendered, its clicks found where 
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::setSong (context, &project->getSong());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     constexpr double rate = 48000.0, beat = 60.0 / 124.0;
     const auto audio = phazite::renderWithOwnEngine (project->getSong(), (int) (8 * 4 * beat * rate), rate, 480);
@@ -591,7 +591,7 @@ TEST_CASE ("Device sound: House Groove's intro played live sounds the same when 
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::setSong (context, &project->getSong());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto* session = phazite::findSession (project->getSong());
     REQUIRE (session != nullptr);
 
@@ -703,7 +703,7 @@ TEST_CASE ("Device sound: where in House Groove's intro the sound above 6 kHz is
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::setSong (context, &project->getSong());
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
 
     phazite::TrackID drums;
 

@@ -41,8 +41,11 @@ bool isUpdatingGoldenFiles();
 // of failing the test.
 juce::File getActualFolder();
 
-// Delivers the messages and runs the timers that are due for some milliseconds, as the app's message loop would, so
-// that what Phazite does asynchronously is done.
+// Delivers the messages and runs the timers that are due for some milliseconds by the wall clock, as the app's message loop
+// would: for a test where time itself passing is what it is about (a drag's auto-repeat timers, JUCE's, while the mouse
+// rests), and for the benchmarks. Never as a wait for something to happen: the message thread's work is
+// dispatchPendingMessages() (UiTestHelpers.h), another thread's is a condition (dispatchMessagesUntil()), and a timeout
+// Phazite reads from the clock is reached by holding the clock and moving it on (HeldClock, TestHelpers.h).
 void settle (int milliseconds = 250);
 
 // An XML file, which must be a document.

@@ -257,6 +257,7 @@ TEST_CASE ("Ducking, the compressor's editor has its key's cuts, and Listen play
     // Off at first; on, the compressor plays its key, as long as the editor asks (each refresh).
     auto* compressor = song.getDevice().getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
+    phazite::test::HeldClock clock;
     editor.refresh();
     CHECK_FALSE (compressor->isPlayingKey());
     phazite::test::Mouse mouse (editor.getListenButton());
@@ -265,8 +266,8 @@ TEST_CASE ("Ducking, the compressor's editor has its key's cuts, and Listen play
     editor.refresh();
     CHECK (compressor->isPlayingKey());
 
-    // On Compress's page, where it hears its own sound, it no longer asks.
-    juce::Thread::sleep (600);
+    // On Compress's page, where it hears its own sound, it no longer asks: once the last ask has run out, the key stops.
+    clock.advance (501.0);
     clickMode (editor, Compressor::Mode::compress);
     editor.refresh();
     CHECK_FALSE (compressor->isPlayingKey());
@@ -406,7 +407,7 @@ TEST_CASE ("How far the compressor turns the sound down reads the same for any n
     // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second, by the clock: as far
     // as the time between the two readings, measured around each of them (however long the machine kept this thread from
     // running), and no lower than none.
-    juce::Thread::sleep (200);
+    juce::Thread::sleep (200); // a lower bound only: at least so long has passed, however long it took
     const auto beforeSecond = now();
     const auto second = reduction->get();
     const auto afterSecond = now();

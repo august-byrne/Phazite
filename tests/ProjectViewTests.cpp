@@ -105,6 +105,7 @@ TEST_CASE ("Notes typed in the Project view go into the song, a burst of typing 
     auto& view = screen.showView();
     auto& notes = view.getNotesField();
     auto& context = screen.session.getContext();
+    phazite::test::HeldClock clock; // which a burst's pause is measured by, and which moves only as the test says
 
     // Typed, in the song at once (a save would have them).
     screen.click (notes);
@@ -124,6 +125,20 @@ TEST_CASE ("Notes typed in the Project view go into the song, a burst of typing 
     // What the undo left shows in the field.
     phazite::test::dispatchPendingMessages();
     CHECK (notes.getText().isEmpty());
+
+    // A pause of a second and a half ends a burst too.
+    screen.click (notes);
+    notes.insertTextAtCaret ("Verse");
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::Gesture::isInProgress (screen.getSong()));
+    clock.advance (1499.0);
+    view.tickNow();
+    CHECK (phazite::Gesture::isInProgress (screen.getSong()));
+    clock.advance (2.0);
+    view.tickNow();
+    CHECK_FALSE (phazite::Gesture::isInProgress (screen.getSong()));
+    CHECK (screen.getSong().getUndoManager().getUndoDescription() == juce::String ("Change Notes"));
+    CHECK (phazite::getProjectNotes (context) == juce::String ("Verse"));
 }
 
 TEST_CASE ("The Project view lists the song's audio files, a missing one with its Locate, and the files nothing plays")

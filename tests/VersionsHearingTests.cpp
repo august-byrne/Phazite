@@ -51,7 +51,7 @@ juce::String keepVersion (phazite::ProjectContext& context, const juce::String& 
 void bounce (TestSong& s, const juce::String& version)
 {
     phazite::bounceVersion (s.context, version, s.renders);
-    REQUIRE (dispatchMessagesUntil ([&s] { return ! s.renders.finished.isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s] { return ! s.renders.finished.isEmpty(); }));
     INFO (s.renders.finished.joinIntoString ("\n").toStdString());
     REQUIRE (s.renders.finished[s.renders.finished.size() - 1].endsWith (": ok"));
     s.renders.finished.clear();
@@ -219,7 +219,7 @@ TEST_CASE ("An old version's bounce is its song alone, rendered in the backgroun
     CHECK_FALSE (phazite::getSession (s.context)->isLentToRender());
     CHECK_FALSE (phazite::canBounce (s.context, phazite::getLastVersion (s.context)->id)); // one at a time
 
-    REQUIRE (dispatchMessagesUntil ([&s, &quiet] { return hasBounceOf (s.context, quiet); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s, &quiet] { return hasBounceOf (s.context, quiet); }));
     CHECK (phazite::getBounceProblem (s.context).isEmpty());
     CHECK_FALSE (phazite::getBounceProgress (s.context, quiet).has_value());
     CHECK (phazite::isSongPlaying (*phazite::findSong (s.context)));
@@ -235,7 +235,7 @@ TEST_CASE ("An old version's bounce is its song alone, rendered in the backgroun
     std::optional<phazite::ExportReport> report;
     const auto exporting = phazite::startExport (*phazite::findSong (s.context), exported, settings,
                                                  [&report] (const phazite::ExportReport& r) { report = r; });
-    REQUIRE (dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&report] { return report.has_value(); }));
     REQUIRE (report->result.wasOk());
 
     const auto bounced = readAudio (phazite::getVersionHistory (s.context)->getBounceFile (quiet)), wanted = readAudio (exported);
@@ -283,8 +283,7 @@ TEST_CASE ("The song plays in real time while an old version renders in the back
             const auto played = playback.getBlocksPlayed() - start;
             return played >= RealTimePlayback::blocksFor (1.5)
                    || (played >= RealTimePlayback::blocksFor (0.25) && hasBounceOf (s.context, old));
-        },
-        60000));
+        }));
     const auto done = hasBounceOf (s.context, old);
     const auto times = engine.takeBlockTimes();
     const auto longestCall = playback.takeLongestCall();
@@ -353,7 +352,7 @@ TEST_CASE ("Save Version with a bounce bounces the version it saves, in the host
     phazite::setBounceWithVersion (s.context, true);
     phazite::setVersionDraft (s.context, "Take one", {});
     REQUIRE (commands.invoke ("version.save"));
-    REQUIRE (dispatchMessagesUntil ([&s] { return ! s.renders.finished.isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s] { return ! s.renders.finished.isEmpty(); }));
     CHECK (s.renders.finished[0] == "Bouncing \"Take one\": ok");
     CHECK (phazite::getLastVersion (s.context)->hasBounce);
 

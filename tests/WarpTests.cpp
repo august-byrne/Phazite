@@ -192,8 +192,7 @@ TEST_CASE ("The hits in a clip's audio are found in the background, each with wh
         {
             hits = phazite::getTransients (warp.song.context, warp.clip);
             return hits.has_value();
-        },
-        30000));
+        }));
 
     REQUIRE (hits->size() == 4);
 
@@ -219,10 +218,10 @@ TEST_CASE ("A file's hits are found once, however often they are asked for while
     phazite::Transients transients;
 
     // As a view asks at every repaint until they are there.
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (first).has_value(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (first).has_value(); }));
 
     // The thread takes files in turn: once the next one asked for is found, nothing asked for before it waits.
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (second).has_value(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (second).has_value(); }));
 
     CHECK (transients.getNumAnalysed() == 2);
 }

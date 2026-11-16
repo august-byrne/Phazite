@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectView.h"
+#include "devices/core/Clock.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/project/UnusedAudio.h"
 #include "ui/input/CommandUI.h"
@@ -502,7 +503,7 @@ void ProjectView::notesChanged()
             juce::Desktop::getInstance().addGlobalMouseListener (pressElsewhere.get());
     }
 
-    lastTyped = juce::Time::getMillisecondCounter();
+    lastTyped = devices::Clock::getMillisecondCounter();
     setProjectNotes (context, notesField->getText());
 }
 
@@ -652,7 +653,7 @@ void ProjectView::visibilityChanged()
 void ProjectView::timerCallback()
 {
     // A burst of typing ends at a pause.
-    if (notesTyping != nullptr && juce::Time::getMillisecondCounter() - lastTyped > typingPause)
+    if (notesTyping != nullptr && devices::Clock::getMillisecondCounter() - lastTyped > typingPause)
         endTyping();
 
     if (isShowing() && (needsReading || ++ticksSinceRead >= ticksBetweenReads))

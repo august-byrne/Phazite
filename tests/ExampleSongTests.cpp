@@ -6,6 +6,7 @@
 #include "GoldenFiles.h"
 #include "RenderHarness.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -107,7 +108,7 @@ TEST_CASE ("Every example song opens as a new project without undo steps or unsa
     {
         CAPTURE (std::string (song.id));
         Example example (song.id);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         CHECK_FALSE (example.project->hasUnsavedChanges());
         CHECK_FALSE (example.project->getSong().getUndoManager().canUndo());
         CHECK (phazite::findExampleTrackToPlay (example.context, song).isValid());

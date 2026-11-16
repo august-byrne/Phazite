@@ -13,7 +13,7 @@
 
 namespace phazite::engine
 {
-// When blocks start, in milliseconds by juce::Time::getMillisecondCounterHiRes(), smoothed. The audio thread's.
+// When blocks start, in milliseconds by devices::Clock (JUCE's getMillisecondCounterHiRes() unless a test holds it), smoothed. The audio thread's.
 class BlockClock
 {
 public:

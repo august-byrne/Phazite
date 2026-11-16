@@ -653,7 +653,7 @@ TEST_CASE ("At every condition a song played live sounds as its render does")
 
             const auto tone = song.addTrack ("Tone");
             song.addAudioClip (tone, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 0.3, 330.0, 0.1f), 4.25);
-            phazite::test::settle();
+            phazite::test::dispatchPendingMessages();
 
             const auto rate = condition.getSampleRate();
             const auto beatSeconds = 60.0 / condition.getTempo();

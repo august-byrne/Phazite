@@ -276,8 +276,8 @@ TEST_CASE ("A project's renders are made in the background, and one that no clip
     const auto shortRender = playedFileOf (song, shortLoop);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&renders, &shortRender]
-        { return phazite::getAudioFileInfo (shortRender).isValid() && ! renders.getProgressOf (shortRender).has_value(); }, 60000));
-    REQUIRE (isWritingLongRender());
+        { return phazite::getAudioFileInfo (shortRender).isValid() && ! renders.getProgressOf (shortRender).has_value(); }));
+    REQUIRE (phazite::test::dispatchMessagesUntil (isWritingLongRender)); // begun by now or soon, however busy the machine
 
     // The short one counts as made, the long one as far as it has come.
     const auto halfway = renders.getProgress();
@@ -376,7 +376,7 @@ TEST_CASE ("A loop previewed in time plays stretched as its clip would be, every
     const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
     REQUIRE (previewer->play (file, song.context));
     REQUIRE (previewer->isInTime());
-    REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }, 60000));
+    REQUIRE (phazite::test::runTimersUntil ([&previews] { return previews.isPlaying(); }));
 
     // Played as a render plays, which waits for each part of the loop the render hasn't reached.
     const auto rate = phazite::test::EnginePlayback::sampleRate;

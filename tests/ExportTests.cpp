@@ -50,7 +50,7 @@ ExportReport exportAndWait (phazite::Song& song, const juce::File& file, const E
 {
     std::optional<ExportReport> report;
     const auto running = phazite::startExport (song, file, settings, [&report] (const ExportReport& r) { report = r; });
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }));
     return *report;
 }
 
@@ -310,7 +310,7 @@ TEST_CASE ("The project's engine plays nothing of it while an export has its plu
     auto running = phazite::startExport (*sine.song, sine.renders.getChildFile ("Song.wav"), ExportSettings {},
                                          [&report] (const ExportReport& r) { report = r; });
     CHECK (engine.getPlan() == nullptr); // the render has it
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }));
     CHECK (report->result.wasOk());
     CHECK (engine.getPlan() != nullptr);
 
@@ -507,7 +507,7 @@ struct ExportWindow
 
     bool waitUntilDone()
     {
-        return phazite::test::dispatchMessagesUntil ([this] { return ! panel.isExporting(); }, 60000);
+        return phazite::test::dispatchMessagesUntil ([this] { return ! panel.isExporting(); });
     }
 };
 } // namespace

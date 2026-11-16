@@ -160,7 +160,7 @@ TEST_CASE ("A/B hears the last commit in place of the song once it is bounced in
     // A press: the commit is bounced in the background, the song playing on, and heard as soon as it is.
     phazite::toggleCompare (s.context);
     CHECK (phazite::isWaitingToCompare (s.context));
-    REQUIRE (dispatchMessagesUntil ([&s, &committed] { return phazite::getHeardVersion (s.context) == committed; }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s, &committed] { return phazite::getHeardVersion (s.context) == committed; }));
     CHECK_FALSE (phazite::isWaitingToCompare (s.context));
     CHECK (phazite::describeHearing (s.context) == "Hearing: Tone");
 
@@ -185,7 +185,7 @@ TEST_CASE ("A/B says why it can't hear a commit with nothing to bounce, until th
     REQUIRE (phazite::canCompare (s.context));
 
     phazite::toggleCompare (s.context);
-    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isWaitingToCompare (s.context); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isWaitingToCompare (s.context); }));
     CHECK (phazite::getHeardVersion (s.context).isEmpty());
     CHECK (phazite::getCompareProblem (s.context).contains ("nothing to bounce"));
 

@@ -695,7 +695,9 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
     CHECK (peakOf (played.left, 4800, 9600) > 0.1f);
     CHECK_FALSE (sampler.hasOwnSound (36));
 
-    // The editor plays a pad at the next block, which it waits for (the engine wakes for it).
+    // The editor plays a pad at the next block, which it waits for (the engine wakes for it), by a clock that moves only as
+    // the test says.
+    phazite::test::HeldClock clock;
     sampler.getPadMeter (38).take();
     CHECK_FALSE (sampler.isWaitingToPlay());
     sampler.audition (38, 0.8f);
@@ -705,10 +707,14 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
     CHECK (peakOf (played.left, 0, 4800) > 0.1f);
     CHECK (sampler.getPadMeter (38).take() == doctest::Approx (0.8f));
 
-    // One that waited longer than a moment, as while the sampler was off, plays never rather than late.
+    // One that waited just under a quarter of a second plays; one that waited longer, as while the sampler was off, plays
+    // never rather than late.
     sampler.audition (38, 0.8f);
-    juce::Thread::sleep (300);
-    juce::Time::getMillisecondCounter(); // the clock moves on, as the engine moves it after each block
+    clock.advance (249.0);
+    play (sampler, getDefaults(), 4800, {});
+    CHECK (sampler.getPadMeter (38).take() == doctest::Approx (0.8f));
+    sampler.audition (38, 0.8f);
+    clock.advance (252.0);
     play (sampler, getDefaults(), 4800, {});
     CHECK (sampler.getPadMeter (38).take() == doctest::Approx (0.0f));
 }

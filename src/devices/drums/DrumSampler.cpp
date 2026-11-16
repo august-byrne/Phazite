@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSampler.h"
 #include "FactoryDrums.h"
+#include "devices/core/Clock.h"
 #include "devices/dsp/Math.h"
 
 #include <algorithm>
@@ -296,7 +297,7 @@ void DrumSampler::audition (int pad, float hitVelocity)
     const auto scope = auditionFifo.write (1);
 
     if (scope.blockSize1 > 0)
-        auditions[(size_t) scope.startIndex1] = { pad, hitVelocity, juce::Time::getMillisecondCounter() };
+        auditions[(size_t) scope.startIndex1] = { pad, hitVelocity, Clock::getMillisecondCounter() };
 }
 
 bool DrumSampler::isWaitingToPlay() const noexcept
@@ -678,9 +679,8 @@ void DrumSampler::process (const ProcessContext& block)
 
     follow (values);
 
-    // Pads the editor played, unless one waited too long for a block, as while the sampler was off. JUCE's approximate
-    // clock (an atomic read) can lag behind, never run ahead: a lag only lets a pad play.
-    const auto now = juce::Time::getApproximateMillisecondCounter();
+    // Pads the editor played, unless one waited too long for a block, as while the sampler was off.
+    const auto now = Clock::getMillisecondCounter();
     const auto playAudition = [this, now, &values] (const Audition& waiting)
     {
         if (juce::isPositiveAndBelow (waiting.pad, numPads) && (int) (now - waiting.playedAt) <= longestAuditionWait)

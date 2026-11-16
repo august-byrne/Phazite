@@ -517,6 +517,7 @@ TEST_CASE ("Listen plays the key, through its cuts, in place of what comes out a
     Multiband multiband;
     multiband.prepare (testRate, testBlockSize);
     CHECK_FALSE (multiband.isPlayingKey());
+    phazite::test::HeldClock clock; // which moves only as the test says, however long the blocks take to play
     multiband.listenToKey();
     CHECK (multiband.isPlayingKey());
 
@@ -534,8 +535,11 @@ TEST_CASE ("Listen plays the key, through its cuts, in place of what comes out a
     CHECK (clicked.left[loudest] == doctest::Approx (0.5f).epsilon (0.02));
     CHECK (multiband.overridesMix());
 
-    // Half a second by the clock after it was last asked for, the sound comes back, and the key no longer plays.
-    juce::Thread::sleep (600);
+    // Half a second by the clock after it was last asked for, and not before, the sound comes back, and the key no longer
+    // plays.
+    clock.advance (499.0);
+    CHECK (multiband.isPlayingKey());
+    clock.advance (2.0);
     CHECK_FALSE (multiband.isPlayingKey());
     const auto after = play (multiband, values, 9600, sine (1000.0, -20.0f), sine (80.0, -6.0f));
     CHECK (getLevel (after.left) == doctest::Approx (-20.0f).epsilon (0.02));

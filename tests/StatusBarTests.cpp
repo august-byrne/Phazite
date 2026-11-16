@@ -29,7 +29,7 @@ TEST_CASE ("The status bar says whether the project is saved, and a click on tha
     Screen screen;
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto& status = screen.shell.getStatusBar();
 
     // What the main window tells it, as the project changes.
@@ -97,7 +97,7 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
     screen.session.openAtStartup();
     REQUIRE (screen.registry.invoke ("help.example.exodus")); // tracks with clips, as Help > Example Songs opens it
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto& status = screen.shell.getStatusBar();
     auto& context = screen.session.getContext();
     auto& selection = context.getSongSelection();
@@ -214,7 +214,7 @@ TEST_CASE ("The status bar shows the song's delay compensation, while it has som
             limiter = type;
 
     phazite::addEffect (context, {}, limiter);
-    phazite::test::settle (300);
+    phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     device.process (20);
     status.refreshNow();
     CHECK (status.getDelayText().startsWith ("Delay comp. "));
@@ -232,7 +232,7 @@ TEST_CASE ("While clips are stretched in the background after a tempo change, th
     Screen screen;
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto& status = screen.shell.getStatusBar();
     auto& context = screen.session.getContext();
     status.refreshNow();
@@ -251,8 +251,7 @@ TEST_CASE ("While clips are stretched in the background after a tempo change, th
         {
             status.refreshNow();
             return status.getRenderText().isNotEmpty();
-        },
-        10000));
+        }));
     CHECK (status.getRenderText().startsWith ("Stretching "));
     CHECK (status.getRenderProgress() >= 0.0);
     CHECK (status.getRenderProgress() <= 1.0);

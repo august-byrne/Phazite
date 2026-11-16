@@ -356,16 +356,20 @@ public:
     // with their names, once for each change of that list.
     std::function<void (const juce::StringArray& plugins)> onOlderPluginStates;
 
+    // What it does at each of its ticks (four a second), done now: for tests, which hold the clock it reads its waits by
+    // (devices/core/Clock.h) and tick it as they move the clock on.
+    void tickNow() { timerCallback(); }
+
 private:
     Project& project;
     const int intervalSeconds, firstDelaySeconds;
-    juce::uint32 changedSince = 0; // when the timer first saw a change not yet autosaved (the millisecond counter), or 0
+    juce::uint32 changedSince = 0; // when the timer first saw a change not yet autosaved (devices::Clock's millisecond counter), or 0
     bool autosavedOnce = false;
     bool wasRecording = false, wasAutosaving = false;
     int failures = 0; // in a row
     bool autoSave = false;
     juce::int64 lastChangeCount = 0;
-    juce::uint32 lastChangeAt = 0, savedAt = 0; // the millisecond counter
+    juce::uint32 lastChangeAt = 0, savedAt = 0; // devices::Clock's millisecond counter
     bool saveDue = false;                       // Auto Save's, waiting for the plug-ins' states
     juce::StringArray toldOlder;                // the plug-ins onOlderPluginStates last named
 

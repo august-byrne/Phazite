@@ -162,7 +162,7 @@ struct MainScreen
         for (auto& dialog : dialogs)
             delete dialog.getComponent();
 
-        phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); }, 60000);
+        phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); });
     }
 
     // A track with a note on it, so that there is a song to export (an empty one has nothing).
@@ -393,7 +393,7 @@ TEST_CASE ("The main window's menus name the app's commands, each shown as its c
 TEST_CASE ("The main window's dialogs open by their commands, show their panels in each theme, and close")
 {
     MainScreen screen;
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     screen.addNotes();
     REQUIRE (screen.registry.invoke ("project.save")); // Clean Up Unused Audio is for a project with a folder of its own
 
@@ -589,7 +589,7 @@ TEST_CASE ("Closing the main window quits at once without unsaved changes, and a
     SUBCASE ("Nothing to save")
     {
         MainScreen screen;
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
         REQUIRE_FALSE (screen.session.getProject()->hasUnsavedChanges());
         screen.window->closeButtonPressed();
         CHECK (screen.quitting);
@@ -636,7 +636,7 @@ TEST_CASE ("Closing the main window quits at once without unsaved changes, and a
 TEST_CASE ("The windows that hold a project's song close as another project opens; About stays")
 {
     MainScreen screen;
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     screen.addNotes();
     REQUIRE (screen.registry.invoke ("project.save")); // Clean Up Unused Audio is for a project with a folder of its own
 

@@ -99,7 +99,7 @@ void stopPlaying (Song&);
 bool isSongPlaying (const Song&);
 BeatPosition getPlayheadBeat (const Song&);
 
-// Where the playhead is heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()): its session's
+// Where the playhead is heard at a moment (milliseconds by devices::Clock (JUCE's getMillisecondCounterHiRes() unless a test holds it)): its session's
 // (PlaybackSession::getHeardPlayhead()), or where playback starts without one.
 BeatPosition getHeardPlayheadBeat (const Song&, double milliseconds);
 

@@ -294,25 +294,20 @@ TEST_CASE ("A channel's CPU meter shows the share of each block's time its devic
     REQUIRE (phazite::groupIntoContainer (context, { second }).isValid());
     CHECK (phazite::getCpuLoad (context, tracks.a) == 0.0f);
 
-    // Each block of each device takes a fifth of its time at least: the meter's lower bounds hold on any machine. Its upper
-    // bounds are what the devices really took, a block at most as long as their longest (more than a fifth only where the
-    // system took the thread away while one worked), with room for the engine's own work around them: a device counted
-    // twice (a container's time with that of the devices in it) would pass them.
-    TestBusy::longestShare = 0.0;
+    // By a clock that moves only as the devices move it, each block of each device takes a fifth of the block's time exactly,
+    // and the engine's own work none: the meter shows the devices' time alone, however busy the machine is, and a device
+    // counted twice (a container's time with that of the devices in it) would show three fifths. (The meter's average
+    // reaches all but a few thousandths of it in a second and a half: DeviceNode.h.)
+    const phazite::test::HeldClock clock;
     phazite::test::EnginePlayback playback;
     playback.play (1.5);
-    const auto both = phazite::getCpuLoad (context, tracks.a);
-    CHECK (both > 1.5 * TestBusy::share);
-    CHECK (both < 2.0 * TestBusy::longestShare.load() + 0.5 * TestBusy::share);
+    CHECK (phazite::getCpuLoad (context, tracks.a) == doctest::Approx (2.0 * TestBusy::share).epsilon (0.01));
     CHECK (phazite::getCpuLoad (context, tracks.b) == 0.0f);
 
     // Switched off, a device takes none, and its share falls away as the engine plays on.
     phazite::setDeviceOn (context, first, false);
-    TestBusy::longestShare = 0.0;
     playback.play (2.0);
-    const auto one = phazite::getCpuLoad (context, tracks.a);
-    CHECK (one > 0.75 * TestBusy::share);
-    CHECK (one < TestBusy::longestShare.load() + 0.5 * TestBusy::share);
+    CHECK (phazite::getCpuLoad (context, tracks.a) == doctest::Approx (TestBusy::share).epsilon (0.01));
 }
 
 TEST_CASE ("The values set by hand of Phazite's own devices are the song's, which what plays takes in, undo and redo too")
@@ -625,7 +620,7 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
     phazite::addEffect (context, tracks.a, tracks.find ("phaziteLimiter"));
     phazite::setDeviceOn (context, phazite::getEffects (context, tracks.a).back().id, false);
 
-    phazite::test::settle (300);
+    phazite::test::dispatchPendingMessages(); // the song, as it is now, handed to the engine for its next block
     device.process (20);
     const auto compensation = phazite::getDelayCompensation (context);
     REQUIRE (compensation.devices.size() == 2);
@@ -641,7 +636,7 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
     CHECK (phazite::getDelayCompensation (context).seconds == 0.0);
     CHECK (phazite::getDelayCompensation (context).devices.empty());
     host.setLowLatency (false);
-    phazite::test::settle (300);
+    phazite::test::dispatchPendingMessages(); // the song, as it is now, handed to the engine for its next block
     device.process (20);
     CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (compensation.seconds));
 }

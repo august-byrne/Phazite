@@ -101,24 +101,12 @@ its fix.
 
 ## Tests
 
-- **182. The test program can crash as it exits, after every case has passed.** Seen three times in two days
-  (2026-11-15 and 16, each time `SandboxedPluginTests` under a loaded machine, "SEGFAULT" after "Status: SUCCESS!"): the main thread was in `ExitProcess`, past every static
-  destructor, when a thread started by the graphics driver (NVIDIA's `nvppex.dll`, under JUCE's Direct2D windows) and ran
-  the program's thread-local initialiser, doctest's `g_oss`, which allocated after the C runtime's lock was gone. No
-  code of Phazite's was on its stack, and the file passes when run again. Fix, if it comes back: end the test
-  program without tearing the runtime down (`_exit` after the last check), which gives up the check of JUCE's leak
-  detector after `main` (`tests/TestMain.cpp`), or make that check before leaving `main`.
-
-- **180. Other tests compare against the wall clock with a slack, and can fail on a loaded machine.** Found by the
-  survey made as known bug 178 was fixed (2026-11-15); none is a fault of Phazite's. A beat compared within 0.001
-  while both sides add the time since the last block (`tests/EnginePlaybackTests.cpp`, about line 606); a block's
-  length against the longest gap, and a worker that must take a task within about 64 ms (`tests/EngineTests.cpp`,
-  about lines 1146 and 2992); levels of plug-ins played with `Timing::realTime`, where a late block plays silent, and
-  the stand-ins' hang limits of one and two seconds (`tests/SandboxedPluginTests.cpp`, `tests/SandboxedPlugins.h`;
-  `tests/SandboxTests.cpp` missed a 7,000 ms limit by 3 ms once); timeouts of 250 ms to 4 s read from the clock (the
-  Listen key in `CompressorTests`, `MultibandTests` and `ExciterTests`; the audition window in the drum sampler's
-  tests; the peak hold in `ControlsTests`; the typing pause in `ProjectViewTests`; the panel hide in `TopBarTests`;
-  Auto Save's tick in `ProjectTests`; the CPU meter's bound in `MixerModelTests`); `dispatchPendingMessages()` failing
-  after 5 s (`tests/UiTestHelpers.cpp`); and `settle (300)` used as "the engine has the song" (`PlaybackTests`,
-  `MixerModelTests`, `StatusBarTests`, `DrumSamplerEditorTests`). Fix: a clock the test drives for the timeouts, a
-  condition for each wait, and blocks played for what is measured against playback, as `tests/README.md` asks.
+- **180. The plug-in tests still compare against the wall clock.** The rest of the tests no longer do (2026-11-16);
+  what is left is in `tests/SandboxedPluginTests.cpp` and `tests/SandboxedPlugins.h`: the stand-ins' hang limits of one
+  and two seconds for every test; bounds on "doesn't wait" (`timeKept (...) < 500` and the like: closing a plug-in's
+  window failed at 856 ms and 2.8 s under load, a crashed plug-in's state, a save, `processBlock`, a render's
+  cancel); waits for a time that stand for a condition (`dispatchMessagesUntil (false, N)`); and the spacing of a
+  large state's answers measured on the real clock. Fix: the short limits only in the tests of hangs, with the
+  stand-in stalling until released; each bound against a long limit for the wait it guards, or a structural check;
+  each time wait made its condition; the spacing judged on the clock a test holds (`devices::Clock`), as
+  `tests/README.md` says ("Real time without the wall clock").

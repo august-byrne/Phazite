@@ -62,7 +62,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
     CHECK (drums[1].tags.contains ("Snare"));
 
     // Search finds what the background index has found, and devices.
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
     const auto kicks = library.search ("kick");
     REQUIRE (! kicks.empty());
     CHECK (kicks[0].name == juce::String ("Deep Kick"));
@@ -111,7 +111,7 @@ TEST_CASE ("The library's index doesn't follow a folder that links back to where
     phazite::Settings settings;
     phazite::Library library (phazite::test::getEngineContext(), settings, {});
     library.addUserFolder (sounds);
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
 
     juce::StringArray found;
 

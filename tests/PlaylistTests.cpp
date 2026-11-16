@@ -304,7 +304,7 @@ TEST_CASE ("A clip dragged past the playlist's edge shows where the song has it 
     REQUIRE (screen.playlist.getView().start.inBeats() > 0.0);     // it scrolled
     REQUIRE (screen.startOf (clip) > 0.0);                         // and moved the clip, which shows still
 
-    screen.playlist.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0);
     CHECK (screen.boundsOf (clip).getX() == screen.playlist.getView().beatToColumn (beats (screen.startOf (clip))));
     mouse.release();
 }
@@ -1318,12 +1318,12 @@ TEST_CASE ("While the song plays, the playlist turns the page at the playhead, u
     REQUIRE (scrolledTo < 19.0);
     CHECK (screen.playlist.isFollowingPaused());
     playTo (40.0);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); // a frame of the display, as the window shows one
     CHECK (viewStart() == doctest::Approx (scrolledTo));
 
     // Stopped and played again, from where it was moved to last, the view follows it there.
     phazite::playOrStop (screen.getSong());
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); // a frame of the display, as the window shows one
     phazite::playOrStop (screen.getSong());
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return viewStart() > 30.0; }));
     CHECK_FALSE (screen.playlist.isFollowingPaused());
@@ -1345,19 +1345,21 @@ TEST_CASE ("Scrolling continuously, the playlist keeps the playhead in the middl
     // Before the middle of the view (8 of its 16 beats), the playhead crosses it; after, the song scrolls under it, a pixel
     // at a time.
     playTo (3.0);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); // a frame of the display, as the window shows one
     CHECK (viewStart() == doctest::Approx (0.0));
     playTo (40.0);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return std::abs (viewStart() - 32.0) < 0.05; }));
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0);
+    CHECK (viewStart() == doctest::Approx (32.0).epsilon (0.002));
     playTo (40.5);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return std::abs (viewStart() - 32.5) < 0.05; }));
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0);
+    CHECK (viewStart() == doctest::Approx (32.5).epsilon (0.002));
 
     // Scrolled away while it plays, it stays there.
     phazite::test::Mouse mouse (*screen.lanes);
     mouse.wheel ({ 10, 10 }, 1.0f, juce::ModifierKeys::shiftModifier);
     const auto scrolledTo = viewStart();
     playTo (41.0);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
+    screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); // a frame of the display, as the window shows one
     CHECK (viewStart() == doctest::Approx (scrolledTo));
     phazite::playOrStop (screen.getSong());
 }
@@ -1389,7 +1391,7 @@ TEST_CASE ("Scrolling continuously, the playhead stays on one column while the s
     for (const auto part : { 0.25, 0.75, 1.25, 1.75 })
     {
         phazite::movePlayhead (screen.getSong(), beats ((pixel + part) / pixelsPerBeat));
-        phazite::test::dispatchMessagesUntil ([] { return false; }, 300); // the editor's checks, five times a second
+        screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); // a frame of the display, as the window shows one
         REQUIRE (playhead->isVisible());
         columns.insert (playhead->getX());
         lines.insert (screen.playlist.getPlayheadX());
@@ -1472,7 +1474,7 @@ TEST_CASE ("At each frame while the song plays, the playhead shows the beat hear
     auto* session = phazite::findPlayingSession (screen.getSong());
     REQUIRE (session != nullptr);
     session->locate (beats (5.37));
-    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto start = phazite::devices::Clock::getMilliseconds();
     const auto heard = phazite::getHeardPlayheadBeat (screen.context, start);
     CHECK (heard.inBeats() == doctest::Approx (5.37));
     screen.playlist.showFrame (start / 1000.0);
@@ -1517,7 +1519,7 @@ TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts 
     // reached, always left, and the playhead stays on its column.
     const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
     const auto pixel = std::floor (40.0 * pixelsPerBeat);
-    const auto frame = [&screen] { screen.playlist.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0); };
+    const auto frame = [&screen] { screen.playlist.showFrame (phazite::devices::Clock::getMilliseconds() / 1000.0); };
     std::set<double> lines;
 
     for (const auto part : { 0.1, 0.3, -0.2, -0.4 })
@@ -2132,8 +2134,9 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
 {
     PlaylistScreen screen;
     phazite::test::TemporaryFolder temp;
-    const auto id = phazite::importFile (screen.getSong(), screen.tracks[0],
-                                         phazite::test::writeClicks (temp.folder.getChildFile ("Long loop"), 64, 120.0), beats (0.0));
+    const auto id =
+        phazite::importFile (screen.getSong(), screen.tracks[0], phazite::test::writeClicks (temp.folder.getChildFile ("Loop"), 16, 120.0),
+                             beats (0.0)); // long enough to see it under way
     REQUIRE (phazite::isAudioState (phazite::findClipState (screen.getSong(), id)));
     phazite::test::dispatchPendingMessages();
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
@@ -2159,7 +2162,7 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     const auto progress = *shownRendering().value_or (std::nullopt);
     CHECK (progress >= 0.0);
     CHECK (progress < 1.0);
-    CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }, 120000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }));
 }
 
 TEST_CASE (
@@ -2199,8 +2202,7 @@ TEST_CASE (
         {
             auto* component = findComponent();
             return component != nullptr && component->hasRenderFailed();
-        },
-        20000));
+        }));
     CHECK_FALSE (findComponent()->getRendering().has_value());
     CHECK (stateOf() == phazite::AudioState::failed);
     CHECK (phazite::getClipsWhoseRenderFailed (screen.context) == std::vector { id });
@@ -2234,7 +2236,7 @@ TEST_CASE (
     for (int round = 0; round < 3; ++round)
     {
         renders->checkFailedAgain(); // its folder looked at in the background
-        REQUIRE (phazite::test::dispatchMessagesUntil ([renders] { return ! renders->isCheckingFolders(); }, 20000));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([renders] { return ! renders->isCheckingFolders(); }));
         REQUIRE (renders->getRendersStarted() == started);
         REQUIRE (stateOf() == phazite::AudioState::failed);
     }
@@ -2254,16 +2256,15 @@ TEST_CASE (
     REQUIRE (cache.deleteFile());
     REQUIRE (cache.createDirectory());
     renders->checkFailedAgain();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([renders, started] { return renders->getRendersStarted() == started + 1; }, 20000));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([renders, started] { return renders->getRendersStarted() == started + 1; }));
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&findComponent, &stateOf]
         {
             auto* component = findComponent();
             return component != nullptr && ! component->hasRenderFailed() && stateOf() == phazite::AudioState::ready;
-        },
-        60000));
+        }));
     CHECK (phazite::getClipsWhoseRenderFailed (screen.context).empty());
-    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return editor.getShownState() == phazite::AudioState::ready; }, 5000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return editor.getShownState() == phazite::AudioState::ready; }));
 }
 
 TEST_CASE ("A track without an instrument has an arm switch: with an input, a click arms it, and its header says what it records")

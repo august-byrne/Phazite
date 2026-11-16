@@ -17,8 +17,9 @@ namespace phazite::test
 // Delivers the messages that are waiting (AsyncUpdater callbacks, change messages, posted calls) and what they post in
 // turn, and runs the timers that are due, as the app's message loop would between two events. Every message posted
 // before the call is delivered, even while another thread's wake-up for JUCE's queue is late (it waits for that, and
-// fails the test after 5 seconds). A message that another thread posts may come later, even after that thread's work
-// looks done: wait for its effect with dispatchMessagesUntil().
+// fails the test after hangTimeout). A message that another thread posts may come later, even after that thread's work
+// looks done: wait for its effect with dispatchMessagesUntil(). (settle(), GoldenFiles.h, lets the loop run for a time by
+// the wall clock: for a test about time itself passing, never as a wait for something to happen.)
 void dispatchPendingMessages();
 
 // Delivers messages and runs the timers that are due until the condition holds, for a message another thread posts

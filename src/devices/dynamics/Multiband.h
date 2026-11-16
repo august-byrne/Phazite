@@ -28,6 +28,7 @@
 #pragma once
 
 #include "DynamicsCurve.h"
+#include "devices/core/Clock.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
@@ -135,12 +136,9 @@ public:
     // the next half second by the clock; its editor asks again each time it refreshes, so that the key stops when the editor
     // no longer shows, as the compressor's Listen does. It fades between the two over a few milliseconds, the key as late as
     // what it puts out.
-    void listenToKey() noexcept
-    {
-        listenUntil.store (juce::Time::getMillisecondCounterHiRes() + listenMilliseconds, std::memory_order_relaxed);
-    }
+    void listenToKey() noexcept { listenUntil.store (Clock::getMilliseconds() + listenMilliseconds, std::memory_order_relaxed); }
 
-    bool isPlayingKey() const noexcept { return juce::Time::getMillisecondCounterHiRes() < listenUntil.load (std::memory_order_relaxed); }
+    bool isPlayingKey() const noexcept { return Clock::getMilliseconds() < listenUntil.load (std::memory_order_relaxed); }
     bool overridesMix() const noexcept override { return keyShare > 0.0f; } // the block it last played: the key, or fading
 
     void prepare (double sampleRate, int maximumBlockSize) override;

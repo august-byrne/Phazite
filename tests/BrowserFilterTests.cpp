@@ -88,7 +88,7 @@ juce::StringArray getTitles (const std::vector<phazite::BrowserPlace>& places)
 
 bool waitForIndex (const phazite::Library& library)
 {
-    const auto done = phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000);
+    const auto done = phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); });
     phazite::test::dispatchPendingMessages(); // what the index tells as it ends
     return done;
 }

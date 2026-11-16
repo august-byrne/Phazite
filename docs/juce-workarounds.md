@@ -109,7 +109,7 @@ How to keep it:
 
 **W26. Whether the pointer is over a notice, from the mouse's last events.** `Component::isMouseOver()` also asks where the system's pointer is now (`juce_Component.cpp`), which the tests' mouse events don't move. The device notices ask what the mouse's events last found under it (`NoticeCard::isUnderPointer()`, `src/ui/shell/NoticeCard.cpp`), as the other notices do (`src/ui/shell/Notices.cpp`). Only the tests need it.
 
-**W27. The display's frames on JUCE's millisecond clock (*JUCE's insides*).** The playhead goes where the song is at the time of the display's frame, which `VBlankAttachment` gives in seconds without saying from when. Phazite reads it as `Time::getMillisecondCounterHiRes()`'s clock (`showFrame()`, `src/ui/timeline/TimelineEditor.*`), which it is on Windows and Linux (`juce_gui_basics/native/juce_VBlank_windows.cpp`, `juce_Windowing_linux.cpp`) but not on macOS, where it is the display's own. Check it when Phazite builds on macOS.
+**W27. The display's frames on JUCE's millisecond clock (*JUCE's insides*).** The playhead goes where the song is at the time of the display's frame, which `VBlankAttachment` gives in seconds without saying from when. Phazite reads it as `Time::getMillisecondCounterHiRes()`'s clock (`showFrame()`, `src/ui/timeline/TimelineEditor.*`), which it is on Windows and Linux (`juce_gui_basics/native/juce_VBlank_windows.cpp`, `juce_Windowing_linux.cpp`) but not on macOS, where it is the display's own. Check it when Phazite builds on macOS. The engine stamps its blocks by `devices::Clock` (`src/devices/core/Clock.h`), which is that clock unless a test holds it; a test that holds it never has frames read the playhead (`HeldClock`, `tests/TestHelpers.h`).
 
 ## The build
 

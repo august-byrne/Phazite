@@ -404,7 +404,7 @@ TEST_SUITE ("golden")
             {
                 song.context.getSongSelection().selectOnly (track);
                 song.run ("track.freeze");
-                REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }, 60000));
+                REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
                 CHECK (song.renders.finished[0].endsWith (": ok"));
                 REQUIRE (phazite::isFrozen (song.context, track));
             },
@@ -431,7 +431,7 @@ TEST_SUITE ("golden")
         addEffectSource (song);
         const auto synth = phazite::getAllPlaylistTracks (song.context).back();
         song.addReturn (synth, phazite::devices::Reverb::typeID, -6.0f);
-        phazite::test::settle();
+        phazite::test::dispatchPendingMessages();
 
         // The song exported, and then its stems (both Phazite's engine's renders).
         const auto exportSong = [&song] (bool stems, const char* name)
@@ -446,7 +446,7 @@ TEST_SUITE ("golden")
             auto running = phazite::startExport (*exported, song.getSoundsFolder().getChildFile (name), settings,
                                                  [&report] (const phazite::ExportReport& finished) { report = finished; });
             REQUIRE (running != nullptr);
-            REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+            REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }));
             REQUIRE_MESSAGE (report->result.wasOk(), report->result.getErrorMessage().toStdString());
             return *report;
         };

@@ -433,7 +433,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         phazite::test::addMidiNote (*song, clip, note, beats (0.0), phazite::BeatDuration::fromBeats (length), 110);
         phazite::ProjectContext context { phazite::test::getEngineContext() }; // which plays it through Phazite's engine
         setSong (context, song.get());
-        phazite::test::settle (300);
+        phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
 
         phazite::playOrStop (*song);
         auto heard = false;

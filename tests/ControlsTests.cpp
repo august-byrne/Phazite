@@ -114,6 +114,7 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     meter.setSource (phazite::makeLevelSource ([&measured] { return &measured; }));
     phazite::test::TestWindow window (meter, 12, 120);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+    phazite::test::HeldClock clock; // the peak's hold is by the clock, which moves here only as the test says
     const auto tick = [&ticker] (int times)
     {
         for (int i = 0; i < times; ++i)
@@ -142,7 +143,10 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     window.takeRepaintedArea();
     tick (10);
     CHECK (window.takeRepaintedArea().isEmpty());
-    juce::Thread::sleep (1100);
+    clock.advance (999.0);
+    tick (1);
+    CHECK (window.takeRepaintedArea().isEmpty());
+    clock.advance (2.0);
     tick (1);
     CHECK_FALSE (window.takeRepaintedArea().isEmpty());
     tick (30);
@@ -638,7 +642,7 @@ TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, an
     {
         phazite::test::dispatchPendingMessages();
         window.takeRepaintedArea();
-        phazite::test::dispatchMessagesUntil ([] { return false; }, 100);
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 100); // an absence: a repaint would come at the timers' first tick
         return window.takeRepaintedArea().isEmpty();
     };
 

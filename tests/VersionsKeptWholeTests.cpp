@@ -239,7 +239,7 @@ TEST_CASE ("A project opened from a file that is its last commit has no changes,
     s.addAudioClip (vocals, writeSound (s.getSoundsFolder().getChildFile ("Vocal.wav"), 1.0), 4.0);
     const auto keys = s.addTrack ("Keys");
     TestPlugin::add (song, keys);
-    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
     s.setVolume (keys, -3.0f);
 
     keepVersion (s.context, "All of it");
@@ -257,7 +257,7 @@ TEST_CASE ("A project opened from a file that is its last commit has no changes,
 
     REQUIRE (waitForVersionHistory (s.context));
     auto& reopened = *phazite::findSong (s.context);
-    REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }));
     REQUIRE (waitForVersionHistory (s.context));
     dispatchPendingMessages();
 
@@ -361,7 +361,7 @@ TEST_CASE ("The example song opened from a file that is its last commit has no c
 {
     TestSong s (TestSong::Start::exodus);
     auto& song = *phazite::findSong (s.context);
-    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
     keepVersion (s.context, "As it came");
     REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
 
@@ -666,7 +666,7 @@ TEST_CASE ("A plug-in that loads after the project opens counts as changed once 
         device = TestPlugin::add (song, s.addTrack ("Keys"));
     }
 
-    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
     keepVersion (s.context, "Gain at one");
     TestPlugin::setGain (song, device, 0.25f); // in its own window
     REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
@@ -674,7 +674,7 @@ TEST_CASE ("A plug-in that loads after the project opens counts as changed once 
     s.reopen (false); // its state saved, the plug-in loading as the history reads
     auto& reopened = *phazite::findSong (s.context);
     REQUIRE (waitForVersionHistory (s.context));
-    REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }));
     CHECK (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }, versionHistoryTimeout));
 }
 

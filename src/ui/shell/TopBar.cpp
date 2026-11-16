@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "devices/core/Clock.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/transport/RecordingModel.h"
 #include "ui/components/ValueText.h"
@@ -387,8 +388,8 @@ void TopBar::updateTempo()
     if (tempoStretch.isVisible())
     {
         if (tempo.isInGesture() || typing || tempoStretch.isMouseOverOrDragging (true) || tempoField.isMouseOverOrDragging (true))
-            tempoStretchShownAt = juce::Time::getMillisecondCounter();
-        else if (juce::Time::getMillisecondCounter() - tempoStretchShownAt > (juce::uint32) Shell::tempoStretchSeconds * 1000)
+            tempoStretchShownAt = devices::Clock::getMillisecondCounter();
+        else if (devices::Clock::getMillisecondCounter() - tempoStretchShownAt > (juce::uint32) Shell::tempoStretchSeconds * 1000)
             hideTempoStretch();
         else
             tempoStretch.update();
@@ -414,7 +415,7 @@ void TopBar::showTempoStretch()
     tempoStretch.update();
     tempoStretch.setVisible (true);
     tempoStretch.toFront (false);
-    tempoStretchShownAt = juce::Time::getMillisecondCounter();
+    tempoStretchShownAt = devices::Clock::getMillisecondCounter();
 
     if (! std::exchange (hearsOutsideClicks, true))
         juce::Desktop::getInstance().addGlobalMouseListener (outsideClick.get());

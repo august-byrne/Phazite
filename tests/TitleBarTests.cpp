@@ -51,7 +51,7 @@ TEST_CASE ("The title bar's Undo and Redo name the step they take, and the searc
     Screen screen;
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    phazite::test::settle();
+    phazite::test::dispatchPendingMessages();
     auto& bar = screen.shell.getTitleBar();
     auto* undo = dynamic_cast<juce::Button*> (findButton (bar, "Undo"));
     auto* redo = dynamic_cast<juce::Button*> (findButton (bar, "Redo"));

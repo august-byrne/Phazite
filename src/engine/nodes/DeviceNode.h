@@ -77,7 +77,7 @@ private:
     bool started = false;                                                                       // the audio thread's: a block started, on
     bool takeBlock (DeviceRunner::Block&, std::span<const ParameterCurve> automation) noexcept; // false while it is off
 
-    // The load, averaged over about loadSeconds, from the high-resolution ticks each block took (start()'s and process()'s).
+    // The load, averaged over about loadSeconds, from the ticks each block took by devices::Clock (start()'s and process()'s).
     static constexpr double loadSeconds = 0.3;
     std::atomic<float> load { 0.0f };
     std::int64_t startTicks = 0; // the audio thread's: what start() took of the block it started

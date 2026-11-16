@@ -43,6 +43,10 @@ public:
     // What the model holds now, read at once (it is read again by itself after changes, and every few seconds while shown).
     void refreshNow();
 
+    // What its timer does at each tick, done now: for tests, which hold the clock a burst of typing ends by
+    // (devices/core/Clock.h) and tick it as they move the clock on.
+    void tickNow() { timerCallback(); }
+
     // Asks for the file to put in a missing one's place, and calls back with it (none if the question is cancelled): a file
     // chooser, unless this is set (the tests answer it).
     std::function<void (const ProjectAudioFile&, std::function<void (const juce::File&)>)> chooseReplacement;

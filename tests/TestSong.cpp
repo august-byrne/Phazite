@@ -144,7 +144,7 @@ void TestSong::reopen (bool waitForPlugins)
 
     // Its plug-ins open in the background as it opens (model/plugins/internal/PluginInstances.h).
     if (waitForPlugins)
-        REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }, 60000));
+        REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }));
 }
 
 bool TestSong::reopenAs (Reopening how)
@@ -188,7 +188,7 @@ void TestSong::openSong (const juce::ValueTree& song)
     project = Project::open (file, false, error);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
-    REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }, 60000));
+    REQUIRE (dispatchMessagesUntil ([this] { return getPluginsLoading (project->getSong()).isEmpty(); }));
 }
 
 void TestSong::run (const juce::String& commandID)

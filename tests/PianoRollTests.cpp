@@ -440,7 +440,7 @@ TEST_CASE ("A note added and dragged is one undo step, however long the drag tak
     mouse.press (screen.at (1.0));
     REQUIRE (screen.notesOf (clip).size() == 1);
     mouse.dragTo (screen.at (2.0));
-    phazite::test::settle (500); // a pause, with the mouse still down
+    phazite::test::settle (500); // a pause, with the mouse still down: time itself, which the drag's timers (JUCE's) see pass
     mouse.dragTo (screen.at (3.0));
     mouse.release();
 
@@ -577,7 +577,7 @@ TEST_CASE ("Ctrl+drag copies the selected notes and the one pressed, once howeve
     // drag's repeats once copied them again and again (2026-11-06).
     mouse.press (screen.middleOf (first), juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier);
     mouse.dragTo (screen.middleOf (first) + juce::Point<int> (screen.at (4.0).x - screen.at (0.0).x, 0));
-    phazite::test::settle (200);
+    phazite::test::settle (200); // the mouse resting: time itself, in which the drag's timers (JUCE's) repeat it
     mouse.release();
     mouse.pause();
     CHECK (screen.getNotes().size() == 4);
