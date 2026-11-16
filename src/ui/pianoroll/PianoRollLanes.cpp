@@ -6,6 +6,7 @@
 
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace phazite::ui
 {
@@ -31,9 +32,10 @@ void PianoRoll::Keys::selectPitches (int from, int to)
     // As in Live and Logic Pro: the shown notes of these pitches, with those selected before when Ctrl or Shift was held.
     const auto low = std::min (from, to), high = std::max (from, to);
     auto notes = selectionBefore;
+    std::unordered_set<NoteRef> chosen (notes.begin(), notes.end());
 
-    for (const auto& note : roll.getAllNotes())
-        if (note.pitch >= low && note.pitch <= high && std::find (notes.begin(), notes.end(), note.getRef()) == notes.end())
+    for (const auto& note : roll.getDrawnNotes().notes) // as painted, the song's as it is now
+        if (note.pitch >= low && note.pitch <= high && chosen.insert (note.getRef()).second)
             notes.push_back (note.getRef());
 
     roll.selectNotes (notes, false);
@@ -309,7 +311,7 @@ std::vector<NoteRef> PianoRoll::VelocityLane::getNotesAt (float x) const
     const auto selected = roll.getSelectedNoteRefs();
     std::vector<NoteRef> atMouse, selectedAtMouse;
 
-    for (const auto& note : roll.getAllNotes())
+    for (const auto& note : roll.getDrawnNotes().notes) // as painted, the song's as it is now
     {
         if (std::abs ((float) timeline.beatToX (note.start) - x) <= (float) velocityHitDistance)
         {

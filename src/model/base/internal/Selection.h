@@ -85,6 +85,9 @@ public:
     static std::uint64_t getPointComparisons() noexcept;
     static void countPointComparisons (std::uint64_t) noexcept;
 
+    // The same for notes: how many times a note was compared with the notes chosen as notes are selected.
+    static std::uint64_t getNoteComparisons() noexcept;
+
 private:
     // A track, a clip or a device by its kind and its ID.
     struct Item

@@ -7,6 +7,7 @@
 #include "AudioThreadMonitor.h"
 #include "StallReport.h"
 #include "TestHelpers.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/plugins/internal/PluginHost.h"
@@ -467,7 +468,10 @@ private:
 // Says where a test case that takes too long is, where the environment asks (StallReport.h): main()'s, while it runs.
 phazite::test::StallReport* stallReport = nullptr;
 
-// Tells the net, and the stall report, which test case runs, as doctest starts and ends each.
+// Tells the net, and the stall report, which test case runs, as doctest starts and ends each. And has each answer of the
+// songs' indexes compared with a walk through the song (model/base/internal/SongIndex.h), which asserts where they
+// differ, in every test case but those that time or count what they do (the benchmarks, the benchmark gates, the long run
+// and the performance gates).
 struct AssertionNetListener final : public doctest::IReporter
 {
     explicit AssertionNetListener (const doctest::ContextOptions&) {}
@@ -478,6 +482,12 @@ struct AssertionNetListener final : public doctest::IReporter
 
         if (stallReport != nullptr)
             stallReport->testCaseStarted (data.m_name);
+
+        // Nor in the performance gates, which count the work Phazite does (the checks' walks would count with it): each of
+        // those compares its songs' whole indexes with a walk at its end instead (isExact()).
+        const std::string suite = data.m_test_suite != nullptr ? data.m_test_suite : "";
+        const auto isGate = std::string (data.m_name).rfind ("Performance gate:", 0) == 0;
+        phazite::SongIndex::setChecking (! isGate && suite != "benchmark" && suite != "benchmark-gate" && suite != "long-run");
     }
 
     // What audio threads noted, taken while the test case can still fail by it: at each check it makes, and as each run

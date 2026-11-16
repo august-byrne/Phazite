@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -182,13 +183,10 @@ namespace
     //==============================================================================
     // The song's notes: each a NOTE in its clip's element (Schema.h), and in each alias's, with the same ID.
 
-    juce::ValueTree findNoteIn (const juce::ValueTree& clipState, NoteID id)
+    // By the song's index (model/base/internal/SongIndex.h), which looks through a clip outside the song.
+    juce::ValueTree findNoteIn (const Song& song, const juce::ValueTree& clipState, NoteID id)
     {
-        for (const auto& child : clipState)
-            if (child.hasType (schema::NOTE) && (juce::int64) child[schema::noteID] == (juce::int64) id.getRaw())
-                return child;
-
-        return {};
+        return song.getIndex().findNote (clipState, id.getRaw());
     }
 
     NoteID getNoteID (const juce::ValueTree& noteState)
@@ -196,8 +194,11 @@ namespace
         return NoteID::fromRaw ((std::uint64_t) std::max<juce::int64> (0, (juce::int64) noteState[schema::noteID]));
     }
 
+    std::uint64_t notesRead = 0; // message thread
+
     NoteData readNote (const juce::ValueTree& clipState, const juce::ValueTree& noteState)
     {
+        ++notesRead;
         return { getClipID (clipState),
                  getNoteID (noteState),
                  (int) noteState[schema::notePitch],
@@ -217,10 +218,10 @@ namespace
         if (! clipState.isValid())
             return;
 
-        const auto aliases = getAliasStates (clipState);
+        const auto aliases = getAliasStates (song, clipState);
 
         for (const auto& alias : aliases)
-            if (auto note = findNoteIn (alias, ref.note); note.isValid())
+            if (auto note = findNoteIn (song, alias, ref.note); note.isValid())
                 change (note, &song.getUndoManager());
     }
 
@@ -252,10 +253,10 @@ namespace
         if (! clipState.isValid())
             return {};
 
-        const auto id =
-            wanted.isValid() && ! findNoteIn (clipState, wanted).isValid() ? (juce::int64) wanted.getRaw() : (juce::int64) song.makeID();
+        const auto id = wanted.isValid() && ! findNoteIn (song, clipState, wanted).isValid() ? (juce::int64) wanted.getRaw()
+                                                                                             : (juce::int64) song.makeID();
 
-        const auto aliases = getAliasStates (clipState);
+        const auto aliases = getAliasStates (song, clipState);
 
         for (auto alias : aliases)
         {
@@ -279,10 +280,10 @@ namespace
         if (! clipState.isValid())
             return;
 
-        const auto aliases = getAliasStates (clipState);
+        const auto aliases = getAliasStates (song, clipState);
 
         for (auto alias : aliases)
-            if (const auto note = findNoteIn (alias, ref.note); note.isValid())
+            if (const auto note = findNoteIn (song, alias, ref.note); note.isValid())
                 alias.removeChild (note, &song.getUndoManager());
     }
 
@@ -297,7 +298,7 @@ namespace
         {
             const auto clipState = findMidiClipState (song, ref.clip);
 
-            if (! findNoteIn (clipState, ref.note).isValid())
+            if (! findNoteIn (song, clipState, ref.note).isValid())
                 continue;
 
             const auto group = clipState[schema::clipLink].toString();
@@ -390,16 +391,21 @@ namespace
 } // namespace
 
 //==============================================================================
+std::uint64_t countNotesRead() noexcept
+{
+    return notesRead;
+}
+
 juce::ValueTree findNoteState (const Song& song, const NoteRef& ref)
 {
-    return findNoteIn (findMidiClipState (song, ref.clip), ref.note);
+    return findNoteIn (song, findMidiClipState (song, ref.clip), ref.note);
 }
 
 std::optional<NoteData> getNoteData (const Song& song, const NoteRef& ref)
 {
     const auto clipState = findMidiClipState (song, ref.clip);
 
-    if (const auto note = findNoteIn (clipState, ref.note); note.isValid())
+    if (const auto note = findNoteIn (song, clipState, ref.note); note.isValid())
         return readNote (clipState, note);
 
     return std::nullopt;
@@ -420,6 +426,7 @@ std::vector<NoteData> getClipNotes (const Song& song, ClipID clip)
 {
     std::vector<NoteData> data;
     const auto clipState = findMidiClipState (song, clip);
+    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
 
     for (const auto& child : clipState)
         if (child.hasType (schema::NOTE))
@@ -475,6 +482,7 @@ std::vector<NoteData> getClipNotesPlayed (const Song& song, ClipID clip)
 {
     std::vector<NoteData> data;
     const auto clipState = findMidiClipState (song, clip);
+    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren());
 
     for (const auto& child : clipState)
         if (child.hasType (schema::NOTE))
@@ -590,7 +598,7 @@ void addControl (Song& song, ClipID clip, BeatPosition beat, bool pitchBend, int
     if (! clipState.isValid())
         return;
 
-    for (auto alias : getAliasStates (clipState))
+    for (auto alias : getAliasStates (song, clipState))
         alias.appendChild (makeControlState ({ beat, pitchBend, number, value }, getContentStart (clipState)), &song.getUndoManager());
 }
 
@@ -607,7 +615,7 @@ void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& valu
     // Each alias filled as a copy, without the history, and put in its place, the same clip by its ID, in one removal and one
     // insertion: what listens to the song hears a recording's thousands of values (a bend's sweep) as one change, and Undo
     // takes them back with it. The original is never filled: the removal's undo brings it back as it was.
-    for (auto alias : getAliasStates (clipState))
+    for (auto alias : getAliasStates (song, clipState))
     {
         auto filled = alias.createCopy();
 
@@ -631,7 +639,7 @@ void removeControls (Song& song, ClipID clip, bool pitchBend, int number, BeatPo
     constexpr auto near = 1.0e-9; // in beats
     const auto first = toClipBeat (clipState, from).inBeats() - near, last = toClipBeat (clipState, to).inBeats() + near;
 
-    for (auto alias : getAliasStates (clipState))
+    for (auto alias : getAliasStates (song, clipState))
     {
         for (auto i = alias.getNumChildren(); --i >= 0;)
         {
@@ -857,7 +865,7 @@ void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
 
     auto* undo = &song.getUndoManager();
     const auto contentStart = getContentStart (clipState);
-    const auto aliases = getAliasStates (clipState);
+    const auto aliases = getAliasStates (song, clipState);
     std::vector<juce::int64> ids;
 
     for (size_t i = 0; i < notes.size(); ++i)

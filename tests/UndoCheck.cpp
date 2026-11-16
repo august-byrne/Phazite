@@ -2,6 +2,7 @@
 #include "UndoCheck.h"
 #include "GoldenFiles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/ProjectContext.h"
@@ -142,6 +143,10 @@ int UndoCheck::getDepth() const
 
 void UndoCheck::compare (const juce::String& what, const juce::String& when, const juce::String& expected, const juce::String& actual)
 {
+    // What finds the song's items by their IDs holds what the song does, after each change, undo and redo.
+    if (! song.getIndex().isExact())
+        fail (what + ": " + when + ": the song's index (model/base/internal/SongIndex.h) differs from a walk through the song");
+
     if (expected == actual)
         return;
 

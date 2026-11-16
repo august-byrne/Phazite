@@ -28,6 +28,7 @@ What every area builds on.
 | `internal/Schema.h` | The names of everything Phazite writes into a project file, with where each is stored and what it holds, and the song's rules as data (`describeSongRules()`: its keys, orders and IDs); which properties are view state and which aren't counted as unsaved changes. |
 | `internal/SongText.h` | How a song is written as text, each value in one way, the same in the project file and in the versions' pieces ([docs/project-format.md](../../docs/project-format.md)). |
 | `internal/Selection.h` | What is selected, by IDs: one `phazite::Selection` for the open project. |
+| `internal/SongIndex.h` | Where a song's tracks, clips and notes are by their IDs, and its alias groups (`Song::getIndex()`): what the model's functions that take IDs find elements by, made from the song's tree as it is first asked and kept exact by the tree's notifications; the tree stays the only truth. In the tests each answer is compared with a walk through the song. |
 | `Toggles.h` | Switches that act on several things: `toggleAll()`, `areAllOn()`. |
 | `BackgroundJobs.h` | Jobs run in the background on threads of their own, never ended by force. |
 | `Json.h` | JSON read from text (`parseJson()`), wherever Phazite reads it, without the numbers JUCE's parser can't count. |

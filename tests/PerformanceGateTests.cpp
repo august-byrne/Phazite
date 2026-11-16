@@ -24,6 +24,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
@@ -157,6 +158,8 @@ TEST_CASE ("Performance gate: each edit gives the engine one plan, however many 
         edit.make();
         CHECK (plans.take() == edit.plans);
     }
+
+    CHECK (song.getIndex().isExact()); // the checks of every lookup are off in the gates: the whole index checked here
 }
 
 TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's notes and every device")
@@ -186,6 +189,8 @@ TEST_CASE ("Performance gate: a new plan keeps what didn't change, a track's not
         // The devices sound on: the same as before, every one.
         CHECK (after.devices.at (id) == before.devices.at (id));
     }
+
+    CHECK (getSong (s).getIndex().isExact());
 }
 
 //==============================================================================
@@ -288,6 +293,7 @@ TEST_CASE ("Performance gate: the playlist makes components for what is in view,
                 REQUIRE (phazite::insertMidiClip (*screen.song, track, { at (c * 16.0), at (c * 16.0 + 16.0) }, nullptr).isValid());
 
         phazite::test::deliverChanges();
+        CHECK (screen.song->getIndex().isExact());
         return std::tuple (phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist).size(),
                            phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist).size(),
                            phazite::test::findAll<juce::Component> (screen.playlist).size());
@@ -512,6 +518,8 @@ TEST_CASE ("Performance gate: what an edit repaints in the playlist")
             CHECK (within);
         }
     }
+
+    CHECK (screen.song->getIndex().isExact());
 }
 
 TEST_CASE ("Performance gate: a note added to one clip among thousands shows that clip again, and no other")
@@ -643,6 +651,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
                               phazite::writeProjectText (text, song.getState());
                           })
                           .value_or (0);
+        CHECK (song.getIndex().isExact());
         return counts;
     };
 
@@ -694,6 +703,7 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
         REQUIRE (selected.has_value());
         CHECK (selected->indices.size() == (size_t) numPoints + 1);
         CHECK (selection.getNumObjectsSelected() == numPoints + 1);
+        CHECK (document.getIndex().isExact());
         return used;
     };
 
@@ -701,6 +711,126 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
     const auto small = comparisonsFor (1000), large = comparisonsFor (10000);
     INFO ("1,000 points: " << small << " comparisons; 10,000: " << large);
     CHECK (large < small * 20);
+}
+
+//==============================================================================
+TEST_CASE ("Performance gate: a step of a drag of notes looks at as many elements as it moves notes, whatever the song and the clip")
+{
+    // Known bug 122: each note was looked for through every track's clips, several times for each note moved, and through
+    // its clip's notes, so that a step of a drag of 500 notes in a clip of 5,000 looked at millions of elements.
+    const auto visitedFor = [] (int numTracks, int numNotes)
+    {
+        auto song = phazite::createSong();
+        phazite::ProjectContext context (phazite::test::getEngineContext());
+        const auto tracks = phazite::ensureTracks (*song, numTracks);
+
+        for (const auto track : tracks)
+            for (int c = 1; c < 24; ++c)
+                REQUIRE (phazite::insertMidiClip (*song, track, { at (2000.0 + c * 16.0), at (2016.0 + c * 16.0) }, nullptr).isValid());
+
+        // A clip of notes four a beat, at the start of the last track (which a walk through the song finds last), a tenth of
+        // them selected.
+        const auto clip = phazite::insertMidiClip (*song, tracks.back(), { at (0.0), at (numNotes * 0.25) }, nullptr);
+        std::vector<phazite::NoteData> notes;
+
+        for (int i = 0; i < numNotes; ++i)
+            notes.push_back ({ .clip = clip, .pitch = 48 + i % 24, .start = at (i * 0.25), .length = lasting (0.2) });
+
+        phazite::setClipNotes (*song, clip, notes);
+        phazite::setSong (context, song.get());
+        notes = phazite::getNotes (context, { clip });
+        notes.resize ((size_t) numNotes / 10);
+        const auto ends = phazite::getClipEnds (context, { clip });
+
+        // As the piano roll's drag makes each step (PianoRollNoteTools.cpp: dragNotes()).
+        const auto step = [&] (double by)
+        {
+            phazite::restoreClipEnds (context, ends);
+            auto moved = notes;
+
+            for (auto& note : moved)
+                note.start = note.start + lasting (by);
+
+            phazite::setNotes (context, moved);
+            REQUIRE (phazite::getNote (context, notes.front().getRef()).has_value());
+        };
+
+        step (0.25); // the first, as the song is first asked for its notes
+        const auto before = phazite::SongIndex::countElementsVisited();
+        step (0.5);
+        const auto visited = phazite::SongIndex::countElementsVisited() - before;
+        CHECK (song->getIndex().isExact());
+        phazite::setSong (context, nullptr);
+        return visited;
+    };
+
+    const auto small = visitedFor (10, 200), moreNotes = visitedFor (10, 2000), moreTracks = visitedFor (100, 200);
+    INFO ("Elements looked at by a step of a drag of 20 notes: " << small << "; of 200 notes in a clip of 2,000: " << moreNotes
+                                                                 << "; of 20 notes in a song of ten times the tracks: " << moreTracks);
+    CHECK (small > 0);
+    CHECK (moreNotes < small * 20); // ten times the notes moved: about ten times the work, never a hundred
+    CHECK (moreTracks < small * 2); // ten times the song: the same work
+}
+
+TEST_CASE ("Performance gate: the piano roll's hover and selection rectangle find notes among those it paints, not in the song")
+{
+    // Known bug 122: the mouse's every move over the notes read every note of the clips shown, and the other tracks' notes,
+    // from the song; and each step of a rectangle read them all again, then compared each with every note chosen.
+    phazite::test::PianoRollScreen screen;
+    auto& song = screen.getSong();
+    constexpr int count = 500;
+    const auto middle = screen.middlePitch();
+    phazite::trimClipEnd (song, screen.clip, at (count * 0.25));
+    const auto ghostClip = phazite::insertMidiClip (song, screen.tracks[1], { at (0.0), at (count * 0.25) }, nullptr);
+
+    for (const auto clip : { screen.clip, ghostClip })
+    {
+        std::vector<phazite::NoteData> notes;
+
+        for (int i = 0; i < count; ++i)
+            notes.push_back ({ .clip = clip, .pitch = middle - 6 + i % 12, .start = at (i * 0.25), .length = lasting (0.2) });
+
+        phazite::setClipNotes (song, clip, notes);
+    }
+
+    phazite::test::deliverChanges();
+    phazite::test::Mouse mouse (*screen.notes);
+    const auto y = screen.yOf (middle + 10); // above the notes: no note there, so ghosts are looked for too
+    mouse.moveTo ({ 10, y });                // the first: what it reads is kept, as a paint keeps it
+
+    auto before = phazite::countNotesRead();
+
+    for (int i = 1; i <= 10; ++i)
+        mouse.moveTo ({ 10 + i * 30, y + (i % 2) * screen.rowHeight() * 12 });
+
+    const auto hover = phazite::countNotesRead() - before;
+
+    // A rectangle across them, a step at a time: each selects more of them.
+    before = phazite::countNotesRead();
+    const auto comparedBefore = phazite::Selection::getNoteComparisons();
+    mouse.press ({ 2, y }, juce::ModifierKeys::commandModifier);
+
+    for (int i = 1; i <= 10; ++i)
+    {
+        mouse.dragTo ({ 2 + i * (screen.notes->getWidth() - 4) / 10, screen.yOf (middle - 8) });
+        phazite::test::deliverChanges();
+    }
+
+    mouse.release();
+    const auto band = phazite::countNotesRead() - before;
+    const auto compared = phazite::Selection::getNoteComparisons() - comparedBefore;
+    const auto selected = (std::uint64_t) screen.getSelected().size();
+
+    INFO ("Notes read by 10 moves of the mouse: " << hover << "; by 10 steps of a rectangle: " << band << ", which selected " << selected
+                                                  << " with " << compared << " comparisons");
+    CHECK (selected > 10);
+    CHECK (hover == 0);
+
+    // What the rectangle's steps read are the notes selected (which what asks whether there are any finds there still), not
+    // the clip's: all ten of them less than the clip's notes once (measured 2026-11-15: 362 of 500, and 9,181 before).
+    CHECK (band < (std::uint64_t) count);
+    CHECK (compared < selected * 20); // each note chosen once, not compared with every other
+    CHECK (song.getIndex().isExact());
 }
 
 //==============================================================================
@@ -768,4 +898,5 @@ TEST_CASE (
     CHECK (noteAdded * 8 < wholeSong);
     CHECK (pluginChanged > 0);
     CHECK (pluginChanged * 8 < wholeSong);
+    CHECK (song.getIndex().isExact());
 }

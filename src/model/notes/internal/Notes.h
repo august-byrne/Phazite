@@ -27,6 +27,10 @@ std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
 
+// How many notes were read from the song as NoteData since the program started: for the speed gates
+// (tests/PerformanceGateTests.cpp), which count what a view's mouse event reads.
+std::uint64_t countNotesRead() noexcept;
+
 // The notes of a clip that play: those in the part of the song the clip covers, one that an edge of the clip cuts too
 // (which plays from the clip's start, or to its end, as model/playback/internal/SongPlayer.h plays it). A split or a trim
 // leaves the others in the clip, as they are, until the clip covers them again: no editor shows them, and no edit of

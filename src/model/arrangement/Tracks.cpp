@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
@@ -21,6 +22,8 @@ namespace
     // Only a folder holds tracks: the others' children (their clips and devices, many in a big song) aren't looked through.
     void collectTrackStates (const juce::ValueTree& parent, std::vector<juce::ValueTree>& states)
     {
+        SongIndex::countVisited ((std::uint64_t) parent.getNumChildren()); // a walk, for the speed gates
+
         for (const auto& child : parent)
         {
             if (child.hasType (schema::TRACK))
@@ -31,24 +34,6 @@ namespace
                     collectTrackStates (child, states);
             }
         }
-    }
-
-    juce::ValueTree findIn (const juce::ValueTree& parent, TrackID id)
-    {
-        for (const auto& child : parent)
-        {
-            if (! child.hasType (schema::TRACK))
-                continue;
-
-            if (getTrackID (child) == id)
-                return child;
-
-            if (isFolderState (child))
-                if (auto found = findIn (child, id); found.isValid())
-                    return found;
-        }
-
-        return {};
     }
 
     // A new track's element, of a kind, with an ID of the song's (Song::makeID()), and its fader's: a folder starts as a bus
@@ -320,14 +305,12 @@ juce::ValueTree findTrackState (const Song& song, TrackID id)
     if (const auto master = song.getState().getChildWithName (schema::MASTER); getTrackID (master) == id)
         return master;
 
-    return findIn (findTrackList (song), id);
+    return song.getIndex().findTrack (id.getRaw());
 }
 
 std::vector<juce::ValueTree> getTrackStates (const Song& song)
 {
-    std::vector<juce::ValueTree> states;
-    collectTrackStates (findTrackList (song), states);
-    return states;
+    return song.getIndex().getTracks();
 }
 
 std::vector<TrackID> getTrackIDs (const Song& song)
@@ -380,18 +363,11 @@ juce::String getTrackName (const Song& song, TrackID id)
     if (const auto name = state[schema::trackName].toString(); name.isNotEmpty() || isFolderState (state))
         return name;
 
-    auto number = 1;
-
-    for (const auto& other : getTrackStates (song))
-    {
-        if (other == state)
-            break;
-
-        if (! isFolderState (other))
-            ++number;
-    }
-
-    return "Track " + juce::String (number);
+    // Its number among the tracks that aren't folders, as the song's index keeps it: every track findTrackState() finds has
+    // one.
+    const auto number = song.getIndex().getTrackPlace (state).number;
+    jassert (number > 0);
+    return number > 0 ? "Track " + juce::String (number) : juce::String ("Track");
 }
 
 TrackID getParentFolder (const Song& song, TrackID id)

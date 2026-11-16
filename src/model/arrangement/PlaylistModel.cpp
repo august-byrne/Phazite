@@ -7,6 +7,7 @@
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/chords/internal/Chords.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
@@ -164,8 +165,7 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
     if (song == nullptr || ! findTrackState (*song, id).isValid())
         return {};
 
-    const auto ids = getTrackIDs (*song);
-    const auto indexOf = [&ids] (TrackID track) { return (int) (std::find (ids.begin(), ids.end(), track) - ids.begin()); };
+    const auto indexOf = [song] (TrackID track) { return song->getIndex().getTrackPlace (findTrackState (*song, track)).index; };
     auto row = makeRow (*song, id, indexOf (id));
 
     for (auto folder = findTrackState (*song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
@@ -308,7 +308,7 @@ std::vector<ClipID> getLinkedClips (const ProjectContext& context, ClipID id)
 
     if (auto* song = findSong (context))
         if (const auto clipState = findClipState (*song, id); clipState.isValid())
-            for (const auto& alias : getAliasStates (clipState))
+            for (const auto& alias : getAliasStates (*song, clipState))
                 linked.push_back (getClipID (alias));
 
     return linked;
@@ -466,6 +466,7 @@ std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
 
     // The notes are in the clip's content, which can start before the clip does.
     const auto contentOffset = -getClipOffset (clipState).inBeats();
+    SongIndex::countVisited ((std::uint64_t) clipState.getNumChildren()); // a walk of the clip's, for the speed gates
 
     for (const auto& note : clipState)
     {

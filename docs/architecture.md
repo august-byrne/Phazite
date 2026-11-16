@@ -117,11 +117,15 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
   them in one place.
 - **Values that change many times a second are polled**, never stored in the project or sent as change messages, and a
   display repaints only when what it draws moved, so that a quiet song costs nothing to show.
+- **Whatever listens to a song listens to its root** (`Song::getState()`), never to one of its elements nor through a
+  `juce::Value` of an element's property. The song's index, which finds tracks, clips and notes by their IDs, listens to
+  the track list, and JUCE tells a change to the elements below first, so it hears of every change there before anything
+  else can ask it about one.
 
 `tools/check-architecture.sh` counts what breaks these rules, and more: includes that point up a layer, window modules
 and classes below the UI, undo steps begun outside the undo code or in the UI, include loops in the model and the
 services, `internal/` headers included in the UI, source files outside an area's folder, includes and CMake source paths
-that name no file exactly, Tracktion Engine, threads ended by force, and colours, font sizes and corner radii written
+that name no file exactly, Tracktion Engine, threads ended by force, listeners on a song's elements rather than its root, and colours, font sizes and corner radii written
 as literals in the UI rather than taken from the design tokens. It compares each count with its budget in
 `tools/architecture-budget.txt`, where every budget is 0 but the literals', the count there was when that rule came,
 which only falls; every count must equal its budget. CI and the pre-commit hook run it; run

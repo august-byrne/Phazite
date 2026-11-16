@@ -201,6 +201,7 @@ the [changelog](changelog.md).
 | G167 | While a loop plays: add a plug-in or a limiter with latency to one track, bypass it and switch it back; delete a track, take a send off, move a track into a bus | A short dip and no click for the latency; for the other edits the other tracks play on without any dip or click | |
 | G36 | With an audio clip of several minutes, click far ahead in the ruler while it plays | The clip comes in within a few milliseconds, faded, with no click | |
 | G171 | Put an LFO on the EQ of a silent track and open the EQ | The band's dot and the knob's ring move | |
+| G122 | In a clip of a few thousand notes (and in several clips of one alias group): drag 500 selected notes, hover over notes and empty rows, draw a selection rectangle across the clip, Select All, then Transpose, Quantize, Duplicate and Delete, each with its Undo | Each answers at once, and the right notes move, in every alias | |
 
 ## Performance on other machines
 

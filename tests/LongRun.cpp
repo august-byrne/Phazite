@@ -25,6 +25,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -313,6 +314,14 @@ TEST_CASE ("Long run: an hour of music played block by block while the song is e
             {
                 blocksSinceEdit = 0;
                 edit();
+
+                // Every few seconds of music, the song's index held to a walk through the song (the checks of each lookup
+                // are off in the long run).
+                if (edits % 3 == 0)
+                {
+                    INFO ("the last edits: " << editsMade.joinIntoString ("; ").toStdString());
+                    REQUIRE (song.getIndex().isExact());
+                }
             }
         }
 

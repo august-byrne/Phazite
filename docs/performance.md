@@ -416,6 +416,53 @@ at once, 16 ms an event and up to 230 ms. What it leaves is mostly the clips' no
 | At rest: the process's CPU | 0.6 to 3.8 % of a core, in runs one after another | 14 |
 | At rest: the message thread's CPU | 0.9 to 1.3 % of a core | 13 |
 
+### Benchmark: a clip of 5,000 notes edited in the piano roll, and what views read of a song of 4,800 clips
+
+Known bug 122: the model found each track, clip and note by looking through the song at every call, several times for each
+note an edit touched, and the piano roll read every note of its clips, and the other tracks' notes, at each move of the
+mouse. Since 2026-11-15 the song keeps an index of where its tracks, clips and notes are by their IDs
+(`src/model/base/internal/SongIndex.h`), and the piano roll finds what is under the mouse among the notes it paints.
+
+The first table: the piano roll in a window (`PianoRollScreen`), a clip of 5,000 notes, four a beat over twelve rows,
+with another track's 5,000 as ghosts; each through the mouse or the command, the song's changes delivered after it, the
+engine's new plan included. The second: the model's reads a view makes in a song of 200 tracks of 24 clips of 16 notes.
+Measured 2026-11-15, the `windows-profile` build, on a machine other builds shared.
+
+| What | Before | After |
+|---|---|---|
+| The mouse moved over the notes (hover) | 7.96 ms | 5.5 ms (finding the note under the mouse 0.013 ms of it; the rest is the hint and the cursor, which change at every move here, the notes a fifth of a pixel apart: not measured further) |
+| ... over empty rows, where ghosts are looked for | 5.36 ms | 0.56 ms |
+| A step of a rectangle selecting across the clip | 122.5 ms | 2.9 ms |
+| A step of a drag of 500 notes | 22.1 ms | 4.5 ms |
+| ... its Undo | 18.0 ms | 7.1 ms |
+| Select All | 340.8 ms | 3.2 ms |
+| Transpose Up, every note / its Undo | 2,377 / 356 ms | 22 / 12 ms |
+| Quantize, every note / its Undo | 2,500 / 530 ms | 58 / 20 ms |
+| Duplicate, every note / its Undo | 6,286 / 805 ms | 37 / 9.5 ms |
+| Delete, every note / its Undo | 1,944 / 408 ms | 27 / 15 ms |
+| Every track's clips (`getClips()`, 200 calls) | 253 ms | 5.9 ms |
+| A clip's info by its ID (`getClip()`) | 0.173 ms | 0.0014 ms |
+| A clip found by its ID (`findClipState()`), alone | not measured | 350 to 440 ns, of which the check of the answer against the tree (it still has the ID, on a track in the track list) is about 250: 90 to 170 ns without it |
+| A track's row (`getTrackRow()`) | 0.091 ms | 0.0026 ms |
+| A clip's note shapes (`getNoteShapes()`) | 0.127 ms | 0.0030 ms |
+| A clip moved, as a drag's step moves it (the model alone) | 0.134 ms | 0.0034 ms |
+
+Where the time went, counted before the change (`SongIndex::countElementsVisited()`, which the walks counted then): a
+step of a drag of 20 notes in a song of 10 tracks looked at 14,988 elements, and of 200 notes in a clip of 2,000 at
+1,229,268, about 6,000 for each note moved: each note was looked for through its clip's notes three times (the drag's
+`setNotes()`, `placeNote()`'s read of it and its change), and its clip through the tracks four times. Ten moves of the
+mouse read 15,000 notes from the song (each move every note of the clip twice, and the ghosts), and ten steps of a
+rectangle 9,181, which then compared each note chosen with every other (`Selection::selectNotes()`: the square of the
+notes, 12.5 million comparisons for Select All). Every clip's info looked up its track's name, whose number ("Track 3")
+was counted through every track. After: 623 elements for the step of 20 notes, 6,203 for 200 in a clip of 2,000, 623
+in a song of ten times the tracks (counting the model's own walks of a track's clips too, which each note's move makes to
+find how far its clip can grow: 24 elements); no notes read by the hover.
+
+What the index costs: about 100 bytes a track and a clip, made in one walk as the song is first asked for one (as a
+single lookup walked before), and about 60 bytes a note of each clip whose notes were asked for, made as the first is;
+each change to the song costs it a lookup in a hash table at most, and each answer a check that the element is still where the index holds it (above), and a change it doesn't follow (an ID changed in
+place, a track made a folder) makes it again at the next lookup.
+
 ### Benchmark: a sandboxed plug-in's round trip at 128 samples
 
 One plug-in played in a helper, a block of 128 samples (2.67 ms at 48 kHz) at a time, against the same plug-in in
@@ -467,6 +514,13 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
 - the changes since the last commit compare nothing while nothing changed, however often the versions tell, and
   only its track for a note added or a plug-in's own change: 270 and 172 elements of the 4,096 the whole song of 32
   tracks compares, measured 2026-11-15 (`countElementsCompared()`; known bug 126).
+- a step of a drag of notes looks at as many elements as it moves notes, whatever the song and the clip: ten times the
+  notes in a clip of ten times as many, under twenty times the elements; ten times the tracks, under twice
+  (`SongIndex::countElementsVisited()`; known bug 122: 623, 6,203 and 623 measured 2026-11-15, the model's walks of a
+  track's and a clip's elements counted too (`countVisited()`); 14,988, 1,229,268 and 22,368 before, the walks by ID alone).
+- the piano roll's hover reads no notes from the song, and ten steps of its selection rectangle fewer than its clip
+  holds, choosing each note once (`countNotesRead()`, `Selection::getNoteComparisons()`; 0 and 362 of 500 measured,
+  15,000 and 9,181 before).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

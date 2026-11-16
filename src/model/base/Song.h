@@ -10,10 +10,12 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 
 namespace phazite
 {
 struct ParameterRef;
+class SongIndex;
 
 class Song final : public juce::ReferenceCountedObject
 {
@@ -23,7 +25,16 @@ public:
     explicit Song (juce::ValueTree state); // a PHAZITE element
     ~Song() override;
 
+    // Whatever listens to the song listens to this, its root (a juce::ValueTree::Listener added to what this returns), and
+    // finds the element a change was made to from what the callback names: never to one of its elements' handles, nor
+    // through a juce::Value or CachedValue of an element's property. The song's index (below) listens to its track list,
+    // and JUCE tells a change to the listeners of the elements below first, so it hears of every change to the tracks,
+    // clips and notes before anything else asks it about one (tools/check-architecture.sh counts: song-listeners).
     juce::ValueTree getState() const noexcept { return state; }
+
+    // Where its tracks, clips and notes are, by their IDs, which the model's functions that take IDs find them by
+    // (model/base/internal/SongIndex.h): kept from its state, which stays the only truth.
+    const SongIndex& getIndex() const noexcept { return *index; }
 
     // Its undo history, which keeps the last steps up to the number set for songs made from then on (as the app starts, from
     // its settings: services/Settings.h, undoSteps), however much each step holds.
@@ -99,6 +110,7 @@ public:
 
 private:
     juce::ValueTree state;
+    std::unique_ptr<SongIndex> index;
     juce::UndoManager undoManager;
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given

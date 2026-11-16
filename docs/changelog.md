@@ -198,6 +198,11 @@ too. A line names the bug's number in that list.
 - **171 A device asleep on silence** still shows its modulation on its knobs and its graph's handles.
 - **Audio files with what isn't a number:** a clip of a float file plays silence where the file holds NaN or
   infinity, stretched or not, and the rest of the song plays on (the whole mix went silent before).
+- **122 Notes, clips and tracks found by their IDs:** the song keeps an index of them (`phazite::SongIndex`), kept
+  exact by the song's own changes and checked against the song at every answer, and the piano roll finds what is
+  under the mouse among the notes it paints: a step of a drag of 500 notes in a clip of 5,000 takes 4.5 ms where it
+  took 22; Select All 3 ms where it took 341; Transpose, Quantize, Duplicate and Delete of 5,000 notes take tens of
+  milliseconds where they took seconds; a view's read of the clips of 200 tracks 6 ms where it took 253.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

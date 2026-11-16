@@ -2272,3 +2272,185 @@ TEST_CASE ("Benchmark: the playlist of 200 tracks and 4,800 clips" * doctest::te
     report << "\nShown: " << shown << "\n";
     MESSAGE (report);
 }
+
+//==============================================================================
+TEST_CASE ("Benchmark: a clip of 5,000 notes edited in the piano roll, and what views read of a song of 4,800 clips"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 122: notes and clips were found by looking through the song at every call, so that editing many notes cost
+    // the square of them. Each made through the window, as the mouse and the keys make it, the song's changes delivered after.
+    using phazite::test::at;
+    using phazite::test::lasting;
+
+    const auto averageOf = [] (int times, const std::function<void (int)>& work)
+    {
+        double total = 0.0;
+
+        for (int i = 0; i < times; ++i)
+            total += millisecondsOf ([&] { work (i); });
+
+        return total / times;
+    };
+
+    juce::String report ("\n| A clip of 5,000 notes, with another track's 5,000 as ghosts | Time |\n|---|---|\n");
+
+    {
+        phazite::test::PianoRollScreen screen;
+        auto& song = screen.getSong();
+        phazite::addNoteCommands (screen.registry, screen.context, [] { return 1.0; });
+        constexpr int count = 5000;
+        const auto length = count * 0.25;
+        const auto middle = screen.middlePitch();
+        phazite::trimClipEnd (song, screen.clip, at (length));
+        const auto ghostClip = phazite::insertMidiClip (song, screen.tracks[1], { at (0.0), at (length) }, nullptr);
+
+        // Four a beat, just off the grid (for Quantize), within six rows of the middle.
+        const auto notesOf = [&] (phazite::ClipID clip, int offset)
+        {
+            std::vector<phazite::NoteData> made;
+
+            for (int i = 0; i < count; ++i)
+                made.push_back (
+                    { .clip = clip, .pitch = middle - 6 + (i * 7 + offset) % 12, .start = at (i * 0.25 + 0.03), .length = lasting (0.2) });
+
+            return made;
+        };
+
+        phazite::setClipNotes (song, screen.clip, notesOf (screen.clip, 0));
+        phazite::setClipNotes (song, ghostClip, notesOf (ghostClip, 5));
+        song.getUndoManager().clearUndoHistory();
+        phazite::test::deliverChanges();
+        const auto notes = screen.getAll();
+        REQUIRE (notes.size() == (size_t) count);
+
+        const auto run = [&] (const char* id)
+        {
+            REQUIRE (screen.registry.invoke (id));
+            phazite::test::deliverChanges();
+        };
+
+        // The mouse over the whole clip: on the notes' rows, and above them, where only ghosts could be.
+        screen.pianoRoll.zoomTo ({ at (0.0), at (length) });
+        phazite::test::deliverChanges();
+        phazite::test::Mouse mouse (*screen.notes);
+        const auto width = screen.notes->getWidth();
+        const auto across = [width] (int i, int of) { return 10 + i * (width - 20) / of; };
+        report << "| The mouse moved over the notes (hover) | "
+               << milliseconds (averageOf (50, [&] (int i) { mouse.moveTo ({ across (i, 50), screen.yOf (middle) }); }), 3) << " |\n";
+        report << "| ... over empty rows, where ghosts are looked for | "
+               << milliseconds (averageOf (50, [&] (int i) { mouse.moveTo ({ across (i, 50), screen.yOf (middle + 9) }); }), 3) << " |\n";
+
+        // A rectangle drawn across the clip (Ctrl+drag), from empty rows down over every note.
+        mouse.press ({ 2, screen.yOf (middle + 9) }, juce::ModifierKeys::commandModifier);
+        const auto band = averageOf (20,
+                                     [&] (int i)
+                                     {
+                                         mouse.dragTo ({ across (i + 1, 20), screen.yOf (middle - 8) });
+                                         phazite::test::deliverChanges();
+                                     });
+        report << "| A step of a rectangle selecting across the clip | " << milliseconds (band) << " |\n";
+        mouse.release();
+        phazite::test::deliverChanges();
+
+        // 500 of them dragged a beat at a time, by the note in the middle row (the 7th).
+        screen.pianoRoll.zoomTo ({ at (0.0), at (16.0) });
+        phazite::test::deliverChanges();
+        screen.selection().selectNotes (getRefs (std::vector<phazite::NoteData> (notes.begin(), notes.begin() + 500)));
+        phazite::test::deliverChanges();
+        const auto pressed = notes[6].getRef();
+        REQUIRE (screen.get (pressed).pitch == middle);
+        const auto from = screen.middleOf (pressed);
+        mouse.press (from);
+        mouse.dragTo (from.translated (5, 0)); // past the drag's threshold, by less than half a beat
+        const auto step = averageOf (10,
+                                     [&] (int i)
+                                     {
+                                         mouse.dragTo (from.translated (screen.widthOf (i + 1.0), 0));
+                                         phazite::test::deliverChanges();
+                                     });
+        report << "| A step of a drag of 500 notes | " << milliseconds (step) << " |\n";
+        mouse.release();
+        phazite::test::deliverChanges();
+        CHECK (screen.get (pressed).start == notes[6].start + lasting (10.0));
+        report << "| ... its Undo | " << milliseconds (millisecondsOf ([&] { run ("edit.undo"); })) << " |\n";
+
+        // Every note: selected, then each edit and its Undo.
+        report << "| Select All | " << milliseconds (millisecondsOf ([&] { run ("note.selectAll"); })) << " |\n";
+        REQUIRE (screen.getSelected().size() == (size_t) count);
+
+        for (const auto& [id, what] :
+             { std::pair { "note.transposeUp", "Transpose Up (the up arrow)" }, std::pair { "edit.quantize", "Quantize" },
+               std::pair { "edit.duplicate", "Duplicate" }, std::pair { "edit.delete", "Delete" } })
+        {
+            run ("note.selectAll");
+            report << "| " << what << ", every note | " << milliseconds (millisecondsOf ([&] { run (id); })) << " |\n";
+            report << "| ... its Undo | " << milliseconds (millisecondsOf ([&] { run ("edit.undo"); })) << " |\n";
+        }
+
+        CHECK (screen.getAll().size() == (size_t) count);
+    }
+
+    // What the playlist reads of a song of 200 tracks of 24 clips of 16 notes each.
+    {
+        auto song = phazite::createSong();
+        phazite::ProjectContext context (phazite::test::getEngineContext());
+        const auto tracks = phazite::ensureTracks (*song, 200);
+        std::vector<phazite::ClipID> clips;
+
+        for (const auto track : tracks)
+        {
+            for (int c = 0; c < 24; ++c)
+            {
+                const auto clip = phazite::insertMidiClip (*song, track, { at (c * 16.0), at (c * 16.0 + 16.0) }, nullptr);
+                std::vector<phazite::NoteData> clipNotes;
+
+                for (int n = 0; n < 16; ++n)
+                    clipNotes.push_back ({ .clip = clip, .pitch = 48 + n, .start = at (c * 16.0 + n), .length = lasting (0.5) });
+
+                phazite::setClipNotes (*song, clip, clipNotes);
+                clips.push_back (clip);
+            }
+        }
+
+        song->getUndoManager().clearUndoHistory();
+        phazite::setSong (context, song.get());
+        phazite::test::dispatchPendingMessages();
+
+        report << "\n| What views read of 200 tracks of 24 clips of 16 notes | Time |\n|---|---|\n";
+        const auto everyTrack = millisecondsOf (
+            [&]
+            {
+                for (const auto track : tracks)
+                    REQUIRE (phazite::getClips (context, track).size() == 24);
+            });
+        report << "| Every track's clips (getClips()) | " << milliseconds (everyTrack) << " |\n";
+        report << "| A clip's info by its ID (getClip()) | "
+               << milliseconds (averageOf (480, [&] (int i) { REQUIRE (phazite::getClip (context, clips[(size_t) i * 10]).has_value()); }),
+                                4)
+               << " |\n";
+        // A lookup alone, by the song's index, with its check of the answer against the tree (SongIndex.h).
+        const auto lookups = millisecondsOf (
+            [&]
+            {
+                for (int i = 0; i < 100000; ++i)
+                    if (! phazite::findClipState (*song, clips[(size_t) (i * 7919) % clips.size()]).isValid())
+                        FAIL ("a clip not found");
+            });
+        report << "| A clip found by its ID (findClipState()) | " << juce::String (lookups * 10.0, 1) << " ns |\n";
+        report << "| A track's row (getTrackRow()) | "
+               << milliseconds (averageOf (200, [&] (int i) { REQUIRE (phazite::getTrackRow (context, tracks[(size_t) i]).has_value()); }),
+                                4)
+               << " |\n";
+        report << "| A clip's note shapes (getNoteShapes()) | "
+               << milliseconds (
+                      averageOf (480, [&] (int i) { REQUIRE (phazite::getNoteShapes (context, clips[(size_t) i * 10]).size() == 16); }), 4)
+               << " |\n";
+        report << "| A clip moved, as a drag's step moves it (the model alone) | "
+               << milliseconds (
+                      averageOf (20, [&] (int i) { phazite::moveClip (context, clips[2400], at (24 * 16.0 + i * 4.0), tracks[100]); }), 4)
+               << " |\n";
+        phazite::setSong (context, nullptr);
+    }
+
+    MESSAGE (report);
+}

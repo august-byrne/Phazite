@@ -155,13 +155,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
 its fix.
 
-- **122. Notes and clips are found by looking through the song at every call, so editing many notes is quadratic.**
-  Each move of the mouse in a drag of notes looks through every track's children several times for each note
-  (`src/model/notes/Notes.cpp`, `src/model/arrangement/Clips.cpp`, `src/model/base/Selection.cpp`); and the piano
-  roll's hover and marquee read every note, and the other tracks' notes, at each mouse event
-  (`src/ui/pianoroll/PianoRollNotes.cpp`). The benchmarks' clips hold 16 notes. Fix: find the clip once a call and keep
-  its notes by ID; test against what the paint already keeps; benchmark a clip of 5,000 notes. Partly confirmed by a
-  second reading (model-arrangement 3, ui-timeline-editors 9).
 - **123. Whole audio files are read and copied on the message thread.** Importing compares a file of the same name
   byte for byte and copies it inside the undo step (`src/model/arrangement/Import.cpp`); Normalize reads the clip's
   whole part (`src/model/arrangement/AudioClips.cpp`); Quantize Audio loads up to ten minutes of audio and finds its

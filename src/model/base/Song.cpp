@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Song.h"
+#include "internal/SongIndex.h"
 
 namespace phazite
 {
@@ -19,7 +20,8 @@ int Song::getUndoSteps()
 }
 
 Song::Song (juce::ValueTree s)
-    : state (std::move (s))
+    : state (std::move (s)),
+      index (std::make_unique<SongIndex> (state))
 {
     // By steps alone: JUCE weighs each change by the size of its record, not by what it holds, so a budget of units kept as
     // few as 30 steps after a drag of many notes.

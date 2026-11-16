@@ -425,7 +425,12 @@ const PianoRoll::DrawnNotes& PianoRoll::getDrawnNotes() const
         drawnNotes = DrawnNotes { std::move (notes), std::move (colours), getSelectedNoteRefs() };
         drawnSongVersion = context.getSongVersion();
     }
+    else if (drawnSelectionChanged)
+    {
+        drawnNotes->selected = getSelectedNoteRefs(); // the notes as they were: only which are selected changed
+    }
 
+    drawnSelectionChanged = false;
     return *drawnNotes;
 }
 
@@ -461,7 +466,7 @@ std::vector<NoteRef> PianoRoll::getSelectedRefsHere() const
 void PianoRoll::selectNotes (const std::vector<NoteRef>& notes, bool addToSelection)
 {
     selection.selectNotes (notes, addToSelection);
-    drawnNotes.reset();
+    drawnSelectionChanged = true;
     grid->repaint();
     velocityLane->repaint();
 }
@@ -837,7 +842,7 @@ void PianoRoll::changeListenerCallback (juce::ChangeBroadcaster*)
             showTrack (track);
     }
 
-    drawnNotes.reset();
+    drawnSelectionChanged = true; // the notes shown read again only if the clips shown changed (clipsChanged())
     grid->repaint();
     velocityLane->repaint();
 }

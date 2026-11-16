@@ -179,9 +179,11 @@ private:
     TrackID auditionTrack; // the track a note is being auditioned on
 
     // What the note grid and the velocity lane draw: the clips' notes, their colours and which are selected, read again
-    // once the song (ProjectContext::getSongVersion()), the clips shown or the selection changed, rather than at each
-    // paint, as the playhead repaints a strip of the grid at each frame while playing (docs/archive/performance-audit.md, U5 and
-    // section 8). Only for painting: the tools read the song as it is (getAllNotes()).
+    // once the song (ProjectContext::getSongVersion()) or the clips shown changed, and which are selected once the
+    // selection did, rather than at each paint, as the playhead repaints a strip of the grid at each frame while playing
+    // (docs/archive/performance-audit.md, U5 and section 8). The song's version changes with each change at once, so these
+    // are the song's notes as they are now whenever they are asked for: the hover and the selection rectangle find notes
+    // among them too, rather than reading every note from the song at each move of the mouse (known bug 122).
     struct DrawnNotes
     {
         std::vector<NoteData> notes;
@@ -191,6 +193,7 @@ private:
 
     mutable std::optional<DrawnNotes> drawnNotes;
     mutable int drawnSongVersion = 0;
+    mutable bool drawnSelectionChanged = false; // which notes are selected, to be read again
 
     //==============================================================================
     void projectChanged() override; // another project, or none

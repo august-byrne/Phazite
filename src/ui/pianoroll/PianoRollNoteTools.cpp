@@ -288,7 +288,7 @@ void PianoRoll::NoteGrid::paintAt (const juce::MouseEvent& e)
     const auto steps = juce::jlimit (-maxStepsAtOnce, maxStepsAtOnce,
                                      (int) std::floor ((roll.getView().xToBeat (e.position.x) - gesture->paintOrigin).inBeats() / step));
     const auto from = std::min (0, steps), to = std::max (0, steps);
-    const auto notes = roll.getAllNotes();
+    const auto notes = roll.getDrawnNotes().notes; // a copy: the steps below add notes
     const auto length = BeatDuration::fromBeats (step);
 
     for (auto i = from; i <= to; ++i)
@@ -603,7 +603,7 @@ void PianoRoll::NoteGrid::mouseDrag (const juce::MouseEvent& e)
             rubberBand = juce::Rectangle<int> (getGestureStart(), e.getPosition());
             std::vector<NoteRef> inside;
 
-            for (const auto& note : roll.getAllNotes())
+            for (const auto& note : roll.getDrawnNotes().notes) // as painted, the song's as it is now
                 if (roll.getNoteBounds (note).intersects (rubberBand.toFloat()) || gesture->selectedBefore.contains (note.getRef()))
                     inside.push_back (note.getRef());
 

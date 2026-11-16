@@ -77,7 +77,7 @@ namespace
         if (! clipState.isValid())
             return;
 
-        for (auto alias : getAliasStates (clipState))
+        for (auto alias : getAliasStates (song, clipState))
         {
             auto sound = getSound (song, alias);
             change (sound);
@@ -147,7 +147,7 @@ namespace
     {
         auto* um = &song.getUndoManager();
 
-        for (auto alias : getAliasStates (clipState))
+        for (auto alias : getAliasStates (song, clipState))
         {
             for (auto i = alias.getNumChildren(); --i >= 0;)
                 if (alias.getChild (i).hasType (schema::WARP))

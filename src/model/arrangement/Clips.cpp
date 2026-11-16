@@ -5,6 +5,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
@@ -56,34 +57,12 @@ namespace
     }
 
     //==============================================================================
-    juce::ValueTree findIn (const juce::ValueTree& trackState, ClipID id)
-    {
-        for (const auto& child : trackState)
-            if (child.hasType (schema::CLIP) && getClipID (child) == id)
-                return child;
-
-        return {};
-    }
-
-    // The clips in a group, on the tracks under a parent (the track list, or a folder's element), but one.
-    void collectLinked (const juce::ValueTree& parent, const juce::String& link, const juce::ValueTree& except,
-                        std::vector<juce::ValueTree>& found)
-    {
-        for (const auto& child : parent)
-        {
-            if (child.hasType (schema::TRACK))
-                collectLinked (child, link, except, found);
-            else if (child.hasType (schema::CLIP) && child != except && child[schema::clipLink].toString() == link)
-                found.push_back (child);
-        }
-    }
-
     void removeClipState (Song& song, juce::ValueTree clipState)
     {
         // The last one left of a group of linked clips leaves it, as Make Unique leaves it (makeClipsUnique()): it would
         // still show as linked to nothing.
         if (clipState.hasProperty (schema::clipLink))
-            if (auto aliases = getAliasStates (clipState); aliases.size() == 2)
+            if (auto aliases = getAliasStates (song, clipState); aliases.size() == 2)
                 aliases[1].removeProperty (schema::clipLink, &song.getUndoManager());
 
         clipState.getParent().removeChild (clipState, &song.getUndoManager());
@@ -243,17 +222,13 @@ namespace
 //==============================================================================
 juce::ValueTree findClipState (const Song& song, ClipID id)
 {
-    if (id.isValid())
-        for (const auto& trackState : getTrackStates (song))
-            if (auto found = findIn (trackState, id); found.isValid())
-                return found;
-
-    return {};
+    return id.isValid() ? song.getIndex().findClip (id.getRaw()) : juce::ValueTree();
 }
 
 std::vector<juce::ValueTree> getClipStates (const juce::ValueTree& trackState)
 {
     std::vector<juce::ValueTree> clips;
+    SongIndex::countVisited ((std::uint64_t) trackState.getNumChildren()); // a walk of a track's elements, for the speed gates
 
     for (const auto& child : trackState)
         if (child.hasType (schema::CLIP))
@@ -267,9 +242,13 @@ std::vector<juce::ValueTree> getClipStates (const Song& song)
     std::vector<juce::ValueTree> clips;
 
     for (const auto& trackState : getTrackStates (song))
+    {
+        SongIndex::countVisited ((std::uint64_t) trackState.getNumChildren());
+
         for (const auto& child : trackState)
             if (child.hasType (schema::CLIP))
                 clips.push_back (child);
+    }
 
     return clips;
 }
@@ -346,22 +325,9 @@ BeatPosition getContentStart (const juce::ValueTree& clipState)
     return getClipRange (clipState).getStart() - getClipOffset (clipState);
 }
 
-std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState)
+std::vector<juce::ValueTree> getAliasStates (const Song& song, const juce::ValueTree& clipState)
 {
-    std::vector<juce::ValueTree> aliases { clipState };
-
-    if (const auto link = clipState[schema::clipLink].toString(); link.isNotEmpty())
-    {
-        // Every clip of the song in the same group: the clip's track's element is in the track list.
-        auto list = clipState.getParent();
-
-        while (list.isValid() && ! list.hasType (schema::TRACKS))
-            list = list.getParent();
-
-        collectLinked (list, link, clipState, aliases);
-    }
-
-    return aliases;
+    return song.getIndex().findLinked (clipState);
 }
 
 juce::ValueTree copyClipState (Song& song, const juce::ValueTree& clipState)
@@ -516,7 +482,7 @@ std::optional<double> getLinkedPlayBeat (const Song& song, const std::vector<Cli
 
     // The place in their shared notes, from where those count, in a clip linked to one of these that plays there.
     for (const auto& clipState : states)
-        for (const auto& other : getAliasStates (clipState))
+        for (const auto& other : getAliasStates (song, clipState))
             if (other != clipState && getClipRange (other).contains (beat))
                 return (getContentStart (clipState) + (beat - getContentStart (other))).inBeats();
 
@@ -827,7 +793,7 @@ void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)
         if (! clipState.hasProperty (schema::clipLink))
             continue;
 
-        const auto aliases = getAliasStates (clipState);
+        const auto aliases = getAliasStates (song, clipState);
         clipState.removeProperty (schema::clipLink, &song.getUndoManager());
 
         // The last one left in the group leaves it too.
@@ -853,7 +819,7 @@ void renameClips (Song& song, const std::vector<ClipID>& clips, const juce::Stri
     std::vector<juce::ValueTree> renamed;
 
     for (const auto clip : clips)
-        for (const auto& clipState : getAliasStates (findClipState (song, clip)))
+        for (const auto& clipState : getAliasStates (song, findClipState (song, clip)))
             if (clipState.isValid() && clipState[schema::clipName].toString() != ownNameOf (clipState)
                 && std::find (renamed.begin(), renamed.end(), clipState) == renamed.end())
                 renamed.push_back (clipState);

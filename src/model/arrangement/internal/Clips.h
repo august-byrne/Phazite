@@ -47,7 +47,7 @@ void moveClipState (Song&, juce::ValueTree clipState, BeatPosition start);
 
 // The clips of a clip's alias group, which hold the same notes (schema::clipLink), the clip itself first; only the clip
 // if it is in none.
-std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState);
+std::vector<juce::ValueTree> getAliasStates (const Song&, const juce::ValueTree& clipState);
 
 // A new MIDI clip's element, with an ID of the song's, on no track yet. With no name, it has none of its own: it is called after
 // the track it goes on (getClipName()).

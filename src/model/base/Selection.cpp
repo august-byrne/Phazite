@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Selection.h"
 #include "internal/Schema.h"
+#include "internal/SongIndex.h"
 
 #include <algorithm>
 #include <functional>
@@ -54,40 +55,17 @@ namespace
         return false;
     }
 
-    std::uint64_t pointComparisons = 0; // message thread
+    std::uint64_t pointComparisons = 0, noteComparisons = 0; // message thread
 
-    // How many of these notes are still in their clips: by their IDs in the song's clips.
-    int countNotesThere (const juce::ValueTree& song, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
+    // How many of these notes are still in their clips, of those shown: each by its ID in its own clip.
+    int countNotesThere (const Song& song, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
     {
-        std::unordered_set<juce::int64> clipsShown;
-
-        for (const auto& id : clips)
-            clipsShown.insert ((juce::int64) id.getRaw());
-
-        std::unordered_set<juce::int64> there; // the notes of those clips, by their IDs
-        std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& parent)
-        {
-            for (const auto& child : parent)
-            {
-                if (child.hasType (schema::CLIP))
-                {
-                    if (clipsShown.contains ((juce::int64) child[schema::clipID]))
-                        for (const auto& note : child)
-                            if (note.hasType (schema::NOTE))
-                                there.insert ((juce::int64) note[schema::noteID]);
-                }
-                else if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK))
-                {
-                    collect (child);
-                }
-            }
-        };
-
-        collect (song);
+        const auto& index = song.getIndex();
         auto count = 0;
 
         for (const auto& ref : notes)
-            if (clipsShown.contains ((juce::int64) ref.clip.getRaw()) && there.contains ((juce::int64) ref.note.getRaw()))
+            if (std::find (clips.begin(), clips.end(), ref.clip) != clips.end()
+                && index.findNote (index.findClip (ref.clip.getRaw()), ref.note.getRaw()).isValid())
                 ++count;
 
         return count;
@@ -102,6 +80,11 @@ void Selection::countPointComparisons (std::uint64_t count) noexcept
 std::uint64_t Selection::getPointComparisons() noexcept
 {
     return pointComparisons;
+}
+
+std::uint64_t Selection::getNoteComparisons() noexcept
+{
+    return noteComparisons;
 }
 
 void Selection::setSong (Song* newSong)
@@ -119,7 +102,22 @@ void Selection::setSong (Song* newSong)
 bool Selection::isThere (Item item) const
 {
     auto* song = getSong();
-    return song != nullptr && item.id != 0 && holds (song->getState(), item.kind, item.id);
+
+    if (song == nullptr || item.id == 0)
+        return false;
+
+    // A track or a clip by the song's index; a device (in a track's chain, the master's or a container's) looked for.
+    if (item.kind == Kind::device)
+        return holds (song->getState(), item.kind, item.id);
+
+    const auto& index = song->getIndex();
+    const auto there = item.kind == Kind::clip
+                           ? index.findClip (item.id).isValid()
+                           : (std::uint64_t) (juce::int64) song->getState().getChildWithName (schema::MASTER)[schema::trackID] == item.id
+                                 || index.findTrack (item.id).isValid();
+
+    jassert (! SongIndex::isChecking() || there == holds (song->getState(), item.kind, item.id)); // the index and the song differ
+    return there;
 }
 
 bool Selection::isThere (SectionID id) const
@@ -223,7 +221,7 @@ int Selection::getNumObjectsSelected() const
             ++count;
 
     if (auto* song = getSong(); song != nullptr && ! notes.empty())
-        count += countNotesThere (song->getState(), noteClips, notes);
+        count += countNotesThere (*song, noteClips, notes);
 
     // Points still in the parameter's curve, of a device the song holds, as getSelectedPoints() (automation/internal/
     // Automation.h) finds them.
@@ -326,15 +324,26 @@ void Selection::setNoteClips (const std::vector<ClipID>& clips)
 void Selection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelection)
 {
     // Only notes of the note clips; adding to notes keeps them, and selecting them deselects anything else.
+    // Each once: a note chosen is looked for among those chosen by its hash, not compared with each of them.
     std::vector<NoteRef> chosen;
+    std::unordered_set<NoteRef> taken;
 
     if (addToSelection)
+    {
         chosen = notes;
+        taken.insert (notes.begin(), notes.end());
+    }
 
     for (const auto& ref : refs)
-        if (std::find (noteClips.begin(), noteClips.end(), ref.clip) != noteClips.end()
-            && std::find (chosen.begin(), chosen.end(), ref) == chosen.end())
+    {
+        if (std::find (noteClips.begin(), noteClips.end(), ref.clip) == noteClips.end())
+            continue;
+
+        ++noteComparisons;
+
+        if (taken.insert (ref).second)
             chosen.push_back (ref);
+    }
 
     if (chosen == notes && items.empty() && sections.empty() && ! pointsParameter.isValid())
         return;

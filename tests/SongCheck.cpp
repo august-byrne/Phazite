@@ -4,6 +4,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/modulation/Modulators.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -485,5 +486,8 @@ void checkSong (const Song& song)
         INFO (problem);
         CHECK (false);
     }
+
+    // And what finds its items by their IDs holds what it does (model/base/internal/SongIndex.h).
+    CHECK (song.getIndex().isExact());
 }
 } // namespace phazite::test

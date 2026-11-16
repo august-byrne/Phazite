@@ -105,8 +105,10 @@ std::optional<NoteData> PianoRoll::NoteGrid::getNoteAt (juce::Point<float> posit
 {
     // A note in the row the mouse is in, the row a click there adds a note to: notes are drawn a pixel inside their rows,
     // and a click on a row's edge would otherwise miss the note there and stack a new one on it. The last drawn is on top.
+    // Of the notes as they are painted, which are the song's as it is now (PianoRoll::getDrawnNotes()), not read from it at
+    // each move of the mouse.
     const auto row = roll.getRowAt (juce::roundToInt (std::floor (position.y)));
-    const auto notes = roll.getAllNotes();
+    const auto& notes = roll.getDrawnNotes().notes;
 
     for (auto it = notes.rbegin(); it != notes.rend(); ++it)
     {
@@ -133,7 +135,7 @@ std::optional<NoteData> PianoRoll::NoteGrid::getNoteToEditAt (juce::Point<float>
     if (row < 0)
         return {};
 
-    for (const auto& note : roll.getAllNotes())
+    for (const auto& note : roll.getDrawnNotes().notes)
     {
         const auto bounds = roll.getNoteBounds (note);
 
@@ -178,12 +180,6 @@ PianoRoll::NoteGrid::Zone PianoRoll::NoteGrid::getZone (const NoteData& note, ju
     return Zone::body;
 }
 
-std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes() const
-{
-    const auto& timeline = roll.getView();
-    return getGhostNotes ({ timeline.xToBeat (0), timeline.xToBeat (getWidth()) });
-}
-
 std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes (BeatRange range) const
 {
     if (! roll.hasProject() || ! roll.showGhostNotes)
@@ -222,9 +218,11 @@ const PianoRoll::NoteGrid::DrawnGhosts& PianoRoll::NoteGrid::getDrawnGhosts()
     return *drawnGhosts;
 }
 
-ClipID PianoRoll::NoteGrid::getGhostClipAt (juce::Point<float> position) const
+ClipID PianoRoll::NoteGrid::getGhostClipAt (juce::Point<float> position)
 {
-    for (const auto& note : getGhostNotes())
+    // Of the ghosts as they are painted (those of the view and as much again on either side), not read from the song at each
+    // move of the mouse.
+    for (const auto& note : getDrawnGhosts().notes)
         if (roll.getNoteBounds (note).contains (position))
             return note.clip;
 
