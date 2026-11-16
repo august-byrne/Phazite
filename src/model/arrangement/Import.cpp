@@ -856,7 +856,7 @@ namespace
             // brought in is remembered first, so that the change finds each copy without reading again.
             if (done && findSong (context)->getFile() == projectFile)
             {
-                copies.take();
+                const auto made = copies.take();
 
                 for (const auto& [file, copy] : brought)
                     noteBrought (file, copy);
@@ -866,6 +866,8 @@ namespace
                     bring.otherwise = nullptr;
                     return;
                 }
+
+                deleteUnused (context, made); // its change not made (what it was for went): what it wrote goes
             }
 
             discard (context);

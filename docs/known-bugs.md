@@ -63,19 +63,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
-## Slow on the message thread
-
-Unless an entry says it was measured, each is the audit's reading of the code, and needs a benchmark before and after
-its fix.
-
-- **183. Loading a preset that holds sounds copies them into the project on the message thread.** A drum kit or a
-  sampler preset whose sounds are outside the project has each copied, and compared in full with a file of the same
-  name, in the call that loads it (`copyDeviceFilesInto()`, `src/model/devices/DeviceFiles.cpp`, from
-  `src/model/presets/Presets.cpp`), where a sound put on a pad, an import and Swap's Keep have gone to the
-  background since known bug 123 was fixed (2026-11-16). A kit of long samples from a slow disk stops the window
-  while they copy. Fix: bring them in as those do (`bringFilesIntoProject()`,
-  `src/model/arrangement/internal/Import.h`), the preset applied once the copies are made.
-
 ## Tests
 
 - **180. The plug-in tests still compare against the wall clock.** The rest of the tests no longer do (2026-11-16);

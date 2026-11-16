@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Presets.h"
 #include "PresetModel.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Json.h"
 #include "model/base/Numbers.h"
@@ -827,6 +828,27 @@ namespace
         return notTaken;
     }
 
+    // The sound files a preset names that a project takes (isSoundFileToTake()), each once: what loading it brings into the
+    // project first (bringFilesIntoProject(), Import.h), in the background for those outside it, as an import's are (known
+    // bug 183), so that what makes its devices (copyDeviceFilesInto()) finds each copy made, reading nothing. The presets
+    // that come with Phazite name none (their sounds are those Phazite makes: tests/PresetTests.cpp checks it), so loading
+    // one copies nothing, as an example song's making does.
+    juce::Array<juce::File> findFilesToBring (const juce::var& preset)
+    {
+        juce::Array<juce::File> files;
+
+        forEachObject (preset,
+                       [&files] (juce::DynamicObject& object)
+                       {
+                           if (const auto* sounds = object.getProperty (keys::sounds).getDynamicObject())
+                               for (const auto& name : getSoundFileNames (*sounds))
+                                   if (const auto path = sounds->getProperty (name).toString(); isSoundFileToTake (path))
+                                       files.addIfNotAlreadyThere (juce::File (path));
+                       });
+
+        return files;
+    }
+
     // What a preset loaded without, told as a problem with the song (the app shows it: model/project/internal/
     // ProjectContext.h, reportProblem()).
     void tellSoundsNotTaken (const ProjectContext& context, const juce::File& file, const juce::StringArray& notTaken)
@@ -1268,6 +1290,70 @@ bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::Fil
     return savePresetFile (context, makeTrackPreset (*song, id), file);
 }
 
+namespace
+{
+    // What loadPreset() puts in, once the sounds it names are in the project: nothing (false) if the track it was for went
+    // meanwhile.
+    bool addPresetNow (ProjectContext& context, const juce::File& file, TrackID target, const juce::var& preset)
+    {
+        auto* song = findSong (context);
+
+        if (song == nullptr || (target.isValid() && ! findTrackState (*song, target).isValid()))
+            return false;
+
+        const auto name = file.getFileNameWithoutExtension();
+        const auto notTaken = findSoundsNotTaken (preset);
+        auto& selection = getSelection (context);
+        const auto& host = getPluginHost (getEngineContext (context));
+        auto added = false;
+
+        {
+            const UndoStep step (*song, "Add " + name);
+
+            if (findKind (preset[keys::kind].toString()) == PresetKind::track)
+            {
+                added = addTrackFromPreset (*song, host, target, preset, &selection).isValid();
+            }
+            else
+            {
+                // A container is named after its preset.
+                const auto device = addDeviceFromPreset (*song, host, target, preset, &selection);
+
+                if (device.isValid() && isContainer (*song, device))
+                    setContainerName (*song, device, name);
+
+                added = device.isValid();
+            }
+        }
+
+        if (added)
+            tellSoundsNotTaken (context, file, notTaken);
+
+        return added;
+    }
+
+    // What loadPresetInto() puts into one of Phazite's own devices, once the sounds it names are in the project: nothing
+    // (false) if the device went meanwhile, or isn't of the preset's type.
+    bool loadOwnPresetNow (ProjectContext& context, DeviceID id, const juce::File& file, const juce::var& preset)
+    {
+        auto* song = findSong (context);
+        const auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
+        const auto* own = findOwnInfo (device);
+        const auto saved = preset[keys::device];
+
+        if (own == nullptr || saved[keys::type].toString() != toString (own->typeID))
+            return false;
+
+        {
+            const UndoStep step (*song, "Load Preset " + file.getFileNameWithoutExtension());
+            loadInto (*song, id, *own, saved);
+        }
+
+        tellSoundsNotTaken (context, file, findSoundsNotTaken (preset));
+        return true;
+    }
+} // namespace
+
 bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target)
 {
     auto* song = findSong (context);
@@ -1276,35 +1362,16 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
     if (! preset.isObject() || (target.isValid() && ! findTrackState (*song, target).isValid()))
         return false;
 
+    // The sounds it names copied into the project first, in the background for those outside it (known bug 183): it goes in
+    // once they are, the window held meanwhile, with Cancel after a second; at once when none is outside.
     const auto name = file.getFileNameWithoutExtension();
-    const auto notTaken = findSoundsNotTaken (preset);
-    auto& selection = getSelection (context);
-    const auto& host = getPluginHost (getEngineContext (context));
-    auto added = false;
-
-    {
-        const UndoStep step (*song, "Add " + name);
-
-        if (findKind (preset[keys::kind].toString()) == PresetKind::track)
-        {
-            added = addTrackFromPreset (*song, host, target, preset, &selection).isValid();
-        }
-        else
-        {
-            // A container is named after its preset.
-            const auto device = addDeviceFromPreset (*song, host, target, preset, &selection);
-
-            if (device.isValid() && isContainer (*song, device))
-                setContainerName (*song, device, name);
-
-            added = device.isValid();
-        }
-    }
-
-    if (added)
-        tellSoundsNotTaken (context, file, notTaken);
-
-    return added;
+    return bringFilesIntoProject (*song,
+                                  { .files = findFilesToBring (preset),
+                                    .title = "Loading " + name,
+                                    .problem = name
+                                               + " wasn't added: where it was dropped went before its sounds were copied "
+                                                 "into the project.",
+                                    .apply = [&context, file, target, preset] { return addPresetNow (context, file, target, preset); } });
 }
 
 bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& file)
@@ -1324,13 +1391,15 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
         if (saved[keys::type].toString() != toString (own->typeID))
             return false;
 
-        {
-            const UndoStep step (*song, stepName);
-            loadInto (*song, id, *own, saved);
-        }
-
-        tellSoundsNotTaken (context, file, findSoundsNotTaken (preset));
-        return true;
+        // As loadPreset() brings its sounds in first.
+        const auto name = file.getFileNameWithoutExtension();
+        return bringFilesIntoProject (*song,
+                                      { .files = findFilesToBring (preset),
+                                        .title = "Loading " + name,
+                                        .problem = name
+                                                   + " wasn't loaded: its device went before its sounds were copied into "
+                                                     "the project.",
+                                        .apply = [&context, id, file, preset] { return loadOwnPresetNow (context, id, file, preset); } });
     }
 
     if (! isPluginState (device) || ! saved[keys::plugin].isObject() || ! isSamePlugin (device, saved[keys::plugin]))

@@ -29,21 +29,32 @@ namespace
     constexpr int noteMilliseconds = 600; // an instrument's note, while the song is stopped
     constexpr int instrumentNote = 60;    // C4; the drum sampler's first pad's for its kits
 
-    // The files a device's sounds name outside the project's folder, as Swap tries them by their full paths, copied into its
-    // Audio folder, each named by its copy then, in the caller's undo step.
-    void copyFilesIn (Song& song, DeviceID id)
+    // The files a device's sounds name outside the project's folder, by their full paths, as Swap tries them.
+    juce::Array<juce::File> findFilesOutside (const Song& song, DeviceID id)
     {
+        juce::Array<juce::File> outside;
         const auto sounds = findDeviceState (song, id).getChildWithName (schema::SOUNDS);
 
-        if (! sounds.isValid())
-            return;
+        for (int i = 0; i < sounds.getNumProperties(); ++i)
+            if (const auto path = sounds[sounds.getPropertyName (i)].toString(); juce::File::isAbsolutePath (path))
+                if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
+                    outside.addIfNotAlreadyThere (file);
+
+        return outside;
+    }
+
+    // Those of them brought into the project (bringFilesIntoProject(), Import.h) each named by its copy, which
+    // copyIntoProject() finds without reading, in the caller's undo step.
+    void copyFilesIn (Song& song, DeviceID id, const juce::Array<juce::File>& brought)
+    {
+        const auto sounds = findDeviceState (song, id).getChildWithName (schema::SOUNDS);
 
         for (int i = 0; i < sounds.getNumProperties(); ++i)
         {
             const auto property = sounds.getPropertyName (i);
 
             if (const auto path = sounds[property].toString(); juce::File::isAbsolutePath (path))
-                if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
+                if (const auto file = makeFileOfFullPath (path); brought.contains (file))
                     if (const auto copy = copyIntoProject (song, file); copy != file)
                         setDeviceSound (song, id, property, getProjectPath (song, copy));
         }
@@ -99,7 +110,7 @@ struct Swap::Impl : private juce::Timer
         return pad >= 0 ? "Put " + triedName + " on Pad " + juce::String (pad) : "Load Preset " + triedName;
     }
 
-    // Copies in what it tried, and names the step after it.
+    // Names what it tried by the copies brought in for it (Swap::keep()), and keeps the step under its name.
     void keep()
     {
         if (trial == nullptr)
@@ -107,7 +118,7 @@ struct Swap::Impl : private juce::Timer
 
         if (auto* s = getSong(); s != nullptr && trial->hasChanges())
         {
-            trial->apply ([this, s] { copyFilesIn (*s, device); });
+            trial->apply ([this, s] { copyFilesIn (*s, device, brought); });
             trial->keep (getStepName());
         }
         else
@@ -116,6 +127,44 @@ struct Swap::Impl : private juce::Timer
         }
 
         end();
+    }
+
+    // Kept first as another change begins (Trial's keepFirst): at once, so its sounds as tried, by their full paths outside
+    // the project, as a sound that couldn't be copied is kept (no copy made there, on the message thread: known bug 183).
+    // They are copied in the background then, and named by their copies once they are, as a step of its own.
+    void keepForAnother()
+    {
+        auto* s = getSong();
+
+        if (trial == nullptr || s == nullptr || ! trial->hasChanges())
+        {
+            putBack();
+            return;
+        }
+
+        trial->keep (getStepName());
+        end();
+
+        const auto outside = findFilesOutside (*s, device);
+
+        if (outside.isEmpty())
+            return;
+
+        bringFilesIntoProject (*s, { .files = outside,
+                                     .title = "Copying " + tried.getFileName(),
+                                     .problem = "What the swap kept plays its sounds from where they are: its device went before they "
+                                                "were copied into the project.",
+                                     .apply = [weak = song, id = device, outside]
+                                     {
+                                         auto* kept = weak.get();
+
+                                         if (kept == nullptr || ! findDeviceState (*kept, id).isValid())
+                                             return false;
+
+                                         const UndoStep step (*kept, "Copy Sounds into the Project");
+                                         copyFilesIn (*kept, id, outside);
+                                         return true;
+                                     } });
     }
 
     void putBack()
@@ -188,6 +237,7 @@ struct Swap::Impl : private juce::Timer
     TrackID noteTrack; // the track an instrument's note plays on, until it stops
     bool ended = false;
     bool keeping = false;             // its sounds being copied into the project, to keep once they are (Swap::keep())
+    juce::Array<juce::File> brought;  // those copied in for its keep
     std::function<void()> afterwards; // what keep() was given, once kept
 };
 
@@ -208,8 +258,8 @@ Swap::Swap (ProjectContext& context, DeviceID device, int pad)
     impl->oldName = pad >= 0 ? getPadName (*song, device, pad) : juce::String();
 
     // Something else that changes the song keeps what is tried first, as a step of its own, and ends the swap.
-    impl->trial =
-        std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad) : "Swap Preset", [kept = impl.get()] { kept->keep(); });
+    impl->trial = std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad) : "Swap Preset",
+                                           [kept = impl.get()] { kept->keepForAnother(); });
 }
 
 Swap::~Swap()
@@ -297,14 +347,8 @@ bool Swap::keep (std::function<void()> afterwards)
     // The sounds it tried by their full paths, copied into the project in the background first, as a sound put on a pad is
     // (known bug 123): kept once they are, its trial open meanwhile, input held; put back if that is cancelled.
     auto& song = *impl->getSong();
-    juce::Array<juce::File> outside;
-    const auto sounds = findDeviceState (song, impl->device).getChildWithName (schema::SOUNDS);
-
-    for (int i = 0; i < sounds.getNumProperties(); ++i)
-        if (const auto path = sounds[sounds.getPropertyName (i)].toString(); juce::File::isAbsolutePath (path))
-            if (const auto file = makeFileOfFullPath (path); file.existsAsFile())
-                outside.add (file);
-
+    const auto outside = findFilesOutside (song, impl->device);
+    impl->brought = outside;
     impl->keeping = true;
     bringFilesIntoProject (song, { .files = outside,
                                    .title = "Copying " + impl->tried.getFileName(),

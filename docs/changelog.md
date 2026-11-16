@@ -292,6 +292,10 @@ too. A line names the bug's number in that list.
 - **184 A damaged project's copies are read in the background.** A project whose file can't be read no longer reads
   its backups and its branch's last commit on the message thread before it offers them: the window holds, a progress
   window shows after a second, its Cancel offers what was read by then, and a quit stops the read.
+- **183 A preset's sounds are copied in the background.** A preset whose sounds are outside the project (a kit's, a
+  sampler's, a wavetable's) has them copied as an import's are and goes in once they are, with Cancel; Swap's trial
+  copies nothing, and a trial kept by another change has its sounds copied in afterwards, as a step of its own
+  ("Copy Sounds into the Project"). A copy made for a change whose device or track went meanwhile is deleted.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

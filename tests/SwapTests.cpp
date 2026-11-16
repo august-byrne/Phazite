@@ -6,11 +6,14 @@
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/SwapModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -281,13 +284,16 @@ TEST_CASE ("Anything else that changes the song keeps what a swap tries, as a st
         CHECK (undo.getRedoDescription() == juce::String ("Put Kick One on Pad 36"));
     }
 
-    SUBCASE ("A save, which saves it kept, copied into the project")
+    SUBCASE ("A save, which saves it kept as tried; its sound then copied into the project in the background, a step of its own")
     {
         phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (kick);
         REQUIRE (song.getProject().save().wasOk());
         CHECK_FALSE (swap.isOpen());
+        CHECK (handle.getPadName (36) == juce::String ("Kick One"));
+        phazite::test::waitForAudioWork (song.context);
         CHECK (song.getProject().getFile().getSiblingFile ("Audio").getChildFile ("Kick One.wav").existsAsFile());
+        CHECK (undo.getUndoDescription() == juce::String ("Copy Sounds into the Project"));
     }
 
     SUBCASE ("Its device going")
@@ -345,6 +351,75 @@ TEST_CASE ("Swap tries presets on one of Phazite's own devices, and the device i
     CHECK (undo.getUndoDescription() == juce::String ("Load Preset Fifth"));
     phazite::undo (*phazite::findSong (song.context));
     CHECK (pitch.getValue() == doctest::Approx (12.0f));
+}
+
+TEST_CASE ("A kit's preset tried by Swap copies nothing; kept, or kept by another change, its sounds are copied in in the "
+           "background, the message thread reading none of them")
+{
+    TestSong song;
+    auto& model = *phazite::findSong (song.context);
+    const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
+    const auto handle = phazite::getDeviceHandle (song.context, drums);
+    const auto audio = song.getProject().getAudioFolder();
+    auto& undo = *song.context.getUndoManager();
+
+    // A kit's preset whose sound is beside it, outside the project ("Kit Sounds/Boom.wav"); the kit then as it was, the
+    // project's copy of the sound gone.
+    const auto preset = song.getSoundsFolder().getChildFile ("Kit.phazitepreset");
+    REQUIRE (handle.setPadSound (0, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Boom.wav"), 2.0)));
+    phazite::test::waitForAudioWork (song.context);
+    REQUIRE (phazite::saveDevicePreset (song.context, drums, preset));
+    phazite::undo (model);
+    REQUIRE (audio.getChildFile ("Boom.wav").deleteFile());
+    const auto beside = preset.getSiblingFile ("Kit Sounds").getChildFile ("Boom.wav");
+    REQUIRE (beside.existsAsFile());
+
+    const auto padFile = [&model, drums]
+    {
+        return phazite::findDeviceState (model, drums)
+            .getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)]
+            .toString();
+    };
+
+    const auto before = phazite::AudioWork::getMessageThreadReads();
+
+    SUBCASE ("Tried, then kept")
+    {
+        {
+            phazite::Swap swap (song.context, drums);
+            REQUIRE (swap.tryFile (preset));
+            CHECK (padFile() == beside.getFullPathName()); // heard from where it is
+            CHECK_FALSE (audio.getChildFile ("Boom.wav").existsAsFile());
+            CHECK_FALSE (phazite::isReadingAudio (song.context));
+            swap.keep();
+        }
+
+        phazite::test::waitForAudioWork (song.context);
+        CHECK (padFile() == juce::String ("Audio/Boom.wav"));
+        CHECK (undo.getUndoDescription() == juce::String ("Load Preset Kit"));
+    }
+
+    SUBCASE ("Tried, then kept by another change: as it was tried, then its sounds copied in as a step of their own")
+    {
+        {
+            phazite::Swap swap (song.context, drums);
+            REQUIRE (swap.tryFile (preset));
+            song.rename (song.firstTrack, "Beat");
+            CHECK_FALSE (swap.isOpen());
+            CHECK (padFile() == beside.getFullPathName()); // kept as tried: nothing copied in the change
+        }
+
+        phazite::test::waitForAudioWork (song.context);
+        CHECK (padFile() == juce::String ("Audio/Boom.wav"));
+        CHECK (undo.getUndoDescription() == juce::String ("Copy Sounds into the Project"));
+        phazite::undo (model);
+        CHECK (padFile() == beside.getFullPathName());
+        CHECK (undo.getUndoDescription() == juce::String ("Rename Track"));
+        phazite::undo (model);
+        CHECK (undo.getUndoDescription() == juce::String ("Load Preset Kit"));
+    }
+
+    CHECK (phazite::AudioWork::getMessageThreadReads() == before);
 }
 
 TEST_CASE ("A swap is in progress for Auto Save, which waits for it, once it has tried something and until it ends")

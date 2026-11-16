@@ -9,6 +9,7 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -83,6 +84,29 @@ struct Song
     std::unique_ptr<phazite::Project> project;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 };
+
+// A drum kit's preset in a folder, its sound beside it ("Kit Sounds/Boom.wav", outside any project), as saved from a first
+// project there.
+juce::File writeKitPreset (const juce::File& folder)
+{
+    const auto file = folder.getChildFile ("Kit" + juce::String (phazite::presetExtension));
+    const auto sound = phazite::test::writeSound (folder.getChildFile ("Sounds/Boom.wav"), 2.0);
+    Song first (folder, "First");
+    phazite::chooseInstrument (first.context, first.track (0), first.find ("phaziteDrums"));
+    const auto drums = phazite::getInstrument (first.context, first.track (0))->id;
+    REQUIRE (phazite::makeDeviceHandle (first.getSong(), drums).setPadSound (0, sound));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    REQUIRE (phazite::saveDevicePreset (first.context, drums, file));
+    return file;
+}
+
+// What a drum sampler's first pad plays, as the song names it.
+juce::String getPadFile (const phazite::Song& song, DeviceID drums)
+{
+    return phazite::findDeviceState (song, drums)
+        .getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)]
+        .toString();
+}
 
 std::vector<juce::String> namesOf (const std::vector<phazite::DeviceSlot>& slots)
 {
@@ -447,6 +471,7 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
     Song second (temp.folder, "Second");
     auto& context = second.context;
     REQUIRE (phazite::loadPreset (context, copied, second.track (0)));
+    phazite::test::waitForAudioWork (context); // its sound copied in, in the background, then the kit added (known bug 183)
     const auto drums = phazite::getInstrument (context, second.track (0));
     REQUIRE (drums.has_value());
     const auto device = phazite::findDeviceState (second.getSong(), drums->id);
@@ -454,6 +479,167 @@ TEST_CASE ("A drum sampler's preset brings its sounds into the project that take
     CHECK (device.getChildWithName (phazite::schema::SOUNDS)[phazite::schema::getPadSoundFile (0)].toString()
            == juce::String ("Audio/Boom.wav"));
     CHECK (second.project->getAudioFolder().getChildFile ("Boom.wav").existsAsFile());
+}
+
+TEST_CASE ("A preset whose sounds are outside the project goes in once they are copied in, in the background, as one undo step, "
+           "the message thread reading none of them")
+{
+    // Known bug 183: a kit's sounds were copied into the project, and compared in full with a file of the same name there,
+    // in the call that loaded it, holding the window.
+    phazite::test::TemporaryFolder temp;
+    const auto file = writeKitPreset (temp.folder);
+    Song second (temp.folder, "Second");
+    auto& context = second.context;
+    const auto audio = second.project->getAudioFolder();
+    phazite::test::UndoCheck undo (context);
+    const auto before = phazite::AudioWork::getMessageThreadReads();
+
+    // Dropped on a track: nothing until its sound is in; then the kit, its pad playing the project's copy.
+    undo.check ("Add Kit",
+                [&]
+                {
+                    REQUIRE (phazite::loadPreset (context, file, second.track (0)));
+                    CHECK (phazite::isReadingAudio (context));
+                    CHECK_FALSE (phazite::getInstrument (context, second.track (0)).has_value());
+                    phazite::test::waitForAudioWork (context);
+                });
+
+    const auto added = phazite::getInstrument (context, second.track (0));
+    REQUIRE (added.has_value());
+    CHECK (getPadFile (second.getSong(), added->id) == juce::String ("Audio/Boom.wav"));
+    CHECK (audio.getChildFile ("Boom.wav").existsAsFile());
+    CHECK (second.describeUndo() == juce::String ("Undo Add Kit"));
+
+    // Loaded into a kit already there, as its Presets menu does: the same, as "Load Preset Kit", the copy made once.
+    phazite::chooseInstrument (context, second.track (1), second.find ("phaziteDrums"));
+    const auto other = phazite::getInstrument (context, second.track (1))->id;
+    undo.check ("Load Preset Kit",
+                [&]
+                {
+                    REQUIRE (phazite::loadPresetInto (context, other, file));
+                    phazite::test::waitForAudioWork (context);
+                });
+
+    CHECK (getPadFile (second.getSong(), other) == juce::String ("Audio/Boom.wav"));
+    CHECK (second.describeUndo() == juce::String ("Undo Load Preset Kit"));
+    CHECK_FALSE (audio.getChildFile ("Boom2.wav").existsAsFile());
+    CHECK (phazite::AudioWork::getMessageThreadReads() == before);
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("A preset's load whose sounds are being copied in changes nothing if it is cancelled, or if its track or device goes "
+           "meanwhile, and leaves no copy")
+{
+    phazite::test::TemporaryFolder temp;
+    const auto file = writeKitPreset (temp.folder);
+    Song second (temp.folder, "Second");
+    auto& context = second.context;
+    auto& work = phazite::getAudioWork (context);
+    phazite::test::RenderHost window;
+    work.setHost (&window);
+    work.setShowAfter (0);
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    // Its copy held until let go, or stopped.
+    std::atomic<bool> letGo { false };
+    work.setOnReadStep (
+        [&letGo] (int, const phazite::BackgroundJobs::ShouldStop& stop)
+        {
+            while (! letGo && ! stop())
+                juce::Thread::sleep (1);
+        });
+
+    SUBCASE ("Cancelled")
+    {
+        const auto songBefore = phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole);
+        REQUIRE (phazite::loadPreset (context, file, second.track (0)));
+        REQUIRE (phazite::test::runTimersUntil ([&window] { return window.render != nullptr; }));
+        CHECK (window.render->getTitle() == juce::String ("Loading Kit"));
+        window.render->cancel(); // as its Cancel does, before its window deletes it
+        window.render = nullptr;
+        REQUIRE (phazite::test::runTimersUntil ([&work] { return ! work.isBusy() && work.countReadsGivenUp() == 0; }));
+        CHECK (phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole) == songBefore);
+        CHECK (problems.isEmpty());
+    }
+
+    SUBCASE ("Its track gone")
+    {
+        REQUIRE (phazite::loadPreset (context, file, second.track (1)));
+
+        {
+            const phazite::UndoStep step (second.getSong(), "Delete Track");
+            phazite::deleteTracks (second.getSong(), { second.track (1) }, nullptr);
+        }
+
+        const auto songBefore = phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole);
+        letGo = true;
+        phazite::test::waitForAudioWork (context);
+        CHECK (phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole) == songBefore);
+        REQUIRE (problems.size() == 1);
+        CHECK (problems[0].contains ("Kit"));
+    }
+
+    SUBCASE ("Its device gone")
+    {
+        phazite::chooseInstrument (context, second.track (0), second.find ("phaziteDrums"));
+        const auto drums = phazite::getInstrument (context, second.track (0))->id;
+        REQUIRE (phazite::loadPresetInto (context, drums, file));
+        phazite::removeDevice (context, drums);
+        const auto songBefore = phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole);
+        letGo = true;
+        phazite::test::waitForAudioWork (context);
+        CHECK (phazite::test::writeSong (second.getSong(), phazite::test::SongPart::whole) == songBefore);
+        REQUIRE (problems.size() == 1);
+        CHECK (problems[0].contains ("Kit"));
+    }
+
+    // No copy left in the project, which nothing names.
+    CHECK_FALSE (second.project->getAudioFolder().getChildFile ("Boom.wav").existsAsFile());
+    work.setOnReadStep (nullptr);
+    work.setHost (nullptr);
+    work.setShowAfter (phazite::AudioWork::showAfterMilliseconds);
+    phazite::setProblemReporter (context, nullptr);
+}
+
+TEST_CASE ("The presets that come with Phazite name no sound files, so loading one copies nothing (as an example song's making "
+           "does)")
+{
+    // Their sounds are those Phazite makes, named ("808 Kick"): what copyDeviceFilesInto() would copy is none.
+    int presets = 0;
+
+    for (const auto& entry :
+         juce::RangedDirectoryIterator (phazite::test::getFactoryPresetsFolder(), true, juce::String ("*") + phazite::presetExtension))
+    {
+        ++presets;
+        juce::StringArray files;
+
+        std::function<void (const juce::var&)> look = [&look, &files] (const juce::var& value)
+        {
+            if (auto* object = value.getDynamicObject())
+            {
+                if (auto* sounds = object->getProperty (keys::sounds).getDynamicObject())
+                    for (const auto& [property, sound] : sounds->getProperties())
+                        if (phazite::schema::isSoundFileProperty (property))
+                            files.add (property.toString() + " = " + sound.toString());
+
+                for (const auto& property : object->getProperties())
+                    look (property.value);
+            }
+            else if (const auto* array = value.getArray())
+            {
+                for (const auto& each : *array)
+                    look (each);
+            }
+        };
+
+        look (juce::JSON::parse (entry.getFile()));
+        INFO (entry.getFile().getFullPathName().toStdString());
+        CHECK (files.isEmpty());
+    }
+
+    CHECK (presets > 50);
 }
 
 TEST_CASE ("A preset's sounds that can't be taken are told by name, those on a network share among them")
@@ -487,6 +673,7 @@ TEST_CASE ("A preset's sounds that can't be taken are told by name, those on a n
     phazite::setProblemReporter (second.context, [&problems] (const juce::String& title, const juce::String& message)
                                  { problems.add (title + ": " + message); });
     REQUIRE (phazite::loadPreset (second.context, file, second.track (0)));
+    phazite::test::waitForAudioWork (second.context); // its sound copied in, in the background, then the kit added (known bug 183)
     REQUIRE (problems.size() == 1);
     INFO (problems[0].toStdString());
     CHECK (problems[0].contains ("Snare.wav"));

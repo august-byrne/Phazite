@@ -350,6 +350,8 @@ namespace
             return {};
         }
 
+        // Phazite's own presets name no sound files (only sounds Phazite makes), so this copies nothing and loads at once
+        // (Presets.cpp: findFilesToBring()).
         void loadPreset (DeviceID device, const char* preset)
         {
             if (const auto file = presets.getChildFile (juce::String (preset) + presetExtension); preset != nullptr && file.existsAsFile())

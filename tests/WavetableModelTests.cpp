@@ -273,6 +273,7 @@ TEST_CASE ("A preset of the wavetable synth brings its sound file into the proje
     Song second (temp.folder, "Second");
     auto& s = second.getSong();
     REQUIRE (phazite::loadPreset (second.context, presetFile, second.track));
+    phazite::test::waitForAudioWork (second.context); // its file copied in, in the background, then it goes in (known bug 183)
 
     // It takes the track's instrument's place, playing its own copy of the file.
     const auto loaded = phazite::getInstrument (s, second.track);

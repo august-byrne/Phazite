@@ -63,9 +63,13 @@ bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 // with an empty ID, below the tracks): a device's or a container's goes where a device dropped there would
 // (MixerModel.h: addDeviceTo()), an effect after the track's effects or on the master, an instrument in place of the
 // track's or on a new track; a container is named after the preset. A track's goes after the track, as a new one, or at
-// the end. Returns whether anything went in. The sounds it names that can't be taken (on a network share, or not there),
-// which their devices play their own sounds in place of, are told by name as a problem with the song
-// (internal/ProjectContext.h: reportProblem()); loadPresetInto() tells them the same.
+// the end. The sound files it names outside the project are copied in first, in the background, as an import's are
+// (model/arrangement/internal/Import.h: bringFilesIntoProject(); known bug 183): the window holds still meanwhile, a progress
+// window with Cancel shows after a second, and the preset goes in once they are in, nothing if where it goes went meanwhile
+// (the user is told); the device plays as it was until then. Returns whether anything went in, or true once that copy
+// started. The sounds it names that can't be taken (on a network share, or not there), which their devices play their own
+// sounds in place of, are told by name as a problem with the song (internal/ProjectContext.h: reportProblem());
+// loadPresetInto() does all this the same.
 bool loadPreset (ProjectContext&, const juce::File&, TrackID);
 
 // Puts a device preset's settings and mix into a device of the preset's kind, in place of its own, as one undo step named
