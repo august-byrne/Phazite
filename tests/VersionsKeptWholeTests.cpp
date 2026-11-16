@@ -4,7 +4,9 @@
 // a damaged piece is read from another pack or written again, and a branch isn't renamed while a commit writes its
 // record.
 #include "BenchmarkSong.h"
+#include "GoldenFiles.h"
 #include "HeldFile.h"
+#include "SongCheck.h"
 #include "TestClips.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -413,7 +415,7 @@ TEST_CASE (
     // The branch reset to it: the song as it is, its changes since that commit, and commits on top of it again.
     phazite::CommandRegistry registry;
     phazite::addVersionCommands (registry, s.context, [] (std::function<void (bool)> then) { then (true); }, s.renders);
-    REQUIRE (registry.invoke ("version.resetToReadable"));
+    REQUIRE (phazite::test::finished (s.context, [&] { return registry.invoke ("version.resetToReadable"); }));
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (phazite::getCurrentBranch (s.context)->head == readable);
     CHECK (phazite::getHeadProblem (s.context).isEmpty());
@@ -471,7 +473,7 @@ TEST_CASE ("A branch whose last commit can't be read offers the newest that read
     CHECK (phazite::getHeadProblem (s.context).contains ("\"Readable\""));
     REQUIRE (phazite::canResetToReadable (s.context));
     CHECK_FALSE (phazite::canSaveVersion (s.context));
-    REQUIRE (phazite::resetToReadable (s.context));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::resetToReadable (s.context); }));
     CHECK (phazite::getCurrentBranch (s.context)->head == readable);
     CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "Initial commit"));
 }
@@ -674,4 +676,140 @@ TEST_CASE ("A plug-in that loads after the project opens counts as changed once 
     REQUIRE (waitForVersionHistory (s.context));
     REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }, 60000));
     CHECK (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }, versionHistoryTimeout));
+}
+
+//==============================================================================
+namespace
+{
+// A commit another computer wrote (or another tool, or anyone), of a song as given, on a branch of its own after the current
+// branch's last commit, put into the project's Versions folder as a synced folder brings it; then the project opened again,
+// whose history reads it. Its id.
+juce::String writeOthersCommit (TestSong& s, const juce::ValueTree& song, const juce::String& branchName)
+{
+    REQUIRE (waitForVersionHistory (s.context));
+    const auto head = phazite::getLastVersion (s.context)->id;
+    const auto folder = s.getProject().getFolder().getChildFile ("Versions");
+    juce::String id;
+
+    {
+        phazite::VersionStore other (folder, "another-computer");
+        phazite::VersionRecord record;
+        record.name = "From elsewhere";
+        record.parents = { head };
+        record.branch = "branch-" + branchName;
+        record.saved = juce::Time::currentTimeMillis();
+        id = other.writeVersion (record, phazite::splitSong (song));
+        REQUIRE (id.isNotEmpty());
+
+        phazite::BranchRecord branch;
+        branch.id = record.branch;
+        branch.name = branchName;
+        branch.colour = juce::Colours::orange;
+        branch.head = id;
+        branch.computer = "another-computer";
+        branch.changed = record.saved;
+        REQUIRE (other.writeBranch (branch));
+        other.getPieces().closeFiles();
+    }
+
+    s.reopen (false);
+    REQUIRE (waitForVersionHistory (s.context));
+    return id;
+}
+} // namespace
+
+TEST_CASE ("A song read from the versions' pieces holds together as a project file does as it opens, whoever wrote them")
+{
+    // Found with known bug 126's work: the loader's checks (Project.h: makeConsistent()) never ran on a song joined from the
+    // versions' pieces, so a history another computer or tool wrote put what no Phazite writes into the song: numbers that
+    // are none or out of range, an ID twice, a send to a return that isn't there.
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto drums = s.addTrack ("Drums");
+    s.setVolume (bass, -6.0f);
+    keepVersion (s.context, "Mine");
+
+    auto hostile = phazite::findSong (s.context)->getState().createCopy();
+    auto tracks = phazite::getTrackElements (hostile);
+    REQUIRE (tracks.size() >= 2);
+    tracks[0].setProperty (phazite::schema::channelVolume, "nan", nullptr);
+    tracks[1].setProperty (phazite::schema::channelPan, "1e300", nullptr);
+    hostile.getChildWithName (phazite::schema::TEMPOMAP).getChild (0).setProperty (phazite::schema::bpm, "inf", nullptr);
+    tracks[1].appendChild (
+        juce::ValueTree (phazite::schema::SEND, { { phazite::schema::sendID, 987654 }, { phazite::schema::sendTo, 876543 } }), nullptr);
+    auto twin = tracks[0].createCopy();
+    twin.setProperty (phazite::schema::trackName, "Twin", nullptr);
+    tracks[0].getParent().appendChild (twin, nullptr); // the same ID twice
+    const auto theirs = writeOthersCommit (s, hostile, "elsewhere");
+    auto& song = *phazite::findSong (s.context);
+
+    SUBCASE ("Checked out")
+    {
+        REQUIRE (finished (s.context, [&] { return phazite::checkoutVersion (s.context, theirs, s.save); }));
+        checkSong (song);
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context)); // the commit as it is read, the same each time
+    }
+
+    SUBCASE ("Restored")
+    {
+        // Not with an ID twice, as a merge isn't (found in review, known bug 126's round): given anew as it is read, an item
+        // would come in as new beside the song's own, unseen. Said, nothing restored.
+        CHECK_FALSE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, theirs); }));
+        CHECK (phazite::getReadingProblem (s.context).contains ("ID twice"));
+
+        // Without it, restored, holding together.
+        auto single = hostile.createCopy();
+        auto list = phazite::getTrackElements (single).back().getParent();
+        list.removeChild (list.getNumChildren() - 1, nullptr); // the twin, added last
+        const auto other = writeOthersCommit (s, single, "elsewhere-2");
+        REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, other); }));
+        checkSong (*phazite::findSong (s.context));
+    }
+
+    SUBCASE ("Merged")
+    {
+        // Not with an ID twice: given anew as it is read, each side on its own, what the two lines share would no longer
+        // have the same IDs (found in review, known bug 126's round). Said, nothing merged.
+        CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+        CHECK (phazite::getReadingProblem (s.context).contains ("ID twice"));
+        CHECK_FALSE (phazite::isMerging (s.context));
+
+        // Without it, merged, holding together.
+        auto single = hostile.createCopy();
+        auto list = phazite::getTrackElements (single).back().getParent();
+        list.removeChild (list.getNumChildren() - 1, nullptr); // the twin, added last
+        const auto other = writeOthersCommit (s, single, "elsewhere-2");
+        REQUIRE (finished (s.context, [&] { return phazite::startMerge (s.context, other); }));
+        phazite::finishTickedMerge (s.context);
+        REQUIRE (phazite::isMerging (s.context));
+        checkSong (*phazite::findSong (s.context));
+    }
+
+    juce::ignoreUnused (drums);
+}
+
+TEST_CASE ("The loader's checks change nothing in a song Phazite wrote, read back from its pieces")
+{
+    // A commit read back is what was committed, so that the changes and the badge see none after a checkout: the
+    // representative project's song, every name Phazite saves in it, split and joined again.
+    TestSong s;
+    const auto golden = getGoldenFolder().getChildFile ("projects/representative.xml");
+    const auto file = s.getProject().getFolder().getChildFile ("Representative.phazite");
+    REQUIRE (golden.copyFileTo (file));
+    juce::String error;
+    const auto project = phazite::Project::open (file, false, error);
+    REQUIRE (project != nullptr);
+    const auto& song = project->getSong().getState();
+    const auto pieces = phazite::splitSong (song);
+    const auto joined = phazite::joinSong (
+        pieces.song,
+        [&pieces] (const juce::String& name) -> std::optional<juce::MemoryBlock>
+        {
+            const auto found = pieces.pieces.find (name);
+            return found != pieces.pieces.end() ? std::optional (found->second) : std::nullopt;
+        },
+        nullptr, nullptr, project->getFolder());
+
+    REQUIRE (joined.isValid());
+    CHECK (phazite::writeElement (joined).toString() == phazite::writeElement (song).toString());
 }

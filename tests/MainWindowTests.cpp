@@ -21,6 +21,7 @@
 #include "UndoCheck.h"
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
+#include "app/InputHold.h"
 #include "app/MainWindow.h"
 #include "app/PluginWindow.h"
 #include "app/ProjectSession.h"
@@ -35,6 +36,8 @@
 #include "model/project/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/input/Keymap.h"
 #include "ui/input/KeymapStore.h"
@@ -1053,4 +1056,104 @@ TEST_CASE ("While audio work holds the window, the transport's keys pass, each p
 
     if (phazite::isSongPlaying (song))
         REQUIRE (screen.registry.invoke ("transport.playStop"));
+}
+
+namespace
+{
+// A song with two branches, for a read of the versions to hold the window: main, and idea-2, the song on it.
+juce::String makeBranches (phazite::ProjectContext& context)
+{
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    REQUIRE (phazite::getLastVersion (context).has_value());
+    const auto main = phazite::getCurrentBranch (context)->id;
+    REQUIRE (phazite::newBranch (context, {}, [] (std::function<void (bool)> then) { then (true); }));
+    return main;
+}
+
+const auto noSave = [] (std::function<void (bool)> then) { then (true); };
+} // namespace
+
+TEST_CASE ("A read of the versions holds the window with the one hold: Space plays and stops, and Escape before its window cancels it")
+{
+    // The last step of known bug 126: the versions' reads hold the window with the head's InputHold, as audio work does.
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    const auto main = makeBranches (context);
+    const auto idea = phazite::getCurrentBranch (context)->id;
+    auto& song = *phazite::findSong (context);
+    auto* peer = screen.window->getPeer();
+    REQUIRE (peer != nullptr);
+    const juce::KeyPress space (juce::KeyPress::spaceKey);
+    phazite::VersionHistory::holdReadsForTests = true; // the read held where it starts
+
+    REQUIRE (phazite::switchBranch (context, main, noSave));
+    REQUIRE (phazite::InputHold::isHold (juce::Component::getCurrentlyModalComponent()));
+    CHECK (screen.session.isHoldingInput (juce::Component::getCurrentlyModalComponent()));
+
+    // Space plays, let go and pressed again it stops.
+    peer->handleKeyPress (space);
+    CHECK (phazite::isSongPlaying (song));
+    peer->handleKeyUpOrDown (false);
+    peer->handleKeyPress (space);
+    CHECK_FALSE (phazite::isSongPlaying (song));
+
+    // Escape, before a progress window shows: the read's Cancel, the song and the branch as they were.
+    peer->handleKeyPress (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (juce::Component::getCurrentlyModalComponent() == nullptr);
+    phazite::VersionHistory::holdReadsForTests = false;
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    CHECK (phazite::getCurrentBranch (context)->id == idea);
+}
+
+TEST_CASE ("A read of the versions and audio work, one after the other: each window waits its turn, and a quit stops both")
+{
+    // The last step of known bug 126: their progress windows go through the main window's render queue, so that they never
+    // stack; one call stops every kind of work that holds the window (ProjectSession::cancelWork()).
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    const auto main = makeBranches (context);
+    const auto idea = phazite::getCurrentBranch (context)->id;
+    auto& work = phazite::getAudioWork (context);
+    work.setShowAfter (0);
+    screen.session.setWorkShownAfter (0);
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Take.wav"), 2.0);
+    ReadGate gate (work);
+    phazite::VersionHistory::holdReadsForTests = true;
+    const auto readsWindow = "Reading branch 'main'";
+
+    SUBCASE ("The import's window first: the read's waits for it")
+    {
+        REQUIRE (phazite::importFilesInBackground (context, { sound.getFullPathName() }, track, phazite::test::at (0.0)));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return isShowing (screen, "Importing Take.wav"); }));
+        REQUIRE (phazite::switchBranch (context, main, noSave));
+        dispatchPendingMessages();
+        CHECK (isShowing (screen, "Importing Take.wav"));
+        CHECK_FALSE (isShowing (screen, readsWindow));
+    }
+
+    SUBCASE ("The read's window first: the import's waits for it")
+    {
+        REQUIRE (phazite::switchBranch (context, main, noSave));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&screen, readsWindow] { return isShowing (screen, readsWindow); }));
+        REQUIRE (phazite::importFilesInBackground (context, { sound.getFullPathName() }, track, phazite::test::at (0.0)));
+        dispatchPendingMessages();
+        CHECK (isShowing (screen, readsWindow));
+        CHECK_FALSE (isShowing (screen, "Importing Take.wav"));
+    }
+
+    // A quit, the other waiting its turn: both stopped by the one call, nothing changed, the window free.
+    screen.session.cancelWork();
+    dispatchPendingMessages();
+    CHECK_FALSE (isShowing (screen, readsWindow));
+    CHECK_FALSE (isShowing (screen, "Importing Take.wav"));
+    CHECK (juce::Component::getCurrentlyModalComponent() == nullptr);
+    phazite::VersionHistory::holdReadsForTests = false;
+    gate.letGo = true;
+    phazite::test::waitForAudioWork (context);
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    CHECK (phazite::getCurrentBranch (context)->id == idea);
+    CHECK (phazite::getClips (context, track).empty());
+    work.setShowAfter (phazite::AudioWork::showAfterMilliseconds);
 }

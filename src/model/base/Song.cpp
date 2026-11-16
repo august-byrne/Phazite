@@ -2,12 +2,16 @@
 #include "Song.h"
 #include "internal/SongIndex.h"
 
+#include <atomic>
+
 namespace phazite
 {
 namespace
 {
-    int undoSteps = Song::defaultUndoSteps;
-}
+    // Set on the message thread, read wherever a song is made: the checks of a song read from the versions make one on the
+    // history's thread (model/versions/SongPieces.cpp).
+    std::atomic<int> undoSteps { Song::defaultUndoSteps };
+} // namespace
 
 void Song::setUndoSteps (int steps)
 {
@@ -25,7 +29,7 @@ Song::Song (juce::ValueTree s)
 {
     // By steps alone: JUCE weighs each change by the size of its record, not by what it holds, so a budget of units kept as
     // few as 30 steps after a drag of many notes.
-    undoManager.setMaxNumberOfStoredUnits (1, undoSteps);
+    undoManager.setMaxNumberOfStoredUnits (1, undoSteps.load());
 }
 
 Song::~Song()

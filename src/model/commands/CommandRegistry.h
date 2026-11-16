@@ -108,6 +108,11 @@ public:
     void setPluginStatesGate (PluginStatesGate gate) { pluginStatesGate = std::move (gate); }
     bool isWaitingForPluginStates() const noexcept { return waitingForStates; }
 
+    // What says the open project waits for work of its own before a command changes it (the app's: ProjectContext's
+    // isHoldingForWork(), while a branch's song is read to switch to it): meanwhile, as while a command waits for the
+    // plug-ins' states, no command that changes a project, or needs the states, runs (invoke() is false for those).
+    void setBusyCheck (std::function<bool()> check) { busyCheck = std::move (check); }
+
     // The command palette's search: matches on the name, category and synonyms, best first.
     juce::Array<const Command*> search (const juce::String& query, int maxResults = 20) const;
 
@@ -128,6 +133,7 @@ private:
     std::map<juce::String, size_t> indexByID;
     juce::ListenerList<Listener> listeners;
     PluginStatesGate pluginStatesGate;
+    std::function<bool()> busyCheck;
     bool waitingForStates = false;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true); // what the gate calls back checks
 

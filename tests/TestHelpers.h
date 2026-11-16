@@ -110,11 +110,20 @@ struct RenderHost : public TrackRenderHost
     bool isShowingRender() const override { return render != nullptr; }
 };
 
-// A folder in the temp directory, deleted again at the end of the test.
+// What a project's history that went still writes, waited for (model/versions/VersionsModel.h: waitForVersionsFinished()).
+void waitForVersionsWrites();
+
+// A folder in the temp directory, deleted again at the end of the test, once no project's history that went still writes
+// into it (deleted under such a write, JUCE's TemporaryFile asserted that its file was gone, under load).
 struct TemporaryFolder
 {
     TemporaryFolder() { folder.createDirectory(); }
-    ~TemporaryFolder() { folder.deleteRecursively(); }
+
+    ~TemporaryFolder()
+    {
+        waitForVersionsWrites();
+        folder.deleteRecursively();
+    }
 
     const juce::File folder =
         juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("PhaziteTests", {}, false);

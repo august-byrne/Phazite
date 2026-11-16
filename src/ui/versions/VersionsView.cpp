@@ -1576,8 +1576,8 @@ void VersionsView::refresh()
 
     for (const auto& text :
          { savingProject ? juce::String ("Saving the project: committing, merging and switching wait until it is saved.") : juce::String(),
-           getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
-           describeHistoryCheck (context), describeDivergence (context) })
+           getReadingProblem (context), getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context),
+           getMergeProblem (context), describeHistoryCheck (context), describeDivergence (context) })
         if (notice.isEmpty())
             notice = text;
 

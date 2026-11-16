@@ -10,9 +10,14 @@
 #include "TestClips.h"
 #include "TestPlugin.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/commands/CommandRegistry.h"
+#include "model/mixer/internal/Freeze.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
+#include "ui/input/CommandBridge.h"
+#include "ui/input/KeyDispatcher.h"
+#include "ui/input/KeyboardLayout.h"
 #include "ui/input/Keymap.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/mixer/Inspector.h"
@@ -22,6 +27,7 @@
 #include "ui/project/ProjectView.h"
 #include "ui/shell/ActivityBar.h"
 #include "ui/shell/PanelLayout.h"
+#include "ui/shell/RenderPanel.h"
 #include "ui/theme/LookAndFeel.h"
 #include "ui/versions/VersionsView.h"
 
@@ -993,4 +999,57 @@ TEST_CASE ("Switching the theme puts what the window shows already in the new th
         CHECK (distance (text, palette.text) < distance (text, previousText));
         previousText = palette.text;
     }
+}
+
+TEST_CASE ("While the window holds its input, a key runs only what runs while a mouse button is down, and Escape cancels a hold's window")
+{
+    // Found in review (known bug 126's round): the hold took every key, so a long read couldn't be stopped from playing, and
+    // its progress window had no Escape.
+    phazite::CommandRegistry registry;
+    int played = 0, deleted = 0;
+    registry.add ({ .id = "transport.playStop", .name = "Play", .perform = [&played] { ++played; } });
+    registry.add ({ .id = "edit.delete", .name = "Delete", .perform = [&deleted] { ++deleted; } });
+    phazite::ui::CommandBridge bridge { registry };
+    phazite::ui::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["transport.playStop"] = { "spacebar" };
+    keymap.keys["edit.delete"] = { "delete" };
+    bridge.setKeymap (keymap);
+    phazite::ui::KeyDispatcher dispatcher { bridge, phazite::ui::getUsLayout() };
+
+    CHECK (dispatcher.keyPressedWhileHeld (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK_FALSE (dispatcher.keyPressedWhileHeld (juce::KeyPress (juce::KeyPress::deleteKey))); // not run: the hold uses it up
+    CHECK (played == 1);
+    CHECK (deleted == 0);
+
+    // A hold's progress window: Escape is its Cancel, and the other keys go to what runs them while it holds.
+    struct Hold final : phazite::TrackRender::Impl
+    {
+        bool& gone;
+        explicit Hold (bool& g)
+            : gone (g)
+        {
+        }
+        ~Hold() override { gone = true; }
+        float getProgress() const override { return -1.0f; }
+        juce::String getTitle() const override { return "Reading branch 'main'"; }
+        bool isHold() const override { return true; }
+    };
+
+    bool gone = false;
+    phazite::ui::RenderPanel panel (std::make_unique<phazite::TrackRender> (std::make_unique<Hold> (gone)));
+    juce::Array<juce::KeyPress> passedOn;
+    panel.onHeldKey = [&passedOn] (const juce::KeyPress& key)
+    {
+        passedOn.add (key);
+        return true;
+    };
+
+    auto& asComponent = static_cast<juce::Component&> (panel);
+    CHECK (asComponent.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK (passedOn.size() == 1);
+    CHECK_FALSE (gone);
+    CHECK (asComponent.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK (gone);
+    CHECK_FALSE (panel.isRendering());
 }

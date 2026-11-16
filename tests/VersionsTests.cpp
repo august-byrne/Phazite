@@ -70,12 +70,18 @@ juce::String describeChanges (phazite::ProjectContext& context)
 struct VersionCommands
 {
     explicit VersionCommands (TestSong& s)
+        : context (s.context)
     {
         phazite::addVersionCommands (registry, s.context, [] (std::function<void (bool)> then) { then (true); }, s.renders);
     }
 
-    void run (const juce::String& id) { REQUIRE_MESSAGE (registry.invoke (id), (id + " is unknown or greyed out").toStdString()); }
+    // Run as a menu runs it, and done once what it read, if it reads, is taken in (finished()).
+    void run (const juce::String& id)
+    {
+        REQUIRE (phazite::test::finished (context, [&] { return registry.invoke (id); }));
+    }
 
+    phazite::ProjectContext& context;
     phazite::CommandRegistry registry;
 };
 } // namespace
@@ -942,11 +948,11 @@ TEST_CASE ("Undo Last Commit takes the last commit off its branch, stages what i
     CHECK (phazite::getStagedChanges (s.context).empty());
 
     // Never the first commit, which follows none.
-    REQUIRE (phazite::undoLastCommit (s.context));
-    REQUIRE (phazite::undoLastCommit (s.context));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
     CHECK (phazite::getLastVersion (s.context)->name == "Initial commit");
     CHECK_FALSE (phazite::canUndoLastCommit (s.context));
-    CHECK_FALSE (phazite::undoLastCommit (s.context));
+    CHECK_FALSE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
 }
 
 TEST_CASE ("Edit Commit Message names a commit anew beside its record, which keeps its id, and the name comes back as the project opens")

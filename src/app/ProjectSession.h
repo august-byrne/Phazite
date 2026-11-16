@@ -20,6 +20,8 @@ namespace phazite
 {
 class TrackRender;
 class TrackRenderHost;
+struct DawProjectFile;
+struct UnpackedAudio;
 
 class ProjectSession : private juce::ChangeListener
 {
@@ -168,6 +170,15 @@ public:
     InputHold& getInputHold() noexcept { return inputHold; }
     void afterPluginStatesGate (std::function<void()>);
 
+    // The work the window holds its input for (the versions' reads: holdForWork(); an audio file's: AudioWork.h) stopped,
+    // every kind by this one call, as Phazite quits or the computer's session ends: the song and the branch as they were,
+    // said so, and the close goes on to its question.
+    void cancelWork();
+    bool cancelHeldWork(); // Escape while the window holds, before a progress window shows: true if it cancelled any
+
+    // How long the work that holds the window waits before its progress window shows (tests: 0, at the next turn).
+    void setWorkShownAfter (int milliseconds) noexcept { workShownAfter = milliseconds; }
+
     // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
     // moment after each change (model/project/internal/Project.h: AutosaveTimer::setAutoSave()), so its changes show in
     // source control at once; a new project, once its first save put it somewhere. The settings keep it (the main
@@ -245,6 +256,12 @@ private:
     std::vector<std::function<void()>> afterGates;
     InputHold inputHold; // the window's one hold on its input, whatever waits (InputHold.h)
     void gatePluginStates (std::function<void (bool go)>);
+    void unpackThenImport (const juce::File&, std::shared_ptr<DawProjectFile>); // the plain import, its audio unpacked first
+    void closeThenImport (const juce::File&, std::shared_ptr<DawProjectFile>, UnpackedAudio, std::shared_ptr<UnsavedFolder> staging);
+    void importUnpacked (const juce::File&, std::shared_ptr<DawProjectFile>, UnpackedAudio, const juce::File& staging);
+    std::vector<std::weak_ptr<void>> workWaits; // its waits, while they live
+    int workShownAfter = 1000;
+    std::unique_ptr<ProjectContext::WorkHold> holdForWork (const juce::String& title, ProjectContext::Cancel, ProjectContext::Progress);
     int closesWaiting = 0; // closeThen()s that wait for the plug-ins' states
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     void showError (const juce::String& title, const juce::String& message);

@@ -1259,6 +1259,15 @@ void forgetCurvesOfGoneDevices (Song& song)
             automation.removeChild (i, nullptr);
 }
 
+void forgetCurvesOfGoneDevices (Song& song, juce::UndoManager* undo, const std::function<bool (const juce::ValueTree&)>& which)
+{
+    auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+
+    for (auto i = automation.getNumChildren(); --i >= 0;)
+        if (const auto curve = automation.getChild (i); which (curve) && ! isCurveOwnerThere (song, getCurveParameter (curve).device))
+            automation.removeChild (i, undo);
+}
+
 //==============================================================================
 std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
 {

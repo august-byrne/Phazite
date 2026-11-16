@@ -213,6 +213,10 @@ the [changelog](changelog.md).
 | G85b | In a 48 kHz project, jump into the middle of 44.1 kHz audio clips while playing | The sound comes in a few milliseconds late, without a crackle | |
 | G173 | Hold a chord on a plug-in synth with the mod wheel on its filter and up in the clip, and jump back into the clip while it plays; start inside a bent note; play aftertouch into a plug-in that uses it, record it and play it back | The filter is where the clip has it at once; the note starts bent; the pressure is heard live and from the take | |
 | G176 | Record audio, hold a fader, press Stop, then record again further on | Both recordings show, each with its own waveform, until the mouse goes up | |
+| G126b | In a big project with two branches, check out the other and press Space at once; then again, and press Escape at once | Play and stop work, edits don't; after a second a window says "Reading branch '...'" and its Cancel leaves the song and the branch as they were; Escape at once changes nothing and no window appears | |
+| G126c | Start Normalize on a long audio clip, then a branch switch; quit while a switch or an import is reading | The two progress windows show one after the other, never on top of each other; Phazite closes without waiting, and after Cancel at the save question Source Control says "Stopped, as Phazite was closing" | |
+| G126d | Import a large .dawproject (File > Import, and as a branch), once to the end and once with Cancel | The progress bar moves; Cancel leaves the open project as it was, no new branch and no unpacked audio in the project's folder; the notice comes only when the import is done | |
+| G126e | Name a track "CON" and record on it; save a project as "NUL"; drop a track named "COM1" into the browser | Each saves: "CON_ Take 1.wav", a folder "NUL_", a preset "COM1_" | |
 
 ## Performance on other machines
 

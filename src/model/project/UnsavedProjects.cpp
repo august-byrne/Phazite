@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
+#include "model/versions/VersionsModel.h"
 
 #include <algorithm>
 #include <optional>
@@ -55,7 +56,8 @@ namespace
     // can't be deleted now (a file still open) goes at a later start (findProjectToRestore()).
     void deleteFolder (const juce::File& folder)
     {
-        AudioWork::whenNoneWritesInto (folder, [folder] { folder.deleteRecursively(); });
+        // Once nothing writes there: an audio file's read given up, nor a commit the project's history was writing as it closed.
+        AudioWork::whenNoneWritesInto (folder, [folder] { whenNoVersionsWriteInto (folder, [folder] { folder.deleteRecursively(); }); });
     }
 
     // When a project was last changed, as far as a crash left it: its autosave, or the newest of the files it made or brought

@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Numbers.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/AudioIO.h"
@@ -209,7 +210,7 @@ juce::File AudioRecorder::getTakeFile (TrackID track) const
 {
     const auto folder = getRecordingsFolder (song);
     const auto trackName = getTrackName (song, track);
-    const auto name = juce::File::createLegalFileName (trackName.isNotEmpty() ? trackName : juce::String ("Recording"));
+    const auto name = makeUsableFileName (trackName.isNotEmpty() ? trackName : juce::String ("Recording"));
 
     for (int take = 1;; ++take)
         if (const auto file = folder.getChildFile (name + " Take " + juce::String (take) + ".wav"); ! file.exists())

@@ -87,14 +87,14 @@ TEST_CASE ("Merge waits while a first save copies the versions: refused, saying 
     auto& context = s.context;
     const auto bass = s.addTrack ("Bass");
     keepVersion (context, "First");
-    REQUIRE (phazite::newBranch (context, {}, s.save));
+    REQUIRE (phazite::test::finished (context, [&] { return phazite::newBranch (context, {}, s.save); }));
     s.setVolume (bass, -12.0f);
     const auto theirs = keepVersion (context, "Quieter");
-    REQUIRE (phazite::switchBranch (context, findBranch (context, "main"), s.save));
+    REQUIRE (phazite::test::finished (context, [&] { return phazite::switchBranch (context, findBranch (context, "main"), s.save); }));
     REQUIRE (waitForVersionHistory (context));
     s.addTrack ("Lead"); // not committed: the song before the merge, which Abort Merge needs, is written into the store
 
-    REQUIRE (phazite::startMerge (context, theirs));
+    REQUIRE (phazite::test::finished (context, [&] { return phazite::startMerge (context, theirs); }));
     REQUIRE_FALSE (phazite::getMergeLines (context).empty());
     REQUIRE (phazite::canFinishMerge (context));
 
@@ -271,4 +271,50 @@ TEST_CASE ("A bounce of an old commit that a first save's copy of the versions s
     REQUIRE (dispatchMessagesUntil ([&copy] { return copy.copied().has_value(); }));
     history->endFolderCopy();
     REQUIRE (dispatchMessagesUntil ([&context, &old] { return phazite::getBounceProgress (context, old).has_value(); }));
+}
+TEST_CASE (
+    "A switch and a merge's start wait while a first save copies the versions, and one begun before the copy writes nothing after it")
+{
+    // The review of known bug 126's merge: a switch's read wrote the song left on the branch into the store from a job the
+    // copy's hold didn't stop, and its take-in wrote the branches' records, either of which could land in the folder the
+    // project was leaving. Now they are refused while the folder is copied, and a read begun before it is refused as it is
+    // taken in; writeWholeFile()'s assertion is the net for a write into the held folder.
+    TestSong s;
+    auto& context = s.context;
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (context, "First");
+    REQUIRE (phazite::newBranch (context, {}, s.save));
+    s.setVolume (bass, -12.0f);
+    const auto theirs = keepVersion (context, "Quieter");
+    const auto main = findBranch (context, "main");
+    auto* history = phazite::getVersionHistory (context);
+
+    // Begun before the copy: its read runs before the copy job, on the same thread; taken in while the folder is held,
+    // refused, saying why, the song and the branch as they were.
+    REQUIRE (phazite::switchBranch (context, main, s.save));
+
+    {
+        SlowCopy copy;
+        copy.start (context);
+        REQUIRE (dispatchMessagesUntil ([&copy] { return copy.started(); }));
+        REQUIRE (dispatchMessagesUntil ([history] { return ! history->isReadingForCommand(); }));
+        CHECK (phazite::getCurrentBranch (context)->name == "idea-2");
+        CHECK (phazite::getReadingProblem (context).contains ("saved"));
+
+        // Started while it copies: refused at once, nothing read.
+        CHECK_FALSE (phazite::switchBranch (context, main, s.save));
+        CHECK_FALSE (phazite::startMerge (context, theirs));
+        CHECK_FALSE (history->isReadingForCommand());
+
+        copy.letGo();
+        REQUIRE (dispatchMessagesUntil ([&copy] { return copy.copied().has_value(); }));
+        history->endFolderCopy();
+    }
+
+    // Once it is over, both go on.
+    REQUIRE (waitForVersionHistory (context));
+    REQUIRE (finished (context, [&] { return phazite::switchBranch (context, main, s.save); }));
+    CHECK (phazite::getCurrentBranch (context)->name == "main");
+    REQUIRE (finished (context, [&] { return phazite::startMerge (context, theirs); }));
+    CHECK_FALSE (phazite::getMergeLines (context).empty());
 }

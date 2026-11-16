@@ -3,6 +3,8 @@
 #include "internal/ApplySong.h"
 #include "internal/VersionHistory.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -48,6 +50,150 @@ namespace
 
     // The song as it is, kept in Local History before what makes it another (below).
     void keepSongBefore (VersionHistory&, const juce::String& reason);
+} // namespace
+
+//==============================================================================
+// A command that reads whole songs before it changes anything (VersionHistory.h: startCommandRead()).
+bool startCommandRead (ProjectContext& context, VersionHistory& history, const juce::String& title,
+                       std::function<VersionHistory::TakeIn()> read, std::function<void (bool)> done,
+                       std::shared_ptr<std::atomic<float>> progress)
+{
+    if (history.isReadingForCommand() || history.getStore() == nullptr)
+        return false;
+
+    const auto cancel = [&context] (const juce::String& why)
+    {
+        if (auto* reading = findHistory (context))
+            reading->cancelReading (why);
+    };
+
+    std::shared_ptr<ProjectContext::WorkHold> hold = context.holdForWork (
+        title, cancel, progress != nullptr ? std::function<float()> ([progress] { return progress->load(); }) : nullptr);
+    return history.startReading (title, std::move (read), std::move (hold), std::move (done));
+}
+
+namespace
+{
+    // A song of the store read on the history's thread, a commit's (without a merge's element) or one kept without a commit
+    // (a snapshot's), with its plug-ins' values, and as much of it as can be read where asked (missing); then taken in.
+    struct SongRead
+    {
+        juce::ValueTree song;
+        PluginParameterValues parameters;
+        std::vector<MissingPiece> missing;
+        bool idsGivenAnew = false; // it held an ID twice, which the checks gave anew as it was read
+    };
+
+    enum class Kept
+    {
+        asCommit,
+        asItIs
+    };
+
+    bool startSongRead (ProjectContext& context, VersionHistory& history, const juce::String& title, const juce::String& piece,
+                        bool asMuchAsCan, std::function<VersionHistory::Taken (SongRead&)> takeIn, Kept kept = Kept::asCommit)
+    {
+        return startCommandRead (context, history, title,
+                                 [store = history.getStore(), piece, asMuchAsCan, kept, takeIn]() -> VersionHistory::TakeIn
+                                 {
+                                     auto read = std::make_shared<SongRead>();
+                                     auto* missing = asMuchAsCan ? &read->missing : nullptr;
+                                     read->song = kept == Kept::asCommit
+                                                      ? readCommitSong (*store, piece, &read->parameters, missing, &read->idsGivenAnew)
+                                                      : store->readSong (piece, &read->parameters, missing, &read->idsGivenAnew);
+                                     store->getPieces().closeFiles();
+                                     return [read, takeIn] { return takeIn (*read); };
+                                 });
+    }
+
+    // Whether the song can be made another now, as a command that read on the history's thread takes what it read in: not
+    // while it records, nor while a render has its plug-ins.
+    bool canChangeSongNow (const ProjectContext& context)
+    {
+        const auto* history = findHistory (context);
+        const auto* song = findSong (context);
+        const auto* session = getSession (context);
+        return history != nullptr && song != nullptr && ! history->isReading() && ! history->isSaving() && ! isRecording (*song)
+               && (session == nullptr || ! session->isLentToRender());
+    }
+
+    // Why a song can't be made another now, as what was read is taken in; none while it can.
+    juce::String whyNotChangeSongNow (const ProjectContext& context, const juce::String& what)
+    {
+        const auto* song = findSong (context);
+        const auto* session = getSession (context);
+
+        if (song != nullptr && isRecording (*song))
+            return "The song started recording while it was read: " + what + " Stop recording first.";
+
+        if (session != nullptr && session->isLentToRender())
+            return "A render started while the song was read: " + what + " Let it finish first.";
+
+        return canChangeSongNow (context) ? juce::String() : "The project's versions are busy: " + what;
+    }
+
+    // The song's curves now, before a song from the versions is taken in; and, after, those it brought in that name a device
+    // the song hasn't taken away again in the same step: a song read in part (a damaged commit) keeps what names what it
+    // couldn't read, which the song judges here, so that it is what its file would open as (found in review).
+    std::vector<juce::ValueTree> findCurves (const Song& song)
+    {
+        std::vector<juce::ValueTree> curves;
+
+        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+            curves.push_back (curve);
+
+        return curves;
+    }
+
+    void forgetCurvesBroughtIn (Song& song, const std::vector<juce::ValueTree>& before)
+    {
+        forgetCurvesOfGoneDevices (song, &song.getUndoManager(), [&before] (const juce::ValueTree& curve)
+                                   { return std::find (before.begin(), before.end(), curve) == before.end(); });
+    }
+
+    // Why a restore of a commit that held an ID twice takes nothing: given anew as it was read, an item would come in as new,
+    // beside the song's own, unseen (as a merge refuses such a commit).
+    juce::String idsTwiceRefusal()
+    {
+        return "Nothing was restored: that commit holds an ID twice, which no Phazite writes (another tool wrote it), so what it "
+               "holds can't be told from what the song has.";
+    }
+
+    // Restore from This Commit, once the commit's song is read.
+    VersionHistory::Taken takeInBringBack (ProjectContext& context, const juce::String& versionID, const SongRead& read)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+        const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
+
+        if (song == nullptr || version == nullptr)
+            return false;
+
+        if (const auto why = whyNotChangeSongNow (context, "nothing was restored."); why.isNotEmpty())
+            return VersionHistory::Taken::refused (why);
+
+        if (read.idsGivenAnew)
+            return VersionHistory::Taken::refused (idsTwiceRefusal());
+
+        history->restoreMissing = read.missing;
+        history->restoreRefused.clear();
+        history->tellNow();
+
+        if (! read.song.isValid())
+            return false;
+
+        // A change of its own, one undo step, as git restore --source makes the working tree a commit's, the song as it was
+        // kept in Local History first. The plug-ins' own settings as they are now, to tell which differ from the commit's:
+        // only those are set again.
+        keepSongBefore (*history, "restore");
+        const UndoStep step (*song, "Restore from \"" + getDisplayName (*version) + "\"");
+        song->storeDeviceStates();
+        const auto curves = findCurves (*song);
+        makeSongLike (*song, read.song);
+        removeBrokenReferences (*song); // what the song kept where a damaged piece was can name what the commit hadn't
+        forgetCurvesBroughtIn (*song, curves);
+        return true;
+    }
 } // namespace
 
 bool keepsVersions (const ProjectContext& context)
@@ -422,18 +568,38 @@ bool canEditSelectedMessage (const ProjectContext& context)
 bool canUndoLastCommit (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->canUndoLastCommit();
+    return history != nullptr && ! history->isReadingForCommand() && history->canUndoLastCommit();
 }
 
 bool undoLastCommit (ProjectContext& context)
 {
     auto* history = findHistory (context);
+    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* before = last != nullptr && canUndoLastCommit (context) ? history->findVersion (last->parents[0]) : nullptr;
 
-    if (history == nullptr || ! history->undoLastCommit())
+    if (before == nullptr)
         return false;
 
-    stopHearingWhatWent (context, *history);
-    return true;
+    // The commit before's song, which the changes are from then, read on the history's thread.
+    return startSongRead (
+        context, *history, "Reading \"" + getDisplayName (*before) + "\"", before->song, false,
+        [&context, undone = last->id] (SongRead& read) -> VersionHistory::Taken
+        {
+            auto* reading = findHistory (context);
+
+            if (! read.song.isValid())
+                return VersionHistory::Taken::refused (
+                    "The commit before can't be read from the Versions folder: a piece of it is damaged or missing. Verify History says what is damaged.");
+
+            const auto* lastNow = reading != nullptr ? reading->findLastVersion() : nullptr;
+
+            if (lastNow == nullptr || lastNow->id != undone
+                || ! reading->undoLastCommit (std::move (read.song), std::move (read.parameters)))
+                return false;
+
+            stopHearingWhatWent (context, *reading);
+            return true;
+        });
 }
 
 void saveProjectAndVersion (ProjectContext& context, const SaveProjectThen& saveProjectThen, TrackRenderHost& renders)
@@ -456,41 +622,57 @@ void saveProjectAndVersion (ProjectContext& context, const SaveProjectThen& save
         });
 }
 
-//==============================================================================
 bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
 {
     auto* history = findHistory (context);
-    auto* song = findSong (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
-    if (song == nullptr || version == nullptr)
+    if (findSong (context) == nullptr || version == nullptr)
         return false;
 
-    // As much of it as can be read: what a damaged piece held stays as it is now, and is told (getRestoreProblem()).
-    std::vector<MissingPiece> missing;
-    const auto then = history->readSong (versionID, nullptr, &missing);
-    history->restoreMissing = missing;
-    history->restoreRefused.clear();
-    history->tellNow();
-
-    if (! then.isValid())
-        return false;
-
-    // A change of its own, one undo step, as git restore --source makes the working tree a commit's, the song as it was kept
-    // in Local History first. The plug-ins' own settings as they are now, to tell which differ from the commit's: only those
-    // are set again.
-    keepSongBefore (*history, "restore");
-    const UndoStep step (*song, "Restore from \"" + getDisplayName (*version) + "\"");
-    song->storeDeviceStates();
-    makeSongLike (*song, then);
-    removeBrokenReferences (*song); // what the song kept where a damaged piece was can name what the commit hadn't
-    return true;
+    // As much of it as can be read, on the history's thread: what a damaged piece held stays as it is now, and is told
+    // (getRestoreProblem()).
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*version) + "\"", version->song, true,
+                          [&context, versionID] (SongRead& read) { return takeInBringBack (context, versionID, read); });
 }
 
-void compareWithVersion (ProjectContext& context, const juce::String& versionID)
+bool compareWithVersion (ProjectContext& context, const juce::String& versionID)
 {
-    if (auto* history = findHistory (context))
-        history->compareWith (versionID);
+    auto* history = findHistory (context);
+
+    if (history == nullptr)
+        return false;
+
+    // The last version is the changes' own, compared with at once; another is read on the history's thread first.
+    const auto* last = history->findLastVersion();
+    const auto* version = history->findVersion (versionID);
+
+    if (version == nullptr || (last != nullptr && last->id == versionID))
+    {
+        history->compareWith ({});
+        return true;
+    }
+
+    if (versionID == history->getComparedVersion())
+        return true;
+
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*version) + "\"", version->song, false,
+                          [&context, versionID] (SongRead& read) -> VersionHistory::Taken
+                          {
+                              auto* reading = findHistory (context);
+
+                              if (reading == nullptr)
+                                  return false;
+
+                              reading->compareWith (versionID, read.song, std::move (read.parameters));
+
+                              if (! read.song.isValid())
+                                  return VersionHistory::Taken::refused (
+                                      "That commit can't be read from the Versions folder: a piece of it is "
+                                      "damaged or missing. Verify History says what is damaged.");
+
+                              return true;
+                          });
 }
 
 juce::String getComparedVersion (const ProjectContext& context)
@@ -544,109 +726,135 @@ bool isReadingVersionChanges (const ProjectContext& context, const juce::String&
     return history != nullptr && history->isReadingVersionChanges (versionID);
 }
 
-bool restoreFromVersion (ProjectContext& context, const juce::String& versionID, const VersionChange& line)
+namespace
 {
-    auto* history = findHistory (context);
-    auto* song = findSong (context);
-    const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
-
-    if (song == nullptr || version == nullptr)
-        return false;
-
-    // As much of it as can be read, as the whole song's restore takes it: what a damaged piece held stays as it is now, and
-    // what of the line's that is, is told (getRestoreProblem()).
-    std::vector<MissingPiece> missing;
-    const auto then = history->readSong (versionID, nullptr, &missing);
-    const auto onLine = [&line] (const MissingPiece& piece)
+    // Restore from This Commit of a line, once the commit's song is read.
+    VersionHistory::Taken takeInRestoreLine (ProjectContext& context, const juce::String& versionID, const VersionChange& line,
+                                             const juce::ValueTree& then, const std::vector<MissingPiece>& missing, bool idsGivenAnew)
     {
-        if (piece.path.size() < 2)
-            return true; // the whole song, or its own element
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+        const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
-        if (line.isSong)
+        if (song == nullptr || version == nullptr)
+            return false;
+
+        if (const auto why = whyNotChangeSongNow (context, "nothing was restored."); why.isNotEmpty())
+            return VersionHistory::Taken::refused (why);
+
+        if (idsGivenAnew)
+            return VersionHistory::Taken::refused (idsTwiceRefusal());
+
+        // As much of it as can be read, as the whole song's restore takes it: what a damaged piece held stays as it is now, and
+        // what of the line's that is, is told (getRestoreProblem()).
+        const auto onLine = [&line] (const MissingPiece& piece)
         {
-            for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
-                if (piece.path[1].startsWith (type->toString() + ":"))
+            if (piece.path.size() < 2)
+                return true; // the whole song, or its own element
+
+            if (line.isSong)
+            {
+                for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+                    if (piece.path[1].startsWith (type->toString() + ":"))
+                        return true;
+
+                return false;
+            }
+
+            for (const auto& step : piece.path)
+                if (step == schema::TRACK.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw())
+                    || step == schema::MASTER.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw()))
                     return true;
 
             return false;
-        }
+        };
 
-        for (const auto& step : piece.path)
-            if (step == schema::TRACK.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw())
-                || step == schema::MASTER.toString() + ":" + juce::String ((juce::uint64) line.track.getRaw()))
-                return true;
+        history->restoreMissing.clear();
+        history->restoreRefused.clear();
+        std::copy_if (missing.begin(), missing.end(), std::back_inserter (history->restoreMissing), onLine);
+        history->tellNow();
 
-        return false;
-    };
-
-    history->restoreMissing.clear();
-    history->restoreRefused.clear();
-    std::copy_if (missing.begin(), missing.end(), std::back_inserter (history->restoreMissing), onLine);
-    history->tellNow();
-
-    if (! then.isValid())
-        return false;
-
-    // A track the commit holds nowhere it can read, where the piece of a track that could hold it can't be read: whether it
-    // was there then can't be told, so nothing is taken, rather than the track taken away as added since. One could hold it
-    // that is a folder it is in now (the nearest named), a folder now, or a track the song hasn't now, whose kind is unknown.
-    if (! line.isSong)
-    {
-        juce::ValueTree there;
-        std::vector<juce::ValueTree> unreadable;
-
-        for (const auto& track : getTrackElements (then))
-        {
-            if (readID (track[schema::trackID]) == line.track.getRaw())
-                there = track;
-            else if (track.hasProperty (schema::versions::missing))
-                unreadable.push_back (track);
-        }
-
-        std::vector<std::uint64_t> folders; // the line's track's, nearest first
-        for (auto folder = getParentFolder (*song, line.track); folder.isValid(); folder = getParentFolder (*song, folder))
-            folders.push_back (folder.getRaw());
-
-        juce::ValueTree holder;
-
-        for (const auto& track : unreadable)
-        {
-            const auto id = readID (track[schema::trackID]);
-            const auto place = std::find (folders.begin(), folders.end(), id);
-            const auto couldHold = place != folders.end() || ! findTrackState (*song, TrackID::fromRaw (id)).isValid()
-                                   || isFolder (*song, TrackID::fromRaw (id));
-
-            if (couldHold && (! holder.isValid() || place < std::find (folders.begin(), folders.end(), readID (holder[schema::trackID]))))
-                holder = track;
-        }
-
-        const auto isMasterThere = readID (then.getChildWithName (schema::MASTER)[schema::trackID]) == line.track.getRaw();
-
-        if (! there.isValid() && ! isMasterThere && holder.isValid())
-        {
-            const auto id = TrackID::fromRaw (readID (holder[schema::trackID]));
-            const auto name =
-                findTrackState (*song, id).isValid() ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
-            history->restoreMissing.clear();
-            history->restoreRefused = "Couldn't restore " + line.name + " from \"" + getDisplayName (*version)
-                                      + "\": the commit's piece of " + name + ", which may hold it, can't be read.";
-            history->tellNow();
+        if (! then.isValid())
             return false;
+
+        // A track the commit holds nowhere it can read, where the piece of a track that could hold it can't be read: whether it
+        // was there then can't be told, so nothing is taken, rather than the track taken away as added since. One could hold it
+        // that is a folder it is in now (the nearest named), a folder now, or a track the song hasn't now, whose kind is unknown.
+        if (! line.isSong)
+        {
+            juce::ValueTree there;
+            std::vector<juce::ValueTree> unreadable;
+
+            for (const auto& track : getTrackElements (then))
+            {
+                if (readID (track[schema::trackID]) == line.track.getRaw())
+                    there = track;
+                else if (track.hasProperty (schema::versions::missing))
+                    unreadable.push_back (track);
+            }
+
+            std::vector<std::uint64_t> folders; // the line's track's, nearest first
+            for (auto folder = getParentFolder (*song, line.track); folder.isValid(); folder = getParentFolder (*song, folder))
+                folders.push_back (folder.getRaw());
+
+            juce::ValueTree holder;
+
+            for (const auto& track : unreadable)
+            {
+                const auto id = readID (track[schema::trackID]);
+                const auto place = std::find (folders.begin(), folders.end(), id);
+                const auto couldHold = place != folders.end() || ! findTrackState (*song, TrackID::fromRaw (id)).isValid()
+                                       || isFolder (*song, TrackID::fromRaw (id));
+
+                if (couldHold
+                    && (! holder.isValid() || place < std::find (folders.begin(), folders.end(), readID (holder[schema::trackID]))))
+                    holder = track;
+            }
+
+            const auto isMasterThere = readID (then.getChildWithName (schema::MASTER)[schema::trackID]) == line.track.getRaw();
+
+            if (! there.isValid() && ! isMasterThere && holder.isValid())
+            {
+                const auto id = TrackID::fromRaw (readID (holder[schema::trackID]));
+                const auto name =
+                    findTrackState (*song, id).isValid() ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
+                history->restoreMissing.clear();
+                history->restoreRefused = "Couldn't restore " + line.name + " from \"" + getDisplayName (*version)
+                                          + "\": the commit's piece of " + name + ", which may hold it, can't be read.";
+                history->tellNow();
+                return false;
+            }
         }
+
+        // A change of its own, one undo step, as git restore --source <commit> <file> makes one file a commit's.
+        const UndoStep step (*song, "Restore " + line.name + " from \"" + getDisplayName (*version) + "\"");
+        song->storeDeviceStates();
+        const auto curves = findCurves (*song);
+        auto done = true;
+
+        if (line.isSong)
+            makeSongOwnLike (*song, then);
+        else
+            done = makeTrackLike (*song, line.track, then);
+
+        removeBrokenReferences (*song);
+        forgetCurvesBroughtIn (*song, curves);
+        return done;
     }
+} // namespace
 
-    // A change of its own, one undo step, as git restore --source <commit> <file> makes one file a commit's.
-    const UndoStep step (*song, "Restore " + line.name + " from \"" + getDisplayName (*version) + "\"");
-    song->storeDeviceStates();
-    auto done = true;
+bool restoreFromVersion (ProjectContext& context, const juce::String& versionID, const VersionChange& line)
+{
+    auto* history = findHistory (context);
+    const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
-    if (line.isSong)
-        makeSongOwnLike (*song, then);
-    else
-        done = makeTrackLike (*song, line.track, then);
+    if (findSong (context) == nullptr || version == nullptr)
+        return false;
 
-    removeBrokenReferences (*song);
-    return done;
+    // Read on the history's thread first.
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*version) + "\"", version->song, true,
+                          [&context, versionID, line] (SongRead& read)
+                          { return takeInRestoreLine (context, versionID, line, read.song, read.missing, read.idsGivenAnew); });
 }
 
 void selectVersion (ProjectContext& context, const juce::String& versionID)
@@ -818,32 +1026,121 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
     if (! canSwitchBranch (context))
         return false;
 
+    // The branch made first, and taken away again if the switch to it doesn't finish (cancelled, or the commit can't be read),
+    // so that nothing is left of a Create Branch that did nothing.
     const auto branch = history->makeBranch (fromVersion, false);
-    return branch.isNotEmpty() && switchBranch (context, branch, saveProjectThen);
+    const auto forget = [&context, branch] (bool switched)
+    {
+        // Once a first save's copy of the folder is over, if one is under way: nothing is written into it meanwhile.
+        if (auto* made = findHistory (context); made != nullptr && ! switched)
+            made->whenNotCopying (
+                [&context, branch]
+                {
+                    if (auto* history = findHistory (context))
+                        history->deleteBranch (branch);
+                });
+    };
+
+    if (branch.isEmpty())
+        return false;
+
+    if (switchBranch (context, branch, saveProjectThen, forget))
+        return true;
+
+    forget (false);
+    return false;
 }
 
 bool canSwitchBranch (const ProjectContext& context)
 {
     // Not while the song records (a take not finished would be lost), while a render has its plug-ins, while a version is
-    // being saved or the versions read.
+    // being saved or the versions read, nor while a command reads them to change the song.
     const auto* history = findHistory (context);
-    const auto* song = findSong (context);
-    const auto* session = getSession (context);
-    return history != nullptr && song != nullptr && ! history->isReading() && ! history->isSaving() && ! isRecording (*song)
-           && (session == nullptr || ! session->isLentToRender());
+    return canChangeSongNow (context) && ! history->isReadingForCommand();
 }
 
-bool switchBranch (ProjectContext& context, const juce::String& branchID, const SaveProjectThen& saveProjectThen)
+// What takes a switch's reads in: the song made the other's in place (switchSongInPlace()), as one; unless the song
+// changed while the other was read, which sends the song left round once more on the history's thread from a new copy,
+// twice at most (rounds), after which the hold keeps the user's edits out and what a plug-in or the automation changed
+// since is split as the switch ends (VersionHistory::finishSwitch()).
+VersionHistory::TakeIn takeInSwitch (ProjectContext& context, VersionHistory::Switch plan, std::shared_ptr<VersionHistory::SwitchRead> read,
+                                     int rounds)
+{
+    return [&context, plan, read, rounds]() mutable -> VersionHistory::Taken
+    {
+        auto* reading = findHistory (context);
+        const auto nothing = juce::String ("nothing was switched, the song and the branch as they were.");
+
+        if (reading == nullptr)
+            return false;
+
+        if (const auto why = whyNotChangeSongNow (context, nothing); why.isNotEmpty())
+            return VersionHistory::Taken::refused (why);
+
+        if (rounds > 0 && reading->copyLeftAgain (plan))
+            return VersionHistory::Taken::readAgain (
+                [&context, plan, read, rounds, store = reading->getStore()]() -> VersionHistory::TakeIn
+                {
+                    VersionHistory::keepLeftIn (*store, plan, *read);
+                    store->getPieces().closeFiles();
+                    return takeInSwitch (context, plan, read, rounds - 1);
+                });
+
+        VersionHistory::Taken taken (false);
+        switchSongInPlace (context,
+                           [reading, &plan, &read, &taken]
+                           {
+                               taken = reading->finishSwitch (plan, std::move (*read));
+                               return taken.did;
+                           });
+        return taken;
+    };
+}
+
+namespace
+{
+    // A switch to another branch or a commit, read on the history's thread (VersionHistory.h: Switch), then made in place,
+    // as one; the project saved after it, so that its file is the song the versions say it is. Then done.
+    bool startSwitch (ProjectContext& context, VersionHistory& history, std::optional<VersionHistory::Switch> plan,
+                      const juce::String& title, const SaveProjectThen& saveProjectThen, std::function<void (bool)> done = {})
+    {
+        if (! plan.has_value())
+            return false;
+
+        return startCommandRead (
+            context, history, title,
+            [&context, plan = *plan, store = history.getStore()]() -> VersionHistory::TakeIn
+            {
+                auto read = std::make_shared<VersionHistory::SwitchRead> (VersionHistory::readSwitch (*store, plan));
+                return takeInSwitch (context, plan, read, 2);
+            },
+            [saveProjectThen, done] (bool did)
+            {
+                if (did)
+                    saveProjectThen ([] (bool) {});
+
+                if (done != nullptr)
+                    done (did);
+            });
+    }
+
+    juce::String describeBranchRead (const VersionHistory& history, const juce::String& branchID)
+    {
+        for (const auto& branch : history.getBranches())
+            if (branch.id == branchID)
+                return "Reading branch '" + branch.name + "'";
+
+        return "Reading the branch";
+    }
+} // namespace
+
+bool switchBranch (ProjectContext& context, const juce::String& branchID, const SaveProjectThen& saveProjectThen,
+                   std::function<void (bool switched)> done)
 {
     auto* history = findHistory (context);
-
-    if (history == nullptr || ! canSwitchBranch (context)
-        || ! switchSongInPlace (context, [history, &branchID] { return history->switchTo (branchID); }))
-        return false;
-
-    // The project's file the branch's song, as the versions now say it is.
-    saveProjectThen ([] (bool) {});
-    return true;
+    return history != nullptr && canSwitchBranch (context)
+           && startSwitch (context, *history, history->prepareSwitch (branchID), describeBranchRead (*history, branchID), saveProjectThen,
+                           std::move (done));
 }
 
 bool canCheckout (const ProjectContext& context, const juce::String& versionID)
@@ -857,13 +1154,11 @@ bool checkoutVersion (ProjectContext& context, const juce::String& versionID, co
 {
     auto* history = findHistory (context);
 
-    if (history == nullptr || ! canCheckout (context, versionID)
-        || ! switchSongInPlace (context, [history, &versionID] { return history->checkout (versionID); }))
+    if (history == nullptr || ! canCheckout (context, versionID))
         return false;
 
-    // The project's file the commit's song, as the versions now say it is.
-    saveProjectThen ([] (bool) {});
-    return true;
+    return startSwitch (context, *history, history->prepareCheckout (versionID),
+                        "Reading \"" + getDisplayName (*history->findVersion (versionID)) + "\"", saveProjectThen);
 }
 
 bool isDetached (const ProjectContext& context)
@@ -881,12 +1176,12 @@ bool backToBranch (ProjectContext& context, const SaveProjectThen& saveProjectTh
 {
     auto* history = findHistory (context);
 
-    if (history == nullptr || ! canGoBackToBranch (context)
-        || ! switchSongInPlace (context, [history] { return history->backFromDetached(); }))
+    if (history == nullptr || ! canGoBackToBranch (context))
         return false;
 
-    saveProjectThen ([] (bool) {});
-    return true;
+    auto plan = history->prepareBackFromDetached();
+    const auto title = plan.has_value() ? describeBranchRead (*history, plan->branchID) : juce::String();
+    return startSwitch (context, *history, std::move (plan), title, saveProjectThen);
 }
 
 juce::String describeBackToBranch (const ProjectContext& context)
@@ -939,6 +1234,10 @@ bool canDeleteBranch (const ProjectContext& context, const juce::String& branchI
 
     // Not while a merge of its line shows, nor while a merge waiting (here, or on another branch) took in a commit that only
     // its line holds, which would leave the graph with it.
+    // What Delete Branch's question will say of the changes left on it, found out on the history's thread now, as the picker
+    // lists it, so that it is known by the time it is asked.
+    findHistory (context)->hasChangesLeftOn (branchID);
+
     return ! (history->preview.has_value() && history->preview->version == found->head) && ! history->holdsCommitMergeWaits (*found);
 }
 
@@ -951,7 +1250,7 @@ bool canDeleteAnyBranch (const ProjectContext& context)
 
 juce::String describeBranchDeletion (const ProjectContext& context, const juce::String& branchID)
 {
-    const auto* history = findHistory (context);
+    auto* history = findHistory (context);
 
     if (history == nullptr)
         return {};
@@ -963,8 +1262,16 @@ juce::String describeBranchDeletion (const ProjectContext& context, const juce::
     if (only > 0)
         parts.add (juce::String (only) + (only == 1 ? " commit" : " commits") + " that no other branch has");
 
-    if (history->hasChangesLeftOn (branchID))
+    // Whether it has any is found out on the history's thread the first time it is asked for (canDeleteBranch() asks, as the
+    // picker lists it): until it is known, said as maybe.
+    using LeftSong = VersionHistory::LeftSong;
+
+    if (const auto left = history->hasChangesLeftOn (branchID); ! left.has_value())
+        parts.add ("the changes left on it uncommitted, if it has any");
+    else if (*left == LeftSong::changed)
         parts.add ("the changes left on it uncommitted");
+    else if (*left == LeftSong::unreadable)
+        parts.add ("what was left on it uncommitted, which can't be read from the Versions folder to tell what it holds");
 
     if (parts.isEmpty())
         return {};
@@ -1091,6 +1398,170 @@ juce::String describeMergeInto (const ProjectContext& context)
     return branch.has_value() ? "Merge into '" + branch->name + "'..." : juce::String ("Merge into Current Branch...");
 }
 
+namespace
+{
+    // What the start of a merge takes on the message thread before it reads: the commits, what earlier merges of that line
+    // gave anew, the song as it is (copied, its plug-ins' states in it as they gave them last: version.merge's gate asked
+    // them, known bug 166) with its plug-ins' knobs, and how often the song had changed then.
+    struct MergeStart
+    {
+        juce::String version, head, otherBranch, basePiece, theirsPiece;
+        std::vector<RenumberedID> renumbering;
+        juce::ValueTree ours;
+        PluginParameterValues ourParameters;
+        juce::int64 changesAtCopy = 0;
+    };
+
+    // The merge's list worked out from the two songs read (the newest both lines have, and the other's), as they were read,
+    // against the song as it is (ours): numbered as this line, where earlier merges of that line gave what it added IDs anew,
+    // its plug-ins' knobs too, an item that line made since with an ID such a merge gave to another of theirs given one past
+    // the song's (next, which the song's count is moved past as it is taken in); what it changed, by line; and what of it
+    // clashes with what the song changed: a merge of every line, tried on copies. Any thread.
+    struct MergeWorked
+    {
+        VersionHistory::Merge preview;
+        juce::ValueTree baseRead, theirsRead; // as read, to work it out again against the song if it changed meanwhile
+        PluginParameterValues theirParametersRead;
+        std::uint64_t next = 0;
+        bool idsGivenAnew = false; // as either song was read: then it can't be merged
+    };
+
+    void workOutMerge (MergeWorked& worked, const MergeStart& start, const juce::ValueTree& ours,
+                       const PluginParameterValues& ourParameters)
+    {
+        auto& preview = worked.preview;
+        preview.base = worked.baseRead.createCopy();
+        preview.theirs = worked.theirsRead.createCopy();
+        preview.theirParameters = worked.theirParametersRead;
+        const auto floor = juce::jmax (findNextID (preview.base), findNextID (preview.theirs));
+        worked.next = juce::jmax (findNextID (ours), floor);
+        const auto translation = findTranslation (preview.base, preview.theirs, start.renumbering, [&worked] { return worked.next++; });
+        translateIDs (preview.base, translation.all);
+        translateIDs (preview.theirs, translation.all);
+        preview.theirParameters = translateKnobs (std::move (preview.theirParameters), translation.all);
+        preview.translation = translation.all;
+        preview.renumbered = translation.givenAnew;
+        preview.lines = findChanges (preview.base, preview.theirs);
+
+        auto next = juce::jmax (worked.next, findNextID (ours), findNextID (preview.theirs));
+        MergeLines everything;
+
+        for (const auto& line : preview.lines)
+        {
+            if (line.where == SongChange::Where::song)
+                everything.songOwn = true;
+            else
+                everything.tracks.insert (line.trackID);
+        }
+
+        preview.clashes = mergeSongs (preview.base, ours, preview.theirs, everything, [&next] { return next++; }).clashes;
+        nameKnobs (preview.clashes, ours, preview.theirs, ourParameters, preview.theirParameters);
+    }
+
+    // The song as it was copied for the merge's list, kept in the store as Merge will need it for Abort Merge (VersionHistory.h:
+    // keepMerge()), here on the history's thread (known bug 126: Merge split and wrote the whole song on the message thread):
+    // its piece, which Merge takes while the song is still as it was copied; none if it couldn't be written.
+    void keepSongBeforeMerge (VersionStore& store, MergeWorked& worked, const MergeStart& start)
+    {
+        const auto pieces = splitSong (start.ours);
+        const auto kept = store.writeSong (pieces);
+        store.getPieces().closeFiles();
+        worked.preview.before = start.ours;
+        worked.preview.beforePiece = kept ? pieces.song : juce::String();
+        worked.preview.beforeChanges = start.changesAtCopy;
+    }
+
+    MergeWorked readMerge (VersionStore& store, const MergeStart& start)
+    {
+        MergeWorked worked;
+        worked.preview.version = start.version;
+        worked.preview.otherBranch = start.otherBranch;
+        auto baseRenumbered = false, theirsRenumbered = false;
+        worked.baseRead = start.basePiece.isNotEmpty() ? readCommitSong (store, start.basePiece, nullptr, nullptr, &baseRenumbered)
+                                                       : juce::ValueTree (schema::PHAZITE);
+        worked.theirsRead = readCommitSong (store, start.theirsPiece, &worked.theirParametersRead, nullptr, &theirsRenumbered);
+        store.getPieces().closeFiles();
+
+        // A song that held an ID twice (which no Phazite writes) was given IDs anew as it was read, each side on its own, so
+        // that what the two lines share no longer has the same IDs: nothing a merge could make of them would be right.
+        worked.idsGivenAnew = baseRenumbered || theirsRenumbered;
+
+        if (worked.baseRead.isValid() && worked.theirsRead.isValid() && ! worked.idsGivenAnew)
+        {
+            workOutMerge (worked, start, start.ours, start.ourParameters);
+            keepSongBeforeMerge (store, worked, start);
+        }
+
+        return worked;
+    }
+
+    // The merge's list shown, once what it read is in, with the song's count of IDs past those it gave anew; unless the song
+    // changed meanwhile (a plug-in's own change, the automation written as it plays), which sends the list round once more on
+    // the history's thread against a new copy, twice at most (rounds), after which the hold keeps the user's edits out and
+    // what changed since is worked in here.
+    VersionHistory::TakeIn takeInMerge (ProjectContext& context, MergeStart start, std::shared_ptr<MergeWorked> worked, int rounds)
+    {
+        return [&context, start, worked, rounds]() mutable -> VersionHistory::Taken
+        {
+            auto* history = findHistory (context);
+            auto* song = findSong (context);
+            const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+            const auto* version = history != nullptr ? history->findVersion (start.version) : nullptr;
+            const auto name = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : juce::String ("that commit");
+
+            if (song == nullptr || history == nullptr)
+                return false;
+
+            if (! worked->baseRead.isValid() || ! worked->theirsRead.isValid())
+                return VersionHistory::Taken::refused ("Nothing was merged: " + name
+                                                       + " or the commit both lines have can't be read from the Versions folder. "
+                                                         "Verify History says what is damaged.");
+
+            if (worked->idsGivenAnew)
+                return VersionHistory::Taken::refused ("Nothing was merged: " + name
+                                                       + " or the commit both lines have holds an ID twice, which no Phazite writes "
+                                                         "(another tool wrote it), so what the two lines share can't be told apart.");
+
+            if (last == nullptr || last->id != start.head || version == nullptr || history->getMerging().has_value()
+                || history->preview.has_value())
+                return VersionHistory::Taken::refused ("Nothing was merged: the branch moved on while " + name + " was read. Merge again.");
+
+            if (history->countSongChanges() != start.changesAtCopy)
+            {
+                song->storeDeviceStates();
+                start.ours = song->getState().createCopy();
+                start.ourParameters = history->readPluginParameters();
+                start.changesAtCopy = history->countSongChanges();
+
+                if (rounds > 0)
+                    return VersionHistory::Taken::readAgain (
+                        [&context, start, worked, rounds, store = history->getStore()]() -> VersionHistory::TakeIn
+                        {
+                            workOutMerge (*worked, start, start.ours, start.ourParameters);
+                            keepSongBeforeMerge (*store, *worked, start);
+                            return takeInMerge (context, start, worked, rounds - 1);
+                        });
+
+                workOutMerge (*worked, start, start.ours, start.ourParameters);
+                worked->preview.beforePiece.clear(); // kept again as Merge is clicked
+            }
+
+            if (worked->next > findNextID (song->getState()) && ! worked->preview.renumbered.empty())
+            {
+                song->getState().setProperty (schema::nextID, (juce::int64) worked->next, nullptr);
+                // Its count of IDs, which isn't counted as a change (Abort Merge leaves it as it is), no reason to keep the song
+                // before it again as Merge is clicked.
+                worked->preview.beforeChanges = history->countSongChanges();
+            }
+
+            history->ticked.assign (worked->preview.lines.size(), true);
+            history->preview = std::move (worked->preview);
+            history->tellNow();
+            return true;
+        };
+    }
+} // namespace
+
 bool startMerge (ProjectContext& context, const juce::String& versionID)
 {
     auto* history = findHistory (context);
@@ -1099,62 +1570,40 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
     // Not while another waits for its commit, which it would take the place of (canMerge()).
-    if (song == nullptr || last == nullptr || version == nullptr || history->getMerging().has_value())
+    if (song == nullptr || last == nullptr || version == nullptr || history->getMerging().has_value() || history->isReadingForCommand())
         return false;
 
-    // From the newest version both lines have, or from nothing for two of no common line.
-    VersionHistory::Merge preview;
-    preview.version = versionID;
-    history->mergeFailure.clear();
+    // From the newest version both lines have, or from nothing for two of no common line; both songs read, and the list
+    // worked out, on the history's thread (known bug 126).
+    MergeStart start;
+    start.version = versionID;
+    start.head = last->id;
     const auto parted = history->findCommonVersion (last->id, versionID);
-    preview.base = parted.isNotEmpty() ? history->readSong (parted) : juce::ValueTree (schema::PHAZITE);
-    preview.theirs = history->readSong (versionID, &preview.theirParameters);
+    const auto* partedVersion = history->findVersion (parted);
 
-    if (! preview.base.isValid() || ! preview.theirs.isValid())
+    if (parted.isNotEmpty() && partedVersion == nullptr)
         return false;
 
-    // Numbered as this line, where earlier merges of that line gave what it added IDs anew, its plug-ins' knobs too; an item
-    // that line made since with an ID such a merge gave to another of theirs gets one of the song's (its count moved past it,
-    // so that nothing made meanwhile has it), which the merge's commit records.
-    const auto floor = juce::jmax (findNextID (preview.base), findNextID (preview.theirs));
-    const auto translation = findTranslation (preview.base, preview.theirs, history->findRenumbering (last->id, versionID, parted),
-                                              [song, floor]
-                                              {
-                                                  const auto next = juce::jmax (findNextID (song->getState()), floor);
-                                                  song->getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
-                                                  return song->makeID();
-                                              });
-    translateIDs (preview.base, translation.all);
-    translateIDs (preview.theirs, translation.all);
-    preview.theirParameters = translateKnobs (std::move (preview.theirParameters), translation.all);
-    preview.translation = translation.all;
-    preview.renumbered = translation.givenAnew;
+    start.basePiece = partedVersion != nullptr ? partedVersion->song : juce::String();
+    start.theirsPiece = version->song;
+    start.renumbering = history->findRenumbering (last->id, versionID, parted);
 
     for (const auto& branch : history->getBranches())
         if (branch.id == version->branch)
-            preview.otherBranch = branch.name;
+            start.otherBranch = branch.name;
 
-    // What it changed, by line, and what of it clashes with what the song changed: a merge of every line, tried on copies,
-    // the song's plug-ins' states in it as they gave them last (version.merge's gate asked them: known bug 166).
-    preview.lines = findChanges (preview.base, preview.theirs);
+    history->mergeFailure.clear();
     song->storeDeviceStates();
-    auto next = juce::jmax (findNextID (song->getState()), findNextID (preview.theirs));
-    MergeLines everything;
+    start.ours = song->getState().createCopy();
+    start.ourParameters = history->readPluginParameters();
+    start.changesAtCopy = history->countSongChanges();
 
-    for (const auto& line : preview.lines)
-    {
-        if (line.where == SongChange::Where::song)
-            everything.songOwn = true;
-        else
-            everything.tracks.insert (line.trackID);
-    }
-
-    preview.clashes = mergeSongs (preview.base, song->getState(), preview.theirs, everything, [&next] { return next++; }).clashes;
-    nameKnobs (preview.clashes, song->getState(), preview.theirs, history->readPluginParameters(), preview.theirParameters);
-    history->ticked.assign (preview.lines.size(), true);
-    history->preview = std::move (preview);
-    history->tellNow();
-    return true;
+    return startCommandRead (context, *history, "Reading \"" + getDisplayName (*version) + "\" to merge it",
+                             [&context, start, store = history->getStore()]() -> VersionHistory::TakeIn
+                             {
+                                 auto worked = std::make_shared<MergeWorked> (readMerge (*store, start));
+                                 return takeInMerge (context, start, worked, 2);
+                             });
 }
 
 std::vector<MergeLine> getMergeLines (const ProjectContext& context)
@@ -1214,7 +1663,23 @@ bool canResetToReadable (const ProjectContext& context)
 bool resetToReadable (ProjectContext& context)
 {
     auto* history = findHistory (context);
-    return history != nullptr && history->resetToReadable();
+    const auto* readable =
+        history != nullptr && history->canResetToReadable() ? history->findVersion (history->getReadableCommit()) : nullptr;
+
+    if (readable == nullptr)
+        return false;
+
+    // That commit's song, which the changes are from then, read on the history's thread first.
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*readable) + "\"", readable->song, false,
+                          [&context] (SongRead& read) -> VersionHistory::Taken
+                          {
+                              if (! read.song.isValid())
+                                  return VersionHistory::Taken::refused (
+                                      "That commit can't be read from the Versions folder any more: nothing was reset.");
+
+                              auto* reading = findHistory (context);
+                              return reading != nullptr && reading->resetToReadable (std::move (read.song), std::move (read.parameters));
+                          });
 }
 
 void cancelMerge (ProjectContext& context)
@@ -1281,6 +1746,56 @@ bool canCancelMerge (const ProjectContext& context)
     return merging.has_value() ? ! merging->reading : history->holdsMergeElement() && history->getMergeProblem().isNotEmpty();
 }
 
+namespace
+{
+    // Merge, once the song before it is kept in the store (merge.beforePiece): the lines taken, as one undo step.
+    bool takeMergeIn (ProjectContext& context, VersionHistory::Merge merge, const std::vector<VersionChange>& lines)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+        const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+
+        if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
+            return false;
+
+        merge.head = last->id;
+        merge.taken = toMergeLines (lines);
+        auto result = mergeSongs (merge.base, merge.before, merge.theirs, merge.taken, [song] { return song->makeID(); });
+
+        merge.clashes = std::move (result.clashes);
+        merge.renumbered.insert (merge.renumbered.end(), result.renumbered.begin(),
+                                 result.renumbered.end()); // after those of findTranslation()
+        nameKnobs (merge.clashes, merge.before, merge.theirs, history->readPluginParameters(), merge.theirParameters);
+        merge.notes = result.notes;
+        const auto element = history->keepMerge (merge, std::vector<int> (merge.clashes.size(), 1));
+
+        if (! element.isValid())
+        {
+            history->mergeFailure = "Nothing was merged: Phazite couldn't write the song as it is into the project's Versions folder, "
+                                    "which Abort Merge would need. Make room on the drive, or check that the folder can be written to, "
+                                    "then Merge again.";
+            history->tellNow();
+            return false;
+        }
+
+        history->preview.reset();
+        history->mergeFailure.clear();
+        keepSongBefore (*history, "merge");
+
+        // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
+        // of its lines makes, its IDs counted on past them, with the merge waiting for its commit in it (Schema.h: MERGING), so
+        // that Undo takes the merge back whole, and every file the song is saved into holds it as the song does.
+        const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
+        result.song.removeChild (result.song.getChildWithName (schema::MERGING), nullptr); // one finished before, as the song had it
+        makeSongLike (*song, result.song);
+        removeBrokenReferences (*song); // what one side names that the other took away: a send to a return it deleted
+        countIDs (*song);
+        setMergingElement (*song, element);
+        history->tellNow(); // the view shows the merge's conflicts at once
+        return true;
+    }
+} // namespace
+
 bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lines)
 {
     auto* history = findHistory (context);
@@ -1301,45 +1816,44 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     }
 
     // The song as it was, for Abort Merge: kept in the store first (where the song's element of the merge names it), and in
-    // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why.
+    // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why. Kept
+    // already as the list was worked out, on the history's thread, while the song is still as it was then (known bug 126);
+    // changed since, kept there now, the window held meanwhile, then taken.
     auto merge = *history->preview;
     song->storeDeviceStates();
+
+    if (merge.beforePiece.isNotEmpty() && history->countSongChanges() == merge.beforeChanges)
+        return takeMergeIn (context, std::move (merge), lines);
+
     merge.before = song->getState().createCopy();
-    merge.head = last->id;
-    merge.taken = toMergeLines (lines);
-    auto result = mergeSongs (merge.base, merge.before, merge.theirs, merge.taken, [song] { return song->makeID(); });
+    merge.beforePiece.clear();
+    return startCommandRead (
+        context, *history, "Keeping the song as it is, for Abort Merge",
+        [&context, merge, lines, store = history->getStore()]() mutable -> VersionHistory::TakeIn
+        {
+            const auto pieces = splitSong (merge.before);
+            const auto kept = store->writeSong (pieces);
+            store->getPieces().closeFiles();
+            merge.beforePiece = kept ? pieces.song : juce::String();
 
-    merge.clashes = std::move (result.clashes);
-    merge.renumbered.insert (merge.renumbered.end(), result.renumbered.begin(),
-                             result.renumbered.end()); // after those of findTranslation()
-    nameKnobs (merge.clashes, merge.before, merge.theirs, history->readPluginParameters(), merge.theirParameters);
-    merge.notes = result.notes;
-    const auto element = history->keepMerge (merge, std::vector<int> (merge.clashes.size(), 1));
+            return [&context, merge, lines]() -> VersionHistory::Taken
+            {
+                if (merge.beforePiece.isEmpty())
+                {
+                    const auto why =
+                        juce::String ("Nothing was merged: Phazite couldn't write the song as it is into the project's Versions "
+                                      "folder, which Abort Merge would need. Make room on the drive, or check that the folder can be "
+                                      "written to, then Merge again.");
 
-    if (! element.isValid())
-    {
-        history->mergeFailure = "Nothing was merged: Phazite couldn't write the song as it is into the project's Versions folder, "
-                                "which Abort Merge would need. Make room on the drive, or check that the folder can be written to, "
-                                "then Merge again.";
-        history->tellNow();
-        return false;
-    }
+                    if (auto* history = findHistory (context))
+                        history->mergeFailure = why; // said where a merge says its problems, its list kept
 
-    history->preview.reset();
-    history->mergeFailure.clear();
-    keepSongBefore (*history, "merge");
+                    return VersionHistory::Taken::refused (why);
+                }
 
-    // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
-    // of its lines makes, its IDs counted on past them, with the merge waiting for its commit in it (Schema.h: MERGING), so
-    // that Undo takes the merge back whole, and every file the song is saved into holds it as the song does.
-    const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
-    result.song.removeChild (result.song.getChildWithName (schema::MERGING), nullptr); // one finished before, as the song had it
-    makeSongLike (*song, result.song);
-    removeBrokenReferences (*song); // what one side names that the other took away: a send to a return it deleted
-    countIDs (*song);
-    setMergingElement (*song, element);
-    history->tellNow(); // the view shows the merge's conflicts at once
-    return true;
+                return takeMergeIn (context, merge, lines);
+            };
+        });
 }
 
 bool isMerging (const ProjectContext& context)
@@ -1667,7 +2181,27 @@ namespace
                 return juce::Result::fail ("That commit isn't there any more.");
 
             title = "Bouncing \"" + getDisplayName (*version) + "\"";
-            const auto state = history->readSong (versionID);
+
+            // Its song read on the history's thread (known bug 126), then rendered.
+            history->readCommitInBackground (versionID,
+                                             [this, living = std::weak_ptr<bool> (alive)] (const juce::ValueTree& state)
+                                             {
+                                                 if (! living.expired())
+                                                     if (const auto result = render (state); result.failed())
+                                                         finished (result); // which lets go of this
+                                             });
+            return juce::Result::ok();
+        }
+
+        juce::Result render (const juce::ValueTree& state)
+        {
+            auto* history = findHistory (context);
+            auto* open = findSong (context);
+            const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
+
+            if (open == nullptr || version == nullptr)
+                return juce::Result::fail ("That commit isn't there any more.");
+
             song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
 
             if (song == nullptr)
@@ -1693,8 +2227,9 @@ namespace
         ProjectContext& context;
         const juce::String versionID;
         juce::String title;
-        Song::Ptr song;                        // the version's, alone
-        std::unique_ptr<SongExport> exporting; // goes before the song it renders
+        Song::Ptr song;                                              // the version's, alone
+        std::unique_ptr<SongExport> exporting;                       // goes before the song it renders
+        std::shared_ptr<bool> alive = std::make_shared<bool> (true); // what its read checks as it comes back
 
         void finished (const juce::Result& result)
         {
@@ -1898,27 +2433,58 @@ std::vector<SnapshotInfo> getSnapshots (const ProjectContext& context)
     return infos;
 }
 
+namespace
+{
+    // Restore from Local History, once the snapshot's song is read.
+    VersionHistory::Taken takeInSnapshot (ProjectContext&, juce::int64 time, const juce::ValueTree& then);
+} // namespace
+
 bool restoreSnapshot (ProjectContext& context, juce::int64 time)
 {
     auto* history = findHistory (context);
-    auto* song = findSong (context);
 
-    if (history == nullptr || song == nullptr)
+    if (history == nullptr || findSong (context) == nullptr)
         return false;
 
-    const auto then = history->readSnapshot (time);
+    // Its song read on the history's thread first, as it was kept.
+    const auto& all = history->getSnapshots();
+    const auto snapshot = std::find_if (all.begin(), all.end(), [time] (const Snapshot& each) { return each.time == time; });
 
-    if (! then.isValid())
+    if (snapshot == all.end())
         return false;
 
-    // The song as it is kept first; then a change of its own, one undo step, as VS Code's Local History restores a file's save.
-    keepSongBefore (*history, "history");
-    const UndoStep step (*song, "Restore Local History of " + describeSnapshotTime (time));
-    song->storeDeviceStates();
-    makeSongLike (*song, then);
-    removeBrokenReferences (*song);
-    return true;
+    return startSongRead (
+        context, *history, "Reading Local History of " + describeSnapshotTime (time), snapshot->song, false,
+        [&context, time] (SongRead& read) { return takeInSnapshot (context, time, read.song); }, Kept::asItIs);
 }
+
+namespace
+{
+    VersionHistory::Taken takeInSnapshot (ProjectContext& context, juce::int64 time, const juce::ValueTree& then)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+
+        if (history == nullptr || song == nullptr)
+            return false;
+
+        if (! then.isValid())
+            return VersionHistory::Taken::refused (
+                "That snapshot of Local History can't be read from the Versions folder: a piece of it is "
+                "damaged or missing. Nothing was restored.");
+
+        if (const auto why = whyNotChangeSongNow (context, "nothing was restored."); why.isNotEmpty())
+            return VersionHistory::Taken::refused (why);
+
+        // The song as it is kept first; then a change of its own, one undo step, as VS Code's Local History restores a file's save.
+        keepSongBefore (*history, "history");
+        const UndoStep step (*song, "Restore Local History of " + describeSnapshotTime (time));
+        song->storeDeviceStates();
+        makeSongLike (*song, then);
+        removeBrokenReferences (*song);
+        return true;
+    }
+} // namespace
 
 void selectSnapshot (ProjectContext& context, juce::int64 time)
 {
@@ -2026,6 +2592,12 @@ int recoverLostVersions (ProjectContext& context)
 {
     auto* history = findHistory (context);
     return history != nullptr ? history->recoverLostVersions() : 0;
+}
+
+juce::String getReadingProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->readingProblem : juce::String();
 }
 
 juce::String getRestoreProblem (const ProjectContext& context)
@@ -2169,7 +2741,8 @@ bool hearVersion (ProjectContext& context, const juce::String& versionID)
 
     if (versionID.isNotEmpty() && (history->bounceCompared != versionID || player.getComparisonState() == nullptr))
     {
-        const auto then = history->readSong (versionID);
+        // Its tempo map alone, from its song's own piece (known bug 126: the whole song was read for it).
+        const auto then = history->readSongOwn (versionID);
         juce::ValueTree tempo (schema::PHAZITE);
 
         if (const auto map = then.getChildWithName (schema::TEMPOMAP); map.isValid())
@@ -2366,23 +2939,28 @@ bool canDeleteSelectedBounce (const ProjectContext& context)
 //==============================================================================
 namespace
 {
-    // An old version's song exported as a DAWproject: the song, made for it, kept while it renders.
+    // An old version's song exported as a DAWproject: its song read on the history's thread first (known bug 126), what it
+    // is called meanwhile; then the song, made for it, kept while it renders; and what its read checks as it comes back.
     class VersionExport final : public TrackRender::Impl
     {
     public:
-        explicit VersionExport (Song::Ptr s)
-            : song (std::move (s))
+        explicit VersionExport (juce::String reading)
+            : title (std::move (reading))
         {
         }
 
+        void setSong (Song::Ptr s) { song = std::move (s); }
         Song& getSong() const noexcept { return *song; }
         void setRender (std::unique_ptr<TrackRender> r) { render = std::move (r); }
+        std::weak_ptr<bool> getAlive() const { return alive; }
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
-        juce::String getTitle() const override { return render != nullptr ? render->getTitle() : juce::String(); }
+        juce::String getTitle() const override { return render != nullptr ? render->getTitle() : title; }
 
     private:
+        juce::String title;
         Song::Ptr song;
         std::unique_ptr<TrackRender> render; // goes before the song
+        std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     };
 
     // The version selected, or none for Now (the song as it is).
@@ -2417,7 +2995,7 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
     const auto project = open->getFile().getFileNameWithoutExtension();
     const auto title = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : project;
     const auto file = open->getFile().getSiblingFile ("Renders").getChildFile (
-        juce::File::createLegalFileName (version != nullptr ? project + " - " + getDisplayName (*version) : project) + ".dawproject");
+        makeUsableFileName (version != nullptr ? project + " - " + getDisplayName (*version) : project) + ".dawproject");
 
     // The version it came from, by which importing it again finds it (step D2).
     const auto comment = "Exported by " + juce::String (appName) + " " + getVersionString()
@@ -2438,18 +3016,33 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
         return;
     }
 
-    const auto state = findHistory (context)->readSong (version->id);
-    auto song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
+    // Its window shows at once, the commit's song read on the history's thread meanwhile; its Cancel stops waiting for it.
+    auto exporting = std::make_unique<VersionExport> ("Reading " + title);
+    auto* reading = exporting.get();
+    findHistory (context)->readCommitInBackground (
+        version->id,
+        [&context, reading, living = reading->getAlive(), title, comment, file, finished] (const juce::ValueTree& state)
+        {
+            auto* openNow = findSong (context);
 
-    if (song == nullptr)
-    {
-        host.renderFinished (heading, juce::Result::fail ("Phazite couldn't read " + title + "."));
-        return;
-    }
+            if (living.expired() || openNow == nullptr)
+                return;
 
-    auto exporting = std::make_unique<VersionExport> (song);
-    exporting->setRender (
-        startDawProjectExport (exporting->getSong(), &getPluginHost (getEngineContext (context)), file, title, comment, finished));
+            auto song = state.isValid() ? makeSong (state, openNow->getFile(), openNow->getCacheFolder()) : nullptr;
+
+            if (song == nullptr)
+            {
+                finished (juce::Result::fail ("Phazite couldn't read " + title + ".")); // which deletes the render
+                return;
+            }
+
+            reading->setSong (song);
+            auto render =
+                startDawProjectExport (reading->getSong(), &getPluginHost (getEngineContext (context)), file, title, comment, finished);
+
+            if (! living.expired()) // one that failed at once was finished already
+                reading->setRender (std::move (render));
+        });
     host.runRender (std::make_unique<TrackRender> (std::move (exporting)));
 }
 

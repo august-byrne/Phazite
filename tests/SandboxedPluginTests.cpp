@@ -2453,6 +2453,7 @@ TEST_CASE ("Delete of notes waits for no plug-in; a macro, Bring Back and a pres
     }
 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! song.commands.isWaitingForPluginStates(); }, longWait));
+    REQUIRE (phazite::test::waitForVersionHistory (song.context)); // the commit read on the history's thread (known bug 126)
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getStoredLevel (opened, slow) > 0.49f; }, longWait));
     phazite::undo (opened);
     CHECK (getStoredLevel (opened, slow) == doctest::Approx (0.25f));

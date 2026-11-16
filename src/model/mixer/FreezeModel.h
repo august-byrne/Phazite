@@ -73,6 +73,10 @@ public:
     // Its progress window's Cancel, before the window deletes it: what goes on as its window goes (work that holds the
     // window, model/arrangement/internal/AudioWork.h) is cancelled only so; the others cancel as they are deleted.
     void cancel();
+    // Whether it is a wait the window holds its input for (the plug-ins' states, a song read from the versions:
+    // ProjectContext::holdForWork()) rather than a render: Escape is its Cancel, and the keys that run while a mouse button is
+    // down (play and stop, the tools, the zoom) run meanwhile.
+    bool isHold() const;
 
     struct Impl; // the render, and what its thread shares with this (Freeze.cpp)
     explicit TrackRender (std::unique_ptr<Impl>);

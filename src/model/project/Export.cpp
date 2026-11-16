@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -283,7 +284,7 @@ std::vector<TrackID> getStemChannels (const Song& song)
 
 juce::String getStemFileName (int index, const juce::String& channelName, const juce::String& suffix)
 {
-    const auto name = juce::File::createLegalFileName (channelName.trim());
+    const auto name = makeUsableFileName (channelName.trim());
     return juce::String (index + 1).paddedLeft ('0', 2) + " " + (name.isNotEmpty() ? name : juce::String ("Track")) + suffix;
 }
 

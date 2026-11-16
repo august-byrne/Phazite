@@ -142,7 +142,7 @@ public:
     // what is missing, as much of it as can be read (SongPieces.h: joinSong()).
     bool writeSong (const SongPieces&);
     juce::ValueTree readSong (const juce::String& songPiece, PluginParameterValues* parameters = nullptr,
-                              std::vector<MissingPiece>* missing = nullptr) const;
+                              std::vector<MissingPiece>* missing = nullptr, bool* idsGivenAnew = nullptr) const;
 
     // How many songs every store read since the program started, and how many of them on the message thread: what the
     // performance tests count (tests/PerformanceGateTests.cpp), as a song read whole is the costly part of a store.
@@ -152,6 +152,7 @@ public:
     };
 
     static SongsRead countSongsRead();
+    static SongsRead countSongsWritten(); // writeSong()'s, likewise
 
     // Every computer's record of every branch (in no particular order), this computer's with the songs left on them. A
     // branch written as this computer's record, the song left on it kept on this computer alone. And which one the project

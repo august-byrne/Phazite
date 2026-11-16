@@ -73,10 +73,36 @@ void RenderPanel::goOn()
 
 bool RenderPanel::keyPressed (const juce::KeyPress& key)
 {
-    if (key != juce::KeyPress::escapeKey || goOnButton.getButtonText().isEmpty())
+    const auto isHold = render != nullptr && render->isHold();
+
+    // Escape is Cancel for a wait with a second way out, and for a hold; a hold passes on the keys that run while a mouse
+    // button is down (play and stop), which change nothing it waits for, and uses up the rest.
+    if (key == juce::KeyPress::escapeKey && (isHold || goOnButton.getButtonText().isNotEmpty()))
+    {
+        cancel();
+        return true;
+    }
+
+    if (isHold)
+    {
+        if (onHeldKey != nullptr)
+            onHeldKey (key);
+
+        return true;
+    }
+
+    return false;
+}
+
+bool RenderPanel::keyStateChanged (bool isKeyDown)
+{
+    // A hold's: what runs its keys hears them let go, so that Space pressed again stops what it started (InputHold.h).
+    if (render == nullptr || ! render->isHold())
         return false;
 
-    cancel();
+    if (onHeldKeyState != nullptr)
+        onHeldKeyState (isKeyDown);
+
     return true;
 }
 

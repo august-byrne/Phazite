@@ -132,6 +132,10 @@ TEST_CASE ("Random songs: a song cut into a version's pieces and joined again is
         const auto seed = 20261214 + i;
         INFO ("seed " << seed);
         const auto song = makeRandomSong (seed, sounds.folder);
+
+        // What only an undo needs, which the loader's checks leave out of a song joined as they do of one opened (SongPieces.h:
+        // joinSong()), left out first.
+        leaveOutWhatNamesNothing (*song);
         const auto pieces = phazite::splitSong (song->getState());
         const auto joined = phazite::joinSong (pieces.song,
                                                [&pieces] (const juce::String& name) -> std::optional<juce::MemoryBlock>

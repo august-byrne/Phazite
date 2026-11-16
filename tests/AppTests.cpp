@@ -1741,3 +1741,76 @@ TEST_CASE ("Save As while recording stops recording first and keeps the take, wh
     CHECK_FALSE (phazite::isRecording (copied));
     CHECK (phazite::getClipStates (phazite::findTrackState (copied, track)).size() == 1);
 }
+TEST_CASE ("The window's hold while a branch's song is read lets play and stop through, and a quit cancels the read")
+{
+    // Found in review (known bug 126's round): the hold took every key (no stopping playback during a long read), and a quit
+    // while it showed was refused. Now it passes on what runs while a mouse button is down, and a quit (or the computer's
+    // session ending) cancels the read, the song and the branch as they were, and goes on to the close.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    phazite::test::RenderHost host;
+    phazite::CommandRegistry registry;
+    session.setAutoSave (false); // so that closing with changes asks
+    session.onError = [] (const juce::String&, const juce::String&) {};
+    session.addCommands (registry, host);
+    session.openProject (file);
+    auto& context = session.getContext();
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    const auto save = [] (std::function<void (bool)> then) { then (true); };
+    const auto main = phazite::getCurrentBranch (context)->id;
+    REQUIRE (phazite::newBranch (context, {}, save));
+    const auto idea = phazite::getCurrentBranch (context)->id;
+
+    juce::Array<juce::KeyPress> passedOn;
+    context.setInputHolder (&session.getInputHold()); // as the main window sets it
+    session.getInputHold().setWindow (nullptr,
+                                      [&passedOn] (const juce::KeyPress& key)
+                                      {
+                                          passedOn.add (key);
+                                          return true;
+                                      });
+
+    REQUIRE (phazite::switchBranch (context, main, save));
+    auto* hold = juce::Component::getCurrentlyModalComponent();
+    REQUIRE (hold != nullptr);
+    CHECK (session.isHoldingInput (hold));
+    CHECK_FALSE (registry.invoke ("track.add")); // nothing that changes the song runs meanwhile
+
+    // A key goes to what runs the window's keys while it holds (its KeyDispatcher::keyPressedWhileHeld()).
+    const juce::KeyPress space (juce::KeyPress::spaceKey);
+    hold->keyPressed (space);
+    CHECK (passedOn.size() == 1);
+
+    // A quit cancels it: the hold gone, the song and the branch as they were.
+    session.cancelWork();
+    CHECK (juce::Component::getCurrentlyModalComponent() == nullptr);
+    CHECK_FALSE (context.isHoldingForWork());
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    CHECK (phazite::getCurrentBranch (context)->id == idea);
+
+    // Said where the Source Control view says its problems (the second review: it was stopped silently); and the close
+    // goes on to its question, which the user answers Cancel: the song and the branch as they were, open still.
+    CHECK (phazite::getReadingProblem (context).contains ("closing"));
+    phazite::addTrackAtEnd (context, false); // a change, so that closing asks
+    using Answer = phazite::ProjectSession::UnsavedChanges;
+    auto asked = 0;
+    session.askToSave = [&asked] (const juce::File&, const juce::String&, std::function<void (Answer)> answer)
+    {
+        ++asked;
+        answer (Answer::cancel);
+    };
+    REQUIRE (session.getProject()->hasUnsavedChanges());
+    std::optional<bool> closed;
+    session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&closed] { return closed.has_value(); }));
+    CHECK (asked == 1);
+    CHECK_FALSE (*closed);
+    CHECK (session.getProject() != nullptr);
+    CHECK (phazite::getCurrentBranch (context)->id == idea);
+    context.setInputHolder (nullptr);
+    session.getInputHold().setWindow (nullptr, nullptr);
+}

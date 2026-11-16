@@ -202,9 +202,12 @@ TEST_CASE ("The Project view finds the unused audio in the background, reading e
     auto& song = screen.getSong();
     REQUIRE (phazite::test::waitForVersionHistory (context));
     const auto main = phazite::getCurrentBranch (context)->id;
-    REQUIRE (phazite::newBranch (context, {}, [] (std::function<void (bool)> then) { then (true); }));
+    REQUIRE (phazite::test::finished (context, [&]
+                                      { return phazite::newBranch (context, {}, [] (std::function<void (bool)> then) { then (true); }); }));
     const auto track = screen.addTrack();
-    REQUIRE (phazite::switchBranch (context, main, [] (std::function<void (bool)> then) { then (true); })); // a song left there
+    REQUIRE (phazite::test::finished (
+        context,
+        [&] { return phazite::switchBranch (context, main, [] (std::function<void (bool)> then) { then (true); }); })); // a song left there
     phazite::test::writeSound (song.getFile().getParentDirectory().getChildFile ("Audio/Old take.wav"), 0.5);
     REQUIRE (phazite::test::waitForVersionHistory (context));
 

@@ -67,9 +67,10 @@ public:
     // (overPlugins), and running it. The plug-in gets the other keys.
     bool runsOverPlugins (const juce::KeyPress&) const;
     bool keyPressedOverPlugin (const juce::KeyPress&);
+
     std::vector<juce::KeyPress> getKeysOverPlugins() const; // every key of those commands, enabled or not
 
-    // While work holds the window's input (model/arrangement/internal/AudioWork.h): runs the key's command only if it is one
+    // While work holds the window's input (model/arrangement/internal/AudioWork.h, ProjectContext::holdForWork()): runs the key's command only if it is one
     // that also runs while a mouse button is down (playing and stopping, the tools, the editors' zoom), which change nothing
     // in the song, its history or its files. Whether it ran one.
     bool keyPressedWhileHeld (const juce::KeyPress&);

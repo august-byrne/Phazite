@@ -257,6 +257,50 @@ The history is the `Versions` folder beside the project file. Its format is writ
   closes is written after it, on the history's thread, which the close doesn't wait for; the project opened again (or
   another history of the same folder) reads the folder only after it, and quitting waits for it behind a window that
   says what is being finished. What the history reads is let go.
+- **Commands that read whole songs read them there too** (known bug 126): Checkout Branch, Checkout (Detached), Back
+  to Branch, Create Branch from a commit, Import DAWproject back as a branch, Merge's list, Restore from This Commit (the
+  song's or a line's), Compare with Working Tree, Restore from Local History, Undo Last Commit and Reset Branch to Last
+  Readable Commit read on the history's thread, and change the song on the message thread once what they read is in
+  (one named undo step where the command is one). A switch also splits and keeps the song it leaves there, from a copy
+  taken as it starts; the merge's list is worked out there against a copy of the song, which is kept in the store there
+  too, for Abort Merge (Merge takes that piece, unless the song changed since: then it is kept on the history's thread as
+  Merge is clicked, the window held). The import of a DAWproject as a branch unpacks its audio there, with progress. If the song changed while it was
+  read (a plug-in's own change, the automation written as it plays), that part goes round again on the history's thread
+  from a new copy, twice at most; what changed after that (the hold keeps every edit of the user's out) is worked in on
+  the message thread as the command ends. Bouncing an old commit, exporting one as DAWproject and Delete Branch's
+  question (whether the song left there had changes) read on the history's thread too, without holding the window;
+  hearing a commit's bounce reads its song's own piece alone, for its tempo map.
+- **The window held meanwhile** (`ProjectContext::holdForWork()`): from the command's start the window takes no input but
+  the keys that work while a mouse button is down (play and stop, the tools, the editors' zoom): the window's one hold
+  (`src/app/InputHold.h`), the same as a command waiting for the plug-ins' states and an audio file's work take, and the
+  message loop runs on; no other command that changes the project runs, nor does a file dropped on the window. A read
+  of more than a second shows in the progress window, saying what is being read, with progress where it is known, in
+  the window's queue of progress windows, after an audio file's work's if that shows first. Its Cancel, or Escape
+  (before its window shows too), and a quit or the computer's session ending, cancel it
+  (a quit says so where the view says its problems: "Stopped, as Phazite was closing"), and what each leaves is:
+  - a switch, a checkout, Back to Branch: the song and the branch as they were; the song left may already be kept in the
+    store as a piece that nothing names, which takes only its room;
+  - Create Branch from a commit, Import DAWproject as a branch: nothing; a branch made for it is taken away again (the
+    import's audio unpacked by then is deleted again);
+  - Merge's list, the restores, Compare, Undo Last Commit, Reset Branch: nothing changed.
+  A command that can't finish says why in the Versions view (`getReadingProblem()`): a song that can't be read, the
+  song recording or a render begun meanwhile, the branch moved on, a folder that can't be written to, the project
+  saved into a new folder meanwhile. None of them starts while a first save copies the `Versions` folder, and one that
+  read before the copy is refused as it is taken in, so that nothing is written into the folder the project leaves; a
+  branch a cancelled command made is taken away once the copy is over. Delete Branch's question says when what was left
+  on the branch can't be read.
+- **Songs from elsewhere:** a song read from the pieces (a commit's, a song left on a branch, a snapshot) is made
+  consistent as a project file is as it opens (`makeConsistent()`), whoever wrote it: what no Phazite writes (a number
+  that is none or out of its range, an ID twice, a send to nothing, a sound file outside the project's folder) never
+  reaches the song. Of a song Phazite wrote the checks change nothing but what a project opened leaves out too: the
+  curves of a device deleted, which the song keeps while an Undo could bring the device back. That loses nothing: a
+  switch starts the undo history again; Restore from This Commit and from Local History are undo steps, whose Undo puts
+  the curves back with the rest; a line's Restore leaves them as they are; a merge counts them as this side's. A song
+  read in part (a commit with damaged pieces) keeps what names what it couldn't read (a send to a lost return, a lost
+  device's curves and modulations), which the song it is taken into judges (`removeBrokenReferences()`, and a curve it
+  brought in of a device the song hasn't taken away again, in the same step), so that the song is what its file would open
+  as. A merge, Restore from This Commit and a line's Restore refuse a song that held an ID twice, which its line's IDs no
+  longer match once the checks give it new ones (an item would come in as new).
 - Save Project As copies the history with the project. Without a `Versions` folder, a project opens with no history
   and makes its initial commit.
 

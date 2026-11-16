@@ -25,6 +25,7 @@
 
 namespace phazite
 {
+class ProjectContext;
 class TrackRender;
 struct MergeState;
 struct VersionsAudio;
@@ -82,6 +83,11 @@ public:
     void endFolderCopy();
     bool isCopyingFolder() const noexcept { return copyingFolder; }
 
+    // What writes into the store from the message thread when it may: at once, or once a first save's copy of the folder is over
+    // (endFolderCopy(), at the next turn of the message loop), in the folder the project is in then; never if the history goes
+    // first. Taking back what a command that read made, when it didn't finish (a branch it made, deleted again).
+    void whenNotCopying (std::function<void()>);
+
     // The branches, in the order they were made; the current one (none before the first version); every branch's versions,
     // newest first; one by its id; and the current branch's last.
     std::vector<BranchRecord> getBranches() const;
@@ -126,6 +132,15 @@ public:
     juce::ValueTree readSong (const juce::String& versionID, PluginParameterValues* parameters = nullptr,
                               std::vector<MissingPiece>* missing = nullptr) const;
 
+    // A version's song's own piece alone, without its tracks, its master or its automation, which are pieces of their own
+    // (stand-ins in their places): its tempo map, its sections and its chord lane, cheaply. Invalid if it can't be read.
+    juce::ValueTree readSongOwn (const juce::String& versionID) const;
+
+    // A version's song read on the history's thread for what goes on in the background meanwhile (an old commit's bounce, a
+    // commit's export as DAWproject; known bug 126), told on the message thread: invalid for one that can't be read. Not told
+    // if the history goes first.
+    void readCommitInBackground (const juce::String& versionID, std::function<void (const juce::ValueTree&)> then);
+
     // What the last Restore from This Commit couldn't take, as the commit's pieces that couldn't be read left it: none
     // while it took everything; or why it took nothing (a line whose place in the commit can't be read). Told until the
     // next one.
@@ -155,10 +170,12 @@ public:
     // A current branch whose last commit can't be read as the history opened (a piece of it damaged or missing): said, with
     // the newest commit of the branch's log on this computer that reads (VersionStore.h: readBranchLog()), offered; none
     // while it reads. No commit is made on top of it meanwhile, unless the log has none that reads: a commit then starts the
-    // branch's line again. And the branch reset to that commit (git reset --soft), the song as it is: false if it can't be.
+    // branch's line again. And the branch reset to that commit (git reset --soft), the song as it is, given that commit's
+    // song read on the history's thread: false if it can't be. The commit offered.
     juce::String getHeadProblem() const;
     bool canResetToReadable() const;
-    bool resetToReadable();
+    bool resetToReadable (juce::ValueTree then, PluginParameterValues parameters);
+    juce::String getReadableCommit() const;
 
     // The Versions view's choices, which the commands act on: the version selected in its history, and the line of the
     // changes selected; and the version the changes are listed against while Take from This Version… shows one (none: the
@@ -167,7 +184,9 @@ public:
     std::optional<SongChange> selectedChange;
     bool selectedChangeIsStaged = false;
     std::optional<SongChange> selectedVersionChange; // a line of what the selected version changed, under it in the graph
-    void compareWith (const juce::String& versionID);
+    // Another version's song, read on the history's thread, with its plug-ins' values (none for the last version: the
+    // changes' own); invalid for one that couldn't be read, which compares nothing.
+    void compareWith (const juce::String& versionID, juce::ValueTree read = {}, PluginParameterValues readParameters = {});
     const juce::String& getComparedVersion() const noexcept { return comparedVersion; }
     const std::vector<SongChange>& getListedChanges();
 
@@ -227,15 +246,14 @@ public:
     juce::String makeBranch (const juce::String& fromVersion, bool makeCurrent);
 
     // A branch from a version, whose song is another (a DAWproject's that came back: model/project/internal/DawProject.h),
-    // kept there as the song left on it, to switch to: its id, or none.
-    juce::String makeBranchWithSong (const juce::String& fromVersion, const juce::ValueTree& song);
+    // kept there as the song left on it (its piece, which the store holds already), to switch to: its id, or none.
+    juce::String makeBranchWithSong (const juce::String& fromVersion, const juce::String& songPiece);
 
-    // Switching to another branch in place: the song as it is now, view state and unsaved changes included, kept on the branch
-    // it leaves; then the other's song, as it was left there (or as its last version had it), made the song's with the fewest
-    // edits (ApplySong.h: makeSongTheSame()), so that what both have stays as it is: its plug-ins loaded, its audio read, the
-    // song playing on. Its changes since its last version from then on. A merge waiting for its version stays with its
-    // branch. False if it can't be.
-    bool switchTo (const juce::String& branchID);
+    // Switching to another branch in place (prepareSwitch(), below): the song as it is now, view state and unsaved changes
+    // included, kept on the branch it leaves; then the other's song, as it was left there (or as its last version had it),
+    // made the song's with the fewest edits (ApplySong.h: makeSongTheSame()), so that what both have stays as it is: its
+    // plug-ins loaded, its audio read, the song playing on. Its changes since its last version from then on. A merge waiting
+    // for its version stays with its branch.
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
 
@@ -244,10 +262,9 @@ public:
     // to. The song is on no branch then, but this computer's record of the checkout (BranchRecord::detachedFrom), the current
     // one, so that the project opens again where it was left; other computers leave it out. Nothing is committed or merged
     // while detached: a branch made from the song (makeBranch() from none) takes what changed there. Going back to a branch,
-    // the one it came from (backFromDetached()) or another (switchTo()), keeps what changed in Local History first, and the
-    // record of the checkout goes. Checking out another commit while detached goes on to it alike. False if it can't be.
-    bool checkout (const juce::String& versionID);
-    bool backFromDetached();
+    // the one it came from (prepareBackFromDetached()) or another (prepareSwitch()), keeps what changed in Local History
+    // first, and the record of the checkout goes. Checking out another commit while detached goes on to it alike
+    // (prepareCheckout()).
     bool isDetached() const;
     juce::String getDetachedFrom() const; // the branch's id, none while on a branch
 
@@ -258,14 +275,22 @@ public:
     // how many commits no other branch holds, and whether the song left there had changes since its last commit.
     bool deleteBranch (const juce::String& branchID);
     int countVersionsOnlyOn (const juce::String& branchID) const;
-    bool hasChangesLeftOn (const juce::String& branchID) const;
+    enum class LeftSong
+    {
+        same,
+        changed,
+        unreadable // the song left there, or its last commit's, can't be read: it may hold anything
+    };
+
+    std::optional<LeftSong> hasChangesLeftOn (const juce::String& branchID); // none while it is being found out
 
     // Undo Last Commit (git reset --soft HEAD~, as VS Code's): the current branch moved back to the commit before its last,
     // what that commit recorded staged again, the song as it is, and its message the draft again while none is typed. Not
     // for the first commit or a merge's, nor while a commit is being made or a merge is under way. The commit stays in the
-    // store, so Recover Lost Commits brings it back while no branch holds it.
+    // store, so Recover Lost Commits brings it back while no branch holds it. Given the song of the commit before, read on
+    // the history's thread (startReading(): VersionsModel.cpp), with its plug-ins' values.
     bool canUndoLastCommit() const;
-    bool undoLastCommit();
+    bool undoLastCommit (juce::ValueTree before, PluginParameterValues beforeParameters);
 
     // What a commit changed: from the commit it follows (its first parent; nothing, for the first) to it, by line, worked
     // out once each (a commit never changes), its two songs read and compared on the history's thread the first time it is
@@ -321,8 +346,9 @@ public:
         juce::StringArray notes;
         juce::ValueTree before; // the song as it was before the merge was taken, which Abort Merge makes it again
         juce::String beforePiece;
-        juce::String head; // the current branch's last version as the merge was taken
-        MergeLines taken;  // the lines the merge took
+        juce::int64 beforeChanges = -1; // the song's count of changes (countSongChanges()) as before was copied, for its piece
+        juce::String head;              // the current branch's last version as the merge was taken
+        MergeLines taken;               // the lines the merge took
 
         // Whether its three songs were read whole, so that its clashes are known (none while they are being read on the
         // history's thread, or where one can't be).
@@ -370,11 +396,109 @@ public:
     // Tells onChange at once: what was read or written, a branch made, a merge begun.
     void tellNow();
 
+    //==============================================================================
+    // A command that reads whole songs before it changes anything (Checkout Branch, Checkout (Detached), Back to Branch,
+    // Merge's list, Restore from This Commit, Restore from Local History, Compare with Working Tree, Undo Last Commit, Reset
+    // Branch to Last Readable Commit: known bug 126), in two halves: what it reads, on the history's thread (read, given
+    // what it needs copied first, never the song, whose tree is the message thread's), which returns what takes it in, on
+    // the message thread once it is read (TakeIn: whether it did what the command does). One at a time, and not while the
+    // history is being read; false, with nothing started, then. Cancelled meanwhile (cancelReading(): the progress window's
+    // Cancel), nothing is taken in. What holds the window meanwhile (hold, the caller's: ProjectContext::holdForWork()) lets
+    // go once it is over, after what was read was taken in; then done is told whether it did (not if the history went).
+    // Whether one is under way, and what it is, as the progress window names it; and how the last one ended.
+    // What taking it in came to (Taken): done or not, with why not (readingProblem, which the Source Control view says until
+    // the next command that reads), or read again first: what it worked out from a copy of the song was out of date (the song
+    // changed meanwhile), so another round reads on the history's thread from a new copy before it is taken in.
+    struct Taken;
+    using TakeIn = std::function<Taken()>;
+
+    struct Taken
+    {
+        Taken (bool doneIt)
+            : did (doneIt)
+        {
+        } // NOLINT: a take-in that did it, or not, says so
+
+        static Taken refused (juce::String why)
+        {
+            Taken taken (false);
+            taken.problem = std::move (why);
+            return taken;
+        }
+
+        static Taken readAgain (std::function<TakeIn()> read)
+        {
+            Taken taken (false);
+            taken.again = std::move (read);
+            return taken;
+        }
+
+        bool did = false;
+        juce::String problem;
+        std::function<TakeIn()> again;
+    };
+
+    juce::String readingProblem;
+    bool startReading (const juce::String& title, std::function<TakeIn()> read, std::shared_ptr<void> hold = {},
+                       std::function<void (bool did)> done = {});
+    bool isReadingForCommand() const noexcept { return commandRead.has_value(); }
+    juce::String getCommandReadTitle() const { return commandRead.has_value() ? commandRead->title : juce::String(); }
+    void cancelReading (const juce::String& why = {}); // why, said as the reading's problem: none for the user's Cancel
+    bool didLastReading() const noexcept { return lastReadingDid; }
+    int getReadingsStarted() const noexcept { return readingsStarted; }
+
+    // The store, for what a command reads on the history's thread (startReading()); none for a song that keeps no versions.
+    std::shared_ptr<VersionStore> getStore() const noexcept { return store; }
+
+    // How many times the song changed (each property, child added, removed or moved, view state too, and each change its
+    // plug-ins said they made): what a command that read on the history's thread from a copy of it compares as it takes
+    // in what it read, to do again with the song as it is what it worked out from the copy.
+    juce::int64 countSongChanges() const noexcept { return songChanges + song.getChangesOutsideHistory(); }
+
+    // A switch to another branch, or to a commit checked out (Checkout Branch, Checkout (Detached), Back to Branch), in its halves
+    // (startReading()): what it takes on the message thread first (the song left copied, its plug-ins' settings stored), what
+    // it reads (the song left split and kept, the other's song and its last commit's read), and how it ends, the song made
+    // the other's. Invalid, with nothing done, if it can't be.
+    struct Switch
+    {
+        juce::String branchID;              // the branch entered: an existing one, or the checkout's record (record)
+        std::optional<BranchRecord> record; // a checkout's from a branch, written as the switch ends
+        bool movesCheckout = false;         // checked out already: on to another commit, in place
+        juce::String commitID;              // the commit checked out, for the log
+        juce::ValueTree left;               // the song as it is, kept on the branch it leaves; none leaving a checkout
+        PluginParameterValues leftParameters;
+        juce::int64 changesAtCopy = 0;
+        juce::String otherPiece;  // the other's song: as it was left there, or its last commit's
+        bool otherIsHead = false; // its last commit's (none was left there): read once
+        juce::String headPiece;   // its last commit's song, which its changes are from: none before its first
+    };
+
+    struct SwitchRead
+    {
+        juce::String leftPiece;
+        bool leftKept = false;
+        juce::int64 leftChanges = 0; // the song's count of changes (countSongChanges()) as the copy split was taken
+        juce::ValueTree other, last;
+        PluginParameterValues lastParameters;
+    };
+
+    std::optional<Switch> prepareSwitch (const juce::String& branchID, bool withinRead = false); // within: a command's read's next step
+    std::optional<Switch> prepareCheckout (const juce::String& versionID);
+    std::optional<Switch> prepareBackFromDetached();
+    static SwitchRead readSwitch (VersionStore&, const Switch&);
+    Taken finishSwitch (const Switch&, SwitchRead);
+
+    // Another round of the song left, for a switch whose song changed while the other was read: copied again (false if it
+    // didn't change), and split and kept on the history's thread.
+    bool copyLeftAgain (Switch&);
+    static void keepLeftIn (VersionStore&, const Switch&, SwitchRead&);
+
     // The name and the note the Versions view holds for the next version, until it is saved with them.
     juce::String draftName, draftNote;
 
     // For tests: while set, every history's writes wait before they write, as a slow disk would make them.
     static std::atomic<bool> holdWritesForTests;
+    static std::atomic<bool> holdReadsForTests; // and reads, each where it starts
 
 private:
     Song& song;
@@ -450,6 +574,11 @@ private:
     juce::int64 lastSnapshotTime = 0;
     void snapshotTaken (int generation, std::vector<Snapshot> oldestFirst);
 
+    // Whether the songs left on branches had changes since their last commits (hasChangesLeftOn()), by their pieces, and those
+    // being compared.
+    std::map<juce::String, LeftSong> changesLeft;
+    std::set<juce::String> changesLeftBeingRead;
+
     // The versions no branch's line holds any more (a branch deleted, a commit undone) let go of: they stay in the store.
     void forgetUnreachable();
 
@@ -490,6 +619,7 @@ private:
     // While the folder is copied (copyFolder()), and what the history started meanwhile, to start once it is over: with the
     // version whose bounce it stopped, and how to make it again. What the copy job and the message thread share.
     bool copyingFolder = false, initialCommitWaiting = false, openSnapshotWaiting = false;
+    std::vector<std::function<void()>> waitingForCopy; // whenNotCopying()'s
     juce::String bounceWaiting;
     std::function<void (const juce::String&)> restartBounce;
 
@@ -518,10 +648,29 @@ private:
     void run (std::function<void()> job, Work);
     void checked (int generation, Check);
 
-    // Leaving the current branch for another: the song as it is now kept on it, and the other's as it was left there (or as
-    // its last version had it), to make the song's: invalid if it can't be. Leaving a checkout, what changed goes into Local
-    // History, and the record of the checkout goes, its id kept for the next.
-    juce::ValueTree leaveFor (const juce::String& branchID);
+    // A command reading on the history's thread (startReading()): what it is, what holds the window, what is told as it ends,
+    // and its number among those started; how many started, and whether the last did what it does.
+    struct CommandRead
+    {
+        juce::String title;
+        std::shared_ptr<void> hold;
+        std::function<void (bool)> done;
+        int number = 0;
+        juce::File folder; // the store's as it began, which what it read was read from
+    };
+
+    std::optional<CommandRead> commandRead;
+    int readingsStarted = 0;
+    bool lastReadingDid = false;
+    void readOnThread (int number, std::function<TakeIn()> read);
+    void readingDone (int generationThen, int number, const TakeIn&);
+    void endReading (Taken);
+
+    // How many times the song changed (countSongChanges()).
+    juce::int64 songChanges = 0;
+
+    // The song as it is now, its plug-ins' settings stored, to be kept on the branch it leaves (none leaving a checkout).
+    void keepLeft (Switch&, const BranchRecord& current);
     juce::String checkoutRecord; // the id of this computer's last record of a checkout, made again for the next
     void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts);
 
@@ -541,8 +690,19 @@ public:
 private:
     void timerCallback() override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
+
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+    {
+        ++songChanges;
+        markChildChanged (parent, child);
+    }
+
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
+    {
+        ++songChanges;
+        markChildChanged (parent, child);
+    }
+
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (VersionHistory)
@@ -565,6 +725,21 @@ bool follows (const std::map<juce::String, VersionRecord>& versions, const juce:
 // other side's song and the parting's, translated through them (SongMerge.h: translateIDs()), are numbered as this side's.
 std::vector<RenumberedID> findRenumbering (const std::map<juce::String, VersionRecord>& versions, const juce::String& ours,
                                            const juce::String& theirs, const juce::String& parted);
+
+// A command that reads whole songs before it changes anything, on the history's thread (VersionHistory::startReading()),
+// the window held meanwhile (ProjectContext::holdForWork(): its title for the progress window, and its Cancel cancelling the
+// read), as the versions' commands start one (VersionsModel.cpp); false, with nothing started, while another is under way.
+// And what takes a switch's reads in (VersionHistory::Switch), the song made the other's in place; read again from a new
+// copy of the song left, rounds times at most, if it changed meanwhile.
+bool startCommandRead (ProjectContext&, VersionHistory&, const juce::String& title, std::function<VersionHistory::TakeIn()> read,
+                       std::function<void (bool did)> done = {}, std::shared_ptr<std::atomic<float>> progress = {});
+VersionHistory::TakeIn takeInSwitch (ProjectContext&, VersionHistory::Switch, std::shared_ptr<VersionHistory::SwitchRead>, int rounds);
+
+// A commit's song read from a store, without a merge's element (Schema.h: MERGING), which no commit's song holds, whoever
+// wrote it: what the song is made like (a checkout, a switch, Bring Back) never brings one. As VersionStore::readSong()
+// reads it. Any thread.
+juce::ValueTree readCommitSong (const VersionStore&, const juce::String& songPiece, PluginParameterValues* parameters = nullptr,
+                                std::vector<MissingPiece>* missing = nullptr, bool* idsGivenAnew = nullptr);
 
 // The song of the current branch's last commit in a project's history, read from its Versions folder without opening the
 // project (when its file can't be read, ProjectSession offers it), and the commit's name; invalid for none, or one that

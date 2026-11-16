@@ -12,13 +12,16 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/CommandRegistry.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/project/internal/UnsavedProjects.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -629,10 +632,34 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     const auto file = folder.folder.getChildFile ("Back.dawproject");
     REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
 
-    const auto read = phazite::readDawProject (file);
-    REQUIRE (read.fromVersion == first);
+    const auto read = std::make_shared<phazite::DawProjectFile> (phazite::readDawProject (file));
+    REQUIRE (read->fromVersion == first);
+    std::optional<bool> imported;
     juce::StringArray said;
-    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, said));
+    const auto told = [&imported, &said] (bool done, const juce::StringArray& left)
+    {
+        imported = done;
+        said = left;
+    };
+
+    // Cancelled once its branch is made (found in review, known bug 126's round): nothing left of it, and told only then.
+    const auto branches = phazite::getBranches (s.context).size();
+    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, told));
+    CHECK_FALSE (imported.has_value());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getBranches (s.context).size() > branches; },
+                                                   phazite::test::versionHistoryTimeout));
+    phazite::getVersionHistory (s.context)->cancelReading();
+    REQUIRE (imported.has_value());
+    CHECK_FALSE (*imported);
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    CHECK (phazite::getBranches (s.context).size() == branches);
+    CHECK (phazite::getCurrentBranch (s.context)->name == "main");
+
+    // Done to its end: told so once it is.
+    imported.reset();
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::importDawProjectAsBranch (s.context, read, s.save, told); }));
+    REQUIRE (imported.has_value());
+    CHECK (*imported);
     CHECK (phazite::getCurrentBranch (s.context)->name == "idea-2");
 
     // Those two changes, and nothing else: the rest as it was, to the bit.
@@ -654,8 +681,9 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
 
     // Kept as a version there, it merges into main with those two lines and no clash.
     const auto back = keepVersion (s.context, "From another DAW");
-    REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save));
-    REQUIRE (phazite::startMerge (s.context, back));
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, back); }));
     const auto lines = phazite::getMergeLines (s.context);
     REQUIRE (lines.size() == 2);
     CHECK_FALSE (lines[0].clashes);
@@ -1015,4 +1043,171 @@ TEST_CASE ("A DAWproject with a note a million beats along, or audio from past w
     auto& song = *phazite::findSong (into.context);
     phazite::takeDawProject (song, read);
     phazite::test::checkSong (song);
+}
+
+TEST_CASE ("A DAWproject imported back unpacks its audio off the message thread, and one cancelled leaves none of it")
+{
+    // The second review of known bug 126: the import unpacked every audio file on the message thread, inside the window's
+    // hold, which couldn't paint nor be cancelled meanwhile. Now it unpacks on the history's thread, with progress; a
+    // cancelled import takes back what it unpacked, and a finished one what nothing plays.
+    TestSong s;
+    const auto drums = s.addTrack ("Drums");
+    s.addAudioClip (drums, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 1.0), 8.0);
+    const auto first = keepVersion (s.context, "First");
+    auto content = phazite::describeDawProject (*phazite::findSong (s.context), "Test",
+                                                "Exported by Phazite from the version \"First\" (" + first + ").");
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Back.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    const auto read = std::make_shared<phazite::DawProjectFile> (phazite::readDawProject (file));
+
+    // The project's own copy gone, so that the import unpacks one (which the song names).
+    const auto audio = s.getProject().getAudioFolder();
+    const auto own = audio.findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (own.size() == 1);
+    REQUIRE (own[0].deleteFile());
+    const auto bytes = phazite::countBytesUnpackedOnMessageThread();
+    std::optional<bool> imported;
+    const auto told = [&imported] (bool done, const juce::StringArray&) { imported = done; };
+
+    // Cancelled once its branch is made, its audio unpacked by then: none of it left.
+    const auto branches = phazite::getBranches (s.context).size();
+    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, told));
+    REQUIRE (dispatchMessagesUntil ([&] { return phazite::getBranches (s.context).size() > branches; }, versionHistoryTimeout));
+    phazite::getVersionHistory (s.context)->cancelReading();
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (imported.has_value());
+    CHECK_FALSE (*imported);
+    CHECK (audio.findChildFiles (juce::File::findFiles, false, "*.wav").isEmpty());
+
+    // Finished: the file the song plays there, unpacked on the history's thread.
+    imported.reset();
+    REQUIRE (finished (s.context, [&] { return phazite::importDawProjectAsBranch (s.context, read, s.save, told); }));
+    CHECK (*imported);
+    CHECK (audio.findChildFiles (juce::File::findFiles, false, "*.wav").size() == 1);
+    CHECK (phazite::countBytesUnpackedOnMessageThread() == bytes);
+}
+
+TEST_CASE ("Import DAWproject unpacks its audio before the open project closes: cancelled, that project stays open as it was")
+{
+    // The third review of known bug 126: the open project closed first and the audio was unpacked after, so Cancel left
+    // nothing open. Now it unpacks into a staging folder (locked, beside the new projects) first, and closes the open project
+    // (asking about its changes) only once that is done; cancelled, nothing changed, and nothing of it left.
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Elsewhere.dawproject");
+
+    {
+        TestSong s;
+        const auto drums = s.addTrack ("Drums");
+        s.addAudioClip (drums, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 1.0), 4.0);
+        auto content = phazite::describeDawProject (*phazite::findSong (s.context), "Elsewhere", "From elsewhere");
+        content.bounces.clear();
+        REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    }
+
+    juce::File open;
+
+    {
+        juce::String error;
+        const auto made = phazite::Project::create (folder.folder, "Open", error);
+        REQUIRE (made != nullptr);
+        open = made->getFile();
+    }
+
+    const auto unsaved = folder.folder.getChildFile ("Unsaved");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (getEngineContext(), recent, folder.folder, unsaved);
+    phazite::test::RenderHost host;
+    phazite::CommandRegistry registry;
+    session.addCommands (registry, host);
+    session.setAutoSave (false);
+    session.openProject (open);
+    REQUIRE (session.getProject() != nullptr);
+    auto asked = 0;
+    session.askToSave =
+        [&asked] (const juce::File&, const juce::String&, std::function<void (phazite::ProjectSession::UnsavedChanges)> answer)
+    {
+        ++asked;
+        answer (phazite::ProjectSession::UnsavedChanges::discard);
+    };
+
+    // Cancelled while it unpacks: the open project as it was, no question asked, no staging folder left.
+    session.importDawProject (file);
+    REQUIRE (host.render != nullptr); // the unpack's window
+    host.render = nullptr;            // its Cancel
+    dispatchPendingMessages();
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == open);
+    CHECK (asked == 0);
+    CHECK (unsaved.findChildFiles (juce::File::findDirectories, false).isEmpty());
+
+    // To its end: unpacked first, then the open project closes, then the new one is made with the audio.
+    session.importDawProject (file);
+    REQUIRE (
+        dispatchMessagesUntil ([&session, &open] { return session.getProject() != nullptr && session.getProject()->getFile() != open; }));
+    CHECK (session.isUntitled());
+    CHECK (session.getProject()->getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav").size() == 1);
+}
+
+TEST_CASE ("A staging folder an import left as Phazite crashed is deleted at the next start, and one in use is left alone")
+{
+    // The third review of known bug 126: the import's staging folder sits beside the new projects', locked as theirs are.
+    TemporaryFolder folder;
+    const auto unsaved = folder.folder.getChildFile ("Unsaved");
+    REQUIRE (unsaved.createDirectory());
+
+    // In use: locked, left alone by another Phazite starting.
+    auto staging = phazite::UnsavedFolder::create (unsaved);
+    REQUIRE (staging != nullptr);
+    REQUIRE (staging->getFolder().getChildFile ("Loop.wav").replaceWithText ("unpacking"));
+    CHECK (phazite::UnsavedFolder::findProjectToRestore (unsaved) == juce::File());
+    CHECK (staging->getFolder().isDirectory());
+
+    // Left by a crash (its lock gone with the process): it holds no project, so it is deleted, never offered back.
+    const auto left = unsaved.getChildFile ("Left by a crash");
+    REQUIRE (left.createDirectory());
+    REQUIRE (left.getChildFile ("Loop.wav").replaceWithText ("half unpacked"));
+    CHECK (phazite::UnsavedFolder::findProjectToRestore (unsaved) == juce::File());
+    CHECK_FALSE (left.exists());
+}
+
+TEST_CASE ("An archive's entry named as Windows names a device is unpacked under another name, on every system")
+{
+    // The third review of known bug 126: an entry "CON.wav" passed createLegalFileName(), and no file of it can be made on
+    // Windows; a project goes from one system to another, so it is renamed everywhere.
+    CHECK (phazite::isReservedFileName ("CON"));
+    CHECK (phazite::isReservedFileName ("nul.wav"));
+    CHECK (phazite::isReservedFileName ("COM1 .flac"));
+    CHECK (phazite::isReservedFileName (juce::String::fromUTF8 ("LPT\xc2\xb9")));
+    CHECK_FALSE (phazite::isReservedFileName ("Console"));
+    CHECK_FALSE (phazite::isReservedFileName ("COM10"));
+    CHECK (phazite::makeUsableFileName ("CON") == "CON_");
+    CHECK (phazite::makeUsableFileName ("con.backup") == "con_.backup");
+
+    TemporaryFolder folder;
+    const auto archive = folder.folder.getChildFile ("Devices.dawproject");
+
+    {
+        juce::ZipFile::Builder builder;
+        const juce::MemoryBlock sound ("riff", 4);
+
+        for (const auto* name : { "audio/CON.wav", "audio/nul.flac", "audio/Kick.wav" })
+            builder.addEntry (std::make_unique<juce::MemoryInputStream> (sound, true), 0, name, juce::Time (2026, 0, 1, 0, 0));
+
+        juce::FileOutputStream out (archive);
+        REQUIRE (builder.writeToStream (out, nullptr));
+    }
+
+    phazite::DawProjectFile in;
+    in.file = archive;
+    in.project = juce::parseXML (R"(<Project><Audio><File path="audio/CON.wav"/></Audio><Audio><File path="audio/nul.flac"/></Audio>)"
+                                 R"(<Audio><File path="audio/Kick.wav"/></Audio></Project>)");
+    REQUIRE (in.project != nullptr);
+    const auto audio = folder.folder.getChildFile ("Audio");
+    const auto unpacked = phazite::unpackDawProjectAudio (in, audio);
+    REQUIRE (unpacked.files.size() == 3);
+    CHECK (unpacked.files.at ("audio/CON.wav").getFileName() == "CON_.wav");
+    CHECK (unpacked.files.at ("audio/nul.flac").getFileName() == "nul_.flac");
+    CHECK (unpacked.files.at ("audio/Kick.wav").getFileName() == "Kick.wav");
 }

@@ -123,3 +123,33 @@ juce::File makeFileOfFullPath (const juce::String& path)
     return juce::File (path);
 }
 } // namespace phazite
+
+namespace phazite
+{
+bool isReservedFileName (const juce::String& name)
+{
+    const auto stem = name.upToFirstOccurrenceOf (".", false, false).trimEnd().toUpperCase();
+
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
+        return true;
+
+    if (stem.length() != 4 || ! (stem.startsWith ("COM") || stem.startsWith ("LPT")))
+        return false;
+
+    const auto last = stem[3];
+    return juce::CharacterFunctions::isDigit (last) || last == (juce::juce_wchar) 0x00b9 || last == (juce::juce_wchar) 0x00b2
+           || last == (juce::juce_wchar) 0x00b3;
+}
+
+juce::String makeUsableFileName (const juce::String& name)
+{
+    const auto legal = juce::File::createLegalFileName (name);
+
+    if (! isReservedFileName (legal))
+        return legal;
+
+    // After what comes before its first dot, which is what Windows looks at.
+    const auto dot = legal.indexOfChar ('.');
+    return dot < 0 ? legal.trimEnd() + "_" : legal.substring (0, dot).trimEnd() + "_" + legal.substring (dot);
+}
+} // namespace phazite

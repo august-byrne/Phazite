@@ -24,6 +24,11 @@ public:
     // has one (getGoOnName()), does what it does first; Escape is Cancel there.
     void cancel();
     void goOn();
+
+    // While it shows a hold (TrackRender::isHold()), what runs the keys that run while a mouse button is down: the window's
+    // (KeyDispatcher::keyPressedWhileHeld()).
+    std::function<bool (const juce::KeyPress&)> onHeldKey;
+    std::function<void (bool isKeyDown)> onHeldKeyState; // and the keys' going down and up, so that a key let go is pressed again
     juce::TextButton& getGoOnButton() noexcept { return goOnButton; }
 
     // Told once its Cancel has closed it (the next render waiting its turn shows then).
@@ -47,6 +52,7 @@ private:
     juce::ProgressBar progressBar { progress };
     juce::TextButton cancelButton { "Cancel" }, goOnButton;
     bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool isKeyDown) override;
     juce::String shownWait; // what the bar says of a plug-in the render waits for (showWait())
 
     void timerCallback() override;

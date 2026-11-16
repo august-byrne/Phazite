@@ -278,6 +278,11 @@ public:
 
         session->setSessionEnding (ending);
 
+        // A song being read from the versions for a command is let go, the song and the branch as they were, as a quit lets
+        // it go.
+        if (ending)
+            session->cancelWork();
+
         if (ending && ! session->isClosing() && ! isDialogShowing())
             systemRequestedQuit();
     }
@@ -292,6 +297,11 @@ public:
 
     void systemRequestedQuit() override
     {
+        // A song being read from the versions for a command is let go first, the song and the branch as they were (its
+        // progress window is no dialog to finish), and the close goes on to its question.
+        if (session != nullptr)
+            session->cancelWork();
+
         if (isDialogShowing())
         {
             juce::Component::getCurrentlyModalComponent()->toFront (true);

@@ -79,6 +79,10 @@ int countVersionsBeingFinished();
 juce::StringArray getProjectsBeingFinished();
 void waitForVersionsFinished();
 
+// Runs an action (a project's folder deleted: an unsaved one that closed) once no history that went writes into that folder
+// or one inside it any more: at once if none does, else as the last write ends. Message thread.
+void whenNoVersionsWriteInto (const juce::File& folder, std::function<void()> action);
+
 // Every branch's versions, newest first; the branches, in the order they were made; the current one, which the project
 // file is (none before the first version); and its last version.
 std::vector<VersionInfo> getVersions (const ProjectContext&);
@@ -147,6 +151,11 @@ juce::int64 getVersionsSize (const ProjectContext&);
 //==============================================================================
 // Going back (docs/design/versions.md: Going back): each a named undo step, which what plays follows as it follows an undo. What
 // isn't counted (view state, how the song plays) stays as it is now, and the history keeps every version.
+//
+// The commands that read a whole song (Restore from This Commit, a line's Restore, Compare with Working Tree, Restore from
+// Local History, Undo Last Commit, Reset Branch to Last Readable Commit, and the switches and the merge's list below) read it
+// on the history's thread and change the song once it is in, the window held meanwhile (ProjectContext::holdForWork();
+// known bug 126): true for one started (or done at once), false for one that can't start. One at a time.
 
 // Bring Back This Version: the song made what it was then ("Bring Back "Verse 2""), as much of it as its pieces hold whole:
 // what a damaged piece held stays as it is now (not there, for what the song hasn't now), and getRestoreProblem() says what.
@@ -157,7 +166,7 @@ bool bringBackVersion (ProjectContext&, const juce::String& versionID);
 // compares the song with another (compareWithVersion(); none for the last version again), what differs from that one. And
 // one of its lines taken back from that version: Put Back from the last version ("Put Back Bass"), Take from another ("Take
 // Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone.
-void compareWithVersion (ProjectContext&, const juce::String& versionID);
+bool compareWithVersion (ProjectContext&, const juce::String& versionID);
 juce::String getComparedVersion (const ProjectContext&);
 std::vector<VersionChange> getListedChanges (const ProjectContext&);
 bool takeBack (ProjectContext&, const VersionChange&);
@@ -228,7 +237,8 @@ bool newBranch (ProjectContext&, const juce::String& fromVersion, const SaveProj
 // changes, the branch the song is on keeping its name.
 juce::String newBranchNamed (ProjectContext&, const juce::String& name);
 
-bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProjectThen&);
+// Started, it reads on the history's thread (above, Going back), and tells done once it is over whether it switched.
+bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProjectThen&, std::function<void (bool switched)> done = {});
 
 // Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a
 // render has its plug-ins (an export, a freeze, a bounce), while a version is being saved or the versions are read.
@@ -423,6 +433,11 @@ bool resetToReadable (ProjectContext&);
 // What the last Restore from This Commit couldn't take from a damaged commit, which stayed as it is, as the Versions view
 // says it ("Bass: a clip"): none while it took everything, and why when it could take nothing.
 juce::String getRestoreProblem (const ProjectContext&);
+
+// Why the last command that read the versions first (a switch, a checkout, a merge's list, a restore: above) did nothing,
+// as the Versions view says it: a song that can't be read, the song recording, a render started, the branch moved on, the
+// folder that can't be written to. None while it did, or was cancelled; until the next one starts.
+juce::String getReadingProblem (const ProjectContext&);
 
 // The current branch's lines that went their own way on another computer (docs/archive/format-audit.md, R8): their last
 // versions, which Merge into the current branch joins again; and as the Versions view says it. None while the computers

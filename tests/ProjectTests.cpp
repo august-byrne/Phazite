@@ -120,6 +120,17 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
     CHECK (error.isNotEmpty());
 }
 
+TEST_CASE ("A project named as Windows reserves a name, NUL, makes a folder and a file Windows can make")
+{
+    // Windows makes no file or folder named NUL (or NUL.phazite): it is a device's name there.
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "NUL");
+
+    CHECK (project->getFile() == temp.folder.getChildFile ("NUL_").getChildFile ("NUL_.phazite"));
+    CHECK (project->getFile().existsAsFile());
+    CHECK (project->getAudioFolder().isDirectory());
+}
+
 TEST_CASE ("A new project whose first save fails leaves no folder behind, and its name can be tried again")
 {
     TemporaryFolder temp;

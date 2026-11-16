@@ -60,7 +60,7 @@ VersionHistory* getVersionHistory (const ProjectContext&);
 // here. Nothing of the previous song stays selected, and the clipboard is empty. Then tells the listeners.
 void setSong (ProjectContext&, Song*);
 
-// The open song made another branch's in place by apply (model/versions/internal/VersionHistory.h: switchTo()), which says
+// The open song made another branch's in place by apply (model/versions/internal/VersionHistory.h: finishSwitch()), which says
 // whether it was. Then what holds parts of it by their IDs starts again (nothing selected, no time range, no notes in the
 // editors, the parameter touched last forgotten), and its frozen tracks stay frozen only where their files hold what they
 // play (model/mixer/internal/Freeze.h: FreezeKeeper::keepThrough()), while the views go on showing the same song, which

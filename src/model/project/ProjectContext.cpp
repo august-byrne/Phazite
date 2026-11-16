@@ -403,6 +403,53 @@ void ProjectContext::withPluginStates (std::function<void (bool)> then)
         then (true);
 }
 
+std::unique_ptr<ProjectContext::WorkHold> ProjectContext::holdForWork (const juce::String& title, Cancel cancel, Progress progress)
+{
+    // Counted while it lives, the input held (the input holder's, the one set as it goes), and the app's wait in it.
+    struct Counted final : WorkHold
+    {
+        Counted (std::shared_ptr<Held> h, std::unique_ptr<WorkHold> w)
+            : held (std::move (h)),
+              wait (std::move (w))
+        {
+            ++held->count;
+
+            if (held->holder != nullptr)
+                held->holder->holdInput();
+        }
+
+        ~Counted() override
+        {
+            wait = nullptr;
+            --held->count;
+
+            if (held->holder != nullptr)
+                held->holder->releaseInput();
+        }
+
+        std::shared_ptr<Held> held;
+        std::unique_ptr<WorkHold> wait;
+    };
+
+    return std::make_unique<Counted> (held, workHolder != nullptr ? workHolder (title, std::move (cancel), std::move (progress)) : nullptr);
+}
+
+void ProjectContext::setInputHolder (InputHolder* holder)
+{
+    // The holds alive taken over by the new holder: let go of on the old one, held on the new.
+    for (int i = 0; i < held->count; ++i)
+    {
+        if (held->holder != nullptr)
+            held->holder->releaseInput();
+
+        if (holder != nullptr)
+            holder->holdInput();
+    }
+
+    held->holder = holder;
+    getAudioWork (*this).setInputHolder (holder); // the audio files' work holds the same one
+}
+
 int ProjectContext::getProjectNumber() const noexcept
 {
     return impl->projectNumber;

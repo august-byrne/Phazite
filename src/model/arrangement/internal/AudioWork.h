@@ -31,19 +31,10 @@
 
 namespace phazite
 {
+class InputHolder; // ProjectContext.h
 class ProjectContext;
 class Song;
 class TrackRenderHost;
-
-// What holds the window's input while work runs: the app's (src/app/InputHold.h); none in most tests. Each holdInput() is
-// matched by a releaseInput().
-class InputHolder
-{
-public:
-    virtual ~InputHolder() = default;
-    virtual void holdInput() = 0;
-    virtual void releaseInput() = 0;
-};
 
 class AudioWork final : private juce::Timer
 {
@@ -99,6 +90,13 @@ public:
     // The open song, as the project context sets it (setSong()): another gives up every job of the one before, at once,
     // waiting for none of their reads (abandon()); the user is told.
     void songChanged (Song*);
+
+    // Every job given up at once, as songChanged() gives them up, as Phazite quits or the computer's session ends
+    // (ProjectSession::cancelWork()): nothing of theirs changes the song, what they made goes, and the user is told why
+    // (none: nothing said). And the first cancelled, as its progress window's Cancel cancels it: Escape before that window
+    // shows (ProjectSession::cancelHeldWork()); false for none. Message thread.
+    void giveUpAll (const juce::String& why);
+    bool cancelFirst();
 
     // The work for a song, while it is the open song of a context: for what holds a song alone (a device's handle).
     static AudioWork* find (const Song&);

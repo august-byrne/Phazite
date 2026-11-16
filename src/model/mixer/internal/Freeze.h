@@ -64,7 +64,7 @@ public:
     explicit FreezeKeeper (Song&);
     ~FreezeKeeper() override;
 
-    // The song made another branch's in place by apply (model/versions/internal/VersionHistory.h: switchTo()), which this
+    // The song made another branch's in place by apply (model/versions/internal/VersionHistory.h: finishSwitch()), which this
     // doesn't watch, and which says whether it was. A track frozen there stays frozen only if its file holds what it plays
     // there, as far as this knows: what the file held as the track was last frozen (on any branch: a track's file is its
     // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
@@ -100,6 +100,7 @@ struct TrackRender::Impl
     virtual std::optional<RenderWait> getWait() const { return {}; } // a render's (OfflineRender::findWait())
     virtual juce::String getGoOnName() const { return {}; }          // a second way out of its window but Cancel, if any
     virtual void goOn() {}
-    virtual void cancel() {} // most cancel as they go (TrackRender::cancel())
+    virtual void cancel() {}                      // most cancel as they go (TrackRender::cancel())
+    virtual bool isHold() const { return false; } // a wait the window holds its input for (TrackRender::isHold())
 };
 } // namespace phazite

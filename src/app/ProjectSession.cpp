@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ProjectSession.h"
+#include "model/arrangement/internal/AudioWork.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/FreezeModel.h"
@@ -74,6 +76,7 @@ namespace
         float getProgress() const override { return -1.0f; } // no end known: JUCE's bar shows it busy
         juce::String getTitle() const override { return wait->title; }
         juce::String getGoOnName() const override { return wait->forCommand ? juce::String ("Go On Without Them") : juce::String(); }
+        bool isHold() const override { return wait->forCommand; }
 
         void goOn() override
         {
@@ -105,6 +108,64 @@ namespace
 
         std::shared_ptr<StatesWait> wait;
     };
+
+    // A wait for the project's own work before a command changes the song (ProjectContext::holdForWork(): a branch's song
+    // read): whether it is over, whether the progress window shows it, with what title, and what its Cancel does.
+    struct WorkWait
+    {
+        bool over = false, shown = false;
+        juce::String title;
+        std::function<void (const juce::String& why)> cancel; // why: none for the user's Cancel
+        std::function<float()> progress;                      // from 0 to 1, below 0 while it isn't known; none for none
+    };
+
+    // That wait as the progress window shows it after a second: its Cancel (the window going while the wait isn't over)
+    // cancels the work, which then changes nothing.
+    struct WaitForWork final : TrackRender::Impl
+    {
+        explicit WaitForWork (std::shared_ptr<WorkWait> shownWait)
+            : wait (std::move (shownWait))
+        {
+            wait->shown = true;
+        }
+
+        ~WaitForWork() override
+        {
+            wait->shown = false;
+
+            if (! wait->over && wait->cancel != nullptr)
+                wait->cancel ({}); // which lets go of the hold below, the window going already
+        }
+
+        float getProgress() const override { return wait->progress != nullptr ? wait->progress() : -1.0f; }
+        juce::String getTitle() const override { return wait->title; }
+        bool isHold() const override { return true; }
+
+        std::shared_ptr<WorkWait> wait;
+    };
+
+    // The wait itself, while the work holds the window (its input is the session's one hold, InputHold.h, which the context
+    // holds: ProjectContext::holdForWork()): its progress window, once handed to the render queue, goes as it does, shown or
+    // still waiting its turn.
+    struct WorkShown final : ProjectContext::WorkHold
+    {
+        WorkShown (TrackRenderHost* host, std::shared_ptr<WorkWait> w)
+            : renders (host),
+              wait (std::move (w))
+        {
+        }
+
+        ~WorkShown() override
+        {
+            wait->over = true;
+
+            if (wait->shown && renders != nullptr)
+                renders->renderFinished (wait->title, juce::Result::ok()); // which deletes its window, or takes it out of the queue
+        }
+
+        TrackRenderHost* renders;
+        std::shared_ptr<WorkWait> wait;
+    };
 } // namespace
 
 ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
@@ -122,6 +183,10 @@ ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentPro
 
     // What reads the plug-ins' states gets them first, the session's way (gatePluginStates()).
     context.setPluginStatesGate ([this] (std::function<void (bool)> run) { gatePluginStates (std::move (run)); });
+
+    // And what waits for the project's own work holds the window as that does (holdForWork()).
+    context.setWorkHolder ([this] (const juce::String& title, ProjectContext::Cancel cancel, ProjectContext::Progress progress)
+                           { return holdForWork (title, std::move (cancel), std::move (progress)); });
 }
 
 ProjectSession::~ProjectSession()
@@ -1252,6 +1317,54 @@ bool ProjectSession::isHoldingInput (const juce::Component* modal) const noexcep
     return InputHold::isHold (modal); // whichever work holds it: a wait for the plug-ins' states, or audio files' work
 }
 
+void ProjectSession::cancelWork()
+{
+    // Each read cancelled, the song and the branch as they were, its hold let go (which lets go of its window).
+    for (const auto& w : std::exchange (workWaits, {}))
+        if (const auto wait = std::static_pointer_cast<WorkWait> (w.lock()); wait != nullptr && ! wait->over && wait->cancel != nullptr)
+            wait->cancel ("Stopped, as Phazite was closing: nothing was changed.");
+
+    // And an audio file's work (an import, Normalize), its reads not waited for (AudioWork.h): every kind of work that holds
+    // the window, stopped by this one call, so that the close goes on.
+    getAudioWork (context).giveUpAll ("Stopped, as Phazite was closing: nothing was changed.");
+}
+
+bool ProjectSession::cancelHeldWork()
+{
+    // Escape while the window holds, before a progress window shows (which takes its own Escape): the newest work that
+    // holds it cancelled, as its window's Cancel would; a versions read's, else an audio file's.
+    for (auto w = workWaits.rbegin(); w != workWaits.rend(); ++w)
+        if (const auto wait = std::static_pointer_cast<WorkWait> (w->lock()); wait != nullptr && ! wait->over && wait->cancel != nullptr)
+        {
+            wait->cancel ({});
+            return true;
+        }
+
+    return getAudioWork (context).cancelFirst();
+}
+
+std::unique_ptr<ProjectContext::WorkHold> ProjectSession::holdForWork (const juce::String& title, ProjectContext::Cancel cancel,
+                                                                       ProjectContext::Progress progress)
+{
+    // As a command's wait for the plug-ins' states holds it (gatePluginStates()): the window held at once, and the progress
+    // window shown once a second has gone, unless the work is over by then.
+    auto wait = std::make_shared<WorkWait>();
+    wait->title = title;
+    wait->cancel = std::move (cancel);
+    wait->progress = std::move (progress);
+    auto hold = std::make_unique<WorkShown> (renders, wait);
+    std::erase_if (workWaits, [] (const std::weak_ptr<void>& w) { return w.expired(); });
+    workWaits.push_back (wait);
+
+    juce::Timer::callAfterDelay (workShownAfter,
+                                 [this, session = std::weak_ptr<bool> (alive), wait]
+                                 {
+                                     if (! session.expired() && ! wait->over && renders != nullptr)
+                                         renders->runRender (std::make_unique<TrackRender> (std::make_unique<WaitForWork> (wait)));
+                                 });
+    return hold;
+}
+
 void ProjectSession::afterPluginStatesGate (std::function<void()> then)
 {
     if (gatesWaiting > 0)
@@ -1267,6 +1380,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
     // A command that reads the plug-ins' states runs once they are in, as everything does that reads them (the context's
     // gate: gatePluginStates()).
     registry.setPluginStatesGate ([this] (std::function<void (bool)> run) { context.withPluginStates (std::move (run)); });
+    registry.setBusyCheck ([this] { return context.isHoldingForWork(); });
 
     // Help > Example Songs, each as a new untitled project.
     for (const auto& song : getExampleSongs())
@@ -1401,36 +1515,165 @@ void ProjectSession::importDawProject (const juce::File& file)
                 if (! go || session.expired())
                     return;
 
-                juce::StringArray said;
+                // Said once it is over (the commit read, the branch made and switched to, the window held meanwhile), or not at
+                // all if it was cancelled.
+                importDawProjectAsBranch (
+                    context, read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); },
+                    [this, session, file] (bool imported, const juce::StringArray& said)
+                    {
+                        if (session.expired())
+                            return;
 
-                if (importDawProjectAsBranch (
-                        context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
-                    showNotice ("Imported " + file.getFileName(),
-                                "It came back as a new branch from the commit it was exported from."
-                                    + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
-                else
-                    showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
+                        if (imported)
+                            showNotice ("Imported " + file.getFileName(),
+                                        "It came back as a new branch from the commit it was exported from."
+                                            + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
+                        else if (said.joinIntoString ({}).isNotEmpty())
+                            showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
+                    });
             });
 
         return;
     }
 
-    // Any other: a new project of its own, in place of the open one, whose changes are saved first if the user wants.
-    closeThen (
-        [this, file, read] (bool closed)
+    // Any other: a new project of its own, in place of the open one: its audio unpacked first, on a thread of its own, in the
+    // progress window, whose Cancel leaves the open project as it was (found in review of known bug 126: the message thread
+    // unpacked it, for seconds with a large file); then the open one closed, its changes saved first if the user wants.
+    unpackThenImport (file, read);
+}
+
+namespace
+{
+    // An import's audio unpacked into a folder of its own beside the new projects, on a thread of its own, as the progress
+    // window shows it; its Cancel (the window going before it is done) stops it, and what was unpacked is taken away.
+    struct UnpackForImport final : TrackRender::Impl
+    {
+        struct State
         {
-            if (! closed)
-                return;
+            std::atomic<float> progress { 0.0f };
+            std::atomic<bool> stop { false };
+            bool over = false;
+        };
 
-            // What it couldn't bring in, told by track (known bug 91: it was said nowhere).
-            auto said = std::make_shared<juce::StringArray>();
+        UnpackForImport (juce::String t, std::shared_ptr<State> s, std::shared_ptr<UnsavedFolder> staged)
+            : title (std::move (t)),
+              state (std::move (s)),
+              staging (std::move (staged))
+        {
+        }
 
-            if (const auto result = createUntitled (file.getFileNameWithoutExtension(),
-                                                    [read, said] (Song& song) { *said = takeDawProject (song, *read); });
-                result.failed())
-                showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
-            else if (! said->isEmpty())
-                showNotice ("Imported " + file.getFileName(), "Left out: " + said->joinIntoString ("; ") + ".");
+        ~UnpackForImport() override
+        {
+            state->stop = true;
+            jobs.removeAll (true); // then the staging folder goes with the last of what holds it: cancelled, nothing left
+        }
+
+        float getProgress() const override { return state->progress.load(); }
+        juce::String getTitle() const override { return title; }
+
+        juce::String title;
+        std::shared_ptr<State> state;
+        std::shared_ptr<UnsavedFolder> staging; // locked while it lives, as a new project's folder is, and deleted as it goes
+        BackgroundJobs jobs { "Phazite import", 1, juce::Thread::Priority::normal };
+    };
+} // namespace
+
+void ProjectSession::unpackThenImport (const juce::File& file, std::shared_ptr<DawProjectFile> read)
+{
+    // A folder of its own beside the new projects' (on their drive, so that its files move into the project by a rename),
+    // locked as theirs are, so that another Phazite starting leaves it alone; one a crash left, which holds no project, is
+    // deleted at the next start (UnsavedFolder::findProjectToRestore()).
+    const std::shared_ptr<UnsavedFolder> staging = UnsavedFolder::create (unsavedFolder);
+
+    if (staging == nullptr)
+    {
+        showError ("Phazite couldn't import " + file.getFileName(),
+                   "It couldn't make a folder in " + unsavedFolder.getFullPathName() + ".");
+        return;
+    }
+
+    // Without a window to show it (a session of the tests' without one), unpacked here, at once.
+    if (renders == nullptr)
+    {
+        closeThenImport (file, read, unpackDawProjectAudio (*read, staging->getFolder()), staging);
+        return;
+    }
+
+    const auto title = "Unpacking the audio of " + file.getFileName();
+    const auto state = std::make_shared<UnpackForImport::State>();
+    auto unpacking = std::make_unique<UnpackForImport> (title, state, staging);
+    unpacking->jobs.add (
+        [this, session = std::weak_ptr<bool> (alive), state, staging, read, file, title] (const BackgroundJobs::ShouldStop& shouldStop)
+        {
+            auto audio = std::make_shared<UnpackedAudio> (unpackDawProjectAudio (
+                *read, staging->getFolder(), [&shouldStop, state] { return shouldStop() || state->stop.load(); },
+                [state] (float done) { state->progress = done; }));
+
+            juce::MessageManager::callAsync (
+                [this, session, state, staging, read, file, title, audio]
+                {
+                    if (session.expired() || state->stop.load())
+                        return;
+
+                    // The window goes (renderFinished() deletes it), what was unpacked kept: then into the new project.
+                    state->over = true;
+
+                    if (renders != nullptr)
+                        renders->renderFinished (title, juce::Result::ok());
+
+                    closeThenImport (file, read, *audio, staging);
+                });
         });
+
+    renders->runRender (std::make_unique<TrackRender> (std::move (unpacking)));
+}
+
+void ProjectSession::closeThenImport (const juce::File& file, std::shared_ptr<DawProjectFile> read, UnpackedAudio audio,
+                                      std::shared_ptr<UnsavedFolder> staging)
+{
+    // Unpacked: now the open project closes, asking whether to save its changes; left open, what was unpacked goes with the
+    // staging folder.
+    closeThen (
+        [this, file, read, audio, staging] (bool closed)
+        {
+            if (closed)
+                importUnpacked (file, read, audio, staging->getFolder());
+        });
+}
+
+void ProjectSession::importUnpacked (const juce::File& file, std::shared_ptr<DawProjectFile> read, UnpackedAudio audio,
+                                     const juce::File& staging)
+{
+    // What it couldn't bring in, told by track (known bug 91: it was said nowhere). The audio moved from where it was
+    // unpacked into the new project's Audio folder (a rename: the same drive), each by the name it has there.
+    auto said = std::make_shared<juce::StringArray>();
+    const auto result = createUntitled (file.getFileNameWithoutExtension(),
+                                        [read, said, &audio] (Song& song)
+                                        {
+                                            const auto folder = song.getFile().getSiblingFile ("Audio");
+                                            folder.createDirectory();
+                                            UnpackedAudio moved;
+
+                                            for (const auto& [path, unpacked] : audio.files)
+                                            {
+                                                const auto target = folder.getNonexistentChildFile (unpacked.getFileNameWithoutExtension(),
+                                                                                                    unpacked.getFileExtension(), false);
+
+                                                if (unpacked.moveFileTo (target))
+                                                {
+                                                    moved.files.emplace (path, target);
+                                                    moved.made.push_back (target);
+                                                }
+                                            }
+
+                                            *said = takeDawProject (song, *read, moved);
+                                            forgetUnusedAudio (moved, song.getState(), song.getFile());
+                                        });
+    juce::ignoreUnused (staging); // deleted with its folder's holder, by the caller
+
+    if (result.failed())
+        showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
+    else if (! said->isEmpty())
+        showNotice ("Imported " + file.getFileName(), "Left out: " + said->joinIntoString ("; ") + ".");
 }
 } // namespace phazite

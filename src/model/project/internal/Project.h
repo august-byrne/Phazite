@@ -50,7 +50,19 @@ inline constexpr double maxSongBeats = 1.0e6;
 // getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder
 // with "..", looked for by its name in the project's Audio folder (a full path of a computer's stays: Phazite writes one
 // where a file couldn't be copied in). No undo steps.
-void makeConsistent (Song&);
+// A song read in part (the versions' song of a commit some of whose pieces couldn't be read, with stand-ins for them:
+// model/versions/internal/SongPieces.h, joinSong()) keeps what names an ID it hasn't, which may be in what wasn't read (a
+// send to a return, a curve or a modulation of a device in a lost piece): the song it is taken into, which knows, removes
+// what names nothing there (model/versions/internal/ApplySong.h: removeBrokenReferences()). For any thread, on a song that
+// belongs to that thread alone and to no session: nothing here asks a plug-in's instance (a plug-in's curve is kept within
+// 0 to 1 from its element) nor anything else of the message thread's.
+enum class ReadAs
+{
+    whole,
+    inPart
+};
+
+void makeConsistent (Song&, ReadAs = ReadAs::whole);
 
 // The properties makeConsistent() takes as switches, by their element's type (Schema.h: "bool", or "true, or none"):
 // whether Phazite leaves one that is off out (none), as their setters do, rather than writing it false; and what one that

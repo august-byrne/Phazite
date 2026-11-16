@@ -292,6 +292,7 @@ TEST_CASE ("A commit selected in the graph is what Restore and Compare with Work
     CHECK (phazite::getCurrentName (*screen.registry.find ("version.bringBack")) == "Restore from \"One\"");
 
     REQUIRE (screen.registry.invoke ("version.takeFrom"));
+    screen.waitForVersions(); // the commit read on the history's thread first (known bug 126)
     CHECK (view.getChangesHeading() == "Compare with \"One\"");
     CHECK (view.getDoneButton().isShowing());
     CHECK (view.getNumChanges() == 1); // the track added since
@@ -822,6 +823,7 @@ TEST_CASE ("The branch picker merges another branch in, and deletes one, asking 
         phazite::test::dispatchPendingMessages();
     }
 
+    screen.waitForVersions(); // its songs read on the history's thread first (known bug 126)
     CHECK (view.getLines() == phazite::ui::VersionsView::Lines::merge);
     screen.click (view.getCancelButton());
     CHECK (view.getLines() == phazite::ui::VersionsView::Lines::changes);

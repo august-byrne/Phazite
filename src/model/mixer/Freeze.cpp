@@ -11,6 +11,7 @@
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -614,7 +615,7 @@ namespace
             : RenderOfTrack (c, s, t, "Bouncing " + getTrackName (s, t), std::move (callback)),
               name (getTrackName (s, t) + " (Bounce)")
         {
-            target = getRecordingsFolder (s).getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
+            target = getRecordingsFolder (s).getNonexistentChildFile (makeUsableFileName (name), ".wav", false);
             rendered = target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
             start (std::nullopt);
         }
@@ -749,7 +750,7 @@ namespace
                     continue;
 
                 // "Bass (Consolidated).wav", or the first "Bass (Consolidated) 2.wav"... that no file, nor another part, has.
-                const auto name = juce::File::createLegalFileName (getTrackName (*song, part.track) + " (Consolidated)");
+                const auto name = makeUsableFileName (getTrackName (*song, part.track) + " (Consolidated)");
                 auto target = folder.getChildFile (name + ".wav");
 
                 for (int number = 2; target.exists() || taken.contains (target.getFullPathName()); ++number)
@@ -918,6 +919,11 @@ juce::String TrackRender::getGoOnName() const
 void TrackRender::goOn()
 {
     impl->goOn();
+}
+
+bool TrackRender::isHold() const
+{
+    return impl->isHold();
 }
 
 float TrackRender::getProgress() const

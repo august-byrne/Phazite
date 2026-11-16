@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
+#include "model/base/WholeFile.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/notes/NoteValues.h"
 #include "ui/components/ValueText.h"
@@ -1808,8 +1809,7 @@ void askWhereToSavePreset (std::unique_ptr<juce::FileChooser>& chooser, const ju
                            std::function<void (const juce::File&)> save)
 {
     folder.createDirectory();
-    chooser = std::make_unique<juce::FileChooser> ("Save a Preset",
-                                                   folder.getChildFile (juce::File::createLegalFileName (name) + presetExtension),
+    chooser = std::make_unique<juce::FileChooser> ("Save a Preset", folder.getChildFile (makeUsableFileName (name) + presetExtension),
                                                    "*" + juce::String (presetExtension));
 
     chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
@@ -1838,7 +1838,7 @@ void Browser::saveTrackPreset (TrackID track)
 
                 const auto folder = safeThis->library.getPresetsFolder().getChildFile (trackPresetsFolder);
                 folder.createDirectory();
-                const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), presetExtension, true);
+                const auto file = folder.getNonexistentChildFile (makeUsableFileName (name), presetExtension, true);
 
                 if (phazite::saveTrackPreset (safeThis->projectContext, track, file))
                     safeThis->presetSaved (file);

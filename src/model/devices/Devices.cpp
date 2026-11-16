@@ -21,6 +21,8 @@
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 
+#include <deque>
+#include <mutex>
 #include <vector>
 
 namespace phazite
@@ -76,9 +78,20 @@ namespace
         { &devices::StereoExpander::info, make<devices::StereoExpander> },
     };
 
-    std::vector<OwnDevice>& getRegistered() // message thread
+    // The types tests register (registerDeviceType()), which the message thread adds to while another thread may look for one:
+    // the history's, whose checks of a song read from the versions ask a device's parameters (model/project/Project.cpp:
+    // makeConsistent()), even one that outlived an earlier test case. Under a lock, which only a look past Phazite's own
+    // devices takes, never on the audio thread (only the model looks); in a deque, whose elements stay where they are as
+    // more come.
+    struct Registered
     {
-        static std::vector<OwnDevice> registered;
+        std::mutex lock;
+        std::deque<OwnDevice> devices;
+    };
+
+    Registered& getRegistered()
+    {
+        static Registered registered;
         return registered;
     }
 
@@ -88,7 +101,10 @@ namespace
             if (device.info->typeID == typeID)
                 return &device;
 
-        for (const auto& device : getRegistered())
+        auto& registered = getRegistered();
+        const std::scoped_lock held (registered.lock);
+
+        for (const auto& device : registered.devices)
             if (device.info->typeID == typeID)
                 return &device;
 
@@ -110,7 +126,11 @@ std::unique_ptr<devices::Processor> createOwnDevice (std::string_view typeID)
 
 void registerDeviceType (const devices::DeviceInfo& info, DeviceFactory create)
 {
-    if (findOwn (info.typeID) == nullptr)
-        getRegistered().push_back ({ &info, create });
+    if (findOwn (info.typeID) != nullptr)
+        return;
+
+    auto& registered = getRegistered();
+    const std::scoped_lock held (registered.lock);
+    registered.devices.push_back ({ &info, create });
 }
 } // namespace phazite

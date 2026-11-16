@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The window's one hold on its input (the model's InputHolder, model/arrangement/internal/AudioWork.h), for whatever must
+// The window's one hold on its input (the model's InputHolder, model/project/ProjectContext.h), for whatever must
 // keep the user from changing the project while it waits: a command waiting for the plug-ins' states (ProjectSession's
 // gate), the work of a command that reads much of an audio file, and whatever else takes it (a ProjectContext's hold for
 // work to come: each holdInput() is matched by a releaseInput()).
@@ -27,14 +27,15 @@
 // of the computer keyboard, a shortcut ignored at its next press); and the keyboard's focus goes back where it was, if
 // nothing else took it meanwhile.
 //
-// For work of the model's own that holds it (a ProjectContext's hold for work to come): the model reaches it as an
-// InputHolder, as audio work does (AudioWork::setInputHolder(), which MainWindow gives this); its progress window goes
-// through MainWindow's render queue (TrackRenderHost::runRender()), so that two never show at once, one waiting for the
-// other's to end; and a quit waits for no audio work: closing the project gives up its jobs at once, their reads not waited
-// for (AudioWork::songChanged()), as a cancel of other work at a quit should.
+// For work of the model's own that holds it (a ProjectContext's hold for work to come, an audio file's work): the model
+// reaches it as an InputHolder through the context (ProjectContext::setInputHolder(), which MainWindow gives this and which
+// hands it to the audio work too); their progress windows go through MainWindow's render queue
+// (TrackRenderHost::runRender()), so that two never show at once, one waiting for the other's to end; Escape before a
+// progress window shows cancels the newest work that holds it (ProjectSession::cancelHeldWork(), from setWindow()'s
+// passKey); and a quit cancels every kind at once (ProjectSession::cancelWork()), waiting for none of their reads.
 #pragma once
 
-#include "model/arrangement/internal/AudioWork.h"
+#include "model/project/ProjectContext.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 

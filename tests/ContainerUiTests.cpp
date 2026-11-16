@@ -4,6 +4,7 @@
 // line: DevicesViewTests.cpp), presets saved by commands or by a track dragged into the browser, and presets dropped on
 // a mixer channel.
 #include "UiTestHelpers.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -180,6 +181,12 @@ TEST_CASE ("Saving presets: the commands for the selected device and track, and 
 
             return false;
         }));
+
+    // A track named as Windows reserves a name, COM1 (a device's name there, whatever follows the dot): its preset in a file
+    // Windows can make.
+    phazite::renameTrack (song.context, song.track(), "COM1");
+    browser.itemDropped (drag);
+    CHECK (tracks.getChildFile (juce::String ("COM1_") + phazite::presetExtension).existsAsFile());
 }
 
 TEST_CASE ("A preset dropped on a mixer channel goes onto it, and a track's makes a track after it")

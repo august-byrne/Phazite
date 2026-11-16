@@ -44,6 +44,8 @@ struct AudioWork::Shown final : TrackRender::Impl
             state->cancelled = true;
     }
 
+    bool isHold() const override { return true; } // Escape is its Cancel, as a versions read's is
+
     const std::shared_ptr<State> state;
 };
 
@@ -199,6 +201,14 @@ void AudioWork::songChanged (Song* newSong)
 
     // Every job of the project before given up at once, none waited for (a read may be stuck in the system for ever):
     // nothing of theirs changes the song, and what they made goes.
+    giveUpAll (newSong != nullptr ? juce::String ("Another project was opened before it was done, so nothing was changed.")
+                                  : juce::String());
+}
+
+void AudioWork::giveUpAll (const juce::String& why)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
     if (jobs.empty())
         return;
 
@@ -217,9 +227,18 @@ void AudioWork::songChanged (Song* newSong)
 
     hold (false);
 
-    if (newSong != nullptr)
-        reportProblem (context, stopped.front().state->title + " stopped",
-                       "Another project was opened before it was done, so nothing was changed.");
+    if (why.isNotEmpty())
+        reportProblem (context, stopped.front().state->title + " stopped", why);
+}
+
+bool AudioWork::cancelFirst()
+{
+    // As its progress window's Cancel cancels it (Shown::cancel()): given up at the next tick.
+    if (jobs.empty() || jobs.front().state->over)
+        return false;
+
+    jobs.front().state->cancelled = true;
+    return true;
 }
 
 void AudioWork::giveUp (Entry& entry)

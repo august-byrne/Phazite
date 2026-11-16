@@ -11,6 +11,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
@@ -26,7 +27,9 @@
 #include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
+#include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 
 namespace
 {
@@ -69,7 +72,7 @@ TEST_CASE ("New Branch from Now goes on with the song and its changes on a branc
 {
     Branches b;
     b.s.setVolume (b.bass, -6.0f);
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
 
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-6.0f));
@@ -81,20 +84,21 @@ TEST_CASE ("New Branch from Now goes on with the song and its changes on a branc
     CHECK (branches[0].colour != branches[1].colour);
 
     // The next one is idea-3.
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     CHECK (b.current() == "idea-3");
 }
 
 TEST_CASE ("Switching keeps each branch's song as it was left there, unsaved changes included, and starts the undo history again")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.bass, -6.0f);
     keepVersion (b.s.context, "Quieter bass");
     b.s.setVolume (b.bass, -9.0f); // not in a version
 
     // main as its last version had it.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (b.current() == "main");
     CHECK (b.volume (b.bass) == doctest::Approx (0.0f));
     CHECK_FALSE (phazite::canUndo (*phazite::findSong (b.s.context)));
@@ -103,14 +107,16 @@ TEST_CASE ("Switching keeps each branch's song as it was left there, unsaved cha
     b.s.addTrack ("Keys"); // left on main
 
     // idea-2 as it was left, its change since its version too.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
     CHECK (phazite::getChangesSinceLastVersion (b.s.context).size() == 1);
     CHECK (phazite::getTrackIDs (*phazite::findSong (b.s.context)).size() == 3);
 
     // And main with Keys.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (phazite::getTrackIDs (*phazite::findSong (b.s.context)).size() == 4);
 
     // It opens again on the branch it was on.
@@ -126,24 +132,26 @@ TEST_CASE ("New Branch from a version opens that version's song on the new branc
     keepVersion (b.s.context, "Second");
     b.s.setVolume (b.bass, -12.0f);
 
-    REQUIRE (phazite::newBranch (b.s.context, b.first, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, b.first, b.s.save); }));
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (0.0f));
     CHECK (phazite::getLastVersion (b.s.context)->id == b.first);
 
     // main kept its change since its last version.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (b.volume (b.bass) == doctest::Approx (-12.0f));
 }
 
 TEST_CASE ("A branch that changed other tracks merges with no clashes, and the version after follows both lines")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.drums, -9.0f);
     const auto drumsVersion = keepVersion (b.s.context, "Drums down");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     b.s.setVolume (b.bass, -6.0f);
     const auto bassVersion = keepVersion (b.s.context, "Bass down");
 
@@ -153,7 +161,7 @@ TEST_CASE ("A branch that changed other tracks merges with no clashes, and the v
     phazite::selectVersion (b.s.context, drumsVersion);
     REQUIRE (phazite::canMerge (b.s.context));
 
-    REQUIRE (phazite::startMerge (b.s.context, drumsVersion));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, drumsVersion); }));
     CHECK (phazite::describeMerge (b.s.context) == "Drums down");
     const auto lines = phazite::getMergeLines (b.s.context);
     REQUIRE (lines.size() == 1);
@@ -184,15 +192,16 @@ TEST_CASE ("A branch that changed other tracks merges with no clashes, and the v
 TEST_CASE ("A knob both branches changed is a clash, which switches between its three values, each an undo step")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.bass, -12.0f);
     const auto theirs = keepVersion (b.s.context, "Much quieter");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     b.s.setVolume (b.bass, -6.0f);
     keepVersion (b.s.context, "Quieter");
 
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     const auto lines = phazite::getMergeLines (b.s.context);
     REQUIRE (lines.size() == 1);
     CHECK (lines[0].clashes);
@@ -226,14 +235,15 @@ TEST_CASE ("A knob both branches changed is a clash, which switches between its 
 TEST_CASE ("No switching branches while the song records, which would lose the take, nor a branch from a version")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save)); // from Now: no switch
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); })); // from Now: no switch
     auto& song = *phazite::findSong (b.s.context);
     phazite::getSession (b.s.context)->setLiveTrack (b.bass); // live MIDI plays it: it can record
 
     phazite::startRecording (song);
     REQUIRE (phazite::isRecording (song));
     CHECK_FALSE (phazite::canSwitchBranch (b.s.context));
-    CHECK_FALSE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    CHECK_FALSE (phazite::test::finished (b.s.context,
+                                          [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (phazite::findSong (b.s.context) == &song); // the same song, still recording
     CHECK (phazite::isRecording (song));
     CHECK (b.current() == "idea-2");
@@ -241,7 +251,7 @@ TEST_CASE ("No switching branches while the song records, which would lose the t
     // Nor a branch from an old version, which switches to it; from Now still, which doesn't.
     phazite::selectVersion (b.s.context, b.first);
     CHECK_FALSE (phazite::canMakeBranch (b.s.context));
-    CHECK_FALSE (phazite::newBranch (b.s.context, b.first, b.s.save));
+    CHECK_FALSE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, b.first, b.s.save); }));
     CHECK (phazite::getBranches (b.s.context).size() == 2);
 
     phazite::stopRecording (song);
@@ -256,11 +266,11 @@ TEST_CASE ("The branch commands act on the version and the branch the Versions v
     phazite::addVersionCommands (commands, b.s.context, b.s.save, b.s.renders);
 
     phazite::selectVersion (b.s.context, {}); // Now
-    REQUIRE (commands.invoke ("version.newBranch"));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return commands.invoke ("version.newBranch"); }));
     CHECK (b.current() == "idea-2");
 
     phazite::selectBranch (b.s.context, findBranch (b.s.context, "main"));
-    REQUIRE (commands.invoke ("version.switchBranch"));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return commands.invoke ("version.switchBranch"); }));
     CHECK (b.current() == "main");
     CHECK (phazite::getCurrentName (*commands.find ("version.merge")) == "Merge into 'main'...");
     CHECK_FALSE (commands.invoke ("version.finishMerge")); // no merge's list shows
@@ -273,7 +283,7 @@ TEST_CASE ("A switch makes the song the other branch's in place: its plug-ins bo
     auto& song = *phazite::findSong (b.s.context);
     const auto effect = TestPlugin::add (song, b.bass);
     keepVersion (b.s.context, "With the effect");
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.drums, -9.0f);
     b.s.addTrack ("Keys"); // on idea-2 alone
 
@@ -284,7 +294,8 @@ TEST_CASE ("A switch makes the song the other branch's in place: its plug-ins bo
     playback.play (0.5);
     const auto before = phazite::getPlayheadBeat (song);
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (phazite::findSong (b.s.context) == &song); // the same song, now main's
     CHECK (b.volume (b.drums) == doctest::Approx (0.0f));
     CHECK (phazite::getTrackIDs (song).size() == 3);                                   // the first track, Bass and Drums
@@ -298,27 +309,30 @@ TEST_CASE ("A switch makes the song the other branch's in place: its plug-ins bo
 TEST_CASE ("Each branch keeps its own view state, and a merge waiting for its version stays with the branch it was made on")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     phazite::setCollapsed (b.s.context, b.drums, true);
     b.s.setVolume (b.bass, -12.0f);
     const auto theirs = keepVersion (b.s.context, "Much quieter");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK_FALSE (phazite::isCollapsed (*phazite::findSong (b.s.context), b.drums));
     b.s.setVolume (b.bass, -6.0f);
     keepVersion (b.s.context, "Quieter");
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     REQUIRE (phazite::getClashes (b.s.context).size() == 1);
 
     // On idea-2, its own view state, and no merge.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     CHECK (phazite::isCollapsed (*phazite::findSong (b.s.context), b.drums));
     CHECK_FALSE (phazite::isMerging (b.s.context));
     CHECK (phazite::getClashes (b.s.context).empty());
 
     // Back on main, the merge as it was, its clash to switch.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (phazite::isMerging (b.s.context));
     REQUIRE (phazite::getClashes (b.s.context).size() == 1);
     CHECK (b.volume (b.bass) == doctest::Approx (-6.0f));
@@ -344,42 +358,55 @@ TEST_CASE ("A frozen track stays frozen through a switch where its file holds wh
     keepVersion (b.s.context, "Frozen bass");
 
     // idea-2 plays the bass live, with a note more; main's bass is what its file holds still.
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.addNote (clip, 50, 1.0, 1.0);
     phazite::test::dispatchPendingMessages();
     REQUIRE_FALSE (phazite::isFrozen (b.s.context, b.bass));
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK (phazite::isFrozen (b.s.context, b.bass));
 
     // Frozen on idea-2 with that note, its file holds that: on main, the bass plays live.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     CHECK_FALSE (phazite::isFrozen (b.s.context, b.bass)); // as it was left there
     freeze();
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     CHECK_FALSE (phazite::isFrozen (b.s.context, b.bass));
 
     // And on idea-2 again, frozen, as its file holds.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     CHECK (phazite::isFrozen (b.s.context, b.bass));
 }
 
 TEST_CASE ("Delete Branch takes another branch away, with the commits only it had, which stay in the store to recover")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save)); // idea-2, nothing of its own yet
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::newBranch (b.s.context, {}, b.s.save); })); // idea-2, nothing of its own yet
     const auto empty = findBranch (b.s.context, "idea-2");
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save)); // idea-3, with a commit of its own and a change left on it
+    REQUIRE (phazite::test::finished (
+        b.s.context,
+        [&] { return phazite::newBranch (b.s.context, {}, b.s.save); })); // idea-3, with a commit of its own and a change left on it
     const auto idea = findBranch (b.s.context, "idea-3");
     b.s.setVolume (b.drums, -9.0f);
     keepVersion (b.s.context, "Quiet drums");
     b.s.setVolume (b.drums, -12.0f);
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
 
     // Not the branch the song is on; what goes with each, said before it goes.
     CHECK_FALSE (phazite::canDeleteBranch (b.s.context, findBranch (b.s.context, "main")));
     CHECK (phazite::canDeleteBranch (b.s.context, idea));
     CHECK (phazite::canDeleteAnyBranch (b.s.context));
     CHECK (phazite::describeBranchDeletion (b.s.context, empty).isEmpty());
+
+    // Whether the song left there changed is found out on the history's thread as the picker lists the branch (canDeleteBranch()
+    // asks; known bug 126): said as maybe until it is known.
+    CHECK (phazite::describeBranchDeletion (b.s.context, idea).contains ("if it has any"));
+    REQUIRE (waitForVersionHistory (b.s.context));
     CHECK (phazite::describeBranchDeletion (b.s.context, idea)
            == "This also deletes 1 commit that no other branch has, and the changes left on it uncommitted. Recover Lost Commits brings "
               "the commits back.");
@@ -441,11 +468,12 @@ TEST_CASE ("A branch deleted on one computer comes back where another computer c
 TEST_CASE ("Merge Branch merges another branch's last commit, and Abort Merge makes the song what it was before it")
 {
     Branches b;
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     const auto idea = findBranch (b.s.context, "idea-2");
     b.s.setVolume (b.drums, -9.0f);
     keepVersion (b.s.context, "Quiet drums");
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     const auto main = findBranch (b.s.context, "main");
 
     // Another branch with commits main doesn't have; not main itself.
@@ -455,7 +483,7 @@ TEST_CASE ("Merge Branch merges another branch's last commit, and Abort Merge ma
     CHECK (phazite::canMergeAnyBranch (b.s.context));
 
     // Its lines listed, taken, then aborted: the song as it was, one undo step, and no merge waiting for a commit.
-    REQUIRE (phazite::mergeBranch (b.s.context, idea));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::mergeBranch (b.s.context, idea); }));
     REQUIRE_FALSE (phazite::getMergeLines (b.s.context).empty());
     phazite::finishTickedMerge (b.s.context);
     CHECK (phazite::isMerging (b.s.context));
@@ -467,7 +495,7 @@ TEST_CASE ("Merge Branch merges another branch's last commit, and Abort Merge ma
     CHECK (phazite::describeUndo (phazite::findSong (b.s.context)) == "Undo Abort Merge");
 
     // Merged and committed: nothing more to merge from it.
-    REQUIRE (phazite::mergeBranch (b.s.context, idea));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::mergeBranch (b.s.context, idea); }));
     phazite::finishTickedMerge (b.s.context);
     keepVersion (b.s.context);
     CHECK (phazite::getLastVersion (b.s.context)->name == "Merge branch 'idea-2'");
@@ -493,7 +521,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     keepVersion (b.s.context, "Grouped");
 
     // idea-2: the folder ungrouped, and the clip onto Drums.
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
 
     {
         const phazite::UndoStep step (song, "Ungroup");
@@ -504,13 +532,14 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     const auto theirs = keepVersion (b.s.context, "Ungrouped");
 
     // main: a note in the clip.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     REQUIRE (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
     b.s.addNote (clip, 40, 2.0, 1.0);
     keepVersion (b.s.context, "Note");
     const auto before = song.getState().createCopy();
 
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     REQUIRE (phazite::isMerging (b.s.context));
     checkIDs (song);
@@ -536,7 +565,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     checkIDs (song);
     CHECK (phazite::findChanges (before, song.getState()).empty());
     CHECK (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     checkIDs (song);
     CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
@@ -558,14 +587,15 @@ TEST_CASE ("A merge leaves out a send the other side added to a return this side
     const auto reverb = b.s.addReturn (b.bass, "phaziteReverb");
     keepVersion (b.s.context, "Reverb");
 
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.addSend (b.drums, reverb, -12.0f);
     const auto send = phazite::getSends (*phazite::findSong (b.s.context), b.drums).front();
     const auto lfo = b.s.addModulator (b.drums, phazite::ModulatorType::lfo);
     b.s.modulate (lfo, { send, phazite::schema::sendLevelParameter }, 0.5f);
     const auto drumsSend = keepVersion (b.s.context, "Drums to the reverb");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
 
     {
         auto& mainSong = *phazite::findSong (b.s.context);
@@ -574,7 +604,7 @@ TEST_CASE ("A merge leaves out a send the other side added to a return this side
     }
 
     keepVersion (b.s.context, "No reverb");
-    REQUIRE (phazite::startMerge (b.s.context, drumsSend));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, drumsSend); }));
     phazite::finishTickedMerge (b.s.context);
 
     auto& merged = *phazite::findSong (b.s.context);
@@ -593,16 +623,17 @@ TEST_CASE ("A merge lets go of a sidechain that the two lines' changes made into
     const auto compressor = b.s.addEffect (b.bass, phazite::devices::Compressor::typeID);
     keepVersion (b.s.context, "Reverb");
 
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.addSend (b.bass, reverb, -12.0f);
     const auto theirs = keepVersion (b.s.context, "Bass to the reverb");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     phazite::setSidechainSource (song, compressor, reverb);
     REQUIRE (phazite::getSidechainSource (song, compressor) == reverb);
     keepVersion (b.s.context, "Ducked under the reverb");
 
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     UndoCheck undoCheck (b.s.context);
     undoCheck.check ("Merge", [&b] { phazite::finishTickedMerge (b.s.context); });
     REQUIRE (phazite::isMerging (b.s.context));
@@ -626,12 +657,13 @@ TEST_CASE ("A merge's conflict answered for the other side leaves out what that 
     const auto compressor = b.s.addEffect (b.bass, phazite::devices::Compressor::typeID);
     keepVersion (b.s.context, "Drums");
 
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     phazite::setSidechainSource (song, compressor, snare);
     REQUIRE (phazite::getSidechainSource (song, compressor) == snare);
     const auto theirs = keepVersion (b.s.context, "Under the snare");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     phazite::setSidechainSource (song, compressor, kick);
 
     {
@@ -640,7 +672,7 @@ TEST_CASE ("A merge's conflict answered for the other side leaves out what that 
     }
 
     keepVersion (b.s.context, "Under the kick, no snare");
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     CHECK (phazite::getSidechainSource (song, compressor) == kick); // this side's, to start with
 
@@ -663,15 +695,16 @@ TEST_CASE ("Undo after a merge takes the merge back with the song, Redo brings i
 {
     Branches b;
     auto& song = *phazite::findSong (b.s.context);
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.bass, -12.0f);
     const auto theirs = keepVersion (b.s.context, "Much quieter");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     b.s.setVolume (b.bass, -6.0f);
     const auto quieter = keepVersion (b.s.context, "Quieter");
 
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     REQUIRE (phazite::isMerging (b.s.context));
     REQUIRE (phazite::getClashes (b.s.context).size() == 1);
@@ -730,13 +763,14 @@ TEST_CASE ("A merge undone leaves the next commit on this line alone, and an und
 {
     Branches b;
     auto& song = *phazite::findSong (b.s.context);
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     b.s.setVolume (b.drums, -9.0f);
     const auto theirs = keepVersion (b.s.context, "Quiet drums");
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
 
     // Merged, undone, and something else committed: one parent.
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     phazite::undo (song);
     b.s.setVolume (b.bass, -3.0f);
@@ -744,7 +778,7 @@ TEST_CASE ("A merge undone leaves the next commit on this line alone, and an und
     CHECK (phazite::getLastVersion (b.s.context)->parents.size() == 1);
 
     // Merged and committed; then undone and redone: no merge waits again.
-    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, theirs); }));
     phazite::finishTickedMerge (b.s.context);
     keepVersion (b.s.context);
     CHECK (phazite::getLastVersion (b.s.context)->parents.size() == 2);
@@ -761,11 +795,12 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     Branches b;
     auto& song = *phazite::findSong (b.s.context);
     const auto count = song.getState()[phazite::schema::nextID];
-    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
     const auto pad = b.s.addTrack ("Pad");
     const auto t1 = keepVersion (b.s.context, "Pad");
 
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
     song.getState().setProperty (phazite::schema::nextID, count, nullptr);
     const auto lead = b.s.addTrack ("Lead");
     REQUIRE (lead == pad); // counted on from the same place
@@ -783,7 +818,7 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     };
 
     // The first merge gives idea-2's Pad a new ID here.
-    REQUIRE (phazite::startMerge (b.s.context, t1));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, t1); }));
     phazite::finishTickedMerge (b.s.context);
     keepVersion (b.s.context);
     REQUIRE (findNamed ("Pad").size() == 1);
@@ -792,7 +827,8 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     const auto numTracks = phazite::getTrackIDs (song).size();
 
     // idea-2, as the other computer has it: its next track gets the ID the merge gave its Pad here; and its Pad renamed.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     song.getState().setProperty (phazite::schema::nextID, (juce::int64) padHere.getRaw(), nullptr);
     const auto strings = b.s.addTrack ("Strings");
     REQUIRE (strings == padHere);
@@ -800,8 +836,9 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     const auto t2 = keepVersion (b.s.context, "Strings");
 
     // Merged again: Pad 2 onto the Pad here, Strings beside it with an ID of its own.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
-    REQUIRE (phazite::startMerge (b.s.context, t2));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, t2); }));
     phazite::finishTickedMerge (b.s.context);
     checkIDs (song);
     CHECK (phazite::getClashes (b.s.context).empty());
@@ -815,15 +852,257 @@ TEST_CASE ("A line merged again after it made an item with an ID a merge gave to
     keepVersion (b.s.context);
 
     // And once more, through both merges' records: idea-2's Strings renamed lands on the Strings here.
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     b.s.rename (strings, "Strings 2");
     const auto t3 = keepVersion (b.s.context, "Strings 2");
-    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
-    REQUIRE (phazite::startMerge (b.s.context, t3));
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::startMerge (b.s.context, t3); }));
     phazite::finishTickedMerge (b.s.context);
     checkIDs (song);
     CHECK (findNamed ("Strings").empty());
     CHECK (findNamed ("Strings 2") == std::vector { stringsHere });
     CHECK (findNamed ("Pad 2") == std::vector { padHere });
     CHECK (phazite::getTrackIDs (song).size() == numTracks + 1);
+}
+
+TEST_CASE ("A switch reads on the history's thread, the window held meanwhile: nothing that changes the song runs, and Cancel leaves it")
+{
+    // Known bug 126: a switch read the branch's song and its last commit's on the message thread. Now it holds the window
+    // (ProjectContext::holdForWork()) from its start until what was read is taken in; a command that changes the song isn't
+    // run meanwhile; and the progress window's Cancel leaves the song and the branch as they were.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    b.s.setVolume (b.bass, -6.0f);
+    keepVersion (b.s.context, "Quieter bass");
+    b.s.setVolume (b.bass, -9.0f); // left on idea-2
+
+    std::vector<juce::String> holds;
+    std::function<void (const juce::String&)> cancel;
+    struct Hold final : phazite::ProjectContext::WorkHold
+    {
+        std::vector<juce::String>& holds;
+        explicit Hold (std::vector<juce::String>& h)
+            : holds (h)
+        {
+        }
+        ~Hold() override { holds.push_back ("released"); }
+    };
+
+    b.s.context.setWorkHolder (
+        [&] (const juce::String& title, std::function<void (const juce::String&)> cancelIt, phazite::ProjectContext::Progress)
+        {
+            holds.push_back (title);
+            cancel = std::move (cancelIt);
+            return std::make_unique<Hold> (holds);
+        });
+
+    const auto main = findBranch (b.s.context, "main");
+    const auto tracks = phazite::getTrackIDs (*phazite::findSong (b.s.context)).size();
+    REQUIRE (phazite::switchBranch (b.s.context, main, b.s.save));
+    REQUIRE (holds.size() == 1);
+    CHECK (holds[0] == "Reading branch 'main'");
+    CHECK (b.s.context.isHoldingForWork());
+    CHECK_FALSE (phazite::canSwitchBranch (b.s.context)); // one at a time
+    CHECK_FALSE (b.s.commands.invoke ("track.add"));      // nothing that changes the song runs in between
+    CHECK (phazite::getTrackIDs (*phazite::findSong (b.s.context)).size() == tracks);
+
+    // Cancelled before what it read is in: nothing changes, then or after.
+    cancel ({});
+    CHECK (holds.back() == "released");
+    CHECK_FALSE (b.s.context.isHoldingForWork());
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (b.current() == "idea-2");
+    CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
+    CHECK (phazite::getChangesSinceLastVersion (b.s.context).size() == 1);
+
+    // Again, to its end: the hold goes once the song is main's.
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, main, b.s.save); }));
+    CHECK (holds.back() == "released");
+    CHECK (b.current() == "main");
+    CHECK (b.volume (b.bass) == doctest::Approx (0.0f));
+    CHECK (phazite::test::finished (b.s.context,
+                                    [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
+    CHECK (b.volume (b.bass) == doctest::Approx (-9.0f)); // the change left there kept, as it was copied
+}
+
+TEST_CASE ("A switch keeps on the branch it leaves what a plug-in changed in the song while the other was read")
+{
+    // The song left is copied as the switch starts, and split on the history's thread; changed meanwhile (a plug-in's own
+    // change, which comes in while the window is held), it is split again as it is when the other is taken in.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    keepVersion (b.s.context, "Same");
+    const auto main = findBranch (b.s.context, "main");
+    REQUIRE (phazite::switchBranch (b.s.context, main, b.s.save));
+    b.s.setVolume (b.drums, -4.0f); // as a change that comes in while it reads
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getVersionHistory (b.s.context)->isReadingForCommand(); },
+                                                   versionHistoryTimeout));
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (b.current() == "main");
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
+    CHECK (b.volume (b.drums) == doctest::Approx (-4.0f));
+}
+
+TEST_CASE ("Create Branch from a commit leaves no branch behind when its switch is cancelled or can't be made")
+{
+    // Found in review (known bug 126's round): the branch was made and written before the switch read, and stayed when the
+    // switch was cancelled.
+    Branches b;
+    keepVersion (b.s.context, "Second");
+    const auto before = phazite::getBranches (b.s.context).size();
+
+    REQUIRE (phazite::newBranch (b.s.context, b.first, b.s.save)); // reading
+    phazite::getVersionHistory (b.s.context)->cancelReading();     // the progress window's Cancel
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (phazite::getBranches (b.s.context).size() == before);
+    CHECK (b.current() == "main");
+
+    // Done to its end, it is there, and the song on it.
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, b.first, b.s.save); }));
+    CHECK (phazite::getBranches (b.s.context).size() == before + 1);
+    CHECK (b.current() == "idea-2");
+}
+
+TEST_CASE ("A switch or a merge that can't be taken in says why, where the Source Control view says its problems")
+{
+    // Found in review (known bug 126's round): it ended silently after its progress window had shown.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    b.s.setVolume (b.bass, -6.0f);
+    keepVersion (b.s.context, "Quieter");
+    auto& song = *phazite::findSong (b.s.context);
+    const auto main = findBranch (b.s.context, "main");
+
+    SUBCASE ("Recording started while it read")
+    {
+        phazite::getSession (b.s.context)->setLiveTrack (b.bass);
+        REQUIRE (phazite::switchBranch (b.s.context, main, b.s.save));
+        phazite::startRecording (song); // a key that started it, which the hold lets through as play does
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getVersionHistory (b.s.context)->isReadingForCommand(); },
+                                                       versionHistoryTimeout));
+        CHECK (b.current() == "idea-2");
+        CHECK (phazite::getReadingProblem (b.s.context).contains ("recording"));
+        phazite::stopRecording (song);
+    }
+
+    SUBCASE ("The song left on the branch can't be read")
+    {
+        // main's song as it was left there, its piece gone from the store (as a sync that hasn't finished leaves it).
+        REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, main, b.s.save); }));
+        b.s.setVolume (b.drums, -3.0f); // left on main
+        REQUIRE (phazite::test::finished (b.s.context, [&]
+                                          { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
+        auto* history = phazite::getVersionHistory (b.s.context);
+        phazite::BranchRecord broken;
+
+        for (const auto& branch : history->getBranches())
+            if (branch.id == main)
+                broken = branch;
+
+        REQUIRE (broken.working.isNotEmpty());
+        broken.working = juce::String::repeatedString ("0", 64); // a piece the store hasn't
+        REQUIRE (history->getStore()->writeBranch (broken));
+        b.s.reopen (false);
+        REQUIRE (waitForVersionHistory (b.s.context));
+
+        CHECK_FALSE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, main, b.s.save); }));
+        CHECK (b.current() == "idea-2");
+        CHECK (phazite::getReadingProblem (b.s.context).contains ("can't be read"));
+    }
+}
+
+TEST_CASE ("A switch made while the song changes splits and keeps the song left on the history's thread, not on the message thread")
+{
+    // Found in review (known bug 126's round): a change while the other was read (a plug-in's own, the automation written
+    // as it plays) sent the split and the write of the whole song left back onto the message thread.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    keepVersion (b.s.context, "Same");
+    const auto splits = phazite::countSongsSplit();
+    const auto writes = phazite::VersionStore::countSongsWritten();
+
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    b.s.setVolume (b.drums, -4.0f); // as a change that comes in while it reads
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getVersionHistory (b.s.context)->isReadingForCommand(); },
+                                                   versionHistoryTimeout));
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (b.current() == "main");
+    CHECK (phazite::countSongsSplit().onMessageThread == splits.onMessageThread);
+    CHECK (phazite::VersionStore::countSongsWritten().onMessageThread == writes.onMessageThread);
+    CHECK (phazite::countSongsSplit().all > splits.all + 1); // split twice, the second from the song as it changed
+
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
+    CHECK (b.volume (b.drums) == doctest::Approx (-4.0f));
+}
+
+TEST_CASE ("A switch whose records can't all be written leaves every branch's record as it was, the song left on each named still")
+{
+    // The second review of known bug 126: with the current branch's file failing to be written, the rollback wrote back only
+    // the record of the branch left, and the branch entered no longer named the song left there.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    keepVersion (b.s.context, "Idea");
+    b.s.setVolume (b.bass, -9.0f); // left on idea-2
+    const auto idea = findBranch (b.s.context, "idea-2");
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
+
+    for (const auto* failing : { "current", "branch" })
+    {
+        CAPTURE (failing);
+
+        {
+            // The file named fails, as a full drive makes it: the current branch's, or the entered branch's record.
+            const phazite::WholeFileHook failure (
+                [failing, &idea] (const juce::File& file)
+                {
+                    return juce::String (failing) == "current" ? file.getFileName() != "current" : ! file.getFullPathName().contains (idea);
+                });
+            CHECK_FALSE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
+            CHECK (phazite::getReadingProblem (b.s.context).contains ("couldn't write"));
+        }
+
+        CHECK (b.current() == "main");
+
+        // What is on disk names the song left on idea-2 still: opened again, a switch there finds it.
+        b.s.reopen (false);
+        REQUIRE (waitForVersionHistory (b.s.context));
+        CHECK (b.current() == "main");
+    }
+
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
+    CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
+}
+
+TEST_CASE ("Delete Branch's question says when what was left on the branch can't be read, rather than that nothing was")
+{
+    // The second review of known bug 126: a song left on a branch that couldn't be read counted as no changes, so the branch
+    // went without the question.
+    Branches b;
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    b.s.setVolume (b.bass, -9.0f); // left on idea-2
+    const auto idea = findBranch (b.s.context, "idea-2");
+    REQUIRE (phazite::test::finished (b.s.context,
+                                      [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
+
+    auto* history = phazite::getVersionHistory (b.s.context);
+    phazite::BranchRecord broken;
+
+    for (const auto& branch : history->getBranches())
+        if (branch.id == idea)
+            broken = branch;
+
+    REQUIRE (broken.working.isNotEmpty());
+    broken.working = juce::String::repeatedString ("0", 64); // a piece the store hasn't
+    REQUIRE (history->getStore()->writeBranch (broken));
+    b.s.reopen (false);
+    REQUIRE (waitForVersionHistory (b.s.context));
+
+    CHECK (phazite::canDeleteBranch (b.s.context, idea)); // which finds out on the history's thread
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (phazite::describeBranchDeletion (b.s.context, idea).contains ("can't be read"));
 }

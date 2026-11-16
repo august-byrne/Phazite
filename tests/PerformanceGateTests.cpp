@@ -44,7 +44,9 @@
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
+#include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/playlist/TrackHeader.h"
@@ -960,4 +962,61 @@ TEST_CASE ("Performance gate: a track's controllers' index holds a place for eac
     CAPTURE (sixty);
     CHECK (sixty <= one + 60 * 64);                                              // a few bytes for each controller more
     CHECK (one <= 120000 * (sizeof (phazite::engine::NoteSequence::Event) + 8)); // the events, and a place for each
+}
+
+TEST_CASE (
+    "Performance gate: a branch switch, a checkout and the start of a merge read no song on the message thread, nor split or write one")
+{
+    // Known bug 126: a switch read two songs on the message thread (the branch's and its last commit's), and the start of a
+    // merge two (the commit both lines have, and the other's), keeping the window for a second and more in a large song.
+    // Now they are read on the history's thread, and only what they read is taken in on the message thread.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 4, 8.0);
+    auto& song = getSong (s);
+    const auto commit = [&s]
+    {
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        std::optional<juce::Result> result;
+        REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        return phazite::getLastVersion (s.context)->id;
+    };
+
+    commit();
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    REQUIRE (phazite::newBranch (s.context, {}, s.save));
+    const auto idea = phazite::getCurrentBranch (s.context)->id;
+    phazite::setChannelVolume (song, built.tracks[1], -9.0f);
+    const auto theirs = commit();
+    const auto before = phazite::VersionStore::countSongsRead();
+    const auto splitsBefore = phazite::countSongsSplit();
+    const auto writesBefore = phazite::VersionStore::countSongsWritten();
+
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, s.save); }));
+    phazite::setChannelVolume (song, built.tracks[2], -3.0f);
+    commit();
+    phazite::setChannelVolume (song, built.tracks[3], -2.0f); // a change left on main as it switches
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, idea, s.save); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, s.save); }));
+    CHECK (phazite::getChannelVolume (song, built.tracks[3]) == doctest::Approx (-2.0f)); // the change left there, back
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::checkoutVersion (s.context, theirs, s.save); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::backToBranch (s.context, s.save); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+    CHECK_FALSE (phazite::getMergeLines (s.context).empty());
+
+    // And Merge, which keeps the song before it in the store for Abort Merge: kept as its list was worked out, on the
+    // history's thread (the second review of known bug 126).
+    phazite::finishTickedMerge (s.context);
+    CHECK (phazite::isMerging (s.context));
+
+    const auto after = phazite::VersionStore::countSongsRead();
+    INFO ("Songs read: " << after.all - before.all << ", on the message thread " << after.onMessageThread - before.onMessageThread);
+    CHECK (after.all > before.all);
+    CHECK (after.onMessageThread == before.onMessageThread);
+
+    // Nor do they split or write a song there (the song left on the branch, kept as it switches).
+    CHECK (phazite::countSongsSplit().onMessageThread == splitsBefore.onMessageThread);
+    CHECK (phazite::VersionStore::countSongsWritten().onMessageThread == writesBefore.onMessageThread);
+    CHECK (phazite::VersionStore::countSongsWritten().all > writesBefore.all);
 }

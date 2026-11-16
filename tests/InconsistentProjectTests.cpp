@@ -421,18 +421,34 @@ TEST_CASE ("A step sequencer's steps open within -1 to 1, what is no finite numb
            == "0.5 " + juce::String (0.0) + " " + juce::String (-1.0) + " " + juce::String (0.0) + " 0.25");
 }
 
-TEST_CASE ("A version's piece with a number whose exponent JUCE's reader would overflow is joined with the same number readable")
+TEST_CASE ("A version's piece with a number whose exponent JUCE's reader would overflow is joined readable, then made consistent")
 {
-    // Known bug 170, for the versions: a piece is anyone's, as a project file is.
-    const auto piece = juce::String (R"(<PHAZITE><TRACKS><TRACK id="5" kind="track" name="1e12345678901" volume="1e12345678901">)"
-                                     R"(<CLIP id="6" kind="midi" start="2" length="-3e-12345678901"/></TRACK></TRACKS></PHAZITE>)");
+    // Known bug 170, for the versions: a piece is anyone's, as a project file is. Its numbers made readable first, then the
+    // song made consistent as a project file is as it opens (known bug 126's round: joinSong()).
+    const auto piece =
+        juce::String (R"(<PHAZITE><TRACKS><TRACK id="5" kind="track" name="1e12345678901" volume="1e12345678901" pan="5e-12345678901">)"
+                      R"(<DEVICE id="7" type="phaziteSampler"><SOUNDS sampleSlices="0.25 1e12345678901"/></DEVICE>)"
+                      R"(<CLIP id="6" kind="midi" start="2" length="-3e-12345678901"/></TRACK></TRACKS></PHAZITE>)");
     const auto song = phazite::joinSong ("song", [&piece] (const juce::String&) -> std::optional<juce::MemoryBlock>
                                          { return juce::MemoryBlock (piece.toRawUTF8(), piece.getNumBytesAsUTF8()); });
     REQUIRE (song.isValid());
     const auto track = song.getChildWithName (schema::TRACKS).getChild (0);
-    CHECK (track[schema::channelVolume].toString() == "1e999");
-    CHECK (track[schema::trackName].toString() == "1e12345678901");
-    CHECK (track.getChild (0)[schema::clipLength].toString() == "-0");
+    CHECK_FALSE (track.hasProperty (schema::channelVolume));        // no finite number: its default, as a file's
+    CHECK (track[schema::trackName].toString() == "1e12345678901"); // a name, as it was
+    CHECK (track[schema::channelPan].toString() == "0");
+
+    const auto slices = track.getChildWithName (schema::DEVICE).getChildWithName (schema::SOUNDS)[schema::samplerSlices].toString();
+    CHECK_FALSE (slices.contains ("12345678901"));
+
+    // And a piece joined alone, a track's, which no checks of a whole song see (makeExponentsReadable(), known bug 170): its
+    // numbers made readable all the same, as JUCE's reader takes them.
+    const auto trackPiece = juce::String (R"(<TRACK id="5" kind="track" name="1e12345678901" volume="1e12345678901"/>)");
+    const auto alone = phazite::joinSong ("track", [&trackPiece] (const juce::String&) -> std::optional<juce::MemoryBlock>
+                                          { return juce::MemoryBlock (trackPiece.toRawUTF8(), trackPiece.getNumBytesAsUTF8()); });
+    REQUIRE (alone.isValid());
+    CHECK (alone[schema::channelVolume].toString() == "1e999");
+    CHECK (alone[schema::trackName].toString() == "1e12345678901");
+    CHECK ((double) track.getChildWithName (schema::CLIP)[schema::clipLength] > 0.0); // brought within its range
 }
 
 TEST_CASE ("A send to a return the song hasn't is left out, with what modulated it")

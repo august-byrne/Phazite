@@ -89,7 +89,10 @@ says, it can't crash Phazite or make it do anything but open a song.
 - **A preset** keeps its volumes within a fader's range (-100 to +6 dB, as everywhere a volume is set), and a sound it
   names on a network path, or one that isn't an audio file, is refused without being opened.
 - **A DAWproject's** `project.xml` and `metadata.xml` are read only up to 256 MB each, and what it unpacks only up to
-  what an archive of its size can hold, so a small archive can't fill the memory or the disk.
+  what an archive of its size can hold, so a small archive can't fill the memory or the disk. Its audio is unpacked off the
+  message thread, before the file is taken in (a new project's import in the progress window, an import back as a branch
+  on the history's thread), with progress and Cancel; what a cancelled import unpacked, and what nothing plays, is
+  deleted again.
 - **The helper of a plug-in** is read with its lists capped by its message's length, and a plug-in's latency, tail and
   channel counts clamped.
 - **The settings file** gives its default for a number that isn't a finite one.

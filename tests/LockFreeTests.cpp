@@ -15,6 +15,13 @@
 #include "engine/core/EventQueue.h"
 #include "engine/core/Handover.h"
 #include "engine/core/PlayheadClock.h"
+#include "model/base/internal/Schema.h"
+#include "model/devices/internal/Devices.h"
+#include "model/project/ProjectContext.h"
+#include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
+#include "model/versions/internal/SongDiff.h"
+#include "model/versions/internal/SongPieces.h"
 
 #include <algorithm>
 #include <array>
@@ -25,6 +32,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -972,4 +980,99 @@ TEST_CASE ("The sampler's sounds swapped as it plays raced: none is let go of wh
 
     CHECK (raced.notNumbers == 0);
     CHECK (raced.letGo > 100); // most of them, while it played
+}
+
+TEST_CASE (
+    "Songs read from the versions made consistent on another thread raced: none asks the message thread's sessions as they come and go")
+{
+    // Found in review (known bug 126's round): the loader's checks, run on the history's thread on a song joined from the
+    // versions' pieces, asked a plug-in's curve's range of its instance, through the playback sessions the message thread
+    // makes and destroys (findSession()). Now a plug-in's curve is kept within 0 to 1 from its element alone. A fixed count
+    // of joins on another thread, while the message thread opens and closes songs, each with a session of its own.
+    auto song = phazite::createSong();
+    auto state = song->getState();
+    auto track = phazite::getTrackElements (state).front();
+    track.appendChild (juce::ValueTree (phazite::schema::DEVICE, { { phazite::schema::deviceID, 900 },
+                                                                   { phazite::schema::deviceType, phazite::schema::deviceIsPlugin } }),
+                       nullptr);
+    juce::ValueTree curve (phazite::schema::CURVE, { { phazite::schema::curveDevice, 900 }, { phazite::schema::curveParameter, "p1" } });
+    curve.appendChild (
+        juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, 0.0 }, { phazite::schema::pointValue, 2.0 } }), nullptr);
+    juce::ValueTree automation (phazite::schema::AUTOMATION);
+    automation.appendChild (curve, nullptr);
+    state.appendChild (automation, nullptr);
+    const auto pieces = phazite::splitSong (state);
+
+    constexpr int joins = 300;
+    std::atomic<int> joined { 0 }, kept { 0 };
+    std::thread reader (
+        [&]
+        {
+            for (int i = 0; i < joins; ++i)
+            {
+                const auto read = phazite::joinSong (pieces.song,
+                                                     [&pieces] (const juce::String& name) -> std::optional<juce::MemoryBlock>
+                                                     {
+                                                         const auto found = pieces.pieces.find (name);
+                                                         return found != pieces.pieces.end() ? std::optional (found->second) : std::nullopt;
+                                                     });
+                const auto point = read.getChildWithName (phazite::schema::AUTOMATION).getChild (0).getChild (0);
+
+                if (juce::exactlyEqual ((double) point[phazite::schema::pointValue], 1.0))
+                    ++kept; // within the plug-in's 0 to 1
+
+                ++joined;
+            }
+        });
+
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+
+    while (joined.load() < joins)
+    {
+        auto other = phazite::createSong();
+        phazite::setSong (context, other.get());
+        phazite::setSong (context, nullptr);
+    }
+
+    reader.join();
+    CHECK (kept.load() == joins);
+}
+
+TEST_CASE ("The tests' device types registered while another thread looks for them raced: each found whole once it is there")
+{
+    // The second review of known bug 126: registerDeviceType() grew the registry while a history's thread, one an earlier
+    // test case left, looked a device up in it (the checks of a song read from the versions). Now under a lock that only a
+    // look past Phazite's own devices takes, in a deque whose elements stay where they are.
+    constexpr int types = 64;
+    static std::array<std::string, types> names;
+    static std::array<phazite::devices::DeviceInfo, types> infos;
+
+    for (int i = 0; i < types; ++i)
+    {
+        names[(size_t) i] = "racedDevice" + std::to_string (i);
+        infos[(size_t) i] = { names[(size_t) i], names[(size_t) i] };
+    }
+
+    std::atomic<int> registered { 0 }, wrong { 0 };
+    std::thread looker (
+        [&]
+        {
+            for (int round = 0; round < 2000; ++round)
+            {
+                const auto there = registered.load();
+
+                for (int i = 0; i < there; ++i)
+                    if (const auto* info = phazite::findOwnDevice (names[(size_t) i]); info == nullptr || info->typeID != names[(size_t) i])
+                        ++wrong;
+            }
+        });
+
+    for (int i = 0; i < types; ++i)
+    {
+        phazite::registerDeviceType (infos[(size_t) i], [] { return std::unique_ptr<phazite::devices::Processor>(); });
+        ++registered;
+    }
+
+    looker.join();
+    CHECK (wrong.load() == 0);
 }

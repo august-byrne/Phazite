@@ -2507,7 +2507,7 @@ TEST_CASE ("Benchmark: what a branch switch and a merge spend on the message thr
     const auto idea = phazite::getCurrentBranch (s.context)->id;
     phazite::setChannelVolume (song, built.tracks[1], -9.0f);
     const auto theirs = commit();
-    REQUIRE (phazite::switchBranch (s.context, main, save));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, save); }));
     phazite::setChannelVolume (song, built.tracks[2], -3.0f);
     commit();
     phazite::setChannelVolume (song, built.tracks[3], -2.0f); // a change left on main as it switches
@@ -2521,20 +2521,54 @@ TEST_CASE ("Benchmark: what a branch switch and a merge spend on the message thr
 
     const auto split = time ([&] { juce::ignoreUnused (phazite::splitSong (song.getState().createCopy())); });
     const auto read = time ([&] { juce::ignoreUnused (history->readSong (theirs)); });
+    const auto made = time ([&] { juce::ignoreUnused (phazite::makeSong (song.getState().createCopy())); });
 
+    // Each command to its end (known bug 126: they read on the history's thread, and take what they read in after): how long its
+    // call kept the message thread, the longest any one message kept it after (taking it in among them), and the whole.
+    struct Kept
+    {
+        double call = 0.0, longest = 0.0, whole = 0.0;
+    };
+
+    const auto keep = [history, &s] (const std::function<bool()>& command)
+    {
+        Kept kept;
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+        REQUIRE (command());
+        kept.call = juce::Time::getMillisecondCounterHiRes() - start;
+
+        while (history->isReadingForCommand() && juce::Time::getMillisecondCounterHiRes() - start < phazite::test::versionHistoryTimeout)
+        {
+            const auto before = juce::Time::getMillisecondCounterHiRes();
+            phazite::test::dispatchPendingMessages();
+            kept.longest = juce::jmax (kept.longest, juce::Time::getMillisecondCounterHiRes() - before);
+        }
+
+        kept.whole = juce::Time::getMillisecondCounterHiRes() - start;
+        REQUIRE (history->didLastReading());
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        return kept;
+    };
+
+    const auto describe = [] (const Kept& kept)
+    { return juce::String (kept.call, 1) + " + " + juce::String (kept.longest, 1) + " ms of " + juce::String (kept.whole, 1) + " ms"; };
+
+    const auto splitsBefore = phazite::countSongsSplit().onMessageThread;
     auto songsRead = phazite::VersionStore::countSongsRead();
-    const auto toIdea = time ([&] { REQUIRE (phazite::switchBranch (s.context, idea, save)); });
+    const auto toIdea = keep ([&] { return phazite::switchBranch (s.context, idea, save); });
+    const auto back = keep ([&] { return phazite::switchBranch (s.context, main, save); });
     const auto switchReads = phazite::VersionStore::countSongsRead().onMessageThread - songsRead.onMessageThread;
-    const auto back = time ([&] { REQUIRE (phazite::switchBranch (s.context, main, save)); });
+    const auto switchSplits = phazite::countSongsSplit().onMessageThread - splitsBefore;
 
     songsRead = phazite::VersionStore::countSongsRead();
-    const auto merge = time ([&] { REQUIRE (phazite::startMerge (s.context, theirs)); });
+    const auto merge = keep ([&] { return phazite::startMerge (s.context, theirs); });
     const auto mergeReads = phazite::VersionStore::countSongsRead().onMessageThread - songsRead.onMessageThread;
 
-    MESSAGE ("32 tracks, 64 beats: a switch " << toIdea << " ms (back " << back << " ms), reading " << switchReads
-                                              << " songs on the message thread; the song split into pieces " << split
-                                              << " ms; a commit's song read " << read << " ms; the start of a merge " << merge
-                                              << " ms, reading " << mergeReads << " songs");
+    MESSAGE ("32 tracks, 64 beats, the message thread kept by the call + the longest message after, of the whole: a switch "
+             << describe (toIdea) << " (back " << describe (back) << "), reading " << switchReads << " songs and splitting " << switchSplits
+             << " on the message thread; the song split into pieces " << split << " ms; a commit's song read (with the loader's checks) "
+             << read << " ms; the start of a merge " << describe (merge) << ", reading " << mergeReads
+             << " songs; a song made of a commit's (what a DAWproject import does on the message thread) " << made << " ms");
 }
 
 namespace

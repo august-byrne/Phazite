@@ -21,6 +21,17 @@ namespace phazite
 {
 class EngineContext;
 
+// What holds the window's input while work runs (an audio file's work, model/arrangement/internal/AudioWork.h; a hold for
+// work to come, ProjectContext::holdForWork()): the app's one (src/app/InputHold.h), which the context hands both
+// (ProjectContext::setInputHolder()); none in most tests. Each holdInput() is matched by a releaseInput(); holds are counted.
+class InputHolder
+{
+public:
+    virtual ~InputHolder() = default;
+    virtual void holdInput() = 0;
+    virtual void releaseInput() = 0;
+};
+
 // Which items of one kind a group of changes was in: those it names, each once, or, after a change that couldn't be tied
 // to its items, any of them.
 template <typename ItemID>
@@ -115,12 +126,57 @@ public:
     void setPluginStatesGate (PluginStatesGate gate) { pluginStatesGate = std::move (gate); }
     void withPluginStates (std::function<void (bool go)> then);
 
+    // The one way to hold the window while a command waits for work on another thread before it changes the song (the
+    // versions' commands that read whole songs: model/versions/internal/VersionHistory.h, startReading(); known bug 126):
+    // - From holdForWork() on, the window takes no input: the hold is the input holder's (setInputHolder(): the app's one,
+    //   src/app/InputHold.h, which an audio file's work holds too, AudioWork.h), counted with every other, which passes only
+    //   the keys that run while a mouse button is down (play and stop, the tools, the editors' zoom) and keys let go; the
+    //   message loop runs on; no command that changes a project runs (CommandRegistry::setBusyCheck()), nor does a file
+    //   dropped on the window (JUCE gives a drop to no component a modal one blocks).
+    // - After a second a progress window shows title, what is waited for ("Reading branch 'idea-2'"), with progress's value
+    //   (0 to 1, read at the window's ticks on the message thread: an atomic the work sets; none, or below 0, shows it busy),
+    //   through the app's render queue, so that it waits its turn behind another's window, never on top of it. Its Cancel, and
+    //   Escape (in the first second too, before it shows: app/ProjectSession.h, cancelHeldWork()), call cancel with no why:
+    //   the caller stops its work, lets go of the hold and changes nothing. A quit or the computer's session ending calls
+    //   cancel too (ProjectSession::cancelWork(), which gives up an audio file's work alike), with why ('Stopped, as Phazite
+    //   was closing'), which the caller says where it says its problems, and the close goes on to its question. cancel is
+    //   called on the message thread, at most once, and never after the hold went.
+    // - The wait is over as what holdForWork() returns goes. Holds can follow one another, the next made before the one before
+    //   goes, without the window taking input in between.
+    // The app's session shows the wait (setWorkHolder()); without one (as in most tests), nothing shows, and the hold is still
+    //   counted, the input holder's too where there is one. Whether one is held now.
+    struct WorkHold
+    {
+        virtual ~WorkHold() = default;
+    };
+
+    using Cancel = std::function<void (const juce::String& why)>;
+    using Progress = std::function<float()>;
+    using WorkHolder = std::function<std::unique_ptr<WorkHold> (const juce::String& title, Cancel cancel, Progress progress)>;
+    void setWorkHolder (WorkHolder holder) { workHolder = std::move (holder); }
+    std::unique_ptr<WorkHold> holdForWork (const juce::String& title, Cancel cancel, Progress progress = {});
+    bool isHoldingForWork() const noexcept { return held->count > 0; }
+
+    // What holds the window's input, for the work of the model's that holds it (holdForWork(), and an audio file's: AudioWork.h):
+    // the app's one, which the main window sets; none in most tests. Another set takes over the holds of the one before.
+    void setInputHolder (InputHolder*);
+    InputHolder* getInputHolder() const noexcept { return held->holder; }
+
     struct Impl; // the open song, the selection and the range selection (internal/ProjectContext.h)
     Impl& getImpl() const noexcept { return *impl; }
 
 private:
     std::unique_ptr<Impl> impl;
     PluginStatesGate pluginStatesGate;
+    WorkHolder workHolder;
+    // How many holds for work are alive, and the input holder they hold, which they let go of as they go.
+    struct Held
+    {
+        int count = 0;
+        InputHolder* holder = nullptr;
+    };
+
+    std::shared_ptr<Held> held = std::make_shared<Held>();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ProjectContext)
 };

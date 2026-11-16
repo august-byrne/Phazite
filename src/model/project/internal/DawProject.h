@@ -20,6 +20,7 @@
 #include "model/base/Song.h"
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -113,10 +114,35 @@ juce::int64 getUnpackLimit (const juce::File& archive);
 // project's song, or comes back into a copy of the version it was exported from, with what another DAW changed in it.
 juce::StringArray takeDawProject (Song&, const DawProjectFile&);
 
+// The audio files a DAWproject's clips name unpacked into a folder (a project's Audio folder), for any thread, before the file
+// is taken in, so that the message thread unpacks none (found in review: a large file's audio kept the window for seconds):
+// each once, the archive opened once, and not at all where the folder has a file of its name that holds the same; within what
+// an archive of its size can hold (getUnpackLimit()); in blocks, until shouldStop says stop (a cancelled import, which takes
+// back the file it was unpacking), telling how far it is (0 to 1). What it unpacked, by the paths inside the archive; the
+// files it made, to take away again where the import doesn't finish; and whether it stopped before the end. Then takeDawProject()
+// with them, which unpacks nothing more; and the files it made that a song doesn't play (its file given, which its paths
+// start from) deleted, as an import that didn't finish, or took fewer clips than the file has, leaves them. And how many
+// bytes were unpacked on the message thread since the program started, which the performance tests count.
+struct UnpackedAudio
+{
+    std::map<juce::String, juce::File> files;
+    std::vector<juce::File> made;
+    bool stopped = false;
+};
+
+UnpackedAudio unpackDawProjectAudio (const DawProjectFile&, const juce::File& audioFolder, const std::function<bool()>& shouldStop = {},
+                                     const std::function<void (float)>& progress = {});
+juce::StringArray takeDawProject (Song&, const DawProjectFile&, const UnpackedAudio&);
+void forgetUnusedAudio (const UnpackedAudio&, const juce::ValueTree& song, const juce::File& projectFile);
+juce::int64 countBytesUnpackedOnMessageThread();
+
 // The same into a new branch from the version it came from, of the open project, whose versions must have it: the version's
 // song with what the DAWproject holds taken in, which the song then switches to, as it switches to any branch, the project
-// saved after it (model/versions/VersionsModel.h: switchBranch(), with the app's save). False, with why, if it can't be; else
-// what it couldn't take.
-bool importDawProjectAsBranch (ProjectContext&, const DawProjectFile&,
-                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, juce::StringArray& said);
+// saved after it (model/versions/VersionsModel.h: switchBranch(), with the app's save). In steps, the commit read and the
+// branch's song split on the history's thread, the window held throughout (ProjectContext::holdForWork()), whose Cancel leaves
+// nothing behind (the branch made is taken away again). False if it can't start; then, or once it is over, done is told
+// whether it was imported, with what it couldn't take, or why not.
+using ImportDone = std::function<void (bool imported, const juce::StringArray& said)>;
+bool importDawProjectAsBranch (ProjectContext&, std::shared_ptr<const DawProjectFile>,
+                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, ImportDone done);
 } // namespace phazite

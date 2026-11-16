@@ -45,6 +45,15 @@ struct SongPieces
 // values if given.
 SongPieces splitSong (const juce::ValueTree& song, const PluginParameterValues& = {});
 
+// How many whole songs (PHAZITE) were split since the program started, and how many of them on the message thread: what the
+// performance tests count (tests/PerformanceGateTests.cpp), as splitting a song is a costly part of keeping it.
+struct SongsSplit
+{
+    int all = 0, onMessageThread = 0;
+};
+
+SongsSplit countSongsSplit();
+
 // A piece's bytes by its name, or nothing for one that is missing or damaged.
 using ReadPiece = std::function<std::optional<juce::MemoryBlock> (const juce::String& name)>;
 
@@ -61,8 +70,14 @@ struct MissingPiece
 // element whose piece is missing becomes a stand-in of its type and key (Schema.h: schema::versions::missing), and so does
 // one whose run of notes or whose bytes are, so that making the song like it leaves those as they are now. Invalid still if
 // the element's own piece can't be read.
+// A whole song (PHAZITE) comes out as a project file opens, whoever wrote its pieces (another computer's, another tool's):
+// made consistent by the loader's checks (model/project/internal/Project.h: makeConsistent()), its sound files' paths
+// against the project's folder if given, which change nothing in a song Phazite wrote (but what only an Undo needs: the
+// curves of a device deleted, which a project opened leaves out too); its stand-ins are left out of them, as they are, and
+// what names an ID it hasn't is kept where it was read in part (ReadAs::inPart). Whether they gave items IDs anew (an ID
+// held twice, or none), if asked: such a song can't be merged, its IDs another's than its line's.
 juce::ValueTree joinSong (const juce::String& name, const ReadPiece&, PluginParameterValues* parameters = nullptr,
-                          std::vector<MissingPiece>* missing = nullptr);
+                          std::vector<MissingPiece>* missing = nullptr, const juce::File& projectFolder = {}, bool* idsGivenAnew = nullptr);
 
 // The pieces a piece names, in its order: its elements that are pieces of their own ("TRACK:12"), its runs ("_run"), its
 // bytes ("_bytes:state") and its plug-in's parameters ("_parameters"). Nothing for what isn't a piece.

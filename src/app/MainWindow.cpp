@@ -180,9 +180,17 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     getAudioWork (s.getContext()).setHost (this);
     // And the window takes no input while it reads, but the transport's keys and the few others that change nothing.
     s.getInputHold().setWindow (
-        shell, [this] (const juce::KeyPress& key) { return shortcutKeys.keyPressedWhileHeld (key); },
+        shell,
+        [this] (const juce::KeyPress& key)
+        {
+            // Escape before a progress window shows is the work's Cancel, as it is once it shows (ProjectSession.h).
+            if (key == juce::KeyPress::escapeKey && session.cancelHeldWork())
+                return true;
+
+            return shortcutKeys.keyPressedWhileHeld (key);
+        },
         [this] (bool isKeyDown) { shortcutKeys.keyStateChanged (isKeyDown, nullptr); });
-    getAudioWork (s.getContext()).setInputHolder (&s.getInputHold());
+    s.getContext().setInputHolder (&s.getInputHold()); // which the audio files' work and the versions' holds take
 
     // The playlist's clips draw their waveforms from Phazite's own cache of their files' levels (ClipWaveforms.h).
     ui::setClipWaveformMaker (getClipWaveformMaker());
@@ -241,7 +249,7 @@ MainWindow::~MainWindow()
     session.onCleanUpAudio = nullptr;
     session.dialogParent = nullptr;
     getAudioWork (session.getContext()).setHost (nullptr);
-    getAudioWork (session.getContext()).setInputHolder (nullptr);
+    session.getContext().setInputHolder (nullptr);
     session.getInputHold().setWindow (nullptr, nullptr);
     rendersWaiting.clear();
 
@@ -948,6 +956,8 @@ void MainWindow::runRender (std::unique_ptr<TrackRender> render)
                     safeThis->showNextRender();
             });
     };
+    panel->onHeldKey = [this] (const juce::KeyPress& key) { return shortcutKeys.keyPressedWhileHeld (key); };
+    panel->onHeldKeyState = [this] (bool isKeyDown) { shortcutKeys.keyStateChanged (isKeyDown, nullptr); };
 
     juce::DialogWindow::LaunchOptions o;
     o.dialogTitle = panel->getTitle();

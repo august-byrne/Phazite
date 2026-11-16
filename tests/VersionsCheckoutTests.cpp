@@ -52,7 +52,7 @@ TEST_CASE ("Checkout (Detached) makes the song a commit's on no branch, and Back
 {
     Checkout c;
     REQUIRE (phazite::canCheckout (c.s.context, c.first));
-    REQUIRE (phazite::checkoutVersion (c.s.context, c.first, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::checkoutVersion (c.s.context, c.first, c.s.save); }));
 
     // On no branch, named as the commit is; the song as the commit had it, with no changes since.
     CHECK (phazite::isDetached (c.s.context));
@@ -81,7 +81,7 @@ TEST_CASE ("Checkout (Detached) makes the song a commit's on no branch, and Back
     // Back to main: its song as it was left, its change not committed too; what changed here kept in Local History first.
     const auto snapshots = phazite::getSnapshots (c.s.context).size();
     REQUIRE (phazite::canGoBackToBranch (c.s.context));
-    REQUIRE (phazite::backToBranch (c.s.context, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::backToBranch (c.s.context, c.s.save); }));
     CHECK_FALSE (phazite::isDetached (c.s.context));
     CHECK (c.current() == "main");
     CHECK (c.volume() == doctest::Approx (-9.0f));
@@ -95,8 +95,8 @@ TEST_CASE ("Checkout (Detached) makes the song a commit's on no branch, and Back
 TEST_CASE ("A commit checked out goes on to another commit checked out, or to a branch picked, and stays as the project opens again")
 {
     Checkout c;
-    REQUIRE (phazite::checkoutVersion (c.s.context, c.first, c.s.save));
-    REQUIRE (phazite::checkoutVersion (c.s.context, c.second, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::checkoutVersion (c.s.context, c.first, c.s.save); }));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::checkoutVersion (c.s.context, c.second, c.s.save); }));
     CHECK (phazite::getCurrentBranch (c.s.context)->head == c.second);
     CHECK (c.volume() == doctest::Approx (-6.0f));
 
@@ -109,7 +109,7 @@ TEST_CASE ("A commit checked out goes on to another commit checked out, or to a 
 
     // main picked in the branch picker goes there as Back to main would.
     const auto main = phazite::getBranches (c.s.context)[0].id;
-    REQUIRE (phazite::switchBranch (c.s.context, main, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::switchBranch (c.s.context, main, c.s.save); }));
     CHECK_FALSE (phazite::isDetached (c.s.context));
     CHECK (c.volume() == doctest::Approx (-9.0f));
     CHECK (phazite::getBranches (c.s.context).size() == 1);
@@ -118,12 +118,17 @@ TEST_CASE ("A commit checked out goes on to another commit checked out, or to a 
 TEST_CASE ("Create Branch Here keeps what changed on a commit checked out, on a branch from it; main keeps its own song")
 {
     Checkout c;
-    REQUIRE (phazite::checkoutVersion (c.s.context, c.first, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&] { return phazite::checkoutVersion (c.s.context, c.first, c.s.save); }));
     c.s.setVolume (c.bass, -3.0f);
 
     // Create Branch on the commit checked out, selected in the graph, makes it here, as the bar's Create Branch Here does.
     phazite::selectVersion (c.s.context, c.first);
-    phazite::newBranchFromSelection (c.s.context, c.s.save);
+    REQUIRE (phazite::test::finished (c.s.context,
+                                      [&]
+                                      {
+                                          phazite::newBranchFromSelection (c.s.context, c.s.save);
+                                          return true;
+                                      }));
     CHECK_FALSE (phazite::isDetached (c.s.context));
     CHECK (c.current() == "idea-2");
     CHECK (phazite::getCurrentBranch (c.s.context)->head == c.first);
@@ -131,7 +136,8 @@ TEST_CASE ("Create Branch Here keeps what changed on a commit checked out, on a 
     CHECK (phazite::canSaveVersion (c.s.context)); // a commit can be made of it now
     CHECK (phazite::getBranches (c.s.context).size() == 2);
 
-    REQUIRE (phazite::switchBranch (c.s.context, phazite::getBranches (c.s.context)[0].id, c.s.save));
+    REQUIRE (phazite::test::finished (c.s.context, [&]
+                                      { return phazite::switchBranch (c.s.context, phazite::getBranches (c.s.context)[0].id, c.s.save); }));
     CHECK (c.current() == "main");
     CHECK (c.volume() == doctest::Approx (-9.0f));
 }

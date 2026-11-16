@@ -1244,7 +1244,7 @@ juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
     if (! device.isValid())
         return {};
 
-    return isContainerState (device) ? juce::String ("Containers") : juce::File::createLegalFileName (getDeviceName (*song, id));
+    return isContainerState (device) ? juce::String ("Containers") : makeUsableFileName (getDeviceName (*song, id));
 }
 
 bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::File& file)

@@ -46,6 +46,7 @@ TestSong::TestSong (Start start)
         [this] (std::function<void (bool)> run)
         { whenPluginStatesIn (project->getSong(), SandboxedInstance::Ask::changedAndAnswering, [run] (bool) { run (true); }); });
     commands.setPluginStatesGate ([this] (std::function<void (bool)> run) { context.withPluginStates (std::move (run)); });
+    commands.setBusyCheck ([this] { return context.isHoldingForWork(); });
 
     // As the app's save (ProjectSession::saveThen()): its plug-ins asked for their states first.
     save = [this] (std::function<void (bool)> then)
@@ -82,6 +83,31 @@ bool waitForVersionHistory (ProjectContext& context)
             return history == nullptr || (! history->isReading() && ! history->isBusy());
         },
         versionHistoryTimeout);
+}
+
+bool finished (ProjectContext& context, const std::function<bool()>& command)
+{
+    const auto* history = getVersionHistory (context);
+    const auto before = history != nullptr ? history->getReadingsStarted() : 0;
+
+    if (! command())
+        return false;
+
+    history = getVersionHistory (context);
+
+    if (history == nullptr || history->getReadingsStarted() == before)
+        return true;
+
+    const auto over = dispatchMessagesUntil (
+        [&context]
+        {
+            const auto* reading = getVersionHistory (context);
+            return reading == nullptr || ! reading->isReadingForCommand();
+        },
+        versionHistoryTimeout);
+
+    history = getVersionHistory (context);
+    return over && history != nullptr && history->didLastReading() && waitForVersionHistory (context);
 }
 
 Project& TestSong::getProject() const
@@ -168,6 +194,15 @@ void TestSong::openSong (const juce::ValueTree& song)
 void TestSong::run (const juce::String& commandID)
 {
     REQUIRE_MESSAGE (commands.invoke (commandID), (commandID + " is unknown or greyed out").toStdString());
+
+    // One of the versions' that reads whole songs first is done once what it read is taken in (finished()).
+    REQUIRE (dispatchMessagesUntil (
+        [this]
+        {
+            const auto* history = getVersionHistory (context);
+            return history == nullptr || ! history->isReadingForCommand();
+        },
+        versionHistoryTimeout));
 }
 
 void TestSong::setSwitch (const juce::String& commandID, bool on)
@@ -391,5 +426,13 @@ void TestSong::modulate (ModulatorID modulator, const ParameterRef& parameter, f
 {
     phazite::modulate (context, modulator, parameter, amount);
     REQUIRE (! getModulations (context, parameter).empty());
+}
+} // namespace phazite::test
+
+namespace phazite::test
+{
+void waitForVersionsWrites()
+{
+    waitForVersionsFinished();
 }
 } // namespace phazite::test

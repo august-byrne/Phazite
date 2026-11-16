@@ -192,6 +192,101 @@ TEST_CASE ("Fuzz: a version's pieces join into a song that holds together, or no
                      });
 }
 
+TEST_CASE (
+    "Fuzz: a song another computer wrote into the versions goes into the song holding together, as it is checked out, merged, restored or brought back from Local History")
+{
+    // The representative project's song, damaged each round as anyone could write it, kept as another computer's commit on a
+    // branch of its own and as a snapshot of this computer's Local History, with each piece's name what it holds (so that
+    // the store reads it); the project opened again, the song made it in each way the versions make it, and checked.
+    TestSong s;
+    juce::String error;
+    const auto golden = getGoldenFolder().getChildFile ("projects/representative.xml");
+    const auto copy = s.getProject().getFolder().getChildFile ("Representative.phazite");
+    REQUIRE (golden.copyFileTo (copy));
+    const auto representative = phazite::Project::open (copy, false, error);
+    REQUIRE (representative != nullptr);
+    const auto seed = phazite::writeElement (representative->getSong().getState());
+    const auto versions = s.getProject().getFolder().getChildFile ("Versions");
+    auto round = 0;
+
+    fuzz::runRounds ("versions from elsewhere", 20,
+                     [&] (fuzz::Mutator& mutator, juce::MemoryBlock& fed) -> std::string
+                     {
+                         fed = mutator.mutate (seed, fuzz::Shape::xml);
+                         const auto hostile = phazite::readElement (fed);
+
+                         if (! hostile.hasType (schema::PHAZITE))
+                             return {};
+
+                         REQUIRE (waitForVersionHistory (s.context));
+                         const auto head = phazite::getLastVersion (s.context)->id;
+                         const auto main = phazite::getCurrentBranch (s.context)->id;
+                         const auto time = juce::Time::currentTimeMillis() + ++round;
+                         juce::String id;
+
+                         {
+                             phazite::VersionStore other (versions, "fuzz-computer");
+                             phazite::VersionRecord record;
+                             record.parents = { head };
+                             record.branch = "fuzz-" + juce::String (round);
+                             record.saved = time;
+                             const auto pieces = phazite::splitSong (hostile);
+                             id = other.writeVersion (record, pieces);
+                             REQUIRE (id.isNotEmpty());
+                             phazite::BranchRecord branch;
+                             branch.id = record.branch;
+                             branch.name = record.branch;
+                             branch.head = id;
+                             branch.computer = "fuzz-computer";
+                             branch.changed = time;
+                             REQUIRE (other.writeBranch (branch));
+                             other.getPieces().closeFiles();
+
+                             phazite::VersionStore mine (versions, phazite::getThisComputer());
+                             auto snapshots = mine.readSnapshots();
+                             snapshots.push_back ({ time, main, pieces.song, "auto" });
+                             REQUIRE (mine.writeSnapshots (snapshots));
+                         }
+
+                         s.reopen (false);
+                         REQUIRE (waitForVersionHistory (s.context));
+                         std::vector<std::string> problems;
+                         const auto check = [&] (const char* how)
+                         {
+                             for (const auto& problem : findSongProblems (*phazite::findSong (s.context)))
+                                 problems.push_back (std::string (how) + ": " + problem);
+                         };
+
+                         if (finished (s.context, [&] { return phazite::checkoutVersion (s.context, id, s.save); }))
+                         {
+                             check ("checked out");
+                             REQUIRE (finished (s.context, [&] { return phazite::backToBranch (s.context, s.save); }));
+                         }
+
+                         if (finished (s.context, [&] { return phazite::startMerge (s.context, id); }))
+                         {
+                             phazite::finishTickedMerge (s.context);
+                             check ("merged");
+                             phazite::cancelMerge (s.context);
+                             check ("merge aborted");
+                         }
+
+                         if (finished (s.context, [&] { return phazite::bringBackVersion (s.context, id); }))
+                         {
+                             check ("restored");
+                             phazite::undo (*phazite::findSong (s.context));
+                         }
+
+                         if (finished (s.context, [&] { return phazite::restoreSnapshot (s.context, time); }))
+                         {
+                             check ("Local History restored");
+                             phazite::undo (*phazite::findSong (s.context));
+                         }
+
+                         return fuzz::joinProblems (problems);
+                     });
+}
+
 TEST_CASE ("Fuzz: a pack of a version's pieces is read whole or not at all")
 {
     TemporaryFolder temporary;
@@ -351,14 +446,14 @@ TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, an
 
     commit();
     const auto main = phazite::getCurrentBranch (s.context)->id;
-    REQUIRE (phazite::newBranch (s.context, {}, s.save));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
     s.setVolume (bass, -12.0f);
     s.addTrack ("Keys");
     const auto theirs = commit();
-    REQUIRE (phazite::switchBranch (s.context, main, s.save));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, s.save); }));
     s.setVolume (bass, -6.0f);
     commit();
-    REQUIRE (phazite::startMerge (s.context, theirs));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
     phazite::finishTickedMerge (s.context);
     REQUIRE (phazite::isMerging (s.context));
 
@@ -554,9 +649,25 @@ TEST_CASE ("Fuzz: a DAWproject is taken into a song that holds together, or refu
 
         project.getParentDirectory().deleteRecursively();
         project.getParentDirectory().createDirectory();
+
+        // What the project's Audio folder held before: a file of its own, and one of an entry's name with other bytes.
+        const auto audio = project.getSiblingFile ("Audio");
+        audio.createDirectory();
+        const std::vector<std::pair<juce::String, juce::String>> before { { "Kept.wav", "kept" }, { "Loop.wav", "not the loop" } };
+
+        for (const auto& [name, bytes] : before)
+            audio.getChildFile (name).replaceWithText (bytes);
+
+        // As an import takes one in: its audio unpacked first, off the message thread in the app; what nothing plays then gone.
         auto song = phazite::createSong (project);
-        phazite::takeDawProject (*song, read);
+        const auto unpacked = phazite::unpackDawProjectAudio (read, audio);
+        phazite::takeDawProject (*song, read, unpacked);
+        phazite::forgetUnusedAudio (unpacked, song->getState(), project);
         auto problems = findSongProblems (*song);
+
+        for (const auto& [name, bytes] : before)
+            if (audio.getChildFile (name).loadFileAsString() != bytes)
+                problems.push_back ("the Audio folder's " + name.toStdString() + " was changed or deleted");
 
         if (const auto copied = findNonAudio (project.getSiblingFile ("Audio")); ! copied.empty())
             problems.push_back (copied);

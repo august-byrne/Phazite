@@ -13,6 +13,7 @@
 
 #include <juce_events/juce_events.h>
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -155,6 +156,11 @@ void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 // Forgets the curves of devices the song hasn't any more (the song keeps them while an undo can bring the device back), as
 // a project opens: without an undo step. A device keeps those of parameters it hasn't, as a plug-in that isn't installed.
 void forgetCurvesOfGoneDevices (Song&);
+
+// The same in the caller's undo step (undo), of the curves which says alone: those a song taken from the versions in part
+// brought in that name a device the song hasn't (a restore from a damaged commit: model/versions/VersionsModel.cpp), so that
+// the song is what its file would open as.
+void forgetCurvesOfGoneDevices (Song&, juce::UndoManager* undo, const std::function<bool (const juce::ValueTree& curve)>& which);
 
 //==============================================================================
 // Watches the song's values set by hand (Song::ParameterListener): remembers the parameter changed last by hand (by a

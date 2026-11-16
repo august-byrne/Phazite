@@ -338,6 +338,26 @@ and ten keys' pressure: 0.045 % of a block of 128 at 48 kHz.
 | Autosave | 49 ms | 12 |
 | Open | 28 ms | 12 |
 
+### Benchmark: what a branch switch and a merge spend on the message thread, by part
+
+The 32-track benchmark song of 64 beats, `windows-profile`, three runs each, measured 2026-11-15 (known bug 126). Before, both
+commands read their songs, split the song left and worked the merge out on the message thread, in the call; now they read
+and work out on the history's thread, and the message thread is kept by the call and by the message that takes what was
+read in (the song made the other branch's, its plan compiled; the merge's list shown).
+
+| | Before: the call | After: the call | After: the longest message after it | After: the whole, start to end |
+|---|---|---|---|---|
+| A branch switch | 280 to 310 ms | 1.6 to 2.7 ms | 89 to 114 ms | 314 to 352 ms |
+| The start of a merge | 208 to 225 ms | 2.4 to 2.7 ms | 10 to 11 ms | 308 to 342 ms |
+| Songs read, and split, on the message thread (switch, merge) | 2, 2 | 0, 0 | | |
+
+A commit's song read, which now passes the loader's checks as it is joined (`joinSong()`), takes 80 to 97 ms on its
+thread, 61 to 80 ms before; the song split into pieces 23 to 33 ms (33 to 37 ms before). Re-measured 2026-11-16 after the review's round (the song left split again on the history's
+thread when it changes meanwhile; reasons; the import in steps). What still runs on the message thread of a DAWproject
+import as a branch: the commit's song made a song of its own (`makeSong()`, which belongs there) with what came back
+taken in, its audio copied out of the file (`takeDawProject()`): 35 to 51 ms for the song made, plus the copy, which
+depends on the file.
+
 ### Benchmark: rendering audio clips stretched and pitched
 
 Not recorded.
@@ -630,6 +650,8 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
 - an import, Normalize and Quantize Audio read no byte of audio on the message thread (`AudioWork::getMessageThreadReads()`,
   known bug 123), and a key typed in the browser's search looks through none of the library there
   (`Library::getItemsSearchedOnMessageThread()`, in `tests/BrowserTests.cpp`; known bug 128).
+- a branch switch, a checkout, going back to the branch, the start of a merge and Merge read, split and write no song on
+  the message thread (`VersionStore::countSongsRead()`, `countSongsWritten()`, `countSongsSplit()`; known bug 126).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

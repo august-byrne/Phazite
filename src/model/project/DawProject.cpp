@@ -32,9 +32,12 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 
 namespace phazite
@@ -1012,6 +1015,131 @@ juce::int64 getUnpackLimit (const juce::File& archive)
     return std::max ((juce::int64) 64 << 20, archive.getSize() * 1100);
 }
 
+//==============================================================================
+namespace
+{
+    std::atomic<juce::int64> bytesUnpackedOnMessageThread { 0 };
+
+    bool holdsTheSameAs (juce::ZipFile& zip, int index, const juce::File& file)
+    {
+        const std::unique_ptr<juce::InputStream> entry (zip.createStreamForEntry (index));
+        juce::FileInputStream existing (file);
+
+        if (entry == nullptr || ! existing.openedOk())
+            return false;
+
+        juce::HeapBlock<char> one (1 << 16), other (1 << 16);
+
+        for (;;)
+        {
+            const auto read = existing.read (one, 1 << 16);
+
+            if (read <= 0)
+                return entry->read (other, 1) <= 0;
+
+            if (entry->read (other, read) != read || std::memcmp (one, other, (size_t) read) != 0)
+                return false;
+        }
+    }
+
+    // A file of the zip copied into a folder: not at all where it has a file of its name that holds the same (a DAWproject
+    // Phazite wrote, coming back); no more than the entry says it holds, nor, with what came out before it (unpacked), than
+    // an archive of this size can hold (getUnpackLimit()): a hostile archive never fills the disk (entries can share their
+    // compressed bytes), one that doesn't fit refused before anything of it is written. In blocks, asking between them
+    // whether to stop (a cancelled import), which takes back what was begun. The file, none for what can't be unpacked; and
+    // whether it was made here.
+    std::pair<juce::File, bool> unpackEntry (juce::ZipFile& zip, const juce::String& path, const juce::File& folder, juce::int64 limit,
+                                             juce::int64& unpacked, const std::function<bool()>& shouldStop)
+    {
+        const auto index = zip.getIndexOfFileName (path);
+
+        if (index < 0 || folder == juce::File())
+            return {};
+
+        // The entry's name, from its path inside the archive: relative, which a juce::File made from it asserts against.
+        const auto entry = juce::File::createFileWithoutCheckingPath (
+            path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
+        const auto name = makeUsableFileName (entry.getFileNameWithoutExtension()); // never one Windows keeps for a device
+        const auto declared = zip.getEntry (index)->uncompressedSize;
+
+        if (const auto same = folder.getChildFile (name + entry.getFileExtension());
+            same.existsAsFile() && same.getSize() == declared && holdsTheSameAs (zip, index, same))
+            return { same, false };
+
+        if (declared < 0 || declared > limit - unpacked)
+            return {};
+
+        const auto target = folder.getNonexistentChildFile (name, entry.getFileExtension(), false);
+        const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (index));
+        folder.createDirectory();
+
+        if (stream == nullptr)
+            return {};
+
+        auto whole = false;
+
+        {
+            juce::FileOutputStream out (target);
+
+            if (! out.openedOk())
+            {
+                target.deleteFile();
+                return {};
+            }
+
+            juce::HeapBlock<char> block (1 << 16);
+            juce::int64 written = 0;
+
+            while (written < declared && ! shouldStop())
+            {
+                const auto read = stream->read (block, (int) std::min ((juce::int64) (1 << 16), declared - written));
+
+                if (read <= 0 || ! out.write (block, (size_t) read))
+                    break;
+
+                written += read;
+            }
+
+            unpacked += written;
+
+            if (juce::MessageManager::existsAndIsCurrentThread())
+                bytesUnpackedOnMessageThread += written;
+
+            char beyond = 0;
+            whole = written == declared && stream->read (&beyond, 1) <= 0;
+        }
+
+        if (! whole)
+        {
+            target.deleteFile();
+            return {};
+        }
+
+        return { target, true };
+    }
+
+    // The paths inside the archive of the audio files its clips name (Audio elements' File), each once, in order.
+    juce::StringArray findAudioPaths (const juce::XmlElement& project)
+    {
+        juce::StringArray paths;
+        const std::function<void (const juce::XmlElement&)> visit = [&] (const juce::XmlElement& element)
+        {
+            for (const auto* child : element.getChildIterator())
+            {
+                if (child->hasTagName ("Audio"))
+                    if (const auto* file = child->getChildByName ("File"))
+                        paths.addIfNotAlreadyThere (file->getStringAttribute ("path"));
+
+                visit (*child);
+            }
+        };
+
+        visit (project);
+        paths.removeEmptyStrings();
+        return paths;
+    }
+} // namespace
+
 DawProjectFile readDawProject (const juce::File& file)
 {
     DawProjectFile read;
@@ -1210,7 +1338,8 @@ namespace
         Song& song;
         const DawProjectFile& in;
         juce::StringArray notTaken {};
-        juce::int64 unpacked = 0; // what copyOut() has written, against getUnpackLimit()
+        juce::int64 unpacked = 0;                // what copyOut() has written, against getUnpackLimit()
+        const UnpackedAudio* prepared = nullptr; // what was unpacked already, off the message thread, if it was
 
         void take()
         {
@@ -1558,6 +1687,13 @@ namespace
 
         juce::File copyOut (const juce::String& path)
         {
+            // Unpacked already, off the message thread (unpackDawProjectAudio()): what it unpacked, and nothing more.
+            if (prepared != nullptr)
+            {
+                const auto found = prepared->files.find (path);
+                return found != prepared->files.end() ? found->second : juce::File();
+            }
+
             if (const auto done = unpackedFiles.find (path); done != unpackedFiles.end())
                 return done->second;
 
@@ -1566,84 +1702,11 @@ namespace
             return file;
         }
 
-        static bool holdsTheSame (juce::ZipFile& zip, int index, const juce::File& file)
-        {
-            const std::unique_ptr<juce::InputStream> entry (zip.createStreamForEntry (index));
-            juce::FileInputStream existing (file);
-
-            if (entry == nullptr || ! existing.openedOk())
-                return false;
-
-            juce::HeapBlock<char> one (1 << 16), other (1 << 16);
-
-            for (;;)
-            {
-                const auto read = existing.read (one, 1 << 16);
-
-                if (read <= 0)
-                    return entry->read (other, 1) <= 0;
-
-                if (entry->read (other, read) != read || std::memcmp (one, other, (size_t) read) != 0)
-                    return false;
-            }
-        }
-
         juce::File unpack (const juce::String& path)
         {
             juce::ZipFile zip (in.file);
-            const auto index = zip.getIndexOfFileName (path);
-            const auto folder = song.getFile().getSiblingFile ("Audio");
-
-            if (index < 0 || song.getFile() == juce::File())
-                return {};
-
-            // The entry's name, from its path inside the archive: relative, which a juce::File made from it asserts against.
-            const auto entry = juce::File::createFileWithoutCheckingPath (
-                path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
-            const auto name = juce::File::createLegalFileName (entry.getFileNameWithoutExtension());
-            const auto declared = zip.getEntry (index)->uncompressedSize;
-
-            if (const auto same = folder.getChildFile (name + entry.getFileExtension());
-                same.existsAsFile() && same.getSize() == declared && holdsTheSame (zip, index, same))
-                return same;
-
-            const auto target = folder.getNonexistentChildFile (name, entry.getFileExtension(), false);
-            const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (index));
-            folder.createDirectory();
-
-            if (stream == nullptr)
-                return {};
-
-            // No more than the entry says it holds, nor, with what came out before it, than an archive of this size can
-            // hold (getUnpackLimit()): a hostile archive never fills the disk (entries can share their compressed bytes).
-            // One that doesn't fit is refused before anything of it is written.
-            if (declared < 0 || declared > getUnpackLimit (in.file) - unpacked)
-                return {};
-
-            bool whole = false;
-
-            {
-                juce::FileOutputStream out (target);
-
-                if (! out.openedOk())
-                {
-                    target.deleteFile();
-                    return {};
-                }
-
-                const auto written = out.writeFromInputStream (*stream, declared);
-                unpacked += std::max ((juce::int64) 0, written);
-                char beyond = 0;
-                whole = written == declared && stream->read (&beyond, 1) <= 0;
-            }
-
-            if (! whole)
-            {
-                target.deleteFile();
-                return {};
-            }
-
-            return target;
+            const auto folder = song.getFile() != juce::File() ? song.getFile().getSiblingFile ("Audio") : juce::File();
+            return unpackEntry (zip, path, folder, getUnpackLimit (in.file), unpacked, [] { return false; }).first;
         }
 
         void takeTransport()
@@ -1743,47 +1806,238 @@ juce::StringArray takeDawProject (Song& song, const DawProjectFile& in)
     return reader.notTaken;
 }
 
-bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in,
-                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, juce::StringArray& said)
+juce::StringArray takeDawProject (Song& song, const DawProjectFile& in, const UnpackedAudio& unpacked)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (in.project == nullptr)
+        return { in.error };
+
+    Reader reader { song, in };
+    reader.prepared = &unpacked;
+    reader.take();
+    return reader.notTaken;
+}
+
+UnpackedAudio unpackDawProjectAudio (const DawProjectFile& in, const juce::File& audioFolder, const std::function<bool()>& shouldStop,
+                                     const std::function<void (float)>& progress)
+{
+    UnpackedAudio unpacked;
+
+    if (in.project == nullptr)
+        return unpacked;
+
+    // The archive opened once for all of them.
+    juce::ZipFile zip (in.file);
+    const auto paths = findAudioPaths (*in.project);
+    const auto limit = getUnpackLimit (in.file);
+    juce::int64 total = 0;
+
+    for (int i = 0; i < paths.size(); ++i)
+    {
+        if (shouldStop != nullptr && shouldStop())
+        {
+            unpacked.stopped = true;
+            break;
+        }
+
+        if (progress != nullptr)
+            progress ((float) i / (float) paths.size());
+
+        const auto [file, made] =
+            unpackEntry (zip, paths[i], audioFolder, limit, total, shouldStop != nullptr ? shouldStop : [] { return false; });
+
+        if (file != juce::File())
+            unpacked.files.emplace (paths[i], file);
+
+        if (made)
+            unpacked.made.push_back (file);
+    }
+
+    unpacked.stopped = unpacked.stopped || (shouldStop != nullptr && shouldStop());
+    return unpacked;
+}
+
+void forgetUnusedAudio (const UnpackedAudio& unpacked, const juce::ValueTree& song, const juce::File& projectFile)
+{
+    // What the song plays, by its files: a path within the project's folder, or a full one.
+    const auto folder = projectFile.getParentDirectory();
+    std::set<juce::File> played;
+
+    for (const auto& path : findAudioFilePaths (song))
+        played.insert (juce::File::isAbsolutePath (path) ? juce::File (path) : folder.getChildFile (path));
+
+    for (const auto& file : unpacked.made)
+        if (played.count (file) == 0)
+            file.deleteFile();
+}
+
+juce::int64 countBytesUnpackedOnMessageThread()
+{
+    return bytesUnpackedOnMessageThread.load();
+}
+
+bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const DawProjectFile> in,
+                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, ImportDone done)
 {
     auto* history = getVersionHistory (context);
     auto* open = findSong (context);
-    const auto* version = history != nullptr ? history->findVersion (in.fromVersion) : nullptr;
-
-    if (open == nullptr || version == nullptr || in.project == nullptr)
+    const auto* version = history != nullptr && in != nullptr ? history->findVersion (in->fromVersion) : nullptr;
+    const auto refuse = [&done] (const juce::String& why)
     {
-        said = { "It wasn't exported from a commit of this project." };
+        if (done != nullptr)
+            done (false, { why });
+
         return false;
-    }
+    };
+
+    if (open == nullptr || version == nullptr || in == nullptr || in->project == nullptr)
+        return refuse ("It wasn't exported from a commit of this project.");
 
     if (! canSwitchBranch (context))
+        return refuse ("Not while the song records, renders, or commits.");
+
+    // In steps, the window held from the first to the last (known bug 126): the version's song read on the history's thread;
+    // made a song of its own here, with what came back taken in (its audio copied into the project); split and kept on the
+    // history's thread; a branch from the version, with it, made here; and the switch to it, read there and made here, as any
+    // switch is. What it adds takes IDs past the open song's, which no other branch has. A branch made is taken away again if
+    // the switch doesn't finish, so that a cancelled import leaves nothing; done is told what came of it once it is over.
+    struct Import
     {
-        said = { "Not while the song records, renders, or commits." };
-        return false;
-    }
+        juce::StringArray said;
+        juce::String branch;
 
-    // The version's song, made a song of its own, with what came back taken in; then a branch from the version, with it. What
-    // it adds takes IDs past the open song's, which no other branch has (VersionHistory::switchTo()).
-    const auto state = history->readSong (version->id);
-    const auto song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
+        // Its audio, unpacked on the history's thread (known bug 126's review): what came of it, once it has, and whether to
+        // stop, or to take it back as soon as it is done (an import cancelled or failed meanwhile).
+        std::mutex lock;
+        UnpackedAudio audio;
+        bool unpacked = false, takeBack = false;
+        std::atomic<bool> stop { false };
+    };
 
-    if (song == nullptr)
+    auto import = std::make_shared<Import>();
+    const auto fromVersion = version->id;
+    const auto nothing = juce::String ("Nothing was imported.");
+
+    const auto takeInSong = [&context, in, import, fromVersion, nothing] (juce::ValueTree state) -> VersionHistory::Taken
     {
-        said = { "Phazite couldn't read the commit it came from." };
-        return false;
-    }
+        auto* reading = getVersionHistory (context);
+        auto* songNow = findSong (context);
+        const auto song = state.isValid() && songNow != nullptr ? makeSong (state, songNow->getFile(), songNow->getCacheFolder()) : nullptr;
 
-    song->getState().setProperty (schema::nextID, (juce::int64) std::max (findNextID (song->getState()), findNextID (open->getState())),
-                                  nullptr);
-    said = takeDawProject (*song, in);
-    const auto branch = history->makeBranchWithSong (version->id, song->getState());
+        if (reading == nullptr || song == nullptr)
+            return VersionHistory::Taken::refused ("Phazite couldn't read the commit it came from. " + nothing);
 
-    if (branch.isEmpty() || ! switchBranch (context, branch, saveProjectThen))
-    {
-        said = { "Phazite couldn't make a branch for it." };
-        return false;
-    }
+        song->getState().setProperty (schema::nextID,
+                                      (juce::int64) std::max (findNextID (song->getState()), findNextID (songNow->getState())), nullptr);
+        import->said = takeDawProject (*song, *in, import->audio); // unpacked already: nothing more on this thread
 
-    return true;
+        return VersionHistory::Taken::readAgain (
+            [&context, import, fromVersion, nothing, copy = song->getState().createCopy(),
+             store = reading->getStore()]() -> VersionHistory::TakeIn
+            {
+                const auto pieces = splitSong (copy);
+                const auto kept = store->writeSong (pieces);
+                store->getPieces().closeFiles();
+
+                return [&context, import, fromVersion, nothing, kept, piece = pieces.song]() -> VersionHistory::Taken
+                {
+                    auto* making = getVersionHistory (context);
+
+                    if (making == nullptr)
+                        return false;
+
+                    import->branch = kept ? making->makeBranchWithSong (fromVersion, piece) : juce::String();
+                    auto plan = making->prepareSwitch (import->branch, true);
+
+                    if (! plan.has_value())
+                        return VersionHistory::Taken::refused ("Phazite couldn't make a branch for it. " + nothing);
+
+                    return VersionHistory::Taken::readAgain (
+                        [&context, plan = *plan, store = making->getStore()]() -> VersionHistory::TakeIn
+                        {
+                            auto read = std::make_shared<VersionHistory::SwitchRead> (VersionHistory::readSwitch (*store, plan));
+                            return takeInSwitch (context, plan, read, 2);
+                        });
+                };
+            });
+    };
+
+    // How far its unpacking is, for the progress window.
+    const auto progress = std::make_shared<std::atomic<float>> (-1.0f);
+
+    return startCommandRead (
+        context, *history, "Reading \"" + getDisplayName (*version) + "\" to import " + in->file.getFileName(),
+        [store = history->getStore(), piece = version->song, takeInSong, import, in, audioFolder = open->getFile().getSiblingFile ("Audio"),
+         progress = progress]() -> VersionHistory::TakeIn
+        {
+            auto state = readCommitSong (*store, piece);
+            store->getPieces().closeFiles();
+            auto audio = unpackDawProjectAudio (
+                *in, audioFolder, [import] { return import->stop.load(); }, [progress] (float done) { *progress = done; });
+
+            {
+                const std::scoped_lock held (import->lock);
+                import->audio = std::move (audio);
+                import->unpacked = true;
+
+                if (import->takeBack)
+                    for (const auto& file : import->audio.made)
+                        file.deleteFile();
+            }
+
+            return [takeInSong, state] { return takeInSong (state); };
+        },
+        [&context, import, done, saveProjectThen] (bool did)
+        {
+            auto* history = getVersionHistory (context);
+
+            // The audio it unpacked that nothing plays taken away: all of it, where it didn't finish (as soon as it is done
+            // unpacking, if it isn't yet).
+            {
+                import->stop = ! did;
+                const std::scoped_lock held (import->lock);
+
+                if (! import->unpacked)
+                    import->takeBack = true;
+                else if (auto* song = findSong (context); did && song != nullptr)
+                    forgetUnusedAudio (import->audio, song->getState(), song->getFile());
+                else if (import->branch.isEmpty()) // else once the branch made, whose song names them, is gone (below)
+                    for (const auto& file : import->audio.made)
+                        file.deleteFile();
+            }
+
+            if (did)
+                saveProjectThen ([] (bool) {});
+            else if (history != nullptr && import->branch.isNotEmpty())
+                history->whenNotCopying (
+                    [&context, import]
+                    {
+                        auto* making = getVersionHistory (context);
+
+                        if (making == nullptr)
+                            return;
+
+                        // Its audio only once nothing names it: the branch gone. One that can't go now (a commit being
+                        // written) stays whole, with the audio it plays, which Clean Up can offer later; and is said.
+                        if (making->deleteBranch (import->branch))
+                        {
+                            const std::scoped_lock held (import->lock);
+
+                            for (const auto& file : import->audio.made)
+                                file.deleteFile();
+                        }
+                        else
+                        {
+                            making->readingProblem = "The branch the import made couldn't be taken away again, as a commit was being "
+                                                     "written: it stays, with the audio it plays. Delete it from the branch picker.";
+                            making->tellNow();
+                        }
+                    });
+
+            if (done != nullptr)
+                done (did, did ? import->said : juce::StringArray (history != nullptr ? history->readingProblem : juce::String()));
+        },
+        progress);
 }
 } // namespace phazite

@@ -131,7 +131,7 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     const auto changed = song.getState().createCopy();
     REQUIRE (phazite::hasChangesSinceLastVersion (s.context));
 
-    REQUIRE (phazite::bringBackVersion (s.context, verse));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, verse); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     CHECK (phazite::findChanges (then, song.getState()).empty());
     CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
@@ -179,7 +179,7 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
     CHECK (phazite::getClips (*phazite::findSong (s.context), keys).size() == 1);
 
     // Take from This Version: what differs from the first version, and Bass taken from it.
-    phazite::compareWithVersion (s.context, first);
+    phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, first); });
     CHECK (phazite::getComparedVersion (s.context) == first);
     CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume");
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
@@ -188,7 +188,7 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
     CHECK (describeChanges (phazite::getListedChanges (s.context)).isEmpty());
 
     // Back to the changes since the last version, which that one is now.
-    phazite::compareWithVersion (s.context, {});
+    phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, {}); });
     CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume");
 }
 
@@ -299,14 +299,14 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
     keepVersion (s.context, "Moved");
     const auto bassLine = findLine (readVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Bass");
     REQUIRE (bassLine.has_value());
-    REQUIRE (phazite::restoreFromVersion (s.context, first, *bassLine));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, first, *bassLine); }));
     checkIDs (song);
     CHECK (phazite::getClips (song, bass) == std::vector { clip });
     CHECK (phazite::getClips (song, keys).empty());
     phazite::undo (song);
 
     // Bass deleted since, after its clip went onto Keys (the last commit has both so): Bass back, with its clip, once.
-    REQUIRE (phazite::bringBackVersion (s.context, first));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, first); }));
     keepVersion (s.context, "As at first");
     moveToKeys();
 
@@ -376,7 +376,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
     keepVersion (s.context, "Moved");
     const auto keysLine = findLine (readVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Keys");
     REQUIRE (keysLine.has_value());
-    REQUIRE (phazite::restoreFromVersion (s.context, first, *keysLine));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::restoreFromVersion (s.context, first, *keysLine); }));
     checkIDs (song);
     CHECK (phazite::getClips (song, bass) == std::vector { clip });
     CHECK (phazite::getClips (song, keys).empty());
@@ -454,7 +454,7 @@ TEST_CASE ("What is restored into a song opened again as it was saved before it 
 
         INFO (reasons.joinIntoString ("; ").toStdString());
         REQUIRE (time != 0);
-        REQUIRE (phazite::restoreSnapshot (s.context, time));
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::restoreSnapshot (s.context, time); }));
         checkNextItems (s, keys);
     }
 
@@ -463,7 +463,8 @@ TEST_CASE ("What is restored into a song opened again as it was saved before it 
         TestSong s;
         phazite::TrackID keys;
         makeAndReopen (s, keys, true);
-        REQUIRE (phazite::bringBackVersion (s.context, phazite::getLastVersion (s.context)->id));
+        REQUIRE (phazite::test::finished (s.context,
+                                          [&] { return phazite::bringBackVersion (s.context, phazite::getLastVersion (s.context)->id); }));
         checkNextItems (s, keys);
     }
 
@@ -492,12 +493,12 @@ TEST_CASE ("The commands bring back the version selected, and put back the line 
     phazite::selectVersion (s.context, first);
     CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Restore from \"First\"");
     CHECK_FALSE (phazite::canTakeFrom (s.context)); // it is the last version: its changes are listed already
-    REQUIRE (commands.invoke ("version.bringBack"));
+    REQUIRE (phazite::test::finished (s.context, [&] { return commands.invoke ("version.bringBack"); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
 
     s.setVolume (bass, -9.0f);
     phazite::selectChange (s.context, phazite::getListedChanges (s.context).front());
-    REQUIRE (commands.invoke ("version.putBack"));
+    REQUIRE (phazite::test::finished (s.context, [&] { return commands.invoke ("version.putBack"); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     CHECK_FALSE (phazite::canPutBack (s.context)); // the line it put back is gone
 }
@@ -548,12 +549,12 @@ TEST_CASE ("Bring Back sets a plug-in's settings only where they differ from the
     // Something else changed: the plug-in isn't set again.
     s.setVolume (track, -8.0f);
     writes.count = 0;
-    REQUIRE (phazite::bringBackVersion (s.context, version));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, version); }));
     CHECK (writes.count == 0);
 
     // The plug-in's own settings changed in its window: they are set back to the version's, and Undo puts them back.
     TestPlugin::setGain (song, device, gain * 0.25f);
-    REQUIRE (phazite::bringBackVersion (s.context, version));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, version); }));
     CHECK (writes.count >= 1);
     REQUIRE (dispatchMessagesUntil ([&song, device, gain] { return std::abs (TestPlugin::getGain (song, device) - gain) < 0.001f; }));
 
@@ -612,7 +613,7 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
         }
 
         REQUIRE (phazite::hasChangesSinceLastVersion (context));
-        REQUIRE (phazite::bringBackVersion (context, version));
+        REQUIRE (phazite::test::finished (context, [&] { return phazite::bringBackVersion (context, version); }));
         INFO (describeChanges (phazite::getChangesSinceLastVersion (context)).toStdString());
         CHECK_FALSE (phazite::hasChangesSinceLastVersion (context));
 

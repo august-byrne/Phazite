@@ -147,7 +147,7 @@ VersionStore::VersionStore (juce::File versionsFolder, juce::String computerID)
 
 juce::File VersionStore::getLocalFolder() const
 {
-    return folder.getChildFile ("local").getChildFile (juce::File::createLegalFileName (computer));
+    return folder.getChildFile ("local").getChildFile (makeUsableFileName (computer));
 }
 
 juce::String VersionStore::writeVersion (VersionRecord record, const SongPieces& song, juce::String* problem)
@@ -169,14 +169,24 @@ std::optional<VersionRecord> VersionStore::readVersion (const juce::String& id) 
     return std::nullopt;
 }
 
+namespace
+{
+    std::atomic<int> songsRead { 0 }, songsReadOnMessageThread { 0 }, songsWritten { 0 }, songsWrittenOnMessageThread { 0 };
+}
+
 bool VersionStore::writeSong (const SongPieces& song)
 {
+    ++songsWritten;
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        ++songsWrittenOnMessageThread;
+
     return pieces.write (song.pieces);
 }
 
-namespace
+VersionStore::SongsRead VersionStore::countSongsWritten()
 {
-    std::atomic<int> songsRead { 0 }, songsReadOnMessageThread { 0 };
+    return { songsWritten.load(), songsWrittenOnMessageThread.load() };
 }
 
 VersionStore::SongsRead VersionStore::countSongsRead()
@@ -185,22 +195,22 @@ VersionStore::SongsRead VersionStore::countSongsRead()
 }
 
 juce::ValueTree VersionStore::readSong (const juce::String& songPiece, PluginParameterValues* parameters,
-                                        std::vector<MissingPiece>* missing) const
+                                        std::vector<MissingPiece>* missing, bool* idsGivenAnew) const
 {
     ++songsRead;
 
     if (juce::MessageManager::existsAndIsCurrentThread())
         ++songsReadOnMessageThread;
 
-    return joinSong (songPiece, [this] (const juce::String& name) { return pieces.read (name); }, parameters, missing);
+    return joinSong (
+        songPiece, [this] (const juce::String& name) { return pieces.read (name); }, parameters, missing, folder.getParentDirectory(),
+        idsGivenAnew);
 }
 
 //==============================================================================
 juce::File VersionStore::getBranchFile (const juce::String& id, const juce::String& computerID) const
 {
-    return folder.getChildFile ("branches")
-        .getChildFile (juce::File::createLegalFileName (id))
-        .getChildFile (juce::File::createLegalFileName (computerID) + ".xml");
+    return folder.getChildFile ("branches").getChildFile (makeUsableFileName (id)).getChildFile (makeUsableFileName (computerID) + ".xml");
 }
 
 std::vector<BranchRecord> VersionStore::readBranches() const
@@ -234,7 +244,7 @@ std::vector<BranchRecord> VersionStore::readBranches() const
             if (branch.id.isEmpty() || branch.id != branchFolder.getFileName())
                 continue;
 
-            if (branch.computer == juce::File::createLegalFileName (computer))
+            if (branch.computer == makeUsableFileName (computer))
                 if (const auto found = working.find (branch.id); found != working.end())
                     branch.working = found->second;
 
@@ -325,7 +335,7 @@ bool VersionStore::logBranchMove (const juce::String& branchID, const juce::Stri
 {
     jassert (! isInHeldFolder (folder)); // a first save copies it (WholeFile.h: holdFolder())
 
-    const auto file = getLocalFolder().getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID));
+    const auto file = getLocalFolder().getChildFile ("logs").getChildFile (makeUsableFileName (branchID));
 
     if (! file.getParentDirectory().createDirectory())
         return false;
@@ -344,7 +354,7 @@ bool VersionStore::logBranchMove (const juce::String& branchID, const juce::Stri
 
 std::vector<BranchMove> VersionStore::readBranchLog (const juce::String& branchID) const
 {
-    return readLogFile (getLocalFolder().getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID)));
+    return readLogFile (getLocalFolder().getChildFile ("logs").getChildFile (makeUsableFileName (branchID)));
 }
 
 std::vector<BranchMove> VersionStore::readEveryBranchLog (const juce::String& branchID) const
@@ -353,7 +363,7 @@ std::vector<BranchMove> VersionStore::readEveryBranchLog (const juce::String& br
 
     for (const auto& local : folder.getChildFile ("local").findChildFiles (juce::File::findDirectories, false))
     {
-        const auto theirs = readLogFile (local.getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID)));
+        const auto theirs = readLogFile (local.getChildFile ("logs").getChildFile (makeUsableFileName (branchID)));
         moves.insert (moves.end(), theirs.begin(), theirs.end());
     }
 
@@ -413,7 +423,7 @@ std::map<juce::String, MessageEdit> VersionStore::readMessages() const
 {
     // Every computer's, the newest for each commit (this computer's, of two set at once).
     std::map<juce::String, MessageEdit> edits;
-    const auto mine = juce::File::createLegalFileName (computer) + ".xml";
+    const auto mine = makeUsableFileName (computer) + ".xml";
     auto files = folder.getChildFile ("messages").findChildFiles (juce::File::findFiles, false, "*.xml");
     std::stable_partition (files.begin(), files.end(), [&mine] (const juce::File& file) { return file.getFileName() == mine; });
 
@@ -428,7 +438,7 @@ std::map<juce::String, MessageEdit> VersionStore::readMessages() const
 bool VersionStore::writeMessage (const juce::String& versionID, const MessageEdit& edit)
 {
     // This computer's file, read and written whole with the commit's message as it is now.
-    const auto file = folder.getChildFile ("messages").getChildFile (juce::File::createLegalFileName (computer) + ".xml");
+    const auto file = folder.getChildFile ("messages").getChildFile (makeUsableFileName (computer) + ".xml");
     auto edits = readMessagesFile (file);
     edits[versionID] = edit;
     juce::ValueTree element (versions::MESSAGES);
@@ -501,7 +511,7 @@ bool VersionStore::writeSnapshots (const std::vector<Snapshot>& snapshots)
 //==============================================================================
 juce::File VersionStore::getBounceFile (const juce::String& versionID) const
 {
-    return getBouncesFolder().getChildFile (juce::File::createLegalFileName (versionID) + ".flac");
+    return getBouncesFolder().getChildFile (makeUsableFileName (versionID) + ".flac");
 }
 
 std::vector<VersionRecord::File> VersionStore::hashFiles (const juce::StringArray& paths, const juce::File& projectFolder)

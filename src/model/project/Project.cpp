@@ -28,6 +28,7 @@
 #include <charconv>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -95,7 +96,7 @@ namespace
     // the name is empty or the folder exists.
     juce::File findNewProjectFolder (const juce::File& parentFolder, const juce::String& name, juce::String& error)
     {
-        const auto safeName = juce::File::createLegalFileName (name.trim());
+        const auto safeName = makeUsableFileName (name.trim());
 
         if (safeName.isEmpty())
         {
@@ -895,7 +896,8 @@ namespace
         struct Keeper
         {
             Song& song;
-            juce::File folder; // the project's, or none
+            juce::File folder;       // the project's, or none
+            bool readInPart = false; // makeConsistent()'s ReadAs::inPart: what names an ID the song hasn't may lead into what wasn't read
 
             //==============================================================================
             // Each element of a type Phazite knows where Schema.h puts it; one somewhere else goes, with everything in it. One
@@ -1122,7 +1124,7 @@ namespace
                     if (! isKnown (child))
                         continue;
 
-                    if (child.hasType (schema::SEND) && items.count (readID (child[schema::sendTo])) == 0)
+                    if (child.hasType (schema::SEND) && items.count (readID (child[schema::sendTo])) == 0 && ! readInPart)
                     {
                         items.erase (readID (child[schema::sendID]));
                         tree.removeChild (i, nullptr);
@@ -1153,7 +1155,7 @@ namespace
 
                     for (const auto& property : properties)
                     {
-                        if (! schema::namesID (child, property) || items.count (readID (child[property])) > 0)
+                        if (! schema::namesID (child, property) || items.count (readID (child[property])) > 0 || readInPart)
                             continue;
 
                         if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
@@ -1217,17 +1219,29 @@ namespace
 
                     const ParameterRef parameter { DeviceID::fromRaw (readID (curve[schema::curveDevice])),
                                                    curve[schema::curveParameter].toString() };
-                    auto low = 0.0, high = 1.0;
+                    auto low = 0.0, high = 1.0, fallback = 0.0;
 
-                    if (const auto description = describeParameter (song, parameter))
+                    if (const auto device = findDeviceState (song, parameter.device);
+                        device.isValid() && device[schema::deviceType].toString() == schema::deviceIsPlugin)
                     {
-                        low = (double) description->range.start;
+                        // A plug-in's from 0 to 1, as its element says it is one, never asked of its instance: a song that belongs
+                        // to no session (one read from the versions, on the history's thread) has none.
+                    }
+                    else if (const auto description = describeParameter (song, parameter))
+                    {
+                        low = fallback = (double) description->range.start;
                         high = (double) description->range.end;
                     }
                     else if (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
                     {
-                        low = (double) lowestCrossover;
+                        low = fallback = (double) lowestCrossover;
                         high = (double) highestCrossover;
+                    }
+                    else if (readInPart)
+                    {
+                        // Of a device in what wasn't read: kept, its points finite (the song that takes it in knows the device).
+                        low = -std::numeric_limits<double>::max();
+                        high = std::numeric_limits<double>::max();
                     }
                     else if (findDeviceState (song, parameter.device)[schema::deviceType].toString() != schema::deviceIsPlugin)
                     {
@@ -1237,7 +1251,7 @@ namespace
 
                     for (auto point : curve)
                         if (point.hasType (schema::POINT))
-                            keepInRange (point, schema::pointValue, low, high, false, low);
+                            keepInRange (point, schema::pointValue, low, high, false, fallback);
                 }
             }
 
@@ -1376,9 +1390,10 @@ const std::vector<SwitchProperty>& getSwitchProperties()
     return switches;
 }
 
-void makeConsistent (Song& song)
+void makeConsistent (Song& song, ReadAs read)
 {
-    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File() }.keep();
+    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), read == ReadAs::inPart }
+        .keep();
 }
 
 //==============================================================================

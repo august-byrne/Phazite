@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongPieces.h"
 #include "model/base/Json.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/project/internal/Project.h"
@@ -8,6 +9,8 @@
 #include <juce_cryptography/juce_cryptography.h>
 
 #include <algorithm>
+#include <atomic>
+#include <set>
 #include <utility>
 
 namespace phazite
@@ -374,6 +377,113 @@ namespace
             return tree;
         }
     };
+
+    //==============================================================================
+    // A whole song joined made consistent as a project file is as it opens (Project.h: makeConsistent()), whoever wrote its
+    // pieces, its sound files' paths against the project's folder. A stand-in for what a damaged piece held (Schema.h:
+    // schema::versions::missing), which never reaches the song (ApplySong.h), is kept out of the checks meanwhile, inside an
+    // element of a type they don't know, which they leave as it is, and put back in its place after.
+    // Whether a song holds each item's ID once, and each clip each note's, every one of them one the checks keep (above 0,
+    // below 2^62): else they give some anew (Project.cpp: keepIDs()). What it keeps out of them aside.
+    bool holdsEachIDOnce (const juce::ValueTree& song, const juce::Identifier& keptOut)
+    {
+        std::set<std::uint64_t> items;
+        auto once = true;
+        const auto take = [&once] (std::set<std::uint64_t>& seen, const juce::var& value)
+        {
+            const auto id = readID (value);
+            once = once && id > 0 && id < schema::maxID && seen.insert (id).second;
+        };
+
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (keptOut))
+                    continue;
+
+                if (child.hasType (schema::CLIP))
+                {
+                    std::set<std::uint64_t> notes;
+
+                    for (const auto& note : child)
+                        if (note.hasType (schema::NOTE))
+                            take (notes, note[schema::noteID]);
+                }
+
+                if (! child.hasType (schema::NOTE))
+                    for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+                        if (schema::holdsID (child, *property) && (property == &schema::trackID || child.hasProperty (*property)))
+                            take (items, child[*property]);
+
+                visit (child);
+            }
+        };
+
+        visit (song);
+        return once;
+    }
+
+    void makeJoinedSongConsistent (juce::ValueTree& song, const juce::File& projectFolder, bool* idsGivenAnew)
+    {
+        if (idsGivenAnew != nullptr)
+            *idsGivenAnew = false;
+
+        if (! song.hasType (schema::PHAZITE))
+            return;
+
+        static const juce::Identifier keptOut ("_KEPTOUT");
+        std::vector<juce::ValueTree> wrappers;
+        const std::function<void (juce::ValueTree)> wrap = [&] (juce::ValueTree element)
+        {
+            for (int i = 0; i < element.getNumChildren(); ++i)
+            {
+                auto child = element.getChild (i);
+
+                if (! child.hasProperty (versions::missing))
+                {
+                    wrap (child);
+                    continue;
+                }
+
+                juce::ValueTree wrapper (keptOut);
+                element.removeChild (i, nullptr);
+                wrapper.appendChild (child, nullptr);
+                element.addChild (wrapper, i, nullptr);
+                wrappers.push_back (wrapper);
+            }
+        };
+
+        wrap (song);
+
+        if (idsGivenAnew != nullptr)
+            *idsGivenAnew = ! holdsEachIDOnce (song, keptOut);
+
+        {
+            Song checked (song);
+
+            // The project's file isn't read: the checks take the folder it is in.
+            if (projectFolder != juce::File())
+                checked.setFile (projectFolder.getChildFile ("song.phazite"));
+
+            // Read in part, what names an ID it hasn't may name what wasn't read: kept, for the song it is taken into to judge.
+            makeConsistent (checked, wrappers.empty() ? ReadAs::whole : ReadAs::inPart);
+        }
+
+        for (auto& wrapper : wrappers)
+        {
+            auto parent = wrapper.getParent();
+
+            if (! parent.isValid())
+                continue; // what held it went, it with it
+
+            const auto index = parent.indexOf (wrapper);
+            auto standIn = wrapper.getChild (0);
+            wrapper.removeChild (standIn, nullptr);
+            parent.removeChild (index, nullptr);
+            parent.addChild (standIn, index, nullptr);
+        }
+    }
 } // namespace
 
 juce::String getPieceName (const juce::MemoryBlock& block)
@@ -381,8 +491,26 @@ juce::String getPieceName (const juce::MemoryBlock& block)
     return juce::SHA256 (block).toHexString();
 }
 
+namespace
+{
+    std::atomic<int> songsSplit { 0 }, songsSplitOnMessageThread { 0 };
+}
+
+SongsSplit countSongsSplit()
+{
+    return { songsSplit.load(), songsSplitOnMessageThread.load() };
+}
+
 SongPieces splitSong (const juce::ValueTree& song, const PluginParameterValues& parameters)
 {
+    if (song.hasType (schema::PHAZITE))
+    {
+        ++songsSplit;
+
+        if (juce::MessageManager::existsAndIsCurrentThread())
+            ++songsSplitOnMessageThread;
+    }
+
     SongPieces result;
     Splitter splitter { result, parameters };
     result.song = splitter.split (song);
@@ -390,7 +518,7 @@ SongPieces splitSong (const juce::ValueTree& song, const PluginParameterValues& 
 }
 
 juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, PluginParameterValues* parameters,
-                          std::vector<MissingPiece>* missing)
+                          std::vector<MissingPiece>* missing, const juce::File& projectFolder, bool* idsGivenAnew)
 {
     Joiner joiner { read, parameters, missing };
     const auto xml = joiner.parse (name);
@@ -409,6 +537,7 @@ juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, Plugi
         return {};
 
     makeExponentsReadable (tree); // before anything reads a number of it, as a project file's (known bug 170)
+    makeJoinedSongConsistent (tree, projectFolder, idsGivenAnew);
     return tree;
 }
 

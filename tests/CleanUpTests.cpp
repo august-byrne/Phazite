@@ -82,9 +82,11 @@ struct Files
         const auto kept = s.addAudioClip (track, writeSound (sounds.folder.getChildFile ("Kept.wav"), 0.5), 4.0);
         keepVersion (s.context, "Both");
 
-        REQUIRE (phazite::newBranch (s.context, {}, s.save));
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
         s.addAudioClip (s.firstTrack, writeSound (sounds.folder.getChildFile ("Tried.wav"), 0.5), 8.0);
-        REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save)); // Tried: on the branch, as it was left
+        REQUIRE (phazite::test::finished (
+            s.context, [&]
+            { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); })); // Tried: on the branch, as it was left
 
         s.select (kept);
         s.run ("edit.delete"); // Kept: in the version alone
@@ -195,7 +197,7 @@ TEST_CASE ("Clean Up keeps the audio that Local History, and the commits Recover
     // In a commit no branch holds any more alone: committed, the commit undone, the clip taken out.
     const auto undone = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Undone.wav"), 0.5), 0.0);
     keepVersion (s.context, "Undone");
-    REQUIRE (phazite::undoLastCommit (s.context));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
     remove (undone);
     REQUIRE (project.save().wasOk());
     project.getFolder().getChildFile ("Backups").deleteRecursively(); // what they play counts too (the test before)
@@ -278,8 +280,9 @@ TEST_CASE ("Clean Up offers nothing while a commit's pack can't be opened, and d
     keepVersion (s.context, "With it");
     auto packs = versions.findChildFiles (juce::File::findFiles, false, "*.pack");
     packs.removeValuesIn (before);
-    REQUIRE (packs.size() == 1);                   // the commit's pack, with its record
-    REQUIRE (phazite::undoLastCommit (s.context)); // its commit on no branch, which Recover Lost Commits brings back
+    REQUIRE (packs.size() == 1); // the commit's pack, with its record
+    REQUIRE (phazite::test::finished (
+        s.context, [&] { return phazite::undoLastCommit (s.context); })); // its commit on no branch, which Recover Lost Commits brings back
     s.select (clip);
     s.run ("edit.delete");
     REQUIRE (s.getProject().save().wasOk());

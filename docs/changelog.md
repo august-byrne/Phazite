@@ -257,6 +257,21 @@ too. A line names the bug's number in that list.
   own.
 - **176 A take stopped during a drag** stays in the playlist with its waveform until its clip replaces it; a take
   waiting for a drag's end and the take recording after it on the same track each show their own waveform.
+- **126 The versions read off the message thread.** Checking out a branch or a commit, Back to Branch, a merge's
+  list and Merge, the restores, Compare, Create Branch from a commit, Undo Last Commit, Reset Branch and Import
+  DAWproject as a branch read and write whole songs on the versions' own thread. The window holds its input
+  meanwhile with the one hold it has (Space still plays and stops), shows what it reads after a second with Cancel,
+  Escape cancels from the start, and a quit stops the read and says so. A switch, merge or restore that can't finish
+  says why in Source Control; Delete Branch asks when what was left on a branch can't be read. Left: known bug 184.
+- **Songs read from the versions pass the loader's checks.** A history another computer or tool wrote can't put
+  impossible values, an ID twice or a reference to nothing into the song; a merge or a restore of a commit that held
+  an ID twice is refused with a word; a restore from a damaged commit leaves the song as its file would open.
+- **Import DAWproject unpacks its audio in the background**, into a new project or as a branch, with progress and
+  Cancel; a cancelled or failed import leaves the open project as it was and deletes what it unpacked.
+- **Names Windows keeps for devices** (CON, NUL, COM1...) are no longer given to files named from what the user
+  typed: projects, recordings, presets, stems, freezes, bounces, exports and the versions' files get "_" added.
+- **An unsaved project closed right after a commit** no longer has its folder deleted under that commit's last
+  write.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

@@ -197,6 +197,21 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     CHECK (phazite::getClips (studio.song.context, studio.song.firstTrack).empty());
 }
 
+TEST_CASE ("A take on a track named as Windows reserves a name, CON, goes into a file Windows can make")
+{
+    // Windows makes no file named CON (or CON.wav): it is a device's name there, whatever follows the dot.
+    EngineStudio studio;
+    auto& song = *phazite::findSong (studio.song.context);
+    phazite::renameTrack (song, studio.song.firstTrack, "CON");
+    studio.record (1.0);
+
+    const auto clips = phazite::getClips (studio.song.context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto take = phazite::getRecordingsFolder (song).getChildFile ("CON_ Take 1.wav");
+    CHECK (take.existsAsFile());
+    CHECK (take.getSize() > 0);
+}
+
 TEST_CASE ("A take started while the song plays lands as one started from a stop does")
 {
     EngineStudio studio;

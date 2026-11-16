@@ -123,11 +123,11 @@ bool CommandRegistry::invoke (const juce::String& id)
     if (command == nullptr || ! isEnabled (*command))
         return false;
 
-    // While a command waits for the plug-ins' states, none that changes a project runs in between: what it reads is what
-    // the song is as it runs.
+    // While a command waits for the plug-ins' states, or the project for work of its own (a branch's song read), none that
+    // changes a project runs in between: what it reads is what the song is as it runs.
     const auto reads = readsPluginStatesNow (*command);
 
-    if (waitingForStates && (reads || command->undoTarget != nullptr))
+    if ((waitingForStates || (busyCheck != nullptr && busyCheck())) && (reads || command->undoTarget != nullptr))
         return false;
 
     if (reads && pluginStatesGate != nullptr)

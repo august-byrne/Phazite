@@ -77,15 +77,6 @@ its fix.
 - **125. An export of stems compiles a whole player and plan for every stem before it starts,** on the message thread,
   and holds them all at once (`src/model/playback/OfflineRender.cpp`, `src/model/project/Export.cpp`). Fix: compile
   each stem as its turn comes. Not yet checked (model-playback 11).
-- **126. Switching branches and starting a merge read whole songs on the message thread.** On the 32-track benchmark
-  song a branch switch keeps the window for 1.6 s in a Debug build, about three quarters of it reading two songs from
-  the store (the rest: splitting the song left on the branch, applying the new one and compiling it); the start of
-  a merge for 1.4 s, 86 % of it reads (measured 2026-11-15; `Benchmark: what a branch switch and a merge spend on
-  the message thread, by part`, `tests/Benchmarks.cpp`). The badge, opening a commit, a waiting merge's reads and
-  the Project view's look for unused audio no longer run there. Why: both commands apply the song in the call that
-  reads it (`src/model/versions/VersionsModel.cpp`), and 65 test call sites expect the result in that call. Fix: the
-  switch and the merge read on the history's thread and finish when the read is in, the view showing "Switching..."
-  meanwhile; the commands' callers then wait for that.
 - **145. A plan's compile costs about 0.4 ms a track, on every edit.** With 100 busy tracks every edit, and every step
   of a drag, takes about 40 ms of the message thread, measured on 2026-11-14 ([performance.md](performance.md),
   "a song of 100 tracks"), so a drag stutters in a large song. Why: every edit compiles the whole song again
@@ -99,6 +90,14 @@ its fix.
   background since known bug 123 was fixed (2026-11-16). A kit of long samples from a slow disk stops the window
   while they copy. Fix: bring them in as those do (`bringFilesIntoProject()`,
   `src/model/arrangement/internal/Import.h`), the preset applied once the copies are made.
+
+- **184. Opening a project whose file can't be read reads its branch's last commit on the message thread.** When the
+  project file can't be read, Phazite offers the current branch's last commit instead, and `readLastCommitSong()`
+  (`src/model/versions/VersionHistory.cpp`) opens the store and joins that commit's whole song, with the loader's
+  checks, on the message thread before the offer shows: about 80 to 190 ms on the 32-track benchmark song in
+  `windows-profile`, more with a long history's packs to open. Rare: it needs a damaged project file. Why: opening
+  asks, then opens, all in one call. Fix: read it with `ProjectContext::holdForWork()` and show the offer once it is
+  in. Left as the rest of known bug 126 was fixed (2026-11-16).
 
 ## Tests
 

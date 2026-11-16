@@ -51,4 +51,12 @@ private:
 // Linux's) counts as full too, and juce::File asserts before it takes it for one on the current drive: here it is that
 // file without the assertion, as such a path is nothing Phazite did wrong. JUCE workaround W37 (docs/juce-workarounds.md).
 juce::File makeFileOfFullPath (const juce::String& path);
+
+// Whether Windows keeps a file's name for a device (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9, in any case, and with
+// the superscript digits), so that a file of it can't be made: by what comes before its first dot, spaces at its end left
+// out ("con.wav", "COM1 .flac"). Asked on every system, as a project goes from one to another. And a name for a file made
+// from text anyone wrote (an archive's entry): juce::File::createLegalFileName(), and, for a reserved one, with "_" after
+// it ("CON_").
+bool isReservedFileName (const juce::String& name);
+juce::String makeUsableFileName (const juce::String& name);
 } // namespace phazite
