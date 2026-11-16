@@ -236,6 +236,7 @@ struct Swap::Impl : private juce::Timer
     juce::String oldName;
     TrackID noteTrack; // the track an instrument's note plays on, until it stops
     bool ended = false;
+    bool heldBack = false;            // closed from the start, as another's keep was under way (Swap::isHeldBack())
     bool keeping = false;             // its sounds being copied into the project, to keep once they are (Swap::keep())
     juce::Array<juce::File> brought;  // those copied in for its keep
     std::function<void()> afterwards; // what keep() was given, once kept
@@ -252,6 +253,7 @@ Swap::Swap (ProjectContext& context, DeviceID device, int pad)
     if (song == nullptr || Trial::isKeepPending (*song))
     {
         impl->ended = true;
+        impl->heldBack = song != nullptr;
         return;
     }
 
@@ -272,6 +274,11 @@ bool Swap::isOpen() const
 {
     // Kept, its sounds being copied in: closed, as once kept.
     return ! impl->keeping && impl->getSong() != nullptr && impl->trial != nullptr && impl->trial->isOpen();
+}
+
+bool Swap::isHeldBack() const
+{
+    return impl->heldBack;
 }
 
 DeviceID Swap::getDevice() const

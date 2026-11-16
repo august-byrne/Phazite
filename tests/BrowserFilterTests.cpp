@@ -186,6 +186,11 @@ TEST_CASE ("The filters narrow every place to the sounds with their values, and 
     CHECK (countOf (all.types, "Bass") == 2); // the 808, and the bass loop
     CHECK (countOf (all.types, "Clap") == 0);
     CHECK (std::none_of (all.types.begin(), all.types.end(), [] (const auto& t) { return t.second == 0; })); // only what is there
+
+    for (const auto& [type, count] : all.types) // as the index counts them, which a pad's Swap asks (none of it gone through)
+        CHECK (model.countSoundsOfType (type) == count);
+
+    CHECK (model.countSoundsOfType ("Clap") == 0);
     CHECK (all.loops == 2);
     CHECK (all.oneShots == 7);
     CHECK (all.tempos == std::vector<std::pair<int, int>> { { 90, 1 }, { 120, 1 } });
@@ -351,9 +356,18 @@ struct FilterScreen
     juce::StringArray getRows() { return ::getRows (browser); }
     juce::Rectangle<int> getRow (const juce::String& name) { return ::getRow (browser, name); }
 
+    // A filter's menu, as its chip opens it: once its counts are in, from the library's thread.
+    juce::PopupMenu menuOf (Filter filter)
+    {
+        std::optional<juce::PopupMenu> menu;
+        browser.getFilterBar().askMenu (filter, [&menu] (juce::PopupMenu made) { menu = std::move (made); });
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&menu] { return menu.has_value(); }));
+        return std::move (*menu);
+    }
+
     void choose (Filter filter, const juce::String& value)
     {
-        REQUIRE (phazite::test::runMenuItem (browser.getFilterBar().getMenu (filter), { value }));
+        REQUIRE (phazite::test::runMenuItem (menuOf (filter), { value }));
         phazite::test::dispatchPendingMessages();
     }
 };
@@ -366,7 +380,7 @@ TEST_CASE ("A beat maker narrows a big folder down to the kicks in one key with 
     CHECK_FALSE (bar.getClearButton().isVisible());
 
     // The type's menu offers the types there are, each with how many.
-    const auto typeMenu = bar.getMenu (Filter::type);
+    const auto typeMenu = screen.menuOf (Filter::type);
     const auto* kickItem = phazite::test::findMenuItem (typeMenu, { "Kick" });
     REQUIRE (kickItem != nullptr);
     CHECK (kickItem->shortcutKeyDescription == juce::String ("4"));
@@ -378,7 +392,7 @@ TEST_CASE ("A beat maker narrows a big folder down to the kicks in one key with 
     CHECK (bar.getClearButton().isVisible());
     CHECK (screen.getRows() == juce::StringArray { "Big Folder, 4" });
 
-    const auto keyMenu = bar.getMenu (Filter::key);
+    const auto keyMenu = screen.menuOf (Filter::key);
     REQUIRE (phazite::test::findMenuItem (keyMenu, { "F" }) != nullptr);
     CHECK (phazite::test::findMenuItem (keyMenu, { "F" })->shortcutKeyDescription == juce::String ("2"));
     CHECK (phazite::test::findMenuItem (keyMenu, { "G" })->shortcutKeyDescription == juce::String ("1"));
@@ -410,6 +424,46 @@ TEST_CASE ("A beat maker narrows a big folder down to the kicks in one key with 
     CHECK_FALSE (bar.getClearButton().isVisible());
     CHECK (screen.getRows().contains ("Big Folder"));
     CHECK_FALSE (screen.getRows().contains ("Kick 01 (F), F"));
+}
+
+TEST_CASE ("Performance gate: a filter's menu counts what it offers on the library's thread, the newest words' counts alone")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): the counts went through the whole library on the message thread as
+    // each chip's menu opened, and at each Swap of a pad; the search had gone to the background (known bug 128).
+    FilterScreen screen;
+    auto& search = screen.browser.getSearchField();
+    const auto before = phazite::Library::getItemsSearchedOnMessageThread();
+
+    // Words typed, a menu opened, a value chosen, another menu: the counts of what search finds for the words.
+    search.setText ("kick", true);
+    phazite::test::dispatchPendingMessages();
+    const auto keyMenu = screen.menuOf (Filter::key);
+    REQUIRE (phazite::test::findMenuItem (keyMenu, { "F" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (keyMenu, { "F" })->shortcutKeyDescription == juce::String ("2"));
+    screen.choose (Filter::key, "F");
+    CHECK (phazite::test::findMenuItem (screen.menuOf (Filter::type), { "Kick" })->shortcutKeyDescription == juce::String ("2"));
+    CHECK (phazite::Library::getItemsSearchedOnMessageThread() == before);
+
+    // A menu asked for while the count is held, then other words typed: the count of the words before never opens a menu.
+    std::atomic<bool> letGo { false };
+    screen.library.setBeforeSearch (
+        [&letGo]
+        {
+            while (! letGo)
+                juce::Thread::sleep (1);
+        });
+
+    std::optional<juce::PopupMenu> late;
+    screen.browser.getFilterBar().askMenu (Filter::type, [&late] (juce::PopupMenu made) { late = std::move (made); });
+    search.setText ("snare", true);
+    phazite::test::dispatchPendingMessages();
+    letGo = true;
+    const auto typeMenu = screen.menuOf (Filter::type); // the newest's, after the one before was let go
+    screen.library.setBeforeSearch (nullptr);
+    CHECK_FALSE (late.has_value());
+    CHECK (phazite::test::findMenuItem (typeMenu, { "Snare" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (typeMenu, { "Kick" }) == nullptr);
+    CHECK (phazite::Library::getItemsSearchedOnMessageThread() == before);
 }
 
 TEST_CASE ("The four filters fit the side panel's width in one row, each name whole, a set one's value too")
@@ -766,4 +820,50 @@ TEST_CASE ("A Swap asked for on another pad while one is kept starts once that k
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&browser] { return browser.getSelectedItem().has_value() && browser.getSelectedItem()->name == juce::String ("Kick Two"); }));
     CHECK (browser.getSearchField().getText() == juce::String ("kick"));
+}
+
+TEST_CASE ("A Swap asked for while the Keep before it still copies its sound in says so, rather than being dropped")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): such a swap opened closed (SwapModel.h) and the browser dropped it
+    // without a word. In the app no click or key can ask for one then (the window's input is held from the copy's start,
+    // app/InputHold.h); code that asks, as a test once did, asks at the wrong time, and the browser asserts.
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
+    const auto pack = song.getSoundsFolder().getChildFile ("Pack");
+    phazite::test::writeSound (pack.getChildFile ("Kick One.wav"), 0.2);
+
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack sounds { temp.folder.getChildFile ("Packs") };
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings);
+    library.addUserFolder (pack);
+    REQUIRE (waitForIndex (library));
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
+    phazite::test::TestWindow window (browser, 320, 700);
+
+    // A kick tried on its pad, from outside the project, and kept: its sound copied in, in the background.
+    browser.startSwap (drums, 36);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    phazite::test::Mouse mouse (browser.getTree());
+    mouse.click (getRow (browser, "Pack").getCentre());
+    phazite::test::dispatchPendingMessages();
+    window.pressKey (juce::KeyPress (juce::KeyPress::downKey));
+    REQUIRE (phazite::getDeviceHandle (song.context, drums).getPadName (36) == juce::String ("Kick One"));
+    browser.keepSwap();
+    REQUIRE (phazite::isReadingAudio (song.context)); // the copy under way
+
+    // Another pad's Swap, asked for meanwhile: held back, and said.
+    {
+        const phazite::test::ExpectedAssertion askedTooSoon ("Browser.cpp");
+        browser.startSwap (drums, 38);
+#if JUCE_DEBUG
+        CHECK (askedTooSoon.getCount() == 1);
+#endif
+    }
+
+    CHECK_FALSE (browser.isSwapping());
+    phazite::test::waitForAudioWork (song.context);
+    CHECK (phazite::getDeviceHandle (song.context, drums).getPadName (36) == juce::String ("Kick One"));
 }

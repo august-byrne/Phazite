@@ -117,11 +117,14 @@ it, packed or stored, so that a large recording in a DAWproject takes as much me
   Phazite's folder there), so that recordings, imported audio and the autosave have a place from the start.
 - The first save copies its folders across and goes on there with its undo history. The untitled folder is deleted
   when the project closes, saved or not. The folders are copied into "*name* (saving)" beside, which takes the
-  project's name only once it is whole; until then the project stays where it was. Past 8 MB the copy runs in the
-  background, in a progress window with Cancel, which leaves nothing behind. The copy takes no link inside the
-  folders (a symbolic link or a junction), nor what it leads to, and copies what OneDrive or Dropbox keep. It leaves
-  behind a clip's render in `Cache` that goes or changes while it copies, as Phazite renders it again; any other file
-  it can't copy, a frozen track's among them, fails the save. A "(saving)" folder holds a marker of Phazite's; one that
+  project's name only once it is whole; until then the project stays where it was. The copy always runs in the
+  background, however small, the window taking no input meanwhile: after a second a progress window shows it, with
+  Cancel, which leaves nothing behind (Escape cancels it before then), so a small project's save looks done at once.
+  The copy takes no link inside the folders (a symbolic link or a junction), nor what it leads to, and copies what
+  OneDrive or Dropbox keep. A file another program holds a moment (an antivirus, the indexer, a backup tool) is tried
+  again for a second or so. It leaves behind a clip's render in `Cache` that goes or changes while it copies, as
+  Phazite renders it again; any other file it can't copy, a frozen track's among them, fails the save, which says which
+  file. A "(saving)" folder holds a marker of Phazite's; one that
   a crash left goes to the system's trash, in the background, at the next first save into that folder. A folder of that
   name without the marker, or with a project file in it, is never touched.
 - The `Versions` folder is copied last, by the history's own thread after what it was writing: meanwhile nothing is

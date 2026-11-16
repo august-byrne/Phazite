@@ -645,6 +645,20 @@ folders, indexed by the library) and an index of 500,000 made in the test:
 | 50,000 sounds: the search itself, wherever it runs | 60 to 83 ms | 3.6 to 7.5 ms (search keys made with the index) |
 | 500,000 sounds: the search itself, on its own thread | (the index stopped at 50,000) | 37 to 53 ms |
 
+The browser's filters' counts, which a filter's menu shows (`the browser's filters' counts and its filtered places`,
+measured 2026-11-16 in `windows-profile` while other builds ran): before, counted on the message thread as the menu
+opened; now counted on the search's thread, the menu opening once they are in.
+
+| Words, filters | Before: the message thread (ms) | Now: the call (ms) | Now: the counts there after (ms) |
+|---|---|---|---|
+| none, none | 10.3 | 0.06 | 14.7 |
+| "kick", none | 3.7 | 0.01 | 5.8 |
+| none, Type Kick | 9.8 | 0.01 | 14.9 |
+| "deep", Type Kick | 4.1 | 0.01 | 5.2 |
+
+What is left on the message thread: with a filter set, the places and their counts are still listed there, a walk of the
+index for each place (17.4 ms for the Type filter set to Kick, in the same library).
+
 A ten-minute stereo recording at 48 kHz, 24-bit (173 MB), with a file of the same name in the project already:
 
 | Command | Before: the message thread | After: the call | After: the message thread in all | After: done after |
@@ -705,13 +719,17 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
 - a step of a drag of notes looks at as many elements as it moves notes, whatever the song and the clip: ten times the
   notes in a clip of ten times as many, under twenty times the elements; ten times the tracks, under twice
   (`SongIndex::countElementsVisited()`; known bug 122: 623, 6,203 and 623 measured 2026-11-15, the model's walks of a
-  track's and a clip's elements counted too (`countVisited()`); 14,988, 1,229,268 and 22,368 before, the walks by ID alone).
+  track's and a clip's elements counted too (`countVisited()`); 14,988, 1,229,268 and 22,368 before, the walks by ID alone);
+  and a step of a drag of 500 notes, or a paste of 500 past the clip's end, looks through its track's clips once, not
+  once for each note: on a track of 200 clips under 1,000 elements more than on one of 20 (2,521 and 2,701 for the drag
+  step, 1,020 and 1,200 for the paste, measured 2026-11-16; 13,501 and 103,501, 4,020 and 26,700 before).
 - the piano roll's hover reads no notes from the song, and ten steps of its selection rectangle fewer than its clip
   holds, choosing each note once (`countNotesRead()`, `Selection::getNoteComparisons()`; 0 and 362 of 500 measured,
   15,000 and 9,181 before).
 - an import, Normalize and Quantize Audio read no byte of audio on the message thread (`AudioWork::getMessageThreadReads()`,
   known bug 123), and a key typed in the browser's search looks through none of the library there
-  (`Library::getItemsSearchedOnMessageThread()`, in `tests/BrowserTests.cpp`; known bug 128).
+  (`Library::getItemsSearchedOnMessageThread()`, in `tests/BrowserTests.cpp`; known bug 128), nor does a filter's menu
+  as it counts what it offers (in `tests/BrowserFilterTests.cpp`).
 - a branch switch, a checkout, going back to the branch, the start of a merge and Merge read, split and write no song on
   the message thread (`VersionStore::countSongsRead()`, `countSongsWritten()`, `countSongsSplit()`; known bug 126).
 

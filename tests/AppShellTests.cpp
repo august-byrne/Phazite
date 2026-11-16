@@ -229,7 +229,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     REQUIRE (save != nullptr);
     CHECK (save->isEnabled());
     REQUIRE (screen.registry.invoke ("project.save"));
-    CHECK_FALSE (screen.session.isUntitled());
+    CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); })); // copied in the background
     CHECK (screen.session.getProject()->getFile() == screen.temp.folder.getChildFile ("Projects/Untitled/Untitled.phazite"));
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }

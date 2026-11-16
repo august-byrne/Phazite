@@ -361,15 +361,7 @@ void setNotes (ProjectContext& context, const std::vector<NoteData>& notes)
 {
     // Each as given, those that are gone left out.
     if (auto* song = findSong (context))
-    {
-        for (const auto& note : notes)
-        {
-            if (! findNoteState (*song, note.getRef()).isValid())
-                continue;
-
-            placeNote (*song, note.getRef(), note.start, note.pitch, note.length);
-        }
-    }
+        placeNotes (*song, notes);
 }
 
 ClipEnds getClipEnds (const ProjectContext& context, const std::vector<ClipID>& clips)

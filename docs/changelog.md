@@ -296,6 +296,14 @@ too. A line names the bug's number in that list.
   sampler's, a wavetable's) has them copied as an import's are and goes in once they are, with Cancel; Swap's trial
   copies nothing, and a trial kept by another change has its sounds copied in afterwards, as a step of its own
   ("Copy Sounds into the Project"). A copy made for a change whose device or track went meanwhile is deleted.
+- **A drag or a paste of many notes** finds where its clip can grow once for a command instead of walking the
+  track's clips once for each note (2,701 elements looked at instead of 103,501 for a step of 500 notes on a track of
+  200 clips).
+- **The browser's filter menus count what they offer on the library's thread**, as the search does, the newest
+  words' counts alone, and a pad's Swap picks its type from counts the index keeps.
+- **A new project's first save always copies in the background**, however small: the window no longer waits for a
+  commit being written, a file another program holds for a moment is tried again, and the progress window shows only
+  after a second.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

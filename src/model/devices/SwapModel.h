@@ -29,6 +29,10 @@ public:
     // Until it is kept or put back, something else kept what it tried, its device went, or another project opened.
     bool isOpen() const;
 
+    // Whether it was closed from the start because another swap's keep was still copying its sounds in (keep()): no swap
+    // opens for the song meanwhile.
+    bool isHeldBack() const;
+
     DeviceID getDevice() const;
     int getPad() const; // -1 for a device's presets
 

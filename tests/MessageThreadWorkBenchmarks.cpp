@@ -13,7 +13,9 @@
 #include "model/devices/SwapModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "services/BrowserModel.h"
 #include "services/Library.h"
+#include "services/SoundPack.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -124,6 +126,63 @@ TEST_CASE ("Benchmark: the browser's search at each key typed, in a library of 5
                << juce::String (search, 1) << " | " << juce::String (bigSearch, 1) << " | " << found.total << " |\n";
     }
 
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: the browser's filters' counts and its filtered places, in a library of 50,000 sounds"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    phazite::test::TemporaryFolder temp;
+    constexpr int sounds = 50000;
+
+    for (int i = 0; i < sounds; ++i)
+    {
+        const auto file = temp.folder.getChildFile (makeSoundPath (i) + ".flac");
+        file.getParentDirectory().createDirectory();
+        file.create();
+    }
+
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
+    library.addUserFolder (temp.folder);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+    REQUIRE ((int) library.getIndex()->size() == sounds);
+    const phazite::SoundPack pack { temp.folder.getChildFile ("No Packs") };
+    const phazite::BrowserModel model { library, pack };
+
+    phazite::BrowserFilters kicks;
+    kicks.type = "Kick";
+
+    // What a filter's menu kept the message thread for as it opened (counted there, as before), and what it keeps it for
+    // now: the call that starts the count, and how long until the counts are there; then the filtered places, which are
+    // still listed on the message thread as a filter is set.
+    juce::String report ("\n| Words, filters | Counted on the message thread (ms) | The call now (ms) | Counts there after (ms) |\n"
+                         "|---|---|---|---|\n");
+
+    for (const auto& [words, filters] :
+         { std::pair { juce::String(), phazite::BrowserFilters() }, std::pair { juce::String ("kick"), phazite::BrowserFilters() },
+           std::pair { juce::String(), kicks }, std::pair { juce::String ("deep"), kicks } })
+    {
+        auto started = now();
+        const auto atOnce = model.getFilterOptions (words, filters);
+        const auto before = now() - started;
+        juce::ignoreUnused (atOnce);
+
+        std::optional<phazite::FilterOptions> arrived;
+        started = now();
+        model.startFilterOptions (words, filters, [&arrived] (phazite::FilterOptions found) { arrived = std::move (found); });
+        const auto call = now() - started;
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&arrived] { return arrived.has_value(); }));
+        const auto there = now() - started;
+
+        report << "| \"" << words << "\", " << (filters.isEmpty() ? "none" : "Kick") << " | " << juce::String (before, 1) << " | "
+               << juce::String (call, 2) << " | " << juce::String (there, 1) << " |\n";
+    }
+
+    auto started = now();
+    const auto places = model.getPlaces (kicks);
+    report << "\nThe places with the Type filter set to Kick, listed on the message thread: " << juce::String (now() - started, 1)
+           << " ms (" << (int) places.size() << " places)\n";
     MESSAGE (report);
 }
 

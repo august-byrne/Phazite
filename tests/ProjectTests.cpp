@@ -579,15 +579,18 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     REQUIRE (projects.getChildFile ("Taken").createDirectory().wasOk());
     std::optional<juce::Result> moved;
     const auto keep = [&moved] (const juce::Result& result) { moved = result; };
-    CHECK (project->moveTo (projects, "Taken", keep) == nullptr); // small: done at once
+    CHECK (project->moveTo (projects, "Taken", keep) == nullptr); // it can't begin: told at once
     REQUIRE (moved.has_value());
     CHECK (moved->failed());
     CHECK (project->getFile() == oldFile);
     CHECK (project->hasUnsavedChanges());
 
+    // Copied in the background, however small, the project staying where it was until the copy is whole.
     moved.reset();
-    CHECK (project->moveTo (projects, "Beat", keep) == nullptr);
-    REQUIRE (moved.has_value());
+    const auto copying = project->moveTo (projects, "Beat", keep);
+    REQUIRE (copying != nullptr);
+    CHECK (project->getFile() == oldFile);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&moved] { return moved.has_value(); }));
     REQUIRE (moved->wasOk());
     CHECK (projects.findChildFiles (juce::File::findDirectories, false).size() == 2); // Taken and Beat, nothing half made
     const auto newFile = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
@@ -645,8 +648,8 @@ TEST_CASE ("A plan after a first save plays the audio of the project's new folde
     REQUIRE (audioOf (*before).size() == 3);
 
     std::optional<juce::Result> moved;
-    REQUIRE (project->moveTo (temp.folder.getChildFile ("Projects"), "Beat", [&moved] (const juce::Result& r) { moved = r; }) == nullptr);
-    REQUIRE (moved.has_value());
+    const auto copying = project->moveTo (temp.folder.getChildFile ("Projects"), "Beat", [&moved] (const juce::Result& r) { moved = r; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&moved] { return moved.has_value(); }));
     REQUIRE (moved->wasOk());
 
     const auto asked = phazite::SongPlayer::countFilesAsked();

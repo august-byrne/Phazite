@@ -53,7 +53,13 @@ struct Screen : public phazite::test::AppScreen
         phazite::test::dispatchPendingMessages();
     }
 
-    void waitForVersions() { REQUIRE (phazite::test::waitForVersionHistory (session.getContext())); }
+    // A first save's copy done first (a commit of a new project saves it, in the background: the window holds meanwhile),
+    // then what the history writes.
+    void waitForVersions()
+    {
+        REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! session.getContext().isHoldingForWork(); }));
+        REQUIRE (phazite::test::waitForVersionHistory (session.getContext()));
+    }
 
     bool leftShows (LeftView view) { return shell.getPanel (Panel::left).isShowing() && shell.getPanelLayout().leftView == view; }
 

@@ -145,6 +145,7 @@ TEST_CASE ("The Project view lists the song's audio files, a missing one with it
 {
     Screen screen;
     REQUIRE (screen.registry.invoke ("project.save")); // a folder of its own, which the audio files are copied into
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
     auto& song = screen.getSong();
     const auto track = screen.addTrack();
     const auto sounds = screen.temp.folder.getChildFile ("Sounds");

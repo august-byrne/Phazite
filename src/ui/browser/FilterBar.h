@@ -32,13 +32,18 @@ public:
     void show (const BrowserFilters&, bool searchHasWords);
     const BrowserFilters& getFilters() const noexcept { return filters; }
 
-    // Asked as a menu opens: what the filters offer now. Told when a menu or a chip's x changed the filters, and of Clear.
-    std::function<FilterOptions()> getOptions;
+    // Asked as a menu is to open: what the filters offer now, given to then once it is counted, in the background
+    // (BrowserModel::startFilterOptions()); the menu opens then, never with counts of what showed before. Asked again before
+    // it answers, or once what shows changed, the asker gives the newest answer alone, or none. Told when a menu or a chip's x
+    // changed the filters, and of Clear.
+    std::function<void (std::function<void (FilterOptions)> then)> askOptions;
     std::function<void (const BrowserFilters&)> onChange;
     std::function<void()> onClear;
 
-    // A filter's menu: its values, each with how many have it, the one set ticked (choosing it again takes it away).
-    juce::PopupMenu getMenu (Filter);
+    // A filter's menu: its values, each with how many have it, the one set ticked (choosing it again takes it away). And
+    // the same once the options are counted (askOptions), as a chip opens it.
+    juce::PopupMenu getMenu (Filter, const FilterOptions&);
+    void askMenu (Filter, std::function<void (juce::PopupMenu)> then);
 
     // How tall it is at a width, its chips going onto another row where they don't fit.
     int getHeightForWidth (int width) const;

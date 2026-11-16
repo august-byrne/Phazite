@@ -223,39 +223,43 @@ public:
     // move there and save: until then it stays where it was, and nothing that looks like a project is left half made. The
     // folder it was in stays as it is, for its owner to delete once the project has closed (files in it may be open until
     // then). It calls back with what came of it, on the message thread, once: a failure changes nothing (that folder exists,
-    // or something can't be written). What copies in no more than copyAtOnceBytes is done before this returns, which then
-    // returns nothing; more is copied on a background thread (known bug 90: the message thread copied gigabytes of
-    // recordings), which this returns as a TrackRender: its progress window's, whose deletion cancels it, leaving nothing
-    // behind and without calling back. Message thread; the project must outlive what it returns.
+    // or something can't be written). The folders are copied on a background thread, however few bytes they hold (known
+    // bug 90: the message thread copied gigabytes of recordings; and a small project's copy on the message thread waited
+    // for the history's writes and failed at the first file another program held a moment), which this returns as a
+    // TrackRender, with its progress, whose deletion cancels it, leaving nothing behind and without calling back. Nothing,
+    // having called back with why, when the copy couldn't begin (the folder exists, or can't be made). Message thread; the
+    // project must outlive what it returns.
     // The copy takes no link inside those folders, nor what it leads to (isLinkElsewhere()); a clip's render in the Cache
     // folder that goes or changes while it copies is left behind, as Phazite renders it again, and nothing else is (a frozen
     // track's file may be all that is left of a plug-in). Its "(saving)" folder holds a marker file (copyMarkerName), which
     // proves it Phazite's: the next first save or Save As into that folder moves one a run that crashed left there (marked
     // before this run started, with no project file in it) to the system's trash, in the background, and nothing else.
     // Its versions are copied last, by what writes them (setVersionsCopier()), so that nothing is written into the folder
-    // the project leaves after they were copied (known bug 169); their bytes count with the rest's, in what is copied at
-    // once and in the progress, and Cancel stops their copy too. A file another program holds a moment is tried again for a
-    // second or so, off the message thread.
+    // the project leaves after they were copied (known bug 169); their bytes count with the rest's in the progress, and
+    // Cancel stops their copy too. A file another program holds a moment (an antivirus, the indexer) is tried again for a
+    // second or so before the save fails, saying which file.
     std::unique_ptr<TrackRender> moveTo (const juce::File& parentFolder, const juce::String& name,
                                          std::function<void (const juce::Result&)> onFinished);
 
     // How a first save copies the project's Versions folder, given by what writes into it, its song's history
-    // (model/versions/internal/VersionHistory.h: makeVersionsCopier()). wait() returns once every write it was given is
-    // done, for a copy made at once on the message thread, which starts none meanwhile. copy() runs what it is given on the
-    // writer's own thread, after every write it was given before, holding every write asked for after until end(), and calls
-    // back on the message thread with what came of it. end(), once the move is over, moved or not. Without one, the folder is
-    // copied with the rest.
+    // (model/versions/internal/VersionHistory.h: makeVersionsCopier()). copy() runs what it is given on the writer's own
+    // thread, after every write it was given before, holding every write asked for after until end(), and calls back on the
+    // message thread with what came of it. end(), once the move is over, moved or not. Without one, the folder is copied
+    // with the rest.
     struct VersionsCopier
     {
-        std::function<void()> wait;
         std::function<void (std::function<juce::Result (const BackgroundJobs::ShouldStop&)>, std::function<void (const juce::Result&)>)>
             copy;
         std::function<void()> end;
     };
 
     void setVersionsCopier (VersionsCopier copier) { versionsCopier = std::move (copier); }
-    static constexpr juce::int64 copyAtOnceBytes = (juce::int64) 8 << 20;
     static constexpr const char* copyMarkerName = ".phazite-saving";
+
+    // For tests: while one is set, called on the copy's thread each time a first save's copy is about to try a file again
+    // that couldn't be opened, read or written (another program holds it), with how many tries it made, so that a test can
+    // let go of a file it holds after a few. None: nullptr. Any thread.
+    static void setCopyRetryHook (std::function<void (int tries)>);
 
 private:
     Project (Song::Ptr, const juce::File&);

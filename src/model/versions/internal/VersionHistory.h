@@ -786,8 +786,8 @@ void nameKnobs (std::vector<MergeClash>&, const juce::ValueTree& ours, const juc
 // then the newest of each hour for a day, then the newest of each day for 30 days, and none older; oldest first, as given.
 std::vector<Snapshot> thinSnapshots (const std::vector<Snapshot>& oldestFirst, juce::int64 now);
 // How a first save copies the open project's Versions folder (Project::VersionsCopier): by the history of the song the
-// context holds as each is called (copyFolder(), endFolderCopy(), waitForThread()); with none, the copy runs on the
-// message thread.
+// context holds as each is called (copyFolder(), endFolderCopy()); with none, the copy runs on the message thread (a first
+// save gives a project without a history none: ProjectSession::moveUntitledTo()).
 class ProjectContext;
 Project::VersionsCopier makeVersionsCopier (ProjectContext&);
 } // namespace phazite

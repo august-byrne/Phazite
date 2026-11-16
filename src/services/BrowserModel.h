@@ -115,8 +115,21 @@ public:
     void startSearch (const juce::String& query, const BrowserFilters&, std::function<void (BrowserContents)> found) const;
     void cancelSearch() const;
 
-    // What each filter offers, over what search finds for the query, or over every sound without one.
+    // What each filter offers, over what search finds for the query, or over every sound without one. At once, on the
+    // calling thread; through an index given, on any thread, stopping (with nothing) once shouldStop says so.
     FilterOptions getFilterOptions (const juce::String& query, const BrowserFilters&) const;
+    static std::optional<FilterOptions> countFilterOptions (const LibraryIndex&, const juce::String& query, const BrowserFilters&,
+                                                            const std::function<bool()>& shouldStop = nullptr);
+
+    // The same as a filter's menu opens: counted in the background, on the search's thread (Library::startCount()), so that
+    // a click on a filter goes through none of the library on the message thread; each count cancelling the one before, so
+    // that found has the newest's alone, on the message thread; or none, once cancelled.
+    void startFilterOptions (const juce::String& query, const BrowserFilters&, std::function<void (FilterOptions)> found) const;
+    void cancelFilterOptions() const;
+
+    // How many of the sounds and MIDI files are of a type ("Kick"), as the Type filter counts them over every sound: from
+    // the index, without going through it.
+    int countSoundsOfType (const juce::String& type) const;
 
     // The longest list a place shows while filters are set; a line after it says how many more there are.
     static constexpr int maxListed = 2000;

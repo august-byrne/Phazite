@@ -107,7 +107,10 @@ reads only what is new or changed.
 Under the search field is a chip for each of **Type**, **Loop**, **Tempo** and **Key**.
 
 - A chip opens a menu of the values that what the browser shows has, as the other filters and the search's words
-  leave it, each with how many sounds have it, the one set ticked. So a value chosen never leaves nothing.
+  leave it, each with how many sounds have it, the one set ticked. So a value chosen never leaves nothing. The counts
+  are made in the background, as the search is, when the chip is clicked; the menu opens once they are in (at once in
+  a library of tens of thousands of sounds), never with the counts of what showed before: words typed or a filter set
+  meanwhile cancel it.
 - A chip that is set shows its value in the accent's wash; its x takes it away.
 - **Clear**, there while a filter is set or the search has words, takes all of them away.
 - Nothing keeps the filters from one start to the next.

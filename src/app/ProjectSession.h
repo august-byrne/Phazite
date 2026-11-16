@@ -191,8 +191,8 @@ public:
 
     juce::Array<juce::File> getRecentProjects() const { return recent.getProjects(); }
 
-    // The "project." commands, and the versions', whose bounces render in a host (the main window's progress window), as a
-    // new project's first save copies its folders when they are large (Project::moveTo()).
+    // The "project." commands, and the versions', whose bounces render in a host (the main window's progress window), where
+    // the work the window holds for shows too (holdForWork(): a new project's first save's copy, Project::moveTo()).
     void addCommands (CommandRegistry&, TrackRenderHost&);
 
 private:
@@ -204,8 +204,9 @@ private:
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
-    TrackRenderHost* renders = nullptr;     // addCommands()'
-    std::unique_ptr<TrackRender> firstSave; // a first save's copy without a host to run it (tests'), until the next
+    TrackRenderHost* renders = nullptr;                      // addCommands()'
+    std::unique_ptr<TrackRender> firstSave;                  // a first save's copy, until it is over
+    std::unique_ptr<ProjectContext::WorkHold> firstSaveHold; // the window's hold while it runs (holdForWork())
 
     // A file double-clicked while a dialog was open, opened once none is.
     juce::File fileWaiting;

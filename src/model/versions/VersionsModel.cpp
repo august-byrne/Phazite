@@ -210,7 +210,6 @@ bool isReadingVersions (const ProjectContext& context)
 Project::VersionsCopier makeVersionsCopier (ProjectContext& context)
 {
     return {
-        [&context] { waitForVersionsWritten (context); },
         [&context] (std::function<juce::Result (const BackgroundJobs::ShouldStop&)> copy, std::function<void (const juce::Result&)> copied)
         {
             if (auto* history = findHistory (context))

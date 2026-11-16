@@ -93,10 +93,12 @@ struct LibraryIndex
 {
     std::vector<LibraryItem> files, folders;
     std::vector<SearchKey> fileKeys, folderKeys;
+    std::map<juce::String, int> soundTags; // how many of the sounds and MIDI files have each tag ("Kick": 412)
     bool full = false;
 
     void addFile (LibraryItem, const juce::File& root);
     void addFolder (LibraryItem, const juce::File& root);
+    void countTags (const LibraryItem&); // a file's, into soundTags, as addFile() does
 };
 
 // What a search found: the best, as many as it was asked for, and how many match in all; stopped, if it was cancelled
@@ -167,15 +169,29 @@ public:
     void startSearch (const juce::String& query, int maximum, Accepts accepts, std::function<void (SearchResults)> found) const;
     void cancelSearch() const;
 
-    // Tests: what a search's thread does before it looks (held until let go, so that its results come later).
+    // Tests: what a search's thread does before it looks, and before a count (held until let go, so that its results come
+    // later).
     void setBeforeSearch (std::function<void()> before) const { beforeSearch = std::move (before); }
 
     // How many items the searches looked through on the message thread, since the program started: none for the browser's
     // search as the user types (the performance gates check that). Any thread.
     static juce::int64 getItemsSearchedOnMessageThread() noexcept { return searchedOnMessageThread.load(); }
 
-    // Each item search would find for the query, every one, in no order: for counting what it finds.
-    void forEachMatch (const juce::String& query, const std::function<void (const LibraryItem&)>&) const;
+    // Each sound, MIDI file and preset of an index that search would find for the query, or every one for an empty query
+    // (none for text without words, as search finds none), in the index's order: for counting what search finds (the browser's filters' counts). False, having stopped,
+    // once shouldStop says so, which it asks between thousands of items. Any thread; on the message thread, what it looks
+    // through counts with the searches' there (getItemsSearchedOnMessageThread()).
+    static bool forEachFileMatch (const LibraryIndex&, const juce::String& query, const std::function<void (const LibraryItem&)>& matched,
+                                  const std::function<bool()>& shouldStop = nullptr);
+
+    // Work that goes through the index, such as a count of what a search finds (forEachFileMatch()), run on the search's
+    // thread as the browser's search is: given the index as it is now, and what says that it is to stop, it returns whether
+    // it finished. Each count started cancels the one before (a search doesn't, nor does a count cancel a search), so that
+    // only the newest's done is called, on the message thread, once its work finished; cancelCount() cancels it with none.
+    // Message thread.
+    using Count = std::function<bool (const LibraryIndex&, const std::function<bool()>& shouldStop)>;
+    void startCount (Count, std::function<void()> done) const;
+    void cancelCount() const;
 
     // The instruments and the effects, as listDevices() gives them.
     std::vector<LibraryItem> getAllDevices() const;
@@ -305,14 +321,16 @@ private:
     // search's thread.
     struct SearchDelivery final : juce::AsyncUpdater
     {
-        explicit SearchDelivery (const Library& l)
-            : library (l)
+        SearchDelivery (const Library& l, void (Library::*d)() const)
+            : library (l),
+              deliver (d)
         {
         }
 
-        void handleAsyncUpdate() override { library.deliverSearch(); }
+        void handleAsyncUpdate() override { (library.*deliver)(); }
 
         const Library& library;
+        void (Library::*deliver)() const;
     };
 
     mutable std::atomic<int> searchNumber { 0 };
@@ -320,10 +338,18 @@ private:
     mutable std::function<void()> beforeSearch;
     mutable std::mutex deliveredLock;
     mutable std::optional<std::pair<int, SearchResults>> delivered;
-    mutable SearchDelivery searchDelivery { *this };
-    mutable BackgroundJobs searches { "Phazite browser search", 1, juce::Thread::Priority::normal };
+    mutable SearchDelivery searchDelivery { *this, &Library::deliverSearch };
     static inline std::atomic<juce::int64> searchedOnMessageThread { 0 };
 
+    // The count (startCount()) the same way: the newest's number, what it calls when done, and the number of one done.
+    mutable std::atomic<int> countNumber { 0 };
+    mutable std::function<void()> countDone;
+    mutable std::optional<int> counted; // guarded by deliveredLock
+    mutable SearchDelivery countDelivery { *this, &Library::deliverCount };
+
+    mutable BackgroundJobs searches { "Phazite browser search", 1, juce::Thread::Priority::normal };
+
     void deliverSearch() const;
+    void deliverCount() const;
 };
 } // namespace phazite

@@ -442,6 +442,43 @@ BrowserContents BrowserModel::describeSearch (const juce::String& query, const B
 
 FilterOptions BrowserModel::getFilterOptions (const juce::String& query, const BrowserFilters& filters) const
 {
+    const auto indexed = library.getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    return *countFilterOptions (*indexed, query, filters);
+}
+
+void BrowserModel::startFilterOptions (const juce::String& query, const BrowserFilters& filters,
+                                       std::function<void (FilterOptions)> found) const
+{
+    const auto options = std::make_shared<FilterOptions>();
+    library.startCount (
+        [options, query, filters] (const LibraryIndex& index, const std::function<bool()>& shouldStop)
+        {
+            auto counted = countFilterOptions (index, query, filters, shouldStop);
+
+            if (! counted.has_value())
+                return false;
+
+            *options = std::move (*counted);
+            return true;
+        },
+        [options, found = std::move (found)] { found (std::move (*options)); });
+}
+
+void BrowserModel::cancelFilterOptions() const
+{
+    library.cancelCount();
+}
+
+int BrowserModel::countSoundsOfType (const juce::String& type) const
+{
+    const auto indexed = library.getWholeIndex();
+    const auto found = indexed->soundTags.find (type);
+    return found != indexed->soundTags.end() ? found->second : 0;
+}
+
+std::optional<FilterOptions> BrowserModel::countFilterOptions (const LibraryIndex& index, const juce::String& query,
+                                                               const BrowserFilters& filters, const std::function<bool()>& shouldStop)
+{
     // Each item counts for a filter's values where it has the other filters' values: so a filter offers what the others
     // leave, and choosing another of its values never leaves nothing.
     std::map<juce::String, int> types;
@@ -474,17 +511,9 @@ FilterOptions BrowserModel::getFilterOptions (const juce::String& query, const B
             ++keys[*item.key];
     };
 
-    if (query.trim().isNotEmpty())
-    {
-        library.forEachMatch (query.trim(), count);
-    }
-    else
-    {
-        const auto indexed = library.getIndex(); // held while it is gone through: the index thread may replace it meanwhile
-
-        for (const auto& item : *indexed)
-            count (item);
-    }
+    // What search finds for the query, or every sound without one: devices count for no filter.
+    if (! Library::forEachFileMatch (index, query.trim(), count, shouldStop))
+        return std::nullopt;
 
     for (const auto& type : Library::getSoundTypes())
         if (const auto found = types.find (type); found != types.end())

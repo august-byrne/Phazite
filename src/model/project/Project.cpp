@@ -31,6 +31,8 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <unordered_set>
@@ -255,17 +257,30 @@ namespace
     // tool) may hold a file a moment just as it is made or changed: on Windows such a hold refuses what asks for more
     // sharing than it gives. Whether it worked in the end; it stops trying once shouldStop says so. Never on the message
     // thread, which no sleep may hold up: there, it tries once.
+    std::mutex retryHookLock;
+    std::shared_ptr<const std::function<void (int)>> retryHook; // Project::setCopyRetryHook()'s
+
     bool tryAgainBriefly (const std::function<bool()>& attempt, const std::function<bool()>& shouldStop)
     {
         const auto mayWait = ! juce::MessageManager::existsAndIsCurrentThread();
 
-        for (int tries = 0;; ++tries)
+        for (int tries = 1;; ++tries)
         {
             if (attempt())
                 return true;
 
-            if (! mayWait || tries >= 50 || shouldStop())
+            if (! mayWait || tries > 50 || shouldStop())
                 return false;
+
+            std::shared_ptr<const std::function<void (int)>> hook;
+
+            {
+                const std::scoped_lock held (retryHookLock);
+                hook = retryHook;
+            }
+
+            if (hook != nullptr)
+                (*hook) (tries);
 
             juce::Thread::sleep (20);
         }
@@ -2001,34 +2016,19 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
         return {};
     }
 
-    // The versions last (copyVersions()), counted with the rest.
+    // The versions last (copyVersions()), counted with the rest. Always in the background, however little there is: the
+    // message thread waits neither for the copy nor for the history's writes the versions' copy comes after (a commit being
+    // written), and a file another program holds a moment is tried again there, which it can't be on the message thread.
     auto list = listFoldersToCopy (getFolder(), FoldersListed::allButVersions);
     const auto versionsBytes = listFoldersToCopy (getFolder(), FoldersListed::versions).bytes;
+    return std::make_unique<TrackRender> (
+        std::make_unique<FolderCopy> (*this, copy, folder, std::move (list), versionsBytes, std::move (onFinished)));
+}
 
-    if (list.bytes + versionsBytes > copyAtOnceBytes)
-        return std::make_unique<TrackRender> (
-            std::make_unique<FolderCopy> (*this, copy, folder, std::move (list), versionsBytes, std::move (onFinished)));
-
-    // Small: at once, on the message thread, which starts no write meanwhile; the versions once what writes them is done.
-    std::atomic<juce::int64> copied { 0 };
-    auto result = copyFolders (getFolder(), copy, list, [] { return false; }, copied);
-
-    if (result.wasOk())
-    {
-        if (versionsCopier.wait != nullptr)
-            versionsCopier.wait();
-
-        result = copyVersions (getFolder(), copy, [] { return false; }, copied);
-    }
-
-    if (result.wasOk())
-        result = finishMoveTo (copy, folder);
-
-    if (result.failed())
-        copy.deleteRecursively();
-
-    onFinished (result);
-    return {};
+void Project::setCopyRetryHook (std::function<void (int tries)> hook)
+{
+    const std::scoped_lock held (retryHookLock);
+    retryHook = hook != nullptr ? std::make_shared<const std::function<void (int)>> (std::move (hook)) : nullptr;
 }
 juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& folder)
 {

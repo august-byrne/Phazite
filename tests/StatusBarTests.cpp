@@ -56,8 +56,7 @@ TEST_CASE ("The status bar says whether the project is saved, and a click on tha
     REQUIRE (item != nullptr);
     phazite::test::Mouse mouse (*item);
     mouse.click (item->getLocalBounds().getCentre());
-    phazite::test::dispatchPendingMessages();
-    CHECK_FALSE (screen.session.isUntitled()); // the save dialog answers with what it suggests here
+    CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); })); // as the dialog suggests
 
     // The hints in the middle, between the items.
     auto& hints = status.getHintBar();

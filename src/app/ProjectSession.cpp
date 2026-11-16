@@ -771,20 +771,22 @@ void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<voi
     keepRecording();
 
     // Its versions move with it, whole, copied last by the history's thread, after what it was asked to write: the initial
-    // commit as a new project opens, which may come while the rest is copied (known bug 169).
-    project->setVersionsCopier (makeVersionsCopier (context));
+    // commit as a new project opens, which may come while the rest is copied (known bug 169). Without a history, with the
+    // rest.
+    project->setVersionsCopier (keepsVersions (context) ? makeVersionsCopier (context) : Project::VersionsCopier());
 
-    // A large copy runs in the host's progress window, which tells a failure itself.
     firstSave = nullptr;
-    const auto inWindow = std::make_shared<bool> (false);
+    firstSaveHold = nullptr;
     const auto title = "Saving " + juce::File::createLegalFileName (getChosenName (chosen).trim());
 
     auto copying = project->moveTo (chosen.getParentDirectory(), getChosenName (chosen),
-                                    [this, callback, inWindow, title] (const juce::Result& result)
+                                    [this, callback] (const juce::Result& result)
                                     {
-                                        // The host deletes the copy, and this with it: what comes after takes copies.
+                                        // The copy is calling back, and lets go of itself last: what comes after takes copies.
                                         const auto then = callback;
                                         const auto saved = result.wasOk();
+                                        firstSaveHold = nullptr; // the window takes input again, its progress window gone
+                                        firstSave = nullptr;
 
                                         if (saved)
                                         {
@@ -796,24 +798,33 @@ void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<voi
                                             if (onProjectChanged != nullptr)
                                                 onProjectChanged();
                                         }
-
-                                        if (*inWindow && renders != nullptr)
-                                            renders->renderFinished (title, result);
-                                        else if (! saved)
+                                        else
+                                        {
                                             showError ("Phazite couldn't save the project", result.getErrorMessage());
+                                        }
 
                                         then (saved);
                                     });
 
     if (copying == nullptr)
-        return; // done, and called back
+        return; // it couldn't begin, and said why
 
-    *inWindow = true;
+    // In the background, however small, the window held as for any work it waits for (ProjectContext::holdForWork()): its
+    // progress window shows after a second, so a small project's save looks as if it were done at once. Its Cancel, Escape
+    // before it shows, or a quit stop the copy, leaving nothing of it, and the project stays where it was.
+    const auto* render = copying.get();
+    firstSave = std::move (copying);
+    firstSaveHold = context.holdForWork (
+        title,
+        [this] (const juce::String& why)
+        {
+            firstSaveHold = nullptr;
+            firstSave = nullptr;
 
-    if (renders != nullptr)
-        renders->runRender (std::move (copying));
-    else
-        firstSave = std::move (copying);
+            if (why.isNotEmpty())
+                showError ("Phazite didn't save the project", why);
+        },
+        [render] { return render->getProgress(); });
 }
 
 void ProjectSession::chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)> callback)
@@ -1275,7 +1286,8 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
         keepRecording();
 
     autosaveTimer = nullptr;
-    firstSave = nullptr; // a first save's copy of the project closing stops, and goes (it would move that project)
+    firstSaveHold = nullptr; // a first save's copy of the project closing stops, and goes (it would move that project)
+    firstSave = nullptr;
 
     // What holds the song (an export, a render, the devices' windows, which store what their plug-ins changed) goes while
     // it is still open and playing, before the context lets go of it.

@@ -380,6 +380,7 @@ TEST_CASE ("The main window's menus name the app's commands, each shown as its c
     REQUIRE (screen.registry.invoke ("track.add"));
     REQUIRE (screen.registry.invoke ("view.hoverHelp"));
     REQUIRE (screen.registry.invoke ("project.save"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); })); // copied in the background
     dispatchPendingMessages();
     CHECK_FALSE (screen.registry.find ("view.hoverHelp")->isTicked());
     checkMenus (screen, recent);
@@ -402,6 +403,7 @@ TEST_CASE ("The main window's dialogs open by their commands, show their panels 
     phazite::test::dispatchPendingMessages();
     screen.addNotes();
     REQUIRE (screen.registry.invoke ("project.save")); // Clean Up Unused Audio is for a project with a folder of its own
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
 
     // Each once, in each theme, then the dark one again; a second time while it is open, it stays the one. Scan for Plug-ins
     // isn't among them: it scans the machine's VST3 folders.
@@ -631,7 +633,7 @@ TEST_CASE ("Closing the main window quits at once without unsaved changes, and a
         REQUIRE (screen.registry.invoke ("track.add"));
         screen.answerToSave = Answer::save;
         screen.window->closeButtonPressed();
-        CHECK (screen.quitting);
+        CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return screen.quitting; })); // once its copy is in place
         REQUIRE (screen.session.getProject() != nullptr);
         CHECK_FALSE (screen.session.isUntitled());
         CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
@@ -645,6 +647,7 @@ TEST_CASE ("The windows that hold a project's song close as another project open
     phazite::test::dispatchPendingMessages();
     screen.addNotes();
     REQUIRE (screen.registry.invoke ("project.save")); // Clean Up Unused Audio is for a project with a folder of its own
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.session.isUntitled(); }));
 
     juce::Array<juce::Component::SafePointer<juce::DialogWindow>> projects;
 

@@ -523,6 +523,7 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     // Answered, it goes into a folder of its own there, with its undo history, and is a recent project from now on.
     answer = projects.getChildFile ("Beat.phazite"); // with the extension, as the dialog adds it
     REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.isUntitled(); })); // copied in the background
     const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     CHECK (session.getProject()->getFile() == file);
     CHECK (file.existsAsFile());
@@ -595,6 +596,7 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); },
                                                    phazite::test::versionHistoryTimeout));
     REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.isUntitled(); }));
     CHECK (errors.isEmpty());
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("Initial commit"));
@@ -1332,6 +1334,46 @@ TEST_CASE ("A project double-clicked while a dialog is open opens once the dialo
     CHECK (phazite::test::dispatchMessagesUntil ([&session, &second] { return session.getProject()->getFile() == second; }));
 }
 
+namespace
+{
+// A recording whose copy takes a while.
+constexpr juce::int64 largeRecording = (juce::int64) 8 << 20;
+
+// While one lives, a first save's copy that meets a file another program holds stops at its first try again (Project::
+// setCopyRetryHook()) until the test lets it go on (letGo()); as it goes, it lets the copy go on, so that nothing waits for
+// it. Made after the session, so that it goes first.
+struct CopyStopped
+{
+    CopyStopped()
+    {
+        phazite::Project::setCopyRetryHook (
+            [state = state] (int)
+            {
+                state->reached = true;
+
+                while (! state->goOn.load())
+                    juce::Thread::sleep (1);
+            });
+    }
+
+    ~CopyStopped()
+    {
+        letGo();
+        phazite::Project::setCopyRetryHook (nullptr);
+    }
+
+    bool isReached() const { return state->reached.load(); }
+    void letGo() { state->goOn = true; }
+
+    struct State
+    {
+        std::atomic<bool> reached { false }, goOn { false };
+    };
+
+    const std::shared_ptr<State> state = std::make_shared<State>();
+};
+} // namespace
+
 TEST_CASE ("A new project's first save copies its folders in the background, with its progress, and can be cancelled")
 {
     // Known bug 90: the first save copied the Audio, Cache and Versions folders on the message thread.
@@ -1344,6 +1386,7 @@ TEST_CASE ("A new project's first save copies its folders in the background, wit
     phazite::CommandRegistry registry;
     phazite::test::RenderHost renders;
     session.addCommands (registry, renders);
+    session.setWorkShownAfter (0); // its progress window at the next turn, not after a second
     session.chooseSaveFile = [&projects] (const juce::File&, std::function<void (const juce::File&)> callback)
     { callback (projects.getChildFile ("Beat")); };
     juce::StringArray errors;
@@ -1352,32 +1395,48 @@ TEST_CASE ("A new project's first save copies its folders in the background, wit
     REQUIRE (session.createProject ({}).wasOk());
     const auto untitled = session.getProject()->getFile();
 
-    // A recording larger than what is copied at once.
-    juce::MemoryBlock recording ((size_t) phazite::Project::copyAtOnceBytes + 4096, true);
+    // A large recording, which another program holds as the copy reaches it, the copy stopped there: it is still under way
+    // when the progress window shows.
+    juce::MemoryBlock recording ((size_t) largeRecording, true);
     const auto take = session.getProject()->getAudioFolder().getChildFile ("Take 1.wav");
     REQUIRE (take.replaceWithData (recording.getData(), recording.getSize()));
 
-    // The copy runs in the progress window; the project stays where it was until it is whole.
-    REQUIRE (registry.invoke ("project.save"));
-    REQUIRE (renders.render != nullptr);
-    CHECK (renders.render->getTitle() == "Saving Beat");
-    CHECK (renders.render->getProgress() >= 0.0f);
-    CHECK (session.isUntitled());
-    CHECK (session.getProject()->getFile() == untitled);
+    {
+        const phazite::test::HeldFile held (take);
+        CopyStopped stopped;
 
-    // Cancelled, nothing is left of the copy, and the project is still untitled.
-    renders.render = nullptr;
-    phazite::test::dispatchPendingMessages();
-    CHECK (session.isUntitled());
-    CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty());
-    CHECK (errors.isEmpty());
+        if (! held.works())
+        {
+            MESSAGE ("The file can't be held from this user: the copy can't be kept under way.");
+            return;
+        }
+
+        // The copy runs in the background, the window held, its progress window showing; the project stays where it was
+        // until it is whole.
+        REQUIRE (registry.invoke ("project.save"));
+        CHECK (session.getContext().isHoldingForWork());
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&renders, &stopped] { return renders.render != nullptr && stopped.isReached(); }));
+        CHECK (renders.render->getTitle() == "Saving Beat");
+        CHECK (renders.render->getProgress() >= 0.0f);
+        CHECK (session.isUntitled());
+        CHECK (session.getProject()->getFile() == untitled);
+
+        // Cancelled, nothing is left of the copy, and the project is still untitled.
+        stopped.letGo(); // its next try sees it is to stop
+        renders.render = nullptr;
+        phazite::test::dispatchPendingMessages();
+        CHECK (session.isUntitled());
+        CHECK_FALSE (session.getContext().isHoldingForWork());
+        CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty());
+        CHECK (errors.isEmpty());
+    }
 
     // Again, to the end: the project in its folder, its recording whole there.
     REQUIRE (registry.invoke ("project.save"));
-    REQUIRE (renders.render != nullptr);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.render == nullptr; }));
-    CHECK (renders.finished == juce::StringArray ("Saving Beat: ok"));
-    CHECK_FALSE (session.isUntitled());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.isUntitled(); }));
+    phazite::test::dispatchPendingMessages();
+    CHECK (renders.render == nullptr);
+    CHECK_FALSE (session.getContext().isHoldingForWork());
     const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     CHECK (session.getProject()->getFile() == file);
     CHECK (file.existsAsFile());
@@ -1426,9 +1485,19 @@ TEST_CASE ("A copy of a project leaves out a link that leads elsewhere, and copi
 namespace
 {
 // A session with a new untitled project, whose first save goes to Projects/Beat; with a host for its progress window
-// unless told not to (the session then keeps the copy itself).
+// unless told not to.
 struct FirstSave
 {
+    // Whether a first save's copy is under way: the window is held while it is.
+    bool isSaving() { return session.getContext().isHoldingForWork(); }
+
+    // Waits for the save under way to end; whether the project was saved (if not, an error said why).
+    bool waitForSave()
+    {
+        REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! isSaving(); }));
+        return ! session.isUntitled();
+    }
+
     explicit FirstSave (bool withHost = true)
     {
         if (withHost)
@@ -1440,8 +1509,8 @@ struct FirstSave
         REQUIRE (session.createProject ({}).wasOk());
     }
 
-    // A recording in the project's Audio folder, larger than what is copied at once unless told how large.
-    juce::File addRecording (juce::int64 bytes = phazite::Project::copyAtOnceBytes + 4096)
+    // A recording in the project's Audio folder, one whose copy takes a while unless told how large.
+    juce::File addRecording (juce::int64 bytes = largeRecording)
     {
         juce::MemoryBlock recording ((size_t) bytes, true);
         const auto take = session.getProject()->getAudioFolder().getChildFile ("Take 1.wav");
@@ -1493,11 +1562,10 @@ TEST_CASE ("A first save copies the project's versions last, with the commit its
         });
 
     FirstSave s;
-    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+    s.addRecording (largeRecording * 4);
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr); // in the background, the message thread going on
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
-    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    REQUIRE (s.isSaving()); // in the background, the message thread going on
+    CHECK (s.waitForSave());
     CHECK (s.errors.isEmpty());
     CHECK (writesToVersions.load() > 0);
 
@@ -1522,20 +1590,21 @@ juce::File addToVersions (FirstSave& s, juce::int64 bytes)
 }
 } // namespace
 
-TEST_CASE ("A first save counts its versions with the rest: a small project with a large history copies in the background")
+TEST_CASE ("A first save of a small project with a large history copies the history whole, in the background")
 {
     // A reviewer, of known bug 169's fix: only the files but the versions were counted, so a project of a little audio and a
-    // long history was copied at once, the window waiting for the whole of its history.
+    // long history was copied at once, the window waiting for the whole of its history. Every first save copies in the
+    // background now.
     FirstSave s;
     REQUIRE (phazite::test::waitForVersionHistory (s.session.getContext()));
-    addToVersions (s, phazite::Project::copyAtOnceBytes + 4096);
+    addToVersions (s, largeRecording);
     s.addRecording (1024);
 
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr); // in its progress window
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
-    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
-    CHECK (s.projects.getChildFile ("Beat/Versions/local/big.bin").getSize() == phazite::Project::copyAtOnceBytes + 4096);
+    REQUIRE (s.isSaving());
+    CHECK (s.waitForSave());
+    CHECK (s.errors.isEmpty());
+    CHECK (s.projects.getChildFile ("Beat/Versions/local/big.bin").getSize() == largeRecording);
     REQUIRE (phazite::test::waitForVersionHistory (s.session.getContext()));
     CHECK (phazite::getVersions (s.session.getContext()).size() == 1);
 }
@@ -1560,11 +1629,11 @@ TEST_CASE ("A first save's versions are copied by their history's thread, after 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
     auto* history = phazite::getVersionHistory (context);
     REQUIRE (history != nullptr);
-    addToVersions (s, phazite::Project::copyAtOnceBytes + 4096);
+    addToVersions (s, largeRecording);
     s.addRecording (1024);
 
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr);
+    REQUIRE (s.isSaving());
 
     // Once the rest is copied, the history holds every write: a commit is refused for the save.
     juce::String refused;
@@ -1575,9 +1644,10 @@ TEST_CASE ("A first save's versions are copied by their history's thread, after 
             return refused.contains ("into its folder");
         }));
 
-    // Cancelled while its copy waits behind the commit: nothing is left of it, the project stays where it was, and the
-    // history writes again once the commit it held is done.
-    s.renders.render = nullptr;
+    // Cancelled (Escape, before its progress window shows) while its copy waits behind the commit: nothing is left of it,
+    // the project stays where it was, and the history writes again once the commit it held is done.
+    CHECK (s.session.cancelHeldWork());
+    CHECK_FALSE (s.isSaving());
     holding = false;
     CHECK (s.listProjects().isEmpty());
     CHECK (s.session.isUntitled());
@@ -1597,10 +1667,10 @@ TEST_CASE ("A commit's bounce made while a first save copies, after its folder w
     const auto versions = phazite::getVersions (context);
     REQUIRE (versions.size() == 1);
     const auto id = versions.front().id;
-    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+    s.addRecording (largeRecording * 4);
 
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr);
+    REQUIRE (s.isSaving());
 
     // Its bounce, finished as the rest is copied: in the folder the project leaves.
     const auto bounce = history->getBounceFile (id);
@@ -1609,34 +1679,35 @@ TEST_CASE ("A commit's bounce made while a first save copies, after its folder w
     history->readBounces();
     REQUIRE (history->hasBounce (id));
 
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
-    REQUIRE (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    REQUIRE (s.waitForSave());
     CHECK (history->hasBounce (id) == history->getBounceFile (id).existsAsFile());
     CHECK (history->getBounceFile (id).isAChildOf (s.projects.getChildFile ("Beat")));
 }
 
-TEST_CASE ("A first save whose background copy fails says why in its progress window, and the project stays untitled")
+TEST_CASE ("A first save whose background copy fails says why, and the project stays untitled")
 {
     // The reviewer's finding on the first wave: the copy called its callback straight from the member that the progress
-    // window's deletion freed, and the session's callback read the title that went with it.
+    // window's deletion freed, and the session's callback read the title that went with it. Its progress window shown.
     FirstSave s;
+    s.session.setWorkShownAfter (0);
     s.addRecording();
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr);
+    REQUIRE (s.isSaving());
 
     // Its folder made meanwhile: the copy can't take its place.
     REQUIRE (s.projects.getChildFile ("Beat").createDirectory());
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
-    REQUIRE (s.renders.finished.size() == 1);
-    CHECK (s.renders.finished[0].startsWith ("Saving Beat: "));
-    CHECK_FALSE (s.renders.finished[0].endsWith (": ok"));
+    CHECK_FALSE (s.waitForSave());
+    CHECK (s.renders.render == nullptr); // its progress window gone
+    REQUIRE (s.errors.size() == 1);
+    CHECK (s.errors[0].startsWith ("Phazite couldn't save the project: "));
+    CHECK (s.errors[0].contains ("Beat"));
     CHECK (s.session.isUntitled());
     CHECK (s.listProjects() == juce::StringArray ("Beat")); // the copy gone, the folder made meanwhile left as it was
 }
 
 TEST_CASE ("A first save's copy without a host stops when another project opens in its place")
 {
-    // The reviewer's finding on the first wave: the copy the session keeps itself (the tests') outlived its project.
+    // The reviewer's finding on the first wave: the copy the session keeps itself outlived its project.
     FirstSave s (false);
     s.addRecording();
     s.session.saveProject();
@@ -1644,6 +1715,7 @@ TEST_CASE ("A first save's copy without a host stops when another project opens 
 
     REQUIRE (s.session.createProject ({}).wasOk());
     CHECK (s.listProjects().isEmpty()); // stopped, and what it had copied gone
+    CHECK_FALSE (s.isSaving());         // the window's hold let go of
     phazite::test::dispatchPendingMessages();
     CHECK (s.session.isUntitled());
 }
@@ -1660,7 +1732,7 @@ TEST_CASE ("A first save copies what the project's folders hold, but not what a 
     s.addRecording (1024);
 
     REQUIRE (s.registry.invoke ("project.save"));
-    CHECK (s.renders.render == nullptr); // small: copied at once
+    CHECK (s.waitForSave());
     CHECK (s.errors.isEmpty());
     const auto audio = s.projects.getChildFile ("Beat").getChildFile ("Audio");
     CHECK (audio.getChildFile ("Take 1.wav").existsAsFile());
@@ -1673,17 +1745,15 @@ TEST_CASE ("A first save goes on without a clip's render in the Cache folder tha
     // The reviewer's finding on the first wave: a render of a clip, which Phazite renders again as the clip plays, that changed
     // or went during the background copy failed the whole save.
     FirstSave s;
-    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+    s.addRecording (largeRecording * 4);
     const auto cached = s.session.getProject()->getCacheFolder().getChildFile (juce::String (phazite::renderFilePrefix) + "1234.wav");
     REQUIRE (cached.getParentDirectory().createDirectory());
     REQUIRE (cached.replaceWithText ("frozen"));
 
     REQUIRE (s.registry.invoke ("project.save"));
-    REQUIRE (s.renders.render != nullptr);
+    REQUIRE (s.isSaving());
     REQUIRE (cached.deleteFile()); // listed, then gone before the copy reaches it, behind the large recording
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }));
-    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
-    CHECK_FALSE (s.session.isUntitled());
+    CHECK (s.waitForSave());
     CHECK (s.errors.isEmpty());
 }
 
@@ -1726,6 +1796,7 @@ TEST_CASE ("A first save removes the copies a crashed save left beside it, and o
     const juce::ScopeGuard asTheAppDoes { [] { phazite::setLeftoverCopyRemoval (nullptr); } };
     s.addRecording (1024);
     REQUIRE (s.registry.invoke ("project.save"));
+    CHECK (s.waitForSave());
     INFO (s.errors.joinIntoString ("; ").toStdString());
     CHECK (s.errors.isEmpty());
     const juce::StringArray staying ("Beat", "Mine (saving)", "Named (saving)", "Running (saving)");
@@ -1749,14 +1820,16 @@ TEST_CASE ("A first save fails, saying which, when a frozen track's file or a cl
         REQUIRE (file.replaceWithText ("audio"));
 
         {
-            // Held by another program, sharing it with none: the copy can't read it.
+            // Held by another program, sharing it with none, for longer than the copy tries it again: it can't read it.
             const auto held = CreateFileW (file.getFullPathName().toWideCharPointer(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
                                            FILE_ATTRIBUTE_NORMAL, nullptr);
             REQUIRE (held != INVALID_HANDLE_VALUE);
             s.errors.clear();
             const auto saveRan = s.registry.invoke ("project.save");
+            const auto saved = saveRan && s.waitForSave();
             CloseHandle (held);
             REQUIRE (saveRan);
+            CHECK_FALSE (saved);
             REQUIRE (s.errors.size() == 1);
             CHECK (s.errors[0].contains (name));
             CHECK (s.session.isUntitled());
@@ -1806,8 +1879,11 @@ TEST_CASE ("A first save that fails part way leaves no folder where it was going
             return;
         }
 
+        // Held for longer than the copy tries it again (a second or so): the save fails, saying which file.
         REQUIRE (registry.invoke ("project.save"));
-        CHECK (errors.size() == 1);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.getContext().isHoldingForWork(); }));
+        REQUIRE (errors.size() == 1);
+        CHECK (errors[0].contains ("Audio/Take 1.wav"));
         CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty()); // nothing, half made or not
         CHECK (session.isUntitled());
         CHECK (session.getProject()->getFile() == untitledFile);
@@ -1819,6 +1895,7 @@ TEST_CASE ("A first save that fails part way leaves no folder where it was going
 
     // Tried again with the same name once the take can be read, it is saved there, with its take.
     REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.isUntitled(); }));
     const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     CHECK (errors.size() == 1);
     CHECK (session.getProject()->getFile() == file);
@@ -1826,6 +1903,92 @@ TEST_CASE ("A first save that fails part way leaves no folder where it was going
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK (file.getSiblingFile ("Audio").getChildFile ("Take 1.wav").loadFileAsString() == "a take");
     CHECK (file.loadFileAsString().contains ("pop"));
+}
+
+TEST_CASE ("A first save tries again a file another program holds a moment, and saves once it is let go of")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): a small project's first save copied on the message thread, which
+    // tries a file once, so a file an antivirus or the indexer held a moment as it was copied failed the save. Held here for
+    // the copy's first three tries, then let go of.
+    FirstSave s;
+    const auto take = s.addRecording (1024);
+
+    struct Held
+    {
+        std::unique_ptr<phazite::test::HeldFile> file;
+        std::atomic<int> tries { 0 };
+    };
+
+    const auto held = std::make_shared<Held>();
+    held->file = std::make_unique<phazite::test::HeldFile> (take);
+
+    if (! held->file->works())
+    {
+        MESSAGE ("The file can't be held from this user: nothing to try again.");
+        return;
+    }
+
+    phazite::Project::setCopyRetryHook (
+        [held] (int tried)
+        {
+            held->tries = tried;
+
+            if (tried == 3)
+                held->file = nullptr; // on the copy's thread, before it tries again
+        });
+
+    const juce::ScopeGuard noHook { [] { phazite::Project::setCopyRetryHook (nullptr); } };
+    REQUIRE (s.registry.invoke ("project.save"));
+    CHECK (s.waitForSave());
+    CHECK (s.errors.isEmpty());
+    CHECK (held->tries.load() == 3);
+    CHECK (s.projects.getChildFile ("Beat").getChildFile ("Audio").getChildFile ("Take 1.wav").getSize() == 1024);
+}
+
+TEST_CASE ("A small project's first save waits on the message thread for no commit its history is writing")
+{
+    // A reviewer, of the known bugs' round (2026-11-16): a first save of less than 8 MiB copied at once on the message
+    // thread, which first waited for every write the history had been given (a commit being written, however long that
+    // takes). The history's initial commit is held here until the save has been asked for and has returned; a hold longer
+    // than hangTimeout gives up, which only a message thread waiting for it lets happen.
+    std::atomic<bool> holding { true }, gaveUp { false };
+    const auto giveUpAt = juce::Time::getMillisecondCounter() + (juce::uint32) phazite::test::hangTimeout;
+    const phazite::WholeFileHook held (
+        [&] (const juce::File& file)
+        {
+            while (holding.load() && file.getFullPathName().contains ("Versions"))
+            {
+                if (juce::Time::getMillisecondCounter() > giveUpAt)
+                {
+                    gaveUp = true;
+                    break;
+                }
+
+                juce::Thread::sleep (1);
+            }
+
+            return true;
+        });
+
+    FirstSave s;
+    auto& context = s.session.getContext();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
+    auto* history = phazite::getVersionHistory (context);
+    REQUIRE (history != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([history] { return history->isBusy(); })); // its initial commit, held
+    s.addRecording (1024);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    CHECK_FALSE (gaveUp.load()); // returned, the commit still held
+    CHECK (s.isSaving());
+    CHECK (s.session.isUntitled());
+
+    holding = false;
+    CHECK (s.waitForSave());
+    CHECK (s.errors.isEmpty());
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    CHECK (phazite::getVersions (context).size() == 1);
+    CHECK (s.projects.getChildFile ("Beat").getChildFile ("Versions").getChildFile ("current").existsAsFile());
 }
 
 TEST_CASE ("Closing a project while it records stops recording first, as Stop does, and keeps the take, which the save question holds")

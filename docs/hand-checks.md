@@ -219,6 +219,8 @@ the [changelog](changelog.md).
 | G126e | Name a track "CON" and record on it; save a project as "NUL"; drop a track named "COM1" into the browser | Each saves: "CON_ Take 1.wav", a folder "NUL_", a preset "COM1_" | |
 | G184 | In a committed project, close Phazite, replace the .phazite file's text with garbage and open it again | "Phazite couldn't read the project" offers the backup and the last commit; Open the Last Commit opens the committed song, shown as changed; with a long history the window takes no input while it reads and shows "Reading the copies of ..." after a second, whose Cancel offers the backup alone or says the error | |
 | G183 | Drop a drum-kit preset saved with its sounds outside the project onto a track; then swap kit presets and click a knob on another device | The window holds still, a big kit shows "Loading ..." with Cancel after a second (Cancel leaves nothing), then the kit appears and its pads play; the tried kit stays, and shortly after Undo shows "Copy Sounds into the Project" | |
+| G-save | Make a new project, add a short sound, Save; then the same with the sound held open by another program that locks it | It saves as before, with no progress window, the title showing the new name within a moment; with the file locked the save fails naming that file, and nothing is left in the projects folder | |
+| G-chips | In a big sound library, click the Type chip, then type in the search and click Key | Each menu opens at once with counts for what shows | |
 
 ## Performance on other machines
 

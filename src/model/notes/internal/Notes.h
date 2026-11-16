@@ -111,6 +111,10 @@ void setNoteLength (Song&, const NoteRef&, BeatDuration);
 // between the two (moved with its old length, or made longer from its old start).
 void placeNote (Song&, const NoteRef&, BeatPosition start, int pitch, BeatDuration);
 
+// Each note (by its clip and ID; those gone left out) placed as placeNote() says, at its start, pitch and length: a step of
+// the piano roll's drag. Where each clip can grow to is found once for all of them, not once for each note.
+void placeNotes (Song&, const std::vector<NoteData>&);
+
 void deleteNotes (Song&, const std::vector<NoteRef>&);
 
 // Transposes the notes by semitones, all by the same amount and none beyond the MIDI range.

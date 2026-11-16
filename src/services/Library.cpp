@@ -236,8 +236,16 @@ SearchKey makeSearchKey (const LibraryItem& item, const juce::File& root)
     return key;
 }
 
+void LibraryIndex::countTags (const LibraryItem& item)
+{
+    if (item.kind == LibraryItem::Kind::sound || item.kind == LibraryItem::Kind::midi)
+        for (const auto& tag : item.tags)
+            ++soundTags[tag];
+}
+
 void LibraryIndex::addFile (LibraryItem item, const juce::File& root)
 {
+    countTags (item);
     fileKeys.push_back (makeSearchKey (item, root));
     files.push_back (std::move (item));
 }
@@ -605,7 +613,10 @@ struct Library::Indexer : public juce::Thread
         made->fileKeys.reserve (items.size());
 
         for (size_t i = 0; i < items.size(); ++i)
+        {
             made->fileKeys.push_back (makeSearchKey (items[i], files[i].root));
+            made->countTags (items[i]);
+        }
 
         made->folders = folderItems;
         made->folderKeys = folderKeys;
@@ -700,8 +711,10 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
 Library::~Library()
 {
     cancelSearch();
+    cancelCount();
     searches.removeAll (true); // a search looks at whether it should stop between thousands of items
     searchDelivery.cancelPendingUpdate();
+    countDelivery.cancelPendingUpdate();
     indexer = nullptr;
     cancelPendingUpdate();
 }
@@ -1048,22 +1061,89 @@ void Library::deliverSearch() const
     found (std::move (taken->second));
 }
 
-void Library::forEachMatch (const juce::String& query, const std::function<void (const LibraryItem&)>& matched) const
+bool Library::forEachFileMatch (const LibraryIndex& index, const juce::String& query,
+                                const std::function<void (const LibraryItem&)>& matched, const std::function<bool()>& shouldStop)
 {
+    // No text: every one. Text without words (punctuation alone): none, as search finds none.
     const Query wanted (query);
+    const auto all = query.trim().isEmpty();
 
-    if (wanted.isEmpty())
+    if (! all && wanted.isEmpty())
+        return true;
+
+    size_t looked = 0;
+    auto finished = true;
+
+    for (; looked < index.files.size() && looked < index.fileKeys.size(); ++looked)
+    {
+        if (looked % itemsBetweenStops == 0 && shouldStop != nullptr && shouldStop())
+        {
+            finished = false;
+            break;
+        }
+
+        if (all || wanted.getScore (index.fileKeys[looked]) >= 0)
+            matched (index.files[looked]);
+    }
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        searchedOnMessageThread += (juce::int64) looked;
+
+    return finished;
+}
+
+void Library::startCount (Count count, std::function<void()> done) const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // What it goes through, taken here: the index as it is now (shared, never changed).
+    const auto number = ++countNumber;
+    countDone = std::move (done);
+    searches.add (
+        [this, number, indexed = getWholeIndex(), count = std::move (count),
+         before = beforeSearch] (const BackgroundJobs::ShouldStop& shouldStop)
+        {
+            if (before != nullptr)
+                before();
+
+            const auto isOld = [this, number, &shouldStop] { return shouldStop() || countNumber.load() != number; };
+
+            if (isOld() || ! count (*indexed, isOld) || isOld())
+                return;
+
+            {
+                const std::scoped_lock held (deliveredLock);
+                counted = number;
+            }
+
+            countDelivery.triggerAsyncUpdate();
+        });
+}
+
+void Library::cancelCount() const
+{
+    ++countNumber;
+    countDone = nullptr;
+
+    const std::scoped_lock held (deliveredLock);
+    counted.reset();
+}
+
+void Library::deliverCount() const
+{
+    std::optional<int> taken;
+
+    {
+        const std::scoped_lock held (deliveredLock);
+        taken.swap (counted);
+    }
+
+    // The newest count's alone: one started since, or cancelled, has its own (or none).
+    if (! taken.has_value() || *taken != countNumber.load() || countDone == nullptr)
         return;
 
-    const auto indexed = getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
-
-    for (size_t i = 0; i < indexed->files.size(); ++i)
-        if (wanted.getScore (indexed->fileKeys[i]) >= 0)
-            matched (indexed->files[i]);
-
-    for (const auto& item : getAllDevices())
-        if (wanted.getScore (makeSearchKey (item, {})) >= 0)
-            matched (item);
+    const auto done = std::exchange (countDone, nullptr);
+    done();
 }
 
 std::vector<LibraryItem> Library::searchDevices (const juce::String& query) const

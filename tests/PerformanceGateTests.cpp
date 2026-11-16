@@ -962,6 +962,86 @@ TEST_CASE ("Performance gate: a step of a drag of notes looks at as many element
     CHECK (moreTracks < small * 2); // ten times the song: the same work
 }
 
+TEST_CASE ("Performance gate: a drag or a paste of many notes looks through its clip's track once, not once for each note")
+{
+    // Where a clip can grow to (the next clip on its track) was found by a walk through the track's clips for each note a
+    // drag's step placed, and for each pasted note past the clip's end: 500 notes in a clip on a track of 200 clips looked at
+    // 100,000 clips for each step.
+    struct Visited
+    {
+        std::uint64_t drag = 0, paste = 0;
+    };
+
+    const auto visitedFor = [] (int clipsOnTrack)
+    {
+        constexpr int numNotes = 5000, numMoved = 500, numPasted = 500;
+        auto song = phazite::createSong();
+        phazite::ProjectContext context (phazite::test::getEngineContext());
+        const auto track = phazite::ensureTracks (*song, 1).front();
+
+        // The clip first, then the others after it, a bar apart: the next one leaves its clip room to grow into.
+        const auto clipEnd = numNotes * 0.25;
+        const auto clip = phazite::insertMidiClip (*song, track, { at (0.0), at (clipEnd) }, nullptr);
+
+        for (int c = 0; c < clipsOnTrack - 1; ++c)
+            REQUIRE (phazite::insertMidiClip (*song, track, { at (clipEnd + 1000.0 + c * 8.0), at (clipEnd + 1004.0 + c * 8.0) }, nullptr)
+                         .isValid());
+
+        std::vector<phazite::NoteData> notes;
+
+        for (int i = 0; i < numNotes; ++i)
+            notes.push_back ({ .clip = clip, .pitch = 48 + i % 24, .start = at (i * 0.25), .length = lasting (0.2) });
+
+        phazite::setClipNotes (*song, clip, notes);
+        phazite::setSong (context, song.get());
+        notes = phazite::getNotes (context, { clip });
+        notes.resize ((size_t) numMoved);
+        const auto ends = phazite::getClipEnds (context, { clip });
+
+        // As the piano roll's drag makes each step (PianoRollNoteTools.cpp: dragNotes()).
+        const auto step = [&] (double by)
+        {
+            phazite::restoreClipEnds (context, ends);
+            auto moved = notes;
+
+            for (auto& note : moved)
+                note.start = note.start + lasting (by);
+
+            phazite::setNotes (context, moved);
+        };
+
+        Visited visited;
+        step (0.25); // the first, as the song is first asked for its notes
+        auto before = phazite::SongIndex::countElementsVisited();
+        step (0.5);
+        visited.drag = phazite::SongIndex::countElementsVisited() - before;
+
+        // A paste past the clip's end, which grows the clip to hold the notes, as the paste makes them (Clipboard.cpp:
+        // pasteNotes()).
+        std::vector<phazite::NoteData> pasted;
+
+        for (int i = 0; i < numPasted; ++i)
+            pasted.push_back ({ .clip = clip, .pitch = 60, .start = at (clipEnd + i * 0.5), .length = lasting (0.25) });
+
+        before = phazite::SongIndex::countElementsVisited();
+        const auto made = phazite::replaceNotes (*song, {}, pasted);
+        visited.paste = phazite::SongIndex::countElementsVisited() - before;
+        CHECK (made.size() == (size_t) numPasted);
+        CHECK (song->getIndex().isExact());
+        phazite::setSong (context, nullptr);
+        return visited;
+    };
+
+    const auto few = visitedFor (20), many = visitedFor (200);
+    INFO ("Elements looked at by a step of a drag of 500 notes, with 20 clips on the track: "
+          << few.drag << "; with 200: " << many.drag << ". By a paste of 500 notes past the clip's end: " << few.paste << " and "
+          << many.paste);
+    CHECK (few.drag > 0);
+    CHECK (few.paste > 0);
+    CHECK (many.drag < few.drag + 1000); // ten times the clips on the track: the same work, but a walk of them once
+    CHECK (many.paste < few.paste + 1000);
+}
+
 TEST_CASE ("Performance gate: the piano roll's hover and selection rectangle find notes among those it paints, not in the song")
 {
     // Known bug 122: the mouse's every move over the notes read every note of the clips shown, and the other tracks' notes,

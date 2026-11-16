@@ -746,8 +746,11 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     volumeFader.onDragCancelled = [this] { volumeFader.onValueChange(); };
     previewer.setVolume ((float) volumeFader.getValue());
 
-    // The filters under the search, what each offers as the search and the others leave it, and Clear.
-    filterBar.getOptions = [this] { return model.getFilterOptions (searchField.getText(), filters); };
+    // The filters under the search, what each offers as the search and the others leave it, counted in the background as a
+    // menu is to open, and Clear. What shows changing (the search's words, the filters, the index) cancels a count still
+    // under way: its menu doesn't open.
+    filterBar.askOptions = [this] (std::function<void (FilterOptions)> then)
+    { model.startFilterOptions (searchField.getText(), filters, std::move (then)); };
     filterBar.onChange = [this] (const BrowserFilters& changed) { setFilters (changed); };
     filterBar.onClear = [this] { clearFiltersAndSearch(); };
 
@@ -764,7 +767,8 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     // Search finds more once the index of the sounds is ready, and the filters count what it found.
     library.onIndexChanged = [this]
     {
-        searchShown.clear(); // the rows shown are of the index before: the same text finds them again
+        model.cancelFilterOptions(); // counted in the index before
+        searchShown.clear();         // the rows shown are of the index before: the same text finds them again
         if (searchField.getText().trim().isNotEmpty())
             updateSearch (true);
         else if (! filters.isEmpty())
@@ -781,6 +785,7 @@ Browser::~Browser()
     soundPack.removeChangeListener (this);
     library.onIndexChanged = nullptr;
     model.cancelSearch(); // which would call back into it
+    model.cancelFilterOptions();
 
     // What a swap tried stays, as anything else that changes the song leaves it.
     if (swap != nullptr && swap->isOpen())
@@ -904,8 +909,10 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
 
 void Browser::textEditorTextChanged (juce::TextEditor&)
 {
-    // Typed on after Enter or Down: the field keeps the keys, and the results to come don't take them.
+    // Typed on after Enter or Down: the field keeps the keys, and the results to come don't take them. A filter's menu still
+    // waiting for its counts doesn't open: they were of the words before.
     focusWhenShown = false;
+    model.cancelFilterOptions();
     updateSearch();
     showFilters(); // Clear, while the search has words
 }
@@ -928,6 +935,7 @@ void Browser::setFilters (const BrowserFilters& changed)
     if (filters.isEmpty() && ! changed.isEmpty() && placesRoot != nullptr)
         opennessUnfiltered = placesRoot->getOpennessState();
 
+    model.cancelFilterOptions(); // counted for the filters before
     filters = changed;
     showFilters();
     rebuildPlaces();
@@ -1485,6 +1493,11 @@ void Browser::startSwap (DeviceID device, int pad)
 
     if (! swap->isOpen())
     {
+        // Held back by another swap's keep, which copies its sounds in (SwapModel.h), only when code asks at the wrong time:
+        // the window takes no click or key from that copy's start (app/InputHold.h, model/arrangement/internal/AudioWork.h),
+        // and the swap asked for by what began the keep waits for it (above). Said, so that what asks so fails clearly,
+        // rather than the swap it asked for being dropped without a word.
+        jassert (! swap->isHeldBack());
         swap = nullptr;
         return;
     }
@@ -1506,10 +1519,10 @@ void Browser::startSwap (DeviceID device, int pad)
         // An empty pad's, the drum General MIDI puts on its note.
         const auto old = swap->getOldName();
         const auto types = getSoundTypesIn (old.isNotEmpty() || pad < 35 || pad > 81 ? old : getDrumName (pad));
-        const auto options = model.getFilterOptions ({}, {});
 
-        for (const auto& [type, count] : options.types)
-            if (fitting.type.isEmpty() && types.contains (type) && count > 0)
+        // The first in the Type filter's order that some sounds are, by the index's counts (none of it gone through here).
+        for (const auto& type : Library::getSoundTypes())
+            if (fitting.type.isEmpty() && types.contains (type) && model.countSoundsOfType (type) > 0)
                 fitting.type = type;
     }
 

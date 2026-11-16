@@ -257,10 +257,9 @@ void FilterBar::change (const BrowserFilters& changed)
         onChange (filters);
 }
 
-juce::PopupMenu FilterBar::getMenu (Filter filter)
+juce::PopupMenu FilterBar::getMenu (Filter filter, const FilterOptions& options)
 {
     juce::PopupMenu menu;
-    const auto options = getOptions != nullptr ? getOptions() : FilterOptions();
     const juce::Component::SafePointer<FilterBar> safeThis (this);
     auto setIsOffered = false;
 
@@ -332,9 +331,30 @@ juce::PopupMenu FilterBar::getMenu (Filter filter)
     return menu;
 }
 
+void FilterBar::askMenu (Filter filter, std::function<void (juce::PopupMenu)> then)
+{
+    if (askOptions == nullptr)
+    {
+        then (getMenu (filter, {}));
+        return;
+    }
+
+    askOptions (
+        [safeThis = juce::Component::SafePointer<FilterBar> (this), filter, then = std::move (then)] (const FilterOptions& options)
+        {
+            if (safeThis != nullptr)
+                then (safeThis->getMenu (filter, options));
+        });
+}
+
 void FilterBar::showMenu (Filter filter)
 {
-    getMenu (filter).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (chips[(size_t) filter].get()));
+    askMenu (filter,
+             [safeThis = juce::Component::SafePointer<FilterBar> (this), filter] (juce::PopupMenu menu)
+             {
+                 if (safeThis != nullptr)
+                     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (safeThis->chips[(size_t) filter].get()));
+             });
 }
 
 std::vector<juce::Rectangle<int>> FilterBar::layOut (int width) const
