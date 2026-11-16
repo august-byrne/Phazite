@@ -5,6 +5,7 @@
 #include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -79,9 +80,12 @@ namespace
         std::map<juce::String, std::vector<juce::ValueTree>> unkeyed;
     };
 
+    std::atomic<juce::int64> elementsCompared { 0 };
+
     Children getChildren (const juce::ValueTree& element)
     {
         Children children;
+        elementsCompared.fetch_add (element.getNumChildren(), std::memory_order_relaxed);
 
         for (const auto& child : element)
         {
@@ -423,6 +427,11 @@ namespace
         return order;
     }
 } // namespace
+
+juce::int64 countElementsCompared()
+{
+    return elementsCompared.load();
+}
 
 bool holdTheSame (const juce::ValueTree& a, const juce::ValueTree& b)
 {

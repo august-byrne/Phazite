@@ -211,6 +211,7 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
 {
     TemporaryFolder temporary;
     const auto versions = temporary.folder.getChildFile ("Versions");
+    const auto songFile = temporary.folder.getChildFile ("Fuzzed.phazite");
     juce::String branchID, versionID;
 
     {
@@ -221,7 +222,9 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
         record.note = "A note";
         record.saved = 1793800000000;
         record.files.push_back ({ "Audio/Kick.wav", 1234, juce::String::repeatedString ("ab", 32) });
-        versionID = store.writeVersion (record, phazite::splitSong (song->getState()));
+        const auto pieces = phazite::splitSong (song->getState());
+        versionID = store.writeVersion (record, pieces);
+        record.song = pieces.song; // which the snapshot names below
         REQUIRE (versionID.isNotEmpty());
 
         phazite::BranchRecord branch;
@@ -254,6 +257,7 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
                          const auto original = readBytes (file);
                          fed = mutator.mutate (original, file.hasFileExtension ("xml") ? fuzz::Shape::xml : fuzz::Shape::bytes);
                          file.replaceWithData (fed.getData(), fed.getSize());
+                         std::string problems;
 
                          {
                              const phazite::VersionStore store (versions, "fuzz-computer");
@@ -263,12 +267,38 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
                              const auto messages = store.readMessages();
                              const auto snapshots = store.readSnapshots();
                              const auto version = store.readVersion (versionID);
-                             juce::ignoreUnused (branches, current, log, messages, snapshots, version);
+                             juce::ignoreUnused (branches, current, log, messages);
+
+                             // The songs they name read from their pieces, as Local History and a commit are: a whole
+                             // song that holds together, or none.
+                             juce::StringArray songs;
+
+                             for (const auto& snapshot : snapshots)
+                                 songs.add (snapshot.song);
+
+                             for (const auto& branch : branches)
+                                 songs.add (branch.working);
+
+                             if (version.has_value())
+                                 songs.add (version->song);
+
+                             for (const auto& piece : songs)
+                             {
+                                 if (const auto read = store.readSong (piece); read.hasType (phazite::schema::PHAZITE))
+                                 {
+                                     if (const auto song = phazite::makeSong (read, songFile))
+                                     {
+                                         if (const auto found = findSongProblems (*song); ! found.empty())
+                                             problems = fuzz::joinProblems (found);
+                                     }
+                                 }
+                             }
+
                              store.getPieces().closeFiles();
                          }
 
                          file.replaceWithData (original.getData(), original.getSize());
-                         return {};
+                         return problems;
                      });
 }
 

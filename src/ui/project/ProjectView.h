@@ -8,12 +8,14 @@
 // - Plug-ins: each plug-in the song holds, on its track (or the master), and what is wrong with it, if anything: crashed
 //   (with its Reload under the pointer), not installed here, or off; a click selects it and shows it in the Devices view.
 // By the model's functions (model/project/ProjectContents.h) and the commands. It reads them again once a turn after the song
-// changes, and every few seconds while it shows, for files that came or went on the disk.
+// changes, and every few seconds while it shows, for files that came or went on the disk; how many audio files are unused it
+// finds in the background (model/project/UnusedAudio.h: UnusedAudioFinder), showing the last count meanwhile.
 #pragma once
 
 #include "model/commands/SongGesture.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/ProjectContext.h"
+#include "model/project/UnusedAudio.h"
 #include "ui/components/ListRowHover.h"
 #include "ui/components/SectionHeader.h"
 #include "ui/components/ViewTitle.h"
@@ -90,7 +92,9 @@ private:
 
     std::vector<ProjectAudioFile> audioFiles;
     std::vector<ProjectPlugin> plugins;
-    int unusedFiles = -1;     // none read yet
+    int unusedFiles = -1;       // none read yet
+    juce::String unusedProblem; // why it can't tell which are unused (a version that can't be read whole), none while it can
+    UnusedAudioFinder unusedFinder;
     bool needsReading = true; // the song changed since the lists were read
     int ticksSinceRead = 0;
 
@@ -105,6 +109,7 @@ private:
 
     void read();         // the lists, the notes and the unused files, from the model
     void readNotes();    // the notes, unless a burst of typing is going on
+    void showUnused();   // how many files are unused, as the background look found it
     void notesChanged(); // typed: into the song, joining the burst's step
     void endTyping();    // the burst's step kept
     void locate (int row);

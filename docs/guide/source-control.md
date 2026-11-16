@@ -63,3 +63,8 @@ A **branch** is an alternate version of the song, such as a radio edit, a remix 
 - **Switch:** pick another branch in the same list. Each branch keeps its own unfinished changes, so nothing is lost when you switch.
 - **Bring an idea back:** **Merge Branch...** (in the **...** menu at the top of Source Control, under Branch) lists what the other branch changed, a line per track. Untick what you don't want, then click **Merge**. Where both branches changed the same thing, each conflict is listed with a choice of value, heard as you switch it. Commit to finish, or **Abort** to go back to how the song was. Undo takes the merge back as well. A merge you haven't committed yet is part of the project: save, and it still waits when you open the project again.
 - **Clean up:** **Delete Branch...** removes a branch you no longer need. If it holds commits no other branch has, Phazite asks first.
+
+## If the history is damaged
+
+- **A commit that can't be read:** if a piece of the branch's last commit is missing or damaged in the project's `Versions` folder (a sync that hasn't finished, a disk error), Source Control says so and names the newest commit of the branch that reads. Nothing is committed on top of the damaged one. Choose **Reset Branch to Last Readable Commit** (in the **...** menu) to take the branch back to it: the song stays as it is, and its changes since that commit show as usual. The commit that couldn't be read is then on no branch; if its pieces arrive later, **Verify History** and **Recover Lost Commits** bring it back.
+- **Verify History** (in the **...** menu) reads every piece of the history and says what is damaged, and which commits no branch holds. **Recover Lost Commits** makes a branch of each of those.

@@ -4,8 +4,11 @@
 #include "model/base/internal/Schema.h"
 
 #include <juce_cryptography/juce_cryptography.h>
+#include <juce_events/juce_events.h>
 
 #include <algorithm>
+#include <atomic>
+#include <set>
 
 namespace phazite
 {
@@ -147,7 +150,7 @@ juce::File VersionStore::getLocalFolder() const
     return folder.getChildFile ("local").getChildFile (juce::File::createLegalFileName (computer));
 }
 
-juce::String VersionStore::writeVersion (VersionRecord record, const SongPieces& song)
+juce::String VersionStore::writeVersion (VersionRecord record, const SongPieces& song, juce::String* problem)
 {
     record.song = song.song;
     auto block = writeElement (toElement (record));
@@ -155,7 +158,7 @@ juce::String VersionStore::writeVersion (VersionRecord record, const SongPieces&
 
     auto all = song.pieces;
     all.emplace (id, std::move (block));
-    return pieces.write (all) ? id : juce::String();
+    return pieces.write (all, problem) ? id : juce::String();
 }
 
 std::optional<VersionRecord> VersionStore::readVersion (const juce::String& id) const
@@ -171,9 +174,24 @@ bool VersionStore::writeSong (const SongPieces& song)
     return pieces.write (song.pieces);
 }
 
+namespace
+{
+    std::atomic<int> songsRead { 0 }, songsReadOnMessageThread { 0 };
+}
+
+VersionStore::SongsRead VersionStore::countSongsRead()
+{
+    return { songsRead.load(), songsReadOnMessageThread.load() };
+}
+
 juce::ValueTree VersionStore::readSong (const juce::String& songPiece, PluginParameterValues* parameters,
                                         std::vector<MissingPiece>* missing) const
 {
+    ++songsRead;
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        ++songsReadOnMessageThread;
+
     return joinSong (songPiece, [this] (const juce::String& name) { return pieces.read (name); }, parameters, missing);
 }
 
@@ -267,9 +285,14 @@ bool VersionStore::writeBranch (const BranchRecord& branch)
 
 std::map<juce::String, juce::String> VersionStore::readWorking() const
 {
+    return readWorkingIn (getLocalFolder());
+}
+
+std::map<juce::String, juce::String> VersionStore::readWorkingIn (const juce::File& localFolder)
+{
     std::map<juce::String, juce::String> working;
 
-    if (const auto xml = juce::parseXML (getLocalFolder().getChildFile ("working.xml")))
+    if (const auto xml = juce::parseXML (localFolder.getChildFile ("working.xml")))
         for (const auto* left : xml->getChildWithTagNameIterator (versions::LEFT.toString()))
             if (const auto branch = left->getStringAttribute (versions::leftBranch); branch.isNotEmpty())
                 working[branch] = left->getStringAttribute (versions::leftSong);
@@ -319,8 +342,26 @@ bool VersionStore::logBranchMove (const juce::String& branchID, const juce::Stri
 
 std::vector<BranchMove> VersionStore::readBranchLog (const juce::String& branchID) const
 {
+    return readLogFile (getLocalFolder().getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID)));
+}
+
+std::vector<BranchMove> VersionStore::readEveryBranchLog (const juce::String& branchID) const
+{
     std::vector<BranchMove> moves;
-    const auto file = getLocalFolder().getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID));
+
+    for (const auto& local : folder.getChildFile ("local").findChildFiles (juce::File::findDirectories, false))
+    {
+        const auto theirs = readLogFile (local.getChildFile ("logs").getChildFile (juce::File::createLegalFileName (branchID)));
+        moves.insert (moves.end(), theirs.begin(), theirs.end());
+    }
+
+    std::stable_sort (moves.begin(), moves.end(), [] (const auto& a, const auto& b) { return a.time < b.time; });
+    return moves;
+}
+
+std::vector<BranchMove> VersionStore::readLogFile (const juce::File& file)
+{
+    std::vector<BranchMove> moves;
     const auto text = file.loadFileAsString();
 
     // A last line without its end was cut off midway: left out.
@@ -402,8 +443,34 @@ bool VersionStore::writeMessage (const juce::String& versionID, const MessageEdi
 
 std::vector<Snapshot> VersionStore::readSnapshots() const
 {
+    return readSnapshotsIn (getLocalFolder());
+}
+
+std::vector<KeptSong> VersionStore::findKeptSongs() const
+{
+    std::vector<KeptSong> songs;
+    std::set<juce::String> seen; // each once, however long another computer's history is
+
+    for (const auto& local : folder.getChildFile ("local").findChildFiles (juce::File::findDirectories, false))
+    {
+        const auto computerName = local.getFileName();
+
+        for (const auto& [branch, song] : readWorkingIn (local))
+            if (song.isNotEmpty() && seen.insert (song).second)
+                songs.push_back ({ song, computerName, branch, 0 });
+
+        for (const auto& snapshot : readSnapshotsIn (local))
+            if (snapshot.song.isNotEmpty() && seen.insert (snapshot.song).second)
+                songs.push_back ({ snapshot.song, computerName, snapshot.branch, snapshot.time });
+    }
+
+    return songs;
+}
+
+std::vector<Snapshot> VersionStore::readSnapshotsIn (const juce::File& localFolder)
+{
     std::vector<Snapshot> snapshots;
-    const auto text = getLocalFolder().getChildFile ("history").loadFileAsString();
+    const auto text = localFolder.getChildFile ("history").loadFileAsString();
 
     // A last line without its end was cut off midway: left out.
     auto lines = juce::StringArray::fromLines (text);

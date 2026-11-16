@@ -3,12 +3,16 @@
 // the browser's and source control's, the song's notes typed into it, and the song's audio files and plug-ins listed in it.
 #include "AppScreen.h"
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/UnusedAudio.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "ui/project/ProjectView.h"
 #include "ui/shell/ActivityBar.h"
 
@@ -171,8 +175,58 @@ TEST_CASE ("The Project view lists the song's audio files, a missing one with it
     phazite::test::writeSound (song.getFile().getParentDirectory().getChildFile ("Audio/Old take.wav"), 0.5);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return phazite::canCleanUpAudio (screen.session.getContext()); }));
     view.refreshNow();
-    CHECK (view.getCleanUpButton().isShowing());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getCleanUpButton().isShowing(); })); // found in the background
     CHECK (view.getUnusedText().startsWith ("1 file"));
+    CHECK (view.getCleanUpButton().isEnabled());
+
+    // While a snapshot of Local History is written, Clean Up can't look: the button stays, greyed, saying why.
+    phazite::VersionHistory::holdWritesForTests = true;
+    phazite::getVersionHistory (screen.session.getContext())->takeSnapshot ("auto");
+    view.refreshNow();
+    CHECK (view.getCleanUpButton().isShowing());
+    CHECK_FALSE (view.getCleanUpButton().isEnabled());
+    CHECK (view.getCleanUpButton().getTooltip().contains ("being written"));
+    phazite::VersionHistory::holdWritesForTests = false;
+    REQUIRE (phazite::test::waitForVersionHistory (screen.session.getContext()));
+    view.refreshNow();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getCleanUpButton().isEnabled(); }));
+}
+
+TEST_CASE ("The Project view finds the unused audio in the background, reading each branch's song once until the versions change")
+{
+    // Known bug 129: every branch's song was read again on the message thread every few seconds and after each edit.
+    Screen screen;
+    auto& context = screen.session.getContext();
+    auto& song = screen.getSong();
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+    const auto main = phazite::getCurrentBranch (context)->id;
+    REQUIRE (phazite::newBranch (context, {}, [] (std::function<void (bool)> then) { then (true); }));
+    const auto track = screen.addTrack();
+    REQUIRE (phazite::switchBranch (context, main, [] (std::function<void (bool)> then) { then (true); })); // a song left there
+    phazite::test::writeSound (song.getFile().getParentDirectory().getChildFile ("Audio/Old take.wav"), 0.5);
+    REQUIRE (phazite::test::waitForVersionHistory (context));
+
+    const auto before = phazite::VersionStore::countSongsRead();
+    auto& view = screen.showView();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getUnusedText().startsWith ("1 file"); }));
+    const auto first = phazite::VersionStore::countSongsRead();
+    CHECK (first.onMessageThread == before.onMessageThread);
+    CHECK (first.all > before.all); // the song left on the other branch, read in the background
+
+    // Read again, after edits and while time goes by: the branch's song isn't read again.
+    for (int i = 0; i < 3; ++i)
+    {
+        phazite::setTrackName (song, track, "Track " + juce::String (i));
+        phazite::test::dispatchPendingMessages();
+        view.refreshNow();
+    }
+
+    phazite::test::writeSound (song.getFile().getParentDirectory().getChildFile ("Audio/Older take.wav"), 0.5);
+    view.refreshNow();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getUnusedText().startsWith ("2 files"); }));
+    const auto then = phazite::VersionStore::countSongsRead();
+    CHECK (then.onMessageThread == before.onMessageThread);
+    CHECK (then.all == first.all);
 }
 
 TEST_CASE ("The Project view lists the song's plug-ins on their tracks, and a click on one selects it and shows it")

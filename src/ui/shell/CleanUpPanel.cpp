@@ -12,6 +12,7 @@ namespace
 CleanUpPanel::CleanUpPanel (ProjectContext& c, Removal r)
     : context (c),
       removal (r),
+      finder (c),
       list ("Unused audio files", this)
 {
     setTitle ("Clean Up Unused Audio");
@@ -32,17 +33,21 @@ CleanUpPanel::CleanUpPanel (ProjectContext& c, Removal r)
     for (auto* component : std::initializer_list<juce::Component*> { &title, &summary, &list, &deleteButton, &cancelButton })
         addAndMakeVisible (component);
 
-    findFiles();
+    finder.onFound = [this] { showFound(); };
+    finder.find();
     refreshSummary();
     setSize (width, height);
 }
 
-void CleanUpPanel::findFiles()
+void CleanUpPanel::showFound()
 {
-    files = findUnusedAudio (context);
+    // What the look found, or nothing while it can't say which are unused.
+    const auto& found = finder.getFound();
+    files = found.has_value() && found->unreadable.isEmpty() ? found->files : std::vector<UnusedAudioFile>();
     ticked.assign (files.size(), true);
     list.updateContent();
     list.repaint();
+    refreshSummary();
 }
 
 juce::String CleanUpPanel::describeFile (int row) const
@@ -69,7 +74,7 @@ void CleanUpPanel::setTicked (int row, bool tick)
     refreshSummary();
 }
 
-void CleanUpPanel::refreshSummary (const juce::String& done)
+void CleanUpPanel::refreshSummary()
 {
     juce::int64 size = 0;
     auto count = 0;
@@ -83,28 +88,57 @@ void CleanUpPanel::refreshSummary (const juce::String& done)
         }
     }
 
-    const auto said = files.empty() ? juce::String ("No unused audio: the song, its saved files, its versions or its branches play "
-                                                    "every file in the project's Audio and Generated folders.")
-                                    : juce::String (count) + " of " + juce::String ((int) files.size()) + " ticked, taking "
-                                          + juce::File::descriptionOfSizeInBytes (size)
-                                          + ". Undo doesn't bring deleted files back; the recycle bin keeps them.";
+    // While it looks, or why it can't; what it found; and that what a commit or Local History still plays is kept, which a
+    // file once committed always is (model/project/UnusedAudio.h).
+    const auto& found = finder.getFound();
+    const auto why = getWhyNotCleanUpAudio (context);
+    const juce::String kept ("Files a commit or Local History still plays are kept.");
+    juce::String said;
+
+    if (found.has_value() && ! found->unreadable.isEmpty())
+        said = "Phazite can't tell which audio files are unused now: " + found->unreadable.joinIntoString ("; ") + ". " + kept;
+    else if (finder.isLooking() || (! found.has_value() && why.isEmpty()))
+        said = "Looking for the audio files nothing plays...";
+    else if (! found.has_value())
+        said = why;
+    else if (files.empty())
+        said = "No unused audio: the song, its saved files, its versions or its branches play every file in the project's Audio "
+               "and Generated folders. "
+               + kept;
+    else
+        said = juce::String (count) + " of " + juce::String ((int) files.size()) + " ticked, taking "
+               + juce::File::descriptionOfSizeInBytes (size) + ". " + kept
+               + " Undo doesn't bring deleted files back; the recycle bin keeps them.";
+
     summary.setText (done.isNotEmpty() ? done + " " + said : said, juce::dontSendNotification);
-    deleteButton.setEnabled (count > 0);
+    deleteButton.setEnabled (count > 0 && ! finder.isLooking() && why.isEmpty());
 }
 
 void CleanUpPanel::deleteTicked()
 {
+    const auto& found = finder.getFound();
+
+    if (! found.has_value())
+        return;
+
     juce::Array<juce::File> toDelete;
 
     for (size_t i = 0; i < files.size(); ++i)
         if (ticked[i])
             toDelete.add (files[i].file);
 
-    const auto deleted = deleteUnusedAudio (context, toDelete, removal);
+    juce::String refused;
+    const auto deleted = deleteUnusedAudio (context, *found, toDelete, removal, &refused);
     const auto counted = juce::String (deleted) + (deleted == 1 ? " file" : " files");
-    findFiles();
-    refreshSummary (removal == Removal::toRecycleBin ? "Moved " + counted + " to the recycle bin." : "Deleted " + counted + ".");
+    done = refused.isNotEmpty()               ? refused
+           : removal == Removal::toRecycleBin ? "Moved " + counted + " to the recycle bin."
+                                              : "Deleted " + counted + ".";
     cancelButton.setButtonText ("Close");
+    files.clear();
+    ticked.clear();
+    list.updateContent();
+    finder.find(); // what is left, shown once found
+    refreshSummary();
 }
 
 void CleanUpPanel::close()

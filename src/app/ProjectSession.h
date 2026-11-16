@@ -142,6 +142,12 @@ public:
     // asking, unless the save fails, which goes on to ask (askToSave). Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
 
+    // As the program quits, once closeThen() said it may: the project closed, then what the versions of the projects that
+    // closed still write (a commit given as it closed: model/versions/VersionsModel.h, countVersionsBeingFinished())
+    // finished on their own threads, the progress window saying so meanwhile, and then the call back. Its Cancel calls
+    // back at once: the program's end finishes them then, without a window.
+    void closeAndFinishThen (std::function<void()>);
+
     // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
     // moment after each change (model/project/internal/Project.h: AutosaveTimer::setAutoSave()), so its changes show in
     // source control at once; a new project, once its first save put it somewhere. The settings keep it (the main
@@ -207,6 +213,7 @@ private:
     // state of some plug-ins than theirs, by name (none for none).
     void closeWithPluginStates (std::function<void (bool closed)>);
     void tellOlderPluginStates (const juce::StringArray& plugins);
+    std::unique_ptr<juce::Timer> finishing; // what looks whether the versions' writes are done (closeAndFinishThen())
 
     // The open project's plug-ins asked for their states, and then what comes next (ProjectSession.cpp); and this session's
     // life, which what comes a message later checks.

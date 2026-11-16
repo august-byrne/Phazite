@@ -68,7 +68,10 @@ that shows hides the panel.
   - **Notes:** your notes about the song, typed in place and saved with it.
   - **Audio Files:** each audio file the song plays, with the tracks that play it. A missing file shows in the
     warning colour with **Locate...** (or double-click it): the file you choose takes its place everywhere it played.
-    While the project's folder holds audio files that nothing plays, **Clean Up...** offers to delete them.
+    While the project's folder holds audio files that nothing plays, **Clean Up...** offers to delete them. Files a
+    commit or Local History still plays are kept, so a file you once committed stays (Recover Lost Commits and Local
+    History can still bring it back). While a version can't be read whole (another computer's files still syncing),
+    Clean Up waits and says why.
   - **Plug-ins:** each plug-in in the song. A crashed one has **Reload**. A click shows the plug-in in the Devices view.
 - **Source Control:** the song's versions ([Source control](source-control.md)).
 

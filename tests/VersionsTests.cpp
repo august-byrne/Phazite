@@ -24,6 +24,7 @@
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/DevicesView.h"
@@ -995,10 +996,20 @@ TEST_CASE ("A commit's changes are what it changed since the commit before it, a
     s.addTrack ("Keys");
     keepVersion (s.context, "Keys");
 
+    // Read on the history's thread, as a commit is opened: none listed meanwhile, then what it changed (known bug 126).
+    const auto songsRead = phazite::VersionStore::countSongsRead();
+    CHECK (phazite::getVersionChanges (s.context, quieter).empty());
+    CHECK (phazite::isReadingVersionChanges (s.context, quieter));
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK_FALSE (phazite::isReadingVersionChanges (s.context, quieter));
     const auto changes = phazite::getVersionChanges (s.context, quieter);
     CHECK (describe (changes) == "Bass: volume");
+    CHECK (phazite::VersionStore::countSongsRead().onMessageThread == songsRead.onMessageThread);
+    phazite::getVersionChanges (s.context, phazite::getLastVersion (s.context)->id);
+    REQUIRE (waitForVersionHistory (s.context));
     CHECK (describe (phazite::getVersionChanges (s.context, phazite::getLastVersion (s.context)->id)) == "Bass: volume; + Keys");
     CHECK (phazite::getVersionChanges (s.context, "not-a-commit").empty());
+    CHECK_FALSE (phazite::isReadingVersionChanges (s.context, "not-a-commit"));
 
     // Bass as it was in Quieter, one undo step; the rest as it is.
     REQUIRE (changes.size() == 1);

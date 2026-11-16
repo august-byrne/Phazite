@@ -104,8 +104,16 @@ struct Snapshot
     bool operator== (const Snapshot&) const = default;
 };
 
+// A song a computer keeps without a commit (VersionStore::findKeptSongs()): its piece, the computer's folder name, its
+// branch's id, and when it was taken for a snapshot of Local History (0 for a song left on a branch).
+struct KeptSong
+{
+    juce::String piece, computer, branch;
+    juce::int64 time = 0;
+};
+
 // A move of a branch's last version on this computer, as its log keeps it (git's reflog): when, from where (none for
-// none), to where (none for a branch deleted), and why ("commit", "merge", "branch", "recover", "undo" for Undo Last
+// none), to where (none for a branch deleted), and why ("commit", "merge", "branch", "recover", "reset", "undo" for Undo Last
 // Commit, "delete").
 struct BranchMove
 {
@@ -126,7 +134,7 @@ public:
 
     // Writes a version: the pieces of its song the store doesn't have yet, and its own, in one pack; the record's song
     // is the pieces' song. Returns its id, or nothing if it couldn't be written.
-    juce::String writeVersion (VersionRecord, const SongPieces&);
+    juce::String writeVersion (VersionRecord, const SongPieces&, juce::String* problem = nullptr); // why not, if given (PieceStore.h)
     std::optional<VersionRecord> readVersion (const juce::String& id) const;
 
     // A song's pieces kept without a version (a branch's song as it was left), and a song read from its piece, with its
@@ -135,6 +143,15 @@ public:
     bool writeSong (const SongPieces&);
     juce::ValueTree readSong (const juce::String& songPiece, PluginParameterValues* parameters = nullptr,
                               std::vector<MissingPiece>* missing = nullptr) const;
+
+    // How many songs every store read since the program started, and how many of them on the message thread: what the
+    // performance tests count (tests/PerformanceGateTests.cpp), as a song read whole is the costly part of a store.
+    struct SongsRead
+    {
+        int all = 0, onMessageThread = 0;
+    };
+
+    static SongsRead countSongsRead();
 
     // Every computer's record of every branch (in no particular order), this computer's with the songs left on them. A
     // branch written as this computer's record, the song left on it kept on this computer alone. And which one the project
@@ -148,6 +165,9 @@ public:
     bool logBranchMove (const juce::String& branchID, const juce::String& from, const juce::String& to, const juce::String& why);
     std::vector<BranchMove> readBranchLog (const juce::String& branchID) const;
 
+    // Every computer's log of a branch taken together (theirs too, whose folders sync with this one's), oldest first.
+    std::vector<BranchMove> readEveryBranchLog (const juce::String& branchID) const;
+
     // The commits' messages as they were edited, every computer's taken together (the newest for each commit), by the
     // commits' ids; and one edited on this computer, written into its own file (messages/<computer>.xml).
     std::map<juce::String, MessageEdit> readMessages() const;
@@ -157,6 +177,10 @@ public:
     // its songs' pieces kept as a branch's song left on it is (writeSong()); and the list written whole.
     std::vector<Snapshot> readSnapshots() const;
     bool writeSnapshots (const std::vector<Snapshot>&);
+
+    // The songs every computer keeps without a commit (theirs too, whose folders sync with this one's): those left on
+    // branches and those of Local History, each piece once.
+    std::vector<KeptSong> findKeptSongs() const;
 
     // What the audio files at these paths (as a song holds them: within the project's folder, or full ones) hash to, each
     // read once while its size and its time stay the same (files.xml). A file that is missing is left out.
@@ -178,6 +202,9 @@ private:
 
     juce::File getBranchFile (const juce::String& id, const juce::String& computerID) const;
     std::map<juce::String, juce::String> readWorking() const; // by branch
+    static std::map<juce::String, juce::String> readWorkingIn (const juce::File& localFolder);
+    static std::vector<Snapshot> readSnapshotsIn (const juce::File& localFolder);
+    static std::vector<BranchMove> readLogFile (const juce::File&);
     bool writeWorking (const std::map<juce::String, juce::String>&);
 
     JUCE_DECLARE_NON_COPYABLE (VersionStore)

@@ -1440,6 +1440,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsCheckoutTests.cpp
         tests/VersionsGoingBackTests.cpp
         tests/VersionsHearingTests.cpp
+        tests/VersionsKeptWholeTests.cpp
         tests/VersionsMergeTests.cpp
         tests/VersionsMergeWaitingTests.cpp
         tests/VersionsTests.cpp

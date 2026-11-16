@@ -349,6 +349,9 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
 - the allocations a note added and a save make, at 16 and 64 tracks, grow no faster than the song, and a save writes
   the song's text once (`countAllocations()`, counted in Windows Debug builds only; elsewhere the case checks nothing
   and says so).
+- the changes since the last commit compare nothing while nothing changed, however often the versions tell, and
+  only its track for a note added or a plug-in's own change: 270 and 172 elements of the 4,096 the whole song of 32
+  tracks compares, measured 2026-11-15 (`countElementsCompared()`; known bug 126).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

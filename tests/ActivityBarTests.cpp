@@ -777,7 +777,8 @@ TEST_CASE ("A click on a commit in the graph opens it, listing what it changed, 
     mouse.click (history.getRowPosition (row, true).getCentre());
     phazite::test::dispatchPendingMessages();
     CHECK (view.getOpenedVersion() == quieter);
-    REQUIRE (view.getNumHistoryRows() == rows + 1);
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&view, rows] { return view.getNumHistoryRows() == rows + 1; })); // read in the background
     CHECK (view.describeHistoryRow (row).endsWith (", open"));
     CHECK (view.describeHistoryRow (row + 1).endsWith (", Modified: volume"));
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // its lines drawn through the row under it

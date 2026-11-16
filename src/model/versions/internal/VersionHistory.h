@@ -14,6 +14,7 @@
 
 #include <juce_events/juce_events.h>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -24,6 +25,22 @@ namespace phazite
 {
 class TrackRender;
 struct MergeState;
+struct VersionsAudio;
+
+// What a look for the audio the versions play found (VersionHistory::makeAudioPathsFinder()): the files' paths; what it
+// couldn't read whole (a commit's record whose pack can't be opened, a song another computer kept whose pieces haven't all
+// arrived), each said, which leaves what they play unknown; the key of what named them as it began (findVersionsAudioKey());
+// and whether it was told to stop before it was done.
+struct VersionsAudioFound
+{
+    juce::StringArray paths, unreadable;
+    juce::String key;
+    bool stopped = false;
+};
+
+// The key of what names the versions' audio in a store: how many pieces it holds, its kept songs and its branches' last
+// commits. Any thread.
+juce::String findVersionsAudioKey (VersionStore&);
 
 class VersionHistory : private juce::ValueTree::Listener,
                        private juce::Timer
@@ -31,6 +48,8 @@ class VersionHistory : private juce::ValueTree::Listener,
 public:
     // onChange is told, on the message thread, when the versions, the branches or the changes since the last version may
     // have changed, at most a few times a second.
+    // It goes once what it was given to write (a commit, a snapshot) is written, waiting for it, so that a project closed at
+    // once loses none of them and opens again with them; what it was given to read is let go.
     VersionHistory (Song&, std::function<void()> onChange);
     ~VersionHistory() override;
 
@@ -115,6 +134,14 @@ public:
     int recoverLostVersions();
     const juce::ValueTree& getLastVersionSong() const noexcept { return baseline; }
 
+    // A current branch whose last commit can't be read as the history opened (a piece of it damaged or missing): said, with
+    // the newest commit of the branch's log on this computer that reads (VersionStore.h: readBranchLog()), offered; none
+    // while it reads. No commit is made on top of it meanwhile, unless the log has none that reads: a commit then starts the
+    // branch's line again. And the branch reset to that commit (git reset --soft), the song as it is: false if it can't be.
+    juce::String getHeadProblem() const;
+    bool canResetToReadable() const;
+    bool resetToReadable();
+
     // The Versions view's choices, which the commands act on: the version selected in its history, and the line of the
     // changes selected; and the version the changes are listed against while Take from This Version… shows one (none: the
     // last version). What differs from that one, as the changes are listed (from it to the song now), and its song.
@@ -133,9 +160,19 @@ public:
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
 
-    // The audio files every version plays, and every branch's song as it was left: their paths as the songs hold them
-    // (findAudioFilePaths()), each once (model/project/UnusedAudio.h).
-    juce::StringArray findVersionsAudioPaths() const;
+    // A finder of the audio files the versions still play (model/project/UnusedAudio.h), for another thread (a background
+    // job's), which looks until shouldStop says it should stop: their paths as the songs hold them (findAudioFilePaths()),
+    // each once, of every commit in the store's packs, those no branch holds too (Recover Lost Commits brings them back);
+    // of every computer's songs left on branches and in Local History; and of the songs before the merges those and the
+    // song hold, which Abort Merge brings back; with what of them can't be read whole (VersionsAudioFound). What each piece
+    // read whole names is kept, as a piece never changes, so that only what came since is read again. None for a song
+    // that keeps no versions. And what names them, cheaply (findVersionsAudioKey(), message thread): another key than a
+    // look's says that something came since it. And whether a commit or a snapshot is being written meanwhile, which names
+    // files the store doesn't have yet.
+    using AudioPathsFinder = std::function<VersionsAudioFound (const std::function<bool()>& shouldStop)>;
+    AudioPathsFinder makeAudioPathsFinder() const;
+    juce::String findVersionsAudioKey() const;
+    bool isWriting() const; // its own, and a history's of the same folder that went before it (countVersionsBeingFinished())
 
     //==============================================================================
     // Bounces (docs/design/versions.md: Bounces and hearing them): a version's file, whether it has one or not, and whether it has
@@ -213,8 +250,11 @@ public:
     bool undoLastCommit();
 
     // What a commit changed: from the commit it follows (its first parent; nothing, for the first) to it, by line, worked
-    // out once each (a commit never changes). Empty for one that can't be read.
+    // out once each (a commit never changes), its two songs read and compared on the history's thread the first time it is
+    // asked for: empty while they are (isReadingVersionChanges(); onChange is told once they are), and for one that can't
+    // be read.
     const std::vector<SongChange>& getVersionChanges (const juce::String& versionID);
+    bool isReadingVersionChanges (const juce::String& versionID) const;
 
     // Edit Commit Message...: a commit's name and note set anew (either may be empty; the summary of its changes names one
     // without a name), kept beside its record, which never changes (VersionStore.h: writeMessage()), on every computer that
@@ -315,14 +355,19 @@ public:
     // The name and the note the Versions view holds for the next version, until it is saved with them.
     juce::String draftName, draftNote;
 
+    // For tests: while set, every history's writes wait before they write, as a slow disk would make them.
+    static std::atomic<bool> holdWritesForTests;
+
 private:
     Song& song;
     juce::ValueTree state; // the song's, which this listens to
     std::function<void()> onChange;
     juce::File folder; // the store's
     std::shared_ptr<VersionStore> store;
-    BackgroundJobs thread;               // one at a time
-    int pendingJobs = 0, generation = 0; // generation: which store what comes back from the thread was read from
+    std::shared_ptr<BackgroundJobs> thread; // one at a time; finishing its writes after the history goes (~VersionHistory())
+    std::shared_ptr<std::atomic<int>> writesLeft = std::make_shared<std::atomic<int>> (0);
+    int pendingJobs = 0, generation = 0;       // generation: which store what comes back from the thread was read from
+    std::shared_ptr<VersionsAudio> audioPaths; // what each piece names of audio (makeAudioPathsFinder())
     bool hasRead = false, saving = false, checking = false;
     std::optional<Check> lastCheck;
 
@@ -361,6 +406,8 @@ private:
     bool allDirty = true, songDirty = true, automationDirty = true, changesReady = false, notifyPending = false;
     std::vector<SongChange> changes;
     int changesOutsideHistory = 0; // the song's count, as the changes last took it in (a plug-in's own change)
+    ReportCounts outsideSeen;      // and each device's, whose tracks are compared again
+    int pluginsLoadingSeen = 0;    // the plug-ins still loading as the changes last took them in
 
     // While the changes are listed against another version: its song, its plug-ins' values, and what differs from it, worked
     // out again after each change to the song.
@@ -370,8 +417,10 @@ private:
     std::vector<SongChange> comparedChanges;
     bool comparedReady = false;
 
-    // What each commit asked for changed (getVersionChanges()), by its id.
+    // What each commit asked for changed (getVersionChanges()), by its id, and those being read.
     std::map<juce::String, std::vector<SongChange>> versionChanges;
+    std::set<juce::String> versionChangesBeingRead;
+    void versionChangesRead (int generation, const juce::String& versionID, std::vector<SongChange>);
 
     // The commits' messages as they were edited (VersionStore.h: readMessages()), which name them in place of their records'.
     std::map<juce::String, MessageEdit> messageEdits;
@@ -386,10 +435,20 @@ private:
     // The versions no branch's line holds any more (a branch deleted, a commit undone) let go of: they stay in the store.
     void forgetUnreachable();
 
+    // The branches whose last commits couldn't be read as the history opened (getHeadProblem()), by their ids: that commit,
+    // and the newest commit of the branch's log that reads (none for none).
+    struct UnreadableHead
+    {
+        juce::String head, readable;
+    };
+
+    std::map<juce::String, UnreadableHead> unreadableHeads;
+    juce::StringArray getOfferedCommits() const; // the readable ones, which the graph keeps
+
     void open(); // the store beside the song's file, read on the history's thread
     void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,
                  const juce::ValueTree& head, PluginParameterValues, std::map<juce::String, MessageEdit>, std::vector<Snapshot>,
-                 std::optional<std::pair<juce::String, Merge>> mergeRead);
+                 std::optional<std::pair<juce::String, Merge>> mergeRead, std::map<juce::String, UnreadableHead>);
 
     // The merge the song's element says, found again (getMerging()): whether it must be, and those found, by the element
     // each was found from (its text but for the choices), a few, with why it doesn't wait as taken; those being read on the
@@ -409,7 +468,17 @@ private:
     void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues,
                 ReportCounts committed);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
-    void run (std::function<void()> job);
+
+    // A job on the history's thread: one that writes (a commit, a snapshot), which is done before the history goes, or one
+    // that reads, which is let go as it goes, a long one looking at closing between its steps.
+    enum class Work
+    {
+        reads,
+        writes
+    };
+
+    std::shared_ptr<std::atomic<bool>> closing = std::make_shared<std::atomic<bool>> (false);
+    void run (std::function<void()> job, Work);
     void checked (int generation, Check);
 
     // Leaving the current branch for another: the song as it is now kept on it, and the other's as it was left there (or as
@@ -422,8 +491,9 @@ private:
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
     void markAllChanged();
-    void changed(); // tells onChange at the next tick
-    void edited();  // the song changed as the changes count it
+    void changed();          // tells onChange at the next tick
+    void changesMayDiffer(); // and works the changes out again, what is dirty of them
+    void edited();           // the song changed as the changes count it
     void takeChangesOutsideHistory();
 
 public:
@@ -444,7 +514,6 @@ private:
 
 // The versions folder of a song's project, beside its file; none for a song without one.
 juce::File getVersionsFolder (const Song&);
-
 // Where the lines of two versions parted, as git merge-base finds it: of the versions both are or follow, one that no other
 // of them follows. Chosen by the graph, not by when versions were saved, so that computers whose clocks differ agree. Where
 // merges crossed and there are several, the one saved last (then the greater id). None for versions of no common line, or

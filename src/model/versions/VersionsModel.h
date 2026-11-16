@@ -72,6 +72,13 @@ bool isReadingVersions (const ProjectContext&);
 // As copies it.
 void waitForVersionsWritten (const ProjectContext&);
 
+// What the histories of projects that closed still write (a commit or a snapshot given as each closed), each on its own
+// thread, which a close never waits for: how many writes, the projects' names, and a wait for them all, however long it
+// takes (as the program ends, once its window said so: app/ProjectSession.h, closeAndFinishThen()). Message thread.
+int countVersionsBeingFinished();
+juce::StringArray getProjectsBeingFinished();
+void waitForVersionsFinished();
+
 // Every branch's versions, newest first; the branches, in the order they were made; the current one, which the project
 // file is (none before the first version); and its last version.
 std::vector<VersionInfo> getVersions (const ProjectContext&);
@@ -152,12 +159,14 @@ std::vector<VersionChange> getListedChanges (const ProjectContext&);
 bool takeBack (ProjectContext&, const VersionChange&);
 
 // What a commit changed, from the commit it follows (nothing, for the first), by line, as the graph lists them under it
-// (git show --stat); none for a commit that can't be read. And one of them restored from that commit (git restore --source):
-// the line made what it was then, its track there again or taken away as it was or wasn't then, one undo step ("Restore
-// Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone. As
+// (git show --stat), read in the background the first time it is asked for (none listed while it is:
+// isReadingVersionChanges(); the versions tell their listeners once it is); none for a commit that can't be read. And one
+// of them restored from that commit (git restore --source): the line made what it was then, its track there again or taken
+// away as it was or wasn't then, one undo step ("Restore Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone. As
 // much of the line as the commit's pieces hold whole, as Bring Back takes it: what a damaged piece held stays as it is now,
 // and getRestoreProblem() says what.
 std::vector<VersionChange> getVersionChanges (const ProjectContext&, const juce::String& versionID);
+bool isReadingVersionChanges (const ProjectContext&, const juce::String& versionID);
 bool restoreFromVersion (ProjectContext&, const juce::String& versionID, const VersionChange&);
 
 // A line of what a commit changed, selected under it in the graph (with the commit; none for none), which
@@ -397,6 +406,14 @@ juce::String describeHistoryCheck (const ProjectContext&);
 int countLostVersions (const ProjectContext&);
 int recoverLostVersions (ProjectContext&);
 
+// A current branch whose last commit can't be read (VersionHistory.h: getHeadProblem()), as the Versions view says it, with
+// the newest commit of the branch's log that reads, offered; none while it reads. Reset Branch to Last Readable Commit
+// (version.resetToReadable, git reset --soft to it): the branch moved to that commit, the song as it is, its changes since
+// that commit. Whether it can be.
+juce::String getHeadProblem (const ProjectContext&);
+bool canResetToReadable (const ProjectContext&);
+bool resetToReadable (ProjectContext&);
+
 // What the last Restore from This Commit couldn't take from a damaged commit, which stayed as it is, as the Versions view
 // says it ("Bass: a clip"): none while it took everything, and why when it could take nothing.
 juce::String getRestoreProblem (const ProjectContext&);
@@ -454,7 +471,8 @@ void deleteSelectedBounce (ProjectContext&);
 bool canDeleteSelectedBounce (const ProjectContext&);
 
 // Save Version (version.save): the project saved first (saveProjectThen), then a version recorded. Then its bounce, with a
-// bounce (getBounceWithVersion()), in the host.
+// bounce (getBounceWithVersion()), in the host. Greyed while the history is read or a commit is made, while nothing is to
+// commit, and while the branch's last commit can't be read and one that reads is offered (canResetToReadable()).
 void saveProjectAndVersion (ProjectContext&, const SaveProjectThen&, TrackRenderHost&);
 bool canSaveVersion (const ProjectContext&);
 

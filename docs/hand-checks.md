@@ -184,6 +184,9 @@ the [changelog](changelog.md).
 | G112c | Czech layout with the Ableton Live keymap: Ctrl+Alt+3, then Ctrl+Alt+Shift+3; the `+` key; Shift with it. Spanish: Ctrl+Alt+4 | Ctrl+Alt+3 does nothing (a dead key), Ctrl+Alt+Shift+3 shows the piano roll; `+` zooms in; Shift with it is the Smart Tool. On Spanish Ctrl+Alt+4 does nothing and View > Instrument works | |
 | G112d | Linux, X11: `setxkbmap us,de`, German active, computer keyboard on: the key labelled Z, then Y; number pad `*`. Then `setxkbmap us,cz` (or `us,ru`), switch to it, open Settings > MIDI and press the key right of L | Z plays G#4, Y moves the octave down, number pad `*` runs nothing; the help names that layout's letters and the key plays E5 | |
 | G146 | Hover the EQ's Frequency knob, the Vinyl's Low Cut, the Graph header in Source Control and the Project view's Notes header | The hint bar describes each, in words that fit (the owner may reword them: open question 56) | |
+| G172 | Commit a project with large new recordings, then quit at once; open the project again | A window "Finishing the commits of ..." shows until the commit is written, and the commit is there | |
+| G126 | In Source Control, click an older commit in a large project; with the Project view open on a project with several branches, edit freely | The window doesn't freeze, and the commit's lines appear a moment later; nothing stutters, and the count of unused files still follows | |
+| G61 | With the Project view open while a snapshot is being written, look at Clean Up | It stays in place, greyed, and its tooltip says why | |
 
 ## Known bugs that need an ear or a real plug-in
 

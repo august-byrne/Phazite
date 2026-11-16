@@ -31,33 +31,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   from growing: no note is made where it wouldn't play, but the undo step is still named for all of them ("Duplicate 6
   Notes" for 2). Fix: name the step for what was made, or say in the hint bar that some didn't fit.
 
-## Versions
-
-- **25. A project opened from a file equal to its last commit may still take an "As opened" Local History snapshot,**
-  which suggests the history sees a change that isn't there (seen in a test's reopen; not traced).
-- **59. A branch whose last commit can't be read gets a new "Initial commit" on top without a word,** and the older
-  commits leave the graph until Verify History and Recover Lost Commits bring them back. Why: the history opens from
-  the heads and commits when it read none (`src/model/versions/VersionHistory.cpp`); `readBranchLog()`
-  (`src/model/versions/VersionStore.cpp`), which knows the head before, has no caller. Fix: say that the head can't be
-  read and offer the newest commit of the branch's log that reads; commit by itself only where the Versions folder has
-  no branch. Not yet checked (model-versions 5).
-- **61. Clean Up Unused Audio offers audio that Local History and commits that can be recovered still play.** Why:
-  `findVersionsAudioPaths()` (`src/model/versions/VersionHistory.cpp`) lists the files of commits on branches and of
-  songs left on branches only (`src/model/project/UnusedAudio.cpp`). Fix: count the snapshots' songs and the commits
-  that are in the packs and on no branch as using their files. Not yet checked (model-versions 8).
-- **62. A damaged piece is never replaced, and Rename Branch can race a commit.** The index keeps the first pack that
-  lists a piece and a write skips names it has, so every later commit holding that piece is unreadable too, even where
-  another pack has a good copy (`src/model/versions/PieceStore.cpp`). `renameBranch()`
-  (`src/model/versions/VersionHistory.cpp`) isn't refused while a commit saves, and both write the branch's record. Fix:
-  on a read that fails, try the other packs and forget the bad entry; refuse the rename meanwhile. Not yet checked
-  (model-versions 13).
-- **172. A commit, a Local History snapshot or another write still queued on the history's thread as the project closes
-  is dropped without a word.** `~VersionHistory()` (`src/model/versions/VersionHistory.cpp`) calls
-  `thread.removeAll (false)`, which throws away the jobs that haven't started: commit and close at once, and the
-  commit may never be written. Fix: let the writes that are queued finish before the history goes (the close waits
-  for them as Save As does, `waitForVersionsWritten()`), on a thread of their own if the wait could be long. Seen
-  while known bug 60 was fixed; not reproduced by a test.
-
 ## Plug-ins
 
 - **42. A render ends a plug-in's helper that keeps one block for 30 seconds,** though the plug-in may only be slow (six
@@ -264,11 +237,15 @@ its fix.
 - **125. An export of stems compiles a whole player and plan for every stem before it starts,** on the message thread,
   and holds them all at once (`src/model/playback/OfflineRender.cpp`, `src/model/project/Export.cpp`). Fix: compile
   each stem as its turn comes. Not yet checked (model-playback 11).
-- **126. The versions' differences and the store's reads run on the message thread.** The activity bar's badge asks
-  for the changes four times a second, which builds maps of every note of each changed track
-  (`src/model/versions/VersionHistory.cpp`, `src/ui/shell/ActivityBar.cpp`); opening a commit, starting a merge and
-  switching branches unpack and check whole songs before they return. Fix: on the history's thread, comparing pieces by
-  their names from the top down. Not yet checked (model-versions 11).
+- **126. Switching branches and starting a merge read whole songs on the message thread.** On the 32-track benchmark
+  song a branch switch keeps the window for 1.6 s in a Debug build, about three quarters of it reading two songs from
+  the store (the rest: splitting the song left on the branch, applying the new one and compiling it); the start of
+  a merge for 1.4 s, 86 % of it reads (measured 2026-11-15; `Benchmark: what a branch switch and a merge spend on
+  the message thread, by part`, `tests/Benchmarks.cpp`). The badge, opening a commit, a waiting merge's reads and
+  the Project view's look for unused audio no longer run there. Why: both commands apply the song in the call that
+  reads it (`src/model/versions/VersionsModel.cpp`), and 65 test call sites expect the result in that call. Fix: the
+  switch and the merge read on the history's thread and finish when the read is in, the view showing "Switching..."
+  meanwhile; the commands' callers then wait for that.
 - **127. The mixer makes a strip for every channel and brings all of them up to date at any change of a device,**
   those scrolled out of view too, eight times a second while a fader is dragged (`src/ui/mixer/MixerView.cpp`,
   `src/ui/mixer/ChannelStrip.cpp`). No benchmark has a mixer. Fix: only the strips whose channel changed and that are
@@ -277,10 +254,6 @@ its fix.
   files and 200 results without saying that there are more, and doesn't search folders' names
   (`src/services/Library.cpp`, `src/services/BrowserModel.cpp`). Fix: search keys made ahead, a search that runs in
   the background and can be cancelled, and a word where results are cut. Not yet checked (ui-shell-browser 6).
-- **129. While the Project view shows, every branch's song is read again on the message thread every five seconds and
-  after each edit,** to find the audio nothing plays (`src/ui/project/ProjectView.cpp`,
-  `src/model/project/UnusedAudio.cpp`). Fix: find it as a background job, and keep each branch's files until the
-  versions change. Not yet checked (ui-shell-browser 7).
 - **144. A note added repaints the playlist's whole lane area and makes every clip component again,** and the playlist
   makes seven components for every track's header, in view or not. Why: `Playlist::songChanged()`
   (`src/ui/playlist/Playlist.cpp`) treats any change in the clips' group of changes, a note's included, as a change of

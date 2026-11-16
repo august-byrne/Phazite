@@ -307,6 +307,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
       pluginModel (std::make_unique<PluginModel> (*this)),
       audioList ("Audio Files", audioModel.get()),
       pluginList ("Plug-ins", pluginModel.get()),
+      unusedFinder (projectContext),
       pressElsewhere (std::make_unique<PressElsewhere> (*this))
 {
     setTitle ("Project");
@@ -375,6 +376,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     addAndMakeVisible (title);
 
     refreshTooltips();
+    unusedFinder.onFound = [this] { showUnused(); };
     context.addListener (this);
     read();
 }
@@ -420,28 +422,59 @@ void ProjectView::read()
     // What shows changes only when what the model holds did: at rest, nothing repaints.
     auto newFiles = getProjectAudioFiles (context);
     auto newPlugins = getProjectPlugins (context);
-    const auto newUnused = canCleanUpAudio (context) ? (int) findUnusedAudio (context).size() : 0;
-    const auto changed = newFiles != audioFiles || newPlugins != plugins || newUnused != unusedFiles;
+    const auto changed = newFiles != audioFiles || newPlugins != plugins;
     readNotes();
+
+    // The unused files, while it shows: looked for in the background, the count shown once it is found (showUnused()).
+    if (isShowing())
+        unusedFinder.find();
+
+    showUnused(); // the button greyed while it can't look
 
     if (! changed)
         return;
 
     audioFiles = std::move (newFiles);
     plugins = std::move (newPlugins);
-    unusedFiles = newUnused;
 
     const auto missing = (int) std::count_if (audioFiles.begin(), audioFiles.end(), [] (const auto& file) { return file.missing; });
     audioSection.set ("Audio Files", missing > 0 ? juce::String (missing) + " missing" : juce::String(), (int) audioFiles.size());
     pluginSection.set ("Plug-ins", describeProblems (plugins), (int) plugins.size());
-    unusedText.setText (unusedFiles == 1 ? juce::String ("1 file in the project's folder is unused")
-                                         : juce::String (unusedFiles) + " files in the project's folder are unused",
-                        juce::dontSendNotification);
 
     audioList.updateContent();
     pluginList.updateContent();
     audioList.repaint();
     pluginList.repaint();
+    resized();
+}
+
+void ProjectView::showUnused()
+{
+    // The last look's count, the button there while a commit or a snapshot is written (it can't look then), greyed with
+    // why; or why it can't tell which files are unused.
+    const auto& found = unusedFinder.getFound();
+    const auto problem = found.has_value() && ! found->unreadable.isEmpty() ? found->unreadable[0] : juce::String();
+    const auto newUnused = found.has_value() ? (int) found->files.size() : 0;
+    const auto why =
+        problem.isNotEmpty() ? "Phazite can't tell which audio files are unused: " + problem + "." : getWhyNotCleanUpAudio (context);
+    cleanUpButton.setEnabled (why.isEmpty());
+    cleanUpButton.setTooltip (why.isNotEmpty() ? why
+                                               : withShortcut (commands,
+                                                               "Clean Up Unused Audio: lists the audio files in the project's folder "
+                                                               "that nothing plays, any version included, to move those you tick to "
+                                                               "the recycle bin",
+                                                               "project.cleanUpAudio"));
+
+    const auto sameCount = std::exchange (unusedFiles, newUnused) == newUnused;
+    const auto sameProblem = std::exchange (unusedProblem, problem) == problem;
+
+    if (sameCount && sameProblem)
+        return;
+
+    unusedText.setText (unusedProblem.isNotEmpty() ? juce::String ("Can't tell which audio files are unused yet")
+                        : unusedFiles == 1         ? juce::String ("1 file in the project's folder is unused")
+                                                   : juce::String (unusedFiles) + " files in the project's folder are unused",
+                        juce::dontSendNotification);
     resized();
 }
 
@@ -587,7 +620,8 @@ void ProjectView::projectChanged()
     notesField->setText ({}, false);
     audioFiles.clear();
     plugins.clear();
-    unusedFiles = -1; // read anew
+    unusedFiles = 0; // none shown until the new project's are found
+    unusedProblem.clear();
     read();
 }
 
@@ -662,7 +696,7 @@ void ProjectView::resized()
     // The two lists share what is left, each as tall as its rows if there is room, with the clean-up row and the notes of
     // empty lists under their headers.
     const auto audioOpen = audioSection.getToggleState(), pluginsOpen = pluginSection.getToggleState();
-    const auto showsUnused = audioOpen && unusedFiles > 0;
+    const auto showsUnused = audioOpen && (unusedFiles > 0 || unusedProblem.isNotEmpty());
     const auto emptyHeight = 2 * ListRow::height;
     auto fixed = audioSection.getPreferredHeight() + pluginSection.getPreferredHeight() + (showsUnused ? SideBar::buttonRowHeight : 0)
                  + (audioOpen && audioFiles.empty() ? emptyHeight : 0) + (pluginsOpen && plugins.empty() ? emptyHeight : 0);

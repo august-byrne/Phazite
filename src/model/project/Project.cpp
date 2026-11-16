@@ -588,7 +588,10 @@ namespace
             return number;
         }
 
-        // A number within its range: brought in, made whole, or for what is no finite number, its fallback (or none).
+        // A number within its range: brought in, made whole, or for what is no finite number, its fallback (or none); and
+        // held as Phazite writes it (SongText.h: writeValue()), so that a number another tool wrote otherwise ("120.0",
+        // "0.7943282127380371") is the same value as the song's own, which the versions' changes and the project's
+        // comparison with its saved copy compare as text.
         void keepInRange (juce::ValueTree element, const juce::Identifier& property, double low, double high, bool whole,
                           std::optional<double> fallback)
         {
@@ -610,8 +613,9 @@ namespace
             if (element.hasType (schema::TIMESIGNATURE) && property == schema::denominator)
                 kept = std::exp2 (std::round (std::log2 (kept)));
 
-            if (! juce::exactlyEqual (kept, *number))
-                element.setProperty (property, whole ? juce::var ((juce::int64) kept) : juce::var (kept), nullptr);
+            if (const auto value = whole ? juce::var ((juce::int64) kept) : juce::var (kept);
+                ! juce::exactlyEqual (kept, *number) || ! isSameValue (element[property], value))
+                element.setProperty (property, value, nullptr);
         }
 
         // A full path on any system: this one's, one from the root ("/home/...", "\..."), or a Windows drive's ("C:..."). A
@@ -711,10 +715,12 @@ namespace
                         continue;
                     }
 
+                    // Held as Phazite writes it, as keepInRange() holds a number: "1.0" or "5e-1" from another tool is the
+                    // value Phazite's own file would hold, which the versions compare as text.
                     if (const auto number = readNumber (saved); ! number.has_value() || ! std::isfinite (*number))
                         values.removeProperty (name, nullptr);
                     else if (const auto kept = devices::constrain (*parameter, (float) *number);
-                             ! juce::exactlyEqual ((double) kept, *number))
+                             ! juce::exactlyEqual ((double) kept, *number) || ! isSameValue (saved, toSavedValue (*parameter, kept)))
                         values.setProperty (name, toSavedValue (*parameter, kept), nullptr);
                 }
             }

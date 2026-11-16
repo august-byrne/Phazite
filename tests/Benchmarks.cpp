@@ -60,6 +60,10 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongPieces.h"
+#include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "ui/components/Controls.h"
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ReverbEditor.h"
@@ -1725,4 +1729,63 @@ TEST_CASE ("Benchmark: a device's graph repainted, its curve kept or worked out 
     }
 
     MESSAGE (report);
+}
+
+//==============================================================================
+TEST_CASE ("Benchmark: what a branch switch and a merge spend on the message thread, by part" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // What is left of known bug 126: a switch and the start of a merge read whole songs on the message thread. Their parts
+    // timed on their own beside the whole: the song left on the branch split into pieces (and written: its pieces are the
+    // store's already but its own), a commit's song read, and what is left of the whole (the song made the other's, and
+    // what plays it compiled again; the merge's three-way merge).
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 32, 64.0);
+    auto& song = *phazite::findSong (s.context);
+    auto* history = phazite::getVersionHistory (s.context);
+    const auto save = [] (std::function<void (bool)> then) { then (true); };
+    const auto commit = [&]
+    {
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        std::optional<juce::Result> result;
+        REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+        REQUIRE (phazite::test::waitForVersionHistory (s.context));
+        return phazite::getLastVersion (s.context)->id;
+    };
+
+    commit();
+    const auto main = phazite::getCurrentBranch (s.context)->id;
+    REQUIRE (phazite::newBranch (s.context, {}, save));
+    const auto idea = phazite::getCurrentBranch (s.context)->id;
+    phazite::setChannelVolume (song, built.tracks[1], -9.0f);
+    const auto theirs = commit();
+    REQUIRE (phazite::switchBranch (s.context, main, save));
+    phazite::setChannelVolume (song, built.tracks[2], -3.0f);
+    commit();
+    phazite::setChannelVolume (song, built.tracks[3], -2.0f); // a change left on main as it switches
+
+    const auto time = [] (const std::function<void()>& work)
+    {
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+        work();
+        return juce::Time::getMillisecondCounterHiRes() - start;
+    };
+
+    const auto split = time ([&] { juce::ignoreUnused (phazite::splitSong (song.getState().createCopy())); });
+    const auto read = time ([&] { juce::ignoreUnused (history->readSong (theirs)); });
+
+    auto songsRead = phazite::VersionStore::countSongsRead();
+    const auto toIdea = time ([&] { REQUIRE (phazite::switchBranch (s.context, idea, save)); });
+    const auto switchReads = phazite::VersionStore::countSongsRead().onMessageThread - songsRead.onMessageThread;
+    const auto back = time ([&] { REQUIRE (phazite::switchBranch (s.context, main, save)); });
+
+    songsRead = phazite::VersionStore::countSongsRead();
+    const auto merge = time ([&] { REQUIRE (phazite::startMerge (s.context, theirs)); });
+    const auto mergeReads = phazite::VersionStore::countSongsRead().onMessageThread - songsRead.onMessageThread;
+
+    MESSAGE ("32 tracks, 64 beats: a switch " << toIdea << " ms (back " << back << " ms), reading " << switchReads
+                                              << " songs on the message thread; the song split into pieces " << split
+                                              << " ms; a commit's song read " << read << " ms; the start of a merge " << merge
+                                              << " ms, reading " << mergeReads << " songs");
 }

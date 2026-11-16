@@ -72,6 +72,24 @@ namespace
         juce::WeakReference<Song> song;
         std::shared_ptr<StatesWait> wait;
     };
+
+    // The wait for the versions' writes as the program quits (closeAndFinishThen()), as the progress window shows it: its
+    // Cancel (the window going while the wait isn't over) goes on without the window.
+    struct WaitForVersions final : TrackRender::Impl
+    {
+        explicit WaitForVersions (std::shared_ptr<StatesWait> shownWait)
+            : wait (std::move (shownWait))
+        {
+            wait->shown = true;
+        }
+
+        ~WaitForVersions() override { wait->shown = false; }
+
+        float getProgress() const override { return -1.0f; }
+        juce::String getTitle() const override { return wait->title; }
+
+        std::shared_ptr<StatesWait> wait;
+    };
 } // namespace
 
 ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
@@ -763,6 +781,46 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
             else
                 closeThen (callback);
         });
+}
+
+void ProjectSession::closeAndFinishThen (std::function<void()> callback)
+{
+    setProject (nullptr);
+
+    if (countVersionsBeingFinished() == 0 || renders == nullptr)
+    {
+        callback();
+        return;
+    }
+
+    // The progress window says what is being finished, until it is; its Cancel goes on at once.
+    struct Finishing final : juce::Timer
+    {
+        std::function<void()> tick;
+        void timerCallback() override { tick(); }
+    };
+
+    const auto wait = std::make_shared<StatesWait>();
+    wait->title = "Finishing the commits of " + getProjectsBeingFinished().joinIntoString (", ");
+    renders->runRender (std::make_unique<TrackRender> (std::make_unique<WaitForVersions> (wait)));
+
+    auto timer = std::make_unique<Finishing>();
+    timer->tick = [this, wait, callback]
+    {
+        if (countVersionsBeingFinished() > 0 && wait->shown)
+            return;
+
+        finishing->stopTimer(); // it goes with the session, or the next quit's
+        wait->over = true;
+
+        if (wait->shown && renders != nullptr)
+            renders->renderFinished (wait->title, juce::Result::ok()); // which deletes the window
+
+        callback();
+    };
+
+    timer->startTimer (100);
+    finishing = std::move (timer);
 }
 
 void ProjectSession::closeWithPluginStates (std::function<void (bool)> callback)

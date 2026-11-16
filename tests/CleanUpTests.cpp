@@ -2,13 +2,16 @@
 // Clean Up Unused Audio... (model/project/UnusedAudio.h and its window, ui/shell/CleanUpPanel.h): the audio files in a
 // project's Audio and Generated folders that neither its song, nor a version, nor a branch's song as it was left plays, and
 // those ticked deleted.
+#include "HeldFile.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/project/UnusedAudio.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "ui/shell/CleanUpPanel.h"
 
 namespace
@@ -35,6 +38,15 @@ juce::String findBranch (const phazite::ProjectContext& context, const juce::Str
     return {};
 }
 
+// A look for the unused audio, in the background as the window's and the Project view's are, waited for.
+phazite::UnusedAudio lookForUnused (const phazite::ProjectContext& context)
+{
+    phazite::UnusedAudioFinder finder (context);
+    finder.find();
+    REQUIRE (dispatchMessagesUntil ([&finder] { return ! finder.isLooking() && finder.getFound().has_value(); }));
+    return *finder.getFound();
+}
+
 juce::StringArray getNames (const std::vector<phazite::UnusedAudioFile>& files)
 {
     juce::StringArray names;
@@ -43,6 +55,17 @@ juce::StringArray getNames (const std::vector<phazite::UnusedAudioFile>& files)
         names.add (file.name);
 
     return names;
+}
+
+juce::StringArray getNames (const phazite::UnusedAudio& found)
+{
+    return getNames (found.files);
+}
+
+// Those of the files given that a look finds unused, deleted outright: how many went.
+int deleteUnused (phazite::ProjectContext& context, const juce::Array<juce::File>& files)
+{
+    return phazite::deleteUnusedAudio (context, lookForUnused (context), files, phazite::Removal::outright);
 }
 
 // A song that plays one file, a version that plays another, a branch left with a third; and two files nothing plays, in
@@ -77,18 +100,18 @@ TEST_CASE ("Clean Up lists the audio nothing plays: not the song's, nor a versio
 {
     Files p;
     REQUIRE (phazite::canCleanUpAudio (p.s.context));
-    const auto unused = phazite::findUnusedAudio (p.s.context);
+    const auto unused = lookForUnused (p.s.context).files;
     CHECK (getNames (unused) == juce::StringArray ("Audio/Old take.wav", "Generated/Leftover.wav"));
     CHECK (unused[0].size == unused[0].file.getSize());
 
     // Those given that are still unused go; one the song plays stays, even if asked for.
     const auto played = p.s.getProject().getAudioFolder().getChildFile ("Played.wav");
     REQUIRE (played.existsAsFile());
-    CHECK (phazite::deleteUnusedAudio (p.s.context, { unused[0].file, played }, phazite::Removal::outright) == 1);
+    CHECK (deleteUnused (p.s.context, { unused[0].file, played }) == 1);
     CHECK_FALSE (unused[0].file.existsAsFile());
     CHECK (unused[1].file.existsAsFile());
     CHECK (played.existsAsFile());
-    CHECK (getNames (phazite::findUnusedAudio (p.s.context)) == juce::StringArray ("Generated/Leftover.wav"));
+    CHECK (getNames (lookForUnused (p.s.context)) == juce::StringArray ("Generated/Leftover.wav"));
 }
 
 TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosave or a backup plays")
@@ -124,7 +147,221 @@ TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosav
     remove (autosaved);
 
     writeSound (project.getAudioFolder().getChildFile ("Old take.wav"), 0.5);
-    CHECK (getNames (phazite::findUnusedAudio (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+}
+
+TEST_CASE ("Clean Up keeps the audio that Local History, and the commits Recover Lost Commits brings back, still play")
+{
+    // Known bug 61: only the commits on branches and the songs left on branches counted, so that restoring a snapshot, or a
+    // commit recovered, found its sounds deleted.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    auto& project = s.getProject();
+    auto* history = phazite::getVersionHistory (s.context);
+    const auto remove = [&s] (phazite::ClipID clip)
+    {
+        s.select (clip);
+        s.run ("edit.delete");
+    };
+
+    keepVersion (s.context, "Before");
+
+    // In a snapshot of Local History alone: taken, then the clip taken out, the project saved without it.
+    const auto snapshotted = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Snapshotted.wav"), 0.5), 0.0);
+    REQUIRE (waitForVersionHistory (s.context));
+    history->takeSnapshot ("auto");
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (phazite::getSnapshots (s.context).size() == 1);
+    remove (snapshotted);
+
+    // In a commit no branch holds any more alone: committed, the commit undone, the clip taken out.
+    const auto undone = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Undone.wav"), 0.5), 0.0);
+    keepVersion (s.context, "Undone");
+    REQUIRE (phazite::undoLastCommit (s.context));
+    remove (undone);
+    REQUIRE (project.save().wasOk());
+    project.getFolder().getChildFile ("Backups").deleteRecursively(); // what they play counts too (the test before)
+
+    writeSound (project.getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+
+    // Deleting them is refused alike: they are still in use.
+    const auto snapshottedFile = project.getAudioFolder().getChildFile ("Snapshotted.wav");
+    const auto undoneFile = project.getAudioFolder().getChildFile ("Undone.wav");
+    REQUIRE (snapshottedFile.existsAsFile());
+    REQUIRE (undoneFile.existsAsFile());
+    CHECK (deleteUnused (s.context, { snapshottedFile, undoneFile }) == 0);
+    CHECK (snapshottedFile.existsAsFile());
+    CHECK (undoneFile.existsAsFile());
+
+    // And so they play: the snapshot restored, and the commit recovered, hold them.
+    const auto snapshot = history->readSnapshot (phazite::getSnapshots (s.context).front().time);
+    CHECK (phazite::findAudioFilePaths (snapshot).contains ("Audio/Snapshotted.wav"));
+}
+
+TEST_CASE ("Clean Up offers nothing while a song another computer kept can't be read whole, and offers again once its pieces arrive")
+{
+    // The review of known bug 61: computer B records Take.wav and leaves it on a branch; the take and B's working.xml reach
+    // this computer before B's pack does. The take must never be offered, nor deleted (which a sync program would carry
+    // back to B).
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    auto& song = *phazite::findSong (s.context);
+    const auto take = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Take.wav"), 0.5), 0.0);
+    const auto theirs = phazite::splitSong (song.getState().createCopy());
+    s.select (take);
+    s.run ("edit.delete"); // played here no more: only B's song left on its branch plays it
+    REQUIRE (s.getProject().save().wasOk());
+    s.getProject().getFolder().getChildFile ("Backups").deleteRecursively(); // what they play counts too (a test above)
+    writeSound (s.getProject().getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    REQUIRE (waitForVersionHistory (s.context));
+
+    const auto versions = s.getProject().getFolder().getChildFile ("Versions");
+    phazite::VersionStore other (versions, "computer-b");
+    phazite::BranchRecord left;
+    left.id = "b-branch";
+    left.name = "b-idea";
+    left.head = phazite::getLastVersion (s.context)->id;
+    left.working = theirs.song; // its pieces still on their way
+    left.changed = 1;
+    REQUIRE (other.writeBranch (left));
+
+    const auto takeFile = s.getProject().getAudioFolder().getChildFile ("Take.wav");
+    REQUIRE (takeFile.existsAsFile());
+    auto found = lookForUnused (s.context);
+    CHECK (found.files.empty());
+    REQUIRE (found.unreadable.size() == 1);
+    CHECK (found.unreadable[0].contains ("computer-b"));
+    juce::String refused;
+    CHECK (phazite::deleteUnusedAudio (s.context, found, { takeFile }, phazite::Removal::outright, &refused) == 0);
+    CHECK (refused.isNotEmpty());
+    CHECK (takeFile.existsAsFile());
+
+    // B's pack arrives: its song read whole, the take is in use, the old take isn't.
+    REQUIRE (other.writeSong (theirs));
+    found = lookForUnused (s.context);
+    CHECK (found.unreadable.isEmpty());
+    CHECK (getNames (found) == juce::StringArray ("Audio/Old take.wav"));
+    CHECK (deleteUnused (s.context, { takeFile }) == 0);
+    CHECK (takeFile.existsAsFile());
+}
+
+TEST_CASE ("Clean Up offers nothing while a commit's pack can't be opened, and doesn't keep that answer for the next look")
+{
+    // The review of known bug 61: a piece that couldn't be read was kept as "not a commit" for as long as the history
+    // lived, and its commit's files were offered at every look after.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    const auto versions = s.getProject().getFolder().getChildFile ("Versions").getChildFile ("pieces");
+    const auto before = versions.findChildFiles (juce::File::findFiles, false, "*.pack");
+    const auto clip = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Committed.wav"), 0.5), 0.0);
+    keepVersion (s.context, "With it");
+    auto packs = versions.findChildFiles (juce::File::findFiles, false, "*.pack");
+    packs.removeValuesIn (before);
+    REQUIRE (packs.size() == 1);                   // the commit's pack, with its record
+    REQUIRE (phazite::undoLastCommit (s.context)); // its commit on no branch, which Recover Lost Commits brings back
+    s.select (clip);
+    s.run ("edit.delete");
+    REQUIRE (s.getProject().save().wasOk());
+    s.getProject().getFolder().getChildFile ("Backups").deleteRecursively();
+    REQUIRE (waitForVersionHistory (s.context));
+    const auto committed = s.getProject().getAudioFolder().getChildFile ("Committed.wav");
+
+    {
+        const HeldFile held (packs[0]);
+
+        if (! held.works())
+            return;
+
+        const auto found = lookForUnused (s.context);
+        CHECK (found.files.empty());
+        CHECK_FALSE (found.unreadable.isEmpty());
+        CHECK (deleteUnused (s.context, { committed }) == 0);
+    }
+
+    // The pack can be opened again: the commit's record read, its file in use.
+    const auto found = lookForUnused (s.context);
+    CHECK (found.unreadable.isEmpty());
+    CHECK (getNames (found).isEmpty());
+    CHECK (deleteUnused (s.context, { committed }) == 0);
+    CHECK (committed.existsAsFile());
+}
+
+TEST_CASE ("Clean Up keeps the audio of a line staged for the next commit, which its commit records")
+{
+    // The review of known bug 61: a clip staged, then taken out of the song and the file deleted; the commit of what was
+    // staged named a file that wasn't there.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    const auto clip = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Staged.wav"), 0.5), 0.0);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 1; }));
+    REQUIRE (phazite::stageChange (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
+    s.select (clip);
+    s.run ("edit.delete");
+    REQUIRE (s.getProject().save().wasOk());
+    s.getProject().getFolder().getChildFile ("Backups").deleteRecursively();
+
+    const auto staged = s.getProject().getAudioFolder().getChildFile ("Staged.wav");
+    CHECK (getNames (lookForUnused (s.context)).isEmpty());
+    CHECK (deleteUnused (s.context, { staged }) == 0);
+    CHECK (staged.existsAsFile());
+}
+
+TEST_CASE ("Clean Up reads nothing of the versions on the message thread, however many snapshots Local History keeps")
+{
+    // The review of known bug 129: the window and Delete read every kept song on the message thread.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    auto* history = phazite::getVersionHistory (s.context);
+
+    for (int i = 0; i < 8; ++i)
+    {
+        s.setVolume (track, -1.0f - (float) i);
+        REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+        history->takeSnapshot ("auto");
+        REQUIRE (waitForVersionHistory (s.context));
+    }
+
+    REQUIRE (phazite::getSnapshots (s.context).size() == 8);
+    writeSound (s.getProject().getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    const auto before = phazite::VersionStore::countSongsRead();
+
+    phazite::ui::CleanUpPanel panel (s.context, phazite::Removal::outright);
+    TestWindow window (panel, phazite::ui::CleanUpPanel::width, phazite::ui::CleanUpPanel::height);
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
+    REQUIRE (panel.getNumFiles() == 1);
+    Mouse buttons (panel);
+    buttons.click (panel.getDeleteButton().getBounds().getCentre());
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
+    CHECK (panel.getSummary().startsWith ("Deleted 1 file."));
+
+    const auto after = phazite::VersionStore::countSongsRead();
+    INFO ("Songs read: " << (after.all - before.all) << ", on the message thread " << (after.onMessageThread - before.onMessageThread));
+    CHECK (after.onMessageThread == before.onMessageThread);
+    CHECK (after.all > before.all);
+}
+
+TEST_CASE ("Clean Up waits while a snapshot is written, saying why")
+{
+    // The review of known bug 61: a snapshot names files the Versions folder doesn't hold until it is written.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    REQUIRE (phazite::canCleanUpAudio (s.context));
+    s.setVolume (track, -6.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+
+    phazite::VersionHistory::holdWritesForTests = true;
+    phazite::getVersionHistory (s.context)->takeSnapshot ("auto");
+    CHECK_FALSE (phazite::canCleanUpAudio (s.context));
+    CHECK (phazite::getWhyNotCleanUpAudio (s.context).contains ("being written"));
+    phazite::VersionHistory::holdWritesForTests = false;
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (phazite::canCleanUpAudio (s.context));
 }
 
 TEST_CASE ("The Clean Up window lists the files ticked, a click keeps one, and Delete deletes the others and says so")
@@ -132,6 +369,8 @@ TEST_CASE ("The Clean Up window lists the files ticked, a click keeps one, and D
     Files p;
     phazite::ui::CleanUpPanel panel (p.s.context, phazite::Removal::outright);
     TestWindow window (panel, phazite::ui::CleanUpPanel::width, phazite::ui::CleanUpPanel::height);
+    CHECK (panel.getSummary().startsWith ("Looking for the audio files"));
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); })); // in the background
     REQUIRE (panel.getNumFiles() == 2);
     CHECK (panel.describeFile (0).startsWith ("Audio/Old take.wav, "));
     CHECK (panel.describeFile (0).endsWith (", to delete"));
@@ -149,6 +388,7 @@ TEST_CASE ("The Clean Up window lists the files ticked, a click keeps one, and D
     Mouse buttons (panel);
     buttons.click (panel.getDeleteButton().getBounds().getCentre());
     dispatchPendingMessages();
+    REQUIRE (dispatchMessagesUntil ([&panel] { return ! panel.isLooking(); }));
     CHECK (panel.getSummary().startsWith ("Deleted 1 file."));
     CHECK (panel.getNumFiles() == 1);
     CHECK (panel.describeFile (0).startsWith ("Generated/Leftover.wav"));

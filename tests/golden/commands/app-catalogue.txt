@@ -122,6 +122,7 @@ version.exportDawProject
 version.restoreSnapshot
 version.verify
 version.recover
+version.resetToReadable
 project.export | ctrl + shift + R
 project.cleanUpAudio
 project.importDawProject

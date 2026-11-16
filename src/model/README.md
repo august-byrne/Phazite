@@ -89,7 +89,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `ExampleSongs.h`, `internal/ExampleSongs.h` | The example songs that Help opens as new projects. |
 | `Export.h`, `internal/Export.h` | Exporting the song and its stems. |
 | `internal/DawProject.h` | The song, or a version of it, written as a DAWproject for other DAWs; and one read back, as a new project's song or as a branch from the version it came from. |
-| `UnusedAudio.h` | The audio files in the project's folder that no song of it plays, for Clean Up Unused Audio. |
+| `UnusedAudio.h` | The audio files in the project's folder that no song of it plays, for Clean Up Unused Audio, and how many, found in the background for the Project view. |
 | `ProjectContents.h` | What the open project holds, for the Project view: its notes, the audio files its song plays (found or missing), and its plug-ins, as they play. |
 | `ProjectContext.h`, `internal/ProjectContext.h` | The open project as commands and panels find it: its song, selection, range, playback session, clip renders, clipboard and the parameter touched last. The internal header has `findSong()`, `getSelection()`, `getRangeSelection()` and `getSession()`, and the session's `setSong()`. |
 

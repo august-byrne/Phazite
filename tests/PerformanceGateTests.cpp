@@ -15,6 +15,7 @@
 #include "PerformanceCounts.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -32,6 +33,9 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongDiff.h"
+#include "model/versions/internal/VersionHistory.h"
 
 #include <map>
 
@@ -356,4 +360,67 @@ TEST_CASE ("Performance gate: selected automation points are found by their beat
     const auto small = comparisonsFor (1000), large = comparisonsFor (10000);
     INFO ("1,000 points: " << small << " comparisons; 10,000: " << large);
     CHECK (large < small * 20);
+}
+
+//==============================================================================
+TEST_CASE (
+    "Performance gate: the count of changes since the last commit compares nothing while nothing changed, and one track for an edit of it")
+{
+    // Known bug 126: the activity bar's badge asks for the changes each time the versions say anything (four times a
+    // second while a bounce renders); a plug-in's own change compared every track of the song again.
+    const phazite::test::TestPlugin plugin;
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 32, 16.0);
+    auto& song = getSong (s);
+    phazite::DeviceID device;
+
+    {
+        const phazite::UndoStep step (song, "Add Device");
+        device = phazite::test::TestPlugin::add (song, built.tracks[3]);
+    }
+
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    REQUIRE (phazite::countChanges (s.context) == 0);
+    auto* history = phazite::getVersionHistory (s.context);
+
+    // Told again and again, nothing changed: nothing compared.
+    auto before = phazite::countElementsCompared();
+
+    for (int i = 0; i < 20; ++i)
+    {
+        history->tellNow();
+        CHECK (phazite::countChanges (s.context) == 0);
+    }
+
+    CHECK (phazite::countElementsCompared() == before);
+
+    // What the whole song's comparison looks at, against which the others are measured.
+    before = phazite::countElementsCompared();
+    REQUIRE (phazite::findChanges (history->getLastVersionSong(), song.getState()).empty());
+    const auto wholeSong = phazite::countElementsCompared() - before;
+
+    // A note added: its track compared again, not the song.
+    before = phazite::countElementsCompared();
+    phazite::addNote (s.context, built.clips[0], 72, at (2.5), lasting (0.25), 100);
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::countChanges (s.context) == 1);
+    const auto noteAdded = phazite::countElementsCompared() - before;
+
+    // A plug-in's own change, in its window: its track compared again, not the song.
+    before = phazite::countElementsCompared();
+    song.markChangedOutsideHistory (device.getRaw());
+    phazite::test::dispatchPendingMessages();
+    phazite::countChanges (s.context);
+    const auto pluginChanged = phazite::countElementsCompared() - before;
+
+    INFO ("Elements compared: the whole song " << wholeSong << ", a note added " << noteAdded << ", a plug-in's own change "
+                                               << pluginChanged);
+    CHECK (noteAdded > 0);
+    CHECK (noteAdded * 8 < wholeSong);
+    CHECK (pluginChanged > 0);
+    CHECK (pluginChanged * 8 < wholeSong);
 }

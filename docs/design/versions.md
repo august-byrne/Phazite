@@ -31,8 +31,8 @@ Source Control says them. A commit can carry a bounce, so that an earlier versio
 
 ## From the start
 
-- **Initial commit.** A project keeps commits from its start: as soon as its history is read and has none, the song
-  as it is is committed as "Initial commit", on the branch **main**. A new project's history moves with it at its
+- **Initial commit.** A project keeps commits from its start: as soon as its history is read and has no branch, the
+  song as it is is committed as "Initial commit", on the branch **main**. A new project's history moves with it at its
   first save.
 - **Auto Save** keeps the project file up to date ([projects-saving-export.md](projects-saving-export.md)), so every
   change shows in the changes as it is made.
@@ -220,6 +220,13 @@ Local History keeps the song as it was at times while it differed from its last 
   which piece. In the window, only the first is reached: the graph lists no lines under a commit it can't read whole,
   nor does Compare with Working Tree list any, so a damaged commit's lines show nowhere to restore one by one. Verify
   History names such commits. A commit whose own piece can't be read restores nothing.
+- **A branch whose last commit can't be read** (a piece of its record damaged or missing) says so in the view, and
+  offers the newest commit of the branch's log on this computer that reads; **Reset Branch to Last Readable Commit**
+  (`version.resetToReadable`, git reset --soft) takes the branch back to it, the song as it is. Nothing is committed on
+  top of the commit that can't be read meanwhile; where the log holds none that reads, a commit starts the branch's line
+  again.
+- **A damaged piece is read from another pack** that holds it, and a copy found damaged (by a read, or Verify History)
+  is forgotten, so that the next commit holding the piece writes it again.
 - A project file that can't be read offers its branch's last commit
   ([projects-saving-export.md](projects-saving-export.md)).
 
@@ -233,17 +240,23 @@ The history is the `Versions` folder beside the project file. Its format is writ
   curve's points are split into runs, so one note changed in a long clip stores one run. A plug-in's state is a
   piece of its own, in its bytes.
 - **The same song always makes the same pieces:** each value is written in one way, as in the project file.
-- **Packs.** Pieces are kept in packs, written once and never changed. More than 50 packs are joined into one as
-  the history opens.
+- **Packs.** Pieces are kept in packs, written once and never changed, but where every piece of one was found damaged:
+  the next commit that holds them writes it again whole under its own name, in its place (where another program holds the
+  damaged file, the commit fails and says so). More than 50 packs are joined into one as the history opens.
 - **Audio files** are named by their paths, sizes and hashes, not copied. Clean Up Unused Audio keeps every file a
-  commit or a branch plays.
+  commit plays (on a branch, or one Recover Lost Commits brings back), and every song left on a branch or kept in Local
+  History, on any computer, and the song before a merge any of them holds. The Project view finds how many are unused
+  in the background, reading each piece once.
 - **Written safely:** every file is written whole or not at all. Reading checks each piece's hash, so a damaged one
   affects only the commits that hold it.
 - **Each computer writes only files of its own:** its record of each branch, its log of each branch's moves, its
   edited messages, the songs it left on branches and its Local History. A computer is known by an ID made at
   random, never by a name.
 - **Off the message thread:** the song is copied on the message thread; splitting, hashing, compressing and writing
-  run on the history's own thread, as does reading it when the project opens.
+  run on the history's own thread, as does reading it when the project opens. A commit or a snapshot given as the project
+  closes is written after it, on the history's thread, which the close doesn't wait for; the project opened again (or
+  another history of the same folder) reads the folder only after it, and quitting waits for it behind a window that
+  says what is being finished. What the history reads is let go.
 - Save Project As copies the history with the project. Without a `Versions` folder, a project opens with no history
   and makes its initial commit.
 

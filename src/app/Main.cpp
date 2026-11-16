@@ -12,6 +12,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/UnsavedProjects.h"
+#include "model/versions/VersionsModel.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/theme/LookAndFeel.h"
@@ -223,6 +224,7 @@ public:
         // and the project, the services and the previews play on the engine context, which goes last.
         mainWindow = nullptr;
         session = nullptr;
+        waitForVersionsFinished(); // a commit given as the project closed, written before the program ends
         commandBridge = nullptr;
         commands = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -276,11 +278,12 @@ public:
             return;
         }
 
+        // Closed, then what the versions still write finished behind a window that says so (ProjectSession.h).
         session->closeThen (
-            [] (bool closed)
+            [this] (bool closed)
             {
-                if (closed)
-                    quit();
+                if (closed && session != nullptr)
+                    session->closeAndFinishThen ([] { quit(); });
             });
     }
 

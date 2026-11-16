@@ -97,6 +97,14 @@ juce::StringArray findProjectDifferences (const juce::XmlElement& expected, cons
 
     return differences;
 }
+
+// What a commit changed, once the history's thread has read it.
+std::vector<phazite::VersionChange> readVersionChanges (phazite::ProjectContext& context, const juce::String& versionID)
+{
+    phazite::getVersionChanges (context, versionID);
+    REQUIRE (waitForVersionHistory (context));
+    return phazite::getVersionChanges (context, versionID);
+}
 } // namespace
 
 TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves its view state as it is")
@@ -289,7 +297,7 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
 
     // Committed on Keys, then Bass restored from the commit before: the clip is on Bass, once.
     keepVersion (s.context, "Moved");
-    const auto bassLine = findLine (phazite::getVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Bass");
+    const auto bassLine = findLine (readVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Bass");
     REQUIRE (bassLine.has_value());
     REQUIRE (phazite::restoreFromVersion (s.context, first, *bassLine));
     checkIDs (song);
@@ -366,7 +374,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
 
     // Committed on Keys, then Keys alone restored from the commit before: the clip is on Bass, once.
     keepVersion (s.context, "Moved");
-    const auto keysLine = findLine (phazite::getVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Keys");
+    const auto keysLine = findLine (readVersionChanges (s.context, phazite::getLastVersion (s.context)->id), "Keys");
     REQUIRE (keysLine.has_value());
     REQUIRE (phazite::restoreFromVersion (s.context, first, *keysLine));
     checkIDs (song);

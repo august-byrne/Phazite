@@ -31,6 +31,10 @@ struct PluginValues
 // their keys, those with an order in the same order.
 bool holdTheSame (const juce::ValueTree& a, const juce::ValueTree& b);
 
+// How many elements the comparisons looked at since the program started, on every thread: what the performance tests count
+// (tests/PerformanceGateTests.cpp).
+juce::int64 countElementsCompared();
+
 // What changed of one thing: a track (a folder or a return too), the master, or the song's own (its tempo, its sections,
 // its chords, the order of its tracks).
 struct SongChange

@@ -1185,7 +1185,7 @@ juce::PopupMenu VersionsView::makeMoreMenu()
     menu.addSeparator();
     addCommandItems (menu, commands, { "version.exportDawProject", "project.importDawProject" });
     menu.addSeparator();
-    addCommandItems (menu, commands, { "project.cleanUpAudio", "version.verify", "version.recover" });
+    addCommandItems (menu, commands, { "project.cleanUpAudio", "version.verify", "version.recover", "version.resetToReadable" });
     return menu;
 }
 
@@ -1571,7 +1571,7 @@ void VersionsView::refresh()
     const auto room = getVersionsRoom (context);
     juce::String notice;
 
-    for (const auto& text : { getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
+    for (const auto& text : { getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
                               describeHistoryCheck (context), describeDivergence (context) })
         if (notice.isEmpty())
             notice = text;
@@ -1671,9 +1671,10 @@ void VersionsView::refresh()
         formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
             .replace ("Return", "Enter");
     const auto next = describeNextCommit (context);
-    messageField->setTextToShowWhenEmpty (detached ? juce::String ("Create a branch here to commit")
-                                                   : (next.isNotEmpty() ? next : juce::String ("Message")) + " (" + commitKey + " to commit"
-                                                         + onBranch + ")",
+    messageField->setTextToShowWhenEmpty (detached                       ? juce::String ("Create a branch here to commit")
+                                          : canResetToReadable (context) ? juce::String ("Reset Branch to Last Readable Commit to commit")
+                                                                         : (next.isNotEmpty() ? next : juce::String ("Message")) + " ("
+                                                                               + commitKey + " to commit" + onBranch + ")",
                                           getPalette (*this).textMuted);
     messageField->setEnabled (keeps);
 

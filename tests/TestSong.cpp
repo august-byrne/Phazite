@@ -13,6 +13,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 
 namespace phazite::test
@@ -56,6 +57,10 @@ TestSong::~TestSong()
 TestSong::SongDetacher::~SongDetacher()
 {
     setSong (context, nullptr);
+
+    // What its history still writes (its initial commit, say), which a close leaves to finish on its own, done before the
+    // project's folder goes with the test, so that no test's writes run on into the next.
+    waitForVersionsFinished();
 }
 
 bool waitForVersionHistory (ProjectContext& context)

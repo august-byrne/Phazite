@@ -105,6 +105,22 @@ too. A line names the bug's number in that list.
 - **146 Every control explains itself in the hint bar:** the EQ's band controls, the Vinyl's and the Delay's band
   ends, and the Project and Source Control panes' headers have their tooltips, and the walk of every control now
   fails on any that has none.
+- **25 Another tool's numbers:** a song file another tool wrote, equal to its last commit, opens with no changes and
+  no "As opened" snapshot: ranged numbers and devices' values are kept as Phazite writes them.
+- **59 A branch whose last commit can't be read** says so and offers the newest commit that reads, from any
+  computer's log of the branch or from the packs (Reset Branch to Last Readable Commit); nothing is committed on top
+  without a word, and Commit is greyed meanwhile.
+- **61 Clean Up Unused Audio** keeps the files that Local History, every computer's kept songs, commits that can be
+  recovered, the staged song and a waiting merge's earlier song still play; it offers nothing while any of them
+  can't be read whole (a version still syncing), and looks in the background.
+- **62 A damaged piece** is read from another pack and written again by the next commit that holds it, and a branch
+  isn't renamed while a commit writes its record.
+- **172 A commit as the project closes:** a commit or a snapshot still being written as the project closes is
+  finished in the background, the close waiting for neither; quitting says what it is finishing.
+- **126, 129 The versions off the message thread:** the Source Control badge compares nothing while nothing changed
+  and only the track that changed after an edit; opening a commit reads it in the background; the Project view
+  finds the unused audio in the background, reading each kept song once. (Switching branches and starting a merge
+  still read there: what is left of 126.)
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

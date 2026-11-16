@@ -43,7 +43,9 @@ Versions/
 `<branch>` is the branch's id and `<computer>` the computer's: each 32 lowercase hexadecimal digits (a UUID without its
 dashes). A computer's id is made once, at random, and never names the user or the machine.
 
-**Who writes what.** Pieces and bounces are written once and never changed. Each computer writes only its own files: its
+**Who writes what.** Pieces and bounces are written once and never changed. (A pack whose every piece a reader found damaged
+is written again whole, by the next writer that holds those pieces, under its own name: the same index, and so the same
+name, in place of the damaged one; its pieces are the same.) Each computer writes only its own files: its
 record of each branch, its file of edited messages, and everything under `local/<computer>/`. So a folder that Dropbox, OneDrive or a NAS syncs
 between computers never has two writers on one file, but `current`, which goes with the project file, as the project file
 does.
@@ -71,9 +73,10 @@ A reader:
 - refuses a piece whose uncompressed size is more than zlib can make of its compressed bytes (1,032 times them, and a
   little), or that doesn't inflate to that size;
 - checks each piece's SHA-256 against its name, and treats one that doesn't match as missing;
-- takes a piece from the first pack that lists it, when several do.
+- takes a piece from the first pack that lists it, when several do, and from the next one where that copy is damaged.
 
-A writer writes the pieces no pack has yet into a new pack. Phazite joins its packs into one once there are more than 50,
+A writer writes the pieces no pack has yet into a new pack; Phazite forgets a copy it found damaged, so that its next
+write that holds the piece writes it again. Phazite joins its packs into one once there are more than 50,
 writing the joined pack before deleting the others, and keeps a pack that holds a damaged piece.
 
 [`tools/read-versions.pl`](../tools/read-versions.pl) is a reader of packs in under 100 lines of Perl, written from this
@@ -188,7 +191,8 @@ is the oldest.
 computer switched away from with a song of its own on it: the `branch` and the `song` (a song piece, view state
 included). `local/<computer>/logs/<branch>` is a line for each move of the branch's last commit on this computer, as
 git's reflog: when (milliseconds since 1970), the commit it was at (`-` for none), the one it went to (`-` for none), and
-why (`commit`, `merge`, `branch`, `recover`, `undo` for Undo Last Commit, `delete` for a branch deleted, `checkout` for a
+why (`commit`, `merge`, `branch`, `recover`, `undo` for Undo Last Commit, `delete` for a branch deleted, `reset` for a
+branch whose last commit couldn't be read taken back to the newest commit of its log that reads, `checkout` for a
 commit checked out on its own), separated by spaces. A last line without its line end was cut off and is left out.
 
 `local/<computer>/history` is this computer's Local History, a line for each snapshot of the song, oldest first: when it

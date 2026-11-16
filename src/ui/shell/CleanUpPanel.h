@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The window of Clean Up Unused Audio... (model/project/UnusedAudio.h): the audio files in the project's folder that no song
-// of it plays, each ticked, with its size, and what the ticked ones take. Delete moves them to the recycle bin and says how
-// many went; Cancel (then Close) closes the window.
+// of it plays, each ticked, with its size, and what the ticked ones take, looked for in the background (UnusedAudioFinder),
+// the window saying so meanwhile, or why it can't tell. Delete moves them to the recycle bin and says how many went;
+// Cancel (then Close) closes the window.
 #pragma once
 
 #include "model/project/ProjectContext.h"
@@ -21,6 +22,7 @@ public:
     static constexpr int width = 520, height = 440;
 
     // For tests: the files listed, a row at a time as screen readers say it, and their ticks; what the panel says of them.
+    bool isLooking() const noexcept { return finder.isLooking(); }
     int getNumFiles() const noexcept { return (int) files.size(); }
     juce::String describeFile (int row) const;
     bool isTicked (int row) const;
@@ -36,15 +38,17 @@ public:
 private:
     ProjectContext& context;
     const Removal removal;
+    UnusedAudioFinder finder;
+    juce::String done; // what the last Delete did, said until the next
     std::vector<UnusedAudioFile> files;
     std::vector<bool> ticked;
     juce::Label title, summary;
     juce::ListBox list;
     juce::TextButton deleteButton { "Delete" }, cancelButton { "Cancel" };
 
-    void findFiles();
+    void showFound();
     void deleteTicked();
-    void refreshSummary (const juce::String& done = {});
+    void refreshSummary();
     void close();
 
     int getNumRows() override { return getNumFiles(); }

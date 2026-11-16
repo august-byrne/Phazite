@@ -5,6 +5,7 @@
 
 #include <juce_cryptography/juce_cryptography.h>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -119,9 +120,15 @@ void PieceStore::readIndex (const juce::File& file)
     if (juce::SHA256 (entries.getData(), entries.getSize()).toHexString() != file.getFileNameWithoutExtension())
         return;
 
-    const auto packNumber = packs.size();
-    packs.add (file);
-    totalSize += length;
+    // One read before again (written anew in place of its damaged copy, which had the same index) keeps its number.
+    const auto known = packs.indexOf (file);
+    const auto packNumber = known >= 0 ? known : packs.size();
+
+    if (known < 0)
+    {
+        packs.add (file);
+        totalSize += length;
+    }
 
     for (juce::uint32 i = 0; i < count; ++i)
     {
@@ -133,10 +140,15 @@ void PieceStore::readIndex (const juce::File& file)
         location.size = juce::ByteOrder::littleEndianInt (entry + nameSize + 12);
 
         // Within the pack's pieces, counted so that a start no file has can't wrap round; and not empty, which nothing
-        // compressed is.
+        // compressed is. Every pack's copy of it, the first read first.
         if (location.start >= markSize && location.start <= indexStart && location.compressedSize > 0
             && (juce::int64) location.compressedSize <= indexStart - location.start)
-            index.emplace (juce::String::toHexString (entry, nameSize, 0), location);
+        {
+            auto& copies = index[juce::String::toHexString (entry, nameSize, 0)];
+
+            if (std::none_of (copies.begin(), copies.end(), [packNumber] (const Location& copy) { return copy.pack == packNumber; }))
+                copies.push_back (location);
+        }
     }
 }
 
@@ -144,6 +156,47 @@ bool PieceStore::has (const juce::String& name) const
 {
     const juce::ScopedLock sl (lock);
     return index.find (name) != index.end();
+}
+
+PieceStore::Copy PieceStore::readCopy (const Location& location, const juce::String& name, juce::MemoryBlock& piece) const
+{
+    auto& stream = openPacks[location.pack];
+
+    if (stream == nullptr)
+    {
+        stream = std::make_unique<juce::FileInputStream> (packs[location.pack]);
+
+        if (! stream->openedOk())
+        {
+            stream = nullptr;
+            return Copy::unread;
+        }
+    }
+
+    juce::MemoryBlock compressed (location.compressedSize);
+
+    if (! stream->setPosition (location.start)
+        || stream->read (compressed.getData(), (int) location.compressedSize) != (int) location.compressedSize)
+    {
+        // A pack that couldn't be read is opened again for the next piece: its stream reads nothing more. One read whole
+        // that ends before the piece does was cut short: its copy is damaged.
+        if (stream->getStatus().failed())
+        {
+            stream = nullptr;
+            return Copy::unread;
+        }
+
+        return Copy::damaged;
+    }
+
+    // What it holds, if it is what its name says.
+    auto read = decompress (compressed, location.size);
+
+    if (! read.has_value() || getPieceName (*read) != name)
+        return Copy::damaged;
+
+    piece = std::move (*read);
+    return Copy::whole;
 }
 
 std::optional<juce::MemoryBlock> PieceStore::read (const juce::String& name) const
@@ -154,7 +207,42 @@ std::optional<juce::MemoryBlock> PieceStore::read (const juce::String& name) con
     if (found == index.end())
         return std::nullopt;
 
-    const auto& location = found->second;
+    // Each pack's copy in turn; one that isn't what its name says forgotten, so that a write holding the piece writes it
+    // again once no copy is left.
+    auto& copies = found->second;
+    juce::MemoryBlock piece;
+
+    for (size_t i = 0; i < copies.size();)
+    {
+        const auto copy = readCopy (copies[i], name, piece);
+
+        if (copy == Copy::whole)
+            return piece;
+
+        if (copy == Copy::damaged)
+            copies.erase (copies.begin() + (std::ptrdiff_t) i);
+        else
+            ++i;
+    }
+
+    if (copies.empty())
+        index.erase (found);
+
+    return std::nullopt;
+}
+
+std::optional<juce::MemoryBlock> PieceStore::readStart (const juce::String& name, int numBytes) const
+{
+    const juce::ScopedLock sl (lock);
+    const auto found = index.find (name);
+
+    if (found == index.end() || found->second.empty() || numBytes <= 0)
+        return std::nullopt;
+
+    // Enough of its compressed bytes for the start of it: zlib's header and the first block's tables come first.
+    const auto& location = found->second.front();
+    const auto wanted = (int) juce::jmin ((juce::uint32) numBytes, location.size);
+    const auto compressedWanted = (int) juce::jmin (location.compressedSize, (juce::uint32) (wanted + 4096));
     auto& stream = openPacks[location.pack];
 
     if (stream == nullptr)
@@ -168,28 +256,29 @@ std::optional<juce::MemoryBlock> PieceStore::read (const juce::String& name) con
         }
     }
 
-    juce::MemoryBlock compressed (location.compressedSize);
+    juce::MemoryBlock compressed ((size_t) compressedWanted);
 
-    if (! stream->setPosition (location.start)
-        || stream->read (compressed.getData(), (int) location.compressedSize) != (int) location.compressedSize)
+    if (! stream->setPosition (location.start) || stream->read (compressed.getData(), compressedWanted) != compressedWanted)
     {
-        // A pack that couldn't be read is opened again for the next piece: its stream reads nothing more.
         if (stream->getStatus().failed())
             stream = nullptr;
 
         return std::nullopt;
     }
 
-    // What it holds, if it is what its name says.
-    auto piece = decompress (compressed, location.size);
+    juce::MemoryInputStream in (compressed, false);
+    juce::GZIPDecompressorInputStream zlib (&in, false, juce::GZIPDecompressorInputStream::zlibFormat);
+    juce::MemoryBlock start ((size_t) wanted);
+    const auto read = zlib.read (start.getData(), wanted);
 
-    if (! piece.has_value() || getPieceName (*piece) != name)
+    if (read <= 0)
         return std::nullopt;
 
-    return piece;
+    start.setSize ((size_t) read);
+    return start;
 }
 
-bool PieceStore::write (const std::map<juce::String, juce::MemoryBlock>& pieces)
+bool PieceStore::write (const std::map<juce::String, juce::MemoryBlock>& pieces, juce::String* problem)
 {
     std::vector<std::pair<juce::String, const juce::MemoryBlock*>> fresh;
 
@@ -230,8 +319,16 @@ bool PieceStore::write (const std::map<juce::String, juce::MemoryBlock>& pieces)
     pack.writeInt64 (indexStart);
     pack.write (mark, markSize);
 
-    if (! folder.createDirectory())
+    const auto fail = [problem] (const juce::String& why)
+    {
+        if (problem != nullptr)
+            *problem = why;
+
         return false;
+    };
+
+    if (const auto made = folder.createDirectory(); made.failed())
+        return fail ("Phazite couldn't make the Versions folder's pieces folder: " + made.getErrorMessage());
 
     // Written whole beside it, flushed to the disk, then given its name (model/base/WholeFile.h): a pack is never seen half
     // written. Written only if every piece is found in it as it is read back.
@@ -246,26 +343,34 @@ bool PieceStore::write (const std::map<juce::String, juce::MemoryBlock>& pieces)
     };
 
     {
-        // One of its name that is there already (another store's) is read, and is enough if it holds them; one that doesn't
-        // read, cut short or damaged, is written again.
+        // One of its name that is there already (another store's) is read, and is enough if it holds them whole; one that
+        // doesn't read, cut short or damaged (a copy of it this store found damaged, which had the same index), is written
+        // again, let go of first so that it can be replaced.
         const juce::ScopedLock sl (lock);
 
         if (file.existsAsFile() && ! packs.contains (file))
+        {
             readIndex (file);
 
-        if (holdsThem())
-            return true;
+            if (std::all_of (fresh.begin(), fresh.end(), [this] (const auto& piece) { return read (piece.first).has_value(); }))
+                return true;
+        }
+
+        if (const auto known = packs.indexOf (file); known >= 0)
+            openPacks.erase (known);
     }
 
-    if (writeWholeFile (file, pack.getData(), pack.getDataSize()).failed())
-        return false;
+    // One of its name there already, damaged, is replaced; another program that holds it (a sync program, a virus scanner)
+    // keeps that from happening, which is said.
+    if (const auto written = writeWholeFile (file, pack.getData(), pack.getDataSize()); written.failed())
+        return fail ("Phazite couldn't write the pack " + file.getFileName() + " into the Versions folder: " + written.getErrorMessage()
+                     + (file.existsAsFile() ? " Another program (a sync program or a virus scanner) may hold the damaged pack of that "
+                                              "name, which it replaces: try again once it lets go of it."
+                                            : juce::String()));
 
     const juce::ScopedLock sl (lock);
-
-    if (! packs.contains (file))
-        readIndex (file);
-
-    return holdsThem();
+    readIndex (file);
+    return holdsThem() || fail ("Phazite wrote the pack " + file.getFileName() + " but couldn't read it back whole.");
 }
 
 juce::int64 PieceStore::getSize() const
@@ -309,7 +414,7 @@ int PieceStore::getNumPacks() const
     return packs.size();
 }
 
-bool PieceStore::joinPacks()
+bool PieceStore::joinPacks (const std::function<bool()>& shouldStop)
 {
     const juce::ScopedLock sl (lock);
 
@@ -320,6 +425,7 @@ bool PieceStore::joinPacks()
     const auto newPack = folder.getChildFile ("joining.pack.tmp");
     newPack.deleteFile();
     std::set<int> damaged; // the packs that hold a piece that isn't what its name says, which stay
+    auto stopped = false;
     juce::MemoryOutputStream entries;
     int count = 0;
 
@@ -331,33 +437,44 @@ bool PieceStore::joinPacks()
 
         out.write (mark, markSize);
 
-        for (const auto& [name, location] : index)
+        // Of each piece, the first copy that checks out.
+        for (const auto& [name, copies] : index)
         {
-            juce::FileInputStream in (packs[location.pack]);
-            juce::MemoryBlock compressed (location.compressedSize);
-
-            if (! in.openedOk() || ! in.setPosition (location.start)
-                || in.read (compressed.getData(), (int) location.compressedSize) != (int) location.compressedSize)
+            if (shouldStop != nullptr && shouldStop())
             {
-                damaged.insert (location.pack);
-                continue;
+                stopped = true;
+                break;
             }
 
-            if (const auto piece = decompress (compressed, location.size); ! piece.has_value() || getPieceName (*piece) != name)
+            for (const auto& location : copies)
             {
-                damaged.insert (location.pack);
-                continue;
-            }
+                juce::FileInputStream in (packs[location.pack]);
+                juce::MemoryBlock compressed (location.compressedSize);
 
-            juce::MemoryBlock nameBytes;
-            nameBytes.loadFromHexString (name);
-            nameBytes.setSize ((size_t) nameSize, true);
-            entries.write (nameBytes.getData(), (size_t) nameSize);
-            entries.writeInt64 (out.getPosition());
-            entries.writeInt ((int) location.compressedSize);
-            entries.writeInt ((int) location.size);
-            out.write (compressed.getData(), compressed.getSize());
-            ++count;
+                if (! in.openedOk() || ! in.setPosition (location.start)
+                    || in.read (compressed.getData(), (int) location.compressedSize) != (int) location.compressedSize)
+                {
+                    damaged.insert (location.pack);
+                    continue;
+                }
+
+                if (const auto piece = decompress (compressed, location.size); ! piece.has_value() || getPieceName (*piece) != name)
+                {
+                    damaged.insert (location.pack);
+                    continue;
+                }
+
+                juce::MemoryBlock nameBytes;
+                nameBytes.loadFromHexString (name);
+                nameBytes.setSize ((size_t) nameSize, true);
+                entries.write (nameBytes.getData(), (size_t) nameSize);
+                entries.writeInt64 (out.getPosition());
+                entries.writeInt ((int) location.compressedSize);
+                entries.writeInt ((int) location.size);
+                out.write (compressed.getData(), compressed.getSize());
+                ++count;
+                break;
+            }
         }
 
         const auto indexStart = out.getPosition();
@@ -372,6 +489,12 @@ bool PieceStore::joinPacks()
             newPack.deleteFile();
             return false;
         }
+    }
+
+    if (stopped)
+    {
+        newPack.deleteFile(); // the packs as they were
+        return false;
     }
 
     // Named by its index, as any pack is, then read in place of the others, which go but those that stay.

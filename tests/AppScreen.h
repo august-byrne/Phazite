@@ -16,6 +16,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/VersionsModel.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
@@ -51,6 +52,13 @@ struct AppScreen
     }
 
     TemporaryFolder temp;
+
+    // What the project's history still writes as the session closes it (VersionsModel.h), done before the folder goes.
+    struct VersionsFinished
+    {
+        ~VersionsFinished() { waitForVersionsFinished(); }
+    } versionsFinished;
+
     AppServices services { getEngineContext(),
                            { .settingsInMemory = true,
                              .packsFolder = temp.folder.getChildFile ("Packs"),

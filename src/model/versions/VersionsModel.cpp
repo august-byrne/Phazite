@@ -346,7 +346,9 @@ juce::int64 getVersionsSize (const ProjectContext& context)
 bool canSaveVersion (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && ! history->isReading() && ! history->isSaving() && hasSomethingToCommit (context);
+    // Not on top of a last commit that can't be read while one that reads is offered (Reset Branch to Last Readable Commit).
+    return history != nullptr && ! history->isReading() && ! history->isSaving() && ! history->canResetToReadable()
+           && hasSomethingToCommit (context);
 }
 
 bool hasSomethingToCommit (const ProjectContext& context)
@@ -504,6 +506,12 @@ std::vector<VersionChange> getVersionChanges (const ProjectContext& context, con
 {
     auto* history = findHistory (context);
     return history != nullptr ? toLines (history->getVersionChanges (versionID)) : std::vector<VersionChange>();
+}
+
+bool isReadingVersionChanges (const ProjectContext& context, const juce::String& versionID)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isReadingVersionChanges (versionID);
 }
 
 bool restoreFromVersion (ProjectContext& context, const juce::String& versionID, const VersionChange& line)
@@ -881,7 +889,7 @@ bool renameBranch (ProjectContext& context, const juce::String& branchID, const 
 bool canRenameBranch (const ProjectContext& context)
 {
     const auto current = getCurrentBranch (context);
-    return current.has_value() && ! current->detached;
+    return current.has_value() && ! current->detached && ! isSavingVersion (context); // a commit writes its record meanwhile
 }
 
 bool canDeleteBranch (const ProjectContext& context, const juce::String& branchID)
@@ -1157,6 +1165,24 @@ juce::String getMergeProblem (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
     return history != nullptr ? history->getMergeProblem() : juce::String();
+}
+
+juce::String getHeadProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->getHeadProblem() : juce::String();
+}
+
+bool canResetToReadable (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->canResetToReadable();
+}
+
+bool resetToReadable (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->resetToReadable();
 }
 
 void cancelMerge (ProjectContext& context)
@@ -2614,5 +2640,13 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits" },
            .perform = [&context] { recoverLostVersions (context); },
            .isEnabled = [&context] { return countLostVersions (context) > 0; } });
+
+    add ({ .id = "version.resetToReadable",
+           .name = "Reset Branch to Last Readable Commit",
+           .description = "Takes the current branch, whose last commit can't be read from the Versions folder, back to the newest "
+                          "commit of its log that reads, keeping the song as it is.",
+           .synonyms = { "damaged", "broken", "missing commit", "repair", "reset", "reflog" },
+           .perform = [&context] { resetToReadable (context); },
+           .isEnabled = [&context] { return canResetToReadable (context); } });
 }
 } // namespace phazite
