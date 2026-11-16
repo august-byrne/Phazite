@@ -217,6 +217,7 @@ the [changelog](changelog.md).
 | G126c | Start Normalize on a long audio clip, then a branch switch; quit while a switch or an import is reading | The two progress windows show one after the other, never on top of each other; Phazite closes without waiting, and after Cancel at the save question Source Control says "Stopped, as Phazite was closing" | |
 | G126d | Import a large .dawproject (File > Import, and as a branch), once to the end and once with Cancel | The progress bar moves; Cancel leaves the open project as it was, no new branch and no unpacked audio in the project's folder; the notice comes only when the import is done | |
 | G126e | Name a track "CON" and record on it; save a project as "NUL"; drop a track named "COM1" into the browser | Each saves: "CON_ Take 1.wav", a folder "NUL_", a preset "COM1_" | |
+| G184 | In a committed project, close Phazite, replace the .phazite file's text with garbage and open it again | "Phazite couldn't read the project" offers the backup and the last commit; Open the Last Commit opens the committed song, shown as changed; with a long history the window takes no input while it reads and shows "Reading the copies of ..." after a second, whose Cancel offers the backup alone or says the error | |
 
 ## Performance on other machines
 

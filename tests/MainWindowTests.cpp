@@ -304,6 +304,12 @@ void checkMenu (const juce::PopupMenu& menu, const juce::String& path, MainScree
 // Every menu, as the menu bar asks for it now; the commands found in them, in order.
 juce::StringArray checkMenus (MainScreen& screen, int& recent)
 {
+    // What a command may do can depend on what another thread is doing (Clean Up Unused Audio waits for a commit or a snapshot
+    // being written): the menus are compared once the versions' writes are in, so that both sides read the same state.
+    REQUIRE (phazite::test::waitForVersionHistory (screen.session.getContext()));
+    phazite::test::waitForVersionsWrites();
+    dispatchPendingMessages();
+
     auto& menus = getMenus (screen);
     const auto names = menus.getMenuBarNames();
     CHECK (names == phazite::getMainMenuNames());

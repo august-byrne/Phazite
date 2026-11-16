@@ -24,6 +24,8 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <utility>
 
 namespace phazite
@@ -166,6 +168,18 @@ namespace
         TrackRenderHost* renders;
         std::shared_ptr<WorkWait> wait;
     };
+
+    // The copies of a project whose file can't be read, as they come in from the thread that reads them (message thread):
+    // its newest backup that reads, then its branch's last commit; and the window's hold meanwhile, which only the read and
+    // the message that offers them hold (its Cancel holds it weakly), let go of as either ends it.
+    struct CopiesRead
+    {
+        juce::File backupFile;
+        juce::ValueTree backup;
+        std::atomic<bool> stop { false }; // the read cancelled: the commit isn't read if it hasn't started
+        bool over = false;                // offered, or cancelled
+        std::unique_ptr<ProjectContext::WorkHold> hold;
+    };
 } // namespace
 
 ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
@@ -191,6 +205,14 @@ ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentPro
 
 ProjectSession::~ProjectSession()
 {
+    // A read of a project's copies under way ends here, saying nothing: its hold let go of while what it holds lives.
+    if (const auto read = std::static_pointer_cast<CopiesRead> (copiesReading.lock()))
+    {
+        read->over = true;
+        read->stop = true;
+        read->hold = nullptr;
+    }
+
     getSelection().removeChangeListener (this);
     engineContext.removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the engine context goes
@@ -1093,50 +1115,125 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
         return;
     }
 
-    // A file there that doesn't read: its newest backup that does, or its branch's last commit, offered in its place.
+    // A file there that doesn't read: its newest backup that does, or its branch's last commit, offered in its place, once
+    // they are read in the background.
     if (file.existsAsFile())
-    {
-        auto [backupFile, backup] = Project::readNewestBackup (file);
-        auto [commit, commitName] = readLastCommitSong (file);
+        readCopiesThenOffer (file, error);
+    else
+        couldNotOpen (file, error);
+}
 
-        if (backup.isValid() || commit.isValid())
-        {
-            const auto backupText =
-                backup.isValid() ? "the backup of " + backupFile.getLastModificationTime().formatted ("%d %b %Y %H:%M") : juce::String();
-            const auto commitText = commit.isValid() ? "the last commit, \"" + commitName + "\"" : juce::String();
-
-            const auto choose = [this, file, backupSong = backup, commitSong = commit] (int choice)
-            {
-                juce::String copyError;
-
-                if (const auto& song = choice == 1 ? backupSong : commitSong; choice != 0 && song.isValid())
-                {
-                    if (auto opened = Project::openWithSong (file, song, copyError))
-                    {
-                        setProject (std::move (opened));
-                        return;
-                    }
-                }
-
-                recent.remove (file);
-
-                if (copyError.isNotEmpty())
-                    showError ("Phazite couldn't open the project", copyError);
-
-                if (project == nullptr)
-                    createFirstProject();
-            };
-
-            askWhichCopyToOpen (error, backupText, commitText, choose);
-            return;
-        }
-    }
-
+void ProjectSession::couldNotOpen (const juce::File& file, const juce::String& error)
+{
     recent.remove (file);
     showError ("Phazite couldn't open the project", error);
 
     if (project == nullptr)
         createFirstProject();
+}
+
+void ProjectSession::readCopiesThenOffer (const juce::File& file, const juce::String& error)
+{
+    // Known bug 184: the backups and the last commit were read on the message thread before the question showed, the commit's
+    // whole song joined from the store's pieces (80-190 ms in the 32-track benchmark song, more with a long history). Now on
+    // a thread of their own, the window held as for any work (InputHold.h), with a progress window after a second whose
+    // Cancel, or Escape, offers what was read by then (the backup, if it was), or says the error; a quit stops it, saying
+    // nothing. The project's own file and its autosave, read as it opened, are the open itself.
+    const auto read = std::make_shared<CopiesRead>();
+    const auto session = std::weak_ptr<bool> (alive);
+    copiesReading = read;
+
+    read->hold = context.holdForWork ("Reading the copies of \"" + file.getFileNameWithoutExtension() + "\"",
+                                      [this, session, weakRead = std::weak_ptr<CopiesRead> (read), file, error] (const juce::String& why)
+                                      {
+                                          const auto read = weakRead.lock();
+
+                                          if (read == nullptr || read->over)
+                                              return;
+
+                                          read->over = true;
+                                          read->stop = true;
+                                          auto hold = std::move (read->hold); // let go of at the end of this call
+
+                                          // A quit (why given): nothing more. A cancel: what was read, offered a message
+                                          // later, once the progress window has gone.
+                                          if (why.isEmpty())
+                                              juce::MessageManager::callAsync (
+                                                  [this, session, read, file, error]
+                                                  {
+                                                      if (! session.expired())
+                                                          offerCopies (file, error, read->backupFile, read->backup, {}, {});
+                                                  });
+                                      });
+
+    copyReads.add (
+        [this, session, read, file, error, computer = getThisComputer()] (const BackgroundJobs::ShouldStop& shouldStop)
+        {
+            auto [backupFile, backup] = Project::readNewestBackup (file);
+            juce::MessageManager::callAsync (
+                [read, backupFile = backupFile, backup = backup]
+                {
+                    read->backupFile = backupFile;
+                    read->backup = backup;
+                });
+
+            // Tests' seam: the commit's read held where it starts until let go, or cancelled (VersionHistory::holdReadsForTests).
+            while (VersionHistory::holdReadsForTests.load() && ! shouldStop() && ! read->stop.load())
+                juce::Thread::sleep (1);
+
+            if (shouldStop() || read->stop.load())
+                return;
+
+            auto [commit, commitName] = readLastCommitSong (file, computer);
+            juce::MessageManager::callAsync (
+                [this, session, read, file, error, commit = commit, commitName = commitName]
+                {
+                    if (session.expired() || read->over)
+                        return;
+
+                    read->over = true;
+                    read->hold = nullptr; // the window let go of (its progress window too) before the question shows
+                    offerCopies (file, error, read->backupFile, read->backup, commit, commitName);
+                });
+        });
+}
+
+void ProjectSession::offerCopies (const juce::File& file, const juce::String& error, const juce::File& backupFile,
+                                  const juce::ValueTree& backup, const juce::ValueTree& commit, const juce::String& commitName)
+{
+    if (! backup.isValid() && ! commit.isValid())
+    {
+        couldNotOpen (file, error);
+        return;
+    }
+
+    const auto backupText =
+        backup.isValid() ? "the backup of " + backupFile.getLastModificationTime().formatted ("%d %b %Y %H:%M") : juce::String();
+    const auto commitText = commit.isValid() ? "the last commit, \"" + commitName + "\"" : juce::String();
+
+    const auto choose = [this, file, backupSong = backup, commitSong = commit] (int choice)
+    {
+        juce::String copyError;
+
+        if (const auto& song = choice == 1 ? backupSong : commitSong; choice != 0 && song.isValid())
+        {
+            if (auto opened = Project::openWithSong (file, song, copyError))
+            {
+                setProject (std::move (opened));
+                return;
+            }
+        }
+
+        recent.remove (file);
+
+        if (copyError.isNotEmpty())
+            showError ("Phazite couldn't open the project", copyError);
+
+        if (project == nullptr)
+            createFirstProject();
+    };
+
+    askWhichCopyToOpen (error, backupText, commitText, choose);
 }
 
 void ProjectSession::askWhichCopyToOpen (const juce::String& error, const juce::String& backup, const juce::String& commit,

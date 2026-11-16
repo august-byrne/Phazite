@@ -3578,9 +3578,9 @@ std::vector<RenumberedID> findRenumbering (const std::map<juce::String, VersionR
     return renumbered;
 }
 
-std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile)
+std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile, const juce::String& computer)
 {
-    const VersionStore store (projectFile.getSiblingFile ("Versions"), getThisComputer());
+    const VersionStore store (projectFile.getSiblingFile ("Versions"), computer);
     const auto records = store.readBranches();
     const auto current = store.readCurrentBranch();
 

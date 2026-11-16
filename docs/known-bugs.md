@@ -76,14 +76,6 @@ its fix.
   while they copy. Fix: bring them in as those do (`bringFilesIntoProject()`,
   `src/model/arrangement/internal/Import.h`), the preset applied once the copies are made.
 
-- **184. Opening a project whose file can't be read reads its branch's last commit on the message thread.** When the
-  project file can't be read, Phazite offers the current branch's last commit instead, and `readLastCommitSong()`
-  (`src/model/versions/VersionHistory.cpp`) opens the store and joins that commit's whole song, with the loader's
-  checks, on the message thread before the offer shows: about 80 to 190 ms on the 32-track benchmark song in
-  `windows-profile`, more with a long history's packs to open. Rare: it needs a damaged project file. Why: opening
-  asks, then opens, all in one call. Fix: read it with `ProjectContext::holdForWork()` and show the offer once it is
-  in. Left as the rest of known bug 126 was fixed (2026-11-16).
-
 ## Tests
 
 - **180. The plug-in tests still compare against the wall clock.** The rest of the tests no longer do (2026-11-16);

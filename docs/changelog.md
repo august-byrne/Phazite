@@ -289,6 +289,9 @@ too. A line names the bug's number in that list.
 - **125 An export of stems compiles each stem as its turn comes** and lets go of the one before: 17 ms before the
   first starts where it was 127, and a quarter of the memory.
 - **S5.7 The plan rebuilt only for what changed, notes and clips found by an index** is built with 122, 124 and 145.
+- **184 A damaged project's copies are read in the background.** A project whose file can't be read no longer reads
+  its backups and its branch's last commit on the message thread before it offers them: the window holds, a progress
+  window shows after a second, its Cancel offers what was read by then, and a quit stops the read.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

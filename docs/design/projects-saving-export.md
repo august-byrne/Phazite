@@ -189,8 +189,10 @@ An untitled project, and any project while Auto Save is off, is autosaved into a
   **Discard them**. Recordings made after the last autosave come back on tracks of their own. Untitled folders with
   nothing to restore are deleted.
 - A project file that can't be read offers the newest backup that reads (**Open the Backup**) or the song of its
-  branch's last commit (**Open the Last Commit**), opened in its place. Without either, it leaves Open Recent with
-  an error that says so.
+  branch's last commit (**Open the Last Commit**), opened in its place. Both are read in the background before the
+  question shows, the window held as for any work (a progress window after a second; its Cancel, or Escape, offers
+  the backup if it was read by then; a quit stops it). Without either, it leaves Open Recent with an error that says
+  so.
 - **A restored project is unsaved until it is saved.** A project opened from an autosave, a backup or a commit does
   not match its project file, so it shows as changed whatever else happens, and closing it saves it (with Auto Save)
   or asks (without it, or for an untitled project).

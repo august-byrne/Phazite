@@ -870,7 +870,7 @@ TEST_CASE ("A project's last commit is read from its Versions folder without the
     keepVersion (s.context, "Kept");
     auto& song = *phazite::findSong (s.context);
 
-    const auto [commit, name] = phazite::readLastCommitSong (song.getFile());
+    const auto [commit, name] = phazite::readLastCommitSong (song.getFile(), phazite::getThisComputer());
     REQUIRE (commit.isValid());
     CHECK (name == "Kept");
     CHECK (commit.hasType (schema::PHAZITE));

@@ -35,9 +35,14 @@
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "model/versions/internal/VersionStore.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
+
+#include <optional>
+#include <vector>
 
 // Last, so that its macros can't change the headers above: a file held by another program, as Windows lets one hold it.
 #if JUCE_WINDOWS
@@ -461,7 +466,9 @@ TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a 
     session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
     session.openAtStartup();
 
-    // An error says why, the file is left as it was, and a first project opens.
+    // An error says why, once no backup and no commit were found in the background, the file is left as it was, and a
+    // first project opens.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&errors] { return ! errors.isEmpty(); }));
     REQUIRE (errors.size() == 1);
     CHECK (errors[0].contains (broken.getFullPathName()));
     CHECK (broken.loadFileAsString() == juce::String ("Not a project"));
@@ -1034,6 +1041,7 @@ TEST_CASE ("A project file that won't open offers its newest backup that reads i
     };
 
     session.openProject (file);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&offered] { return offered.isNotEmpty(); })); // read in the background
     CHECK (offered.startsWith ("the backup of"));
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.getProject()->getFile() == file);
@@ -1043,6 +1051,174 @@ TEST_CASE ("A project file that won't open offers its newest backup that reads i
     REQUIRE (session.getProject()->save().wasOk());
     juce::String error;
     CHECK (phazite::Project::open (file, false, error) != nullptr);
+}
+
+namespace
+{
+// A project with a commit on its branch ("Kept", with a track named Bass), copied with its folders into parentFolder, as
+// an earlier session left it, its project file then damaged as a write cut short could leave it; its backups taken away
+// unless keepBackups, and the commit's pieces damaged too if commitDamaged. Its tracks, as the commit has them.
+struct DamagedProject
+{
+    juce::File file;
+    size_t tracks = 0;
+};
+
+DamagedProject makeDamagedProject (const juce::File& parentFolder, bool keepBackups, bool commitDamaged)
+{
+    DamagedProject made;
+    phazite::test::TestSong s;
+    s.addTrack ("Bass");
+    phazite::setVersionDraft (s.context, "Kept", {});
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (result->wasOk());
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    phazite::test::waitForVersionsWrites();
+    made.tracks = phazite::getTrackElements (phazite::findSong (s.context)->getState()).size();
+
+    const auto folder = s.getProject().getFile().getParentDirectory();
+    const auto copy = parentFolder.getChildFile (folder.getFileName());
+    REQUIRE (folder.copyDirectoryTo (copy));
+    made.file = copy.getChildFile (s.getProject().getFile().getFileName());
+    const auto backups = copy.getChildFile ("Backups");
+    REQUIRE (backups.deleteRecursively());
+
+    if (keepBackups) // the file as it was saved, a backup
+    {
+        REQUIRE (backups.createDirectory());
+        REQUIRE (made.file.copyFileTo (
+            backups.getChildFile (made.file.getFileNameWithoutExtension() + " backup" + made.file.getFileExtension())));
+    }
+
+    REQUIRE (made.file.replaceWithText ("<PHAZITE damaged"));
+
+    if (commitDamaged)
+        for (const auto& pack : copy.getChildFile ("Versions").findChildFiles (juce::File::findFiles, true, "*.pack"))
+            REQUIRE (pack.replaceWithText ("damaged"));
+
+    return made;
+}
+} // namespace
+
+TEST_CASE ("A project file that won't open offers its branch's last commit, read on a thread of its own while the window holds")
+{
+    // Known bug 184: the backups and the last commit were read on the message thread before the question showed.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    struct Offer
+    {
+        juce::String backup, commit;
+    };
+
+    std::vector<Offer> offers;
+    juce::StringArray errors;
+    auto answer = 0;
+    const auto makeSession = [&]
+    {
+        auto session = std::make_unique<phazite::ProjectSession> (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+        session->askWhichCopy =
+            [&] (const juce::String&, const juce::String& backup, const juce::String& commit, std::function<void (int)> then)
+        {
+            offers.push_back ({ backup, commit });
+            then (answer);
+        };
+        session->onError = [&errors] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+        return session;
+    };
+
+    SUBCASE ("Opened in the project's place, its song read from the store on no message thread")
+    {
+        const auto damaged = makeDamagedProject (temp.folder, false, false);
+        auto session = makeSession();
+        answer = 2;
+        const auto before = phazite::VersionStore::countSongsRead();
+        session->openProject (damaged.file);
+        CHECK (session->getContext().isHoldingForWork()); // the window held while it reads
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&offers] { return ! offers.empty(); }));
+        CHECK_FALSE (session->getContext().isHoldingForWork()); // let go of before the question
+        CHECK (offers[0].backup.isEmpty());
+        CHECK (offers[0].commit == "the last commit, \"Kept\"");
+        CHECK (phazite::VersionStore::countSongsRead().onMessageThread == before.onMessageThread);
+        CHECK (phazite::VersionStore::countSongsRead().all > before.all);
+
+        REQUIRE (session->getProject() != nullptr);
+        CHECK (session->getProject()->getFile() == damaged.file);
+        CHECK (session->getProject()->hasUnsavedChanges());
+        CHECK (phazite::getTrackElements (session->getProject()->getSong().getState()).size() == damaged.tracks);
+        CHECK (errors.isEmpty());
+    }
+
+    SUBCASE ("Declined: a first project instead, the damaged one off the recent list")
+    {
+        const auto damaged = makeDamagedProject (temp.folder, true, false);
+        auto session = makeSession();
+        answer = 0;
+        session->openProject (damaged.file);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&offers] { return ! offers.empty(); }));
+        CHECK (offers[0].backup.startsWith ("the backup of"));
+        CHECK (offers[0].commit.isNotEmpty());
+        REQUIRE (session->getProject() != nullptr);
+        CHECK (session->getProject()->getFile() != damaged.file);
+        CHECK_FALSE (recent.getProjects().contains (damaged.file));
+    }
+
+    SUBCASE ("Its commit unreadable too: the backup alone offered, and with none, the error")
+    {
+        const auto damaged = makeDamagedProject (temp.folder, true, true);
+        auto session = makeSession();
+        answer = 0;
+        session->openProject (damaged.file);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&offers] { return ! offers.empty(); }));
+        CHECK (offers[0].backup.isNotEmpty());
+        CHECK (offers[0].commit.isEmpty());
+
+        const auto bare = makeDamagedProject (temp.folder.getChildFile ("Bare"), false, true);
+        session->openProject (bare.file);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&errors] { return ! errors.isEmpty(); }));
+        CHECK (offers.size() == 1);
+        CHECK (errors[0].startsWith ("Phazite couldn't open the project"));
+    }
+
+    SUBCASE ("Cancelled during the read, or Escape before its window: what was read by then is offered, or the error said")
+    {
+        const auto damaged = makeDamagedProject (temp.folder, true, false);
+        auto session = makeSession();
+        answer = 0;
+        phazite::VersionHistory::holdReadsForTests = true; // the commit's read held where it starts
+        session->openProject (damaged.file);
+        REQUIRE (session->getContext().isHoldingForWork());
+        CHECK (session->cancelHeldWork()); // Escape, as the window's Cancel
+        CHECK_FALSE (session->getContext().isHoldingForWork());
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! offers.empty() || ! errors.isEmpty(); }));
+        phazite::VersionHistory::holdReadsForTests = false;
+        REQUIRE (offers.size() + (size_t) errors.size() == 1);
+
+        // The backup, if it was in by then; never the commit, whose read the cancel stopped.
+        if (! offers.empty())
+            CHECK (offers[0].commit.isEmpty());
+    }
+
+    SUBCASE ("A quit during the read stops it, saying nothing, and offering nothing")
+    {
+        const auto damaged = makeDamagedProject (temp.folder, true, false);
+        auto session = makeSession();
+        phazite::VersionHistory::holdReadsForTests = true;
+        session->openProject (damaged.file);
+        REQUIRE (session->getContext().isHoldingForWork());
+        session->cancelWork(); // as the quit cancels every work that holds the window
+        CHECK_FALSE (session->getContext().isHoldingForWork());
+        phazite::VersionHistory::holdReadsForTests = false;
+        session = nullptr; // the read ends with the session, waited for
+        phazite::test::dispatchPendingMessages();
+        CHECK (offers.empty());
+        CHECK (errors.isEmpty());
+    }
 }
 
 TEST_CASE ("An autosave that can't be read gives way to the project's own file, and Phazite says so")

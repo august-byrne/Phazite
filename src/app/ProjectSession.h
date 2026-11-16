@@ -4,6 +4,7 @@
 #pragma once
 
 #include "InputHold.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
@@ -221,6 +222,13 @@ private:
     void open (const juce::File&, bool restoreAutosave);
     void restoreUntitled (const juce::File&, bool restore);
     void askWhetherToRestore (const juce::File&, bool untitled, std::function<void (bool restore)>);
+    // A project whose file can't be read: its newest backup that reads and its branch's last commit read on a thread of its
+    // own while the window holds (known bug 184: on the message thread, before the question showed), then offered in its
+    // place; and what is left when none is, or the read is cancelled: the error, a first project if none is open.
+    void readCopiesThenOffer (const juce::File&, const juce::String& error);
+    void offerCopies (const juce::File&, const juce::String& error, const juce::File& backupFile, const juce::ValueTree& backup,
+                      const juce::ValueTree& commit, const juce::String& commitName);
+    void couldNotOpen (const juce::File&, const juce::String& error);
     void askWhichCopyToOpen (const juce::String& error, const juce::String& backup, const juce::String& commit, std::function<void (int)>);
     void askHowToOpenAfterCrash (const juce::File&, std::function<void (AfterCrash)>);
     bool pluginsOffUntilOpen = false; // the project opening opens with its plug-ins off
@@ -264,6 +272,8 @@ private:
     std::unique_ptr<ProjectContext::WorkHold> holdForWork (const juce::String& title, ProjectContext::Cancel, ProjectContext::Progress);
     int closesWaiting = 0; // closeThen()s that wait for the plug-ins' states
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
+    BackgroundJobs copyReads { "Phazite copies", 1, juce::Thread::Priority::normal }; // readCopiesThenOffer()'s
+    std::weak_ptr<void> copiesReading;                                                // the one under way, if one is
     void showError (const juce::String& title, const juce::String& message);
     void showNotice (const juce::String& title, const juce::String& message);
 

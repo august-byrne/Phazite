@@ -742,9 +742,10 @@ juce::ValueTree readCommitSong (const VersionStore&, const juce::String& songPie
                                 std::vector<MissingPiece>* missing = nullptr, bool* idsGivenAnew = nullptr);
 
 // The song of the current branch's last commit in a project's history, read from its Versions folder without opening the
-// project (when its file can't be read, ProjectSession offers it), and the commit's name; invalid for none, or one that
-// can't be read whole.
-std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile);
+// project (when its file can't be read, ProjectSession offers it, read on a thread of its own: known bug 184), and the
+// commit's name; invalid for none, or one that can't be read whole. computer is this computer's (getThisComputer(), read on
+// the message thread). Any thread.
+std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile, const juce::String& computer);
 
 // Every computer's record of every branch (VersionStore.h) taken together, a record a branch, as this computer has them:
 // its name and color the newest record's; its last version the one that follows every other computer's, or, where the

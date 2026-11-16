@@ -19,6 +19,7 @@
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "app/ProjectSession.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
@@ -53,6 +54,8 @@
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
+#include "services/RecentProjects.h"
+#include "services/Settings.h"
 #include "ui/mixer/ChannelStrip.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/playlist/TrackHeader.h"
@@ -1146,7 +1149,8 @@ TEST_CASE ("Performance gate: a track's controllers' index holds a place for eac
 }
 
 TEST_CASE (
-    "Performance gate: a branch switch, a checkout and the start of a merge read no song on the message thread, nor split or write one")
+    "Performance gate: a branch switch, a checkout, the start of a merge and an open that offers the last commit read no song on the "
+    "message thread, nor split or write one")
 {
     // Known bug 126: a switch read two songs on the message thread (the branch's and its last commit's), and the start of a
     // merge two (the commit both lines have, and the other's), keeping the window for a second and more in a large song.
@@ -1200,4 +1204,31 @@ TEST_CASE (
     CHECK (phazite::countSongsSplit().onMessageThread == splitsBefore.onMessageThread);
     CHECK (phazite::VersionStore::countSongsWritten().onMessageThread == writesBefore.onMessageThread);
     CHECK (phazite::VersionStore::countSongsWritten().all > writesBefore.all);
+
+    // Nor does an open whose project file can't be read, which offers the branch's last commit (known bug 184): the project
+    // copied with its history as it is now, its file damaged, opened in a session of its own.
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    phazite::test::waitForVersionsWrites();
+    phazite::test::TemporaryFolder elsewhere;
+    const auto folder = song.getFile().getParentDirectory();
+    REQUIRE (folder.copyDirectoryTo (elsewhere.folder.getChildFile (folder.getFileName())));
+    const auto damaged = elsewhere.folder.getChildFile (folder.getFileName()).getChildFile (song.getFile().getFileName());
+    REQUIRE (damaged.replaceWithText ("<PHAZITE damaged"));
+
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (phazite::test::getEngineContext(), recent, elsewhere.folder,
+                                     elsewhere.folder.getChildFile ("Unsaved"));
+    juce::String offered;
+    session.askWhichCopy =
+        [&offered] (const juce::String&, const juce::String&, const juce::String& commit, std::function<void (int)> answer)
+    {
+        offered = commit;
+        answer (0);
+    };
+    const auto openBefore = phazite::VersionStore::countSongsRead();
+    session.openProject (damaged);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&offered] { return offered.isNotEmpty(); }));
+    CHECK (phazite::VersionStore::countSongsRead().onMessageThread == openBefore.onMessageThread);
+    CHECK (phazite::VersionStore::countSongsRead().all > openBefore.all);
 }
