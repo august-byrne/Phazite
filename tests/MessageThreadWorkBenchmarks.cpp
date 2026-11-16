@@ -179,10 +179,23 @@ TEST_CASE ("Benchmark: the browser's filters' counts and its filtered places, in
                << juce::String (call, 2) << " | " << juce::String (there, 1) << " |\n";
     }
 
+    // The places the Type filter set to Kick leaves: before, listed on the message thread; now, the call that starts the
+    // listing, and how long until the places are there.
     auto started = now();
     const auto places = model.getPlaces (kicks);
-    report << "\nThe places with the Type filter set to Kick, listed on the message thread: " << juce::String (now() - started, 1)
-           << " ms (" << (int) places.size() << " places)\n";
+    const auto atOnce = now() - started;
+
+    std::optional<phazite::BrowserModel::FilteredPlaces> listed;
+    started = now();
+    model.startFilteredPlaces (kicks, [&listed] (phazite::BrowserModel::FilteredPlaces found) { listed = std::move (found); });
+    const auto call = now() - started;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&listed] { return listed.has_value(); }));
+    const auto there = now() - started;
+    REQUIRE (listed->places.size() == places.size());
+
+    report << "\nThe places with the Type filter set to Kick (" << (int) places.size() << "): listed on the message thread "
+           << juce::String (atOnce, 1) << " ms; the call now " << juce::String (call, 2) << " ms, the places there after "
+           << juce::String (there, 1) << " ms\n";
     MESSAGE (report);
 }
 

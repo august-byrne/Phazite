@@ -3695,7 +3695,9 @@ TEST_CASE ("A plug-in that keeps telling changes is asked at the latest a second
     change();
     changeFor (999.0);
     CHECK_FALSE (instance.isAskingState());
-    changeFor (1.0);
+
+    // Past the second, not onto it: the clock's milliseconds are doubles, and a difference of exactly 1000 may read as less.
+    changeFor (2.0);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.isAskingState(); }));
 
     // Its answer takes 300 ms (on the clock): the next ask no sooner than ten times that after the first, though a second
@@ -3707,7 +3709,7 @@ TEST_CASE ("A plug-in that keeps telling changes is asked at the latest a second
     gate.shut();
     changeFor (3000.0 - 300.0 - 1.0);
     CHECK_FALSE (instance.isAskingState());
-    changeFor (1.0);
+    changeFor (2.0); // past it, as above (held exactly on the limit, the ask never came: seen once in a whole run)
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.isAskingState(); }));
     gate.open();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.countAnswers() == answersBefore + 2; }, longWait));

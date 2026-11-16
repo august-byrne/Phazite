@@ -184,14 +184,30 @@ public:
     static bool forEachFileMatch (const LibraryIndex&, const juce::String& query, const std::function<void (const LibraryItem&)>& matched,
                                   const std::function<bool()>& shouldStop = nullptr);
 
-    // Work that goes through the index, such as a count of what a search finds (forEachFileMatch()), run on the search's
-    // thread as the browser's search is: given the index as it is now, and what says that it is to stop, it returns whether
-    // it finished. Each count started cancels the one before (a search doesn't, nor does a count cancel a search), so that
-    // only the newest's done is called, on the message thread, once its work finished; cancelCount() cancels it with none.
-    // Message thread.
-    using Count = std::function<bool (const LibraryIndex&, const std::function<bool()>& shouldStop)>;
-    void startCount (Count, std::function<void()> done) const;
-    void cancelCount() const;
+    // Work that goes through the index for the browser (the filters' counts, the places a filter leaves), run on the
+    // search's thread as the browser's search is: given the index as it is now, and what says that it is to stop, it returns
+    // whether it finished. Each lane's start() cancels what it started before (another lane's work, and a search, go on), so
+    // that only its newest's done is called, on the message thread, once that work finished; cancel() cancels it with none,
+    // as the lane's going does. Message thread; the library outlives its lanes.
+    using Work = std::function<bool (const LibraryIndex&, const std::function<bool()>& shouldStop)>;
+
+    class IndexWork
+    {
+    public:
+        explicit IndexWork (const Library&);
+        ~IndexWork();
+
+        void start (Work, std::function<void()> done);
+        void cancel();
+        bool isPending() const;
+
+    private:
+        struct State;
+        const Library& library;
+        std::shared_ptr<State> state;
+
+        JUCE_DECLARE_NON_COPYABLE (IndexWork)
+    };
 
     // The instruments and the effects, as listDevices() gives them.
     std::vector<LibraryItem> getAllDevices() const;
@@ -321,16 +337,14 @@ private:
     // search's thread.
     struct SearchDelivery final : juce::AsyncUpdater
     {
-        SearchDelivery (const Library& l, void (Library::*d)() const)
-            : library (l),
-              deliver (d)
+        explicit SearchDelivery (const Library& l)
+            : library (l)
         {
         }
 
-        void handleAsyncUpdate() override { (library.*deliver)(); }
+        void handleAsyncUpdate() override { library.deliverSearch(); }
 
         const Library& library;
-        void (Library::*deliver)() const;
     };
 
     mutable std::atomic<int> searchNumber { 0 };
@@ -338,18 +352,10 @@ private:
     mutable std::function<void()> beforeSearch;
     mutable std::mutex deliveredLock;
     mutable std::optional<std::pair<int, SearchResults>> delivered;
-    mutable SearchDelivery searchDelivery { *this, &Library::deliverSearch };
+    mutable SearchDelivery searchDelivery { *this };
     static inline std::atomic<juce::int64> searchedOnMessageThread { 0 };
-
-    // The count (startCount()) the same way: the newest's number, what it calls when done, and the number of one done.
-    mutable std::atomic<int> countNumber { 0 };
-    mutable std::function<void()> countDone;
-    mutable std::optional<int> counted; // guarded by deliveredLock
-    mutable SearchDelivery countDelivery { *this, &Library::deliverCount };
-
     mutable BackgroundJobs searches { "Phazite browser search", 1, juce::Thread::Priority::normal };
 
     void deliverSearch() const;
-    void deliverCount() const;
 };
 } // namespace phazite

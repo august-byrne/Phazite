@@ -125,7 +125,9 @@ Under the search field is a chip for each of **Type**, **Loop**, **Tempo** and *
 While any filter is set:
 
 - each place shows how many of its sounds have the filters' values, and lists them as one list, its folders' sounds
-  within it; places with none don't show;
+  within it; places with none don't show. The places are listed in the background, as the search is, at each filter
+  set and each change of the index; the tree shows the places it showed until the newest filters' are in, whole, and a
+  key that moves or Enter pressed meanwhile acts on those once they are;
 - a list shows 2,000 sounds at most, then says how many more there are;
 - search results take the filters too;
 - MIDI files take the filters as sounds do; folders, devices and presets have none of their values, so they don't

@@ -412,7 +412,7 @@ struct Browser::PlaceNode : public Node
 
     bool mightContainSubItems() override { return place.holdsItems(); }
     juce::String getUniqueName() const override { return "place:" + place.getKey(); }
-    void populate() override { browser.addRows (*this, browser.model.getContents (place, browser.filters)); }
+    void populate() override { browser.addRows (*this, browser.getPlaceContents (place)); }
 
     void clicked() override
     {
@@ -465,6 +465,22 @@ struct Browser::Tree : public juce::TreeView
         // The keys in use: the selection's outline shows.
         if (! std::exchange (browser.keysMovedSelection, true))
             repaint();
+
+        // Moving or Enter while the rows to come aren't in (a swap's first places, the newest text's results): on those, once
+        // they are, never on the rows they replace.
+        const auto moves =
+            key.isKeyCode (juce::KeyPress::downKey) || key.isKeyCode (juce::KeyPress::upKey) || key.isKeyCode (juce::KeyPress::returnKey);
+
+        if (moves && browser.isWaitingForRows())
+        {
+            browser.afterSearch (
+                [safeThis = juce::Component::SafePointer<Tree> (this), key]
+                {
+                    if (safeThis != nullptr)
+                        safeThis->keyPressed (key);
+                });
+            return true;
+        }
 
         auto* before = dynamic_cast<Node*> (getSelectedItem (0));
 
@@ -769,10 +785,12 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     {
         model.cancelFilterOptions(); // counted in the index before
         searchShown.clear();         // the rows shown are of the index before: the same text finds them again
+
+        if (! filters.isEmpty())
+            rebuildPlaces(); // listed again from this index, what was being listed from the one before cancelled
+
         if (searchField.getText().trim().isNotEmpty())
             updateSearch (true);
-        else if (! filters.isEmpty())
-            rebuildPlaces();
     };
 
     soundPack.addChangeListener (this);
@@ -786,6 +804,7 @@ Browser::~Browser()
     library.onIndexChanged = nullptr;
     model.cancelSearch(); // which would call back into it
     model.cancelFilterOptions();
+    model.cancelFilteredPlaces();
 
     // What a swap tried stays, as anything else that changes the song leaves it.
     if (swap != nullptr && swap->isOpen())
@@ -824,6 +843,45 @@ void Browser::addRows (juce::TreeViewItem& parent, const BrowserContents& conten
 
 void Browser::rebuildPlaces()
 {
+    // With filters set, the places of the index are gone through on the library's thread: the tree shows the places it
+    // showed until the newest filters' are in, then those, whole, never a mix. What waits for the rows (Enter, Down, a
+    // swap's end) waits for them too (afterSearch()).
+    if (! filters.isEmpty())
+    {
+        placesPending = true;
+        model.startFilteredPlaces (filters,
+                                   [this] (BrowserModel::FilteredPlaces found)
+                                   {
+                                       placesPending = false;
+                                       listedPlaces = std::move (found); // what the new places' rows list, as they open
+                                       showPlaces (listedPlaces.places);
+                                       runWhenSearchShown();
+                                   });
+        return;
+    }
+
+    model.cancelFilteredPlaces();
+    placesPending = false;
+    listedPlaces = {};
+    showPlaces (model.getPlaces());
+    runWhenSearchShown();
+}
+
+BrowserContents Browser::getPlaceContents (const BrowserPlace& place) const
+{
+    // As listed with the places the tree shows: without filters, what the place holds; with them, what they were listed with,
+    // or for a collection under Collections (a list of the user's own), its sounds with those filters' values.
+    if (listedPlaces.filters.isEmpty())
+        return model.getContents (place);
+
+    if (const auto found = listedPlaces.contents.find (place.getKey()); found != listedPlaces.contents.end())
+        return found->second;
+
+    return model.getContents (place, listedPlaces.filters);
+}
+
+void Browser::showPlaces (std::vector<BrowserPlace> places)
+{
     // Folders open now stay open; at first, those open when Phazite last closed, or else Phazite's sounds.
     std::unique_ptr<juce::XmlElement> openness;
 
@@ -835,7 +893,7 @@ void Browser::rebuildPlaces()
     auto root = std::make_unique<RootNode> (*this);
     PlaceNode* sounds = nullptr;
 
-    for (auto& place : model.getPlaces (filters))
+    for (auto& place : places)
     {
         const auto isSounds = place.kind == BrowserPlace::Kind::sounds;
         auto* node = new PlaceNode (*this, std::move (place));
@@ -1001,7 +1059,7 @@ void Browser::updateSearch (bool again)
 
 void Browser::afterSearch (std::function<void()> then)
 {
-    if (! searchPending)
+    if (! isWaitingForRows())
     {
         then();
         return;
@@ -1018,6 +1076,10 @@ void Browser::afterSearch (std::function<void()> then)
 
 void Browser::runWhenSearchShown()
 {
+    // Once the search's results and the filters' places are both in.
+    if (isWaitingForRows())
+        return;
+
     if (const auto then = std::exchange (whenSearchShown, nullptr))
         then();
 
@@ -1027,7 +1089,7 @@ void Browser::runWhenSearchShown()
 
 void Browser::focusTreeAfterSearch()
 {
-    if (searchPending)
+    if (isWaitingForRows())
         focusWhenShown = true;
     else
         focusTree();

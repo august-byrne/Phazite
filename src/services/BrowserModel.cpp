@@ -2,7 +2,9 @@
 #include "BrowserModel.h"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
+#include <memory>
 
 namespace phazite
 {
@@ -146,16 +148,88 @@ std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters
     if (filters.isEmpty())
         return places;
 
-    // With filters set, the places with sounds that have their values, each with how many; Collections while any of its
-    // collections has some.
-    std::vector<BrowserPlace> filtered;
+    std::vector<BrowserPlace> ofIndex;
+    std::copy_if (places.begin(), places.end(), std::back_inserter (ofIndex), isOfIndex);
+    const auto indexed = library.getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+    return assemble (filters, std::move (places), *listIndexed (*indexed, ofIndex, filters)).places;
+}
+
+bool BrowserModel::isOfIndex (const BrowserPlace& place)
+{
+    using Kind = BrowserPlace::Kind;
+    return place.kind == Kind::sounds || place.kind == Kind::folder || place.kind == Kind::presets || place.kind == Kind::factoryPresets;
+}
+
+std::optional<std::vector<BrowserModel::Listed>> BrowserModel::listIndexed (const LibraryIndex& index,
+                                                                            const std::vector<BrowserPlace>& places,
+                                                                            const BrowserFilters& filters,
+                                                                            const std::function<bool()>& shouldStop)
+{
+    // One walk for all of them, each item looked for in each place's folder by its path.
+    juce::StringArray paths;
+
+    for (const auto& place : places)
+        paths.add (place.folder != juce::File() ? place.folder.getFullPathName() : juce::String());
+
+    std::vector<Listed> listed (places.size());
+
+    const auto take = [&] (const LibraryItem& item)
+    {
+        if (! filters.accepts (item))
+            return;
+
+        for (int i = 0; i < paths.size(); ++i)
+            if (paths[i].isNotEmpty() && isWithin (item, paths[i]))
+                listed[(size_t) i].items.push_back (item);
+    };
+
+    if (! Library::forEachFileMatch (index, {}, take, shouldStop))
+        return std::nullopt;
+
+    for (auto& each : listed)
+    {
+        std::sort (each.items.begin(), each.items.end(), byName);
+        each.total = (int) each.items.size();
+
+        if (each.total > maxListed)
+            each.items.resize ((size_t) maxListed);
+    }
+
+    return listed;
+}
+
+BrowserContents BrowserModel::describeFiltered (const BrowserPlace&, Listed listed) const
+{
+    BrowserContents contents;
+    contents.items = std::move (listed.items);
+
+    if (listed.total > maxListed)
+        contents.messages.add ("The first " + juce::String (maxListed) + " of " + juce::String (listed.total) + ": filter them further");
+    else if (contents.items.empty())
+        contents.messages.add ("None of these with the filters set");
+
+    return contents;
+}
+
+BrowserModel::FilteredPlaces BrowserModel::assemble (const BrowserFilters& filters, std::vector<BrowserPlace> places,
+                                                     std::vector<Listed> ofIndex) const
+{
+    // The places with sounds that have the filters' values, each with how many; Collections while any of its collections
+    // has some. The index's places as listed, in their order; the user's own lists at once.
+    using Kind = BrowserPlace::Kind;
+    FilteredPlaces filtered;
+    filtered.filters = filters;
+    size_t nextOfIndex = 0;
 
     for (auto& place : places)
     {
         if (place.kind == Kind::collections)
         {
-            if (! getContents (place, filters).places.empty())
-                filtered.push_back (std::move (place));
+            if (auto contents = getContents (place, filters); ! contents.places.empty())
+            {
+                filtered.contents[place.getKey()] = std::move (contents);
+                filtered.places.push_back (std::move (place));
+            }
 
             continue;
         }
@@ -163,17 +237,56 @@ std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters
         if (! place.holdsItems() || place.kind == Kind::instruments || place.kind == Kind::effects)
             continue;
 
-        auto total = 0;
-        getFiltered (place, filters, total);
+        Listed listed;
 
-        if (total > 0)
+        if (isOfIndex (place))
         {
-            place.count = total;
-            filtered.push_back (std::move (place));
+            if (nextOfIndex < ofIndex.size())
+                listed = std::move (ofIndex[nextOfIndex]);
+
+            ++nextOfIndex;
+        }
+        else
+        {
+            listed.items = getFiltered (place, filters, listed.total);
+        }
+
+        if (listed.total > 0)
+        {
+            place.count = listed.total;
+            filtered.contents[place.getKey()] = describeFiltered (place, std::move (listed));
+            filtered.places.push_back (std::move (place));
         }
     }
 
     return filtered;
+}
+
+void BrowserModel::startFilteredPlaces (const BrowserFilters& filters, std::function<void (FilteredPlaces)> found) const
+{
+    auto places = getPlaces();
+    std::vector<BrowserPlace> ofIndex;
+    std::copy_if (places.begin(), places.end(), std::back_inserter (ofIndex), isOfIndex);
+    const auto listed = std::make_shared<std::vector<Listed>>();
+
+    listings.start (
+        [listed, ofIndex, filters] (const LibraryIndex& index, const std::function<bool()>& shouldStop)
+        {
+            auto made = listIndexed (index, ofIndex, filters, shouldStop);
+
+            if (! made.has_value())
+                return false;
+
+            *listed = std::move (*made);
+            return true;
+        },
+        [this, listed, filters, places = std::move (places), found = std::move (found)]
+        { found (assemble (filters, places, std::move (*listed))); });
+}
+
+void BrowserModel::cancelFilteredPlaces() const
+{
+    listings.cancel();
 }
 
 std::vector<BrowserPlace> BrowserModel::getPresetPlaces (const juce::String& folderName) const
@@ -204,28 +317,19 @@ std::vector<BrowserPlace> BrowserModel::getPresetPlaces (const juce::String& fol
     return found;
 }
 
-std::vector<LibraryItem> BrowserModel::getIndexedIn (const juce::File& folder, const BrowserFilters& filters) const
-{
-    std::vector<LibraryItem> items;
-
-    if (folder == juce::File())
-        return items;
-
-    const auto path = folder.getFullPathName();
-
-    const auto indexed = library.getIndex(); // held while it is gone through: the index thread may replace it meanwhile
-
-    for (const auto& item : *indexed)
-        if (filters.accepts (item) && isWithin (item, path))
-            items.push_back (item);
-
-    return items;
-}
-
 std::vector<LibraryItem> BrowserModel::getFiltered (const BrowserPlace& place, const BrowserFilters& filters, int& total) const
 {
     using Kind = BrowserPlace::Kind;
     std::vector<LibraryItem> items;
+
+    // A place of the index: gone through, on the calling thread.
+    if (isOfIndex (place))
+    {
+        const auto indexed = library.getWholeIndex(); // held while it is gone through: the index thread may replace it meanwhile
+        auto listed = std::move (listIndexed (*indexed, { place }, filters)->front());
+        total = listed.total;
+        return std::move (listed.items);
+    }
 
     const auto keep = [&filters, &items] (std::vector<LibraryItem> all)
     {
@@ -249,8 +353,6 @@ std::vector<LibraryItem> BrowserModel::getFiltered (const BrowserPlace& place, c
         case Kind::folder:
         case Kind::presets:
         case Kind::factoryPresets:
-            items = getIndexedIn (place.folder, filters);
-            break;
         case Kind::collections:
         case Kind::instruments:
         case Kind::effects:
@@ -298,15 +400,9 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
             return contents;
         }
 
-        auto total = 0;
-        contents.items = getFiltered (place, filters, total);
-
-        if (total > maxListed)
-            contents.messages.add ("The first " + juce::String (maxListed) + " of " + juce::String (total) + ": filter them further");
-        else if (contents.items.empty())
-            contents.messages.add ("None of these with the filters set");
-
-        return contents;
+        Listed listed;
+        listed.items = getFiltered (place, filters, listed.total);
+        return describeFiltered (place, std::move (listed));
     }
 
     switch (place.kind)
@@ -450,7 +546,7 @@ void BrowserModel::startFilterOptions (const juce::String& query, const BrowserF
                                        std::function<void (FilterOptions)> found) const
 {
     const auto options = std::make_shared<FilterOptions>();
-    library.startCount (
+    counts.start (
         [options, query, filters] (const LibraryIndex& index, const std::function<bool()>& shouldStop)
         {
             auto counted = countFilterOptions (index, query, filters, shouldStop);
@@ -466,7 +562,7 @@ void BrowserModel::startFilterOptions (const juce::String& query, const BrowserF
 
 void BrowserModel::cancelFilterOptions() const
 {
-    library.cancelCount();
+    counts.cancel();
 }
 
 int BrowserModel::countSoundsOfType (const juce::String& type) const

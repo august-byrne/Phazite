@@ -711,10 +711,8 @@ Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File 
 Library::~Library()
 {
     cancelSearch();
-    cancelCount();
     searches.removeAll (true); // a search looks at whether it should stop between thousands of items
     searchDelivery.cancelPendingUpdate();
-    countDelivery.cancelPendingUpdate();
     indexer = nullptr;
     cancelPendingUpdate();
 }
@@ -1092,58 +1090,63 @@ bool Library::forEachFileMatch (const LibraryIndex& index, const juce::String& q
     return finished;
 }
 
-void Library::startCount (Count count, std::function<void()> done) const
+// What a lane's jobs share with it, which may go first: the newest's number, which a job that isn't it stops at, and what
+// the newest calls once done (message thread).
+struct Library::IndexWork::State
+{
+    std::atomic<int> number { 0 };
+    std::function<void()> done;
+};
+
+Library::IndexWork::IndexWork (const Library& l)
+    : library (l),
+      state (std::make_shared<State>())
+{
+}
+
+Library::IndexWork::~IndexWork()
+{
+    cancel();
+}
+
+void Library::IndexWork::start (Work work, std::function<void()> done)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
     // What it goes through, taken here: the index as it is now (shared, never changed).
-    const auto number = ++countNumber;
-    countDone = std::move (done);
-    searches.add (
-        [this, number, indexed = getWholeIndex(), count = std::move (count),
-         before = beforeSearch] (const BackgroundJobs::ShouldStop& shouldStop)
+    const auto number = ++state->number;
+    state->done = std::move (done);
+    library.searches.add (
+        [state = state, number, indexed = library.getWholeIndex(), work = std::move (work),
+         before = library.beforeSearch] (const BackgroundJobs::ShouldStop& shouldStop)
         {
             if (before != nullptr)
                 before();
 
-            const auto isOld = [this, number, &shouldStop] { return shouldStop() || countNumber.load() != number; };
+            const auto isOld = [&state, number, &shouldStop] { return shouldStop() || state->number.load() != number; };
 
-            if (isOld() || ! count (*indexed, isOld) || isOld())
+            if (isOld() || ! work (*indexed, isOld) || isOld())
                 return;
 
-            {
-                const std::scoped_lock held (deliveredLock);
-                counted = number;
-            }
-
-            countDelivery.triggerAsyncUpdate();
+            // The newest's alone, once on the message thread: one started since, or cancelled, has its own (or none).
+            juce::MessageManager::callAsync (
+                [state, number]
+                {
+                    if (state->number.load() == number && state->done != nullptr)
+                        std::exchange (state->done, nullptr)();
+                });
         });
 }
 
-void Library::cancelCount() const
+void Library::IndexWork::cancel()
 {
-    ++countNumber;
-    countDone = nullptr;
-
-    const std::scoped_lock held (deliveredLock);
-    counted.reset();
+    ++state->number;
+    state->done = nullptr;
 }
 
-void Library::deliverCount() const
+bool Library::IndexWork::isPending() const
 {
-    std::optional<int> taken;
-
-    {
-        const std::scoped_lock held (deliveredLock);
-        taken.swap (counted);
-    }
-
-    // The newest count's alone: one started since, or cancelled, has its own (or none).
-    if (! taken.has_value() || *taken != countNumber.load() || countDone == nullptr)
-        return;
-
-    const auto done = std::exchange (countDone, nullptr);
-    done();
+    return state->done != nullptr;
 }
 
 std::vector<LibraryItem> Library::searchDevices (const juce::String& query) const

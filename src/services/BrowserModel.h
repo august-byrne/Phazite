@@ -8,6 +8,9 @@
 #include "SoundPack.h"
 #include "model/engine/Preview.h"
 
+#include <functional>
+#include <map>
+#include <optional>
 #include <vector>
 
 namespace phazite
@@ -99,6 +102,24 @@ public:
     BrowserContents getContents (const BrowserPlace&, const BrowserFilters& = {}) const;
     BrowserContents getContents (const LibraryItem& folder) const;
 
+    // The places with filters set and what each lists, as getPlaces() and getContents() give them, by each place's key
+    // (BrowserPlace::getKey()); the collections' own under Collections aren't among them (getContents() lists one, a list of
+    // the user's own).
+    struct FilteredPlaces
+    {
+        BrowserFilters filters;
+        std::vector<BrowserPlace> places;
+        std::map<juce::String, BrowserContents> contents;
+    };
+
+    // The same as the browser lists them while filters are set: the places of the index (Phazite Sounds, the user's folders,
+    // the presets) gone through on the search's thread (Library::IndexWork), so that a filter set or the index changed goes
+    // through none of it on the message thread; Favorites, Recent and the collections, the user's own lists, at once. Each
+    // listing cancels the one before, so that found has the newest's alone, on the message thread; or none, once cancelled.
+    void startFilteredPlaces (const BrowserFilters&, std::function<void (FilteredPlaces)> found) const;
+    void cancelFilteredPlaces() const;
+    bool isListingPlaces() const { return listings.isPending(); }
+
     // A device's presets, as its swap shows them alone (model/devices/SwapModel.h): Phazite Presets, then Presets, each as
     // its folder for the device, by the folder's name (model/presets/PresetModel.h: getPresetFolderName()), with how many
     // presets it holds, while it holds any. Nothing for a device without presets.
@@ -121,7 +142,7 @@ public:
     static std::optional<FilterOptions> countFilterOptions (const LibraryIndex&, const juce::String& query, const BrowserFilters&,
                                                             const std::function<bool()>& shouldStop = nullptr);
 
-    // The same as a filter's menu opens: counted in the background, on the search's thread (Library::startCount()), so that
+    // The same as a filter's menu opens: counted in the background, on the search's thread (Library::IndexWork), so that
     // a click on a filter goes through none of the library on the message thread; each count cancelling the one before, so
     // that found has the newest's alone, on the message thread; or none, once cancelled.
     void startFilterOptions (const juce::String& query, const BrowserFilters&, std::function<void (FilterOptions)> found) const;
@@ -155,11 +176,21 @@ public:
 private:
     const Library& library;
     const SoundPack& soundPack;
+    mutable Library::IndexWork counts { library }, listings { library }; // the filters' counts; the filtered places
 
     // What a place lists while filters are set: its sounds with their values, by name, as many as maxListed; and how many
-    // it has in all.
+    // it has in all. And what the places of the index list, in one walk through it, any thread (none, once shouldStop says).
     std::vector<LibraryItem> getFiltered (const BrowserPlace&, const BrowserFilters&, int& total) const;
-    std::vector<LibraryItem> getIndexedIn (const juce::File& folder, const BrowserFilters&) const;
+    static bool isOfIndex (const BrowserPlace&);
+    struct Listed
+    {
+        std::vector<LibraryItem> items;
+        int total = 0;
+    };
+    static std::optional<std::vector<Listed>> listIndexed (const LibraryIndex&, const std::vector<BrowserPlace>&, const BrowserFilters&,
+                                                           const std::function<bool()>& shouldStop = nullptr);
+    BrowserContents describeFiltered (const BrowserPlace&, Listed) const;
+    FilteredPlaces assemble (const BrowserFilters&, std::vector<BrowserPlace> places, std::vector<Listed> ofIndex) const;
     BrowserContents describeSearch (const juce::String& query, const BrowserFilters&, SearchResults) const;
 };
 } // namespace phazite

@@ -656,8 +656,10 @@ opened; now counted on the search's thread, the menu opening once they are in.
 | none, Type Kick | 9.8 | 0.01 | 14.9 |
 | "deep", Type Kick | 4.1 | 0.01 | 5.2 |
 
-What is left on the message thread: with a filter set, the places and their counts are still listed there, a walk of the
-index for each place (17.4 ms for the Type filter set to Kick, in the same library).
+The places a filter leaves, each with how many of its sounds have its values (the Type filter set to Kick, in the same
+library): before, listed on the message thread at each filter set and each change of the index, a walk of the index for
+each place, 17.4 to 18.3 ms; now listed on the search's thread in one walk, the call 0.02 ms, the places there after
+22.5 ms, the tree showing the places it showed until then.
 
 A ten-minute stereo recording at 48 kHz, 24-bit (173 MB), with a file of the same name in the project already:
 

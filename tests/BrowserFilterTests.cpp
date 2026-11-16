@@ -139,6 +139,13 @@ juce::Rectangle<int> getRow (phazite::ui::Browser& browser, const juce::String& 
     return {};
 }
 
+// Until the rows a browser is to show are in from the library's thread: the search's results, the places the filters leave.
+void waitForRows (phazite::ui::Browser& browser)
+{
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&browser] { return ! browser.isWaitingForRows(); }));
+    phazite::test::dispatchPendingMessages();
+}
+
 // The rows of a browser's tree that are in view, from the top of the view, as screen readers read them.
 juce::StringArray getRowsInView (phazite::ui::Browser& browser)
 {
@@ -368,8 +375,11 @@ struct FilterScreen
     void choose (Filter filter, const juce::String& value)
     {
         REQUIRE (phazite::test::runMenuItem (menuOf (filter), { value }));
-        phazite::test::dispatchPendingMessages();
+        waitForRows();
     }
+
+    // The places the filters leave, and the search's results, once they are in from the library's thread.
+    void waitForRows() { ::waitForRows (browser); }
 };
 } // namespace
 
@@ -409,7 +419,7 @@ TEST_CASE ("A beat maker narrows a big folder down to the kicks in one key with 
     // The type's x takes it away: everything in F.
     phazite::test::Mouse chip (bar.getChip (Filter::type));
     chip.click (bar.getClearArea (Filter::type).getCentre());
-    phazite::test::dispatchPendingMessages();
+    screen.waitForRows();
     CHECK (screen.browser.getFilters().type.isEmpty());
     CHECK (screen.getRows().contains ("Big Folder, 4"));
 
@@ -424,6 +434,59 @@ TEST_CASE ("A beat maker narrows a big folder down to the kicks in one key with 
     CHECK_FALSE (bar.getClearButton().isVisible());
     CHECK (screen.getRows().contains ("Big Folder"));
     CHECK_FALSE (screen.getRows().contains ("Kick 01 (F), F"));
+}
+
+TEST_CASE ("Performance gate: a filter set, or the index changed, lists the places the filters leave on the library's thread")
+{
+    // The places a filter leaves, each with how many of its sounds have its values, and what each lists, went through the
+    // whole index on the message thread, once for each place, at each filter set and at each change of the index.
+    FilterScreen screen;
+    auto& bar = screen.browser.getFilterBar();
+    const auto before = phazite::Library::getItemsSearchedOnMessageThread();
+
+    screen.choose (Filter::type, "Kick");
+    CHECK (screen.getRows() == juce::StringArray { "Big Folder, 4" });
+
+    // The key set while the library's thread is held, then the type taken away: the tree shows the places it showed, whole,
+    // until the newest filters' are in; those of the filters between never come.
+    const auto keyMenu = screen.menuOf (Filter::key);
+    std::atomic<bool> letGo { false };
+    screen.library.setBeforeSearch (
+        [&letGo]
+        {
+            while (! letGo)
+                juce::Thread::sleep (1);
+        });
+
+    REQUIRE (phazite::test::runMenuItem (keyMenu, { "F" }));
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.browser.isWaitingForRows());
+    CHECK (screen.getRows() == juce::StringArray { "Big Folder, 4" }); // the kicks, as before
+
+    phazite::test::Mouse chip (bar.getChip (Filter::type));
+    chip.click (bar.getClearArea (Filter::type).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getRows() == juce::StringArray { "Big Folder, 4" });
+
+    letGo = true;
+    screen.waitForRows();
+    screen.library.setBeforeSearch (nullptr);
+    CHECK (screen.browser.getFilters().type.isEmpty());
+    CHECK (screen.getRows() == juce::StringArray { "Big Folder, 4" }); // everything in F: two kicks, a snare, an 808
+
+    // Opened, the place lists what it was listed with, none of it gone through here.
+    phazite::test::Mouse mouse (screen.browser.getTree());
+    mouse.click (screen.getRow ("Big Folder").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.getRows().size() == 5);
+
+    // The index made again: listed again from the new one, on the library's thread.
+    screen.library.refresh();
+    REQUIRE (phazite::test::runTimersUntil ([&screen] { return ! screen.library.isIndexing(); }));
+    phazite::test::dispatchPendingMessages(); // the index's change told
+    screen.waitForRows();
+    CHECK (screen.getRows().contains ("Big Folder, 4"));
+    CHECK (phazite::Library::getItemsSearchedOnMessageThread() == before);
 }
 
 TEST_CASE ("Performance gate: a filter's menu counts what it offers on the library's thread, the newest words' counts alone")
@@ -570,7 +633,7 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
 
     // Swap on the kick's pad: the browser shows kicks, its strip says what it swaps, and it has the keys.
     browser.startSwap (drums, 36);
-    phazite::test::dispatchPendingMessages();
+    waitForRows (browser); // the places a pad's type leaves, from the library's thread
     REQUIRE (browser.isSwapping());
     CHECK (started == 1);
     CHECK (browser.getSwapStrip().isVisible());
@@ -604,7 +667,7 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
 
     // Again, and Esc puts the one before back, adding no step.
     browser.startSwap (drums, 36);
-    phazite::test::dispatchPendingMessages();
+    waitForRows (browser); // the places a pad's type leaves, from the library's thread
     REQUIRE (browser.isSwapping());
     mouse.click (getRow (browser, "Pack").getCentre());
     phazite::test::dispatchPendingMessages();
@@ -798,7 +861,7 @@ TEST_CASE ("A Swap asked for on another pad while one is kept starts once that k
 
     // The kick's pad tries a sound; Swap asked for on the snare's pad keeps it first, which copies it in, in the background.
     browser.startSwap (drums, 36);
-    phazite::test::dispatchPendingMessages();
+    waitForRows (browser); // the places a pad's type leaves, from the library's thread
     REQUIRE (browser.isSwapping());
     mouse.click (getRow (browser, "Pack").getCentre());
     phazite::test::dispatchPendingMessages();
@@ -820,6 +883,58 @@ TEST_CASE ("A Swap asked for on another pad while one is kept starts once that k
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&browser] { return browser.getSelectedItem().has_value() && browser.getSelectedItem()->name == juce::String ("Kick Two"); }));
     CHECK (browser.getSearchField().getText() == juce::String ("kick"));
+}
+
+TEST_CASE ("Down pressed as a pad's Swap starts, before the places its type leaves are in, tries the first of those")
+{
+    // The places a filter leaves come from the library's thread: a key that moves meanwhile acts on them once they are in,
+    // never on the rows they replace.
+    phazite::test::TestSong song;
+    const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
+    const auto pack = song.getSoundsFolder().getChildFile ("Pack");
+    phazite::test::writeSound (pack.getChildFile ("Kick One.wav"), 0.2);
+    phazite::test::writeSound (pack.getChildFile ("Snare One.wav"), 0.2);
+
+    phazite::test::TemporaryFolder temp;
+    phazite::SoundPack sounds { temp.folder.getChildFile ("Packs") };
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings);
+    library.addUserFolder (pack);
+    REQUIRE (waitForIndex (library));
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
+    phazite::test::TestWindow window (browser, 320, 700);
+
+    // The pack open, the kick first in it.
+    phazite::test::dispatchPendingMessages(); // the tree makes its rows' components
+    phazite::test::Mouse mouse (browser.getTree());
+    mouse.click (getRow (browser, "Pack").getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (getRows (browser).contains ("Kick One"));
+
+    // The snare's pad's Swap, the library's thread held: the tree shows the places it showed, and Down waits.
+    std::atomic<bool> letGo { false };
+    library.setBeforeSearch (
+        [&letGo]
+        {
+            while (! letGo)
+                juce::Thread::sleep (1);
+        });
+
+    browser.startSwap (drums, 38);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    CHECK (browser.isWaitingForRows());
+    window.pressKey (downKey);
+    CHECK (browser.getSwap()->getTried() == juce::File());
+
+    letGo = true;
+    waitForRows (browser);
+    library.setBeforeSearch (nullptr);
+    CHECK (getRows (browser).contains ("Snare One"));
+    CHECK_FALSE (getRows (browser).contains ("Kick One"));
+    CHECK (browser.getSwap()->getTried() == pack.getChildFile ("Snare One.wav"));
+    browser.putBackSwap();
 }
 
 TEST_CASE ("A Swap asked for while the Keep before it still copies its sound in says so, rather than being dropped")
@@ -844,7 +959,7 @@ TEST_CASE ("A Swap asked for while the Keep before it still copies its sound in 
 
     // A kick tried on its pad, from outside the project, and kept: its sound copied in, in the background.
     browser.startSwap (drums, 36);
-    phazite::test::dispatchPendingMessages();
+    waitForRows (browser); // the places a pad's type leaves, from the library's thread
     REQUIRE (browser.isSwapping());
     phazite::test::Mouse mouse (browser.getTree());
     mouse.click (getRow (browser, "Pack").getCentre());

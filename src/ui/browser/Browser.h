@@ -124,6 +124,10 @@ public:
     const Swap* getSwap() const noexcept { return swap.get(); }
     juce::Component& getSwapStrip();
 
+    // Whether rows the tree is to show are still to come from the library's thread: the newest text's search results, or the
+    // places the newest filters leave (the tree shows what it showed meanwhile).
+    bool isWaitingForRows() const noexcept { return searchPending || placesPending; }
+
     // A row's menu, as a right-click shows it: an item's (into the song, favorites, collections, its folder), or a place's
     // (a collection's: rename or delete it). And the field that names a collection, while it shows.
     juce::PopupMenu getItemMenu (const LibraryItem&, bool canRemoveFolder);
@@ -195,7 +199,14 @@ private:
     std::map<std::tuple<Icon, bool, juce::uint32>, std::unique_ptr<juce::Drawable>> icons;
     void drawIcon (juce::Graphics&, Icon, juce::Rectangle<float>, juce::Colour, bool filled = false);
 
+    // The places at the top of the tree, as the filters leave them: with none set, at once; with some, listed in the
+    // background (BrowserModel::startFilteredPlaces()), the tree showing the places it showed until the newest filters'
+    // arrive, whole. What places the tree shows were listed for (none: the places without filters), and what each lists.
     void rebuildPlaces();
+    void showPlaces (std::vector<BrowserPlace>);
+    BrowserContents getPlaceContents (const BrowserPlace&) const;
+    BrowserModel::FilteredPlaces listedPlaces;
+    bool placesPending = false;
     void refreshPlace (BrowserPlace::Kind); // after what places of that kind list changed
     void saveSelectedDevicePreset();
     void saveSelectedTrackPreset();
@@ -234,7 +245,7 @@ private:
     BrowserFilters filtersShown;
 
     // Whether the newest text's results are still to come, and what waits for them (Enter, Down, a swap's end): run once
-    // they are shown, or at once while none are to come.
+    // they are shown, and the places the newest filters leave with them, or at once while none are to come.
     bool searchPending = false;
     std::function<void()> whenSearchShown;
     void afterSearch (std::function<void()>);

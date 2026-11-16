@@ -319,6 +319,9 @@ too. A line names the bug's number in that list.
   of hangs set short hang limits.
 - **A plug-in's window closed opens again** for a plug-in that makes its own editor (the helper told it that its
   editor went).
+- **With a filter set, the browser lists the places it leaves on the library's thread**, the newest filters' alone:
+  the tree keeps the places it showed until they are in, and a key pressed meanwhile acts on them once they arrive
+  (0.02 ms of the message thread instead of 18 ms in a library of 50,000 sounds).
 
 ## Stage 2, the last step: the first push (2026-11-15)
 
