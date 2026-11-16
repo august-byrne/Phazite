@@ -52,13 +52,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Devices and playback
 
-- **85. A loop's wrap and a jump put their work into one block, and the message thread can wait for the disk.** The
-  wrap looks through every note before the playhead on every track, starts each resampled clip's resampler from
-  nothing, and a jump resets every device, in one block (`src/engine/core/Engine.cpp`,
-  `src/engine/audio/AudioRegion.cpp`). And the reading thread holds a file's lock across its read, which the message
-  thread takes at every new plan (`src/engine/audio/AudioFile.cpp`). Fix: an index of the notes sounding, resamplers
-  started on the reading thread, and reads outside the lock. Not measured. Not yet checked (engine 13).
-
 - **136. The FM leaves a little under its held notes where a modulator sits a few hertz from a whole multiple of its
   carrier** (Fine or Detune a little off): frequency modulation then puts a sideband a few hertz above 0 Hz (0.083 of
   the notes' level at one drawn setting), which no blocker takes away without the lowest notes too. At its defaults
@@ -69,23 +62,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
-
-- **173. Aftertouch and channel pressure are neither heard live nor played back.** `engine::toNoteEvent()`
-  (`src/engine/nodes/DeviceRunner.cpp`) drops them, `devices::NoteEvent` has no type for them, and `SongPlayer`
-  ignores the CONTROL kinds `channelPressure` and `aftertouch` that a MIDI file's import already stores; so a take
-  doesn't keep them either. Fix: the event types in the engine, handed to devices and plug-ins, then recorded as the
-  other controllers are. Seen while known bug 93 was fixed.
-
-## Mixer and automation
-
-- **175. A take after a jump that lands exactly where the take before ended lets go of a held pedal for one tick at
-  the seam.** The take before is placed before the next exists, so it writes its pedal-up at its end; between the
-  parts of one take (a loop's wrap) nothing is let go of. Rare. Fix: place the takes of one recording together.
-  Left while known bug 93 was fixed.
-- **176. A take that ends while a control is held (Stop pressed, or a write that fails, in the middle of a drag)
-  vanishes from the playlist until the mouse goes up,** when its clip is placed: the clip shown while recording needs
-  the engine's recording, which the take lets go of as it ends (`getInProgress()`,
-  `src/model/playback/PlaybackSession.cpp`). Cosmetic. Left while known bug 163 was fixed.
 
 ## Slow on the message thread
 

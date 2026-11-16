@@ -19,6 +19,30 @@ namespace
         return juce::Time::getMillisecondCounterHiRes();
     }
 
+    // What MIDI's Reset All Controllers (RP-015) sets a controller to, as a device takes it, or none for one it leaves as it
+    // is: the mod wheel, breath and the foot to none, expression to full, and the pedals (sustain, portamento, sostenuto,
+    // soft, legato, hold 2) up.
+    std::optional<float> getResetValue (int controller) noexcept
+    {
+        switch (controller)
+        {
+            case 1:
+            case 2:
+            case 4:
+            case 64:
+            case 65:
+            case 66:
+            case 67:
+            case 68:
+            case 69:
+                return 0.0f;
+            case 11:
+                return 1.0f;
+            default:
+                return std::nullopt;
+        }
+    }
+
     // Whether every sample is sound, as the devices take it (devices::soundOf()): a number, and none beyond any level, as a
     // filter gone wrong plays on its way to infinity.
     bool isFinite (const float* samples, int numSamples) noexcept
@@ -246,8 +270,9 @@ void Engine::takeTransport (const Plan& plan) noexcept
 
     if (locate.has_value() && locate->second != locatesTaken.load (std::memory_order_relaxed)) // not taken by the stop
     {
-        // While the song plays (not counting in), what sounds fades out first; the latest beat asked for is taken then.
-        if (transport.playing && transport.countIn.left == 0)
+        // While the song plays (not counting in), what sounds fades out first; the latest beat asked for is taken then. Held
+        // at a landing, silent, it is taken at once (and not held there in turn: Landing).
+        if (transport.playing && transport.countIn.left == 0 && ! landing.held)
         {
             // From where what follows a jump just before fades in, if it does, rather than from full level (a fade out
             // across a plan realigned, under way too, goes on: the lower of the two is heard).
@@ -262,7 +287,7 @@ void Engine::takeTransport (const Plan& plan) noexcept
         }
         else
         {
-            takeJump (plan, locate->first, locate->second);
+            takeJump (plan, locate->first, locate->second, clock + partStart);
         }
     }
 
@@ -302,7 +327,7 @@ void Engine::stopTransport (bool fadedOut) noexcept
     // The notes sounding end, and what they leave rings on; the audio clips that play, which would stop in a step, fade
     // out from where the song is, unless what goes out has faded out already (a jump's fade, which a stop waits for). The
     // clicks to come don't, but the one sounding rings on.
-    if (transport.countIn.left == 0 && ! fadedOut)
+    if (transport.countIn.left == 0 && ! fadedOut && ! landing.held)
         stopFade = { transport.sample, transport.sample + fadeLength };
 
     transport.notesOff = true;
@@ -310,9 +335,10 @@ void Engine::stopTransport (bool fadedOut) noexcept
     transport.countIn.left = 0;
     brokeTake = true;
     numClickStarts = 0;
+    endHold();
 }
 
-void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count) noexcept
+void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count, std::int64_t at) noexcept
 {
     // A jump while playing: the notes sounding stop, and those where it lands start, from silence, fading in if what
     // sounded faded out. The clicks to come were for where the song was, but the one sounding rings on.
@@ -335,6 +361,41 @@ void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count) noexc
     numClickStarts = 0;
     jump.pending = jump.thenStop = false;
     locatesTaken.store (count);
+
+    // Playing on from where it lands, held there while the audio clips at another rate there make their resampling ready
+    // (Landing, Engine.h): not during a count-in, nor in a render, nor in a run of jumps.
+    const auto heldBefore = landing.held;
+    endHold();
+
+    if (! transport.playing || transport.countIn.left > 0)
+        return;
+
+    const auto inRun = heldBefore || at - landing.lastJump < (std::int64_t) (runSeconds * sampleRate);
+    landing.lastJump = at;
+
+    if (holdsLandings && ! rendering && ! inRun && blockLength <= maximumHoldSeconds * sampleRate
+        && needsPreparingAt (plan, transport.sample))
+        landing.held = true;
+}
+
+bool Engine::needsPreparingAt (const Plan& plan, std::int64_t songSample) const noexcept
+{
+    for (const auto& strip : plan.strips)
+        for (const auto& region : strip.audio)
+            if (region.needsPreparing (songSample, sampleRate))
+                return true;
+
+    return false;
+}
+
+void Engine::prepareLanding (const Plan& plan, int numSamples) noexcept
+{
+    // A share of the block for each, as much of its file as it plays in one (AudioRegion::prepare()).
+    const std::int64_t places[] = { transport.sample };
+
+    for (const auto& strip : plan.strips)
+        for (const auto& region : strip.audio)
+            region.prepare (transport.sample, false, places, sampleRate, numSamples);
 }
 
 const Plan* Engine::choosePlan (const Plan* given) noexcept
@@ -526,8 +587,15 @@ void Engine::expectAudio (const Plan& plan) noexcept
     // Where the audio clips' files play next that what reads them ahead can't see coming (audio/AudioFile.h reads ahead of
     // where a file plays): while the song waits to play, where the playhead is, from where it will start; and the loop's
     // start, which follows the loop's end. Each is read ahead of as a place the file plays is.
-    std::array<std::int64_t, 2> places {};
-    size_t numPlaces = 0;
+    // (Kept for the strips' audio clips at another rate, which make their resampling ready for the first of them that each
+    // plays at: AudioRegion::prepare().)
+    auto& places = expectedPlaces;
+    auto& numPlaces = numExpectedPlaces;
+    numPlaces = 0;
+
+    // A jump fading out: where it lands, first (its file read there first already: locate()).
+    if (jump.pending)
+        places[numPlaces++] = std::llround (plan.tempo.toSamples (jump.beat));
 
     if (! transport.playing || transport.countIn.left > 0)
         places[numPlaces++] = transport.sample;
@@ -707,7 +775,17 @@ void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t part
         loopEnd = std::llround (plan.tempo.toSamples (plan.loop->end));
     }
 
-    // What let go while there was no plan, first, unrecorded (what started it wasn't).
+    // What the part a hold started in took after where it started, first, at its start (where the hold landed); followed
+    // and recorded as it was taken (liveLanding).
+    for (int i = 0; i < numLiveLanding && numLiveEvents < (int) liveEvents.size(); ++i)
+    {
+        liveEvents[(size_t) numLiveEvents] = liveLanding[(size_t) i];
+        liveEvents[(size_t) numLiveEvents++].event.sample = 0;
+    }
+
+    numLiveLanding = 0;
+
+    // What let go while there was no plan, then, unrecorded (what started it wasn't).
     for (int i = 0; i < numEndsWaiting; ++i)
     {
         auto end = endsWaiting[(size_t) i];
@@ -725,6 +803,27 @@ void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t part
     }
 
     lastPart = { partClock, transport.sample, transport.playing && transport.countIn.left == 0 };
+}
+
+void Engine::keepLiveForLanding (int from) noexcept
+{
+    // Never full: it holds what one part took at most, and is emptied as the next part takes its own.
+    for (int i = 0; i < numLiveEvents; ++i)
+        if (liveEvents[(size_t) i].event.sample >= from && numLiveLanding < (int) liveLanding.size())
+            liveLanding[(size_t) numLiveLanding++] = liveEvents[(size_t) i];
+
+    numLiveEvents = 0;
+}
+
+void Engine::landLiveEvents (const Plan& plan, int offset, int numSamples, std::int64_t partClock) noexcept
+{
+    // Those of the rest of the part, from where it lands, as a part of their own would take them; at their places in it.
+    takeLiveEvents (plan, numSamples - offset, partClock + offset);
+
+    for (int i = 0; i < numLiveEvents; ++i)
+        liveEvents[(size_t) i].event.sample += offset;
+
+    lastPart = { partClock, transport.sample - offset, true };
 }
 
 int Engine::takePlayed (std::span<PlayedEvent> into) noexcept
@@ -753,6 +852,7 @@ int Engine::getOutputLatency (const Plan& plan) noexcept
 void Engine::process (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples) noexcept
 {
     const juce::ScopedNoDenormals noDenormals;
+    blockLength = std::max (1, numSamples);
     const auto startTicks = juce::Time::getHighResolutionTicks();
     const auto startMilliseconds = blockClock.stamp (getMilliseconds(), numSamples, sampleRate); // smoothed (PlayheadClock.h)
     numOutputs = std::min (numOutputs, maximumChannels);
@@ -804,7 +904,19 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             }
 
             takeTransport (*plan);
-            takeLiveEvents (*plan, length, clock + done);
+
+            // Held where a jump landed (Landing), the live notes wait in their queue for where it lands (landLiveEvents()): from
+            // here, as they came in now.
+            if (landing.held)
+            {
+                numLiveEvents = 0;
+                lastBlockMilliseconds = getMilliseconds();
+                lastPart = { clock + done, transport.sample, true };
+            }
+            else
+            {
+                takeLiveEvents (*plan, length, clock + done);
+            }
             expectAudio (*plan);
             auto startBeat = transport.beat;
             auto startRound = loopRounds; // the times round the loop as it started (or after a jump taken in it)
@@ -838,8 +950,37 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
             {
                 auto offset = counted;
 
+                auto preparedLanding = false;
+
                 while (offset < length && transport.playing)
                 {
+                    // Held where a jump landed (Landing): silent, in whole blocks, while the audio clips at another rate there
+                    // make their resampling ready, a share of each block; then on from there, at the place in the block it
+                    // landed in, as it would have played at once.
+                    if (landing.held)
+                    {
+                        if (! std::exchange (preparedLanding, true))
+                            prepareLanding (*plan, numSamples);
+
+                        const auto maximumHeld = (int) (maximumHoldSeconds * sampleRate) / blockLength * blockLength;
+
+                        if (landing.heldFor > 0 && landing.heldFor % blockLength == 0
+                            && (landing.heldFor >= maximumHeld || ! needsPreparingAt (*plan, transport.sample)))
+                        {
+                            endHold();
+                            jumpedAt = offset;
+                            startBeat = transport.beat;
+                            startRound = loopRounds;
+                            landLiveEvents (*plan, offset, length, clock + done);
+                            continue;
+                        }
+
+                        const auto silent = std::min (length - offset, blockLength - landing.heldFor % blockLength);
+                        landing.heldFor += silent;
+                        offset += silent;
+                        continue;
+                    }
+
                     auto span = length - offset;
                     std::int64_t loopStart = 0, loopEnd = 0;
 
@@ -894,7 +1035,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                     if (jump.pending && (jump.left -= span) <= 0)
                     {
                         const auto stops = jump.thenStop;
-                        takeJump (*plan, jump.beat, jump.count);
+                        takeJump (*plan, jump.beat, jump.count, clock + done + offset);
 
                         if (recording != nullptr)
                             recording->end();
@@ -908,6 +1049,10 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         // A stop that waited for the jump's fade: where it landed, with nothing left to fade out.
                         if (stops)
                             stopTransport (true);
+
+                        // Held there: the live notes this part took for after here, where it lands.
+                        if (landing.held)
+                            keepLiveForLanding (offset);
                     }
                 }
 
@@ -920,8 +1065,10 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 
             // Where this part started, and when: the block's start on its smoothed clock and the samples before the part;
             // or after a jump taken in it, where it landed and when.
-            const auto beatsPerSecond =
-                transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerQuarterNote (startBeat) : 0.0;
+            // (Held where a jump landed, it waits there.)
+            const auto beatsPerSecond = transport.playing && transport.countIn.left == 0 && ! landing.held
+                                            ? sampleRate / plan->tempo.getSamplesPerQuarterNote (startBeat)
+                                            : 0.0;
             publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + (done + jumpedAt) * 1000.0 / sampleRate,
                              (length - jumpedAt) * 1000.0 / sampleRate, startRound, loopRounds != startRound);
         }
@@ -1487,6 +1634,13 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
 
             if (! audioPlayed)
                 playAudio();
+
+            // Those of files at another rate made ready, a little a block, for where they play from next without playing
+            // on to there (known bug 85: the loop's wrap started every one's resampler from nothing, in one block); while
+            // a jump fades out, for where it lands first, and where it lands, held there until they are (Landing).
+            for (const auto& region : strip.audio)
+                region.prepare (span.songSample + numSamples, transport.playing && ! jump.pending,
+                                std::span (expectedPlaces.data(), numExpectedPlaces), sampleRate, numSamples);
         }
 
         // What it sends before its fader, muted too (its sends' cuts say whether each sends: SendLevel).
@@ -1655,19 +1809,11 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
 
     // The notes sounding here: those that started before it and end after its first sample. A note that ends where the
     // span starts ends on that sample, however its beat rounds to it, so that a song played from where one note ends
-    // and the next starts plays the next alone.
-    const auto firstSampleEnd = plan.tempo.toBeats (from + 0.5);
+    // and the next starts plays the next alone. Found by the sequence's index of them, not by a look through every note
+    // before here (known bug 85).
+    const auto firstSampleEnd = std::max (fromBeat, plan.tempo.toBeats (from + 0.5));
     const auto forEachSounding = [notes, fromBeat, firstSampleEnd] (auto&& action)
-    {
-        for (const auto& note : notes->getNotes())
-        {
-            if (note.start >= fromBeat)
-                break;
-
-            if (note.end > firstSampleEnd)
-                action (note);
-        }
-    };
+    { notes->forEachSounding (fromBeat, firstSampleEnd, action); };
 
     if (state.sequence != notes)
     {
@@ -1693,15 +1839,68 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     {
         state.nextEvent = notes->findEvent (fromBeat);
 
+        // Where playback starts, jumps or goes round the loop, the controllers, the bend and the channel's pressure as the
+        // track's clips have them there, before the notes sounding start, as Cubase's and Ableton Live's chase does (a
+        // plug-in with the mod wheel on its filter, a note started in the middle of a bend). Each the last value before here
+        // where the clips hold one; where they hold none before here, the bend's middle, no pressure, and the controllers
+        // that MIDI's Reset All Controllers resets (RP-015: the mod wheel, breath, the foot, expression at full and the
+        // pedals) to that; any other controller the clips change only later (a volume, a pan) is left as it is, having no
+        // value of its own to go back to. One that changes where playback starts (on its first sample) isn't chased: its own
+        // change plays there, once. Not where the song changed as it played (a new sequence): its controllers are as they
+        // were. A search through its changes for each one the track changes, nothing allocated.
+        const auto chasesControls = transport.chase;
+
+        if (chasesControls)
+        {
+            notes->forEachControlAt (fromBeat, firstSampleEnd,
+                                     [&state] (const NoteSequence::ControlAt& control)
+                                     {
+                                         if (control.type == Type::aftertouch)
+                                             return;
+
+                                         if (control.held)
+                                         {
+                                             state.addEvent ({ control.type, 0, control.number, control.value });
+                                             return;
+                                         }
+
+                                         if (control.type != Type::controller)
+                                         {
+                                             state.addEvent ({ control.type, 0, control.number, 0.0f }); // the middle, none
+                                             return;
+                                         }
+
+                                         if (const auto reset = getResetValue (control.number))
+                                             state.addEvent ({ control.type, 0, control.number, *reset });
+                                     });
+        }
+
+        // The notes sounding here start, each from where it started.
+        std::array<double, 128> startedAt;
+        startedAt.fill (-1.0);
+
         forEachSounding (
-            [&state] (const NoteSequence::Note& note)
+            [&state, &startedAt] (const NoteSequence::Note& note)
             {
                 if (! state.sounding[(size_t) note.pitch])
                 {
                     state.addEvent ({ Type::noteOn, 0, note.pitch, note.velocity });
                     state.sounding.set ((size_t) note.pitch);
+                    startedAt[(size_t) note.pitch] = note.start;
                 }
             });
+
+        // And a note's own pressure, where it changed since that note started.
+        if (chasesControls)
+            notes->forEachControlAt (fromBeat, firstSampleEnd,
+                                     [&state, &startedAt] (const NoteSequence::ControlAt& control)
+                                     {
+                                         const auto pitch = (size_t) std::clamp (control.number, 0, 127);
+
+                                         if (control.type == Type::aftertouch && control.held && startedAt[pitch] >= 0.0
+                                             && control.beat >= startedAt[pitch])
+                                             state.addEvent ({ control.type, 0, control.number, control.value });
+                                     });
 
         state.mustChase = false;
     }

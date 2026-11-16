@@ -49,6 +49,15 @@ namespace
                 bytes[1] = 123;
                 bytes[2] = 0;
                 return 3;
+            case Type::aftertouch: // polyphonic: the note's
+                bytes[0] = 0xa0;
+                bytes[1] = byte (event.number);
+                bytes[2] = byte (juce::roundToInt (event.value * 127.0f));
+                return 3;
+            case Type::channelPressure:
+                bytes[0] = 0xd0;
+                bytes[1] = byte (juce::roundToInt (event.value * 127.0f));
+                return 2;
             case Type::slide: // MIDI has no slide of one note to another
                 return 0;
         }

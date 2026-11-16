@@ -26,7 +26,11 @@ struct NoteEvent
         // without glides plays it as a note on); and every sounding note gliding to the pitch number, evenly, over value
         // seconds, as FL Studio's slide notes make them (an instrument without glides ignores it).
         portamentoOn,
-        slide
+        slide,
+        // How hard a key is pressed while it is held: one note's (polyphonic aftertouch; number: the note), or every note's
+        // on the channel (channel pressure); value: from 0 to 1. An instrument that doesn't use pressure ignores both.
+        aftertouch,
+        channelPressure
     };
 
     Type type = Type::noteOn;

@@ -101,7 +101,7 @@ namespace
         using juce::AudioProcessor::processBlock;
 
         double getTailLengthSeconds() const override { return 0.0; }
-        bool acceptsMidi() const override { return kind == Kind::synth || kind == Kind::synthWithInput; }
+        bool acceptsMidi() const override { return kind == Kind::synth || kind == Kind::synthWithInput || kind == Kind::midiLog; }
         bool producesMidi() const override { return false; }
         juce::AudioProcessorEditor* createEditor() override { return new juce::GenericAudioProcessorEditor (*this); }
         bool hasEditor() const override { return true; }
@@ -282,7 +282,12 @@ namespace
         }
 
         void prepareToPlay (double sampleRate, int) override { rate = sampleRate; }
-        void reset() override { stop (-1); }
+
+        void reset() override
+        {
+            stop (-1);
+            pressure = 1.0f;
+        }
 
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
@@ -308,6 +313,12 @@ namespace
                     start (message.getNoteNumber());
                 else if (message.isNoteOff()) // and no controller: all notes off ends none of its notes
                     stop (message.getNoteNumber());
+                else if (message.isChannelPressure()) // the keys' pressure scales its notes: the channel's, and a note's
+                    pressure = 1.0f - 0.5f * (float) message.getChannelPressureValue() / 127.0f;
+                else if (message.isAftertouch())
+                    for (auto& voice : voices)
+                        if (voice.note == message.getNoteNumber())
+                            voice.pressure = 1.0f - 0.5f * (float) message.getAfterTouchValue() / 127.0f;
             }
 
             playNotes (buffer, done, buffer.getNumSamples());
@@ -318,18 +329,20 @@ namespace
         {
             int note = -1;
             double phase = 0.0;
+            float pressure = 1.0f; // what its aftertouch leaves of its level
         };
 
         StandInParameter* level = nullptr;
         std::array<Voice, 16> voices {};
         double rate = 44100.0;
+        float pressure = 1.0f; // what the channel's pressure leaves of its level
 
         void start (int note)
         {
             for (auto& voice : voices)
                 if (voice.note < 0)
                 {
-                    voice = { note, 0.0 };
+                    voice = { note, 0.0, 1.0f };
                     return;
                 }
         }
@@ -352,7 +365,7 @@ namespace
 
                 for (int i = from; i < to; ++i)
                 {
-                    const auto sample = level->getValue() * (float) std::sin (voice.phase);
+                    const auto sample = level->getValue() * pressure * voice.pressure * (float) std::sin (voice.phase);
                     voice.phase += step;
 
                     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
@@ -550,6 +563,56 @@ namespace
     };
 
     // An effect in mono, in and out, as some plug-ins take no other layout: its sound at half.
+    // Plays nothing, and keeps the MIDI it is given since it was last reset as its state: each message's bytes, three at
+    // most, in order, as many as fit. Written as it plays, read as its state is taken, once what it was given has played.
+    class TestMidiLog final : public StandIn
+    {
+    public:
+        TestMidiLog()
+            : StandIn (Kind::midiLog, BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+        {
+        }
+
+        void reset() override { count.store (0, std::memory_order_release); }
+
+        using StandIn::processBlock;
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
+        {
+            buffer.clear();
+            auto kept = count.load (std::memory_order_relaxed);
+
+            for (const auto metadata : midi)
+            {
+                if (kept >= (int) log.size())
+                    break;
+
+                auto& entry = log[(size_t) kept++];
+                entry.fill (0);
+
+                for (int i = 0; i < std::min (3, metadata.numBytes); ++i)
+                    entry[(size_t) i] = metadata.data[i];
+            }
+
+            count.store (kept, std::memory_order_release);
+        }
+
+        void getStateInformation (juce::MemoryBlock& data) override
+        {
+            juce::MemoryOutputStream out (data, false);
+            const auto kept = count.load (std::memory_order_acquire);
+            out.writeInt (kept);
+
+            for (int i = 0; i < kept; ++i)
+                out.write (log[(size_t) i].data(), 3);
+        }
+
+        void setStateInformation (const void*, int) override {}
+
+    private:
+        std::array<std::array<juce::uint8, 3>, 4096> log {};
+        std::atomic<int> count { 0 };
+    };
+
     class TestMono final : public StandIn
     {
     public:
@@ -661,6 +724,8 @@ namespace
                 return { "Test Synth With Input", "PhaziteTestSynthWithInput", 0x7e5753, true };
             case Kind::mono:
                 return { "Test Mono", "PhaziteTestMono", 0x7e5701, false };
+            case Kind::midiLog:
+                return { "Test MIDI Log", "PhaziteTestMidiLog", 0x7e5741, true };
             case Kind::slow:
                 return { "Test Slow", "PhaziteTestSlow", 0x7e5761, false };
             case Kind::slowToo:
@@ -771,6 +836,8 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
             return std::make_unique<TestPlayhead>();
         case Kind::mono:
             return std::make_unique<TestMono>();
+        case Kind::midiLog:
+            return std::make_unique<TestMidiLog>();
         case Kind::slow:
         case Kind::slowToo:
         case Kind::slowSibling:
@@ -794,6 +861,21 @@ juce::File TestPlugins::getSlowGate (bool closing)
 juce::File TestPlugins::getSlowWaiting (Kind kind)
 {
     return getSlowGate().getSiblingFile (juce::String ("PhaziteTestSlowWaiting-") + juce::String (describe (kind).uniqueId));
+}
+
+std::vector<juce::MidiMessage> TestPlugins::readMidiLog (const juce::MemoryBlock& state)
+{
+    juce::MemoryInputStream in (state, false);
+    std::vector<juce::MidiMessage> messages;
+
+    for (auto count = in.getNumBytesRemaining() >= 4 ? in.readInt() : 0; count > 0 && in.getNumBytesRemaining() >= 3; --count)
+    {
+        juce::uint8 bytes[3] {};
+        in.read (bytes, 3);
+        messages.emplace_back (bytes, juce::MidiMessage::getMessageLengthFromFirstByte (bytes[0]), 0.0);
+    }
+
+    return messages;
 }
 
 TestPlugins::Playhead TestPlugins::Playhead::read (const juce::MemoryBlock& state)

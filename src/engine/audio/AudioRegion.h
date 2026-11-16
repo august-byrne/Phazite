@@ -8,6 +8,7 @@
 #include "AudioFile.h"
 
 #include <memory>
+#include <span>
 
 namespace phazite::engine
 {
@@ -58,8 +59,12 @@ struct RegionState
     std::int64_t playedStart = 0;
     double playedFileStart = 0.0;
 
+    // A file at another rate's resampling, or nullptr; and a second, made ready ahead of where the region plays from next
+    // without playing on to there (AudioRegion::prepare()), which then takes the first's place, so that it plays from there
+    // at once rather than work its filter's start through in one block (known bug 85: every resampled clip did at the
+    // loop's wrap, in the same block).
     struct Conversion;
-    std::unique_ptr<Conversion> conversion; // a file at another rate's, or nullptr
+    std::unique_ptr<Conversion> conversion, spare;
 };
 
 // A cut the transport makes in what plays (a stop, the loop's end): the sound fades out over so many samples before a
@@ -98,6 +103,18 @@ struct AudioRegion
     // Audio thread: a sample of the song it will play from next if it plays there, though the song doesn't play there now
     // (where playback will start, the loop's start): its file reads ahead of there too (AudioFile::expect()).
     void expect (std::int64_t songSample, double engineRate) const noexcept;
+
+    // Audio thread, once a block: a file at another rate's resampling made ready, a little a block, for where it will play
+    // from next without playing on to there: its start, half a second or less ahead of the sample the song plays next
+    // (while it plays); else the first of the places given that it plays at (where playback will start, the loop's start).
+    // What it plays from there then is the same, to the last bit, as from nothing.
+    void prepare (std::int64_t songSample, bool playing, std::span<const std::int64_t> places, double engineRate,
+                  int numSamples) const noexcept;
+
+    // Audio thread: whether it is a file at another rate that plays at a sample of the song, read there, whose resampling
+    // isn't made ready for there yet (prepare()): what a jump that lands there waits for (Engine.h: Landing). One whose file
+    // isn't read there yet doesn't count: it plays as silence and fades in once it is, never waited for.
+    bool needsPreparing (std::int64_t songSample, double engineRate) const noexcept;
 
     // Message thread: a sample of the song it plays from at once if it plays there (where a jump lands), which its file
     // reads first (AudioFile::want()).

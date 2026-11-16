@@ -84,6 +84,11 @@ namespace
                         controls.push_back ({ beat, EventType::controller, (int) child[schema::controlNumber], (float) value / 127.0f });
                     else if (kind == schema::controlIsPitchWheel)
                         controls.push_back ({ beat, EventType::pitchBend, 0, (float) (value - 8192) / 8192.0f });
+                    else if (kind == schema::controlIsChannelPressure)
+                        controls.push_back ({ beat, EventType::channelPressure, 0, (float) juce::jlimit (0, 127, value) / 127.0f });
+                    else if (kind == schema::controlIsAftertouch)
+                        controls.push_back ({ beat, EventType::aftertouch, (int) child[schema::controlNumber],
+                                              (float) juce::jlimit (0, 127, value) / 127.0f });
                 }
             }
         }

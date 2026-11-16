@@ -264,11 +264,11 @@ TEST_CASE ("The playhead moved while recording: the next take starts where it la
     auto* session = phazite::getSession (context);
     REQUIRE (session != nullptr);
     session->locateWhileRecording (phazite::BeatPosition::fromBeats (8.5),
-                                   [&studio] (phazite::Take& take)
+                                   [&studio] (std::unique_ptr<phazite::Take> take)
                                    {
                                        studio.playback.play (0.1);
                                        const phazite::UndoStep step (*phazite::findSong (studio.song.context), "Record");
-                                       take.finish();
+                                       take->finish();
                                    });
     CHECK (studio.isRecording());
     studio.playback.play (1.1); // to beat 10.9
@@ -427,6 +427,47 @@ TEST_CASE ("A write that fails while a control is held keeps the take, a Record 
     phazite::undo (song);
     CHECK (phazite::getClips (context, track).empty());
     CHECK (volume.getValue() == doctest::Approx (before));
+}
+
+TEST_CASE (
+    "A take stopped while a control is held stays in the playlist, with its levels, until its clip takes its place as the mouse goes up")
+{
+    // Known bug 176: the clip shown while recording needed the engine's recording, which the take let go of as it ended, so a
+    // take stopped during a drag vanished from the playlist until the drag ended and its clip was placed.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0); // to beat 2
+    const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (1.0), phazite::BeatPosition::fromBeats (1.25));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f; }));
+    const auto recording = phazite::getRecordingsInProgress (context);
+    REQUIRE (recording.size() == 1);
+
+    auto volume = phazite::getVolume (context, track);
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    studio.song.run ("transport.record"); // Stop, by its key, while the fader is held
+    CHECK_FALSE (studio.isRecording());
+    CHECK (phazite::getClips (context, track).empty()); // its clip waits for the drag's end
+
+    // Shown as it was when it stopped, with what came in.
+    const auto shown = phazite::getRecordingsInProgress (context);
+    REQUIRE (shown.size() == 1);
+    CHECK (shown[0].track == track);
+    CHECK (shown[0].source == phazite::RecordSource::input);
+    CHECK (shown[0].range.getStart() == recording[0].range.getStart());
+    CHECK (shown[0].range.getEnd() >= recording[0].range.getEnd());
+    CHECK (phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f);
+
+    // The mouse up: its clip in its place, and nothing shown as recording any more.
+    volume.endGesture();
+    const auto clips = phazite::getClips (context, track);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (shown[0].range.getStart().inBeats()).epsilon (0.01));
+    CHECK (phazite::getRecordingsInProgress (context).empty());
+    CHECK (phazite::getRecordingLevels (context, track, span, 1)[0] == 0.0f);
 }
 
 TEST_CASE ("A write that fails during a take, as on a full drive, stops recording and keeps what was written, and Phazite says so")

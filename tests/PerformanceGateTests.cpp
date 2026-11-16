@@ -21,6 +21,7 @@
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
+#include "engine/nodes/NoteSequence.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -935,4 +936,28 @@ TEST_CASE ("Performance gate: an import, Normalize and Quantize Audio read none 
     // What the gate counts: a peak read at once, on the message thread, counts its bytes.
     REQUIRE (phazite::getClipPeak (song, clip).has_value());
     CHECK (phazite::AudioWork::getMessageThreadReads() > before);
+}
+
+TEST_CASE ("Performance gate: a track's controllers' index holds a place for each change, however many controllers change")
+{
+    // Known bug 85's review: the index of the controllers' values that the chase reads kept every controller's value at a
+    // mark every 64 changes, so it grew with the changes times the controllers (90 MB for a long take with dense pressure
+    // on one track), made again at each note edited on it. Now each controller's changes are a list of places among the
+    // events: 120,000 changes cost as much, spread over one controller or sixty.
+    using Type = phazite::devices::NoteEvent::Type;
+    const auto bytesFor = [] (int controllers)
+    {
+        std::vector<phazite::engine::NoteSequence::Control> controls;
+
+        for (int i = 0; i < 120000; ++i)
+            controls.push_back ({ i * 0.01, Type::controller, i % controllers, (float) (i % 128) / 127.0f });
+
+        return phazite::engine::NoteSequence ({ { 0.0, 1200.0, 60, 0.8f } }, std::move (controls)).getBytes();
+    };
+
+    const auto one = bytesFor (1), sixty = bytesFor (60);
+    CAPTURE (one);
+    CAPTURE (sixty);
+    CHECK (sixty <= one + 60 * 64);                                              // a few bytes for each controller more
+    CHECK (one <= 120000 * (sizeof (phazite::engine::NoteSequence::Event) + 8)); // the events, and a place for each
 }

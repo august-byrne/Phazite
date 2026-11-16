@@ -169,7 +169,20 @@ void PlaybackSession::placeTakesNow()
     }
 }
 
-void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::function<void (Take&)>& finish)
+std::vector<Take*> PlaybackSession::getTakesShown()
+{
+    std::vector<Take*> shown;
+
+    for (const auto& waiting : takesToPlace)
+        shown.push_back (waiting.get());
+
+    if (take != nullptr)
+        shown.push_back (take.get());
+
+    return shown;
+}
+
+void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::function<void (std::unique_ptr<Take>)>& finish)
 {
     if (take == nullptr)
     {
@@ -190,11 +203,16 @@ void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::functi
     if (onJumpAsked != nullptr)
         onJumpAsked();
 
-    // This one's clips, and the song with them, which the engine loops as the take looped it still (the song's own loop
-    // would take a playhead past the song's end back to its start); then it goes, finished or else dropped.
+    // This one ended, and its clips placed (now, or after the drag under way), which the engine loops as the take looped it
+    // still (the song's own loop would take a playhead past the song's end back to its start). The next hears from it what
+    // it lets go of where it ended, as it is placed, which the next may carry on.
     const auto restarted = take->getDeviceStarts() != host.getDeviceStarts();
     const auto was = take->getSampleRate();
-    finish (*take);
+
+    if (next != nullptr)
+        next->followOn (*take);
+
+    finish (std::move (take));
     take = std::move (next);
     update();
 

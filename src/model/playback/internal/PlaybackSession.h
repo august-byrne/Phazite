@@ -88,13 +88,17 @@ public:
     void placeTake (std::unique_ptr<Take>);
     void placeTakesNow();
 
+    // The takes whose recordings the playlist shows (Take::getInProgress()): those that wait to be placed, then the one it
+    // records, if any.
+    std::vector<Take*> getTakesShown();
+
     // The playhead put elsewhere while it records, as locate() puts it: recording goes on from there, as Ableton Live's does
     // after a jump. Another take starts where the playhead lands, to the sample, if anything would still record: given to
     // the engine before the take ends, so that nothing after the jump is missed while the message thread finishes it
-    // (Take::start()). The take ends where the song is (the engine ends what it records at a jump: Engine.h), finished by
-    // the function given, which keeps it as a stop would, in an undo step of its own. The engine loops what the take looped
-    // all the while.
-    void locateWhileRecording (BeatPosition, const std::function<void (Take&)>& finish);
+    // (Take::start()). The take ends where the song is (the engine ends what it records at a jump: Engine.h), handed to the
+    // function given, which keeps it as a stop would, in an undo step of its own: ended at once, and placed now or once the
+    // drag under way has ended (placeTake()). The engine loops what the take looped all the while.
+    void locateWhileRecording (BeatPosition, const std::function<void (std::unique_ptr<Take>)>& finish);
 
     // For tests: called as locateWhileRecording() has asked the engine for the jump, before anything after it, as the audio
     // thread may take the jump then (a test plays blocks).

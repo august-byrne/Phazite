@@ -17,7 +17,8 @@ namespace
 
 AudioFile::AudioFile (std::unique_ptr<SampleReader> r, const std::atomic<std::uint64_t>* engineBlocks)
     : reader (std::move (r)),
-      blocks (engineBlocks)
+      blocks (engineBlocks),
+      serial (filesMade.fetch_add (1, std::memory_order_relaxed) + 1)
 {
     numChannels = std::max (1, reader->getNumChannels());
     sampleRate = reader->getSampleRate() > 0.0 ? reader->getSampleRate() : 44100.0;
@@ -102,10 +103,17 @@ bool AudioFile::readWantedChunk()
 
 void AudioFile::keep (std::int64_t sample)
 {
-    const std::lock_guard lock (mutex);
+    // Not the reading's lock, which a read from the disk holds.
+    const std::lock_guard lock (keptMutex);
 
     if (sample >= 0 && sample < length)
         kept.insert ((int) (sample / chunkSamples));
+}
+
+bool AudioFile::isKept (int index)
+{
+    const std::lock_guard lock (keptMutex);
+    return kept.count (index) > 0;
 }
 
 bool AudioFile::readChunk (int index)
@@ -155,10 +163,25 @@ bool AudioFile::readNext()
         return false;
     }
 
-    // A longer one: where each clip that plays it starts, then ahead of everywhere it plays, the nearest first.
-    for (const auto index : kept)
-        if (index < numChunks && read[(size_t) index] == nullptr)
-            return readChunk (index);
+    // A longer one: where each clip that plays it starts, then ahead of everywhere it plays, the nearest first. (The chunk
+    // to read found under the kept lock, and read outside it.)
+    auto keptUnread = -1;
+
+    {
+        const std::lock_guard keptLock (keptMutex);
+
+        for (const auto index : kept)
+        {
+            if (index < numChunks && read[(size_t) index] == nullptr)
+            {
+                keptUnread = index;
+                break;
+            }
+        }
+    }
+
+    if (keptUnread >= 0)
+        return readChunk (keptUnread);
 
     findWherePlaying();
     const auto ahead = (int) std::ceil (aheadSeconds * sampleRate / chunkSamples);
@@ -178,7 +201,7 @@ bool AudioFile::readNext()
 
     for (int i = 0; i < numChunks; ++i)
     {
-        if (read[(size_t) i] != nullptr && kept.count (i) == 0 && ! isNear (i))
+        if (read[(size_t) i] != nullptr && ! isNear (i) && ! isKept (i))
         {
             chunks[(size_t) i].store (nullptr, std::memory_order_release);
             letGo.emplace_back (std::move (read[(size_t) i]), blocks->load (std::memory_order_acquire) + 2);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -13,6 +14,9 @@ namespace phazite::engine
 namespace
 {
     constexpr int jumpFade = 40; // samples a region fades in over after a jump, rather than click
+
+    // How far ahead of where the song plays a region's start is made ready for (prepare()), in seconds.
+    constexpr double prepareAheadSeconds = 0.5;
 
     bool isSameRate (double fileRate, double engineRate) noexcept
     {
@@ -95,6 +99,56 @@ struct RegionState::Conversion
 
         numLeft = 0;
         nextInput = fileSample;
+        warmSerial = 0;
+        warmed = false;
+    }
+
+    // Ahead of a sample of the file it will play from next (known bug 85): from there afresh, given so many of the file's
+    // samples a block until its filter's start is through and it gives out its first; whether it is ready to play from
+    // there. A part not read yet waits for the next block, rather than fill it with silence. The same as restart() and
+    // convert() from there would make it, to the last bit: the resampler's output doesn't depend on how its input comes.
+    bool warm (AudioFile& file, std::int64_t fileSample, int budget) noexcept
+    {
+        if (warmSerial != file.getSerial() || warmFrom != fileSample)
+        {
+            restart (fileSample);
+            warmSerial = file.getSerial();
+            warmFrom = fileSample;
+        }
+
+        const auto numChannels = (int) resamplers.size();
+
+        for (auto given = 0; ! warmed && budget > 0; budget -= given)
+        {
+            given = std::min (budget, maximumInput);
+
+            // (Before the file's start and past its end, silence is what plays there anyway; a part spans two chunks at most.)
+            const auto first = std::max<std::int64_t> (0, nextInput), last = std::min (nextInput + given, file.getLength()) - 1;
+
+            if (first <= last && (! file.isRead (first) || ! file.isRead (last)))
+                return false;
+
+            auto out = 0;
+
+            for (int channel = 0; channel < numChannels; ++channel)
+            {
+                readFile (file, channel, nextInput, input.data(), given);
+                const double* output = nullptr;
+                out = resamplers[(size_t) channel]->process (input.data(), given, output);
+                std::copy (output, output + out, left[(size_t) channel].data());
+            }
+
+            numLeft = out;
+            nextInput += given;
+            warmed = out > 0;
+        }
+
+        return warmed;
+    }
+
+    bool isWarmFor (const AudioFile& file, std::int64_t fileSample) const noexcept
+    {
+        return warmed && warmSerial == file.getSerial() && warmFrom == fileSample;
     }
 
     // Fills a destination for each of its channels with so many samples at the engine's rate, from where it is; whether
@@ -156,6 +210,12 @@ struct RegionState::Conversion
     std::array<std::vector<double>, 2> left; // what each gave out beyond what a block played
     int numLeft = 0;
     std::int64_t nextInput = 0; // the file's sample read next
+
+    // What it was warmed for (warm()): the file, by its serial (never by its address, which a file made later can have), and
+    // its sample; and whether it gives out from there now.
+    std::uint64_t warmSerial = 0;
+    std::int64_t warmFrom = -1;
+    bool warmed = false;
 };
 
 RegionState::RegionState() = default;
@@ -163,7 +223,10 @@ RegionState::RegionState() = default;
 RegionState::RegionState (const AudioFile& file, double engineRate)
 {
     if (! isSameRate (file.getSampleRate(), engineRate))
+    {
         conversion = std::make_unique<Conversion> (file.getSampleRate(), engineRate, std::min (2, file.getNumChannels()));
+        spare = std::make_unique<Conversion> (file.getSampleRate(), engineRate, std::min (2, file.getNumChannels()));
+    }
 }
 
 RegionState::~RegionState() = default;
@@ -211,6 +274,48 @@ void AudioRegion::expect (std::int64_t songSample, double engineRate) const noex
         file->expect ((std::int64_t) (fileStart + (double) (songSample - start) * file->getSampleRate() / engineRate));
 }
 
+void AudioRegion::prepare (std::int64_t songSample, bool playing, std::span<const std::int64_t> places, double engineRate,
+                           int numSamples) const noexcept
+{
+    if (file == nullptr || state == nullptr || state->spare == nullptr || ! state->playsAt (*file, engineRate))
+        return;
+
+    // Where it plays from next without playing on to there: its start, a moment ahead of where the song plays next; or else
+    // the first place given that it plays at. None where it plays on to anyway.
+    const auto ahead = (std::int64_t) (prepareAheadSeconds * engineRate);
+    std::optional<std::int64_t> next;
+
+    if (playing && start >= songSample && start - songSample <= ahead)
+        next = start;
+
+    for (size_t i = 0; i < places.size() && ! next.has_value(); ++i)
+        if (places[i] >= start && places[i] < getEnd())
+            next = places[i];
+
+    if (! next.has_value() || (state->playedTo == *next && state->playedFile == file.get()))
+        return;
+
+    // As much of the file each block as it plays in one, and no less than a quarter of what the resampler takes at a time;
+    // from the file's sample play() starts it from there (the same sum, to the last bit).
+    const auto budget =
+        std::max (RegionState::Conversion::maximumInput / 4, (int) std::ceil (numSamples * file->getSampleRate() / engineRate));
+    state->spare->warm (*file, std::llround (fileStart + (double) (*next - start) * file->getSampleRate() / engineRate), budget);
+}
+
+bool AudioRegion::needsPreparing (std::int64_t songSample, double engineRate) const noexcept
+{
+    if (file == nullptr || state == nullptr || state->spare == nullptr || ! state->playsAt (*file, engineRate) || songSample < start
+        || songSample >= getEnd() || (state->playedTo == songSample && state->playedFile == file.get())) // plays on there
+        return false;
+
+    const auto fileSample = std::llround (fileStart + (double) (songSample - start) * file->getSampleRate() / engineRate);
+
+    if (fileSample >= 0 && fileSample < file->getLength() && ! file->isRead (fileSample))
+        return false; // never waited for: it fades in once it is read
+
+    return ! state->spare->isWarmFor (*file, fileSample);
+}
+
 void AudioRegion::want (std::int64_t songSample, double engineRate) const
 {
     if (file != nullptr && songSample >= start && songSample < getEnd())
@@ -252,8 +357,20 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
         playing.playedStart = start;
         playing.playedFileStart = fileStart;
 
+        // A file at another rate: through the resampling made ready for here, if it was (prepare()), else from nothing.
         if (playing.conversion != nullptr)
-            playing.conversion->restart (std::llround (playing.filePosition));
+        {
+            if (const auto fileSample = std::llround (playing.filePosition);
+                playing.spare != nullptr && playing.spare->isWarmFor (*file, fileSample))
+            {
+                std::swap (playing.conversion, playing.spare);
+                playing.spare->warmSerial = 0; // what played before, of no use now: warmed afresh for the next
+            }
+            else
+            {
+                playing.conversion->restart (fileSample);
+            }
+        }
     }
 
     playing.playedTo = to;

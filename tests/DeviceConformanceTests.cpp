@@ -372,8 +372,8 @@ Sound makeWhatIsNotSound (int numSamples, int numChannels)
 }
 
 // Notes and the rest at their ends, for an instrument: the lowest and the highest note, as hard and as soft as notes come,
-// the bend and controllers at their ends, a glide and a slide, every note let go, and a note that starts and ends on the
-// stretch's last sample.
+// the bend and controllers at their ends, the keys' pressure (a note's and the channel's, which Phazite's instruments take
+// without using), a glide and a slide, every note let go, and a note that starts and ends on the stretch's last sample.
 std::vector<devices::NoteEvent> makeNotesAtTheirEnds (int numSamples)
 {
     using Type = devices::NoteEvent::Type;
@@ -385,11 +385,15 @@ std::vector<devices::NoteEvent> makeNotesAtTheirEnds (int numSamples)
              { Type::controller, eighth + 1, 1, 1.0f }, // the modulation wheel
              { Type::pitchBend, 2 * eighth, 0, -1.0f },
              { Type::controller, 2 * eighth + 1, 64, 1.0f }, // the sustain pedal
+             { Type::aftertouch, 2 * eighth + 2, 60, 1.0f }, // a note's pressure, and the channel's, at their ends
+             { Type::channelPressure, 2 * eighth + 3, 0, 1.0f },
+             { Type::aftertouch, 2 * eighth + 4, 99, 0.0f }, // a note that isn't held
              { Type::portamentoOn, 3 * eighth, 72, 0.8f },
              { Type::slide, 3 * eighth + 1, 84, 0.01f },
              probe::noteOff (4 * eighth, 0),
              probe::noteOff (4 * eighth, 127),
              { Type::controller, 5 * eighth, 64, 0.0f },
+             { Type::channelPressure, 5 * eighth + 1, 0, 0.0f },
              { Type::allNotesOff, 6 * eighth, 0, 0.0f },
              probe::noteOn (6 * eighth + 1, 60, 1.0f),
              probe::noteOn (numSamples - 1, 64, 1.0f),

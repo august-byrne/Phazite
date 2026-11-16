@@ -13,6 +13,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
+#include "ProcessMemory.h"
 #include "SandboxedPlugins.h"
 #include "TestClips.h"
 #include "TestDevices.h"
@@ -42,6 +43,9 @@
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/audio/AudioRegion.h"
+#include "engine/audio/Resampler.h"
+#include "engine/nodes/DeviceRunner.h"
+#include "engine/nodes/Strip.h"
 #include "host/ThreadCpu.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -59,6 +63,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/Export.h"
@@ -409,6 +414,116 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
 
         report << " |\n";
     }
+
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every device in the block that starts or lands"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 85's review: what a reset costs each of Phazite's devices, through its runner as the engine resets it
+    // (engine::Engine::flushStrip()), at 48 kHz in blocks of 128, after it has played a while (notes held, noise in), as
+    // a share of a block's 2.67 ms. The median of 50.
+    const std::vector<std::pair<const dev::DeviceInfo*, std::function<std::unique_ptr<dev::Processor>()>>> makers {
+        { &dev::Synth::info, maker<dev::Synth>() },
+        { &dev::WavetableSynth::info, maker<dev::WavetableSynth>() },
+        { &dev::FmSynth::info, maker<dev::FmSynth>() },
+        { &dev::DrumSampler::info, maker<dev::DrumSampler>() },
+        { &dev::Sampler::info, maker<dev::Sampler>() },
+        { &dev::Equalizer::info, maker<dev::Equalizer>() },
+        { &dev::FilterEffect::info, maker<dev::FilterEffect>() },
+        { &dev::Compressor::info, maker<dev::Compressor>() },
+        { &dev::Multiband::info, maker<dev::Multiband>() },
+        { &dev::Limiter::info, maker<dev::Limiter>() },
+        { &dev::Saturator::info, maker<dev::Saturator>() },
+        { &dev::Exciter::info, maker<dev::Exciter>() },
+        { &dev::Vinyl::info, maker<dev::Vinyl>() },
+        { &dev::Delay::info, maker<dev::Delay>() },
+        { &dev::Reverb::info, maker<dev::Reverb>() },
+        { &dev::StereoExpander::info, maker<dev::StereoExpander>() },
+        { &dev::Phaser::info, maker<dev::Phaser>() },
+        { &dev::Flanger::info, maker<dev::Flanger>() },
+        { &dev::Chorus::info, maker<dev::Chorus>() },
+        { &dev::Vocoder::info, maker<dev::Vocoder>() },
+    };
+
+    juce::String report ("\n| Device | Its reset (% of a block of 128 at 48 kHz) |\n|---|---|\n");
+    juce::Random random (3);
+
+    for (const auto& [infoOf, make] : makers)
+    {
+        const auto& info = *infoOf;
+        phazite::engine::DeviceRunner runner (info, make());
+        runner.prepare (benchRate, benchBlock);
+        auto values = defaultsOf (info);
+        juce::AudioBuffer<float> buffer (2, benchBlock);
+        std::vector<dev::NoteEvent> notes;
+
+        for (int n = 0; n < 8; ++n)
+            notes.push_back ({ .type = dev::NoteEvent::Type::noteOn, .sample = 0, .number = 48 + n * 3, .value = 0.8f });
+
+        std::vector<double> times;
+
+        for (int round = 0; round < 50; ++round)
+        {
+            for (int b = 0; b < 20; ++b)
+            {
+                for (int channel = 0; channel < 2; ++channel)
+                    for (int i = 0; i < benchBlock; ++i)
+                        buffer.setSample (channel, i, info.kind == dev::DeviceKind::instrument ? 0.0f : 0.3f * (random.nextFloat() - 0.5f));
+
+                const dev::ProcessContext context { .channels = buffer.getArrayOfWritePointers(),
+                                                    .numChannels = 2,
+                                                    .numSamples = benchBlock,
+                                                    .events = b == 0 ? std::span<const dev::NoteEvent> (notes)
+                                                                     : std::span<const dev::NoteEvent>(),
+                                                    .parameters = values,
+                                                    .isPlaying = true };
+                runner.getProcessor().process (context);
+            }
+
+            times.push_back (millisecondsOf ([&runner] { runner.reset(); }));
+        }
+
+        report << "| " << juce::String (std::string (info.name)) << " | "
+               << juce::String (100.0 * phazite::test::percentileOf (times, 0.5) * benchRate / 1000.0 / benchBlock, 2) << " % |\n";
+    }
+
+    // And the paths' rings, of which a song of 200 tracks sending to 8 returns has about 400, each a third of a second and
+    // a block at 48 kHz: reset (writing nothing), against clearing them as a reset did before.
+    std::vector<std::unique_ptr<phazite::engine::DelayLine>> rings;
+    std::vector<juce::AudioBuffer<float>> cleared;
+
+    for (int i = 0; i < 400; ++i)
+    {
+        rings.push_back (std::make_unique<phazite::engine::DelayLine> (16384 + 128));
+        cleared.emplace_back (2, 16384 + 128);
+    }
+
+    std::vector<double> resets, clears;
+
+    for (int round = 0; round < 20; ++round)
+    {
+        for (auto& buffer : cleared)
+            buffer.setSample (0, 0, 1.0f); // not clear any more, as one that played isn't
+
+        resets.push_back (millisecondsOf (
+            [&rings]
+            {
+                for (auto& ring : rings)
+                    ring->reset();
+            }));
+        clears.push_back (millisecondsOf (
+            [&cleared]
+            {
+                for (auto& buffer : cleared)
+                    buffer.clear();
+            }));
+    }
+
+    const auto ofBlock = [] (double ms) { return juce::String (100.0 * ms * benchRate / 1000.0 / benchBlock, 1) + " %"; };
+    report << "| 400 paths' rings, reset (each 16,512 samples) | " << ofBlock (phazite::test::percentileOf (resets, 0.5)) << " |\n"
+           << "| The same, cleared as a reset did before | " << ofBlock (phazite::test::percentileOf (clears, 0.5)) << " |\n";
 
     MESSAGE (report);
 }
@@ -836,6 +951,379 @@ TEST_CASE ("Benchmark: an everyday edit's block while its paths fade, on the ben
              << juce::String (100.0 * phazite::test::percentileOf (steady, 0.99) / length, 1)
              << " % |\n| A send taken away or given back | " << juce::String (100.0 * phazite::test::meanOf (edited) / length, 1) << " % | "
              << juce::String (100.0 * phazite::test::percentileOf (edited, 0.99) / length, 1) << " % |\n");
+}
+
+TEST_CASE ("Benchmark: a loop's wrap and a jump on a song of 200 tracks, against the blocks around them" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // Known bug 85: the block in which the loop goes round (every note before the playhead looked through on every track for
+    // those sounding, and each audio clip of a file at another rate starting its resampler from nothing) and the block in
+    // which a jump lands (every device reset too), against the blocks around them. The benchmark song of 200 tracks, 256
+    // beats of notes (about 176,000), and 40 tracks of audio clips of a file at 44.1 kHz, which the engine at 48 kHz
+    // resamples, looping two beats near the song's end; blocks of 128 samples, on one thread and on four.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 200, 256.0);
+    auto& song = *phazite::findSong (s.context);
+    const auto sound = phazite::test::writeSound (s.getSoundsFolder().getChildFile ("Pad.wav"), 12.0);
+
+    for (int i = 0; i < 40; ++i)
+        s.addAudioClip (s.addTrack ("Audio " + juce::String (i + 1)), sound, 240.0);
+
+    constexpr double loopStart = 248.0, loopEnd = 250.0;
+    phazite::loopBeats (song, { phazite::BeatPosition::fromBeats (loopStart), phazite::BeatPosition::fromBeats (loopEnd) });
+    constexpr int block = 128;
+    phazite::test::EnginePlayback device (phazite::test::EnginePlayback::Input::silence, phazite::test::EnginePlayback::Timing::realTime,
+                                          benchRate, block);
+    s.waitForClipRenders();
+    phazite::test::dispatchPendingMessages();
+
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    const auto threads = engine.getNumThreads();
+    const auto loopLength = (std::int64_t) std::llround ((loopEnd - loopStart) * 0.5 * benchRate); // at 120 BPM
+    juce::String report ("\n| 200 tracks and 40 resampled audio tracks, 48 kHz, blocks of 128 | Threads | Blocks around: median / 99th "
+                         "percentile | The wrap's block: mean / most | A jump's block: mean / most |\n|---|---|---|---|---|\n");
+
+    for (const auto numThreads : { 1, 4 })
+    {
+        engine.setNumThreads (numThreads);
+        phazite::movePlayhead (song, phazite::BeatPosition::fromBeats (loopStart));
+        phazite::playOrStop (song);
+        const auto times = phazite::test::timeEngineBlocks ((int) (12.0 * benchRate / block), block);
+        std::vector<double> around, wraps, jumps;
+
+        // The block the wrap's work falls in: the one the loop's start plays from again in (the first, from where playback
+        // started, isn't one). The first second warms up.
+        for (size_t k = (size_t) (benchRate / block); k < times.size(); ++k)
+        {
+            const auto first = (std::int64_t) k * block, last = first + block;
+            const auto wrapsIn = (last - 1) / loopLength > (first - 1) / loopLength;
+            (wrapsIn ? wraps : around).push_back (times[k]);
+        }
+
+        // A jump to half a beat into the loop, in the middle of a round, where the resampled clips aren't made ready yet: the
+        // most of the eight blocks after it is asked for (its fade out over 144 samples, the landing held while they are made
+        // ready, and the landing).
+        for (int jump = 0; jump < 20; ++jump)
+        {
+            phazite::test::timeEngineBlocks (100, block);
+            phazite::movePlayhead (song, phazite::BeatPosition::fromBeats (loopStart + 0.5));
+            const auto after = phazite::test::timeEngineBlocks (8, block);
+            jumps.push_back (*std::max_element (after.begin(), after.end()));
+        }
+
+        phazite::stopAndReturn (song);
+        const auto share = [] (double seconds) { return juce::String (100.0 * seconds * benchRate / block, 1); };
+        report << "| | " << numThreads << " | " << share (phazite::test::percentileOf (around, 0.5)) << " / "
+               << share (phazite::test::percentileOf (around, 0.99)) << " % | " << share (phazite::test::meanOf (wraps)) << " / "
+               << share (phazite::test::percentileOf (wraps, 1.0)) << " % | " << share (phazite::test::meanOf (jumps)) << " / "
+               << share (phazite::test::percentileOf (jumps, 1.0)) << " % |\n";
+    }
+
+    engine.setNumThreads (threads);
+    MESSAGE (report << "\n(" << built.tracks.size() << " tracks of notes; a block's share of its 2.67 ms)\n");
+}
+
+TEST_CASE ("Benchmark: a loop's wrap's own work, on 200 tracks of notes and 40 resampled clips: the notes sounding found, the clips started"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 85, the wrap's two parts measured alone, without the devices' work around them: the notes sounding at the
+    // loop's start found on 200 tracks of 256 beats (a chord of four on every beat, 1,024 notes a track), by a look through
+    // every note before it (as before) and by the sequences' index; and a block of 128 samples played from the loop's start
+    // by 40 clips of a stereo file at 44.1 kHz on a 48 kHz engine, their resamplers started from nothing (as before) and
+    // their spares made ready beforehand. Each the median of 50.
+    namespace engine = phazite::engine;
+    std::vector<std::shared_ptr<const engine::NoteSequence>> tracks;
+
+    for (int t = 0; t < 200; ++t)
+    {
+        std::vector<engine::NoteSequence::Note> notes;
+
+        for (int beat = 0; beat < 256; ++beat)
+            for (const auto pitch : { 48, 52, 55, 59 })
+                notes.push_back ({ (double) beat, beat + 0.9, pitch + t % 12, 0.8f });
+
+        tracks.push_back (std::make_shared<const engine::NoteSequence> (std::move (notes), std::vector<engine::NoteSequence::Control>()));
+    }
+
+    constexpr double at = 248.5; // in the chord on beat 248
+    auto found = 0;
+    std::vector<double> walked, indexed;
+
+    for (int round = 0; round < 50; ++round)
+    {
+        walked.push_back (millisecondsOf (
+            [&]
+            {
+                for (const auto& track : tracks)
+                    for (const auto& note : track->getNotes())
+                    {
+                        if (note.start >= at)
+                            break;
+
+                        found += note.end > at ? 1 : 0;
+                    }
+            }));
+
+        indexed.push_back (millisecondsOf (
+            [&]
+            {
+                for (const auto& track : tracks)
+                    track->forEachSounding (at, at, [&found] (const auto&) { ++found; });
+            }));
+    }
+
+    struct NoiseReader final : engine::SampleReader
+    {
+        int getNumChannels() const override { return 2; }
+        double getSampleRate() const override { return 44100.0; }
+        std::int64_t getLength() const override { return (std::int64_t) (20.0 * 44100.0); }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t, int numSamples) override
+        {
+            for (int channel = 0; channel < 2; ++channel)
+                for (int i = 0; i < numSamples; ++i)
+                    buffer.setSample (channel, i, 0.3f * (random.nextFloat() * 2.0f - 1.0f));
+
+            return true;
+        }
+
+        juce::Random random { 7 };
+    };
+
+    constexpr double engineRate = 48000.0;
+    constexpr int block = 128;
+    constexpr std::int64_t loopStart = 240000, playing = 400000;
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<NoiseReader>(), nullptr);
+    file->readNow (0, file->getLength());
+    juce::AudioBuffer<float> out (2, block), scratch (2, 9 * block + 16);
+    float* channels[] = { out.getWritePointer (0), out.getWritePointer (1) };
+    const std::int64_t places[] = { loopStart };
+    std::vector<double> fresh, warmed;
+
+    for (int round = 0; round < 50; ++round)
+    {
+        std::vector<engine::AudioRegion> regions;
+
+        for (int i = 0; i < 40; ++i)
+        {
+            engine::AudioRegion region;
+            region.file = file;
+            region.state = std::make_shared<engine::RegionState> (*file, engineRate);
+            region.length = (std::int64_t) (19.0 * engineRate);
+            region.play (channels, playing, block, engineRate, false, scratch); // playing elsewhere, as before the wrap
+            regions.push_back (region);
+        }
+
+        fresh.push_back (millisecondsOf (
+            [&]
+            {
+                for (const auto& region : regions)
+                    region.play (channels, loopStart, block, engineRate, false, scratch);
+            }));
+
+        // Again, each made ready over the blocks before (as the engine does a little a block).
+        for (auto& region : regions)
+        {
+            region.play (channels, playing, block, engineRate, false, scratch);
+
+            for (int b = 0; b < 100; ++b)
+                region.prepare (playing + block, true, places, engineRate, block);
+        }
+
+        warmed.push_back (millisecondsOf (
+            [&]
+            {
+                for (const auto& region : regions)
+                    region.play (channels, loopStart, block, engineRate, false, scratch);
+            }));
+    }
+
+    // What a clip's resamplers hold: 400 clips' states made (each two resamplings of two channels, one of them the spare).
+    const auto memoryBefore = phazite::test::getProcessMemoryBytes();
+    std::vector<std::shared_ptr<engine::RegionState>> states;
+
+    for (int i = 0; i < 400; ++i)
+        states.push_back (std::make_shared<engine::RegionState> (*file, engineRate));
+
+    const auto perClip = (double) (phazite::test::getProcessMemoryBytes() - memoryBefore) / 400.0;
+    states.clear();
+
+    // How much of the file the resampler takes before it gives out its first sample, as it starts from nothing.
+    auto taken = 0;
+    {
+        phazite::engine::Resampler resampler (44100.0, engineRate, 1024);
+        std::vector<double> zeros (64, 0.0);
+
+        for (const double* given = nullptr; resampler.process (zeros.data(), 64, given) == 0;)
+            taken += 64;
+    }
+
+    const auto share = [] (double ms) { return juce::String (100.0 * ms / (block * 1000.0 / engineRate), 1) + " %"; };
+    MESSAGE ("\n| A loop's wrap, its own work, as a share of a block of 128 at 48 kHz | Before | Now |\n|---|---|---|\n"
+             << "| The notes sounding at its start found on 200 tracks of 1,024 notes | "
+             << share (phazite::test::percentileOf (walked, 0.5)) << " | " << share (phazite::test::percentileOf (indexed, 0.5)) << " |\n"
+             << "| 40 clips at 44.1 kHz playing their first block from its start | " << share (phazite::test::percentileOf (fresh, 0.5))
+             << " | " << share (phazite::test::percentileOf (warmed, 0.5)) << " |\n(" << found << " found)\n"
+             << "A resampled clip's state, its two resamplings of two channels: " << juce::String (perClip / 1024.0, 0)
+             << " KB; the resampler's start: " << taken << " samples of the file (44.1 to 48 kHz) before its first comes out ("
+             << juce::String (taken * 1000.0 / 44100.0, 1) << " ms)\n");
+}
+
+TEST_CASE ("Benchmark: a long take dense with pressure: its compile after a note edited, what its sequence holds, the chase at a wrap"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 85's review: the index that the chase reads (NoteSequence::forEachControlAt()) is made with the track's
+    // sequence at every compile of the track, and read at every start, jump and wrap of the loop.
+    namespace engine = phazite::engine;
+    using Type = dev::NoteEvent::Type;
+    juce::String report ("\n");
+
+    // A take of a minute, ten keys held with their pressure at 200 values a second each, in a clip; one note added, and
+    // the session's compile of the song for it (the model's work, the sequence made again).
+    {
+        phazite::test::TestSong s;
+        auto& song = *phazite::findSong (s.context);
+        phazite::test::addTestDevice (song, s.firstTrack, phazite::test::TestTone::typeID);
+        const auto clip = s.addMidiClip (s.firstTrack, 0.0, 120.0);
+        std::vector<phazite::ControlValue> values;
+
+        for (int key = 0; key < 10; ++key)
+        {
+            s.addNote (clip, 60 + key, 0.0, 120.0);
+
+            for (int i = 0; i < 12000; ++i)
+                values.push_back ({ phazite::BeatPosition::fromBeats (i * 0.01), phazite::ControlKind::aftertouch, 60 + key, i % 128 });
+        }
+
+        phazite::addControls (song, clip, values);
+        phazite::test::EnginePlayback playback;
+        playback.play (0.01);
+        auto* session = phazite::findPlayingSession (song);
+        std::vector<double> compiles;
+
+        for (int i = 0; i < 10; ++i)
+            compiles.push_back (millisecondsOf (
+                [&]
+                {
+                    s.addNote (clip, 40 + i, 1.0 + i, 0.5);
+                    session->update();
+                }));
+
+        const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+        REQUIRE (plan != nullptr);
+        std::size_t bytes = 0;
+
+        for (const auto& strip : plan->strips)
+            if (strip.notes != nullptr)
+                bytes += strip.notes->getBytes();
+
+        report << "A take of a minute, ten keys' pressure at 200 values a second (120,000 values): a note added and the song compiled "
+               << milliseconds (phazite::test::percentileOf (compiles, 0.5), 1) << " (median); its sequence holds "
+               << juce::String ((double) bytes / (1024.0 * 1024.0), 2) << " MB\n";
+    }
+
+    // The bound a take keeps to (Take::controlSeconds): ten keys held for five minutes, each one's pressure a thousand
+    // times a second, 3 million values: the sequence made, and what it holds.
+    {
+        std::vector<engine::NoteSequence::Note> notes;
+        std::vector<engine::NoteSequence::Control> controls;
+
+        for (int key = 0; key < 10; ++key)
+        {
+            notes.push_back ({ 0.0, 600.0, 60 + key, 0.8f });
+
+            for (int i = 0; i < 300000; ++i)
+                controls.push_back ({ i * 0.002, Type::aftertouch, 60 + key, (float) (i % 128) / 127.0f });
+        }
+
+        std::unique_ptr<engine::NoteSequence> sequence;
+        const auto made = millisecondsOf ([&] { sequence = std::make_unique<engine::NoteSequence> (notes, controls); });
+        report << "Five minutes of it at the bound (3 million values): the sequence made in " << milliseconds (made, 0) << ", holding "
+               << juce::String ((double) sequence->getBytes() / (1024.0 * 1024.0), 1) << " MB\n";
+    }
+
+    // The chase at a wrap on a track dense with controllers: sixty of them, 2,000 changes each, and ten keys' pressure; its
+    // values found where the loop starts, as a share of a block of 128 at 48 kHz (the median of 1,000).
+    {
+        std::vector<engine::NoteSequence::Note> notes;
+        std::vector<engine::NoteSequence::Control> controls;
+
+        for (int key = 0; key < 10; ++key)
+            notes.push_back ({ 0.0, 600.0, 60 + key, 0.8f });
+
+        for (int i = 0; i < 120000; ++i)
+            controls.push_back ({ i * 0.005, Type::controller, i % 60, (float) (i % 128) / 127.0f });
+
+        for (int i = 0; i < 20000; ++i)
+            controls.push_back ({ i * 0.03, Type::aftertouch, 60 + i % 10, (float) (i % 128) / 127.0f });
+
+        const engine::NoteSequence sequence (notes, controls);
+        std::vector<double> chases;
+        auto found = 0;
+
+        for (int i = 0; i < 1000; ++i)
+            chases.push_back (millisecondsOf (
+                [&]
+                {
+                    const auto at = 100.0 + i * 0.37;
+                    sequence.forEachControlAt (at, at, [&found] (const auto& control) { found += control.held ? 1 : 0; });
+                }));
+
+        report << "The chase at a wrap on a track of sixty controllers with 2,000 changes each and ten keys' pressure: "
+               << juce::String (100.0 * phazite::test::percentileOf (chases, 0.5) * benchRate / 1000.0 / 128.0, 3)
+               << " % of a block of 128 at 48 kHz (median; " << found << " found)\n";
+    }
+
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: what the message thread waits for as a new plan keeps an audio file's clip start, while a chunk is read"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Known bug 85: the reading thread held a file's lock across its read from the disk, which the message thread takes at
+    // every new plan (AudioFile::keep()). A file whose reads each take 20 ms, as a cold read of a chunk from a slow or busy
+    // drive can, read by a thread of its own; the message thread's keep() at each of 200 "plans" meanwhile.
+    namespace engine = phazite::engine;
+
+    struct SlowReader final : engine::SampleReader
+    {
+        int getNumChannels() const override { return 2; }
+        double getSampleRate() const override { return 48000.0; }
+        std::int64_t getLength() const override { return (std::int64_t) (600.0 * 48000.0); }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t, int numSamples) override
+        {
+            juce::Thread::sleep (20);
+            buffer.clear (0, numSamples);
+            return true;
+        }
+    };
+
+    std::atomic<std::uint64_t> blocks { 0 };
+    engine::AudioFile file (std::make_unique<SlowReader>(), &blocks);
+    std::atomic<bool> done { false };
+    std::thread reading (
+        [&]
+        {
+            for (int chunk = 0; ! done.load(); ++chunk)
+            {
+                file.want ((std::int64_t) (chunk % 800) * engine::AudioFile::chunkSamples);
+                file.readNext();
+            }
+        });
+
+    std::vector<double> waits;
+
+    for (int plan = 0; plan < 200; ++plan)
+    {
+        waits.push_back (millisecondsOf ([&] { file.keep ((std::int64_t) plan * 4800); }));
+        juce::Thread::sleep (3);
+    }
+
+    done.store (true);
+    reading.join();
+    MESSAGE ("\nkeep() while chunks of 20 ms are read: median " << milliseconds (phazite::test::percentileOf (waits, 0.5), 3) << ", most "
+                                                                << milliseconds (phazite::test::percentileOf (waits, 1.0), 3) << "\n");
 }
 
 TEST_CASE ("Benchmark: 200 tracks each sending to 8 returns, the rings' memory and a block's cost at 48 and 192 kHz"

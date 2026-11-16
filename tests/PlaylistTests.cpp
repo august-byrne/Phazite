@@ -25,6 +25,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
 #include "model/transport/TransportModel.h"
+#include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
@@ -39,6 +40,7 @@
 #include "ui/playlist/TrackHeights.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <set>
@@ -2385,6 +2387,77 @@ TEST_CASE ("While recording, what comes in shows on its track as a clip growing 
     const auto clips = phazite::getClips (song, screen.tracks[1]);
     REQUIRE (clips.size() == 1);
     CHECK (screen.boundsOf (clips[0]).getX() == shown.getX());
+}
+
+TEST_CASE ("A take waiting for a drag's end and the take recording after it on the same track each draw their own levels")
+{
+    // Known bug 176's review: the levels of a track's recording came from the latest take that showed on it, so a take
+    // stopped during a drag, still waiting to be placed, drew the next take's levels over its own stretch (none there). The
+    // metronome's clicks, on beats 0 and 1, come back into the armed track's input.
+    PlaylistScreen screen;
+    phazite::test::EnginePlayback playback (phazite::test::EnginePlayback::Input::loopback);
+    auto& song = screen.getSong();
+    const auto track = screen.tracks[1];
+    phazite::setMetronomeOn (song, true);
+    phazite::setTrackInput (screen.context, track, "1");
+    phazite::setInputMonitoring (screen.context, track, phazite::InputMonitoring::never);
+    phazite::setArmed (screen.context, track, true);
+    REQUIRE (phazite::isArmed (screen.context, track));
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+
+    phazite::startRecording (song);
+    playback.play (1.0); // beats 0 to 2
+
+    // Stopped while a fader is held: the take waits; then another, from beat 4.
+    auto volume = phazite::getVolume (screen.context, screen.tracks[0]);
+    volume.beginGesture();
+    volume.setValue (0.3f);
+    phazite::stopRecording (song);
+    phazite::movePlayhead (song, phazite::BeatPosition::fromBeats (4.0));
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (1.0); // beats 4 to 6
+
+    const auto loudest = [] (const std::vector<float>& levels) { return *std::max_element (levels.begin(), levels.end()); };
+    const auto span = [] (double from, double to)
+    { return phazite::BeatRange (phazite::BeatPosition::fromBeats (from), phazite::BeatPosition::fromBeats (to)); };
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return loudest (phazite::getRecordingLevels (screen.context, track, span (4.0, 6.0), 64)) > 0.0f; }));
+    CHECK (loudest (phazite::getRecordingLevels (screen.context, track, span (0.0, 2.0), 64)) > 0.0f);
+
+    // On the screen: both, the waiting one with its clicks drawn.
+    ticker.tickNow();
+    std::vector<phazite::ui::ClipComponent*> recordings;
+
+    for (auto* clip : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+        if (clip->isRecording())
+            recordings.push_back (clip);
+
+    REQUIRE (recordings.size() == 2);
+    std::sort (recordings.begin(), recordings.end(),
+               [] (const auto* a, const auto* b) { return a->getInfo().range.getStart() < b->getInfo().range.getStart(); });
+    auto& waiting = *recordings.front();
+    juce::Image painted (juce::Image::ARGB, waiting.getWidth(), waiting.getHeight(), true, juce::SoftwareImageType());
+    {
+        juce::Graphics g (painted);
+        waiting.paintEntireComponent (g, false);
+    }
+
+    // Where nothing came in (half a beat after the click on beat 1), the middle row is the clip's own colour; at the click,
+    // the waveform crosses it.
+    const auto middle = waiting.getHeight() / 2;
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+    const auto quiet = painted.getPixelAt ((int) (1.5 * pixelsPerBeat), middle);
+    auto drawn = 0;
+
+    for (auto x = (int) (0.95 * pixelsPerBeat); x <= (int) (1.15 * pixelsPerBeat); ++x)
+        drawn += painted.getPixelAt (x, middle) != quiet ? 1 : 0;
+
+    CHECK (drawn > 0);
+
+    phazite::stopRecording (song);
+    volume.endGesture();
+    CHECK (phazite::getClips (song, track).size() == 2);
 }
 
 TEST_CASE ("Recording from before a looped range, the part before it shows on its own once round it, this time round beside it")

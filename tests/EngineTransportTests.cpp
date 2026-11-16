@@ -1031,6 +1031,113 @@ TEST_CASE ("A jump while the reading thread waits has the place it lands in read
     CHECK (silent <= (int) std::lround (engine::Engine::fadeSeconds * rate) + 64);
 }
 
+TEST_CASE ("A ring's reset touches none of its memory, whatever its size; what it held before is silence as far back as it reaches")
+{
+    // Known bug 85's review: every Play and every jump resets every ring, which cleared each one whole (about 53 MB at 48 kHz
+    // on a song of 200 tracks sending to 8 returns) in the block that starts or lands. Now a reset writes nothing: what the
+    // ring held before it is silence, never read, and the ring still reaches all its room back, so that a delayed path reads
+    // that silence rather than nothing (which would fade it in).
+    {
+        engine::DelayLine small (1024), large (1 << 20);
+        const auto cleared = engine::DelayLine::getSamplesCleared();
+
+        for (int i = 0; i < 100; ++i)
+        {
+            small.reset();
+            large.reset();
+        }
+
+        CHECK (engine::DelayLine::getSamplesCleared() == cleared);
+        CHECK (small.getReach() == 1024);
+        CHECK (large.getReach() == 1 << 20);
+    }
+
+    juce::AudioBuffer<float> in (2, 64), out (2, 64);
+    std::int64_t count = 0;
+
+    // So many blocks of a count from 1 on, or of a level, through a delay, and what came out on the left.
+    const auto play = [&] (engine::Delay& delay, int blocks, std::optional<float> level = {})
+    {
+        std::vector<float> played;
+
+        for (int block = 0; block < blocks; ++block)
+        {
+            for (int i = 0; i < 64; ++i)
+                for (int channel = 0; channel < 2; ++channel)
+                    in.setSample (channel, i, level.value_or ((float) (count + i + 1)));
+
+            out.clear();
+            delay.addDelayed (in.getArrayOfReadPointers(), out.getArrayOfWritePointers(), 64);
+            played.insert (played.end(), out.getReadPointer (0), out.getReadPointer (0) + 64);
+            count += 64;
+        }
+
+        return played;
+    };
+
+    SUBCASE ("A delay of its own, reset as a jump resets it: silence for its length, then what came in, whole")
+    {
+        engine::Delay delay (std::make_shared<engine::DelayLine> (200 + 1000), 200, 144);
+        play (delay, 40, 7.0f); // what it held before
+        delay.reset();
+        const auto from = count;
+        const auto played = play (delay, 10);
+
+        for (int i = 0; i < 200; ++i)
+            REQUIRE (played[(size_t) i] == 0.0f);
+
+        for (int i = 200; i < 640; ++i)
+            REQUIRE (played[(size_t) i] == (float) (from + i + 1 - 200));
+    }
+
+    SUBCASE ("A tap reset by its strip, read so many samples back right after: silence where it held nothing of its own")
+    {
+        auto ring = std::make_shared<engine::DelayLine> (300 + 1000);
+        engine::Delay delay (ring, 300, 144, false, true);
+        const auto write = [&ring, &in] { ring->write (in.getArrayOfReadPointers(), 64); };
+
+        for (int block = 0; block < 40; ++block)
+        {
+            for (int channel = 0; channel < 2; ++channel)
+                juce::FloatVectorOperations::fill (in.getWritePointer (channel), 7.0f, 64);
+
+            write();
+            out.clear();
+            delay.addDelayed (in.getArrayOfReadPointers(), out.getArrayOfWritePointers(), 64);
+        }
+
+        ring->reset(); // the strip's, as it is flushed
+
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (in.getWritePointer (channel), 0.5f, 64);
+
+        write();
+        out.clear();
+        delay.addDelayed (in.getArrayOfReadPointers(), out.getArrayOfWritePointers(), 64);
+        CHECK (out.getMagnitude (0, 64) == 0.0f); // 300 samples back: before the reset
+        CHECK (delay.getSamplesTouched() <= 64);
+    }
+
+    SUBCASE ("A ring still taking over from an older one, reset by a jump, reads nothing of the older one again")
+    {
+        auto older = std::make_shared<engine::DelayLine> (3000);
+        engine::Delay before (older, 100, 144);
+        play (before, 40, 7.0f); // 2,560 samples of it
+
+        engine::Delay after (std::make_shared<engine::DelayLine> (2000 + 2000, older), 2000, 144);
+        auto played = play (after, 1);
+        REQUIRE (played.front() == 7.0f); // the older one's past, 2,000 samples back
+
+        after.reset();
+        played = play (after, 40);
+        const auto heard = std::count_if (played.begin(), played.end(), [] (float sample) { return sample == 7.0f; });
+        CHECK (heard == 0);
+
+        for (int i = 0; i < 2000; ++i)
+            REQUIRE (played[(size_t) i] == 0.0f);
+    }
+}
+
 TEST_CASE ("A delay made longer than its ring reads the past from the ring before and its work in the block of the switch is the block's")
 {
     // The review of known bug 167 (B): the ring of a delay made longer than its ring copied what the ring before held, all

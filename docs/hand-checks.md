@@ -209,6 +209,10 @@ the [changelog](changelog.md).
 | G123b | Normalize and Quantize Audio on that clip; delete the clip in the first second of one | Each shows its progress after a second and is one undo step; deleting the clip meanwhile gives a notice that nothing was normalized | |
 | G123c | Drop a long WAV on a drum pad, on the sampler and on a wavetable; quit during an import | The window holds still, then the device gets the sound; Phazite quits without waiting for the import | |
 | G128 | Add a folder of tens of thousands of sounds and type in the browser's search; type a broad word, then a folder's name | Keys never stutter and results follow a moment later; a broad word ends the list with "The first 200 of N"; a folder's name lists its sounds, with the folder itself | |
+| G85a | On a big song at a 128-sample buffer: press Play, and jump around the ruler while it plays | No click and no spike of the CPU meter at the start or at a jump | |
+| G85b | In a 48 kHz project, jump into the middle of 44.1 kHz audio clips while playing | The sound comes in a few milliseconds late, without a crackle | |
+| G173 | Hold a chord on a plug-in synth with the mod wheel on its filter and up in the clip, and jump back into the clip while it plays; start inside a bent note; play aftertouch into a plug-in that uses it, record it and play it back | The filter is where the clip has it at once; the note starts bent; the pressure is heard live and from the take | |
+| G176 | Record audio, hold a fader, press Stop, then record again further on | Both recordings show, each with its own waveform, until the mouse goes up | |
 
 ## Performance on other machines
 

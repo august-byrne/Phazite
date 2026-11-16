@@ -52,9 +52,11 @@ namespace
         const ClipComponent& clip;
     };
 
+    // The same recording, as it grows: on the same track, from the same place (a take waiting for a drag's end shows beside
+    // the one recording after it on the same track, from where that one started).
     bool isSame (const RecordingInProgress& a, const RecordingInProgress& b)
     {
-        return a.track == b.track && a.source == b.source && a.beforeLoop == b.beforeLoop;
+        return a.track == b.track && a.source == b.source && a.beforeLoop == b.beforeLoop && a.range.getStart() == b.range.getStart();
     }
 } // namespace
 

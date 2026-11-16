@@ -265,6 +265,71 @@ What it says of scale:
   a drag takes about 40 ms of the message thread, more than two frames (known bug 145 in
   [known-bugs.md](known-bugs.md)). Roadmap step S5.7 compiles only what changed.
 
+### Benchmark: a loop's wrap and a jump on a song of 200 tracks
+
+Known bug 85. Measured on 2026-11-16 on the PC above, from `windows-profile`, **while other agents' builds loaded the
+machine**: each figure is a block's time as a share of a block of 128 samples at 48 kHz (2.67 ms).
+
+The wrap's own work, alone (`Benchmark: a loop's wrap's own work`), the median of 50, two runs: the notes sounding at
+the loop's start found on 200 tracks of 1,024 notes each (a chord of four on every beat for 256 beats), and a block
+played from the loop's start by 40 clips of a stereo file at 44.1 kHz.
+
+| A loop's wrap, its own work | Before | Now |
+|---|---|---|
+| The notes sounding at its start found on 200 tracks | 18 to 22 % (a look through every note before it) | 0.7 to 1.6 % (each track's index of them) |
+| 40 resampled clips playing their first block from its start | 59 to 94 % (each resampler started from nothing) | 1.4 to 3.0 % (each one's spare, made ready a little a block) |
+
+A resampled clip's state holds about 276 KB, half of it the spare resampling (two channels of r8brain's filters and
+buffers each): 5.5 MB for the spares of the song's 40 clips. A resampler gives nothing out until it has taken 832 samples
+of a 44.1 kHz file (18.9 ms of it) at 48 kHz: what a jump's 3 ms of fade can't play through. Made ready all at once in
+the fade's first block, as the second round of the review had it, forty of them took that block 46 % more than a steady
+one on four threads; so a jump that lands among clips not ready there is held, silent, for whole blocks while each makes
+its resampling ready a share of each block (20 ms at most, never waiting for the disk), and then plays as it would have
+at once. The jumps of a run (a tenth of a second apart or less, as a drag of the playhead makes them) are held at their
+first at most, the rest starting from what is ready as before, so a drag sounds as it did before holds.
+
+The whole song (`Benchmark: a loop's wrap and a jump on a song of 200 tracks`): the benchmark song of 200 tracks with
+256 beats of notes, and 40 tracks of those clips, looping two beats near the song's end; and a jump back to the loop's
+start in the middle of a round, 20 times. The song is far more than one thread plays in time, and under the load the
+blocks around moved by a quarter from run to run, so the figures only show the order of what the wrap and the jump add.
+
+| | Threads | Blocks around: median | The wrap's block: mean | A jump's block: mean |
+|---|---|---|---|---|
+| Before | 1 | 566 % | 744 % (+178) | 1036 % (+470) |
+| Before | 4 | 167 % | 224 % (+57) | 281 % (+114) |
+| Now, three runs | 1 | 629 to 714 % | 694 to 827 % (+66 to +161) | 731 to 929 % (+80 to +301) |
+| Now, three runs | 4 | 163 to 208 % | 186 to 261 % (+23 to +53) | 255 to 295 % (+87 to +107) |
+| Now, the rings reset in place, the landing prepared | 1 | 670 % | 718 % (+48) | 639 % (-31) |
+| Now, the rings reset in place, the landing prepared | 4 | 182 % | 216 % (+34) | 252 % (+70) |
+| Now, the landing held, a jump to half a beat into the loop (the clips not ready there), the most of the 8 blocks after it | 1 | 663 % | 796 % (+133) | 496 % (-167) |
+| Now, the landing held, a jump to half a beat into the loop (the clips not ready there), the most of the 8 blocks after it | 4 | 131 % | 156 % (+25) | 152 % (+21) |
+
+The blocks after such a jump, each by itself (a temporary timer in the engine, the means of 20 jumps), in milliseconds of
+a 2.67 ms block, on four threads: before the hold, steady 7.53, the fade's first block 8.76 (its 40 clips' resamplers
+started there: 2.25 ms of the strips' tasks' time) and the landing 7.89 (the resets of every device: 2.26 ms of the tasks'
+time); now steady 6.30, the fade's first 6.74, a block held 3.19 (silent but for the fade's last 16 samples), the landing
+5.93, then 4.4 to 4.9 while the spares are made ready again for the loop's start. On one thread, the same shape: steady
+22.0, fade 20.2, held 5.6, landing 18.6.
+Play and a jump reset every device and every path's ring, which starts the song from silence (`Benchmark: each device's
+reset`): a ring's reset writes nothing now, its past silence: 400 rings of a third of a second at 48 kHz in 0.1 % of a
+block, where clearing them, as a reset did before, took 32.5 %. A device's own reset takes 0.07 % of a block at most for
+the instruments, 0.33 % for the delay (its seconds of buffer) and 0.21 % for the reverb, 0.03 % or less for the rest:
+which would make about 15 % for the song's 600 devices; measured in the landing block, with what each runner resets
+of its own, they take 1.7 ms of one thread (64 % of a block; 2.3 to 2.7 ms of the tasks' time on four, shared by them),
+and the chase of every track 0.3 ms.
+
+The message thread's wait as a new plan keeps each clip's start in its file (`AudioFile::keep()`), while a reading
+thread reads a file whose reads take 20 ms each, as a cold read of a slow or busy drive can
+(`Benchmark: what the message thread waits for`): before, a median of 25 ms and as long as 1.2 s, as the reading thread
+held the file's lock across each read and took it again for the next; now a median of 0.002 ms and at most 0.03 ms,
+keep() taking a lock of its own that no read holds.
+
+The chase's index of the controllers (`Benchmark: a long take dense with pressure`): each controller's changes a list of
+places among the events, 4 bytes a change. A take of a minute, ten keys' pressure at 200 values a second (120,000
+values): a note added and the song compiled in 23.7 ms (the median), its sequence holding 3.2 MB; five minutes at the
+bound a take keeps to (a thousand values a second for each key, 3 million): the sequence made in 353 ms, holding 80 MB,
+of which 72 MB are the events themselves. The chase at a wrap on a track of sixty controllers with 2,000 changes each
+and ten keys' pressure: 0.045 % of a block of 128 at 48 kHz.
 ### Benchmark: saving and opening a big project
 
 | A song of 40 tracks and 10,240 notes, of Phazite's own devices | Time | From |

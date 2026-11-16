@@ -14,6 +14,7 @@
 #include "app/ProjectSession.h"
 #include "app/SandboxedEditor.h"
 #include "app/SessionEnd.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -22,6 +23,8 @@
 #include "model/base/internal/SongText.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PluginScanner.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/DeviceType.h"
@@ -41,6 +44,7 @@
 #include "model/project/NewProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "services/RecentProjects.h"
@@ -55,10 +59,12 @@
 #include "ui/shell/RenderPanel.h"
 #include "ui/versions/BranchPicker.h"
 
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <limits>
 #include <span>
+#include <string>
 #include <thread>
 
 // Last, so that its macros can't change the headers above.
@@ -292,6 +298,147 @@ TEST_CASE ("Plug-in instruments in helpers, handed their blocks as the engine's 
     CHECK (levelOf (audio, 0, 0.1, 0.9) == doctest::Approx (toneLevel).epsilon (0.002));
     CHECK (levelOf (audio, 0, 1.1, 1.9) == doctest::Approx (toneLevel).epsilon (0.002));
     CHECK (levelOf (audio, 0, 2.1, 2.9) == doctest::Approx (toneLevel + 6.02f).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in instrument in a helper hears the keys' pressure, a note's and the channel's, played live and from a clip")
+{
+    // Known bug 173: the engine dropped aftertouch and channel pressure, so a plug-in got neither. The stand-in synth's notes
+    // follow both, turned down by half at full pressure: 440 Hz at its Level, as the first test has it.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, "PhaziteTestSynth");
+    auto& s = getSong (song);
+    phazite::routeLiveMidiInput (s); // live MIDI plays the track
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.05);
+
+    // What the stand-in's notes are turned down by at a pressure: by half at full pressure.
+    const auto decibels = [] (int value) { return juce::Decibels::gainToDecibels (1.0f - 0.5f * (float) value / 127.0f); };
+
+    // Live, as a MIDI input's driver plays them into live MIDI's track (the computer keyboard plays notes alone): a note,
+    // then the channel's pressure at half, then the note's at half too.
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    const auto playFromMidiInput = [&host, &s] (const juce::MidiMessage& message)
+    {
+        const auto event = phazite::engine::toNoteEvent (message, 0);
+        REQUIRE (event.has_value());
+        host.getEngine().playLive ((std::int64_t) phazite::findSession (s)->getLiveTrack().getRaw(), *event);
+    };
+
+    playFromMidiInput (juce::MidiMessage::noteOn (1, 69, 0.8f));
+    CHECK (levelOf (playback.play (0.5), 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
+    playFromMidiInput (juce::MidiMessage::channelPressureChange (1, 64));
+    CHECK (levelOf (playback.play (0.5), 0, 0.1, 0.5) == doctest::Approx (toneLevel + decibels (64)).epsilon (0.002));
+    playFromMidiInput (juce::MidiMessage::aftertouchChange (1, 69, 64));
+    CHECK (levelOf (playback.play (0.5), 0, 0.1, 0.5) == doctest::Approx (toneLevel + 2.0f * decibels (64)).epsilon (0.002));
+    playFromMidiInput (juce::MidiMessage::noteOff (1, 69));
+    playback.play (0.1);
+
+    // From a clip, where they are: a note held from the start, the channel's pressure at a quarter at beat 2 and the note's at
+    // half at beat 4. Playback starts from silence (the synth reset), with no pressure (chased, none held before).
+    const auto clip = song.addMidiClip (track, 0.0, 8.0);
+    song.addNote (clip, 69, 0.0, 8.0);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (2.0), phazite::ControlKind::channelPressure, 0, 32);
+    phazite::addControl (s, clip, phazite::BeatPosition::fromBeats (4.0), phazite::ControlKind::aftertouch, 69, 64);
+    song.run ("transport.playStop");
+    const auto played = playback.play (3.0);
+    CHECK (levelOf (played, 0, 0.1, 0.9) == doctest::Approx (toneLevel).epsilon (0.002));
+    CHECK (levelOf (played, 0, 1.1, 1.9) == doctest::Approx (toneLevel + decibels (32)).epsilon (0.002));
+    CHECK (levelOf (played, 0, 2.1, 2.9) == doctest::Approx (toneLevel + decibels (32) + decibels (64)).epsilon (0.002));
+    song.run ("transport.playStop");
+}
+
+TEST_CASE ("A plug-in on a track of notes alone is given only its notes at Play, a jump and the loop's wrap; with a pedal, the pedal too")
+{
+    // Known bug 85's review of the chase: a track without controllers gets no controller, bend or pressure where playback
+    // starts, jumps or goes round the loop; one whose clip holds the pedal gets it let go of (no value held before) at each
+    // of them; and a controller that changes exactly where playback starts is sent once, its own value. The tests' MIDI
+    // log stand-in keeps what it is given since it was reset (at Play and at a jump: Engine::flushStrip()). Beats 2 to 5
+    // are looped.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    auto& state = getSong (song);
+    const auto notesOnly = song.setInstrument (song.firstTrack, "PhaziteTestMidiLog");
+    const auto notes = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+    song.addNote (notes, 60, 0.0, 16.0);
+    song.addNote (notes, 64, 2.25, 1.0);
+
+    const auto pedalTrack = song.addTrack ("Pedal");
+    const auto pedalled = song.setInstrument (pedalTrack, "PhaziteTestMidiLog");
+    const auto pedalClip = song.addMidiClip (pedalTrack, 0.0, 16.0);
+    song.addNote (pedalClip, 48, 0.0, 16.0);
+    phazite::addControl (state, pedalClip, phazite::BeatPosition::fromBeats (4.0), phazite::ControlKind::controller, 64, 127);
+    phazite::addControl (state, pedalClip, phazite::BeatPosition::fromBeats (4.5), phazite::ControlKind::controller, 64, 0);
+    phazite::addControl (state, pedalClip, phazite::BeatPosition::fromBeats (0.5), phazite::ControlKind::controller, 1, 20);
+    phazite::addControl (state, pedalClip, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::controller, 1, 50);
+    phazite::loopBeats (state, { phazite::BeatPosition::fromBeats (2.0), phazite::BeatPosition::fromBeats (5.0) });
+
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.05);
+
+    // What each was given since it was last reset, as words ("on 60", "cc 64 0", "bend", "pressure"), from so far on.
+    const auto heard = [&song] (phazite::DeviceID device, size_t from = 0)
+    {
+        const auto block = getSandboxed (song, device).getRemote().getState (10000);
+        REQUIRE (block.has_value());
+        std::vector<std::string> words;
+
+        for (const auto& message : phazite::test::TestPlugins::readMidiLog (*block))
+        {
+            if (message.isNoteOn())
+                words.push_back ("on " + std::to_string (message.getNoteNumber()));
+            else if (message.isNoteOff())
+                words.push_back ("off " + std::to_string (message.getNoteNumber()));
+            else if (message.isController())
+                words.push_back ("cc " + std::to_string (message.getControllerNumber()) + " "
+                                 + std::to_string (message.getControllerValue()));
+            else if (message.isPitchWheel())
+                words.push_back ("bend");
+            else
+                words.push_back ("pressure");
+        }
+
+        return std::vector<std::string> (words.begin() + (std::ptrdiff_t) std::min (from, words.size()), words.end());
+    };
+
+    const auto controllersIn = [] (const std::vector<std::string>& words)
+    { return std::count_if (words.begin(), words.end(), [] (const std::string& word) { return word.rfind ("cc", 0) == 0; }); };
+
+    // Play from beat 1: the notes sounding there; the pedal let go of, and the mod wheel's own change on beat 1, once.
+    phazite::movePlayhead (state, phazite::BeatPosition::fromBeats (1.0));
+    phazite::playOrStop (state);
+    playback.play (0.1);
+    CHECK (heard (notesOnly) == std::vector<std::string> { "on 60" });
+    CHECK (heard (pedalled) == std::vector<std::string> { "cc 64 0", "on 48", "cc 1 50" });
+
+    // A jump to beat 3: the notes there, after what lets go of those that sounded (all notes off, through the helper, which
+    // ends each note it gave first); the pedal let go of again, and the mod wheel at its value there.
+    phazite::movePlayhead (state, phazite::BeatPosition::fromBeats (3.0));
+    playback.play (0.1);
+    const auto jumped = heard (notesOnly);
+    CAPTURE (jumped.size());
+    CHECK (std::find (jumped.begin(), jumped.end(), "on 60") != jumped.end());
+    CHECK (std::find (jumped.begin(), jumped.end(), "on 64") != jumped.end());
+    CHECK (std::none_of (jumped.begin(), jumped.end(),
+                         [] (const std::string& word) { return word.rfind ("cc", 0) == 0 && word != "cc 123 0"; }));
+    CHECK (std::none_of (jumped.begin(), jumped.end(), [] (const std::string& word) { return word == "bend" || word == "pressure"; }));
+    const auto pedalJumped = heard (pedalled);
+    CHECK (std::count (pedalJumped.begin(), pedalJumped.end(), "cc 64 0") == 1);
+    CHECK (std::count (pedalJumped.begin(), pedalJumped.end(), "cc 1 50") == 1);
+
+    // Round the loop, from beat 3 to its end at 5 and back to 2: the notes there again; the pedal, pressed at 4 and let go
+    // of at 4.5, let go of again at its start, where the clip hasn't pressed it yet; the mod wheel at its value there.
+    const auto before = heard (notesOnly).size(), pedalBefore = heard (pedalled).size();
+    playback.play (1.2); // to beat 5.4: beat 2.4 the second time round
+    const auto wrapped = heard (notesOnly, before);
+    CHECK (controllersIn (wrapped) == 0);
+    CHECK (std::count (wrapped.begin(), wrapped.end(), "on 60") == 1);
+    const auto pedalWrapped = heard (pedalled, pedalBefore);
+    CHECK (pedalWrapped == std::vector<std::string> { "cc 64 127", "cc 64 0", "off 48", "cc 1 50", "cc 64 0", "on 48" });
+    phazite::stopAndReturn (state);
 }
 
 TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the parameter last touched, which touch writes while it is grabbed")

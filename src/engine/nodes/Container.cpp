@@ -137,9 +137,14 @@ bool ChainState::takes (const devices::NoteEvent& event) noexcept
             sounding.reset();
             return true;
 
+        // A note's pressure goes where the note sounds.
+        case Type::aftertouch:
+            return sounding.test ((size_t) std::clamp (event.number, 0, 127));
+
         case Type::pitchBend:
         case Type::controller:
         case Type::slide:
+        case Type::channelPressure:
             break;
     }
 

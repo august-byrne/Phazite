@@ -14,6 +14,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -92,11 +93,20 @@ public:
     void start() noexcept;
 
     // Audio thread: silence in it, all of it heard (as after a reset, which starts the song from silence); done with the
-    // ring before.
+    // ring before. Its memory isn't touched: it holds nothing of its own yet, and what is older than what it holds is
+    // silence (forEachHeld() hands none of it), as far back as its capacity (getReach()), so that a delayed path reads
+    // silence there rather than nothing, which would fade it in. So a reset costs the same whatever the ring's size: every
+    // Play and every jump resets every ring (known bug 85's review: it cleared each whole, about 53 MB at 48 kHz on a song of
+    // 200 tracks sending to 8 returns, 210 MB at 192 kHz, in the block that starts or lands).
     void reset() noexcept;
 
-    // Audio thread: how many samples of the past it holds, its own and what it reads from the ring before.
-    int getReach() const noexcept { return written + (done.load (std::memory_order_relaxed) ? 0 : inherited); }
+    // Audio thread: how many samples of the past it holds, its own and what it reads from the ring before; since a reset,
+    // all of its capacity, silent before what it has kept.
+    int getReach() const noexcept { return silentBefore ? capacity : written + (done.load (std::memory_order_relaxed) ? 0 : inherited); }
+
+    // For tests: how many samples every ring has cleared (written as silence), on two channels, since the program started:
+    // each as its room is made, and nothing since.
+    static std::int64_t getSamplesCleared() noexcept { return clearedSamples.load (std::memory_order_relaxed); }
 
     // Audio thread: what came in, kept, so many samples.
     void write (const float* const* inputs, int numSamples) noexcept;
@@ -142,6 +152,11 @@ private:
     // The audio thread's: started once played; done once it holds as much as it has room for itself, or after a reset, when
     // the message thread lets go of the old.
     std::atomic<bool> started { false }, done { false };
+
+    // The audio thread's: reset, and not yet written all the way round since: what it hasn't kept itself is silence.
+    bool silentBefore = false;
+
+    static inline std::atomic<std::int64_t> clearedSamples { 0 };
 };
 
 // A delay of a fixed length on two channels, reading a ring (DelayLine) so many samples back: one of its own, which it

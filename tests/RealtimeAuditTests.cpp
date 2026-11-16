@@ -70,6 +70,7 @@
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
@@ -86,6 +87,7 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 using phazite::test::AudioThreadMonitor;
 using phazite::test::TestSong;
@@ -2086,7 +2088,19 @@ TEST_SUITE ("realtime-audit")
         for (int i = 0; i < 64; ++i)
             song.addChord (chords, { 60 + i % 3, 64, 67 }, i * 0.25, 0.2);
 
+        // And an audio clip of a file at 44.1 kHz, which the engine resamples, its spare resampling made ready for the loop's
+        // start each time round and taking the first's place there (known bug 85).
+        song.addAudioClip (song.addTrack ("Pad"), phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Pad.wav"), 10.0), 0.0);
+
         auto& played = getSong (song);
+
+        // And controllers, the bend and the keys' pressure in the chords, which each time round, each jump and the start
+        // chase (Engine.h).
+        for (const auto [beat, kind, number, value] :
+             { std::tuple (0.05, phazite::ControlKind::controller, 1, 90), std::tuple (0.1, phazite::ControlKind::pitchWheel, 0, 10000),
+               std::tuple (0.15, phazite::ControlKind::channelPressure, 0, 70), std::tuple (0.15, phazite::ControlKind::aftertouch, 64, 60),
+               std::tuple (2.1, phazite::ControlKind::controller, 64, 127), std::tuple (5.0, phazite::ControlKind::controller, 1, 20) })
+            phazite::addControl (played, chords, BeatPosition::fromBeats (beat), kind, number, value);
 
         const auto m = playProjectAndMeasure (
             song.context,

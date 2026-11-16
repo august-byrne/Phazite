@@ -930,6 +930,10 @@ void WavetableSynth::handle (const NoteEvent& event, std::span<const float> valu
             bend = event.value;
             break;
 
+        case NoteEvent::Type::aftertouch: // it doesn't play by pressure
+        case NoteEvent::Type::channelPressure:
+            break;
+
         case NoteEvent::Type::controller:
             if (event.number == sustainPedal)
             {

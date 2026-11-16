@@ -6,6 +6,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <vector>
+
 namespace phazite::test
 {
 struct TestPlugins
@@ -18,7 +20,9 @@ struct TestPlugins
                         // (300 by 200, 360 by 240 above 0.9); keeps both as its state; its programs, Full and Half, set its Gain
         synth,          // a sine for each note held, at its Level ("10"), until the note ends or the synth is reset; note 127
                         // turns its Level to 0.75 itself, in a gesture held while the note is (as a control of its window would).
-                        // It takes no controller, all notes off included, as a VST3 that maps none gets none from JUCE's host
+                        // It takes no controller, all notes off included, as a VST3 that maps none gets none from JUCE's host;
+                        // the keys' pressure turns its notes down, the channel's all of them and a note's (aftertouch) its own: by
+                        // half at full pressure, by nothing at none
         crash,          // an effect that crashes as it plays a block while its Crash ("20") is on, and plays what isn't a number
                         // (NaN) in place of its sound while its NaN ("21") is on
         hang,           // an effect that plays nothing back while its Hang ("30") is on: it loops for ever; and its Stall ("31")
@@ -31,6 +35,8 @@ struct TestPlugins
                         // modulator it cuts the helper's blocks into pieces
         synthWithInput, // the synth with an input bus besides, as an instrument that takes sound in has (a vocoder)
         mono,           // an effect in mono alone, in and out, that plays its sound at half
+        midiLog,        // an instrument that plays nothing and keeps, as its state, the MIDI messages it was given since it was last
+                        // reset (as playback starts and jumps), up to 4096 of them (TestPlugins::readMidiLog())
         slow,           // an effect that passes its sound at its Level ("60"), and waits while a slow gate is shut
         slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own,
         slowSibling,    // the third in the first's file (one helper for both, as a file of several plug-ins has). Each crashes as
@@ -38,9 +44,9 @@ struct TestPlugins
                         // host, from a state with a second value of 1 after it
     };
 
-    static constexpr Kind kinds[] = { Kind::effect,    Kind::synth,        Kind::crash,      Kind::hang,           Kind::latency,
-                                      Kind::sidechain, Kind::crashLoading, Kind::playhead,   Kind::synthWithInput, Kind::mono,
-                                      Kind::slow,      Kind::slowToo,      Kind::slowSibling };
+    static constexpr Kind kinds[] = { Kind::effect,    Kind::synth,        Kind::crash,       Kind::hang,           Kind::latency,
+                                      Kind::sidechain, Kind::crashLoading, Kind::playhead,    Kind::synthWithInput, Kind::mono,
+                                      Kind::slow,      Kind::slowToo,      Kind::slowSibling, Kind::midiLog };
 
     // While this file is there, the slow stand-ins wait, in their helpers: as one is made and as its state is taken, or (the
     // closing gate's) as it goes. In the temporary folder, which the helpers share with the tests' process. And the file each
@@ -66,6 +72,9 @@ struct TestPlugins
 
         static Playhead read (const juce::MemoryBlock& state);
     };
+
+    // The MIDI log stand-in's state: each message it was given since it was last reset, in order.
+    static std::vector<juce::MidiMessage> readMidiLog (const juce::MemoryBlock& state);
 
     static juce::PluginDescription getDescription (Kind);
 

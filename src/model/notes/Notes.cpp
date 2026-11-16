@@ -576,23 +576,68 @@ NoteRef addNote (Song& song, ClipID clip, int pitch, BeatPosition start, BeatDur
     return addNoteTo (song, clip, {}, pitch, start, length, velocity, {});
 }
 
+const char* getSchemaKind (ControlKind kind) noexcept
+{
+    switch (kind)
+    {
+        case ControlKind::controller:
+            return schema::controlIsController;
+        case ControlKind::pitchWheel:
+            return schema::controlIsPitchWheel;
+        case ControlKind::channelPressure:
+            return schema::controlIsChannelPressure;
+        case ControlKind::aftertouch:
+            return schema::controlIsAftertouch;
+    }
+
+    return schema::controlIsController;
+}
+
+bool hasNumber (ControlKind kind) noexcept
+{
+    return kind == ControlKind::controller || kind == ControlKind::aftertouch;
+}
+
+int getHighestValue (ControlKind kind) noexcept
+{
+    return kind == ControlKind::pitchWheel ? 16383 : 127;
+}
+
+std::optional<ControlKind> findControlKind (const juce::ValueTree& control)
+{
+    const auto kind = control[schema::controlKind].toString();
+
+    for (const auto each : { ControlKind::controller, ControlKind::pitchWheel, ControlKind::channelPressure, ControlKind::aftertouch })
+        if (kind == getSchemaKind (each))
+            return each;
+
+    return std::nullopt;
+}
+
 namespace
 {
     juce::ValueTree makeControlState (const ControlValue& each, BeatPosition contentStart)
     {
         juce::ValueTree control (schema::CONTROL);
-        control.setProperty (schema::controlKind, each.pitchBend ? schema::controlIsPitchWheel : schema::controlIsController, nullptr);
+        control.setProperty (schema::controlKind, getSchemaKind (each.kind), nullptr);
 
-        if (! each.pitchBend)
+        if (hasNumber (each.kind))
             control.setProperty (schema::controlNumber, juce::jlimit (0, 127, each.number), nullptr);
 
         control.setProperty (schema::controlBeat, std::max (0.0, (each.beat - contentStart).inBeats()), nullptr);
-        control.setProperty (schema::controlValue, juce::jlimit (0, each.pitchBend ? 16383 : 127, each.value), nullptr);
+        control.setProperty (schema::controlValue, juce::jlimit (0, getHighestValue (each.kind), each.value), nullptr);
         return control;
+    }
+
+    // Whether a clip's element is a value of a controller (by its number, if its kind has one).
+    bool isControlOf (const juce::ValueTree& child, ControlKind kind, int number)
+    {
+        return child.hasType (schema::CONTROL) && findControlKind (child) == kind
+               && (! hasNumber (kind) || (int) child[schema::controlNumber] == number);
     }
 } // namespace
 
-void addControl (Song& song, ClipID clip, BeatPosition beat, bool pitchBend, int number, int value)
+void addControl (Song& song, ClipID clip, BeatPosition beat, ControlKind kind, int number, int value)
 {
     const auto clipState = findMidiClipState (song, clip);
 
@@ -600,7 +645,7 @@ void addControl (Song& song, ClipID clip, BeatPosition beat, bool pitchBend, int
         return;
 
     for (auto alias : getAliasStates (song, clipState))
-        alias.appendChild (makeControlState ({ beat, pitchBend, number, value }, getContentStart (clipState)), &song.getUndoManager());
+        alias.appendChild (makeControlState ({ beat, kind, number, value }, getContentStart (clipState)), &song.getUndoManager());
 }
 
 void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& values)
@@ -630,7 +675,7 @@ void addControls (Song& song, ClipID clip, const std::vector<ControlValue>& valu
     }
 }
 
-void removeControls (Song& song, ClipID clip, bool pitchBend, int number, BeatPosition from, BeatPosition to)
+void removeControls (Song& song, ClipID clip, ControlKind kind, int number, BeatPosition from, BeatPosition to)
 {
     const auto clipState = findMidiClipState (song, clip);
 
@@ -646,13 +691,37 @@ void removeControls (Song& song, ClipID clip, bool pitchBend, int number, BeatPo
         {
             const auto child = alias.getChild (i);
 
-            if (! child.hasType (schema::CONTROL)
-                || child[schema::controlKind].toString() != (pitchBend ? schema::controlIsPitchWheel : schema::controlIsController)
-                || (! pitchBend && (int) child[schema::controlNumber] != number))
+            if (! isControlOf (child, kind, number))
                 continue;
 
             if (const auto beat = (double) child[schema::controlBeat]; beat >= first && beat <= last)
                 alias.removeChild (i, &song.getUndoManager());
+        }
+    }
+}
+
+void removeControl (Song& song, ClipID clip, const ControlValue& control)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return;
+
+    constexpr auto near = 1.0e-9; // in beats
+    const auto beat = toClipBeat (clipState, control.beat).inBeats();
+
+    for (auto alias : getAliasStates (song, clipState))
+    {
+        for (auto i = alias.getNumChildren(); --i >= 0;)
+        {
+            const auto child = alias.getChild (i);
+
+            if (isControlOf (child, control.kind, control.number) && std::abs ((double) child[schema::controlBeat] - beat) <= near
+                && (int) child[schema::controlValue] == control.value)
+            {
+                alias.removeChild (i, &song.getUndoManager());
+                break;
+            }
         }
     }
 }

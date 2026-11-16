@@ -2,6 +2,7 @@
 // The song as Phazite's own engine plays it (model/playback/): the plan the model compiles from the song, and the transport
 // the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
+#include "PlaybackConditions.h"
 #include "TestDevices.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -30,6 +31,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ProjectContext.h"
@@ -45,6 +47,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
+#include <vector>
 
 using phazite::test::EnginePlayback;
 using phazite::test::TestSong;
@@ -1370,8 +1374,9 @@ TEST_CASE ("A jump into a long audio file where it isn't read yet is silent only
     phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (80.0));
     CHECK (phazite::test::dispatchMessagesUntil ([&file, landing] { return file->isRead (landing); }, 1000));
 
-    // Then it is silent for the jump's fades alone (3 ms out, and its clip's 40 samples in): no stretch of more than 400
-    // samples near silence, where the tone crosses zero for a sample or two.
+    // Then it is silent for the jump's fades alone (3 ms out, and its clip's 40 samples in), and while the clip, a 44.1 kHz
+    // file in a 48 kHz engine, makes its resampling ready where the jump lands (whole blocks, 20 ms at most: Engine.h,
+    // Landing): no stretch of more than that and 400 samples near silence, where the tone crosses zero for a sample or two.
     const auto played = playback.play (0.2);
     auto quiet = 0, longestQuiet = 0;
 
@@ -1382,7 +1387,7 @@ TEST_CASE ("A jump into a long audio file where it isn't read yet is silent only
     }
 
     CAPTURE (longestQuiet);
-    CHECK (longestQuiet < 400);
+    CHECK (longestQuiet < 400 + (int) (phazite::engine::Engine::maximumHoldSeconds * EnginePlayback::sampleRate));
     song.run ("transport.playStop");
 }
 
@@ -2460,4 +2465,136 @@ TEST_CASE ("In 6/8 the delay's 1 bar echoes a bar of the song's later: three qua
     const auto echo = findFirstSound (audio, 4800);
     CHECK (echo >= 72000 - 4);
     CHECK (echo <= 72000 + 48);
+}
+
+namespace
+{
+// The controllers' changes an instrument was given, in order, as (type, number, value in MIDI's steps).
+std::vector<std::tuple<phazite::devices::NoteEvent::Type, int, int>> controlsGiven (const std::vector<phazite::devices::NoteEvent>& events)
+{
+    using Type = phazite::devices::NoteEvent::Type;
+    std::vector<std::tuple<Type, int, int>> given;
+
+    for (const auto& event : events)
+    {
+        if (event.type == Type::pitchBend)
+            given.emplace_back (event.type, event.number, juce::roundToInt (event.value * 8192.0f) + 8192);
+        else if (event.type == Type::controller || event.type == Type::channelPressure || event.type == Type::aftertouch
+                 || event.type == Type::noteOn)
+            given.emplace_back (event.type, event.number, juce::roundToInt (event.value * 127.0f));
+    }
+
+    return given;
+}
+} // namespace
+
+TEST_CASE ("Where playback starts, jumps or goes round the loop, the clips' controllers, bend and pressure are chased before the notes")
+{
+    // Known bug 85's review: a plug-in with the mod wheel on its filter kept the last value it was given across a jump until
+    // the next change, and a note started in the middle of a bend played unbent. As Cubase and Ableton Live chase them:
+    // each value as the clip has it there, before the notes sounding start; where it has none yet, the bend's middle, no
+    // pressure, and the mod wheel (a controller MIDI's Reset All Controllers resets) to none; the volume, which it changes
+    // only later, as it is. A note held from beat 0 to 16 on the stand-in, which keeps what it is given.
+    using Type = phazite::devices::NoteEvent::Type;
+
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            TestSong song;
+            song.setTempo (condition.getTempo());
+            auto& state = *phazite::findSong (song.context);
+            const auto toneID = phazite::test::addTestDevice (state, song.firstTrack, phazite::test::TestTone::typeID);
+            const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+            song.addNote (clip, 60, 0.0, 16.0, 100);
+            const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+            phazite::addControl (state, clip, at (1.0), phazite::ControlKind::controller, 1, 100);
+            phazite::addControl (state, clip, at (2.0), phazite::ControlKind::pitchWheel, 0, 12288);
+            phazite::addControl (state, clip, at (3.0), phazite::ControlKind::channelPressure, 0, 80);
+            phazite::addControl (state, clip, at (3.5), phazite::ControlKind::aftertouch, 60, 50);
+            phazite::addControl (state, clip, at (6.0), phazite::ControlKind::controller, 7, 90);
+            EnginePlayback playback (condition);
+            playback.play (0.01);
+
+            const auto tone = [&song, toneID]() -> phazite::test::TestTone&
+            {
+                auto* node = phazite::findPlayingSession (*phazite::findSong (song.context))
+                                 ->getPlayer()
+                                 .findDevice ((std::int64_t) toneID.getRaw());
+                REQUIRE (node != nullptr);
+                return dynamic_cast<phazite::test::TestTone&> (node->getRunner().getProcessor());
+            };
+
+            const std::vector<std::tuple<Type, int, int>> inTheMiddle { { Type::controller, 1, 100 },
+                                                                        { Type::pitchBend, 0, 12288 },
+                                                                        { Type::channelPressure, 0, 80 },
+                                                                        { Type::noteOn, 60, 100 },
+                                                                        { Type::aftertouch, 60, 50 } };
+            const std::vector<std::tuple<Type, int, int>> atTheStart { { Type::controller, 1, 0 },
+                                                                       { Type::pitchBend, 0, 8192 },
+                                                                       { Type::channelPressure, 0, 0 },
+                                                                       { Type::noteOn, 60, 100 } };
+            const auto heardNext = [&] (double seconds)
+            {
+                tone().received.clear();
+                playback.play (seconds);
+                return controlsGiven (tone().received);
+            };
+
+            // Playback started at beat 4.
+            phazite::movePlayhead (state, at (4.0));
+            playback.play (0.01);
+            tone().received.clear();
+            phazite::playOrStop (state);
+            CHECK (heardNext (0.05) == inTheMiddle);
+
+            // A jump back to beat 0.5, where nothing is changed yet.
+            phazite::movePlayhead (state, at (0.5));
+            CHECK (heardNext (0.05) == atTheStart);
+
+            // Round a loop from beat 4 to 5: at each time round, the values at its start again.
+            phazite::loopBeats (state, { at (4.0), at (5.0) });
+            phazite::movePlayhead (state, at (4.5));
+            heardNext (0.05);
+            CHECK (heardNext (60.0 / condition.getTempo() * 0.6) == inTheMiddle); // round the loop once
+            phazite::stopAndReturn (state);
+        });
+}
+
+TEST_CASE ("Phazite's synth plays a note started after a bend bent, whether playback reached it or jumped to it")
+{
+    // Known bug 85's review: after a jump, the synth (its bend reset with it) played the note sounding there unbent. A note
+    // held from beat 0, bent up at beat 1: the same pitch half a beat after a jump to beat 2 as at that place played through.
+    TestSong song;
+    song.setTempo (120.0);
+    auto& state = *phazite::findSong (song.context);
+    song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 8.0);
+    song.addNote (clip, 69, 0.0, 8.0, 100);
+    phazite::addControl (state, clip, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::pitchWheel, 0, 16383);
+    EnginePlayback playback;
+
+    // Zero crossings on the left over a quarter of a second, from so far into what was played.
+    const auto crossings = [] (const juce::AudioBuffer<float>& audio, double from)
+    {
+        auto count = 0;
+        const auto first = (int) (from * EnginePlayback::sampleRate);
+
+        for (int i = first + 1; i < first + (int) (0.25 * EnginePlayback::sampleRate); ++i)
+            count += (audio.getSample (0, i - 1) < 0.0f) != (audio.getSample (0, i) < 0.0f) ? 1 : 0;
+
+        return count;
+    };
+
+    phazite::playOrStop (state);
+    const auto through = crossings (playback.play (1.6), 1.25); // beats 2.5 to 3
+    phazite::stopAndReturn (state);
+    playback.play (0.2);
+
+    phazite::movePlayhead (state, phazite::BeatPosition::fromBeats (2.0));
+    phazite::playOrStop (state);
+    const auto jumped = crossings (playback.play (0.6), 0.25); // beats 2.5 to 3 again
+    phazite::stopAndReturn (state);
+
+    CHECK (through > 230); // 440 Hz bent up: more than 220 crossings
+    CHECK (std::abs (jumped - through) <= 2);
 }

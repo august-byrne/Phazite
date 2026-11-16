@@ -70,6 +70,7 @@ void DelayLine::allocate()
 
     samples.setSize (2, capacity);
     samples.clear();
+    clearedSamples.fetch_add (capacity, std::memory_order_relaxed);
 }
 
 void DelayLine::letGoOfTheOld() noexcept
@@ -100,9 +101,9 @@ void DelayLine::start() noexcept
 
 void DelayLine::reset() noexcept
 {
-    samples.clear();
-    position = 0;
-    written = capacity;
+    // Nothing of its own, and silence before it (getReach()): its memory as it was, never read (forEachHeld()).
+    written = 0;
+    silentBefore = true;
     source = nullptr;
     inherited = 0;
     started.store (true, std::memory_order_relaxed);
@@ -124,9 +125,14 @@ void DelayLine::write (const float* const* inputs, int numSamples) noexcept
 
     written = std::min (capacity, written + numSamples);
 
-    // Holding all it has room for itself, it never reads the ring before again.
-    if (written == capacity && ! done.load (std::memory_order_relaxed))
-        done.store (true, std::memory_order_release);
+    // Holding all it has room for itself, it never reads the ring before again, and holds no silence of a reset any more.
+    if (written == capacity)
+    {
+        silentBefore = false;
+
+        if (! done.load (std::memory_order_relaxed))
+            done.store (true, std::memory_order_release);
+    }
 }
 
 Delay::Delay (int samples)

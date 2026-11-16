@@ -60,11 +60,25 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // playing, as outside a trimmed clip. Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
 
-// Adds a controller's value at a song beat, as a recording takes it in with the notes (schema::CONTROL): a MIDI controller's
-// (its number, the sustain pedal 64, the mod wheel 1; its value 0 to 127), or the pitch bend's (0 to 16383, its middle
-// 8192). The clip doesn't grow for it: one past the clip's end or before its start plays nothing. Nothing for a clip that
-// isn't a MIDI clip of the song's.
-void addControl (Song&, ClipID, BeatPosition, bool pitchBend, int number, int value);
+// The kinds of controller events a recording takes in with the notes (schema::CONTROL), as MIDI has them: a MIDI controller
+// (by its number: the sustain pedal 64, the mod wheel 1; its value 0 to 127), the pitch bend (0 to 16383, its middle
+// 8192), the channel's pressure (0 to 127) and a note's pressure, polyphonic aftertouch (by the note's number; 0 to 127).
+enum class ControlKind
+{
+    controller,
+    pitchWheel,
+    channelPressure,
+    aftertouch
+};
+
+const char* getSchemaKind (ControlKind) noexcept;                            // its controlKind in the song
+bool hasNumber (ControlKind) noexcept;                                       // a controller's and a note's pressure have one
+int getHighestValue (ControlKind) noexcept;                                  // 16383 for the pitch bend, 127 for the others
+std::optional<ControlKind> findControlKind (const juce::ValueTree& control); // none for a kind playback doesn't take
+
+// Adds a controller's value at a song beat, as a recording takes it in with the notes. The clip doesn't grow for it: one
+// past the clip's end or before its start plays nothing. Nothing for a clip that isn't a MIDI clip of the song's.
+void addControl (Song&, ClipID, BeatPosition, ControlKind, int number, int value);
 
 // The same for many at once, into one clip, each as addControl() says: what a take recorded (a bend sweep holds thousands).
 // The clip and each of its aliases is filled as a copy and put in its place (one removal and one insertion, the same clip by
@@ -72,15 +86,17 @@ void addControl (Song&, ClipID, BeatPosition, bool pitchBend, int number, int va
 struct ControlValue
 {
     BeatPosition beat;
-    bool pitchBend = false;
+    ControlKind kind = ControlKind::controller;
     int number = 0, value = 0;
 };
 
 void addControls (Song&, ClipID, const std::vector<ControlValue>&);
 
-// Removes a controller's values (by its number), or the pitch bend's, from a clip and its aliases, from one song beat to
-// another, both included: what a recording made with Overdub takes the place of.
-void removeControls (Song&, ClipID, bool pitchBend, int number, BeatPosition from, BeatPosition to);
+// Removes a controller's values (by its number, if its kind has one) from a clip and its aliases, from one song beat to
+// another, both included: what a recording made with Overdub takes the place of. And one value alone, at a beat: what a
+// take after a jump that carries on what the take before let go of at its end takes away (Take.h).
+void removeControls (Song&, ClipID, ControlKind, int number, BeatPosition from, BeatPosition to);
+void removeControl (Song&, ClipID, const ControlValue&);
 
 // Moves a note to a song beat and a pitch. It can't go to before its clip's start (one that starts before it already,
 // which a split or a trim cut, goes no earlier than it is); the clip grows to hold it, as addNote() says, and where the

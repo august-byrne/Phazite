@@ -27,6 +27,12 @@ std::optional<devices::NoteEvent> toNoteEvent (const juce::MidiMessage& message,
         return devices::NoteEvent { Type::controller, sample, message.getControllerNumber(),
                                     (float) message.getControllerValue() / 127.0f };
 
+    if (message.isAftertouch())
+        return devices::NoteEvent { Type::aftertouch, sample, message.getNoteNumber(), (float) message.getAfterTouchValue() / 127.0f };
+
+    if (message.isChannelPressure())
+        return devices::NoteEvent { Type::channelPressure, sample, 0, (float) message.getChannelPressureValue() / 127.0f };
+
     return {};
 }
 

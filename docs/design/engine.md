@@ -97,6 +97,34 @@ r8brain-free-src and Phazite's devices only.
   out over 3 ms, then in after it; a stop and the loop's end fade out the audio clips they cut, the rest ringing on as
   its notes end. A stop asked while a jump fades out waits for the fade to end, and stops where the jump lands. A song
   played without them plays as its render does, to the last bit.
+- **Chase, where playback starts, jumps or goes round the loop:** each track's notes sounding there start, from where
+  each started, and before them its clips' controllers, bend and channel pressure are set to their last values before
+  there, as Cubase and Ableton Live chase them (a plug-in with the mod wheel on its filter, a note started in the middle
+  of a bend). Where the clips hold no value before there, the bend goes to its middle and the pressure to none, and the
+  controllers that MIDI's Reset All Controllers resets (RP-015: the mod wheel, breath, the foot and the pedals to none,
+  expression to full) to that; any other controller they change only later (a volume, a pan) is left as it is, having
+  no value of its own to go back to. A note's own pressure is set where it changed since that note started. Both are
+  found by an index made with the plan (each track's notes sounding at a place, and its controllers' values at a
+  place), so that the block that starts, lands or goes round does no more than a few hundred steps for a track. Where
+  playback starts or lands, every device starts from silence, and so does every path's ring, which a reset leaves as it
+  is in memory, its past silence. A track whose clips hold no controller gets none: only its notes. A controller that
+  changes exactly where playback starts is sent once, its own value.
+- **Audio clips at another rate** keep a second resampling, made ready a little each block ahead of where they play
+  from next without playing on to there (the loop's start, where playback will start, their own start half a second
+  ahead), so that the loop goes round without starting a resampler from nothing (it takes 832 samples of a 44.1 kHz file
+  before one gives anything out at 48 kHz). Where a jump lands among clips not ready there, the playhead waits there,
+  silent, for whole blocks while they make it ready a share of each block, never waiting for the disk (a clip whose
+  file isn't read there plays as silence and fades in once it is), and then plays as it would have at once, later by
+  those blocks. Live notes played meanwhile, and those played in the last moments before it landed, play where it
+  lands; a take after the jump starts there, in time with what is heard ([recording.md](recording.md)).
+  - The hold lasts 20 ms at most, in whole blocks; a block longer than 20 ms is never held. At the bound, the landing
+    plays from there with the clips not ready yet started from nothing, as a jump did before holds: a 192 kHz file
+    on a 44.1 kHz engine at small blocks can need more than 20 ms of shares and get there.
+  - Never held: the loop's wrap (made ready ahead), a jump during a count-in (which makes them ready itself), a jump
+    while stopped, a render, and a jump in a run: one asked for while it is held, which is taken at once, or within a
+    tenth of a second of the jump before, as the playhead dragged while the song plays makes them. Those play from
+    where they land at once, from what is ready, as before holds; so a run of jumps is silent for 20 ms at most, at
+    its first.
 - **A change of delay compensation while playing** (a plug-in with latency that loads or joins, a device switched
   that has one: the alignment of what goes on playing moved) fades what goes out over 3 ms on the plan before, which
   the engine keeps playing meanwhile, and in over 3 ms on the new one: plans that come during the fade make one dip.

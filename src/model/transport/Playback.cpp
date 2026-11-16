@@ -171,12 +171,13 @@ void movePlayhead (Song& song, BeatPosition position)
     }
 
     // While it records, recording goes on from there, as Ableton Live's does after a jump: what was recorded so far is kept
-    // as Stop keeps it, a Record step of its own, and another take starts where the playhead lands.
+    // as Stop keeps it, a Record step of its own (after the drag under way, if there is one, which its Escape would otherwise
+    // take back), and another take starts where the playhead lands.
     session->locateWhileRecording (position,
-                                   [&song] (Take& take)
+                                   [session] (std::unique_ptr<Take> take)
                                    {
-                                       const UndoStep step (song, "Record");
-                                       take.finish();
+                                       take->end();
+                                       session->placeTake (std::move (take));
                                    });
 }
 

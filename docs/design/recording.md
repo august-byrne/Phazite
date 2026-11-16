@@ -90,20 +90,28 @@ what feeds the channel.
 - A note played live is placed where it was heard: earlier by the output's delay and the song's delay compensation.
 - **A note played a moment early,** up to a tenth of a second before the take's start (a downbeat played just before
   the count-in ends), starts on the take's first beat, as Ableton Live, Logic Pro and Cubase keep it.
-- **Controllers:** the sustain pedal, the mod wheel, every other controller and the pitch bend played from a MIDI
-  keyboard go into the take's clips beside its notes, where they were heard, as a MIDI file's import keeps them. Only
+- **Controllers:** the sustain pedal, the mod wheel, every other controller, the pitch bend and the keys' pressure (the
+  channel's, and each note's: polyphonic aftertouch) played from a MIDI keyboard go into the take's clips beside its
+  notes, where they were heard, as a MIDI file's import keeps them, and play back to the track's instrument, Phazite's
+  own (which take them without using them yet) or a plug-in. Only
   what is played during the take (notes, or controllers moved) makes a clip, as Ableton Live records controllers
   alone; a pedal held from before, with nothing played, leaves the track's clips as they were. Only notes take the
   place of the clips there without Overdub: controllers moved without notes go into the clips there, and make a clip of
-  their own only where the track has none across the take. The pedal held down and the bend away from its middle as
-  the take starts are written at its start (as they were when it started, however long the take), and a pedal still
-  down or a bend still away from the middle at its end is let go of just before the end of a clip the take made, so
-  that the next clip's notes aren't held; in a clip that was there and goes on, the take's end gets the value that clip
-  had there, so that what follows plays as it did. Nothing is let go of between the parts of one performance (the part
-  before a looped range and the range's). A value that repeats the one before it is left out, and each controller
-  keeps at most one value a millisecond. A controller recorded into a clip that was there takes the place of its
-  earlier values there from its first move in the take to its last. Capture keeps them too. The computer keyboard plays
-  notes alone. A take after a jump keeps no notes from before its start: the take before kept them.
+  their own only where the track has none across the take. The pedal held down, the bend away from its middle and the
+  channel's pressure held as the take starts are written at its start (as they were when it started, however long the
+  take), and a pedal still down, a bend still away from the middle or the channel's pressure still held at its end is
+  let go of just before the end of a clip the take made, so that the next clip's notes aren't held; in a clip that was
+  there and goes on, the take's end gets the value that clip had there, so that what follows plays as it did. A note's
+  pressure goes with its note. Nothing is let go of between the parts of one performance: the part before a looped
+  range and the range's, and a take and the next after a jump that lands where it ended (the next takes back what the
+  one before let go of at its end, in its own undo step). A value that repeats the one before it is left out, and each
+  controller (a note's pressure by its note) keeps at most one value a millisecond, the latest at the time of the first:
+  not to be heard, as a MIDI cable carries a message a millisecond at most for all of them together, and a bound on a long
+  take of a keyboard that sends its keys' pressure all the time (ten keys held for five minutes keep 3 million values at
+  most). Capture thins them the same way. A controller recorded into a clip that was there takes the place of
+  its earlier values there from its first move in the take to its last. Capture keeps them too. The computer keyboard
+  plays notes alone. A take after a jump keeps no notes from before its start: the take before kept them, whose clips,
+  as Stop's, wait for a drag under way to end, a Record step of their own that the drag's Escape doesn't take back.
 
 ### Audio
 
@@ -174,6 +182,11 @@ jump and starts where the playhead lands, to the sample, however soon the audio 
 finishing the first take takes: the engine's take hands what it records on to the next one once the jump is taken
 (`src/engine/core/Recording.h`). A new take that can't make an input's file says so.
 
+Where the jump lands among audio clips at another rate not ready there, the playhead is held there, silent, for up to
+20 ms in whole blocks while they make their resampling ready ([engine.md](engine.md)). What comes into the inputs
+meanwhile goes into neither take: the take before ended at the jump, and the take after starts at the landing, where
+the song plays on from, so it stays in time with what is heard. Monitoring is silent for the hold too.
+
 A press in the ruler moves the playhead once. A drag in the ruler takes it no further than its press while a take
 records, because every move would end one take and start another. A drag of the top bar's place or time takes the
 playhead only where it is let go, and Escape leaves it where it was.
@@ -222,8 +235,8 @@ step, "Capture", and selects it.
 - In a song without clips, Capture first sets the song's tempo from what was played, when it can tell: a whole
   number of beats a minute between 80 and 160, from at least four notes over at least a second.
 - The clip runs whole bars, and its notes are quantized to sixteenths when Quantize Recordings is on.
-- The sustain pedal, the other controllers and the pitch bend played with the notes go into the clip, where they were
-  played; the pedal held down as the first note was played, at the clip's start.
+- The sustain pedal, the other controllers, the pitch bend and the keys' pressure played with the notes go into the
+  clip, where they were played; the pedal held down as the first note was played, at the clip's start.
 
 ## Metronome and count-in
 

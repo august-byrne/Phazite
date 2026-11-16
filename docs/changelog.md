@@ -239,6 +239,24 @@ too. A line names the bug's number in that list.
   200 of N"), keeps equal matches in the index's order, and Enter or Down acts on the newest text's results.
 - **An unsaved project discarded while its folder couldn't be deleted** is marked and deleted at the next start, and
   the look for unused audio skips empty and temporary files.
+- **85 The loop's wrap and a jump without a burst.** Each track's notes and controllers have an index made with the
+  plan, each resampled clip keeps a spare resampler made ready ahead for the loop's start, a jump among resampled
+  clips that aren't ready waits up to 20 ms of whole silent blocks for them, and a new plan never waits for a file
+  being read. The wrap's own work on 200 tracks and 40 resampled clips went from about 80 % of a 128-sample block to
+  3.6 %.
+- **Play and a jump reset the delay rings in place**, without writing to them (400 rings: 0.1 % of a block, where
+  clearing them took 32.5 %): Play on a big song no longer starts with a burst.
+- **Controllers, bend and pressure are chased.** Where playback starts, jumps or goes round the loop, each track's
+  controllers, bend and pressure take their values at that place before its notes start, as Cubase and Ableton Live
+  chase them; a track without controllers gets none, and a controller that changes exactly there is sent once.
+- **173 Aftertouch and channel pressure** are heard live and played back by plug-ins, kept by takes, Capture and MIDI
+  imports, thinned to one value a millisecond for each controller and each note, and taken without harm by Phazite's
+  own instruments.
+- **175 A pedal across a jump's seam.** A take after a jump that lands where the take before ended carries the pedal,
+  the bend and the pressure on; a jump during a drag places the take before once the drag ends, in a step of its
+  own.
+- **176 A take stopped during a drag** stays in the playlist with its waveform until its clip replaces it; a take
+  waiting for a drag's end and the take recording after it on the same track each show their own waveform.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

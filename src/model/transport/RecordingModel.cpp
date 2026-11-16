@@ -194,16 +194,53 @@ void setClipTake (ProjectContext& context, ClipID id, int take)
 //==============================================================================
 std::vector<RecordingInProgress> getRecordingsInProgress (const ProjectContext& context)
 {
+    // Those ended and still waiting for their clips (stopped during a drag) too, until they are placed.
     auto* session = getSession (context);
-    auto* take = session != nullptr ? session->getTake() : nullptr;
-    return take != nullptr ? take->getInProgress() : std::vector<RecordingInProgress>();
+    std::vector<RecordingInProgress> shown;
+
+    if (session != nullptr)
+        for (auto* take : session->getTakesShown())
+            for (auto& recording : take->getInProgress())
+                shown.push_back (std::move (recording));
+
+    return shown;
 }
 
 std::vector<float> getRecordingLevels (const ProjectContext& context, TrackID track, BeatRange span, int columns)
 {
+    // Each column's from the take that shows what it recorded on the track there, the latest where two do: a take ended
+    // during a drag waits to be placed beside the one recording after it (a jump), each over a stretch of its own.
     auto* session = getSession (context);
-    const auto* take = session != nullptr ? session->getTake() : nullptr;
-    return take != nullptr ? take->getLevels (track, span, columns) : std::vector<float> ((size_t) std::max (0, columns), 0.0f);
+    auto takes = session != nullptr ? session->getTakesShown() : std::vector<Take*>();
+    std::erase_if (takes, [track] (const Take* take) { return ! take->showsOn (track); });
+    std::vector<float> levels ((size_t) std::max (0, columns), 0.0f);
+
+    if (takes.size() == 1)
+        return takes.front()->getLevels (track, span, columns);
+
+    std::vector<bool> found (levels.size(), false);
+    const auto step = span.getLength().inBeats() / std::max (1, columns);
+
+    for (auto take = takes.rbegin(); take != takes.rend(); ++take)
+    {
+        const auto ranges = (*take)->getInputRanges (track); // the input's alone: no notes looked through
+        const auto its = (*take)->getLevels (track, span, columns);
+
+        for (size_t column = 0; column < levels.size(); ++column)
+        {
+            const auto beat = BeatPosition::fromBeats (span.getStart().inBeats() + step * ((double) column + 0.5));
+            const auto covers =
+                std::any_of (ranges.begin(), ranges.end(), [beat] (const BeatRange& range) { return range.contains (beat); });
+
+            if (covers && ! found[column])
+            {
+                levels[column] = its[column];
+                found[column] = true;
+            }
+        }
+    }
+
+    return levels;
 }
 
 //==============================================================================

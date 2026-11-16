@@ -17,14 +17,17 @@
 // that went away) ends the file there, whole: the session stops recording, keeping what was written, and the take says
 // so; and where the drive has room for little recording, starting says so. Stopping waits for the writing thread to finish
 // what it is writing, however long the drive takes. The notes keep those played just before the take's start, moved to it
-// (a downbeat played a little early after the count-in), and the sustain pedal, the mod wheel and every other controller
-// and the pitch bend played on the track go into its clips beside them, as a MIDI file's import makes them.
+// (a downbeat played a little early after the count-in), and the sustain pedal, the mod wheel and every other controller,
+// the pitch bend and the keys' pressure (the channel's, and each note's: aftertouch) played on the track go into its clips
+// beside them, as a MIDI file's import makes them.
 #pragma once
 
 #include "AudioRecorder.h"
+#include "devices/core/Processor.h"
 #include "engine/core/TempoMap.h"
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
+#include "model/notes/internal/Notes.h"
 #include "model/transport/RecordingValues.h"
 
 #include <array>
@@ -32,6 +35,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -76,6 +81,12 @@ public:
     // The notes played live are kept for it from just before it starts (PlaybackSession::keepPlayedFrom()).
     void keepPlayed();
 
+    // One that goes on from another after a jump: where the one before ended, and what it let go of there (the pedal held,
+    // the bend away from its middle, the pressure) as it is placed (at once, or after a drag), which this one takes back as
+    // it is placed if it carries it on from where that one ended (a jump that lands where the take before ended: known bug
+    // 175), as nothing lets go between the parts of one take.
+    void followOn (const Take& before);
+
     // Whether a write of one of its files failed (a full drive), after which nothing more is written into any of them: the
     // session stops recording (any thread).
     bool hasFailedWriting() const noexcept { return writeFailed.load(); }
@@ -107,16 +118,23 @@ public:
     // What it has recorded so far, where it will go (RecordingModel.h): each armed track's input from where it started to
     // where it has got to (round a looped range, once recording has gone round it, what was played before the range, and
     // this time round from the range's start; punched in, what falls in the range), and the notes played into live MIDI's
-    // track once there are any, over what they will be kept in. Nothing once it is finished. Message thread.
+    // track once there are any, over what they will be kept in. Once it has ended, what it recorded, until its clips are
+    // placed (a take stopped during a drag, which waits for the drag's end: known bug 176), then nothing. Message thread.
     std::vector<RecordingInProgress> getInProgress();
+
+    // Where an armed track's input shows so far (as getInProgress() has it), without the notes: what its levels are drawn
+    // over.
+    std::vector<BeatRange> getInputRanges (TrackID) const;
 
     // An armed track's input so far: the loudest sample in each of so many columns across a stretch of the song, as this
     // time round a looped range plays it (and before the range, as the first time round played it), from 0 to 1; 0 where
-    // nothing has come in yet. Message thread.
+    // nothing has come in yet. Once it has ended, all it recorded, until its clips are placed. Message thread.
     std::vector<float> getLevels (TrackID, BeatRange span, int columns) const;
 
-    // Whether it records onto a track: one armed with an input the audio device has, or live MIDI's.
+    // Whether it records onto a track: one armed with an input the audio device has, or live MIDI's; and whether it shows
+    // what it recorded there, until its clips are placed (getInProgress()).
     bool recordsOnto (TrackID) const;
+    bool showsOn (TrackID) const;
 
     // For tests: holds the writing thread back until let go, as a drive that stalls holds it, from its next turn (holding it
     // waits for that); what comes in meanwhile waits in the inputs' buffers, and is lost once they are full.
@@ -125,6 +143,23 @@ public:
     // For tests: the drive its files are on is full from now on: a write that would make a file longer fails, as the
     // operating system fails it, and one over what a file holds already (its header, as the file is ended) doesn't.
     void fillDrive() noexcept { driveFull.store (true); }
+
+    // Each controller's own place among what a take (and Capture) keeps of each: the MIDI controllers' by their numbers,
+    // then the bend's, the channel's pressure's and each note's pressure's by its note.
+    static constexpr std::size_t numControlKeys = 130 + 128;
+    static std::size_t getKey (ControlKind, int number) noexcept;
+
+    // How often a take and Capture keep a value of each controller at most, a note's pressure by its note: once a
+    // millisecond, the latest at the time of the first, besides leaving out a value that repeats the one before. Not to be
+    // heard: a MIDI cable carries a message a millisecond at most, for every controller together, and Phazite moves what
+    // automation moves every 32 samples (0.7 ms at 48 kHz); and it bounds a long take of a keyboard that sends its keys'
+    // pressure all the time (a thousand values a second for each key held, as ten keys held for five minutes are 3 million
+    // at most, where a USB keyboard sending every key's pressure every 0.2 ms would make 15 million).
+    static constexpr double controlSeconds = 0.001;
+
+    // A controller's change played live (one of the engine's events), in MIDI's terms: its kind, its number (a controller's,
+    // or a note's for its pressure; 0 for the others) and its value (0 to 127, the bend 0 to 16383); none for a note.
+    static std::optional<std::tuple<ControlKind, int, int>> toControl (const devices::NoteEvent&);
 
 private:
     explicit Take (PlaybackSession&);
@@ -172,29 +207,37 @@ private:
         std::int64_t start = 0, end = 0;
     };
 
-    // A controller moved or the pitch bend played live: in MIDI's own terms (a controller's number and its value from 0 to
-    // 127, or the bend from 0 to 16383, 8192 its middle), and where it was heard in the song, as if nothing looped.
+    // A controller moved, the pitch bend or a key's pressure played live: in MIDI's own terms (a controller's number, or a
+    // note's for its pressure, and the value from 0 to 127, or the bend from 0 to 16383, 8192 its middle), and where it was
+    // heard in the song, as if nothing looped.
     struct PlayedControl
     {
-        bool bend = false;
+        ControlKind kind = ControlKind::controller;
         int number = 0, value = 0;
         std::int64_t at = 0;
     };
 
+    static std::size_t getKey (const PlayedControl& control) noexcept { return getKey (control.kind, control.number); }
+
     // Notes and controls played live, in order, each where it goes in the song, and the samples of the song a clip of them
     // would go between: round a looped range, the range's (looped), whose notes are every time round's. Only what was played
     // in it (notes, and controls moved within it) makes a clip; the state it starts with (carried: the pedal held down, the
-    // bend away from its middle, a controller moved a moment before) and the pedal and bend let go of just before its end
-    // (released: a control at or past a clip's end isn't played, and the song plays its clips' controls as one stream, so a
-    // pedal left down would hold the next clip's notes) go only into a clip that what was played made.
+    // bend away from its middle, the channel's pressure held, a controller moved a moment before) and the pedal, the bend and
+    // the pressure let go of just before its end (released: a control at or past a clip's end isn't played, and the song
+    // plays its clips' controls as one stream, so a pedal left down would hold the next clip's notes) go only into a clip
+    // that what was played made.
     struct PlayedNotes
     {
         std::vector<Played> notes;
         std::int64_t from = 0, to = 0;
         bool looped = false;
         std::vector<PlayedControl> controls, carried, released;
-        int endPedal = 0, endBend = 8192; // the pedal's and the bend's values at its end
+        int endPedal = 0, endBend = 8192, endPressure = 0; // the pedal's, the bend's and the channel pressure's at its end
     };
+
+    // Whether a control carried into a part (or a take) that starts where another ends carries on what that one let go of at
+    // its end, which then needn't be let go of: the pedal still down, the bend or the pressure where it was.
+    static bool carriesOn (const PlayedControl& carried, const PlayedControl& release, const PlayedNotes& endedPart) noexcept;
 
     // The notes played into live MIDI's track while it recorded, up to so many samples from its start, in the parts a
     // clip of them goes over, in order: those played in the punched range, in it; round a looped range, once recording has
@@ -211,11 +254,12 @@ private:
     // meanwhile ends it.
     int deviceStarts = 0;
 
-    // Each controller's last value on live MIDI's track as it started, and the bend's (128); -1 where none was played: the
-    // state a take longer than the played events are kept for starts with (the take before's, after a jump).
-    std::array<int, 129> heldAtStart {};
+    // Each controller's last value on live MIDI's track as it started (by getKey()); -1 where none was played: the state a
+    // take longer than the played events are kept for starts with (the take before's, after a jump).
+    std::array<int, numControlKeys> heldAtStart {};
 
-    // What it recorded, as it ended, for place(): where it started, how long it was, and its notes.
+    // What it recorded, as it ended, for place(), and for what the playlist shows until then: where it started, how long it
+    // was, and its notes.
     struct Ended
     {
         std::int64_t startSample = 0, length = 0;
@@ -224,6 +268,27 @@ private:
 
     std::optional<Ended> ended;
     bool clipsPlaced = false;
+
+    // Where it started and how long it is, while it records or once it has ended, until it is placed; none before it
+    // started, or once placed.
+    std::optional<std::pair<std::int64_t, std::int64_t>> getRecorded() const;
+    std::vector<RecordingInProgress> getInputsInProgress() const; // getInProgress()'s inputs
+
+    // What its clips let go of at its end, as they were placed, in the clip that holds what was played last there; and the
+    // same of the take before, for one that goes on after a jump (followOn()).
+    struct Seam
+    {
+        std::int64_t at = 0;              // where its last part ends, in the song's samples
+        ClipID clip;                      // where it let go of them
+        PlayedNotes end;                  // its last part's releases and its values at its end, without its notes
+        std::vector<ControlValue> writes; // each release as it was written, in the same order
+    };
+
+    // Its own, set as it is placed; and the take before's, which the next one placed reads as it is placed, whenever the
+    // take before was placed (at once, or once a drag ended: takes are placed in the order they ended, so the one before
+    // first). What it names that was moved or deleted in between matches nothing then, and is left as it is.
+    std::shared_ptr<std::optional<Seam>> seamAtEnd = std::make_shared<std::optional<Seam>>();
+    std::shared_ptr<const std::optional<Seam>> seamBefore;
 
     void placeNotes (const std::vector<PlayedNotes>&);
     void close (bool keep);

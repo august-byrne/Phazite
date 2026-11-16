@@ -3,6 +3,7 @@
 // commands, takes recorded through Phazite's engine as the app's audio device would play it, and what Capture makes of
 // notes played a moment ago.
 #include "EnginePlayback.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -11,12 +12,14 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -929,9 +932,9 @@ TEST_CASE ("With Overdub, a controller recorded into a clip takes the place of i
     auto& song = *phazite::findSong (take.song.context);
     const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 8.0);
     take.song.addNote (there, 48, 0.0, 1.0);
-    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (0.5), false, 64, 127);
-    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), false, 64, 0);
-    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), false, 1, 90);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (0.5), phazite::ControlKind::controller, 64, 127);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), phazite::ControlKind::controller, 64, 0);
+    phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.5), phazite::ControlKind::controller, 1, 90);
 
     take.song.run ("transport.record");
     take.playback.play (0.5); // to beat 1
@@ -1018,8 +1021,8 @@ TEST_CASE (
 
     SUBCASE ("Pressed in the take and held as it stopped, in a clip that holds it down to beat 8: still down there")
     {
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), false, 64, 127);
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), false, 64, 0);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::controller, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), phazite::ControlKind::controller, 64, 0);
         phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (2.0));
         take.song.run ("transport.record");
         take.playback.play (0.25); // beat 2.5
@@ -1040,10 +1043,10 @@ TEST_CASE (
 
     SUBCASE ("Held from before the take, notes overdubbed: the clip's own pedalling between stays")
     {
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), false, 64, 127);
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.0), false, 64, 0);
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.5), false, 64, 127);
-        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), false, 64, 0);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (1.0), phazite::ControlKind::controller, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.0), phazite::ControlKind::controller, 64, 0);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (3.5), phazite::ControlKind::controller, 64, 127);
+        phazite::addControl (song, there, phazite::BeatPosition::fromBeats (8.0), phazite::ControlKind::controller, 64, 0);
         playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
         take.playback.play (0.1);
         phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (2.0));
@@ -1086,6 +1089,352 @@ TEST_CASE ("Round a looped range, a pedal held from before the range on into it 
     const auto inRange = getControls (song, clips[1].id);
     CHECK (std::any_of (inRange.begin(), inRange.end(), [] (const auto& control)
                         { return control.number == 64 && control.value == 127 && std::abs (control.beat - 4.0) < 1.0e-6; }));
+}
+
+TEST_CASE ("A take after a jump that lands where the take before ended carries its pedal on: nothing lets go of it at the seam")
+{
+    // Known bug 175: the take before was placed before the next had recorded anything, so it wrote its pedal-up a tick before
+    // its end, where the next one's clip puts the pedal down again: what only the pedal held let go in that tick. As between
+    // the parts of one take, nothing lets go there now, and Undo of the second take puts it back.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.1, 0.25);
+    take.playback.play (0.25);
+
+    // Where the take ends (what was heard last, as its clip will): the playhead put there.
+    const auto* recording = engine.getRecording();
+    const auto* session = phazite::getSession (take.song.context);
+    REQUIRE (recording != nullptr);
+    REQUIRE (recording->hasStarted());
+    const auto& tempo = engine.getPlan()->tempo;
+    const auto end = recording->getStartSample() + recording->getLength() - session->getOutputLatency()
+                     - phazite::engine::Engine::getOutputLatency (*engine.getPlan());
+    phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (tempo.toBeats ((double) end)));
+    take.playNote (62, 0.1, 0.25);
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    REQUIRE (clips[0].range.getEnd().inBeats() == doctest::Approx (clips[1].range.getStart().inBeats()).epsilon (1.0e-9));
+    const auto pedalUp = [] (const RecordedControl& control) { return control.number == 64 && control.value == 0; };
+    const auto first = getControls (song, clips[0].id);
+    CHECK (std::none_of (first.begin(), first.end(), pedalUp));
+    const auto second = getControls (song, clips[1].id);
+    CHECK (std::any_of (second.begin(), second.end(), [start = clips[1].range.getStart().inBeats()] (const RecordedControl& control)
+                        { return control.number == 64 && control.value == 127 && std::abs (control.beat - start) < 1.0e-9; }));
+
+    // The second take undone: the first lets go of its pedal at its end again, as nothing follows it.
+    phazite::undo (song);
+    const auto alone = getControls (song, clips[0].id);
+    CHECK (std::any_of (alone.begin(), alone.end(), pedalUp));
+}
+
+TEST_CASE ("A jump while a control is held places the take before once the drag ends, a step that its Escape keeps, the pedal carried on")
+{
+    // Known bug 175's review: a jump during a drag placed the take before at once, inside the drag's step, so the drag's
+    // Escape took it back; and the take after the jump mended the seam only from what the take before had let go of as it
+    // was placed by then. Now that one waits for the drag's end as Stop's take does, and the next, placed after it, still
+    // carries the pedal on across the seam.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 127));
+    take.playNote (60, 0.1, 0.25);
+    take.playback.play (0.25);
+
+    auto volume = phazite::getVolume (take.song.context, take.song.firstTrack);
+    volume.beginGesture();
+    volume.setValue (0.3f);
+
+    const auto* recording = engine.getRecording();
+    const auto* session = phazite::getSession (take.song.context);
+    REQUIRE (recording != nullptr);
+    const auto end = recording->getStartSample() + recording->getLength() - session->getOutputLatency()
+                     - phazite::engine::Engine::getOutputLatency (*engine.getPlan());
+    phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (engine.getPlan()->tempo.toBeats ((double) end)));
+    CHECK (phazite::getClips (take.song.context, take.song.firstTrack).empty()); // it waits for the drag's end
+    take.playNote (62, 0.1, 0.25);
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    volume.cancelGesture(); // Escape: the drag goes, the takes stay
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (take.song.context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
+    const auto first = getControls (song, clips[0].id);
+    CHECK (std::none_of (first.begin(), first.end(),
+                         [] (const RecordedControl& control) { return control.number == 64 && control.value == 0; }));
+
+    playFromMidiInput (juce::MidiMessage::controllerEvent (1, 64, 0));
+    take.playback.play (0.05);
+}
+
+TEST_CASE ("A take keeps at most one value a millisecond of each note's pressure, however densely a keyboard sends it")
+{
+    // Known bug 173's review: a keyboard that sends every held key's pressure all the time would fill a take with as many
+    // values; each controller, a note's pressure by its note, keeps at most one a millisecond (Take::controlSeconds), the
+    // latest at the time of the first. Four keys held for a second, each one's pressure sent four times a block, as it comes
+    // in at the block's start (the test plays faster than real time): one of them kept a block.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    take.song.run ("transport.record");
+    take.playback.play (0.1);
+
+    for (const auto pitch : { 60, 64, 67, 72 })
+        audio.playLive (juce::MidiMessage::noteOn (1, pitch, 0.8f));
+
+    const auto blocks = (int) (1.0 * EnginePlayback::sampleRate / EnginePlayback::blockSize);
+    auto sent = 0;
+
+    for (int block = 0; block < blocks; ++block)
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            for (const auto pitch : { 60, 64, 67, 72 })
+            {
+                playFromMidiInput (juce::MidiMessage::aftertouchChange (1, pitch, (block * 4 + i) % 128));
+                ++sent;
+            }
+        }
+
+        take.playback.playSamples (EnginePlayback::blockSize);
+    }
+
+    for (const auto pitch : { 60, 64, 67, 72 })
+        audio.playLive (juce::MidiMessage::noteOff (1, pitch));
+
+    take.playback.play (0.1);
+    take.song.run ("transport.record");
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    const auto kept = std::count_if (controls.begin(), controls.end(), [] (const RecordedControl& control)
+                                     { return control.kind == juce::String (phazite::schema::controlIsAftertouch); });
+    CAPTURE (sent);
+    CHECK (kept >= 4 * blocks * 3 / 4); // what was played is kept, in time: about a value a block for each note (two that
+                                        // came less than a millisecond apart across blocks of a loaded machine, one)
+    CHECK (kept <= 4 * blocks + 8);
+    CHECK (kept <= 4 * (1000 + 2)); // a second of it: a thousand values for each note at most
+}
+
+TEST_CASE (
+    "The keys' pressure, a note's and the channel's, is heard live, recorded into the take, saved, and played back where it was played")
+{
+    // Known bug 173: the engine dropped aftertouch and channel pressure, so neither was heard live, played back, nor kept by
+    // a take. A stand-in instrument that keeps what it is given; a note held while the channel's pressure sweeps up and back,
+    // and the note's own pressure.
+    using Type = phazite::devices::NoteEvent::Type;
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    const auto toneID = phazite::test::addTestDevice (song, take.song.firstTrack, phazite::test::TestTone::typeID);
+    take.playback.play (0.05);
+    const auto tone = [&take, toneID]() -> phazite::test::TestTone&
+    {
+        auto* session = phazite::findPlayingSession (*phazite::findSong (take.song.context));
+        REQUIRE (session != nullptr);
+        auto* node = session->getPlayer().findDevice ((std::int64_t) toneID.getRaw());
+        REQUIRE (node != nullptr);
+        return dynamic_cast<phazite::test::TestTone&> (node->getRunner().getProcessor());
+    };
+
+    const auto pressures = [] (const std::vector<phazite::devices::NoteEvent>& events)
+    {
+        std::vector<std::pair<Type, int>> found;
+
+        for (const auto& event : events)
+            if (event.type == Type::channelPressure || event.type == Type::aftertouch)
+                found.emplace_back (event.type, juce::roundToInt (event.value * 127.0f));
+
+        return found;
+    };
+
+    const std::vector<int> sweep { 20, 60, 100, 127, 90, 40 };
+    std::vector<std::pair<Type, int>> played;
+
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    take.playback.play (0.1);
+
+    for (const auto value : sweep)
+    {
+        playFromMidiInput (juce::MidiMessage::channelPressureChange (1, value));
+        take.playback.play (0.05);
+        played.emplace_back (Type::channelPressure, value);
+    }
+
+    playFromMidiInput (juce::MidiMessage::aftertouchChange (1, 60, 70));
+    played.emplace_back (Type::aftertouch, 70);
+    take.playback.play (0.1);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    take.playback.play (0.2);
+    take.song.run ("transport.record");
+
+    // Heard live, each as it was played; then the pressure let go of, as the next test's take would start with it held.
+    CHECK (pressures (tone().received) == played);
+    playFromMidiInput (juce::MidiMessage::channelPressureChange (1, 0));
+    take.playback.play (0.05);
+
+    // Recorded beside the note, each where it was heard, and the channel's pressure let go of at the clip's end.
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    std::vector<std::pair<juce::String, int>> kept;
+
+    for (const auto& control : controls)
+        kept.emplace_back (control.kind, control.value);
+
+    REQUIRE (kept.size() == played.size() + 1);
+
+    for (size_t i = 0; i < played.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (kept[i].first
+               == juce::String (played[i].first == Type::aftertouch ? phazite::schema::controlIsAftertouch
+                                                                    : phazite::schema::controlIsChannelPressure));
+        CHECK (kept[i].second == played[i].second);
+    }
+
+    CHECK (controls.back().kind == juce::String (phazite::schema::controlIsChannelPressure));
+    CHECK (controls.back().value == 0);
+    CHECK (controls.back().beat == doctest::Approx (clips[0].range.getEnd().inBeats() - 1.0 / 960.0));
+    CHECK (controls[played.size() - 1].number == 60);
+
+    // Saved and opened again, then played from the song's start: the instrument is given each again where it was recorded,
+    // to the sample.
+    take.song.reopen();
+    take.playback.play (0.05);
+    auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    tone().received.clear();
+    take.song.run ("transport.playStop");
+    const auto startClock = engine.getClock();
+    std::vector<std::pair<std::int64_t, phazite::devices::NoteEvent>> heard;
+
+    for (int block = 0; block < 300; ++block)
+    {
+        const auto at = engine.getClock() - startClock;
+        tone().received.clear();
+        take.playback.playSamples (EnginePlayback::blockSize);
+
+        for (const auto& event : tone().received)
+            if (event.type == Type::channelPressure || event.type == Type::aftertouch)
+                heard.emplace_back (at + event.sample, event);
+    }
+
+    take.song.run ("transport.playStop");
+
+    // First, as playback starts, the channel's pressure chased: none yet, where the clip holds it later (Engine.h).
+    REQUIRE (heard.size() == controls.size() + 1);
+    CHECK (heard.front().first == 0);
+    CHECK (heard.front().second.type == Type::channelPressure);
+    CHECK (heard.front().second.value == 0.0f);
+    heard.erase (heard.begin());
+    const auto& tempo = engine.getPlan()->tempo;
+
+    for (size_t i = 0; i < heard.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (juce::roundToInt (heard[i].second.value * 127.0f) == controls[i].value);
+        CHECK (heard[i].first == std::llround (tempo.toSamples (controls[i].beat)));
+    }
+}
+
+TEST_CASE ("Capture keeps the keys' pressure played with the notes, and lets go of the channel's at its clip's end")
+{
+    // Known bug 173, as Capture had it: the pressure played while stopped, among four quarter notes at 120 BPM.
+    EngineTake take;
+    auto& song = *phazite::findSong (take.song.context);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    take.playback.play (0.1);
+    playFromMidiInput (juce::MidiMessage::channelPressureChange (1, 90));
+    take.playback.play (0.05);
+    playFromMidiInput (juce::MidiMessage::aftertouchChange (1, 60, 50));
+    take.playback.play (0.1);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+
+    for (const auto pitch : { 64, 67, 72 })
+        take.playNote (pitch, 0.25, 0.25);
+
+    take.playback.play (0.1);
+    take.song.run ("transport.capture");
+    playFromMidiInput (juce::MidiMessage::channelPressureChange (1, 0));
+    take.playback.play (0.05);
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    const auto controls = getControls (song, clips[0].id);
+    REQUIRE (controls.size() == 3);
+    CHECK (controls[0].kind == juce::String (phazite::schema::controlIsChannelPressure));
+    CHECK (controls[0].value == 90);
+    CHECK (controls[1].kind == juce::String (phazite::schema::controlIsAftertouch));
+    CHECK (controls[1].number == 60);
+    CHECK (controls[1].value == 50);
+    CHECK (controls[2].kind == juce::String (phazite::schema::controlIsChannelPressure));
+    CHECK (controls[2].value == 0);
+    CHECK (controls[2].beat == doctest::Approx (clips[0].range.getEnd().inBeats() - 1.0 / 960.0));
+}
+
+TEST_CASE ("A MIDI file's aftertouch and channel pressure, which its import keeps, play")
+{
+    using Type = phazite::devices::NoteEvent::Type;
+    TestSong s;
+    s.setTempo (120.0);
+    auto& song = *phazite::findSong (s.context);
+    const auto toneID = phazite::test::addTestDevice (song, s.firstTrack, phazite::test::TestTone::typeID);
+
+    juce::MidiMessageSequence events;
+    events.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0.0);
+    events.addEvent (juce::MidiMessage::channelPressureChange (1, 80), 480.0);
+    events.addEvent (juce::MidiMessage::aftertouchChange (1, 60, 30), 960.0);
+    events.addEvent (juce::MidiMessage::noteOff (1, 60), 1920.0);
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (960);
+    midi.addTrack (events);
+    const auto file = s.getSoundsFolder().getChildFile ("Pressed.mid");
+    file.getParentDirectory().createDirectory();
+    {
+        juce::FileOutputStream stream (file);
+        REQUIRE (midi.writeTo (stream));
+    }
+
+    {
+        const phazite::UndoStep step (song, "Import");
+        REQUIRE (phazite::importFile (song, s.firstTrack, file, phazite::BeatPosition()).isValid());
+    }
+
+    EnginePlayback playback;
+    playback.play (0.05);
+    auto* session = phazite::findPlayingSession (song);
+    REQUIRE (session != nullptr);
+    auto& tone = dynamic_cast<phazite::test::TestTone&> (
+        session->getPlayer().findDevice ((std::int64_t) toneID.getRaw())->getRunner().getProcessor());
+    tone.received.clear();
+    s.run ("transport.playStop");
+    playback.play (1.2);
+    s.run ("transport.playStop");
+
+    std::vector<std::pair<Type, int>> heard;
+
+    for (const auto& event : tone.received)
+        if (event.type == Type::channelPressure || event.type == Type::aftertouch)
+            heard.emplace_back (event.type, event.type == Type::aftertouch ? event.number : juce::roundToInt (event.value * 127.0f));
+
+    // (The channel's pressure chased first as playback starts: none yet.)
+    CHECK (heard
+           == std::vector<std::pair<Type, int>> { { Type::channelPressure, 0 }, { Type::channelPressure, 80 }, { Type::aftertouch, 60 } });
 }
 
 TEST_CASE ("Controllers moved without notes clear nothing: they go into the clips there, or a clip of their own where there are none")

@@ -21,6 +21,7 @@
 #include "engine/nodes/LoudnessMeter.h"
 #include "engine/transport/Click.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -351,6 +352,17 @@ TEST_CASE ("MIDI reaches a device as events at their samples, and an instrument 
     CHECK (controller->value == doctest::Approx (1.0f));
     CHECK (allOff->type == Type::allNotesOff);
     CHECK_FALSE (engine::toNoteEvent (juce::MidiMessage::programChange (1, 3), 505).has_value());
+
+    // The keys' pressure (known bug 173: dropped): a note's, and the channel's.
+    const auto aftertouch = engine::toNoteEvent (juce::MidiMessage::aftertouchChange (1, 61, 100), 10);
+    const auto pressure = engine::toNoteEvent (juce::MidiMessage::channelPressureChange (1, 127), 11);
+    REQUIRE (aftertouch.has_value());
+    REQUIRE (pressure.has_value());
+    CHECK (aftertouch->type == Type::aftertouch);
+    CHECK (aftertouch->number == 61);
+    CHECK (aftertouch->value == doctest::Approx (100.0f / 127.0f));
+    CHECK (pressure->type == Type::channelPressure);
+    CHECK (pressure->value == doctest::Approx (1.0f));
 
     // An instrument gets them at their samples, and plays into silence: the track's audio isn't heard.
     auto device = std::make_unique<TestTone>();
@@ -1317,6 +1329,79 @@ engine::Plan::Strip makeMaster (const engine::Plan& plan, int maximumBlockSize)
 }
 } // namespace
 
+TEST_CASE ("A track's notes sounding at a place are found by the sequence's index, as a look through every note before it finds them")
+{
+    // Known bug 85: a loop's wrap and a jump looked through every note before the playhead, on every track, in one block.
+    // Notes of every length on few pitches (a long pad under short ones, notes cut short by the next on their pitch, notes
+    // that start together), asked at random places and at their own edges.
+    juce::Random random (85);
+    std::vector<engine::NoteSequence::Note> notes;
+
+    for (int i = 0; i < 3000; ++i)
+    {
+        const auto start = random.nextInt (4000) * 0.25;
+        const auto length = random.nextInt (10) == 0 ? random.nextDouble() * 400.0 : 0.05 + random.nextDouble() * 2.0;
+        notes.push_back ({ start, start + length, 40 + random.nextInt (24), 0.8f });
+    }
+
+    const engine::NoteSequence sequence (notes, {});
+    std::vector<double> places;
+
+    for (int i = 0; i < 2000; ++i)
+        places.push_back (random.nextDouble() * 1100.0);
+
+    for (const auto& note : sequence.getNotes())
+        for (const auto offset : { -1.0e-9, 0.0, 1.0e-9 })
+            places.push_back (note.start + offset);
+
+    auto mismatches = 0;
+
+    for (const auto before : places)
+    {
+        for (const auto after : { before, before + 1.0e-6, before + 0.3 })
+        {
+            std::vector<const engine::NoteSequence::Note*> walked, indexed;
+
+            for (const auto& note : sequence.getNotes())
+            {
+                if (note.start >= before)
+                    break;
+
+                if (note.end > after)
+                    walked.push_back (&note);
+            }
+
+            sequence.forEachSounding (before, after, [&indexed] (const engine::NoteSequence::Note& note) { indexed.push_back (&note); });
+            mismatches += walked != indexed ? 1 : 0;
+        }
+    }
+
+    CHECK (mismatches == 0);
+    CHECK (sequence.getNotes().size() > 2000);
+
+    // An import whose notes overlap on one pitch (each long, starting every quarter beat): each ends where the next starts,
+    // so one of them sounds at any place, as the look through them finds.
+    std::vector<engine::NoteSequence::Note> overlapping;
+
+    for (int i = 0; i < 1000; ++i)
+        overlapping.push_back ({ i * 0.25, i * 0.25 + 20.0, 60, 0.8f });
+
+    const engine::NoteSequence oneLine (overlapping, {});
+
+    for (const auto before : { 0.1, 10.1, 100.3, 249.9, 260.0 })
+    {
+        std::vector<const engine::NoteSequence::Note*> found;
+        oneLine.forEachSounding (before, before, [&found] (const auto& note) { found.push_back (&note); });
+        CHECK (found.size() == (before < 269.75 ? 1u : 0u));
+    }
+
+    // None, and one.
+    auto count = 0;
+    engine::NoteSequence().forEachSounding (10.0, 10.0, [&count] (const auto&) { ++count; });
+    engine::NoteSequence ({ { 1.0, 3.0, 60, 0.8f } }, {}).forEachSounding (2.0, 2.0, [&count] (const auto&) { ++count; });
+    CHECK (count == 1);
+}
+
 TEST_CASE ("The engine plays a track's notes on their samples, and ends what sounds at the loop's end and starts it again")
 {
     auto plan = makeClickPlan (engine::Plan::BeatRange { 1.0, 2.0 });
@@ -1853,6 +1938,435 @@ TEST_CASE ("A file at another rate played from inside, or after a jump, fades in
     }
 }
 
+TEST_CASE ("A file at another rate made ready for where it plays from next plays from there as from nothing, to the last bit")
+{
+    // Known bug 85: at the loop's wrap, every clip of a file at another rate started its resampler from nothing, working
+    // its filter's start through in the same block. A region's spare resampling is made ready a little a block for where it
+    // plays from next (AudioRegion::prepare(): the loop's start here), and takes the first's place there.
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, 44100.0, 200000), nullptr);
+    file->readNow (0, file->getLength());
+    const auto fresh = makeRegion (file, 0, 200000), warmed = makeRegion (file, 0, 200000);
+    constexpr std::int64_t loopStart = 19200;
+    constexpr int block = 128;
+    const auto expected = playRegion (fresh, loopStart, 6000);
+
+    // Played on further in, made ready for the loop's start a block at a time; then from there.
+    juce::AudioBuffer<float> out (2, block), scratch (2, 8 * 64 + 16);
+    const std::int64_t places[] = { loopStart };
+
+    for (int b = 0; b < 100; ++b)
+    {
+        float* channels[] = { out.getWritePointer (0), out.getWritePointer (1) };
+        const auto at = 40000 + (std::int64_t) b * block;
+        warmed.play (channels, at, block, rate, false, scratch);
+        warmed.prepare (at + block, true, places, rate, block);
+    }
+
+    const auto* spare = warmed.state->spare.get();
+    const auto played = playRegion (warmed, loopStart, 6000);
+    CHECK (warmed.state->conversion.get() == spare); // the one made ready played
+
+    auto different = 0;
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < expected.getNumSamples(); ++i)
+            different += expected.getSample (channel, i) != played.getSample (channel, i) ? 1 : 0;
+
+    CHECK (different == 0);
+
+    // A region's own start, half a second ahead of where the song plays next, is made ready too; and nothing is for where it
+    // plays on to anyway.
+    auto later = makeRegion (file, 60000, 100000);
+    const auto* laterSpare = later.state->spare.get();
+
+    for (int b = 0; b < 100; ++b)
+        later.prepare (60000 - 20000 + (std::int64_t) b * block, true, {}, rate, block);
+
+    playRegion (later, 50000, 20000); // to its start and on
+    CHECK (later.state->conversion.get() == laterSpare);
+}
+
+TEST_CASE ("A file at another rate made ready for the loop's start follows the loop moved, and a jump's landing during its fade")
+{
+    // Known bug 85's review: its spare resampling is made ready for the loop's start as the plan has it now, and while a jump
+    // fades out, for where it lands, all at once (the jump's 3 ms are about one block). A file of a minute at 44.1 kHz on a
+    // 48 kHz engine in blocks of 128, read whole by the test after each block.
+    constexpr int block = 128;
+    engine::Engine player;
+    player.prepare (rate, block);
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, 44100.0, 60 * 44100), &player.getBlocksPlayed());
+    file->keep (0);
+    const auto region = makeRegion (file, 0, 50 * 48000);
+    const auto planFor = [&region] (double loopStart, double loopEnd)
+    {
+        auto plan = std::make_unique<engine::Plan>();
+        plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, rate);
+        plan->loop = engine::Plan::BeatRange { loopStart, loopEnd };
+        plan->maximumBlockSize = block;
+        engine::Plan::Strip track, master;
+        track.id = 1;
+
+        for (auto* strip : { &track, &master })
+        {
+            strip->state = std::make_shared<engine::StripState>();
+            strip->state->prepare (rate, block);
+        }
+
+        track.audio.push_back (region);
+        master.inputs.push_back ({ 0, nullptr });
+        plan->strips.push_back (std::move (track));
+        plan->strips.push_back (std::move (master));
+        return plan;
+    };
+
+    juce::AudioBuffer<float> out (2, block);
+    const auto play = [&] (int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+        {
+            float* channels[] = { out.getWritePointer (0), out.getWritePointer (1) };
+            player.process (channels, 2, block);
+
+            while (file->readNext())
+            {
+            }
+        }
+    };
+
+    // Playing in a loop from beat 4 to 8, which then moves to start at beat 6: its spare is made ready for beat 6, and
+    // takes the first's place there as the loop goes round.
+    player.setPlan (planFor (4.0, 8.0));
+    player.locate (4.0);
+    player.play();
+    play (100);
+    player.setPlan (planFor (6.0, 8.0));
+    play (200); // the spare made ready for beat 6, ahead of the loop's end
+    const auto* spare = region.state->spare.get();
+    play (750); // round the loop: at beat 8 (2 s in), back to 6
+    CHECK (region.state->conversion.get() == spare);
+
+    // A jump to beat 7, in the loop: during its fade out, the spare made ready for where it lands, which plays from there.
+    play (10);
+    const auto* beforeJump = region.state->spare.get();
+    player.locate (7.0);
+    play (5);
+    CHECK (region.state->conversion.get() == beforeJump);
+}
+
+namespace
+{
+// An instrument that keeps the pitch of each note's start it is given, and how many blocks it had played before it.
+struct NoteStarts final : dev::Processor
+{
+    static inline const dev::DeviceInfo info { .typeID = "testNoteStarts", .name = "Note Starts", .kind = dev::DeviceKind::instrument };
+
+    struct Start
+    {
+        int pitch = 0, block = 0, sample = 0;
+    };
+
+    void prepare (double, int) override { starts.reserve (64); }
+    void reset() override {}
+
+    void process (const dev::ProcessContext& context) override
+    {
+        for (const auto& event : context.events)
+            if (event.type == dev::NoteEvent::Type::noteOn)
+                starts.push_back ({ event.number, blocks, event.sample });
+
+        ++blocks;
+    }
+
+    std::vector<Start> starts;
+    int blocks = 0;
+};
+
+// An engine at 48 kHz in blocks of 128 playing one track of an audio clip of a stereo file in memory, read whole, at a rate
+// of its own, from the song's start for 40 seconds; at 120 BPM. And, if asked, a track (ID 2) of an instrument played live.
+struct LandingPlayer
+{
+    explicit LandingPlayer (double fileRate, bool holds = true, bool withInstrument = false)
+    {
+        player.prepare (rate, block);
+        player.setHoldsLandings (holds);
+        auto file =
+            std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, fileRate, (std::int64_t) (45.0 * fileRate)), nullptr);
+        file->readNow (0, file->getLength());
+        auto plan = std::make_unique<engine::Plan>();
+        plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, rate);
+        plan->maximumBlockSize = block;
+        engine::Plan::Strip track, live, master;
+        track.id = 1;
+        live.id = 2;
+
+        for (auto* strip : { &track, &live, &master })
+        {
+            strip->state = std::make_shared<engine::StripState>();
+            strip->state->prepare (rate, block);
+        }
+
+        region = makeRegion (file, 0, 40 * 48000);
+        track.audio.push_back (region);
+        master.inputs.push_back ({ 0, nullptr });
+        plan->strips.push_back (std::move (track));
+
+        if (withInstrument)
+        {
+            auto starts = std::make_unique<NoteStarts>();
+            instrument = starts.get();
+            auto node = std::make_shared<engine::DeviceNode> (NoteStarts::info, std::move (starts));
+            node->getRunner().prepare (rate, block);
+            live.devices.push_back ({ std::move (node), {} });
+            live.hasInstrument = true;
+            master.inputs.push_back ({ 1, nullptr });
+            plan->strips.push_back (std::move (live));
+        }
+
+        plan->strips.push_back (std::move (master));
+        player.setPlan (std::move (plan));
+    }
+
+    // So many blocks, what came out on the left.
+    std::vector<float> play (int blocks)
+    {
+        std::vector<float> out;
+        juce::AudioBuffer<float> buffer (2, block);
+
+        for (int i = 0; i < blocks; ++i)
+        {
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            player.process (channels, 2, block);
+            out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + block);
+        }
+
+        return out;
+    }
+
+    // How many of the samples played aren't silent.
+    static int countSounding (const std::vector<float>& out)
+    {
+        return (int) std::count_if (out.begin(), out.end(), [] (float sample) { return sample != 0.0f; });
+    }
+
+    static constexpr int block = 128;
+    engine::Engine player;
+    engine::AudioRegion region;
+    NoteStarts* instrument = nullptr;
+};
+} // namespace
+
+TEST_CASE ("A jump among clips at another rate is held, silent, for whole blocks while they are made ready, then plays as at once")
+{
+    // Known bug 85's review: forty clips at another rate made ready all at once in a jump's fade cost a block 46 % more on
+    // four threads. A jump that lands among them is held, silent and for whole blocks, while each makes its resampling ready
+    // a share of each block (20 ms at most), then plays from there to the last bit as it would have at once.
+    LandingPlayer held (44100.0), atOnce (44100.0, false);
+
+    for (auto* player : { &held, &atOnce })
+    {
+        player->player.locate (2.0);
+        player->player.play();
+    }
+
+    auto heldOut = held.play (50), atOnceOut = atOnce.play (50);
+    CHECK (heldOut == atOnceOut);
+
+    held.player.locate (20.0);
+    atOnce.player.locate (20.0);
+    heldOut = held.play (40);
+    atOnceOut = atOnce.play (40);
+
+    // Where they part (the landing, after the 3 ms fade out), the held one is silent for whole blocks, then the same.
+    size_t landing = 0;
+
+    while (landing < heldOut.size() && heldOut[landing] == atOnceOut[landing])
+        ++landing;
+
+    REQUIRE (landing < heldOut.size());
+    auto blocksHeld = 0;
+
+    for (int k = 1; k <= 8 && blocksHeld == 0; ++k)
+    {
+        const auto shift = (size_t) (k * LandingPlayer::block);
+        auto same = landing + shift + 2000 <= heldOut.size();
+
+        for (size_t i = 0; same && i < shift; ++i)
+            same = heldOut[landing + i] == 0.0f;
+
+        for (size_t i = 0; same && i < 2000; ++i)
+            same = heldOut[landing + shift + i] == atOnceOut[landing + i];
+
+        if (same)
+            blocksHeld = k;
+    }
+
+    CHECK (blocksHeld >= 1);
+    CHECK (blocksHeld * LandingPlayer::block <= (int) (engine::Engine::maximumHoldSeconds * rate)); // 20 ms at most
+}
+
+TEST_CASE ("A jump with no clip at another rate to make ready, or one not read where it lands, isn't held at all")
+{
+    // A file at the engine's rate: the same as played at once, sample for sample.
+    LandingPlayer held (rate), atOnce (rate, false);
+
+    for (auto* player : { &held, &atOnce })
+    {
+        player->player.locate (2.0);
+        player->player.play();
+        player->play (50);
+        player->player.locate (20.0);
+    }
+
+    CHECK (held.play (40) == atOnce.play (40));
+
+    // A file at another rate not read where the jump lands: never waited for (it fades in once read).
+    std::atomic<std::uint64_t> blocks { 0 };
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (2, 44100.0, 600 * 44100), &blocks);
+    const auto region = makeRegion (file, 0, 500 * 48000);
+    CHECK_FALSE (region.needsPreparing (100 * 48000, rate));
+    file->readNow (100 * 44100, 1);
+    CHECK (region.needsPreparing (100 * 48000, rate));
+}
+
+TEST_CASE ("Held where a jump landed, the playhead waits there, a take starts there, and another jump is taken at once, not held")
+{
+    LandingPlayer held (44100.0);
+    held.player.locate (2.0);
+    held.player.play();
+    held.play (50);
+
+    // A take that goes on from where the jump lands (as Take::start() makes it).
+    auto recording = std::make_unique<engine::Recording> (std::vector<std::unique_ptr<engine::Recording::Input>>());
+    auto* take = recording.get();
+    take->startAfterLocate (held.player.getLocatesTaken(), held.player.getLocatesAsked() + 1);
+    held.player.setRecording (std::move (recording));
+    held.player.locate (20.0);
+    held.play (2); // the fade out (144 samples), and held from there
+
+    CHECK_FALSE (take->hasStarted());
+    CHECK (held.player.getPlayheadBeat() == doctest::Approx (20.0)); // waiting there
+    held.play (10);
+    REQUIRE (take->hasStarted());
+    CHECK (take->getStartSample() == 20 * 24000);
+
+    // Another jump while held, after a run's gap (a tenth of a second): taken at once, from silence (no fade out of what
+    // doesn't sound), and not held again: it plays from there at once, from what is ready, as a jump did before holds.
+    held.play (40);
+    held.player.locate (15.0);
+    const auto fading = held.play (2); // the fade out, and held
+    CHECK (std::all_of (fading.end() - 100, fading.end(), [] (float sample) { return sample == 0.0f; }));
+    held.player.locate (25.0);
+    const auto taken = held.play (1);
+    CHECK (std::any_of (taken.begin(), taken.end(), [] (float sample) { return sample != 0.0f; }));
+    held.play (20);
+    const auto beatsPerBlock = LandingPlayer::block / 24000.0;
+    CHECK (held.player.getPlayheadBeat() >= 25.0 + 20 * beatsPerBlock - 1.0e-9);
+    CHECK (held.player.getPlayheadBeat() < 25.0 + 22 * beatsPerBlock);
+}
+
+TEST_CASE ("Jumps in a run, as the playhead is dragged while the song plays, are held once at most: the drag sounds as it did")
+{
+    // The review of known bug 85: dragging the playhead while the song plays locates about every 16 ms, each among clips at
+    // another rate not ready where it lands; each was held a block or more, so the drag was silent throughout, where before
+    // holds each jump played on from where it landed until the next. A jump within a tenth of a second of the one before (or
+    // during a hold) isn't held; so a run is silent for 20 ms at most, at its first jump.
+    LandingPlayer held (44100.0), atOnce (44100.0, false);
+    std::array<int, 2> sounding {};
+
+    for (auto* player : { &held, &atOnce })
+    {
+        player->player.locate (2.0);
+        player->player.play();
+        player->play (50);
+        auto& count = sounding[player == &held ? 0 : 1];
+
+        for (int i = 0; i < 62; ++i) // a second, a locate every 6 blocks (16 ms)
+        {
+            player->player.locate (4.0 + std::fmod (i * 7.37, 70.0));
+            count += LandingPlayer::countSounding (player->play (6));
+        }
+    }
+
+    CAPTURE (sounding[0]);
+    CAPTURE (sounding[1]);
+    CHECK (sounding[1] > 62 * 6 * LandingPlayer::block / 2); // it sounds between the jumps
+    CHECK (sounding[0] >= sounding[1] - (int) (engine::Engine::maximumHoldSeconds * rate));
+}
+
+TEST_CASE ("A jump during a count-in isn't held: the song starts on time after it")
+{
+    // The review of known bug 85: the count-in makes the clips ready where the song starts; a hold, which lasts a block at
+    // least, made the downbeat late.
+    LandingPlayer straight (44100.0), jumped (44100.0);
+    straight.player.locate (20.0);
+    straight.player.play (true);
+    const auto expected = straight.play (750 + 40); // the count-in, a bar at 120 BPM: 750 blocks
+
+    jumped.player.locate (2.0);
+    jumped.player.play (true);
+    auto played = jumped.play (100);
+    jumped.player.locate (20.0);
+    const auto rest = jumped.play (750 + 40 - 100);
+    played.insert (played.end(), rest.begin(), rest.end());
+
+    const auto songStart = (std::ptrdiff_t) (750 * LandingPlayer::block);
+    REQUIRE (std::any_of (expected.begin() + songStart, expected.end(), [] (float sample) { return sample != 0.0f; }));
+    CHECK (std::equal (expected.begin() + songStart, expected.end(), played.begin() + songStart));
+}
+
+TEST_CASE ("Live notes taken into the block a hold starts in, after where it starts, play where it lands")
+{
+    // The review of known bug 85: what was played live in the last moments before a jump landed, which the block it landed
+    // in took from the queue, was lost if the hold started before it.
+    LandingPlayer held (44100.0, true, true);
+    held.player.locate (2.0);
+    held.player.play();
+    held.play (50);
+    REQUIRE (held.instrument != nullptr);
+    REQUIRE (held.instrument->starts.empty());
+
+    // The jump's fade out: 144 samples, so it lands 16 samples into the second block, and is held from there. A note played
+    // a millisecond or more after the first block started falls after that in the second (48 samples or more in).
+    held.player.locate (20.0);
+    const auto firstStarted = juce::Time::getMillisecondCounterHiRes();
+    held.play (1);
+
+    while (juce::Time::getMillisecondCounterHiRes() < firstStarted + 1.0)
+        std::this_thread::yield();
+
+    held.player.playLive (2, { dev::NoteEvent::Type::noteOn, 0, 60, 1.0f });
+    const auto landedIn = held.play (1);
+    CHECK (std::all_of (landedIn.begin() + 16, landedIn.end(), [] (float sample) { return sample == 0.0f; })); // held
+    CHECK (held.instrument->starts.empty());
+
+    // And one played while it is held.
+    held.player.playLive (2, { dev::NoteEvent::Type::noteOn, 0, 62, 1.0f });
+    held.play (10);
+    REQUIRE (held.instrument->starts.size() == 2);
+    CHECK (held.instrument->starts[0].pitch == 60);
+    CHECK (held.instrument->starts[1].pitch == 62);
+    CHECK (held.instrument->starts[0].block == held.instrument->starts[1].block); // both where it lands
+}
+
+TEST_CASE ("A note's pressure goes to the chain of an instrument container that holds the note, and the channel's to every chain")
+{
+    // Known bug 173's review: an instrument container splits notes by key and velocity among its chains.
+    using Type = dev::NoteEvent::Type;
+    engine::ChainState low, high;
+    low.setNotes (0, 59, 1, 127);
+    high.setNotes (60, 127, 1, 127);
+    const dev::NoteEvent on { Type::noteOn, 0, 64, 0.8f }, pressed { Type::aftertouch, 1, 64, 0.5f },
+        pressure { Type::channelPressure, 2, 0, 0.5f }, off { Type::noteOff, 3, 64, 0.0f };
+    CHECK_FALSE (low.takes (on));
+    CHECK (high.takes (on));
+    CHECK_FALSE (low.takes (pressed));
+    CHECK (high.takes (pressed));
+    CHECK (low.takes (pressure));
+    CHECK (high.takes (pressure));
+    CHECK (high.takes (off));
+    CHECK_FALSE (high.takes (pressed)); // the note ended there
+}
+
 TEST_CASE ("A take that goes on after a jump starts where the playhead lands, handed on by the take before while a block plays that one")
 {
     // Known bug 38: the take after a jump started when the message thread gave it to the engine, after it had finished the
@@ -2140,6 +2654,53 @@ TEST_CASE ("An audio region whose file isn't read yet where it plays is silent, 
     CHECK (out.getSample (1, 128 + 19) == doctest::Approx (0.25f));
     CHECK (out.getSample (0, 128 + 39) == doctest::Approx (0.5f));
     CHECK (out.getSample (0, 191) == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("A new plan keeps a file's clip start without waiting for a read from the disk under way")
+{
+    // Known bug 85: the reading thread held the file's lock across its read from the disk, and the message thread, which
+    // keeps each clip's start at every new plan (AudioFile::keep()), waited for it: 25 ms at a cold read of 20 ms, and as
+    // long as 1.2 s while one read followed another (Benchmarks.cpp). A read held here until the keep is done, or the hang
+    // limit is reached.
+    struct HeldReader final : engine::SampleReader
+    {
+        int getNumChannels() const override { return 1; }
+        double getSampleRate() const override { return rate; }
+        std::int64_t getLength() const override { return 120 * 48000; }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t, int numSamples) override
+        {
+            reading.store (true);
+            released.wait (-1);
+            buffer.clear (0, numSamples);
+            return true;
+        }
+
+        std::atomic<bool> reading { false };
+        juce::WaitableEvent released;
+    };
+
+    std::atomic<std::uint64_t> blocks { 0 };
+    auto reader = std::make_unique<HeldReader>();
+    auto& held = *reader;
+    engine::AudioFile file (std::move (reader), &blocks);
+    file.want (0);
+    std::thread reading ([&file] { file.readNext(); });
+    REQUIRE (phazite::test::runTimersUntil ([&held] { return held.reading.load(); }));
+
+    std::atomic<bool> kept { false };
+    std::thread keeping (
+        [&file, &kept]
+        {
+            file.keep (10 * engine::AudioFile::chunkSamples);
+            kept.store (true);
+        });
+
+    CHECK (phazite::test::runTimersUntil ([&kept] { return kept.load(); }));
+    held.released.signal();
+    reading.join();
+    keeping.join();
+    CHECK (file.isRead (0));
 }
 
 TEST_CASE ("A long audio file plays from where the playhead was put and from the loop's start each time round, without a gap")

@@ -47,6 +47,10 @@ public:
     double getSampleRate() const noexcept { return sampleRate; }
     std::int64_t getLength() const noexcept { return length; }
 
+    // A number no other file made in this run has had, nor will: what it is, where its address could be another's later
+    // (a clip's render made again, at the same address as the one let go of).
+    std::uint64_t getSerial() const noexcept { return serial; }
+
     // Audio thread: the samples of a channel from a sample on, as far as their chunk goes (at most numSamples, which it
     // sets to how many there are), or nullptr if the chunk isn't read yet. Says where it plays, for what is read ahead.
     const float* getSamples (int channel, std::int64_t start, int& numSamples) noexcept;
@@ -90,6 +94,8 @@ private:
 
     std::unique_ptr<SampleReader> reader;
     const std::atomic<std::uint64_t>* blocks;
+    const std::uint64_t serial;
+    static inline std::atomic<std::uint64_t> filesMade { 0 };
     int numChannels = 0;
     double sampleRate = 44100.0;
     std::int64_t length = 0;
@@ -107,7 +113,13 @@ private:
     std::atomic<int> wanted { -1 };
     std::shared_ptr<juce::WaitableEvent> wake;
 
-    std::mutex mutex; // between the reading thread, a render's and the message thread; never the audio thread
+    // What reads the file and what it has read (read, the chunks, letGo, playingAt): the reading thread's and a render's,
+    // one at a time, held across a read from the disk. The message thread never takes it, so that a new plan never waits
+    // for the disk (known bug 85: keep() took it, and waited for the read under way, 25 ms at a cold read of 20 ms and as
+    // long as 1.2 s while one read followed another). What the message thread keeps (kept) has a lock of its own, held for
+    // as long as it takes to add to it or to look at it; never the audio thread either.
+    std::mutex mutex;
+    std::mutex keptMutex;
     std::set<int> kept;
     std::vector<std::pair<std::unique_ptr<Chunk>, std::uint64_t>> letGo; // each with the block count it can go after
     std::vector<int> playingAt;                                          // the reading thread's: where it plays now
@@ -115,5 +127,6 @@ private:
     bool readChunk (int index); // under the mutex
     bool readWantedChunk();     // under the mutex
     void findWherePlaying();    // into playingAt, under the mutex
+    bool isKept (int index);    // under the mutex: takes keptMutex
 };
 } // namespace phazite::engine

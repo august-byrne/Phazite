@@ -19,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <utility>
@@ -254,6 +255,41 @@ private:
 
     int fadingIn = 0;
 
+    // Where a jump lands while the song plays, among audio clips of files at another rate whose resampling isn't ready for
+    // there (it takes 832 samples of a 44.1 kHz file before a resampler gives anything out at 48 kHz: AudioRegion.h), the
+    // playhead is held, silent, for whole blocks, while they make it ready a share of each block, and then plays from there
+    // as it would have at once, later by those blocks: 20 ms at most, and never waiting for the disk (one whose file isn't
+    // read there plays as silence and fades in once it is). Known bug 85's review: forty clips made ready all at once in a
+    // jump's fade took 46 % of a block more on four threads. Never held: the loop's wrap (made ready ahead), a jump during a
+    // count-in (which makes them ready itself), while stopped, in a render, or a jump in a run: one asked for while it is
+    // held, taken at once, or within a tenth of a second of the jump before (the playhead dragged while the song plays),
+    // which plays from there at once, from what is ready, each not ready started from nothing; so a run of jumps is silent
+    // for 20 ms at most, at its first. Live notes that come while it is held wait, and play as it lands, after those the
+    // part it started in took from where it started (liveLanding).
+    struct Landing
+    {
+        bool held = false;
+        int heldFor = 0;                                                      // samples held so far
+        std::int64_t lastJump = std::numeric_limits<std::int64_t>::min() / 2; // by the engine's clock, while it played
+    } landing;
+
+    static constexpr double runSeconds = 0.1; // jumps closer together than this are a run, held at its first at most
+    int blockLength = 512;                    // the device's, as its last block came: what a hold is held in whole numbers of
+    bool needsPreparingAt (const Plan&, std::int64_t songSample) const noexcept; // any of the plan's audio clips there
+    void prepareLanding (const Plan&, int numSamples) noexcept;
+    void endHold() noexcept { landing.held = false, landing.heldFor = 0; }
+
+public:
+    // For tests: whether a jump that lands among audio clips at another rate is held while they are made ready (Landing),
+    // as it is; or played from there at once, each started from nothing. Only while no block plays.
+    void setHoldsLandings (bool holds) noexcept { holdsLandings = holds; }
+
+    // How long a jump's landing is held at most while audio clips at another rate there are made ready (Landing).
+    static constexpr double maximumHoldSeconds = 0.02;
+
+private:
+    bool holdsLandings = true;
+
     // A new plan whose delay compensation changed (Plan::alignment), given while the song plays: what goes out fades out
     // over the samples left on the plan it played, which the engine keeps playing meanwhile (Handover::Block::keep()); then
     // the new plan plays, fading in. Its paths' delays play on from what came in before (nodes/Strip.h: DelayLine), each
@@ -310,10 +346,12 @@ private:
     void takeTransport (const Plan&) noexcept;           // the state asked for, as each part with a plan starts
     void stopTransport (bool fadedOut) noexcept;         // a stop (one asked while a jump fades out waits for it to end)
     void startTransport (const Plan&, bool countIn) noexcept;
-    void takeJump (const Plan&, double beat, std::uint32_t count) noexcept;
-    void fadeMaster (float* const* sides, int offset, int numSamples) noexcept; // around a jump and a plan realigned
+    void takeJump (const Plan&, double beat, std::uint32_t count, std::int64_t at) noexcept; // at the engine's clock
+    void fadeMaster (float* const* sides, int offset, int numSamples) noexcept;              // around a jump and a plan realigned
     bool isFading() const noexcept;
-    void expectAudio (const Plan&) noexcept; // tells the audio clips' files where they play next (AudioRegion::expect())
+    void expectAudio (const Plan&) noexcept;       // tells the audio clips' files where they play next (AudioRegion::expect())
+    std::array<std::int64_t, 3> expectedPlaces {}; // those places, as the part played started (a jump's landing first)
+    size_t numExpectedPlaces = 0;
     void startRealign() noexcept;
     void startLeave (std::uint64_t upTo) noexcept;
     void holdAcrossLeave (const Plan& given) noexcept; // Realign::hold, for the plan given
@@ -399,6 +437,14 @@ private:
     int numLiveEvents = 0;
     double lastBlockMilliseconds = 0.0;
     void takeLiveEvents (const Plan&, int numSamples, std::int64_t partClock) noexcept;
+
+    // Those taken into the part a hold started in (Landing), after where it started, which it doesn't play: played where it
+    // lands (or with the next taken, if it ends otherwise), before those that waited in the queue. Followed and recorded as
+    // they were taken. As many as a part takes, so it is never full.
+    std::array<LiveEvent, 256> liveLanding {};
+    int numLiveLanding = 0;
+    void keepLiveForLanding (int from) noexcept;
+    void landLiveEvents (const Plan&, int offset, int numSamples, std::int64_t partClock) noexcept; // a part held from its start
 
     // What lets go among the live events that came while there was no plan (a render had the song's plug-ins), each once,
     // for the next part with a plan.
