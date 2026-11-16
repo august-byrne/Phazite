@@ -10,10 +10,13 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/engine/EngineContext.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/playback/internal/PlaybackHost.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <thread>
 
@@ -94,47 +97,78 @@ public:
         return found;
     }
 
-    // Plays a note on the device's thread just after a block, as a MIDI driver's thread would, and says how many samples
-    // after it was played it sounds above -60 dBFS, or -1 if it doesn't within 40 blocks. Phazite's engine plays a live
-    // note as far into the next block as it came after the block before started (engine::Engine::playLive()), which this
-    // times as the engine does: what is left is the delay of what plays it (delay compensation, a device's look-ahead).
-    int samplesFromNoteToSound (const std::function<void()>& playNote)
+    // A live note played by playLiveNote(), by the engine's clock (engine::Engine::getClock()), in samples: the start of
+    // the block it was played during (just after the device's call for it returned, as a MIDI driver's thread plays one
+    // between blocks), where in that block the engine took it to have come (Engine::takePlayed()'s clock), and where it
+    // first sounded above -60 dBFS; each -1 if it didn't. Phazite's engine plays a live note in the next block, as far into
+    // it as it came after the block before started by the wall clock (engine::Engine::playLive()), on a thread that a
+    // busy machine may hold up anywhere: so the note's sound is measured from where the engine plays it, by the engine's
+    // clock alone, which no load moves; and where it took the note to have come is checked against the wall clock read on
+    // both sides of the block and of the note, which always holds it, however long the threads were held up.
+    struct LiveNote
     {
-        int found = -1;
+        std::int64_t blockStart = -1, cameAt = -1, sounded = -1;
+        int earliest = 0, latest = 0; // the samples into the block that the note came at by the wall clock, at the least and most
+
+        // Where the engine plays the note: a block after where it came, the same for every note.
+        std::int64_t getPlayedAt() const noexcept { return cameAt >= 0 ? cameAt + blockSize : -1; }
+
+        // The samples from where the engine plays the note to its sound: the delay of what plays it (delay compensation, a
+        // device's look-ahead), or -1 if it went unheard or the engine didn't take it.
+        int toSound() const noexcept { return cameAt >= 0 && sounded >= getPlayedAt() ? (int) (sounded - getPlayedAt()) : -1; }
+
+        // Whether the engine took the note in the block after it came, as far into it as it came by the wall clock.
+        bool isPlacedAsPlayed() const noexcept { return cameAt >= blockStart + earliest && cameAt <= blockStart + latest; }
+    };
+
+    // Plays a note on the device's thread just after a block, as a MIDI driver's thread would, and the blocks after it
+    // until it sounds (40 at most). pitch is the note playNote() plays, by which the engine's place for it is found.
+    LiveNote playLiveNote (const std::function<void()>& playNote, int pitch)
+    {
+        auto& engine = getPlaybackHost (getEngineContext()).getEngine();
+        LiveNote note;
         std::thread audioThread (
             [&]
             {
                 juce::AudioBuffer<float> buffer (2, blockSize);
                 buffer.clear();
+                note.blockStart = engine.getClock();
                 const auto blockStarted = juce::Time::getMillisecondCounterHiRes();
-                device->process (buffer);
+                device->process (buffer); // the engine reads the wall clock somewhere in here
+                const auto blockEnded = juce::Time::getMillisecondCounterHiRes();
                 const auto before = juce::Time::getMillisecondCounterHiRes();
                 playNote();
                 const auto after = juce::Time::getMillisecondCounterHiRes();
-                const auto played = (before + after) / 2.0;
-                const auto intoBlock = std::clamp (juce::roundToInt ((played - blockStarted) * sampleRate / 1000.0), 0, blockSize - 1);
-                uncertainty = (int) std::ceil ((after - before) * sampleRate / 2000.0);
 
-                for (int b = 0; b < 40 && found < 0; ++b)
+                // The engine's block started between blockStarted and blockEnded, the note came between before and after
+                // (and a sample more each way, for the engine's rounding).
+                const auto toSamples = [] (double milliseconds) { return milliseconds * sampleRate / 1000.0; };
+                note.earliest = std::clamp ((int) std::floor (toSamples (before - blockEnded)) - 1, 0, blockSize - 1);
+                note.latest = std::clamp ((int) std::ceil (toSamples (after - blockStarted)) + 1, 0, blockSize - 1);
+
+                for (int b = 0; b < 40 && note.sounded < 0; ++b)
                 {
                     buffer.clear();
                     device->process (buffer);
 
-                    for (int i = 0; i < blockSize && found < 0; ++i)
+                    for (int i = 0; i < blockSize && note.sounded < 0; ++i)
                         if (std::abs (buffer.getSample (0, i)) > 0.001f || std::abs (buffer.getSample (1, i)) > 0.001f)
-                            found = b * blockSize + i - intoBlock;
+                            note.sounded = note.blockStart + (b + 1) * blockSize + i;
                 }
             });
         audioThread.join();
-        return found;
-    }
 
-    // How many samples the last delay may be off by: half the time playing the note took, which it was played somewhere in
-    // (a sanitizer's build makes that time long, so that delays measured to the sample jitter by more than one).
-    int getUncertainty() const noexcept { return uncertainty; }
+        for (const auto& played : getPlaybackHost (getEngineContext()).getPlayedEvents())
+            if (played.clock >= note.blockStart && played.event.number == pitch && played.event.type == devices::NoteEvent::Type::noteOn)
+            {
+                note.cameAt = played.clock;
+                break;
+            }
+
+        return note;
+    }
 
 private:
     TestAudioDevice* device;
-    int uncertainty = 0;
 };
 } // namespace phazite::test

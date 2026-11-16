@@ -4,18 +4,23 @@
 // e.g. `phazite_tests --test-case="*project*"` or `phazite_tests --help`.
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include "AudioThreadMonitor.h"
 #include "StallReport.h"
 #include "TestHelpers.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/plugins/internal/PluginHost.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 // Built with a sanitizer (linux-asan, linux-tsan): GCC says so by these, Clang by __has_feature.
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
@@ -91,7 +96,12 @@ void keepTimerResolution()
 // An assertion may fire on any thread. One that fires while a test case runs fails it (doctest takes failures from the
 // test's other threads); one that fires between test cases, or as the program ends, fails the run, with the last test
 // that ran named; one that fires after main() has returned (JUCE's leak detector, as static objects go) ends the program
-// at once with a failure.
+// at once with a failure. On an audio thread (AudioThreadMonitor::isAudioThread(): a block of the tests' audio device,
+// the engine's workers) the net neither locks nor allocates: it copies the assertion's place into a slot made before, and
+// the tests' thread takes it at the test case's next check, the end of a run through its subcases or an
+// ExpectedAssertion's call, and fails the test case then, naming the assertion and the audio thread; one still waiting as
+// the test case ends fails the run, naming the test case. What JUCE allocates for the message before the net hears of it
+// (logAssertion()) is all the audio thread allocates for it, and the real-time audit leaves that out (known bug 153).
 #if JUCE_DEBUG && ! JUCE_LOG_ASSERTIONS
  #error "Debug builds of the tests need JUCE_LOG_ASSERTIONS, which CMakeLists.txt sets for phazite_core and every target that uses it"
 #endif
@@ -174,6 +184,7 @@ public:
     void testCaseStarted (const char* name)
     {
         install();
+        takeFromAudioThreads(); // what fired before, as the one before ended
         runningTest = name;
         const std::lock_guard held (lock);
         currentTest = name;
@@ -183,13 +194,20 @@ public:
 
     void testCaseEnded()
     {
-        const std::lock_guard held (lock);
-        currentTest = nullptr;
+        {
+            const std::lock_guard held (lock);
+            currentTest = nullptr;
+        }
+
+        // What an audio thread noted that the test's thread hasn't taken yet: the test case has made its last check, so
+        // it fails the run, with the test case named.
+        takeFromAudioThreads();
     }
 
     // The assertions that fired outside any test case, so far; true if there were any (each written to stderr).
     bool reportOutsideTestCases()
     {
+        takeFromAudioThreads();
         const std::lock_guard held (lock);
 
         for (const auto& line : outside)
@@ -199,61 +217,150 @@ public:
         return ! outside.empty();
     }
 
-    // The one place a test expects an assertion at, while its ExpectedAssertion lives; and how often it fired there.
-    void expect (const char* place)
+    // The places a test expects an assertion at, while its ExpectedAssertion lives (its level among those living); and
+    // how often one fired there.
+    size_t expect (const char* place)
     {
+        takeFromAudioThreads(); // what fired before it, which it doesn't expect
         const std::lock_guard held (lock);
-        expected = place != nullptr ? place : "";
-        numExpected = 0;
+        expectations.push_back ({ place != nullptr ? place : "", 0 });
+        ++generation;
+        return expectations.size() - 1;
     }
 
-    int getNumExpected()
+    void stopExpecting (size_t level)
     {
+        takeFromAudioThreads(); // what fired while it lived
         const std::lock_guard held (lock);
-        return numExpected;
+        expectations.resize (std::min (level, expectations.size())); // those made after it went before it
+        ++generation;
+    }
+
+    int getNumExpected (size_t level)
+    {
+        takeFromAudioThreads();
+        const std::lock_guard held (lock);
+        return level < expectations.size() ? expectations[level].count : 0;
     }
 
     // From here on, as static objects go, an assertion ends the program with a failure.
     void runEnded()
     {
+        takeFromAudioThreads();
         const std::lock_guard held (lock);
         ended = true;
     }
 
+    // The assertions noted on audio threads so far (getNumAudioThreadAssertions(), TestHelpers.h).
+    int getNumAudioThreadAssertions() const noexcept { return numClaimed.load() + numLost.load(); }
+
     void logMessage (const juce::String& message) override
     {
-        static constexpr auto prefix = "JUCE Assertion failure in ";
-
         if (! message.startsWith (prefix))
         {
             juce::Logger::outputDebugString (message); // where writeToLog() writes without a logger
             return;
         }
 
-        const auto place = message.fromFirstOccurrenceOf (prefix, false, false).trim();
+        if (phazite::test::AudioThreadMonitor::isAudioThread())
+        {
+            noteOnAudioThread (message);
+            return;
+        }
 
+        takeFromAudioThreads(); // what audio threads noted first
+        const std::lock_guard held (lock);
+        take (message.fromFirstOccurrenceOf (prefix, false, false).trim(), {});
+    }
+
+    // On a thread that isn't an audio thread, the test's own above all: what audio threads noted, each taken as an assertion
+    // that fired on this thread is (take()). The net calls it each time it hears from the test's thread (a check, a
+    // subcase's end, an ExpectedAssertion), so that an assertion on an audio thread fails the test case it fired in.
+    void takeFromAudioThreads()
+    {
+        if (taking || (numTaken.load() == numClaimed.load() && numLostTaken.load() == numLost.load()))
+            return;
+
+        taking = true; // a failure added here is a check, which the listener hears, on this thread
+        const std::lock_guard held (lock);
+
+        for (auto taken = numTaken.load(); taken < numClaimed.load(); ++taken)
+        {
+            auto& slot = audioThreadAssertions[(size_t) (taken % maxAudioThreadAssertions)];
+
+            if (! slot.written.load (std::memory_order_acquire))
+                break; // still being written: the next call takes it
+
+            const juce::String place (slot.place);
+            const AudioThreadAssertion fired { slot.test, slot.generation == generation };
+            slot.written.store (false, std::memory_order_relaxed);
+            numTaken = taken + 1;
+            take (place, fired);
+        }
+
+        if (const auto lost = numLost.load(); lost > numLostTaken.load())
+        {
+            numLostTaken = lost;
+            outside.insert ("JUCE assertions fired on audio threads faster than the tests' thread took them: " + std::to_string (lost)
+                            + " in all could not be kept (tests/TestMain.cpp)");
+        }
+
+        taking = false;
+    }
+
+private:
+    AssertionNet() = default;
+
+    static constexpr auto prefix = "JUCE Assertion failure in ";
+
+    // Where one an audio thread noted came from: the test case running as it fired, and whether the ExpectedAssertions
+    // living then still are (none made or gone since).
+    struct AudioThreadAssertion
+    {
+        const char* test = nullptr;
+        bool asExpected = false;
+    };
+
+    // An assertion that fired (with the lock held): one that is allowed, or that a test expects, passes; one outside a test
+    // case fails the run; one in a test case fails it, once for each place. fromAudioThread says the test case it fired in
+    // and what it can be expected by, for one an audio thread noted; none, for one that fired on this thread now.
+    void take (const juce::String& place, std::optional<AudioThreadAssertion> fromAudioThread)
+    {
         for (const auto& allowed : allowedAssertions)
             if (isPlace (place, allowed.place))
                 return;
 
-        const std::lock_guard held (lock);
+        // One a test makes on purpose (ExpectedAssertion, TestHelpers.h): the one made last that names its place.
+        if (! fromAudioThread.has_value() || fromAudioThread->asExpected)
+            for (auto expectation = expectations.rbegin(); expectation != expectations.rend(); ++expectation)
+                if (isAnyPlace (place, juce::String (expectation->place)))
+                {
+                    ++expectation->count;
+                    return;
+                }
 
-        // One a test makes on purpose (ExpectedAssertion, TestHelpers.h).
-        if (! expected.empty() && isAnyPlace (place, juce::String (expected)))
-        {
-            ++numExpected;
-            return;
-        }
+        const std::string onThread = fromAudioThread.has_value() ? " on an audio thread" : "";
 
         if (ended)
         {
             std::fprintf (stderr,
-                          "JUCE assertion failed at %s after the tests had ended, as static objects went (at "
+                          "JUCE assertion failed at %s%s after the tests had ended, as static objects went (at "
                           "juce_LeakedObjectDetector.h, objects of a class with JUCE_LEAK_DETECTOR were still alive: the stack "
                           "names the class, as LeakedObjectDetector<class>)\n%s\n",
-                          place.toRawUTF8(), juce::SystemStats::getStackBacktrace().toRawUTF8());
+                          place.toRawUTF8(), onThread.c_str(), juce::SystemStats::getStackBacktrace().toRawUTF8());
             std::fflush (stderr);
             std::_Exit (EXIT_FAILURE);
+        }
+
+        if (fromAudioThread.has_value() && (currentTest == nullptr || fromAudioThread->test != currentTest))
+        {
+            const auto* test = fromAudioThread->test;
+            outside.insert ("JUCE assertion failed at " + place.toStdString() + onThread
+                            + (test != nullptr ? ", in or after \"" + std::string (test)
+                                                     + "\", which had ended before the "
+                                                       "tests' thread heard of it"
+                                               : std::string (" before any test case")));
+            return;
         }
 
         if (currentTest == nullptr)
@@ -270,31 +377,91 @@ public:
         const auto file = places.emplace (place.upToLastOccurrenceOf (":", false, false).toStdString()).first;
         const auto line = place.fromLastOccurrenceOf (":", false, false).getIntValue();
 
-        // Where it was called from: the stack's first frames past this logger and JUCE's assertion.
-        auto stack = juce::StringArray::fromLines (juce::SystemStats::getStackBacktrace());
-        stack.removeEmptyStrings();
-        stack.removeRange (0, 4);
-        stack.removeRange (16, stack.size());
-        const auto where = stack.joinIntoString ("\n    ").toStdString();
+        // Where it was called from: the stack's first frames past this logger and JUCE's assertion. None from an audio
+        // thread, where taking it would lock and allocate: the real-time audit lists the stacks of what JUCE allocated for
+        // the assertion's message there, and a debugger stops at it.
+        std::string where;
+
+        if (! fromAudioThread.has_value())
+        {
+            auto stack = juce::StringArray::fromLines (juce::SystemStats::getStackBacktrace());
+            stack.removeEmptyStrings();
+            stack.removeRange (0, 4);
+            stack.removeRange (16, stack.size());
+            where = "\n    " + stack.joinIntoString ("\n    ").toStdString();
+        }
+
         ADD_FAIL_CHECK_AT (file->c_str(), line, // a check's failure, which goes on: an assertion goes on in JUCE too
-                           "JUCE assertion failed at "
-                               << place.toStdString()
-                               << ": fix its cause, or allow it with why in tests/TestMain.cpp (allowedAssertions)\n    " << where);
+                           "JUCE assertion failed at " << place.toStdString() << onThread
+                                                       << ": fix its cause, or allow it with why in tests/TestMain.cpp (allowedAssertions)"
+                                                       << where);
     }
 
-private:
-    AssertionNet() = default;
+    // On an audio thread (AudioThreadMonitor::isAudioThread()): the assertion's place copied into a slot made before,
+    // without a lock or an allocation, for the tests' thread to take (takeFromAudioThreads()). JUCE has made its message,
+    // a juce::String, before the net hears of it (juce_Logger.cpp: logAssertion()), which the real-time audit leaves out.
+    void noteOnAudioThread (const juce::String& message) noexcept
+    {
+        auto claimed = numClaimed.load();
+
+        do
+        {
+            if (claimed - numTaken.load() >= maxAudioThreadAssertions)
+            {
+                ++numLost;
+                return;
+            }
+        } while (! numClaimed.compare_exchange_weak (claimed, claimed + 1));
+
+        auto& slot = audioThreadAssertions[(size_t) (claimed % maxAudioThreadAssertions)];
+        auto text = message.getCharPointer();
+
+        for (auto skip = std::char_traits<char>::length (prefix); skip > 0; --skip)
+            text.getAndAdvance();
+
+        size_t length = 0;
+
+        for (auto c = text.getAndAdvance(); c != 0 && length + 1 < sizeof (slot.place); c = text.getAndAdvance())
+            slot.place[length++] = c >= 32 && c < 127 ? (char) c : '?'; // a file's name and a line
+
+        slot.place[length] = 0;
+        slot.test = runningTest.load();
+        slot.generation = generation.load();
+        slot.written.store (true, std::memory_order_release);
+    }
 
     static inline std::atomic<const char*> runningTest { nullptr };
     std::mutex lock;
     const char* currentTest = nullptr;
     const char* lastTest = nullptr;
+
+    struct Expectation
+    {
+        std::string place; // an ExpectedAssertion's places
+        int count = 0;
+    };
+
     // Standard containers: this object is never deleted, and JUCE's leak detector would count JUCE's at exit.
     std::set<std::string> reportedInThisTest, outside;
-    std::set<std::string> places; // the files' names, which doctest's report points to
-    std::string expected;         // the place of an ExpectedAssertion, while one lives
-    int numExpected = 0;
+    std::set<std::string> places;          // the files' names, which doctest's report points to
+    std::vector<Expectation> expectations; // the ExpectedAssertions living, the one made last at the end
     bool ended = false;
+
+    // What audio threads noted, in a ring of slots that one of them claims at a time and the tests' thread takes from in
+    // order; the count of those lost to a full ring; and the expectations' generation, one more each time an
+    // ExpectedAssertion is made or goes (from the tests' thread, with the lock held).
+    struct NotedAssertion
+    {
+        std::atomic<bool> written { false };
+        char place[256] {};
+        const char* test = nullptr;
+        int generation = 0;
+    };
+
+    static constexpr int maxAudioThreadAssertions = 64;
+    std::array<NotedAssertion, maxAudioThreadAssertions> audioThreadAssertions;
+    std::atomic<int> numClaimed { 0 }, numTaken { 0 }, numLost { 0 }, numLostTaken { 0 }, generation { 0 };
+    static inline thread_local bool taking = false;
 };
 
 // Says where a test case that takes too long is, where the environment asks (StallReport.h): main()'s, while it runs.
@@ -313,7 +480,15 @@ struct AssertionNetListener final : public doctest::IReporter
             stallReport->testCaseStarted (data.m_name);
     }
 
-    void test_case_reenter (const doctest::TestCaseData&) override {}
+    // What audio threads noted, taken while the test case can still fail by it: at each check it makes, and as each run
+    // through its subcases ends (AssertionNet::takeFromAudioThreads()).
+    static void takeFromAudioThreads()
+    {
+        if (! phazite::test::AudioThreadMonitor::isAudioThread())
+            AssertionNet::get().takeFromAudioThreads();
+    }
+
+    void test_case_reenter (const doctest::TestCaseData&) override { takeFromAudioThreads(); }
     void test_case_end (const doctest::CurrentTestCaseStats&) override
     {
         AssertionNet::get().testCaseEnded();
@@ -327,8 +502,8 @@ struct AssertionNetListener final : public doctest::IReporter
     void test_run_end (const doctest::TestRunStats&) override {}
     void test_case_exception (const doctest::TestCaseException&) override {}
     void subcase_start (const doctest::SubcaseSignature&) override {}
-    void subcase_end() override {}
-    void log_assert (const doctest::AssertData&) override {}
+    void subcase_end() override { takeFromAudioThreads(); }
+    void log_assert (const doctest::AssertData&) override { takeFromAudioThreads(); }
     void log_message (const doctest::MessageData&) override {}
     void test_case_skipped (const doctest::TestCaseData&) override {}
 };
@@ -359,18 +534,23 @@ juce::File phazite::test::getSystemTemporaryFolder()
 }
 
 phazite::test::ExpectedAssertion::ExpectedAssertion (const char* place)
+    : level (AssertionNet::get().expect (place))
 {
-    AssertionNet::get().expect (place);
 }
 
 phazite::test::ExpectedAssertion::~ExpectedAssertion()
 {
-    AssertionNet::get().expect (nullptr);
+    AssertionNet::get().stopExpecting (level);
 }
 
 int phazite::test::ExpectedAssertion::getCount() const
 {
-    return AssertionNet::get().getNumExpected();
+    return AssertionNet::get().getNumExpected (level);
+}
+
+int phazite::test::getNumAudioThreadAssertions()
+{
+    return AssertionNet::get().getNumAudioThreadAssertions();
 }
 
 bool phazite::test::runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds)

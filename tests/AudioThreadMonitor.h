@@ -16,12 +16,29 @@ class AudioThreadMonitor
 public:
     static bool isAvailable();
 
+    // Whether it keeps each event's stack, which describeCallSites() and ofAssertions() read: in Windows Debug builds and
+    // Linux builds with glibc, not under the sanitizers.
+    static bool keepsStacks();
+
     // Marks the calling thread as an audio thread while this object exists.
     struct ScopedAudioThread
     {
         ScopedAudioThread();
         ~ScopedAudioThread();
     };
+
+    // Marks the calling thread as one that plays audio while this lives, without counting its allocations: a block of
+    // the tests' audio device (TestAudioDevice::process()), on whichever thread plays it.
+    struct ScopedAudioBlock
+    {
+        ScopedAudioBlock() noexcept;
+        ~ScopedAudioBlock();
+    };
+
+    // Whether the calling thread plays audio: marked as above, in a block of the tests' audio device, or one of Phazite's
+    // own (devices/core/AudioThreads.h: the engine's workers). Where the assertion net (TestMain.cpp) takes a JUCE
+    // assertion without a lock or an allocation of its own. Real-time safe.
+    static bool isAudioThread() noexcept;
 
     struct Counts
     {
@@ -37,7 +54,14 @@ public:
     static int getNumEvents();
 
     // Where the recorded events came from (the first 512 after reset(), from the one numbered firstEvent on), grouped by
-    // call stack and most frequent first, e.g. "12 x  phazite::Foo::bar <- phazite::Baz::process <- ...".
+    // call stack and most frequent first, e.g. "12 x  phazite::Foo::bar <- phazite::Baz::process <- ...". Those of a JUCE
+    // assertion's log are left out (ofAssertions()).
     static juce::StringArray describeCallSites (int framesPerSite = 6, int firstEvent = 0);
+
+    // Of the recorded events from the one numbered firstEvent on, the allocations and frees that JUCE made for an
+    // assertion's message (juce::logAssertion(), which builds it as a juce::String before the assertion net hears of it,
+    // in Debug builds): the test's fault, which the net reports, not the code's that played. Recorded events only (the
+    // first 512 after reset()), and none where no stacks are kept (under the sanitizers).
+    static Counts ofAssertions (int firstEvent = 0);
 };
 } // namespace phazite::test

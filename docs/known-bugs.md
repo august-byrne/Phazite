@@ -239,26 +239,19 @@ its fix.
   (`src/model/playback/SongPlayer.cpp`; see also 124). Fix: compile again only what changed (roadmap step S5.7), with
   the 100-track benchmark before and after.
 
+
 ## Tests
 
-- **178. `tests/LiveInputTests.cpp` fails a timing check on a loaded machine** ("Every live note sounds, however long
-  the message thread was busy", `isNear (samples, first, slack)` at line 362): it failed four times in runs beside
-  other builds on 2026-11-15 and passed each time alone. A test waits for a condition, never for a time: its slack
-  is a time. Fix: measure the notes' places against the blocks played, not against the clock.
-
-- **153. In a Debug build an assertion that fires on the audio thread writes to the log** (`JUCE_LOG_ASSERTIONS`, which
-  the tests' assertion net needs): a string made and a file written there, which the real-time audit then counts. No
-  assertion fires on the audio thread in the audit's scenarios today; one that did would show as an allocation as well
-  as a failed test.
-
-- **149. JUCE asserts on a date that is no date in a damaged zip** (`juce_core/time/juce_Time.cpp`, in Debug builds) as
-  `juce::ZipFile` reads an entry. Phazite never uses an entry's date, so a damaged DAWproject only raises the assertion;
-  the DAWproject fuzz case declares it (`ExpectedAssertion` in `tests/FuzzTests.cpp`). Whether Phazite reads the zip's
-  entries without JUCE's date, or the assertion stays declared, is open question Q7 in
-  [juce-workarounds.md](juce-workarounds.md#open-questions).
-- **150. Full screen is switched in no test, and the main window's tests run on Windows only.**
-  `tests/MainWindowTests.cpp` switches the theme, the interface size and the keymap, but not Full Screen
-  (`view.fullScreen`): Windows' kiosk mode needs a real window, and JUCE asserts for one on no screen. And the file is
-  compiled for Windows alone, as the window reads its theme and the screens from the system, which Linux CI can't
-  without a display server. Fix: a full-screen case in a real window, as the devices' windows in that file are; on
-  Linux, a virtual display (Xvfb) in CI, or the window's theme and screens taken through `MainWindow::Surroundings`.
+- **180. Other tests compare against the wall clock with a slack, and can fail on a loaded machine.** Found by the
+  survey made as known bug 178 was fixed (2026-11-15); none is a fault of Phazite's. A beat compared within 0.001
+  while both sides add the time since the last block (`tests/EnginePlaybackTests.cpp`, about line 606); a block's
+  length against the longest gap, and a worker that must take a task within about 64 ms (`tests/EngineTests.cpp`,
+  about lines 1146 and 2992); levels of plug-ins played with `Timing::realTime`, where a late block plays silent, and
+  the stand-ins' hang limits of one and two seconds (`tests/SandboxedPluginTests.cpp`, `tests/SandboxedPlugins.h`;
+  `tests/SandboxTests.cpp` missed a 7,000 ms limit by 3 ms once); timeouts of 250 ms to 4 s read from the clock (the
+  Listen key in `CompressorTests`, `MultibandTests` and `ExciterTests`; the audition window in the drum sampler's
+  tests; the peak hold in `ControlsTests`; the typing pause in `ProjectViewTests`; the panel hide in `TopBarTests`;
+  Auto Save's tick in `ProjectTests`; the CPU meter's bound in `MixerModelTests`); `dispatchPendingMessages()` failing
+  after 5 s (`tests/UiTestHelpers.cpp`); and `settle (300)` used as "the engine has the song" (`PlaybackTests`,
+  `MixerModelTests`, `StatusBarTests`, `DrumSamplerEditorTests`). Fix: a clock the test drives for the timeouts, a
+  condition for each wait, and blocks played for what is measured against playback, as `tests/README.md` asks.

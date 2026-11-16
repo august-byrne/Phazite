@@ -418,16 +418,15 @@ namespace
 {
     // What JUCE's own readers assert against in a damaged file, in Debug builds, and go on from: a name its XML parser read
     // that XML allows no element or attribute, a tag like the one asked for but for its case (its lookups of a child by
-    // name ask that way), and in a zip a date that is none and a file's name that isn't UTF-8. A damaged file is nothing
-    // Phazite did wrong, and what its readers make of one is what the cases check (open question Q7,
-    // docs/juce-workarounds.md).
-    constexpr const char* readersAssertions =
-        "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_Time.cpp:170-175|juce_String.cpp:2143";
+    // name ask that way), and in a zip a file's name that isn't UTF-8. A damaged file is nothing Phazite did wrong, and
+    // what its readers make of one is what the cases check. A zip's date that is none, the DAWproject case declares around
+    // its reading alone (FuzzTests.cpp). JUCE workaround T8 (docs/juce-workarounds.md).
+    constexpr const char* readersAssertions = "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_String.cpp:2143";
 
     // And, in JSON, an object's member with no name, which its parser makes an Identifier of, and a minus sign with no
     // digit after it.
     constexpr const char* jsonReadersAssertions =
-        "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_Time.cpp:170-175|juce_String.cpp:2143|"
+        "juce_XmlElement.cpp:76|juce_XmlElement.cpp:112|juce_XmlElement.cpp:489|juce_String.cpp:2143|"
         "juce_Identifier.cpp:61|juce_JSON.cpp:268";
 
     Totals runRoundsExpecting (const char* assertions, const juce::String& name, int ownRounds, const Round& round);

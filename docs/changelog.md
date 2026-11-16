@@ -144,6 +144,14 @@ too. A line names the bug's number in that list.
 - **136 The FM's blocker** is 12 dB at 5 Hz: a new FM's electric piano leaves 0.0085 of its level under held notes,
   where it left 0.08. What a modulator a few hertz off a whole ratio leaves stays (it is what FM does), as the entry
   now says.
+- **178 The live notes' timing tests** measure each note by the engine's clock and the blocks played, so a busy
+  machine no longer fails them, and a note taken late or played off its place still does.
+- **153 An assertion on the audio thread** fails its test by its place without the tests' net locking or allocating
+  there, and the real-time audit says that an assertion fired instead of counting JUCE's message as playback's.
+- **149 A damaged zip's dates** stay an assertion the DAWproject fuzz case expects, around its reading alone (JUCE
+  workaround T8): a Release build makes nothing undefined of them.
+- **150 Full Screen** is switched in a test, in a real window on Windows, and the main window's tests are compiled
+  and run on Linux as well.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

@@ -385,14 +385,23 @@ TEST_CASE ("How far the compressor turns the sound down reads the same for any n
     REQUIRE (reduction != nullptr);
     CHECK (reduction->get() == doctest::Approx (0.0f));
 
-    // 12 dB over its corner, turned down as its curve says; reading it takes nothing away from the next reader.
-    play (*compressor, -6.0f, 24000);
+    // 12 dB over its corner, turned down as its curve says; reading it takes nothing away from the next reader. It falls by
+    // the clock from its last block on, so each reading is checked against the time since before that block, measured
+    // around it: however long the machine kept this thread from running (to within 2 % alone, it failed beside other
+    // builds: known bug 178's survey).
     const auto now = [] { return juce::Time::getMillisecondCounterHiRes() / 1000.0; };
+    const auto expected = getDefaultReduction (-6.0f);
+    const auto beforePlayed = now();
+    play (*compressor, -6.0f, 24000);
     const auto beforeFirst = now();
     const auto first = reduction->get();
     const auto afterFirst = now();
-    CHECK (first == doctest::Approx (getDefaultReduction (-6.0f)).epsilon (0.02));
-    CHECK (reduction->get() == doctest::Approx (first).epsilon (0.01));
+    CHECK (first <= expected * 1.02f);
+    CHECK (first >= expected * 0.98f - 15.0f * (float) (afterFirst - beforePlayed));
+    const auto again = reduction->get();
+    const auto afterAgain = now();
+    CHECK (again <= first * 1.01f);
+    CHECK (again >= first * 0.99f - 15.0f * (float) (afterAgain - beforeFirst));
 
     // With nothing played since (a device asleep on silence plays nothing), it falls 15 dB a second, by the clock: as far
     // as the time between the two readings, measured around each of them (however long the machine kept this thread from

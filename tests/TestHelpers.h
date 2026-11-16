@@ -46,20 +46,31 @@ bool runTimersUntil (const std::function<bool()>& condition, int timeoutMillisec
 // While one lives, a JUCE assertion at this place (JUCE's file and line, "juce_ValueTree.cpp:569"; for an assertion
 // written over several lines its first and last, "juce_Time.cpp:170-175", as compilers differ in which they give) doesn't
 // fail the test it fires in (TestMain.cpp fails a test for any other): for a test that makes, on purpose, the very fault
-// JUCE asserts against. Several places are named with | between them. One at a time, on the test's own thread.
+// JUCE asserts against. Several places are named with | between them. Made on the test's own thread, on any thread an
+// assertion fires on (an audio thread's too); one made while another lives adds its places to the other's, for as long as
+// it lives, and goes first.
 class ExpectedAssertion
 {
 public:
     explicit ExpectedAssertion (const char* place);
     ~ExpectedAssertion();
 
-    // How often it fired while this lived: none in a build without JUCE's assertions.
+    // How often it fired while this lived, at this one's places (an assertion at the places of several living counts for
+    // the one made last): none in a build without JUCE's assertions.
     int getCount() const;
 
 private:
+    size_t level = 0; // its place among those living, the first 0
+
     ExpectedAssertion (const ExpectedAssertion&) = delete;
     ExpectedAssertion& operator= (const ExpectedAssertion&) = delete;
 };
+
+// How many JUCE assertions have fired on audio threads since the tests started (TestMain.cpp): a block of the tests' audio
+// device, the engine's workers. The assertion net notes each there without a lock or an allocation of its own, and fails
+// the test it fired in from the test's thread; what JUCE's logAssertion() allocated for its message is left out of the
+// real-time audit's counts, which say that an assertion fired instead (known bug 153).
+int getNumAudioThreadAssertions();
 
 // Runs freezes and bounces as the app's main window does, without a window: it keeps the render while it runs, and
 // what came of each.

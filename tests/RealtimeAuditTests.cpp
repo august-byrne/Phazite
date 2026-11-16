@@ -19,6 +19,8 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/core/AudioThreads.h"
+#include "devices/core/DeviceInfo.h"
+#include "devices/core/Processor.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -48,6 +50,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
@@ -187,6 +190,8 @@ struct Measurement
     int blocksPlayed = 0;
     int firstBusyBlock = -1, lastBusyBlock = -1; // the first and last blocks that allocated or freed, or -1
     float peakLevel = 0.0f;
+    int assertions = 0;                      // JUCE assertions that fired on the audio thread, which fail the test
+    AudioThreadMonitor::Counts ofAssertions; // what JUCE allocated for their messages after the warm-up, left out of steady
 };
 
 // How many threads the engine plays a block on, the audio thread one of them: the others are its workers
@@ -293,6 +298,7 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const Playi
     std::atomic<int> editsDue { 0 }, editsMade { 0 };
     std::atomic<bool> finished { false }, abandoned { false };
 
+    const auto assertionsBefore = phazite::test::getNumAudioThreadAssertions();
     AudioThreadMonitor::reset();
 
     std::thread audioThread (
@@ -393,6 +399,18 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const Playi
     const auto total = AudioThreadMonitor::getCounts();
     m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
 
+    // A JUCE assertion on the audio thread is a failure of the test, which the assertion net reports by its place
+    // (TestMain.cpp); what JUCE allocated for its message there (logAssertion()) isn't playback's, and is left out (known
+    // bug 153).
+    m.assertions = phazite::test::getNumAudioThreadAssertions() - assertionsBefore;
+
+    if (m.assertions > 0)
+    {
+        m.ofAssertions = AudioThreadMonitor::ofAssertions (m.firstSteadyEvent);
+        m.steady.allocations -= m.ofAssertions.allocations;
+        m.steady.frees -= m.ofAssertions.frees;
+    }
+
     phazite::stopAndReturn (song);
     m.callSites = AudioThreadMonitor::describeCallSites();
     m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
@@ -431,6 +449,11 @@ void report (const juce::String& scenario, const Measurement& m)
 {
     juce::String text;
     text << scenario << ": peak output " << juce::Decibels::toString (juce::Decibels::gainToDecibels (m.peakLevel)) << "\n";
+
+    if (m.assertions > 0)
+        text << "  an assertion fired on the audio thread (" << m.assertions << " in all; the test fails with each one's place):"
+             << " what JUCE allocated for their messages after the warm-up (" << m.ofAssertions.allocations << " allocations, "
+             << m.ofAssertions.frees << " frees) is left out below\n";
 
     if (AudioThreadMonitor::isAvailable())
     {
@@ -2150,5 +2173,68 @@ TEST_SUITE ("realtime-audit")
         report ("Every synth taking all its voices at once, the drum sampler taking voices and cutting a pad, sounds swapped", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    // An effect that leaves the sound as it is and fires a JUCE assertion in one of its blocks, on whichever audio thread
+    // plays it (the device's, or one of the engine's workers), when asked to.
+    struct AssertingEffect final : phazite::devices::Processor
+    {
+        static constexpr const char* typeID = "phaziteTestAsserting";
+        static constexpr phazite::devices::DeviceInfo info { .typeID = typeID,
+                                                             .name = "Test Asserting",
+                                                             .kind = phazite::devices::DeviceKind::effect };
+        static inline std::atomic<int> blocksToAssertion { -1 }; // the blocks before the one it asserts in; none below 0
+
+        void prepare (double, int) override {}
+        void reset() override {}
+
+        void process (const phazite::devices::ProcessContext&) override
+        {
+            if (blocksToAssertion.fetch_sub (1) == 0)
+                jassertfalse; // on purpose
+        }
+
+        bool sleepsOnSilence() const noexcept override { return false; }
+    };
+
+    TEST_CASE ("Real-time audit: an assertion on the audio thread is the test's failure, by its place, and none of playback's allocations")
+    {
+        // Known bug 153: the assertion net locked and allocated on the audio thread, and what JUCE allocated for the
+        // assertion's message showed here as the playback's. Now the net notes it there without either, the tests' thread
+        // fails the test with its place (here it is declared, so it passes), and the audit leaves JUCE's message out.
+        [[maybe_unused]] static const bool registered = []
+        {
+            phazite::registerDeviceType (AssertingEffect::info, []() -> std::unique_ptr<phazite::devices::Processor>
+                                         { return std::make_unique<AssertingEffect>(); });
+            return true;
+        }();
+
+        TestSong song;
+        addTone (song, song.firstTrack);
+        auto& played = getSong (song);
+        REQUIRE (
+            phazite::insertDeviceState (played, song.firstTrack, phazite::makeOwnDeviceState (played, AssertingEffect::typeID)).isValid());
+
+        const phazite::test::ExpectedAssertion onPurpose ("RealtimeAuditTests.cpp"); // the jassertfalse above, and only it
+        AssertingEffect::blocksToAssertion = 60;                                     // after the warm-up's blocks (none)
+        const auto m = playProjectAndMeasure (song.context);
+        AssertingEffect::blocksToAssertion = -1;
+        report ("An assertion on the audio thread", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+
+#if JUCE_LOG_ASSERTIONS
+        CHECK (m.assertions == 1);
+        CHECK (onPurpose.getCount() == 1);
+
+        // JUCE made its message there, and only that, which the steady blocks leave out; where the monitor keeps no stacks
+        // (under the sanitizers) it can't be told from playback's.
+        if (AudioThreadMonitor::isAvailable() && AudioThreadMonitor::keepsStacks())
+        {
+            CHECK (m.ofAssertions.allocations > 0);
+            checkSteadyPlaybackDoesNotAllocate (m);
+        }
+#else
+        CHECK (m.assertions == 0); // no assertions in this build
+#endif
     }
 }

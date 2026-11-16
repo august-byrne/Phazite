@@ -5,11 +5,13 @@
 // desktop through peers with no window behind them (MainWindow::Surroundings, createHeadlessPeer()); quitting does what
 // Main.cpp's systemRequestedQuit() does, without JUCE's application, which the tests have none of.
 //
-// Windows only: there the window reads its theme and the screens from the system without a display server, which Linux CI
-// lacks; and the devices' windows are real ones, as AppShellTests.cpp's detached panels are.
+// On every system: the window takes the screens through MainWindow::Surroundings, and what else it reads of the system
+// (its dark mode, the keyboard's layout, the transparency setting) is there without a display server, as Linux CI has
+// none. On Windows also what needs a real window, as AppShellTests.cpp's detached panels do: the devices' windows, and
+// Full Screen, which Windows' kiosk mode makes of the window's own style; on Linux, Full Screen fills the display JUCE
+// knows of, which ScopedDisplay gives a machine without one.
 #include "TestHelpers.h"
 
-#if JUCE_WINDOWS
 #include "GoldenFiles.h"
 #include "PaintCheck.h"
 #include "SandboxedPlugins.h"
@@ -69,19 +71,27 @@ protected:
     }
 };
 
-// The main window, put on the desktop once it is made, through a peer with no window behind it.
+// The main window, put on the desktop once it is made, through a peer with no window behind it, or a real one where a
+// test needs one (never shown).
 class HeadlessMainWindow final : public phazite::MainWindow
 {
 public:
     using phazite::MainWindow::MainWindow;
 
-    void putOnDesktop() { addToDesktop(); }
+    void putOnDesktop (bool onNoScreen)
+    {
+        headless = onNoScreen;
+        addToDesktop();
+    }
 
 protected:
     juce::ComponentPeer* createNewPeer (const juce::DesktopWindowOptions& options) override
     {
-        return phazite::test::createHeadlessPeer (*this, options);
+        return headless ? phazite::test::createHeadlessPeer (*this, options) : phazite::MainWindow::createNewPeer (options);
     }
+
+private:
+    bool headless = true;
 };
 
 // What the app makes, in Main.cpp's order, so that it goes in the app's order (the window, then the session, the commands,
@@ -89,9 +99,16 @@ protected:
 // suggests, and the question about unsaved changes gives answerToSave.
 struct MainScreen
 {
+    enum class Peer
+    {
+        onNoScreen,
+        real // a window of the system's own, never shown
+    };
+
     // setUp: what to do before the window is made (the settings it starts with); screens: the screens' areas it sees (none:
     // one of 1920 by 1040, so that the window is as large on every machine).
-    explicit MainScreen (std::function<void (phazite::Settings&)> setUp = {}, juce::Array<juce::Rectangle<int>> screensToUse = {})
+    explicit MainScreen (std::function<void (phazite::Settings&)> setUp = {}, juce::Array<juce::Rectangle<int>> screensToUse = {},
+                         Peer peer = Peer::onNoScreen)
         : screens (screensToUse.isEmpty() ? juce::Array<juce::Rectangle<int>> { juce::Rectangle<int> (0, 0, 1920, 1040) }
                                           : std::move (screensToUse))
     {
@@ -116,7 +133,7 @@ struct MainScreen
                                                 { return launch (options); },
                                                 .quit = [this] { quit(); },
                                                 .screens = [this] { return screens; } });
-        window->putOnDesktop();
+        window->putOnDesktop (peer == Peer::onNoScreen);
         phazite::addSongCommands (registry, session.getContext(), *window);
         session.addCommands (registry, *window);
         window->addCommands();
@@ -490,8 +507,7 @@ TEST_CASE ("The main window's commands switch the theme, the interface size, the
     REQUIRE (
         screen.registry.invoke ("options.keymap." + juce::String (phazite::ui::Keymap::defaultName).removeCharacters (" ").toLowerCase()));
 
-    // Full screen ("view.fullScreen") isn't switched here: Windows' kiosk mode needs a window of its own (JUCE asserts
-    // for one on no screen).
+    // Full Screen ("view.fullScreen") is switched in a case of its own, below: Windows' kiosk mode needs a real window.
 
     // Hover help and the computer keyboard, off and on again.
     for (const auto* id : { "view.hoverHelp", "input.computerKeyboard" })
@@ -503,6 +519,58 @@ TEST_CASE ("The main window's commands switch the theme, the interface size, the
         REQUIRE (screen.registry.invoke (id));
         CHECK (ticked (id) == was);
     }
+}
+
+TEST_CASE ("Full Screen fills the screen the window is on, and puts it back where it was; the place kept stays")
+{
+    // Known bug 150: switched in no test, as Windows' kiosk mode changes a real window's style (JUCE asserts for one on no
+    // screen); Linux's fills the display JUCE knows of, which a machine without a display has none of.
+#if JUCE_WINDOWS
+    MainScreen screen ({}, {}, MainScreen::Peer::real);
+#else
+    const phazite::test::ScopedDisplay display;
+    MainScreen screen;
+#endif
+    auto& desktop = juce::Desktop::getInstance();
+    auto& window = *screen.window;
+    const auto ticked = [&screen] { return screen.registry.find ("view.fullScreen")->isTicked(); };
+    using phazite::Settings;
+
+    const auto restored = window.getBounds();
+    const auto place = screen.services.settings.get (Settings::windowPlace);
+    const auto* onScreen = desktop.getDisplays().getDisplayForRect (window.getScreenBounds());
+    REQUIRE (onScreen != nullptr);
+    const auto whole = onScreen->logicalBounds.getSmallestIntegerContainer();
+    REQUIRE (whole != restored);
+    CHECK_FALSE (ticked());
+    CHECK (desktop.getKioskModeComponent() == nullptr);
+
+    // On: the whole screen, the menus ticked so, painted; the place kept for the next start is where it was.
+    REQUIRE (screen.registry.invoke ("view.fullScreen"));
+    dispatchPendingMessages();
+    CHECK (ticked());
+    CHECK (desktop.getKioskModeComponent() == &window);
+    CHECK (window.getBounds() == whole);
+    CHECK (screen.services.settings.get (Settings::windowPlace) == place);
+    CHECK_FALSE (screen.services.settings.get (Settings::windowMaximized));
+    int recent = 0;
+    checkMenus (screen, recent);
+    phazite::test::checkPaints (window.getShell(), "full screen");
+
+    // Off: back where it was.
+    REQUIRE (screen.registry.invoke ("view.fullScreen"));
+    dispatchPendingMessages();
+    CHECK_FALSE (ticked());
+    CHECK (desktop.getKioskModeComponent() == nullptr);
+    CHECK (window.getBounds() == restored);
+    CHECK (screen.services.settings.get (Settings::windowPlace) == place);
+
+    // Closed while it fills the screen: it lets go of it as it goes, and the place kept is still the one it had.
+    REQUIRE (screen.registry.invoke ("view.fullScreen"));
+    REQUIRE (desktop.getKioskModeComponent() == &window);
+    screen.window = nullptr;
+    CHECK (desktop.getKioskModeComponent() == nullptr);
+    CHECK (screen.services.settings.get (Settings::windowPlace) == place);
 }
 
 TEST_CASE ("Closing the main window quits at once without unsaved changes, and asks first with them")
@@ -588,6 +656,8 @@ TEST_CASE ("The windows that hold a project's song close as another project open
     CHECK (screen.session.getProject() != nullptr);
 }
 
+#if JUCE_WINDOWS
+// Real windows, which Linux CI can't open without a display.
 TEST_CASE ("A device's window and a plug-in's window open, show their device, and close when the device goes")
 {
     phazite::test::SandboxedPlugins sandboxed;
@@ -630,6 +700,7 @@ TEST_CASE ("A device's window and a plug-in's window open, show their device, an
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return windows.findWindow (plugin) == nullptr; }));
     CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, plugin));
 }
+#endif
 
 TEST_CASE ("Escape while the song exports asks before it stops; the window closed while it exports stops it and says so")
 {
@@ -750,4 +821,3 @@ TEST_CASE ("The main window opens where it was closed, maximized if it was, and 
         CHECK (screen.window->getBounds() == twoScreens.getFirst());
     }
 }
-#endif

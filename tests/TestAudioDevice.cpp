@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestAudioDevice.h"
+#include "AudioThreadMonitor.h"
 
 #include <set>
 
@@ -63,6 +64,7 @@ void TestAudioDevice::stop()
 
 void TestAudioDevice::process (juce::AudioBuffer<float>& buffer)
 {
+    const AudioThreadMonitor::ScopedAudioBlock audioBlock; // an assertion in it is an audio thread's (TestMain.cpp)
     const juce::ScopedLock held (lock);
     auto* playing = callback.load();
     const auto numSamples = std::min (buffer.getNumSamples(), bufferSize);

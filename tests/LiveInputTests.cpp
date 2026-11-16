@@ -46,11 +46,13 @@ void playLive (const juce::MidiMessage& message)
     phazite::getAudioIO (phazite::test::getEngineContext()).playLive (message);
 }
 
-// Whether a note's delay is the one expected, to within the time the test reads of when it was played, and as much more as
-// the measurements may be off by (HostedDevice::getUncertainty()).
-bool isNear (int samples, int expected, int slack = 0)
+using LiveNote = phazite::test::HostedDevice::LiveNote;
+
+// Whether a note's delay from where the engine put it to its sound is the one expected, by the engine's clock: to within
+// the two samples a synth's voice may take more or less to cross -60 dBFS.
+bool isNear (int samples, int expected)
 {
-    return std::abs (samples - expected) <= 2 + slack;
+    return samples >= 0 && std::abs (samples - expected) <= 2;
 }
 
 void addInstrument (phazite::Song& song, phazite::TrackID track)
@@ -72,19 +74,31 @@ phazite::PlaybackHost& getPlaybackHost()
     return phazite::getPlaybackHost (phazite::test::getEngineContext());
 }
 
-// Plays a note until it sounds as wanted, a few times at most, and says when it sounded the last time: the engine is given
-// the song again after a change in the message loop's own time, which a sanitizer's build makes slow.
-int playUntil (const std::function<int()>& playNote, const std::function<bool (int samples)>& wanted)
+// A note played between two blocks, as a MIDI input plays one, after 50 blocks, and let go of before 200 more: where the
+// engine put it and when it sounded (HostedDevice::playLiveNote()).
+LiveNote playNote (phazite::test::HostedDevice& device)
 {
-    auto samples = playNote();
+    device.process (50);
+    const auto note = device.playLiveNote ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); }, 60);
+    playLive (juce::MidiMessage::noteOff (1, 60));
+    device.process (200);
+    return note;
+}
 
-    for (int tries = 0; tries < 20 && ! wanted (samples); ++tries)
+// Plays a note until it sounds as wanted, a few times at most, and says how it sounded the last time: the engine is given
+// the song again after a change in the message loop's own time, which a sanitizer's build makes slow.
+LiveNote playUntil (phazite::test::HostedDevice& device, const std::function<bool (const LiveNote&)>& wanted)
+{
+    auto note = playNote (device);
+    const auto start = juce::Time::getMillisecondCounter();
+
+    while (! wanted (note) && juce::Time::getMillisecondCounter() - start < (juce::uint32) phazite::test::hangTimeout)
     {
         phazite::test::settle (250);
-        samples = playNote();
+        note = playNote (device);
     }
 
-    return samples;
+    return note;
 }
 } // namespace
 
@@ -227,27 +241,15 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
-    // A note played between two blocks, as a MIDI input plays one: how long after it it sounds.
-    const auto playNote = [&]
-    {
-        device.process (50);
-        const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        playLive (juce::MidiMessage::noteOff (1, 60));
-        device.process (200);
-        return samples;
-    };
-
-    // Played until it sounds: the engine is given the song in the message loop's own time, which a busy machine or a
-    // sanitizer's build makes slow: a note played before it had it went unheard, and the notes after
+    // A note played between two blocks, as a MIDI input plays one, put as far into the next block as it came, and sounding
+    // from there at once. Played until it sounds: the engine is given the song in the message loop's own time, which a
+    // busy machine or a sanitizer's build makes slow: a note played before it had it went unheard, and the notes after
     // were compared with that.
-    const auto atOnce = playUntil (playNote, [] (int samples) { return samples >= 0; });
-    const auto atOnceSlack = device.getUncertainty();
+    const auto first = playUntil (device, [] (const LiveNote& note) { return note.toSound() >= 0; });
+    const auto atOnce = first.toSound();
+    CHECK (first.isPlacedAsPlayed());
     CHECK (atOnce >= 0);
-    CHECK (atOnce < 16 + atOnceSlack);
-
-    // Another note's delay against the first's, as near as the times of playing both are known.
-    const auto nearFirst = [&device, atOnceSlack] (int samples, int expected)
-    { return isNear (samples, expected, atOnceSlack + device.getUncertainty()); };
+    CHECK (atOnce < 16);
 
     // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
     const auto limiter = addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
@@ -256,12 +258,16 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     itsDSP.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
     const auto latency = itsDSP.getLatencySamples();
     REQUIRE (latency > 0);
-    CHECK (nearFirst (playUntil (playNote, [&] (int samples) { return nearFirst (samples, atOnce + latency); }), atOnce + latency));
+    const auto compensated = playUntil (device, [&] (const LiveNote& note) { return isNear (note.toSound(), atOnce + latency); });
+    CHECK (compensated.isPlacedAsPlayed());
+    CHECK (isNear (compensated.toSound(), atOnce + latency));
 
     // ...but not once it is switched off.
     phazite::setDeviceOn (song, limiter, false);
     phazite::test::settle (500);
-    CHECK (nearFirst (playUntil (playNote, [&nearFirst, atOnce] (int samples) { return nearFirst (samples, atOnce); }), atOnce));
+    const auto off = playUntil (device, [atOnce] (const LiveNote& note) { return isNear (note.toSound(), atOnce); });
+    CHECK (off.isPlacedAsPlayed());
+    CHECK (isNear (off.toSound(), atOnce));
 }
 
 TEST_CASE ("Low latency plays live notes without delay compensation, and back with it when it is off")
@@ -277,29 +283,21 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
-    const auto playNote = [&]
-    {
-        device.process (50);
-        const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        playLive (juce::MidiMessage::noteOff (1, 60));
-        device.process (200);
-        return samples;
-    };
-
-    const auto compensated = playUntil (playNote, [] (int samples) { return samples > 90; });
+    const auto compensated = playUntil (device, [] (const LiveNote& note) { return note.toSound() > 90; }).toSound();
     CHECK (compensated > 90); // the limiter's look-ahead, about 99 samples
 
     auto& host = getPlaybackHost();
     host.setLowLatency (true);
     phazite::test::settle (500);
     CHECK (host.isLowLatency());
-    const auto low = playUntil (playNote, [] (int samples) { return samples >= 0 && samples < 16; });
+    const auto low = playUntil (device, [] (const LiveNote& note) { return note.toSound() >= 0 && note.toSound() < 16; }).toSound();
     CHECK (low >= 0);
     CHECK (low < 16);
 
     host.setLowLatency (false);
     phazite::test::settle (500);
-    CHECK (isNear (playUntil (playNote, [compensated] (int samples) { return isNear (samples, compensated); }), compensated));
+    CHECK (isNear (playUntil (device, [compensated] (const LiveNote& note) { return isNear (note.toSound(), compensated); }).toSound(),
+                   compensated));
 }
 
 TEST_CASE ("Every live note sounds, however long the message thread was busy")
@@ -336,30 +334,23 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
-    const auto playNote = [&]
-    {
-        device.process (50);
-        const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        playLive (juce::MidiMessage::noteOff (1, 60));
-        device.process (200);
-        return samples;
-    };
+    // Once the engine plays the note, in the block after it came, as far into it as it came, it sounds after the master's
+    // look-ahead, and every note after it as soon. Each is measured by the engine's clock from where the engine put it,
+    // which no load on the machine moves (known bug 178: measured by the wall clock, a note failed beside other builds).
+    const auto first = playUntil (device, [] (const LiveNote& note) { return note.toSound() >= 0; });
+    REQUIRE (first.toSound() >= 0);
+    CHECK (first.isPlacedAsPlayed());
+    CHECK (first.toSound() >= lookAhead);
+    CHECK (first.toSound() < lookAhead + 16);
 
-    // Once the engine plays the note, in the block it came in (after the master's look-ahead), every note after it sounds
-    // as soon.
-    const auto first = playUntil (playNote, [] (int samples) { return samples >= 0; });
-    const auto firstSlack = device.getUncertainty();
-    REQUIRE (first >= 0);
-    CHECK (first < phazite::test::HostedDevice::blockSize + lookAhead);
-
-    // Each to the sample, as near as the times of playing them are known (to within two samples alone, a note failed on
-    // linux-tsan on 2026-11-06, and passed when run again).
     for (int i = 0; i < 12; ++i)
     {
-        const auto samples = playNote();
-        const auto slack = firstSlack + device.getUncertainty();
-        INFO ("note " << i << ": " << samples << " samples, the first " << first << ", give or take " << slack);
-        CHECK (isNear (samples, first, slack));
+        const auto note = playNote (device);
+        INFO ("note " << i << ": taken to have come " << note.cameAt - note.blockStart << " samples into its block (" << note.earliest
+                      << " to " << note.latest << " by the wall clock), sounding " << note.toSound()
+                      << " samples after the engine played it, the first " << first.toSound());
+        CHECK (note.isPlacedAsPlayed());
+        CHECK (isNear (note.toSound(), first.toSound()));
     }
 }
 

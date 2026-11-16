@@ -78,7 +78,8 @@ namespace phazite::test
 {
 namespace
 {
-    thread_local bool isAudioThread = false;
+    thread_local bool isMarked = false;   // ScopedAudioThread's
+    thread_local int inAudioBlocks = 0;   // ScopedAudioBlock's, which may nest
     std::atomic<bool> counting { false }; // from the first reset() on
     std::atomic<int> numAllocations { 0 }, numFrees { 0 };
 
@@ -86,7 +87,7 @@ namespace
     // An audio thread: one the test marked (the audio device's), or one of Phazite's own (the engine's workers).
     bool isCountedThread() noexcept
     {
-        return isAudioThread || devices::isOwnAudioThread();
+        return isMarked || devices::isOwnAudioThread();
     }
 #endif
 
@@ -98,6 +99,7 @@ namespace
     {
         void* frames[maxFrames];
         unsigned short numFrames;
+        bool isFree;
     };
 
     RecordedEvent recordedEvents[maxRecordedEvents];
@@ -122,6 +124,7 @@ namespace
         {
             auto& event = recordedEvents[index];
             event.numFrames = RtlCaptureStackBackTrace (1, maxFrames, event.frames, nullptr);
+            event.isFree = type == _HOOK_FREE;
         }
 
         return TRUE;
@@ -181,6 +184,7 @@ namespace
         {
             auto& event = recordedEvents[index];
             event.numFrames = (unsigned short) std::max (0, backtrace (event.frames, maxFrames));
+            event.isFree = isFree;
         }
 
         inHook = false;
@@ -245,6 +249,32 @@ namespace
 
         return false;
     }
+
+    // Names of functions by their addresses, each looked up once while one lives.
+    struct SymbolNames
+    {
+        const juce::String& get (void* address)
+        {
+            auto found = names.find (address);
+
+            if (found == names.end())
+                found = names.emplace (address, getSymbolName (address)).first;
+
+            return found->second;
+        }
+
+        std::map<void*, juce::String> names;
+    };
+
+    // Whether an event was JUCE's, making an assertion's message (juce_Logger.cpp: logAssertion()).
+    bool isOfAssertion (const RecordedEvent& event, SymbolNames& names)
+    {
+        for (int f = 0; f < event.numFrames; ++f)
+            if (names.get (event.frames[f]).contains ("juce::logAssertion"))
+                return true;
+
+        return false;
+    }
 #endif
 } // namespace
 
@@ -253,14 +283,34 @@ bool AudioThreadMonitor::isAvailable()
     return PHAZITE_ALLOCATION_HOOK != 0 || PHAZITE_GLIBC_MALLOC != 0 || PHAZITE_SANITIZER_HOOKS != 0;
 }
 
+bool AudioThreadMonitor::keepsStacks()
+{
+    return PHAZITE_RECORDS_STACKS != 0;
+}
+
 AudioThreadMonitor::ScopedAudioThread::ScopedAudioThread()
 {
-    isAudioThread = true;
+    isMarked = true;
 }
 
 AudioThreadMonitor::ScopedAudioThread::~ScopedAudioThread()
 {
-    isAudioThread = false;
+    isMarked = false;
+}
+
+AudioThreadMonitor::ScopedAudioBlock::ScopedAudioBlock() noexcept
+{
+    ++inAudioBlocks;
+}
+
+AudioThreadMonitor::ScopedAudioBlock::~ScopedAudioBlock()
+{
+    --inAudioBlocks;
+}
+
+bool AudioThreadMonitor::isAudioThread() noexcept
+{
+    return isMarked || inAudioBlocks > 0 || devices::isOwnAudioThread();
 }
 
 void AudioThreadMonitor::reset()
@@ -309,15 +359,19 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
         return { "(symbols unavailable)" };
 
     std::map<juce::String, int> sites;
+    SymbolNames names;
 
     for (int i = juce::jmax (0, firstEvent); i < juce::jmin (numRecordedEvents.load(), maxRecordedEvents); ++i)
     {
         juce::StringArray frames;
         const auto& event = recordedEvents[i];
 
+        if (isOfAssertion (event, names))
+            continue;
+
         for (int f = 0; f < event.numFrames && frames.size() < framesPerSite; ++f)
         {
-            auto name = getSymbolName (event.frames[f]);
+            const auto& name = names.get (event.frames[f]);
 
             if (frames.isEmpty() && isAllocatorFrame (name))
                 continue; // skip the allocator's own frames, up to whoever called it
@@ -340,6 +394,24 @@ juce::StringArray AudioThreadMonitor::describeCallSites ([[maybe_unused]] int fr
 #endif
 
     return lines;
+}
+
+AudioThreadMonitor::Counts AudioThreadMonitor::ofAssertions ([[maybe_unused]] int firstEvent)
+{
+    Counts counts;
+
+#if PHAZITE_RECORDS_STACKS
+    if (! canNameSymbols())
+        return counts;
+
+    SymbolNames names;
+
+    for (int i = juce::jmax (0, firstEvent); i < juce::jmin (numRecordedEvents.load(), maxRecordedEvents); ++i)
+        if (const auto& event = recordedEvents[i]; isOfAssertion (event, names))
+            ++(event.isFree ? counts.frees : counts.allocations);
+#endif
+
+    return counts;
 }
 } // namespace phazite::test
 
