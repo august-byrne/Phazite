@@ -46,7 +46,8 @@ notes and its parameters' values, and does four things for every device alike:
 - it plays a mono channel in stereo;
 - it reports the device's latency, which the engine makes up for on the other tracks ([engine.md](engine.md));
 - it lets the device sleep once what comes in and what it plays have been silent for a quarter of a second, for
-  longer than its latency and for as long as the tail it reports. A render never sleeps.
+  longer than its latency and for as long as the tail it reports (while the song is stopped, not the tail of one that has
+  heard nothing since it was reset; the vinyl only while it is stopped: [engine.md](engine.md)). A render never sleeps.
 
 Parameters move smoothly, so that turning a knob does not click. Automation, modulators and macros move a device's
 parameters ([automation-and-modulation.md](automation-and-modulation.md)). Each device has a guarded scenario in the

@@ -139,6 +139,10 @@ public:
     // which may play with nothing coming in (an arpeggiator's own pattern, a drone).
     virtual bool sleepsOnSilence() const noexcept { return true; }
 
+    // Whether, while the song plays, it plays with nothing coming in, and only then (the vinyl's surface noise, which starts
+    // with the song): its runner lets it sleep on silence only while the song is stopped, and wakes it as the song plays.
+    virtual bool playsWithTheSong() const noexcept { return false; }
+
     // Whether it takes a block whole, with its moved parameters' values as changes at their samples (ProcessContext::
     // changes), rather than a stretch at a time with their values: a plug-in in a helper process, to which each call is a
     // round trip.

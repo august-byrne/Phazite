@@ -89,8 +89,9 @@ goes on with the copy it had): it keeps only the copy's way into its delay line,
 after that, it makes the way back again from the line's last 128 samples, the same work at any rate (a few 32-sample
 calls' worth), so that the copy comes in without a click.
 
-Because its noise must start with the song whether sound comes in or not, the vinyl is never put to sleep by its
-runner. It rests on its own while the song is stopped, nothing comes in and its delay line has emptied.
+Because its noise must start with the song whether sound comes in or not, its runner puts the vinyl to sleep only while
+the song is stopped, and wakes it as the song plays (`Processor::playsWithTheSong()`). It rests on its own as well while
+the song is stopped, nothing comes in and its delay line has emptied.
 
 ## Its editor
 

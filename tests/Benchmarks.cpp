@@ -626,7 +626,12 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
     REQUIRE (phazite::getLiveMidiTrack (*song) == tracks[0]);
     phazite::test::settle (500);
 
-    // Silence first, then a note played between two blocks, as the computer keyboard plays one.
+    // Silence first, then a note played between two blocks, as the computer keyboard plays one. The engine's clock held, so
+    // that the note comes in as the last block started: the engine places a live note as far into the next block as it came
+    // after the last one started (Engine::takeLiveEvents()), and on the wall clock that was however long the test took
+    // between the two, some tens of samples that differed from note to note (70 alone and 115 with the limiter switched
+    // off, on 2026-11-16, for the same 0 samples of delay). Held, what is measured is the engine's delay alone.
+    const phazite::test::HeldClock clock;
     juce::String report ("\n");
     const auto playNote = [&] (const juce::String& what)
     {
@@ -639,26 +644,36 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
                << (samples < 0 ? juce::String ("never")
                                : juce::String (samples) + " samples (" + milliseconds (samples * 1000.0 / benchRate) + ")")
                << " after the next block starts\n";
+        return samples;
     };
 
-    playNote ("A synth on a track");
+    const auto alone = playNote ("A synth on a track");
 
     // A limiter on another track: delay compensation holds back the track played too.
     const auto limiter = addDevice (*song, tracks[1], dev::Limiter::typeID);
     phazite::test::settle (500);
-    playNote ("With a limiter on another track");
+    const auto withLimiter = playNote ("With a limiter on another track");
 
-    // Switched off, the limiter delays nothing.
+    // Switched off, the limiter delays nothing: the plan lines the tracks up without its latency (SongPlayer::addDevices()).
     phazite::setDeviceOn (*song, limiter, false);
     phazite::test::settle (500);
-    playNote ("With that limiter switched off");
+    const auto switchedOff = playNote ("With that limiter switched off");
     phazite::setDeviceOn (*song, limiter, true);
 
     // A limiter on the master too.
     addDevice (*song, phazite::getMasterID (*song), dev::Limiter::typeID);
     phazite::test::settle (500);
-    playNote ("With a limiter on the master too");
+    const auto onMasterToo = playNote ("With a limiter on the master too");
 
+    // Delays the engine adds, exact whatever the machine: a limiter's latency for each limiter the note goes through or is
+    // lined up with, none for one switched off.
+    dev::Limiter limiterAlone;
+    limiterAlone.prepare (benchRate, benchBlock);
+    const auto latency = limiterAlone.getLatencySamples();
+    CHECK (alone >= 0);
+    CHECK (switchedOff == alone);
+    CHECK (withLimiter - alone == latency);
+    CHECK (onMasterToo - alone == 2 * latency);
     MESSAGE (report);
     phazite::setSong (context, nullptr);
 }

@@ -36,7 +36,7 @@ the run of 2026-11-16.
 | Startup: under 3 seconds to a project that plays, on an SSD, with the plug-in scan in the background | What Phazite does itself takes under 0.2 s. The whole start, with the process and the audio device, is not timed |
 | Memory: long audio streams from disk rather than loading into memory | Yes |
 | A key to its sound in under 15 ms with a wired output | Not measured |
-| A stopped song of 20 tracks (a synth, an EQ, a compressor and a reverb each) costs under 2 % of a core | No, on 2026-11-16: 7.5 % of a block on one thread, 2.6 % on four (1.39 % when the audit judged it, section 18) |
+| A stopped song of 20 tracks (a synth, an EQ, a compressor and a reverb each) costs under 2 % of a core | Yes, since 2026-11-16: 1.0 to 1.2 % on one thread, 0.6 to 0.8 % on four (7.5 % / 2.6 % before, its reverbs playing their tails from silence as it opened) |
 | A parameter's change takes under 0.5 ms of the message thread | Yes |
 | The check for unsaved changes takes under 1 ms | No, on 2026-11-16: 22 ms after a notification that changes nothing, in the song of "the UI's work on a big song" (0.78 ms when the audit measured it, section 7) |
 | An autosave keeps the message thread under 15 ms | Yes |
@@ -96,6 +96,21 @@ instruments hold their notes. The figure is the share of one core's time.
 | Chorus: three voices with Shimmer / eight voices spread | 0.36 / 0.71 | 2026-11-16 |
 | Vocoder, 40 bands | 3.24 | 2026-11-16 |
 
+Three of these were higher in the run of 2026-11-16 than the audit's numbers that stood here before (the Compressor
+0.35 against 0.19 of section 7, the Drum Sampler's beat 0.384 against 0.312 of section 18, the Vinyl with silence in
+0.012 against 0.005 of section 19). None is a change of the known-bugs round: `main` and the branch, run side by side on
+2026-11-16 **while other agents' builds and benchmarks loaded the machine** (each three times):
+
+| Device | `main` | The branch |
+|---|---|---|
+| Compressor (Clean, Drive at 0: its drive doesn't run) | 0.338, 0.370, 0.403 | 0.348, 0.344, 0.369 |
+| Drum Sampler, 4 pads every 16th | 0.363, 0.610, 0.435 | 0.300, 0.359, 0.305 |
+| Vinyl, silence in, stopped | 0.013, 0.014, 0.021 | 0.011, 0.011, 0.011 |
+
+The audit's numbers came from older builds of these devices. At its defaults the compressor's drive (at twice the rate)
+doesn't run at all, so the drive's cost is none of this. In the engine the Vinyl now sleeps while the song is stopped
+and silent (2026-11-16), so its stopped cost there is none.
+
 | Latency reported at 48 kHz | Samples | From |
 |---|---|---|
 | Limiter | 101 | 2026-11-16 |
@@ -109,6 +124,32 @@ instruments hold their notes. The figure is the share of one core's time.
 The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.10 to 0.25 ms after it to -30 dB (2026-11-16:
 the Synth 0.04 / 0.10 ms, the Wavetable 0.06 / 0.15, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum
 Sampler's and the effects' times to sound are not recorded.
+
+### Benchmark: each device's reset, as Play and a jump reset every device in the block that starts or lands
+
+Known bug 85's review: Play, and a jump while the song plays, reset every device on every track in the block that starts
+or lands (a jump while it is stopped resets nothing), so a reset must cost little; a device is reset too as it is
+switched on, and made ready anew by prepare(). Each device through its runner, as the engine resets it, after it has
+played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the median of 50, as a share of a block's
+2.67 ms. Run of 2026-11-16, on a quiet machine.
+
+| Device | Its reset (% of a block of 128 at 48 kHz) | From |
+|---|---|---|
+| Synth / Wavetable / FM | 0.02 / 0.02 / 0.01 | 2026-11-16 |
+| Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
+| EQ / Filter / Compressor / Limiter / Stereo Expander / Phaser / Vocoder | 0.00 | 2026-11-16 |
+| Multiband / Saturator / Exciter / Chorus | 0.01 | 2026-11-16 |
+| Vinyl | 0.02 | 2026-11-16 |
+| Delay | 0.32 | 2026-11-16 |
+| Reverb | 0.17 | 2026-11-16 |
+
+| The paths' rings (known bug 85's review) | Share of a block of 128 at 48 kHz | From |
+|---|---|---|
+| 400 rings of 16,512 samples (a song of 200 tracks sending to 8 returns), reset: marked silent, nothing written | 0.1 % | 2026-11-16 |
+| The same, cleared as a reset did before | 18.2 % | 2026-11-16 |
+
+So the reset of a song of 200 tracks, each an instrument, an EQ and a compressor, takes about 4 % of the block that
+starts; a delay or a reverb, which clear their lines, costs ten to twenty times what another device does.
 
 ### Benchmark: a sound made ready for the sampler as it loads, a minute of it in stereo
 
@@ -171,14 +212,25 @@ Worked out again (2026-11-16): the EQ 0.75 ms, the Reverb 0.35 ms, the sampler's
 
 ### Benchmark: a live note's way through Phazite's engine
 
-How soon a note played live is heard.
+How soon a note played live is heard: the delay Phazite's engine adds, from the start of the block after the note to
+the synth's sound above -60 dBFS. The engine places a live note as far into the next block as it came after the last
+block started (`Engine::takeLiveEvents()`), so that notes keep their timing at a block's delay; the benchmark holds the
+engine's clock (`HeldClock`), so that its note comes in as the last block started and what it measures is the engine's
+own delay, the same on any machine, and it checks it: a limiter's latency for each limiter the note goes through or is
+lined up with, none for one switched off.
 
 | What | Value | From |
 |---|---|---|
-| A live note on a synth, played about 1.5 ms after a block started: heard after the next block starts | 70 samples, 1.46 ms | 2026-11-16 |
-| ... with a limiter on another track (delay compensation holds the played track back too) | 185 samples, 3.85 ms | 2026-11-16 |
-| ... with that limiter switched off | 115 samples, 2.40 ms | 2026-11-16 |
-| ... with a limiter on the master too | 292 samples, 6.08 ms | 2026-11-16 |
+| A live note on a synth: heard after the next block starts | 2 samples, 0.04 ms (the synth's own rise) | 2026-11-16 |
+| ... with a limiter on another track (delay compensation holds the played track back too) | 103 samples, 2.15 ms | 2026-11-16 |
+| ... with that limiter switched off | 2 samples, 0.04 ms | 2026-11-16 |
+| ... with a limiter on the master too | 204 samples, 4.25 ms | 2026-11-16 |
+
+Before the clock was held, the note came in after the last block started by however long the test took between the two,
+some tens of samples that changed from note to note: the run of 2026-11-16 recorded 70, 185, 115 and 292 samples, as if
+the switched-off limiter delayed the note 45 samples. It delays nothing: a switched-off device's latency is left out of
+the plan's delay compensation (`SongPlayer::addDevices()`), as the code says, and those 45 samples were the note's
+place in its block.
 | A live note's wait with blocks of 256 samples at 48 kHz (every note waits one block) | 5.3 ms | 9 |
 
 ### Benchmark: a project's CPU, stopped and playing
@@ -189,11 +241,35 @@ on one thread and on four.
 | Song | Stopped: 1 thread / 4 | Playing: 1 thread / 4 | From |
 |---|---|---|---|
 | 20 empty tracks | 0.39 % / 0.42 % | 0.39 % / 0.43 % | 2026-11-16 |
-| 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 7.48 % / 2.61 % | 43.0 % / 11.9 % | 2026-11-16 |
+| 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 1.02 to 1.17 % / 0.55 to 0.78 % | 43.0 % / 11.9 % | stopped: 2026-11-16, after the fix below; playing: the run of 2026-11-16 |
 | 20 drum samplers, each a beat of a kick, a snare and sixteenth hats | 0.55 % / 0.39 % | 1.75 % / 0.84 % | 2026-11-16 |
 | 20 plug-in synths in one helper (the tests' stand-in), playing chords | 1.21 % / 1.03 % | 1.43 % / 1.73 % | 2026-11-16 |
 
-The 20 tracks of synths, stopped, took 1.39 % / 0.50 % when the audit measured them (sections 18 and 9).
+The stopped figure is the song's first seconds after it opens (20 blocks, then 500 timed: 5.2 seconds). The run of
+2026-11-16 recorded 7.48 % / 2.61 % for the 20 tracks of synths: each reverb, which nothing had come into, played its two
+seconds of tail from silence before it slept (`DeviceRunner` waited for a device's tail whether or not anything had come
+in). That was not new: `main` (before the known-bugs round) measured the same, side by side with the branch on
+2026-11-16 **while other agents' builds and benchmarks loaded the machine** (each three runs, `windows-profile`):
+
+| 20 tracks of a synth, an EQ, a compressor and a reverb, stopped | 1 thread | 4 threads |
+|---|---|---|
+| `main` | 7.30, 12.04, 8.50 % | 2.38, 4.61, 3.00 % |
+| The known-bugs branch, before the fix | 10.10, 7.32, 7.45 % | 4.04, 2.23, 2.23 % |
+| After the fix: a device that has heard nothing since it was reset rests while the song is stopped without waiting for its tail | 1.10, 1.02, 1.17 % | 0.73, 0.55, 0.78 % |
+
+The 1.39 % / 0.50 % that the audit recorded (sections 18 and 9) was measured with an earlier benchmark and reverb. A
+stopped song's devices now work no block once their sound has ended, which `tests/PerformanceGateTests.cpp` counts for
+each of Phazite's devices (see the gates); after Stop, as a chord ends, each rested after (in the gate, at 48 kHz in
+blocks of 256, to a quarter of a second): the Delay 7.5 s (its echoes, then its tail), the Reverb 6.0 s (its decay to
+silence, then its tail), the FM synth 3.8 s, the Drum Sampler and the Vinyl 2.5 s (its noise's hold), the Phaser 0.8 s,
+and every other device 0.5 s. While the song plays, a device still waits for its tail after silence, so that one whose
+sound starts within it plays as a render does (`docs/design/engine.md`).
+
+The plug-in synths, stopped and playing, cost the same in `main` and in the branch, side by side on 2026-11-16 (stopped
+1.13 to 2.28 % / 0.96 to 1.48 % against 1.15 to 1.23 % / 1.00 to 1.48 %; playing 1.44 to 2.21 % / 1.72 to 1.90 %
+against 1.45 to 1.88 % / 1.74 to 1.87 %), under load: what the run of 2026-11-16 recorded above the 0.80 % / 0.79 %
+and 1.10 % / 1.15 % of section 10 is not a change of the known-bugs round. No block's work changed on their path: a
+plug-in never sleeps (it may play with nothing coming in), and each block is a round trip.
 
 Muted tracks play on (their instruments and effects, for when they are heard again: known bug 78, 2026-11-15), so they
 cost what heard ones do; Freeze frees them. Measured side by side on 2026-11-16, `windows-profile`:
@@ -202,6 +278,7 @@ cost what heard ones do; Freeze frees them. Measured side by side on 2026-11-16,
 |---|---|---|
 | 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 7.48 % / 2.61 % | 42.97 % / 11.92 % |
 | The same, every track muted | 7.49 % / 2.31 % | 41.77 % / 11.35 % |
+| After the fix above, heard / muted (three runs each, under load) | 1.02 to 1.17 % / 0.55 to 0.78 %; 1.03 to 1.15 % / 0.56 to 0.71 % | 46 to 50 % / 12 to 15 %; 48 to 49 % / 13 to 14 % |
 
 Every path into a sum keeps a ring of what came into it since 2026-11-15, a delay of none too (each block written into
 it: two channels of the block's length). The same song heard, measured just before and after, `windows-profile`, **while
@@ -327,6 +404,23 @@ What it says of scale:
 - **An edit compiles what it changed** (2026-11-16): at 100 tracks a note added or each step of a drag takes about
   1.5 ms of the message thread, where it took 40 ms, more than two frames, compiling the whole song.
 
+### Benchmark: an everyday edit's block while its paths fade, on the benchmark song
+
+Known bug 167's review: an edit that changes where sound goes while the song plays (here a send taken away, then given
+back by Undo, on each of 40 tracks in turn) fades the path that leaves out on the plan played, which plays in place of
+the new plan for those samples (never beside it), and the new path fades in by itself. The block in which the edit's
+plan is taken, against the ten blocks before each edit, on the benchmark song of 100 tracks (as above) playing at 48
+kHz in blocks of 480 on one thread; each a share of the block's 10 ms. Run of 2026-11-16, on a quiet machine.
+
+| 100 tracks, 48 kHz, blocks of 480, one thread | Mean | 99th percentile | From |
+|---|---|---|---|
+| The blocks around the edits | 166.4 % | 200.6 % | 2026-11-16 |
+| The block that takes a send taken away or given back | 167.2 % | 211.3 % | 2026-11-16 |
+
+The edit's block costs what the others do, within what varies from block to block: the fades replace the old plan's
+work for their samples rather than add a second plan's. (One thread can't play this song in real time, as the section
+above says; the comparison is what matters here.)
+
 ### Benchmark: a song of 500 audio clips, its plan and an edit
 
 50 tracks of ten audio clips, each clip a file of its own (a song of recordings), half a second long, in the project's
@@ -397,8 +491,9 @@ time); now steady 6.30, the fade's first 6.74, a block held 3.19 (silent but for
 5.93, then 4.4 to 4.9 while the spares are made ready again for the loop's start. On one thread, the same shape: steady
 22.0, fade 20.2, held 5.6, landing 18.6.
 
-Play and a jump reset every device and every path's ring, which starts the song from silence (`Benchmark: each device's
-reset`, 2026-11-16): a ring's reset writes nothing now, its past silence: 400 rings of a third of a second at 48 kHz
+Play, and a jump while the song plays, reset every device and every path's ring, which starts the song from silence
+(`Benchmark: each device's reset`, 2026-11-16): a ring's reset writes nothing now, its past silence: 400 rings of a
+third of a second at 48 kHz
 in 0.1 % of a block, where clearing them, as a reset did before, takes 18.2 %. A device's own reset takes 0.02 % of a
 block at most for the instruments, 0.32 % for the delay (its seconds of buffer) and 0.17 % for the reverb, 0.02 % or
 less for the rest: which would make about 4 % for the song's 600 devices; measured in the landing block under load,
@@ -691,6 +786,13 @@ thread that spins for 30 µs, or until the helper answers, before it sleeps: eac
 median of 56 to 67 µs for the stand-in, 74 to 86 µs for Surge XT Effects, 136 to 147 µs for Surge XT) and costs more
 of a core here.
 
+The 34 against 28 microseconds is not a change of the known-bugs round: `main` and the branch, run side by side on
+2026-11-16 **while other agents' builds and benchmarks loaded the machine**, gave the same (the stand-in in a helper, a
+median of 23.7 to 34.6 µs in `main`, 34.3 to 35.3 µs in the branch; Surge XT Effects 57.3 and 63.8 µs against 29.5 to
+52.7 µs; Surge XT 90.6 and 153.6 µs against 91.3 to 121.9 µs). This benchmark plays the helper's channel directly
+(`sandbox::RemoteInstance`), and nothing on that path changed in the round; section 10 measured on an older build and
+Windows.
+
 ### Benchmark: eight sandboxed synths in a block at 128 samples
 
 Eight Surge XTs, a chord each, in a block of 128 samples.
@@ -703,6 +805,10 @@ Eight Surge XTs, a chord each, in a block of 128 samples.
 | A helper each, all handed over first, then waited for | 275 µs | 362 µs | 1.7 ms | 1.9 % here, 66 % in the helpers | 339 MB | 2026-11-16 |
 | One helper with all eight, each waited for in turn | 489 µs | 855 µs | 3.8 ms | 2.6 % here, 17.3 % in the helper | 244 MB | 2026-11-16 |
 | One helper with all eight, handed over first | 259 µs | 338 µs | 1.2 ms | 3.2 % here, 37 % in the helper | 245 MB | 2026-11-16 |
+
+The helpers' CPU varies most from run to run: side by side on 2026-11-16 under load, a helper each, handed over first,
+47.8 to 51.0 % in `main` against 36.9 to 57.9 % in the branch, and one helper with all eight 43.7 to 50.5 % against 32.4
+to 51.7 %. The 66 % and 37 % above, against the 54 % and 45 % of sections 13 and 10, are within that.
 
 ### Benchmark: what the browser's search and the commands that read audio files keep the message thread for
 
@@ -829,6 +935,10 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   as it counts what it offers (in `tests/BrowserFilterTests.cpp`).
 - a branch switch, a checkout, going back to the branch, the start of a merge and Merge read, split and write no song on
   the message thread (`VersionStore::countSongsRead()`, `countSongsWritten()`, `countSongsSplit()`; known bug 126).
+- a stopped song's devices work no block once their sound has ended, each of Phazite's own (an instrument alone, an
+  effect after a synth, and a reverb an LFO modulates): none in a second as the song opens, nothing played, and none in
+  a second after Stop once each has rested (`DeviceRunner::getBlocksWorked()`; until 2026-11-16 a reverb that had heard
+  nothing still played its two seconds of tail as a project opened, and the vinyl never rested).
 
 They don't see anything that does the same amount of work more slowly: a device three times as costly, a slower
 paint.

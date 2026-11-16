@@ -12,6 +12,7 @@
 #include "AudioThreadMonitor.h"
 #include "BenchmarkSong.h"
 #include "EditorScreens.h"
+#include "EnginePlayback.h"
 #include "PerformanceCounts.h"
 #include "TestClips.h"
 #include "TestDevices.h"
@@ -42,12 +43,14 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/ModulationValues.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
@@ -60,6 +63,7 @@
 #include "ui/mixer/MixerView.h"
 #include "ui/playlist/TrackHeader.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -1316,4 +1320,137 @@ TEST_CASE (
     REQUIRE (phazite::test::dispatchMessagesUntil ([&offered] { return offered.isNotEmpty(); }));
     CHECK (phazite::VersionStore::countSongsRead().onMessageThread == openBefore.onMessageThread);
     CHECK (phazite::VersionStore::countSongsRead().all > openBefore.all);
+}
+
+//==============================================================================
+namespace
+{
+// Each device the engine plays now (the plan's strips' own, no container here), by its node: its name and how many blocks it
+// has worked, those it slept through not counted (engine::DeviceRunner::getBlocksWorked()).
+struct Worked
+{
+    juce::String name;
+    std::uint64_t blocks = 0;
+};
+
+std::map<const phazite::engine::DeviceNode*, Worked> countBlocksWorked()
+{
+    std::map<const phazite::engine::DeviceNode*, Worked> worked;
+
+    for (const auto& strip : getPlan().strips)
+        for (const auto& device : strip.devices)
+            worked[device.node.get()] = { juce::String (std::string (device.node->getDeviceInfo().name)),
+                                          device.node->getRunner().getBlocksWorked() };
+
+    return worked;
+}
+} // namespace
+
+TEST_CASE ("Performance gate: a stopped song's devices work no block once their sound has ended, each of Phazite's own")
+{
+    // A stopped song of 20 tracks of a synth, an EQ, a compressor and a reverb cost 7.5 % of a core in its first seconds
+    // (docs/performance.md): each reverb, which nothing had come into, played its two seconds of tail from silence as the
+    // project opened (stopped, a device that has heard nothing since it was reset has nothing to ring with). Counted here,
+    // not timed: the blocks
+    // each device works, which once it rests (engine/nodes/DeviceRunner.h) are none. Every one of Phazite's own devices
+    // rests; the vinyl, whose noise plays with the song, rests while it is stopped (devices::Processor::playsWithTheSong()).
+    // A plug-in never does (it may play with nothing coming in), nor is it counted here.
+    phazite::test::TestSong s;
+
+    // A track for each of Phazite's own devices: an instrument alone, an effect after a synth, each with a chord in its first
+    // beat; and a reverb whose mix an LFO moves, which rests all the same (its knobs show the modulation: known bug 171).
+    const auto addChord = [&s] (phazite::TrackID track) { s.addChord (s.addMidiClip (track, 0.0, 4.0), { 48, 55, 64 }, 0.0, 1.0); };
+
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        const auto track = s.addTrack (juce::String (std::string (info->name)));
+        const std::string type (info->typeID);
+
+        if (info->kind == dev::DeviceKind::effect)
+        {
+            s.setInstrument (track, dev::Synth::typeID);
+            s.addEffect (track, type.c_str());
+        }
+        else
+        {
+            s.setInstrument (track, type.c_str());
+        }
+
+        addChord (track);
+    }
+
+    const auto modulated = s.addTrack ("Modulated reverb");
+    s.setInstrument (modulated, dev::Synth::typeID);
+    const auto reverb = s.addEffect (modulated, "phaziteReverb");
+    s.modulate (s.addModulator (modulated, phazite::ModulatorType::lfo), { reverb, "mix" }, -0.5f);
+    addChord (modulated);
+
+    phazite::test::EnginePlayback playback;
+    const auto blockSeconds = playback.getBlockSize() / playback.getSampleRate();
+
+    // Whether each device worked no block between two counts.
+    const auto checkRested = [] (const std::map<const phazite::engine::DeviceNode*, Worked>& before, const juce::String& when)
+    {
+        for (const auto& [node, now] : countBlocksWorked())
+        {
+            const auto found = before.find (node);
+            REQUIRE (found != before.end());
+            const auto blocks = now.blocks - found->second.blocks;
+            INFO (now.name << " " << when << ": " << blocks << " blocks worked in a second");
+            CHECK (blocks == 0);
+        }
+    };
+
+    // As the song opens, nothing played: every device rests within a quarter of a second (DeviceRunner::sleepAfterSeconds),
+    // a reverb's and a delay's long tails too, as nothing came into them to ring with.
+    playback.play (0.5);
+    const auto opened = countBlocksWorked();
+    playback.play (1.0);
+    checkRested (opened, "as the song opens");
+
+    // Played, then stopped as the chord ends (its beat, at 120 beats a minute): each rests once its sound has ended, a reverb's
+    // tail and a delay's echoes heard out. A quarter of a second at a time, the last time each worked noted, until none has
+    // worked for two seconds (or a minute has gone).
+    s.run ("transport.playStop");
+    playback.play (0.5);
+    s.run ("transport.playStop");
+    REQUIRE_FALSE (phazite::isPlaying (s.context));
+
+    auto last = countBlocksWorked();
+    std::map<const phazite::engine::DeviceNode*, double> workedUntil;
+    auto seconds = 0.0, quietFor = 0.0;
+
+    while (quietFor < 2.0 && seconds < 60.0)
+    {
+        playback.play (0.25);
+        seconds += 0.25;
+        quietFor += 0.25;
+        const auto now = countBlocksWorked();
+
+        for (const auto& [node, worked] : now)
+        {
+            if (worked.blocks != last[node].blocks)
+            {
+                workedUntil[node] = seconds;
+                quietFor = 0.0;
+            }
+        }
+
+        last = now;
+    }
+
+    // Each device's type, and after how long it rested: the longest of those of its type, to a block and a quarter of a second.
+    juce::String report ("\nAfter Stop, as its chord ended, each device rested after (seconds, the longest of its kind):");
+    std::map<juce::String, double> restedAfter;
+
+    for (const auto& [node, worked] : last)
+        restedAfter[worked.name] = std::max (restedAfter[worked.name], workedUntil[node] + blockSeconds);
+
+    for (const auto& [name, after] : restedAfter)
+        report << "\n" << name << ": " << juce::String (after, 2);
+
+    MESSAGE (report);
+    const auto ended = countBlocksWorked();
+    playback.play (1.0);
+    checkRested (ended, "after Stop, its sound ended");
 }

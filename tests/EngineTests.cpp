@@ -446,23 +446,40 @@ TEST_CASE ("Runners sleep once what comes in and what they play have been silent
     instrumentBlock.values = toneValues;
     juce::AudioBuffer<float> buffer (2, deviceBlock);
 
-    // A quarter of a second of silence (24 blocks), then the instrument sleeps; the effect, which reports a tail of a second
-    // and a half, once silence has lasted as long as that (141 blocks).
-    for (int b = 0; b < 150; ++b)
+    // The song stopped, a quarter of a second of silence (24 blocks), then both sleep: the effect too, though it reports a
+    // tail of a second and a half, as nothing has come into it since it was prepared to ring with.
+    const auto playSilence = [&] (int blocks)
     {
-        buffer.clear();
-        effect.process (buffer, 0, deviceBlock, effectBlock);
-        instrument.process (buffer, 0, deviceBlock, instrumentBlock);
-    }
+        for (int b = 0; b < blocks; ++b)
+        {
+            buffer.clear();
+            effect.process (buffer, 0, deviceBlock, effectBlock);
+            instrument.process (buffer, 0, deviceBlock, instrumentBlock);
+        }
+    };
 
-    CHECK (gain.processed == 141);
+    playSilence (150);
+    CHECK (gain.processed == 24);
     CHECK (tone.processed == 24);
 
     // The first sound wakes the effect, which treats it whole.
     buffer = makeLevel (2, deviceBlock, 1.0f);
     effect.process (buffer, 0, deviceBlock, effectBlock);
-    CHECK (gain.processed == 142);
+    CHECK (gain.processed == 25);
     CHECK (buffer.getSample (0, 0) == doctest::Approx (0.5f).epsilon (0.001));
+
+    // Having heard sound, it sleeps once silence has lasted as long as its tail (141 blocks).
+    playSilence (150);
+    CHECK (gain.processed == 25 + 141);
+
+    // While the song plays, it waits for its tail even after a reset, nothing heard: its inner motion runs on as a render's
+    // does, for a sound that comes within it.
+    effect.reset();
+    effectBlock.isPlaying = true;
+    const auto before = gain.processed;
+    playSilence (150);
+    CHECK (gain.processed == before + 141);
+    effectBlock.isPlaying = false;
 
     // A note wakes the instrument, which plays it from its sample.
     std::array<dev::NoteEvent, 1> note { dev::NoteEvent { dev::NoteEvent::Type::noteOn, 48, 60, 1.0f } };

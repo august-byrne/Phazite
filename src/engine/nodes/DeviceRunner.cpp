@@ -81,6 +81,7 @@ void DeviceRunner::prepare (double rate, int maximumBlockSize)
     sleepAfterSamples = std::max ((int) (sleepAfterSeconds * rate), 2 * latencySamples);
     silentSamples = 0;
     asleep = false;
+    heard = false;
     letGoOfNotes();
     hasPreviousValues = false;
     startedEarly = false;
@@ -100,6 +101,7 @@ void DeviceRunner::reset()
     processor->reset();
     silentSamples = 0;
     asleep = false;
+    heard = false;
     letGoOfNotes();
     hasPreviousValues = false;
 
@@ -258,7 +260,10 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
                     && (isSynth || isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
                     && (! begun.hasSidechain || isQuiet (buffer, start, numSamples, 2, 2, silence));
 
-    if (asleep && begun.quietIn && ! in.isRendering)
+    // Asleep, it sleeps on while nothing comes in; but one that plays with the song wakes as the song plays. In the engine,
+    // Play resets every runner (Engine::flushStrip()), which is what wakes it there; this is the backstop for a runner played
+    // without that reset (a test's, or another engine's).
+    if (asleep && begun.quietIn && ! in.isRendering && ! (in.isPlaying && processor->playsWithTheSong()))
     {
         for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
             buffer.clear (channel, start, numSamples);
@@ -284,6 +289,8 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
     }
 
     asleep = false;
+    heard = heard || ! begun.quietIn;
+    blocksWorked.store (blocksWorked.load (std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 
     // Taken whole, it gets the values of what moves as changes: those it moves now, and those it moved in the last block.
     if (processor->takesWholeBlocks())
@@ -312,13 +319,16 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
 
     // Silent in and out long enough, its parts' own outputs too (a pad on a track of its own rings on after the sampler's
     // own sound has ended): asleep from the next block. Long enough is as long as the tail it reports, as it is now, too:
-    // a delay is silent between its echoes, and asleep it would never play the next.
+    // a delay is silent between its echoes, and asleep it would never play the next; but not, while the song is stopped, for
+    // one that has heard nothing since it was prepared or reset, which holds nothing to ring with.
     if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence)
         && arePartsQuiet (in.partOutputs, in.outputOffset, numSamples, silence))
     {
         silentSamples = (int) std::min<std::int64_t> ((std::int64_t) silentSamples + numSamples, maximumSilentSamples);
         asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence()
-                 && (double) silentSamples >= processor->getTailSeconds() * sampleRate && numHeld == 0 && ! pedalDown;
+                 && ! (in.isPlaying && processor->playsWithTheSong())
+                 && ((! heard && ! in.isPlaying) || (double) silentSamples >= processor->getTailSeconds() * sampleRate) && numHeld == 0
+                 && ! pedalDown;
     }
     else
     {

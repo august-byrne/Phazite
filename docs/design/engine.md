@@ -208,7 +208,17 @@ surroundings:
 - it applies an effect's mix, with the sound coming in delayed as much as the effect delays its own;
 - it plays a mono channel in stereo;
 - it lets a device sleep on silence, but never an instrument while it holds a note or its sustain pedal; asleep, its
-  parameters still play their modulation, so that what shows them moves.
+  parameters still play their modulation, so that what shows them moves. A device sleeps once what comes in and what
+  it plays have been silent for a quarter of a second and for as long as the tail it reports: a reverb rings out its
+  decay, a delay its echoes. While the song is stopped, one that has heard nothing since it was last reset or made ready
+  (a project just opened, a device added or switched on) has nothing to ring with, and sleeps after the quarter of a
+  second alone. A device is reset by Play, by a jump while the song plays and by being switched on; a jump while the
+  song is stopped resets nothing, so what rings on before it is waited for. While the song plays, every device
+  waits for its tail, so that one whose sound starts within it plays as a render does (a render never sleeps, and a
+  reverb's sway runs on through silence). A muted track's devices sleep the same way. The vinyl, whose surface noise
+  plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays.
+  `tests/PerformanceGateTests.cpp` counts the blocks each of Phazite's devices works once stopped, which are none once
+  its sound has ended.
 
 A container of devices plays as one device, its chains each in a buffer of its own. A part of a device's sound can
 play on a mixer channel of its own: a drum sampler's pad on a track of its own.

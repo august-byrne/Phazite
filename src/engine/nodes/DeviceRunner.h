@@ -21,6 +21,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -153,6 +154,10 @@ public:
     // glide or stretch in either): its values were as they had been, and went untouched (the audio thread's).
     bool isSettled() const noexcept { return lastSettled; }
 
+    // How many blocks it has played since it was made, those it slept through not counted (any thread): what a test counts
+    // to see it rest.
+    std::uint64_t getBlocksWorked() const noexcept { return blocksWorked.load (std::memory_order_relaxed); }
+
 private:
     const devices::DeviceInfo& info;
     std::unique_ptr<devices::Processor> processor;
@@ -225,12 +230,25 @@ private:
     // work until sound, a note or an event comes in, or something waits in the device to play
     // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render, nor an instrument while it holds
     // a note or its sustain pedal is down: a held note can be silent for a while and sound again (a slow LFO on its filter,
-    // a sample with a gap), and asleep it would stay silent (known bug 37 until 2026-11-14).
+    // a sample with a gap), and asleep it would stay silent (known bug 37 until 2026-11-14). While the song is stopped, its
+    // tail is waited for only once something has come in since it was prepared or reset (heard): until then it holds
+    // nothing to ring with (a device given nothing plays nothing, stopped or playing, from prepare() or a reset(): the
+    // conformance suite's rule), so a reverb that hasn't heard anything rests after sleepAfterSeconds rather than its decay:
+    // as a project opens, or a device is added or switched on while the song is stopped. A device is reset by Play, by a
+    // jump while the song plays (Engine::flushStrip()), by being switched on (DeviceNode), and prepared by prepare(); a jump
+    // while the song is stopped resets nothing, so a tail ringing before it rings on, and is waited for. While
+    // the song plays, it waits for its tail all the same, so that a device whose sound starts within that tail plays it as a
+    // render does (a render never sleeps): its inner motion, which runs on through silence (a reverb's lines' sway), would
+    // stand still asleep, and a send to a reverb that begins a second in would sound otherwise live (the golden mix). One
+    // that plays with the song (devices::Processor::playsWithTheSong(): the vinyl's noise) sleeps only while it is stopped,
+    // and wakes as it plays.
     static constexpr float silence = 1.0e-6f; // -120 dBFS
     static constexpr double sleepAfterSeconds = 0.25;
     static constexpr int maximumSilentSamples = 1 << 30; // counted no further: longer than any tail
     int silentSamples = 0, sleepAfterSamples = 0;
-    bool asleep = false;
+    bool asleep = false, heard = false;
+    std::atomic<std::uint64_t> blocksWorked { 0 }; // written by the audio thread alone
+    static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
     // How many times it holds each note (the song's and a key played live can hold the same one), how many in all, and
     // whether its pedal is down.
     std::array<std::uint8_t, 128> held {};

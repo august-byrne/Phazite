@@ -351,7 +351,7 @@ TEST_CASE ("The vinyl passes the sound in step and as late as it says, at every 
     }
 }
 
-TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl plays it, and its noise needs no sleep")
+TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl plays it, and lets it sleep only while the song is stopped")
 {
     constexpr double rate = 48000.0;
     constexpr int blockSize = 256;
@@ -359,7 +359,7 @@ TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl play
     runner.prepare (rate, blockSize);
     const auto latency = runner.getLatencySamples();
     REQUIRE (latency > 0);
-    CHECK_FALSE (runner.getProcessor().sleepsOnSilence());
+    CHECK (runner.getProcessor().playsWithTheSong()); // its noise starts with the song
 
     // At no mix: the sound as the vinyl's linear way leaves it (its oversampling turns the top octave's phase), as late as the
     // vinyl plays it: what came in, that late, to within what that turn makes of a sound below a sixteenth of the rate, with Bass
@@ -404,6 +404,49 @@ TEST_CASE ("The vinyl's runner mixes what came in back as late as the vinyl play
     CHECK (largest < 0.5f * 0.01f); // 40 dB under it
 }
 
+TEST_CASE ("The vinyl rests while the song is stopped and silent, and its noise starts with the song as it plays")
+{
+    // Its surface noise plays while the song does, sound or none coming in: it kept its runner from ever letting it sleep,
+    // a stopped song's vinyl working every block for nothing. Now it sleeps while the song is stopped, and the song playing
+    // wakes it, nothing coming in.
+    constexpr double rate = 48000.0;
+    constexpr int blockSize = 480;
+    phazite::engine::DeviceRunner runner (Vinyl::info, std::make_unique<Vinyl>());
+    runner.prepare (rate, blockSize);
+    const auto values = with ({ { "hiss", -30.0f }, { "crackle", -12.0f } });
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    phazite::engine::DeviceRunner::Block block;
+    block.values = values;
+
+    // A second stopped, silence in: asleep within a quarter of a second (nothing came in for it to ring with), working no block
+    // in the second after.
+    const auto playBlocks = [&] (int count, bool playing)
+    {
+        auto loudest = 0.0f;
+
+        for (int b = 0; b < count; ++b)
+        {
+            buffer.clear();
+            block.isPlaying = playing;
+            runner.process (buffer, 0, blockSize, block);
+            loudest = std::max (loudest, buffer.getMagnitude (0, blockSize));
+        }
+
+        return loudest;
+    };
+
+    CHECK (playBlocks (100, false) == 0.0f);
+    const auto rested = runner.getBlocksWorked();
+    CHECK (playBlocks (100, false) == 0.0f);
+    CHECK (runner.getBlocksWorked() == rested);
+
+    // The song plays: it wakes in the first block (worked, though its noise, as late as its latency, may come after it), and
+    // its noise sounds, silence coming in; and while the song plays it works every block.
+    playBlocks (1, true);
+    CHECK (runner.getBlocksWorked() == rested + 1);
+    CHECK (playBlocks (100, true) > 0.0f);
+    CHECK (runner.getBlocksWorked() == rested + 101);
+}
 TEST_CASE ("At a mix below 100 %, the vinyl meets what came in in phase: its oversampling and Bass Mono turn the copy as the sound")
 {
     // The same tone on both sides, with nothing moving it (no wow or flutter, no distortion, no noise): what comes out is the

@@ -33,8 +33,8 @@
 //
 // Its editor reads the record's turn, the pitch now and its history, and the clicks as they come. Real-time safe: nothing
 // is allocated after prepare(), and while the song is stopped and nothing comes in it rests, after its delay line has
-// emptied, until sound or the song comes again (so its runner never needs to put it to sleep, which would keep its noise
-// from starting at a silent song's start).
+// emptied, until sound or the song comes again; its runner puts it to sleep only while the song is stopped, and wakes it as the
+// song plays (playsWithTheSong()), so that its noise starts at a silent song's start.
 #pragma once
 
 #include "SurfaceNoise.h"
@@ -109,7 +109,7 @@ public:
     int getLatencySamples() const override { return latency; }
     bool delaysDry() const noexcept override { return true; }
     double getTailSeconds() const override;
-    bool sleepsOnSilence() const noexcept override { return false; } // its noise must start with the song, sound or none
+    bool playsWithTheSong() const noexcept override { return true; } // its noise must start with the song, sound or none
 
     static constexpr double pitchReadingsPerSecond = 100.0;
     static constexpr double holdSeconds = 2.0; // the noise plays on for this long after the sound coming in stops

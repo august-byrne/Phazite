@@ -10,7 +10,9 @@
 //   every parameter in turn at its lowest and its highest, with all of them there, and at settings drawn at random; and
 //   an effect handed a block of what isn't sound (not numbers, infinities, values beyond any level) plays on, there and
 //   after, exactly as if it had been handed silence.
-// - Nothing: with nothing to play (no notes, or silence coming in from the start), a device plays nothing at all.
+// - Nothing: with nothing to play (no notes, or silence coming in from the start), a device plays nothing at all; nor after a
+//   reset() that follows sound. And the same with the song stopped, as the engine plays it live (no exception: what the
+//   runner's sleep leans on, which waits for no tail from a device that has heard nothing since it was reset or prepared).
 // - Tail: once what a device is given has stopped and it has been silent for as long as the tail it reports
 //   (Processor::getTailSeconds(); no shorter than its runner waits before it lets it sleep), it stays silent: what the
 //   runner's sleep and the end of an export rely on (model/playback/OfflineRender.cpp).
@@ -60,6 +62,7 @@ enum class Rule
 {
     numbers,
     nothing,
+    nothingStopped,
     tail,
     latency,
     mix,
@@ -80,6 +83,7 @@ struct RuleInfo
 constexpr RuleInfo rules[] = {
     { Rule::numbers, "numbers", nullptr, 0.0 },
     { Rule::nothing, "nothing", nullptr, 0.0 },
+    { Rule::nothingStopped, "nothing, stopped", nullptr, 0.0 },
     { Rule::tail, "tail", nullptr, 0.0 },
     // A tenth of a sample: what the measurement is good for (the parabola through a cross-correlation's peak) where a device
     // adds a little of its effect to the sound.
@@ -537,6 +541,45 @@ void checkNothing (const devices::DeviceInfo& info, double rate, Findings& findi
 
     if (peak > 0.0)
         findings.fail ("with nothing to play it plays, as loud as " + juce::String (probe::inDecibels (peak), 1) + " dB" + at (rate));
+
+    // After a reset() that follows sound (an instrument's notes, held), nothing either: the reset leaves nothing to ring.
+    play (device, makeMaterial (info, 8192, 6, 1.0f), usualBlock);
+    device.reset();
+    const auto afterReset = probe::getPeak (device.played (probe::makeSilence (8192, getNumChannels (info)), usualBlock));
+
+    if (afterReset > 0.0)
+        findings.fail ("after a reset() that followed sound it plays, as loud as " + juce::String (probe::inDecibels (afterReset), 1)
+                       + " dB" + at (rate));
+}
+
+// The same with the song stopped, as the engine plays it live (no render): from prepare(), and after a reset() that follows
+// sound. Its runner lets it sleep only after a quarter of a second of silence, longer than what is played here, so that each
+// block is the device's own (checked: no block slept).
+void checkNothingStopped (const devices::DeviceInfo& info, double rate, Findings& findings)
+{
+    probe::Device device (info);
+    device.isRendering = false;
+    device.prepare (rate, usualBlock);
+    constexpr int length = 8192;
+
+    const auto check = [&] (const juce::String& when)
+    {
+        const auto before = device.getRunner().getBlocksWorked();
+        auto silence = probe::makeSilence (length, getNumChannels (info));
+        device.playStopped (silence, usualBlock);
+
+        if (device.getRunner().getBlocksWorked() - before != (std::uint64_t) ((length + usualBlock - 1) / usualBlock))
+            findings.fail ("its runner slept " + when + at (rate) + ", so what it plays wasn't heard");
+
+        if (const auto peak = probe::getPeak (silence); peak > 0.0)
+            findings.fail ("stopped, with nothing to play " + when + ", it plays, as loud as " + juce::String (probe::inDecibels (peak), 1)
+                           + " dB" + at (rate));
+    };
+
+    check ("from prepare()");
+    play (device, makeMaterial (info, length, 6, 1.0f), usualBlock);
+    device.reset();
+    check ("after a reset() that followed sound");
 }
 
 void checkTail (const devices::DeviceInfo& info, double rate, Findings& findings)
@@ -867,6 +910,20 @@ TEST_CASE ("A device with nothing to play plays nothing")
                 checkNothing (info, rate, findings);
 
             judge (info, Rule::nothing, findings);
+        });
+}
+
+TEST_CASE ("A device with nothing to play plays nothing while the song is stopped, from prepare() and after a reset()")
+{
+    forEachDevice (
+        [] (const devices::DeviceInfo& info)
+        {
+            Findings findings;
+
+            for (const auto rate : rates)
+                checkNothingStopped (info, rate, findings);
+
+            judge (info, Rule::nothingStopped, findings);
         });
 }
 

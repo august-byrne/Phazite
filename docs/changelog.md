@@ -330,6 +330,14 @@ too. A line names the bug's number in that list.
   thread is stuck, and the folder says "This drive isn't answering..."; a key pressed on a folder being read waits
   only a moment and gives way to whatever the user does next (10 to 17 ms of the message thread instead of 420 to
   440 ms for a folder of 20,000 sounds).
+- A stopped song's devices that have heard nothing since they were reset rest after a quarter of a second rather than
+  ring out a tail from silence: 20 tracks of a synth, an EQ, a compressor and a reverb cost 1.1 % of a core stopped,
+  not 7.5 % (as in `main`: each reverb played two seconds of tail as the song opened). While the song plays nothing
+  changes. The Vinyl rests while the song is stopped and silent, and wakes with its noise as the song plays. A
+  performance gate counts that no device works a block once its sound has ended, and the conformance suite checks that
+  a device given nothing plays nothing while stopped and after a reset, which the rule leans on.
+- The live-note benchmark holds the engine's clock and checks its delays: 101 samples for each limiter the note goes
+  through or is lined up with, none for one switched off (the 45 samples the quiet run showed were the wall clock's).
 
 ## Stage 2, the last step: the first push (2026-11-15)
 
