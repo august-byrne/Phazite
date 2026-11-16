@@ -306,7 +306,10 @@ void Wavetable::findAreasAndMeans (const std::vector<Harmonics>& frames, float s
             for (; folds < upTo; ++folds)
             {
                 const auto h = folds + 1;
-                const auto d = harmonics[folds] / std::complex<float> (0.0f, juce::MathConstants<float>::twoPi * (float) h);
+                // c / (i a), written out: the compiler's division of complex numbers warns of a divisor it can't see is not
+                // zero (C4723, in an optimised build), and a is 2 pi h, with h from 1.
+                const auto a = juce::MathConstants<float>::twoPi * (float) h;
+                const std::complex<float> d (harmonics[folds].imag() / a, -harmonics[folds].real() / a);
                 folded[(size_t) (h % areaPoints)] += std::conj (d);
             }
 
