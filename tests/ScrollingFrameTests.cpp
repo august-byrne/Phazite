@@ -137,6 +137,18 @@ struct PlayingSong
         REQUIRE (other.isValid());
         phazite::addNote (s, other, 64, beats (41.5), phazite::BeatDuration::fromBeats (1.0), 90);
 
+        // More tracks than show at once, each with a clip of a note in view: the rows under the view have no headers or clips
+        // yet (the playlist makes them for the rows in view, Playlist.h).
+        const auto all = phazite::ensureTracks (s, 16);
+
+        for (size_t i = 2; i < all.size(); ++i)
+        {
+            const auto more =
+                phazite::insertMidiClip (s, all[i], { beats (33.0 + (double) i * 0.5), beats (40.0 + (double) i * 0.5) }, nullptr);
+            REQUIRE (more.isValid());
+            phazite::addNote (s, more, 48 + (int) i, beats (34.0 + (double) i * 0.5), phazite::BeatDuration::fromBeats (1.0), 80);
+        }
+
         const auto volume = phazite::getVolume (context, tracks[1]);
         phazite::showAutomationLane (volume);
 
@@ -258,6 +270,7 @@ void checkTimelineMovesWithTheSong (PlayingSong& song, phazite::ui::TimelineEdit
             CAPTURE (step);
             at += step;
             song.showFrameAt (editor, at + part);
+            phazite::test::dispatchPendingMessages(); // as the app's message loop runs between frames: what a jump left for later
             REQUIRE (editor.getSubPixel() == doctest::Approx (part).epsilon (1.0e-4));
             const auto frame = window.paintEverything (renderer);
 
@@ -477,5 +490,96 @@ TEST_CASE ("At a display scale of 150 %, the view starts on the screen's whole p
         CHECK (onScreenPixels (view.start.inBeats() * view.pixelsPerBeat));
         CHECK (roll.getSubPixel() >= 0.0f);
         CHECK (roll.getSubPixel() < 2.0f);
+    }
+}
+
+namespace
+{
+// Where two frames differ in an area, the second scrolled up by so many rows of pixels: each pixel of the second is compared
+// with the one so many rows under it in the first (as far as what it shows moved up).
+Difference compareScrolledUp (const juce::Image& before, const juce::Image& after, juce::Rectangle<int> area, int moved)
+{
+    const juce::Image::BitmapData pixelsBefore (before, juce::Image::BitmapData::readOnly);
+    const juce::Image::BitmapData pixelsAfter (after, juce::Image::BitmapData::readOnly);
+    const auto near = [] (juce::uint8 x, juce::uint8 y) { return std::abs ((int) x - (int) y) <= 2; };
+    Difference difference;
+
+    for (auto y = area.getY(); y + moved < area.getBottom(); ++y)
+        for (auto x = area.getX(); x < area.getRight(); ++x)
+        {
+            const auto p = pixelsBefore.getPixelColour (x, y + moved), q = pixelsAfter.getPixelColour (x, y);
+
+            if (near (p.getRed(), q.getRed()) && near (p.getGreen(), q.getGreen()) && near (p.getBlue(), q.getBlue())
+                && near (p.getAlpha(), q.getAlpha()))
+                continue;
+
+            if (difference.pixels++ == 0)
+                difference.first = { x, y };
+        }
+
+    return difference;
+}
+} // namespace
+
+TEST_CASE ("Scrolling the rows, each frame shows every row once, whole, its header beside it, however late its header was made")
+{
+    // Only the rows in view, and one more at either end, have headers and clips (Playlist.h): as the rows scroll up a few pixels
+    // a frame, each frame is the last one moved up, the headers and clips coming into view made before they show; and each is
+    // what a playlist made afresh at that place shows.
+    const auto& renderer = eachRenderer();
+    PlayingSong song;
+    song.fill();
+    PlaylistOn shown (song);
+    auto* column = phazite::test::findComponentWithTitle (shown.playlist, "Track headers");
+    REQUIRE (column != nullptr);
+
+    const auto rowsBarOf = [] (juce::Component& playlist) -> juce::ScrollBar*
+    {
+        for (auto* each : phazite::test::findAll<juce::ScrollBar> (playlist))
+            if (each->isVertical() && each->getParentComponent() == &playlist)
+                return each;
+
+        return nullptr;
+    };
+
+    auto* bar = rowsBarOf (shown.playlist);
+    REQUIRE (bar != nullptr);
+    const auto end = bar->getMaximumRangeLimit() - bar->getCurrentRangeSize();
+    REQUIRE (end > 200.0); // more rows than show at once
+
+    // The headers and the lanes, left of the rows' scroll bar, which moves, above the line along the window's foot, which
+    // stays. Its top row is left to the playlist made afresh: a header's switch cut by the column's top edge draws its last
+    // row a little otherwise there than whole a frame before (the renderers' clipping), as a fresh playlist draws it too.
+    const auto area = shown.window.getLocalArea (column, column->getLocalBounds())
+                          .withRight (shown.window.getLocalArea (&shown.playlist, bar->getBounds()).getX())
+                          .withTrimmedBottom (1);
+    constexpr int step = 7;
+    auto before = shown.window.paintEverything (renderer);
+    auto frames = 0;
+
+    for (auto at = (double) step; at <= end; at += step)
+    {
+        CAPTURE (at);
+        bar->setCurrentRangeStart (at, juce::sendNotificationSync);
+        phazite::test::dispatchPendingMessages();
+        const auto frame = shown.window.paintEverything (renderer);
+        const auto moved = compareScrolledUp (before, frame, area.withTrimmedTop (1), step);
+        CAPTURE (moved.first.toString().toStdString());
+        CHECK (moved.pixels == 0);
+
+        // Every few frames (a playlist made afresh takes a while), what one made afresh at this place shows.
+        if (++frames % 6 == 0)
+        {
+            PlaylistOn fresh (song);
+            auto* freshBar = rowsBarOf (fresh.playlist);
+            REQUIRE (freshBar != nullptr);
+            freshBar->setCurrentRangeStart (at, juce::sendNotificationSync);
+            phazite::test::dispatchPendingMessages();
+            const auto asFresh = compare (frame, fresh.window.paintEverything (renderer), area);
+            CAPTURE (asFresh.first.toString().toStdString());
+            CHECK (asFresh.pixels == 0);
+        }
+
+        before = frame;
     }
 }

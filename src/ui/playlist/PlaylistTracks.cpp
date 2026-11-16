@@ -229,15 +229,15 @@ void Playlist::fadeMovingHeaders (bool fade)
     if (std::exchange (headersFaded, fade) == fade)
         return;
 
-    // The selected tracks, and those inside the selected folders, which move with them.
+    // The selected tracks, and those inside the selected folders, which move with them; the headers that come into view meanwhile
+    // are faded as they are made (showOnHeader()).
     const auto selected = selection.getTracks();
 
-    for (auto* header : headers)
+    for (const auto& [id, header] : headers)
     {
-        const auto id = header->getTrack();
         const auto moves = fade
                            && std::any_of (selected.begin(), selected.end(),
-                                           [this, id] (TrackID track) { return track == id || isInside (context, id, track); });
+                                           [this, id = id] (TrackID track) { return track == id || isInside (context, id, track); });
         header->setAlpha (moves ? TrackDropTint::moving : 1.0f);
     }
 }

@@ -8,19 +8,34 @@
 
 #include "model/arrangement/SongRange.h"
 #include "model/arrangement/SongSelection.h"
+#include "model/base/IDs.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 namespace phazite
 {
 class EngineContext;
 
+// Which items of one kind a group of changes was in: those it names, each once, or, after a change that couldn't be tied
+// to its items, any of them.
+template <typename ItemID>
+struct ChangedItems
+{
+    std::vector<ItemID> named;
+    bool any = false;
+
+    bool mayInclude (ItemID id) const { return any || std::find (named.begin(), named.end(), id) != named.end(); }
+};
+
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
 // the message loop) come together, after it. View state (model/base/internal/Schema.h), such as how tall a track shows, is no
 // change to the song: it has a group of its own. A drag can change the song as often as the mouse moves: views that
-// take long to show a change show the last one at their next timer tick instead.
+// take long to show a change show the last one at their next timer tick instead. A view of many items (the mixer's strips,
+// the playlist's clips) shows again only those a change was in, as the groups of clips and devices name them.
 struct SongChanges
 {
     bool tracks = false;     // tracks added, deleted, moved or changed
@@ -33,6 +48,16 @@ struct SongChanges
     bool tempo = false;      // the tempo or the time signature
     bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)
     bool notes = false;      // the project's notes (model/project/ProjectContents.h)
+
+    // With clips: the clips added, changed (their notes included) or removed, and the tracks they were on or went to (both of
+    // a clip moved to another track).
+    ChangedItems<ClipID> changedClips;
+    ChangedItems<TrackID> clipTracks;
+
+    // With devices: the channels (tracks, folders, returns and the master) whose devices or sends changed, and the returns
+    // those sends go to; any of them after a plug-in's helper went or one was reloaded, and after a change of where sound can
+    // go (a send added or removed, a sidechain's source), which every strip's send knobs follow.
+    ChangedItems<TrackID> deviceChannels;
 };
 
 class ProjectContext

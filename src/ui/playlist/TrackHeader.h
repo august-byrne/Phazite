@@ -41,7 +41,8 @@ public:
         // While moving them: true if it went out of the playlist and is now carried elsewhere (into the browser, to save it).
         virtual bool trackDraggedOut (TrackHeader&, const juce::MouseEvent&) = 0;
         virtual void trackDragEnded (TrackHeader&, const juce::MouseEvent&) = 0;
-        virtual void trackHeightChanged() = 0; // while its edge is dragged
+        virtual void trackHeightChanged() = 0;          // while its edge is dragged
+        virtual void headerFocusedByKeys (TrackID) = 0; // the Tab key gave one of its switches the focus: bring it into view
     };
 
     TrackHeader (Owner&, ProjectContext&, const TrackRow&);
@@ -75,6 +76,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void focusOfChildComponentChanged (FocusChangeType) override;
 
 private:
     enum class Drag

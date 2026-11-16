@@ -848,6 +848,32 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
     if (! state.hasType (schema::TRACK) || isFolderState (state) || ! isReturnTrack (song, returnTrack) || from == returnTrack)
         return {};
 
+    // Nor to a return whose sound comes back to the track through sends and buses: a loop, which Phazite's engine can't play,
+    // whatever offered the send (a knob shown before the routing changed). One that comes back only through a sidechain is
+    // made, and the sidechain goes (forgetSidechainLoops(), below), as FL Studio's routing does.
+    {
+        std::vector<TrackID> reached { returnTrack };
+
+        for (size_t i = 0; i < reached.size(); ++i)
+        {
+            std::vector<TrackID> next;
+
+            for (const auto send : getSends (song, reached[i]))
+                next.push_back (getSendTarget (song, send));
+
+            for (auto parent = getParentFolder (song, reached[i]); parent.isValid(); parent = getParentFolder (song, parent))
+                if (isBus (song, parent))
+                    next.push_back (parent);
+
+            for (const auto track : next)
+                if (std::find (reached.begin(), reached.end(), track) == reached.end())
+                    reached.push_back (track);
+        }
+
+        if (std::find (reached.begin(), reached.end(), from) != reached.end())
+            return {};
+    }
+
     const auto id = song.makeID();
     juce::ValueTree send (schema::SEND);
     send.setProperty (schema::sendID, (juce::int64) id, nullptr);

@@ -1226,6 +1226,13 @@ void Playlist::AutomationLaneHeader::mouseUp (const juce::MouseEvent&)
     resizing = false;
 }
 
+void Playlist::AutomationLaneHeader::focusOfChildComponentChanged (FocusChangeType cause)
+{
+    // The Tab key gave one of its buttons the keys: the lane scrolls into view (only those in view have components).
+    if (cause == focusChangedByTabKey && hasKeyboardFocus (true))
+        playlist.focusedByKeys (track, parameter);
+}
+
 void Playlist::AutomationLaneHeader::mouseDoubleClick (const juce::MouseEvent& e)
 {
     // As a track's header: the bottom edge resets the height, and anywhere else the lane collapses or expands.
@@ -1399,12 +1406,31 @@ Playlist::AutomationLaneView* Playlist::findLaneView (const ParameterRef& parame
     return nullptr;
 }
 
+Playlist::AutomationLaneView* Playlist::findLaneView (TrackID track, const ParameterRef& parameter) const
+{
+    for (auto* laneView : laneViews)
+        if (laneView->track == track && laneView->parameter == parameter)
+            return laneView;
+
+    return nullptr;
+}
+
+std::optional<std::pair<TrackID, ParameterRef>> Playlist::findShownLaneOf (const ParameterRef& parameter) const
+{
+    // A lane of the parameter that shows, not hidden (focus mode) or collapsed to its line, in view or not.
+    for (const auto& row : rows)
+        for (const auto& lane : row.lanes)
+            if (lane.lane.parameter == parameter && lane.height > 0 && ! lane.collapsed)
+                return std::pair (row.track.id, parameter);
+
+    return std::nullopt;
+}
+
 bool Playlist::canTypeAutomationValue() const
 {
-    // Points selected in a lane that shows them, not collapsed to its line.
+    // Points selected in a lane that shows them, not collapsed to its line; in view or not, as the field scrolls it into view.
     const auto selected = selection.getSelectedAutomationPoints();
-    const auto* laneView = selected.indices.empty() ? nullptr : findLaneView (selected.parameter);
-    return laneView != nullptr && ! laneView->collapsed && laneView->isShowing();
+    return isShowing() && ! selected.indices.empty() && findShownLaneOf (selected.parameter).has_value();
 }
 
 void Playlist::typeAutomationValue()
@@ -1420,7 +1446,14 @@ void Playlist::typeAutomationValue()
         && std::find (selected.indices.begin(), selected.indices.end(), pointPressed->second) != selected.indices.end())
         index = pointPressed->second;
 
-    if (auto* laneView = findLaneView (selected.parameter))
+    // Its lane in view first: only the lanes in view have components (layOutLanes()).
+    const auto lane = findShownLaneOf (selected.parameter);
+
+    if (const auto row = getRowOf (lane->first); row >= 0)
+        if (const auto* laneRow = findLaneRow (lane->first, lane->second))
+            scrollToShowSpan (rows[(size_t) row], laneRow->top, laneRow->height);
+
+    if (auto* laneView = findLaneView (lane->first, lane->second))
         laneView->typeValue (index);
 }
 
@@ -1478,58 +1511,86 @@ void Playlist::noteLanes()
 
 void Playlist::rebuildLanes()
 {
-    // The components of lanes that still show are kept; the others go.
-    juce::OwnedArray<AutomationLaneHeader> keptHeaders;
-    juce::OwnedArray<AutomationLaneView> keptViews;
-
-    for (const auto& row : rows)
+    // The components of lanes that still show are kept, and those of lanes that went go, in use or not; layOutLanes() makes
+    // those of the lanes that come into view.
+    for (auto i = laneHeaders.size(); --i >= 0;)
     {
-        for (const auto& lane : row.lanes)
+        if (findLaneRow (laneHeaders[i]->track, laneHeaders[i]->parameter) == nullptr)
         {
-            AutomationLaneHeader* header = nullptr;
-            AutomationLaneView* laneView = nullptr;
+            laneHeaders.remove (i);
+            laneViews.remove (i);
+        }
+    }
+}
 
-            for (int i = 0; i < laneHeaders.size(); ++i)
-            {
-                if (laneHeaders[i]->track == row.track.id && laneHeaders[i]->parameter == lane.lane.parameter)
-                {
-                    header = laneHeaders.removeAndReturn (i);
-                    laneView = laneViews.removeAndReturn (i);
-                    break;
-                }
-            }
+const Playlist::LaneRow* Playlist::findLaneRow (TrackID track, const ParameterRef& parameter) const
+{
+    if (const auto row = getRowOf (track); row >= 0)
+        for (const auto& lane : rows[(size_t) row].lanes)
+            if (lane.lane.parameter == parameter)
+                return &lane;
 
-            if (header == nullptr)
-            {
-                header = new AutomationLaneHeader (*this, row.track.id, lane.lane.parameter);
-                laneView = new AutomationLaneView (*this, row.track.id, lane.lane.parameter);
-                headerContent.addAndMakeVisible (header); // layOutLanes() moves them where they go
-                scrollingClips.addAndMakeVisible (laneView);
-            }
+    return nullptr;
+}
 
-            keptHeaders.add (header);
-            keptViews.add (laneView);
+void Playlist::layOutLanes (const ItemsInView& inView)
+{
+    // Only the lanes in view have components, as the track headers (layOutHeaders()), and one more at either end; those of lanes
+    // that left go, but not while they are in use: a value being typed over a point, a point dragged while the view scrolls.
+    const auto isInView = [this, &inView] (TrackID track, const ParameterRef& parameter)
+    {
+        const auto row = getRowOf (track);
+
+        if (row < 0)
+            return false;
+
+        const auto& laneRows = rows[(size_t) row].lanes;
+
+        for (size_t j = 0; j < laneRows.size(); ++j)
+            if (laneRows[j].lane.parameter == parameter)
+                return (bool) inView.lanes[(size_t) row][j];
+
+        return false;
+    };
+
+    for (auto i = laneHeaders.size(); --i >= 0;)
+    {
+        auto* header = laneHeaders[i];
+        auto* laneView = laneViews[i];
+        const auto inUse = header->hasKeyboardFocus (true) || header->isMouseButtonDown (true) || laneView->hasKeyboardFocus (true)
+                           || laneView->isMouseButtonDown (true);
+
+        if (! inUse && ! isInView (header->track, header->parameter))
+        {
+            laneHeaders.remove (i);
+            laneViews.remove (i);
         }
     }
 
-    laneHeaders.swapWith (keptHeaders); // the kept arrays hold the lanes that went now, and delete them
-    laneViews.swapWith (keptViews);
-}
+    // A lane's made as it comes into view shows it as it is, and nothing of another.
+    for (size_t r = 0; r < rows.size(); ++r)
+    {
+        const auto& row = rows[r];
 
-void Playlist::layOutLanes()
-{
+        for (size_t j = 0; j < row.lanes.size(); ++j)
+        {
+            const auto& lane = row.lanes[j];
+
+            if (! inView.lanes[r][j] || findLaneView (row.track.id, lane.lane.parameter) != nullptr || ! mayMakeComponent())
+                continue;
+
+            auto* header = laneHeaders.add (new AutomationLaneHeader (*this, row.track.id, lane.lane.parameter));
+            auto* laneView = laneViews.add (new AutomationLaneView (*this, row.track.id, lane.lane.parameter));
+            header->update (row.track, lane);
+            laneView->update (row.track.colour, lane.collapsed);
+        }
+    }
+
     for (int i = 0; i < laneHeaders.size(); ++i)
     {
         auto* header = laneHeaders[i];
         auto* laneView = laneViews[i];
-        const auto rowIndex = getRowOf (header->track);
-        const LaneRow* lane = nullptr;
-
-        if (rowIndex >= 0)
-            for (const auto& each : rows[(size_t) rowIndex].lanes)
-                if (each.lane.parameter == header->parameter)
-                    lane = &each;
-
+        const auto* lane = findLaneRow (header->track, header->parameter);
         const auto shown = lane != nullptr && lane->height > 0;
         header->setVisible (shown);
         laneView->setVisible (shown);
@@ -1538,7 +1599,7 @@ void Playlist::layOutLanes()
             continue;
 
         // In the pinned band with a pinned track, or among the scrolling rows.
-        const auto& row = rows[(size_t) rowIndex];
+        const auto& row = rows[(size_t) getRowOf (header->track)];
         auto& headerParent = row.track.pinned ? pinnedHeaders : headerContent;
         auto& layer = row.track.pinned ? pinnedClips : scrollingClips;
 
@@ -1557,22 +1618,14 @@ void Playlist::updateLanes()
 {
     for (int i = 0; i < laneHeaders.size(); ++i)
     {
-        if (const auto rowIndex = getRowOf (laneHeaders[i]->track); rowIndex >= 0)
+        if (const auto* lane = findLaneRow (laneHeaders[i]->track, laneHeaders[i]->parameter))
         {
-            const auto& row = rows[(size_t) rowIndex];
-
-            for (const auto& lane : row.lanes)
-            {
-                if (lane.lane.parameter == laneHeaders[i]->parameter)
-                {
-                    laneHeaders[i]->update (row.track, lane);
-                    laneViews[i]->update (row.track.colour, lane.collapsed);
-                }
-            }
+            const auto& row = rows[(size_t) getRowOf (laneHeaders[i]->track)];
+            laneHeaders[i]->update (row.track, *lane);
+            laneViews[i]->update (row.track.colour, lane->collapsed);
         }
     }
 }
-
 void Playlist::setLaneCollapsed (TrackID track, const ParameterRef& parameter, bool collapse)
 {
     setAutomationLaneCollapsed (context, parameter, collapse);

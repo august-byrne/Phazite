@@ -9,8 +9,11 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -218,5 +221,92 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     phazite::setTrackName (*song, track, "Lead");
     setSong (context, nullptr);
     CHECK (hear().empty());
+    context.removeListener (&view);
+}
+
+TEST_CASE ("Views hear where the changes of clips and devices were: the clips, their tracks, the channels")
+{
+    struct View : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { heard.push_back (changes); }
+
+        std::vector<phazite::SongChanges> heard;
+    };
+
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
+    const auto reverb = phazite::addReturnTrack (*song, "Reverb", nullptr);
+    REQUIRE (reverb.isValid());
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    setSong (context, song.get());
+    View view;
+    context.addListener (&view);
+
+    // What the view heard of one turn of the message loop.
+    const auto take = [&view]
+    {
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (view.heard.size() == 1);
+        return std::exchange (view.heard, {}).front();
+    };
+
+    using Tracks = std::vector<phazite::TrackID>;
+    const auto sorted = [] (Tracks ids)
+    {
+        std::sort (ids.begin(), ids.end());
+        return ids;
+    };
+
+    // A clip moved to another track: the clip, and both tracks, each once however many changes the move made.
+    const auto clip = phazite::test::addMidiClip (*song, tracks[0], { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
+    phazite::test::dispatchPendingMessages();
+    view.heard.clear();
+    phazite::moveClip (*song, clip, phazite::BeatPosition::fromBeats (8.0), tracks[2]);
+    auto changes = take();
+    CHECK (changes.clips);
+    CHECK_FALSE (changes.changedClips.any);
+    CHECK (changes.changedClips.named == std::vector<phazite::ClipID> { clip });
+    CHECK_FALSE (changes.clipTracks.any);
+    CHECK (changes.clipTracks.named == sorted ({ tracks[0], tracks[2] }));
+
+    // A send: its track, and the return it goes to; and, as it changes where sound can go (every strip's send knobs follow
+    // it), any channel.
+    const auto send = phazite::addSend (*song, tracks[1], reverb, false);
+    REQUIRE (send.isValid());
+    changes = take();
+    CHECK (changes.devices);
+    CHECK (changes.deviceChannels.any);
+    CHECK (changes.deviceChannels.named == sorted ({ tracks[1], reverb }));
+
+    // Switched before the fader: where sound goes is the same; its track and its return alone.
+    phazite::setPreFader (*song, send, true);
+    changes = take();
+    CHECK_FALSE (changes.deviceChannels.any);
+    CHECK (changes.deviceChannels.named == sorted ({ tracks[1], reverb }));
+
+    // An effect added: its track alone.
+    REQUIRE (phazite::insertDeviceState (*song, tracks[2], phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID)).isValid());
+    changes = take();
+    CHECK_FALSE (changes.deviceChannels.any);
+    CHECK (changes.deviceChannels.named == Tracks { tracks[2] });
+
+    // A plug-in's helper gone, or reloaded: the plug-in host doesn't say whose, so any channel.
+    phazite::getPluginHost (phazite::test::getEngineContext()).sendSynchronousChangeMessage();
+    changes = take();
+    CHECK (changes.devices);
+    CHECK (changes.deviceChannels.any);
+
+    // A clip whose element isn't on a track's (a file that put one elsewhere): its track can't be named, so any.
+    juce::ValueTree stray (phazite::schema::CLIP);
+    stray.setProperty (phazite::schema::clipID, (juce::int64) song->makeID(), nullptr);
+    song->getState().appendChild (stray, nullptr);
+    changes = take();
+    CHECK (changes.clips);
+    CHECK (changes.clipTracks.any);
+    song->getState().removeChild (stray, nullptr);
+    take();
+
+    setSong (context, nullptr);
     context.removeListener (&view);
 }

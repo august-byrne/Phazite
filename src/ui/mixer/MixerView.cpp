@@ -4,6 +4,9 @@
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace phazite::ui
 {
 namespace
@@ -28,6 +31,7 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
                     "select its track: the channels it feeds, those that feed it and those its sidechains link it to get an outline.");
 
     viewport.setTitle ("Channels"); // what screen readers say as the keys go to them, to scroll them
+    viewport.onScroll = [this] { layOutStrips(); };
     verticalView.setTitle ("Channels and master");
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
@@ -76,37 +80,18 @@ void MixerView::songChanged (const SongChanges& changes)
 void MixerView::rebuild()
 {
     // The tracks in the playlist's order, then the returns, together next to the master.
-    const auto channels = getMixerChannels (context);
-    auto ids = channels.tracks;
-    ids.insert (ids.end(), channels.returns.begin(), channels.returns.end());
-    firstReturn = (int) channels.tracks.size();
+    const auto mixerChannels = getMixerChannels (context);
+    channels = mixerChannels.tracks;
+    channels.insert (channels.end(), mixerChannels.returns.begin(), mixerChannels.returns.end());
+    firstReturn = (int) mixerChannels.tracks.size();
+    channelIndex.clear();
 
-    // The strips of tracks that are still there are kept, in the tracks' new order.
-    juce::OwnedArray<ChannelStrip> kept;
+    for (int i = 0; i < (int) channels.size(); ++i)
+        channelIndex[channels[(size_t) i]] = i;
 
-    for (const auto id : ids)
-    {
-        ChannelStrip* strip = nullptr;
-
-        for (auto* existing : strips)
-            if (existing->getTrack() == id)
-                strip = existing;
-
-        if (strip != nullptr)
-        {
-            strips.removeObject (strip, false);
-        }
-        else
-        {
-            strip = new ChannelStrip (commands, context);
-            strip->setTrack (id);
-            stripHolder.addAndMakeVisible (strip);
-        }
-
-        kept.add (strip);
-    }
-
-    strips.swapWith (kept); // kept now holds the strips of deleted tracks, and deletes them
+    // The strips of channels that are still there are kept, where their channels are now (layOutStrips()); those of deleted
+    // ones go.
+    std::erase_if (strips, [this] (const std::unique_ptr<ChannelStrip>& strip) { return ! channelIndex.contains (strip->getTrack()); });
     updateSelection();
     resized();
     repaint(); // the hint while there are no tracks
@@ -116,26 +101,158 @@ void MixerView::updateSelection()
 {
     const auto& selection = context.getSongSelection();
     const auto selected = selection.getTracks();
+    selectedChannels.clear();
+    relatedChannels.clear();
 
     // What links two channels: the sound of one reaching the other (a send, a bus), or a sidechain of one listening to the
-    // other, either way round, so that a kick shows the bass that ducks under it.
-    const auto connections = getConnections (context);
-    const auto linked = [this, &connections] (TrackID a, TrackID b)
+    // other, either way round, so that a kick shows the bass that ducks under it. Every channel's, for the strips made as they
+    // come into view.
+    if (! selected.empty())
     {
-        const auto listens = [a, b] (const Connection& c)
-        { return c.kind == Connection::Kind::sidechain && ((c.from == a && c.to == b) || (c.from == b && c.to == a)); };
+        const auto connections = getConnections (context);
+        const auto linked = [this, &connections] (TrackID a, TrackID b)
+        {
+            const auto listens = [a, b] (const Connection& c)
+            { return c.kind == Connection::Kind::sidechain && ((c.from == a && c.to == b) || (c.from == b && c.to == a)); };
 
-        return feeds (context, a, b) || feeds (context, b, a) || std::any_of (connections.begin(), connections.end(), listens);
+            return feeds (context, a, b) || feeds (context, b, a) || std::any_of (connections.begin(), connections.end(), listens);
+        };
+
+        for (const auto id : channels)
+        {
+            if (selection.isSelected (id))
+                selectedChannels.insert (id);
+            else if (std::any_of (selected.begin(), selected.end(), [&linked, id] (TrackID s) { return linked (s, id); }))
+                relatedChannels.insert (id);
+        }
+    }
+
+    for (const auto& strip : strips)
+        showSelectionOn (*strip);
+}
+
+void MixerView::showSelectionOn (ChannelStrip& strip) const
+{
+    strip.setSelected (selectedChannels.contains (strip.getTrack()));
+    strip.setRelated (relatedChannels.contains (strip.getTrack()));
+}
+
+int MixerView::getChannelX (int index) const
+{
+    // A gap sets the returns apart.
+    const auto gap = firstReturn > 0 && firstReturn < (int) channels.size() ? returnsGap : 0;
+    return index * ChannelStrip::width + (index >= firstReturn ? gap : 0);
+}
+
+void MixerView::layOutStrips()
+{
+    // The channels in view, and one more at either end, which the Tab key goes on to.
+    const auto view = viewport.getViewArea();
+    auto first = -1, last = -1;
+
+    for (int i = 0; i < (int) channels.size(); ++i)
+    {
+        if (const auto x = getChannelX (i); x + ChannelStrip::width > view.getX() && x < view.getRight())
+        {
+            first = first < 0 ? i : first;
+            last = i;
+        }
+    }
+
+    if (first >= 0)
+    {
+        first = std::max (0, first - 1);
+        last = std::min ((int) channels.size() - 1, last + 1);
+    }
+
+    // A jump (a scroll bar's thumb dragged far) makes and deletes at most what part of a frame can bear, the rest a turn of the
+    // message loop later, and so on, so that it never stalls a frame; two strips at least each time, as a step of a scroll
+    // brings into view and takes out of it.
+    const auto until = juce::Time::getMillisecondCounterHiRes() + makingBudgetMs;
+    auto done = 0;
+    auto left = false;
+    const auto mayDoMore = [&]
+    {
+        if (done++ < 2 || juce::Time::getMillisecondCounterHiRes() < until)
+            return true;
+
+        left = true;
+        return false;
     };
 
-    for (auto* strip : strips)
+    // The strips of channels that left go, but not while they are in use: one with the keyboard focus (a value being typed),
+    // or the mouse pressed on it (a fader dragged while the mixer scrolls). Out of view, one left for later shows nothing.
+    const auto inRange = [first, last] (int index) { return index >= first && index <= last; };
+    std::erase_if (strips,
+                   [&] (const std::unique_ptr<ChannelStrip>& strip)
+                   {
+                       return ! inRange (channelIndex.at (strip->getTrack())) && ! strip->hasKeyboardFocus (true)
+                              && ! strip->isMouseButtonDown (true) && mayDoMore();
+                   });
+
+    // A strip made as its channel comes into view shows it as it is, and nothing of another.
+
+    for (auto i = first; i >= 0 && i <= last; ++i)
     {
-        const auto id = strip->getTrack();
-        const auto isSelected = selection.isSelected (id);
-        strip->setSelected (isSelected);
-        strip->setRelated (! isSelected
-                           && std::any_of (selected.begin(), selected.end(), [&linked, id] (TrackID s) { return linked (s, id); }));
+        const auto id = channels[(size_t) i];
+
+        if (std::none_of (strips.begin(), strips.end(), [id] (const std::unique_ptr<ChannelStrip>& s) { return s->getTrack() == id; }))
+        {
+            if (! mayDoMore())
+                continue;
+
+            auto& strip = *strips.emplace_back (std::make_unique<ChannelStrip> (commands, context, id));
+            strip.onFocusedByKeys = [this, id] { showWhole (id); };
+            showSelectionOn (strip);
+            stripHolder.addAndMakeVisible (strip);
+        }
     }
+
+    if (left && ! std::exchange (restPosted, true))
+    {
+        juce::MessageManager::callAsync (
+            [safe = juce::Component::SafePointer<MixerView> (this)]
+            {
+                if (safe != nullptr)
+                {
+                    safe->restPosted = false;
+                    safe->layOutStrips();
+                }
+            });
+    }
+
+    const auto height = stripHolder.getHeight();
+
+    for (const auto& strip : strips)
+        strip->setBounds (getChannelX (channelIndex.at (strip->getTrack())), 0, ChannelStrip::width, height);
+
+    // What a screen reader hears of the channels' view: how many there are, and which have strips.
+    const auto shown = channels.empty()
+                           ? juce::String ("No channels")
+                           : "Channels " + juce::String (first + 1) + " to " + juce::String (last + 1) + " of "
+                                 + juce::String (channels.size()) + " show; scroll sideways, or press Tab from the last, for the others";
+
+    if (viewport.getDescription() != shown)
+        viewport.setDescription (shown);
+}
+
+void MixerView::showWhole (TrackID id)
+{
+    // After the focus has moved (this is called as it moves), so that no strip goes in the middle of that.
+    juce::MessageManager::callAsync (
+        [safe = juce::Component::SafePointer<MixerView> (this), id]
+        {
+            if (safe == nullptr || ! safe->channelIndex.contains (id))
+                return;
+
+            const auto x = safe->getChannelX (safe->channelIndex.at (id));
+            const auto view = safe->viewport.getViewArea();
+
+            if (x < view.getX())
+                safe->viewport.setViewPosition (x, view.getY());
+            else if (x + ChannelStrip::width > view.getRight())
+                safe->viewport.setViewPosition (x + ChannelStrip::width - view.getWidth(), view.getY());
+        });
 }
 
 void MixerView::paint (juce::Graphics& g)
@@ -143,7 +260,7 @@ void MixerView::paint (juce::Graphics& g)
     const auto& p = getPalette (*this);
     g.fillAll (p.background);
 
-    if (strips.isEmpty() && context.hasProject())
+    if (channels.empty() && context.hasProject())
     {
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
@@ -169,13 +286,9 @@ void MixerView::resized()
     // The strips fill the height, leaving room for the scroll bar along the bottom. A gap sets the returns apart, and the
     // column after them holds the "+" that adds one, level with the strips' names.
     const auto height = inside.getHeight() - viewport.getScrollBarThickness();
-    const auto gap = firstReturn > 0 && firstReturn < strips.size() ? returnsGap : 0;
-    const auto stripsWidth = strips.size() * ChannelStrip::width + gap;
+    const auto stripsWidth = getChannelX ((int) channels.size());
     stripHolder.setSize (stripsWidth + addReturnColumnWidth, height);
-
-    for (int i = 0; i < strips.size(); ++i)
-        strips[i]->setBounds (i * ChannelStrip::width + (i >= firstReturn ? gap : 0), 0, ChannelStrip::width, height);
-
+    layOutStrips();
     addReturnButton.setBounds (stripsWidth + Space::s / 2, Space::xs, controlHeight, controlHeight);
 }
 } // namespace phazite::ui

@@ -12,6 +12,7 @@
 #include "ui/timeline/TimelineGesture.h"
 
 #include <map>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -201,6 +202,7 @@ struct Playlist::AutomationLaneHeader : public juce::Component
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    void focusOfChildComponentChanged (FocusChangeType) override;
 
     Playlist& playlist;
     const TrackID track;
@@ -215,6 +217,40 @@ struct Playlist::AutomationLaneHeader : public juce::Component
     void showParameterMenu();
     void showModeMenu();
     bool isOnResizeEdge (juce::Point<int>) const;
+};
+
+//==============================================================================
+// While it lives (a scroll, a jump along the song), the components made count against a part of a frame (Playlist.h:
+// makingBudgetMs); what is left is made a turn of the message loop later.
+struct Playlist::MakingPass
+{
+    explicit MakingPass (Playlist& p)
+        : playlist (p),
+          outer (! std::exchange (p.budgeted, true))
+    {
+        if (outer)
+        {
+            playlist.makeUntil = juce::Time::getMillisecondCounterHiRes() + makingBudgetMs;
+            playlist.makingLeft = false;
+            playlist.madeThisPass = 0;
+        }
+    }
+
+    ~MakingPass()
+    {
+        if (! outer)
+            return;
+
+        playlist.budgeted = false;
+
+        if (playlist.makingLeft)
+            playlist.makeRestLater();
+    }
+
+    Playlist& playlist;
+    const bool outer;
+
+    JUCE_DECLARE_NON_COPYABLE (MakingPass)
 };
 
 //==============================================================================

@@ -15,6 +15,7 @@
 #include "ui/components/TrackSwitch.h"
 #include "ui/input/CommandBridge.h"
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -31,7 +32,8 @@ public:
     // How tall the strip must be for its parts not to overlap; the mixer scrolls when it is shorter.
     static int getMinimumHeight();
 
-    ChannelStrip (CommandBridge&, ProjectContext&);
+    // Showing a channel from the start, or none (setTrack()).
+    ChannelStrip (CommandBridge&, ProjectContext&, TrackID = {});
     ~ChannelStrip() override;
 
     // The channel to show (model/mixer/MixerModel.h): a track, a folder (a bus or a plain one) or a return; an empty ID
@@ -44,9 +46,18 @@ public:
     void setRelated (bool); // its sound reaches the selected channel, or the selected channel's reaches it
     bool isRelated() const noexcept { return related; }
 
+    // Called when the Tab key gives one of its controls the keyboard focus: the mixer scrolls it into view.
+    std::function<void()> onFocusedByKeys;
+
+    // How many times it has brought itself up to date with a change of the song, and whether it has one due at its next tick
+    // (for tests: only the channel a change was in brings itself up to date).
+    int getRefreshCount() const noexcept { return refreshes; }
+    bool isRefreshDue() const noexcept { return refreshDue; }
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override; // selects the track
+    void focusOfChildComponentChanged (FocusChangeType) override;
 
     // A device or a preset dragged from the browser goes onto this channel (phazite::addDeviceTo(), loadPreset()).
     bool isInterestedInDragSource (const SourceDetails&) override;
@@ -63,6 +74,7 @@ private:
     std::optional<Channel> channel; // the channel as it was when the song last changed; nothing once it is gone
     bool selected = false, related = false, dropping = false;
     bool refreshDue = false, needDue = false; // the song changed: shown at the next tick (refresh(), refreshNeed())
+    int refreshes = 0;
 
     juce::Label nameLabel, inputLabel;    // the name, and what the channel is and what feeds it
     juce::TextButton outputButton;        // where its sound goes: a menu of the master and the buses

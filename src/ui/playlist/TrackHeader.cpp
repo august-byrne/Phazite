@@ -425,6 +425,12 @@ void TrackHeader::mouseUp (const juce::MouseEvent& e)
     selectOnMouseUp = false;
 }
 
+void TrackHeader::focusOfChildComponentChanged (FocusChangeType cause)
+{
+    if (cause == focusChangedByTabKey && hasKeyboardFocus (true))
+        owner.headerFocusedByKeys (row.id);
+}
+
 void TrackHeader::mouseDoubleClick (const juce::MouseEvent& e)
 {
     // The bottom edge resets the height; anywhere else, the track collapses or expands (the master's lanes do).

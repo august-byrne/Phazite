@@ -218,27 +218,15 @@ its fix.
   reads it (`src/model/versions/VersionsModel.cpp`), and 65 test call sites expect the result in that call. Fix: the
   switch and the merge read on the history's thread and finish when the read is in, the view showing "Switching..."
   meanwhile; the commands' callers then wait for that.
-- **127. The mixer makes a strip for every channel and brings all of them up to date at any change of a device,**
-  those scrolled out of view too, eight times a second while a fader is dragged (`src/ui/mixer/MixerView.cpp`,
-  `src/ui/mixer/ChannelStrip.cpp`). No benchmark has a mixer. Fix: only the strips whose channel changed and that are
-  in view; a benchmark of 200 tracks. Not yet checked (ui-core-mixer-app 10).
 - **128. The browser's search looks through the whole index on the message thread at each key,** stops at 50,000
   files and 200 results without saying that there are more, and doesn't search folders' names
   (`src/services/Library.cpp`, `src/services/BrowserModel.cpp`). Fix: search keys made ahead, a search that runs in
   the background and can be cancelled, and a word where results are cut. Not yet checked (ui-shell-browser 6).
-- **144. A note added repaints the playlist's whole lane area and makes every clip component again,** and the playlist
-  makes seven components for every track's header, in view or not. Why: `Playlist::songChanged()`
-  (`src/ui/playlist/Playlist.cpp`) treats any change in the clips' group of changes, a note's included, as a change of
-  every clip; the headers are made for the whole song. The performance gates (`tests/PerformanceGateTests.cpp`) hold
-  both: the repaint as a known exception, which fails once a note repaints its clip alone, so that the exception goes
-  with the fix; and the headers as at most seven components a track, to be lowered with a fix. Fix: lay out and repaint
-  the clips that changed, and make headers only for the tracks in view, as the clips are.
 - **145. A plan's compile costs about 0.4 ms a track, on every edit.** With 100 busy tracks every edit, and every step
   of a drag, takes about 40 ms of the message thread, measured on 2026-11-14 ([performance.md](performance.md),
   "a song of 100 tracks"), so a drag stutters in a large song. Why: every edit compiles the whole song again
   (`src/model/playback/SongPlayer.cpp`; see also 124). Fix: compile again only what changed (roadmap step S5.7), with
   the 100-track benchmark before and after.
-
 
 ## Tests
 

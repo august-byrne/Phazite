@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Benchmarks (docs/performance.md): what each device costs and how soon it sounds, how soon a live note sounds through
 // Phazite's engine, what a project costs stopped and playing (and a song of 100 tracks at 128 and 512 samples), how long
-// saving, opening and the UI's work take, and what scrolling and zooming a big song cost.
+// saving, opening and the UI's work take, what scrolling and zooming a big song cost, and the mixer's and the playlist's work
+// on a song of 200 tracks.
 // ctest and CI skip them; run them from an optimised build (windows-profile or windows-release) with
 //   phazite_tests.exe --test-suite=benchmark --no-skip
 // and record the numbers in docs/performance.md. Times depend on the machine: compare runs on the same one. What can be
 // compared across machines is gated elsewhere: counts in PerformanceGateTests.cpp (ctest), ratios in BenchmarkGates.cpp.
 #include "AppScreen.h"
 #include "BenchmarkSong.h"
+#include "EditorScreens.h"
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
@@ -68,9 +70,12 @@
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SamplerEditor.h"
+#include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
+#include "ui/playlist/TrackHeader.h"
 #include "ui/theme/LookAndFeel.h"
 #include "ui/theme/Popups.h"
 
@@ -1815,4 +1820,282 @@ TEST_CASE ("Benchmark: what a branch switch and a merge spend on the message thr
                                               << " songs on the message thread; the song split into pieces " << split
                                               << " ms; a commit's song read " << read << " ms; the start of a merge " << merge
                                               << " ms, reading " << mergeReads << " songs");
+}
+
+namespace
+{
+// The message thread's work the next ticks of the views' timers make: after a timer's period (the mixer's strips tick eight
+// times a second), what is due is run and timed, the wait apart.
+double nextTicks (int milliseconds = 130)
+{
+    std::this_thread::sleep_for (std::chrono::milliseconds (milliseconds));
+    return millisecondsOf ([] { phazite::test::dispatchPendingMessages(); });
+}
+
+// The song's plans not compiled from here on (its session lent, as to a render: PlaybackSession::lendToRender()), so that
+// what a benchmark of a view times is the view's work alone: a plan of 200 tracks takes tens of milliseconds of its own
+// (known bug 145).
+void withoutPlans (phazite::ProjectContext& context)
+{
+    auto* session = phazite::getSession (context);
+    REQUIRE (session != nullptr);
+    session->lendToRender (true);
+}
+} // namespace
+
+TEST_CASE ("Benchmark: the mixer of 200 tracks" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // 200 tracks, each with a synth and an EQ, in a mixer as wide as a window of 1600 pixels: about a dozen strips in view.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 200);
+
+    for (const auto track : tracks)
+    {
+        addDevice (*song, track, dev::Synth::typeID);
+        addDevice (*song, track, dev::Equalizer::typeID);
+    }
+
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    withoutPlans (context);
+    phazite::test::dispatchPendingMessages();
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    std::unique_ptr<phazite::ui::MixerView> mixer;
+    std::unique_ptr<phazite::test::TestWindow> window;
+    juce::String report ("\n| The mixer, 200 tracks, a synth and an EQ on each | The message thread's work |\n|---|---|\n");
+
+    report << "| Opened: its strips made and laid out | "
+           << milliseconds (millisecondsOf (
+                                [&]
+                                {
+                                    mixer = std::make_unique<phazite::ui::MixerView> (commands, context);
+                                    window = std::make_unique<phazite::test::TestWindow> (*mixer, 1600, 800);
+                                    phazite::test::dispatchPendingMessages();
+                                }),
+                            1)
+           << " |\n";
+
+    report << "| Strips made / components in the mixer | " << phazite::test::findAll<phazite::ui::ChannelStrip> (*mixer).size() << " / "
+           << phazite::test::findAll<juce::Component> (*mixer).size() << " |\n";
+
+    // At rest: the strips' ticks, eight times a second, which bring their controls' values up to date.
+    nextTicks();
+    double rest = 0.0;
+
+    for (int i = 0; i < 10; ++i)
+        rest += nextTicks();
+
+    report << "| At rest: a tick of the strips (8 a second) | " << milliseconds (rest / 10) << " |\n";
+
+    // A device added on a track in view, and on one out of view: the change heard, then shown at the strips' next tick, then
+    // the mixer's outlines a quarter of a second later.
+    for (const auto& [what, track] : { std::pair ("in view", tracks[1]), std::pair ("out of view", tracks[150]) })
+    {
+        nextTicks (400); // what is due before is done
+        double heard = 0.0, shown = 0.0;
+
+        for (int i = 0; i < 5; ++i)
+        {
+            heard += millisecondsOf (
+                [&, track = track]
+                {
+                    addDevice (*song, track, dev::Delay::typeID);
+                    phazite::test::dispatchPendingMessages();
+                });
+            shown += nextTicks();
+            nextTicks (300);
+        }
+
+        report << "| A device added to a track " << what << ": the change heard | " << milliseconds (heard / 5) << " |\n";
+        report << "| ... and shown at the strips' next tick | " << milliseconds (shown / 5) << " |\n";
+    }
+
+    // A fader's drag: a step changes the track's volume, which the strips' next tick shows.
+    {
+        auto volume = phazite::getVolume (context, tracks[1]);
+        REQUIRE (volume.exists());
+        volume.beginGesture();
+        double step = 0.0, shown = 0.0;
+
+        for (int i = 0; i < 10; ++i)
+        {
+            step += millisecondsOf (
+                [&]
+                {
+                    volume.setValue (0.4f + 0.02f * (float) i);
+                    phazite::test::dispatchPendingMessages();
+                });
+            shown += nextTicks();
+        }
+
+        volume.endGesture();
+        report << "| A fader's drag: a step | " << milliseconds (step / 10) << " |\n";
+        report << "| ... and the strips' next tick | " << milliseconds (shown / 10) << " |\n";
+    }
+
+    // Scrolled sideways a strip at a time, as the wheel scrolls it.
+    {
+        auto* channels = dynamic_cast<juce::Viewport*> (phazite::test::findComponentWithTitle (*mixer, "Channels"));
+        REQUIRE (channels != nullptr);
+        double scrolling = 0.0;
+
+        for (int i = 1; i <= 20; ++i)
+            scrolling += millisecondsOf (
+                [&]
+                {
+                    channels->setViewPosition (i * phazite::ui::ChannelStrip::width, 0);
+                    phazite::test::dispatchPendingMessages();
+                });
+
+        report << "| Scrolled a strip sideways | " << milliseconds (scrolling / 20) << " |\n";
+
+        // The scroll bar's thumb dragged from one end to the other, in 60 of the mouse's events: each a jump of three strips
+        // or more, a whole view's at the most.
+        channels->setViewPosition (0, 0);
+        phazite::test::dispatchPendingMessages();
+        // Each event's own work (what the frame after it waits for), and with what it leaves for the next turns of the message
+        // loop (the strips a jump can't make in a part of a frame).
+        const auto widest = channels->getViewedComponent()->getWidth() - channels->getViewWidth();
+        double total = 0.0, worst = 0.0, withRest = 0.0;
+
+        for (int i = 1; i <= 60; ++i)
+        {
+            const auto event = millisecondsOf ([&] { channels->setViewPosition (widest * i / 60, 0); });
+            withRest += event + millisecondsOf ([] { phazite::test::dispatchPendingMessages(); });
+            total += event;
+            worst = std::max (worst, event);
+        }
+
+        report << "| The scroll bar's thumb dragged end to end, 60 events: each / the worst / each with what it left for later | "
+               << milliseconds (total / 60) << " / " << milliseconds (worst) << " / " << milliseconds (withRest / 60) << " |\n";
+    }
+
+    MESSAGE (report);
+    window = nullptr;
+    mixer = nullptr;
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("Benchmark: the playlist of 200 tracks and 4,800 clips" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // 200 tracks, each with 24 clips of 4 bars and 16 notes: 4,800 clips and 76,800 notes, in a playlist 1600 by 900 pixels.
+    phazite::test::PlaylistScreen screen;
+    withoutPlans (screen.context);
+    screen.window.setSize (1600, 900);
+    const auto tracks = phazite::ensureTracks (*screen.song, 200);
+    std::vector<std::vector<phazite::ClipID>> clips;
+
+    for (const auto track : tracks)
+    {
+        auto& onTrack = clips.emplace_back();
+
+        for (int c = 0; c < 24; ++c)
+        {
+            const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
+            const auto clip =
+                phazite::test::addMidiClip (*screen.song, track, { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
+
+            for (int n = 0; n < 16; ++n)
+                phazite::test::addMidiNote (*screen.song, clip, 48 + (n * 5) % 24, phazite::BeatPosition::fromBeats (n),
+                                            phazite::BeatDuration::fromBeats (0.5), 100);
+
+            onTrack.push_back (clip);
+        }
+    }
+
+    phazite::test::dispatchPendingMessages();
+    auto& playlist = screen.playlist;
+    juce::String report ("\n| The playlist, 200 tracks, 4,800 clips, 76,800 notes | The message thread's work | Asked to repaint |\n"
+                         "|---|---|---|\n");
+
+    const auto measure = [&] (const juce::String& what, int steps, const std::function<void (int)>& step)
+    {
+        double work = 0.0;
+        juce::Rectangle<int> repainted;
+
+        for (int i = 0; i < steps; ++i)
+        {
+            screen.window.takeRepaintedArea();
+            work += millisecondsOf (
+                [&]
+                {
+                    step (i);
+                    phazite::test::dispatchPendingMessages();
+                });
+            repainted = screen.window.takeRepaintedArea().getBounds();
+        }
+
+        report << "| " << what << " | " << milliseconds (work / steps) << " | " << repainted.getWidth() << " x " << repainted.getHeight()
+               << " px |\n";
+    };
+
+    const auto componentCounts = [&]
+    {
+        return juce::String (phazite::test::findAll<phazite::ui::TrackHeader> (playlist).size()) + " headers, "
+               + juce::String (phazite::test::findAll<phazite::ui::ClipComponent> (playlist).size()) + " clips, "
+               + juce::String (phazite::test::findAll<juce::Component> (playlist).size()) + " components";
+    };
+
+    const auto shown = componentCounts();
+    const auto clip = clips[1][1]; // in view
+    measure ("A note added to a clip in view", 20,
+             [&] (int i)
+             {
+                 phazite::addNote (screen.context, clip, 72 + i % 12, phazite::BeatPosition::fromBeats (16.0 + 0.25 * i),
+                                   phazite::BeatDuration::fromBeats (0.25), 100);
+             });
+    measure ("A note added to a clip out of view", 20,
+             [&] (int i)
+             {
+                 phazite::addNote (screen.context, clips[150][20], 72 + i % 12, phazite::BeatPosition::fromBeats (320.0 + 0.25 * i),
+                                   phazite::BeatDuration::fromBeats (0.25), 100);
+             });
+
+    auto beat = phazite::getClipRange (*screen.song, clips[2][0]).getStart();
+    measure ("A clip moved a beat, as a drag's step moves it", 20,
+             [&] (int)
+             {
+                 beat = beat + phazite::BeatDuration::fromBeats (1.0);
+                 phazite::moveClip (*screen.song, clips[2][0], beat, tracks[2]);
+             });
+
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto centre = screen.lanes->getLocalBounds().getCentre();
+    constexpr auto notch = (float) phazite::ui::wheelNotch;
+    measure ("A wheel notch, scrolling down", 40, [&] (int) { mouse.wheel (centre, -notch); });
+    measure ("A wheel notch, scrolling up", 40, [&] (int) { mouse.wheel (centre, notch); });
+    {
+        // The rows' scroll bar's thumb dragged from the top to the bottom, in 60 of the mouse's events.
+        juce::ScrollBar* rowsBar = nullptr;
+
+        for (auto* bar : phazite::test::findAll<juce::ScrollBar> (playlist))
+            if (bar->isVertical() && bar->getParentComponent() == &playlist)
+                rowsBar = bar;
+
+        REQUIRE (rowsBar != nullptr);
+        rowsBar->setCurrentRangeStart (0.0, juce::sendNotificationSync);
+        phazite::test::dispatchPendingMessages();
+        const auto end = rowsBar->getMaximumRangeLimit() - rowsBar->getCurrentRangeSize();
+        double total = 0.0, worst = 0.0, withRest = 0.0;
+
+        for (int i = 1; i <= 60; ++i)
+        {
+            const auto event = millisecondsOf ([&] { rowsBar->setCurrentRangeStart (end * i / 60.0, juce::sendNotificationSync); });
+            withRest += event + millisecondsOf ([] { phazite::test::dispatchPendingMessages(); });
+            total += event;
+            worst = std::max (worst, event);
+        }
+
+        report << "| The rows' scroll bar's thumb dragged top to bottom, 60 events: each / the worst / each with what it left for later | "
+               << milliseconds (total / 60) << " / " << milliseconds (worst) << " / " << milliseconds (withRest / 60) << " | |\n";
+        rowsBar->setCurrentRangeStart (0.0, juce::sendNotificationSync);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    measure ("A track renamed", 10, [&] (int i) { phazite::renameTrack (screen.context, tracks[3], "Renamed " + juce::String (i)); });
+    measure ("A track added at the end", 10, [&] (int) { phazite::addTrackAtEnd (screen.context, false); });
+
+    report << "\nShown: " << shown << "\n";
+    MESSAGE (report);
 }

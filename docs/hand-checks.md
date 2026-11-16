@@ -191,6 +191,8 @@ the [changelog](changelog.md).
 | G71 | Drum Sampler with the Trap Kit: roll the 808 pad (note 41); turn Cut Itself off and roll again. Then fast hats over long crashes until all 32 voices are busy | Each hit cuts the one before, with no pile-up and no click; with it off the hits overlap. The oldest crash fades out instead of clicking | |
 | G72 | While a Sampler note holds, drop a new sound on it | The old note fades out with no click, and a new note plays the new sound | |
 | G135 | Wavetable with Basic Shapes: sweep Osc 1's Warp Amount with Sync, Bend + and Pulse Width on a held low note, a scope on the master. Then a held chord on a new FM | The wave stays centred, with no thump as notes start or end; the FM shows no slow wobble around zero | |
+| G127 | In a song of 200 tracks (or 40): drag a fader and turn the wheel to scroll the mixer sideways in mid-drag; Tab past the last strip in view; drag the mixer's scroll bar quickly end to end; with three returns, turn R2's send to R1 while R1 sends to R3 | The fader keeps following and Undo puts it back; the mixer scrolls to the next strip; no stall, strips may appear over a frame or two; R3's send knob to R2 goes | |
+| G144 | In the same song: scroll the playlist down and up, and drag its scroll bar end to end; Tab through the headers' mute switches past the bottom; drag a header below the bottom; add notes in the piano roll; drag a clip from a muted red track to a blue one | Headers appear with no flicker or gap; the rows scroll with the focus; the tracks scroll and the header drops at the end; only that clip redraws; the clip turns blue and stops looking faded during the drag | |
 
 ## Known bugs that need an ear or a real plug-in
 

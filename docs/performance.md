@@ -293,6 +293,57 @@ The playlist with 100 tracks, 2,400 clips and 38,400 notes, in the whole window.
 The clip's move took 3.2 ms before; why it grew is not found ([backlog.md](backlog.md)). Of its 3.3 ms in section 12,
 0.8 ms was the new plan and 1.5 ms the playlist's work.
 
+### Benchmark: the mixer of 200 tracks
+
+200 tracks, each with a synth and an EQ, in a mixer 1600 pixels wide (about a dozen strips in view). The song's plans
+aren't compiled (its session is lent, as to a render), so that the times are the mixer's work alone; a strip shows a
+change at its next tick, eight times a second. Measured on 2026-11-15 from `windows-profile` on the PC above, **while
+other builds loaded the machine**, before and after the fix of known bugs 127 and 144 (only the strips in view, and
+only the changed channel's brought up to date).
+
+| What | Before | After |
+|---|---|---|
+| Opened: its strips made and laid out | 546 ms | 16.5 to 16.8 ms |
+| Strips made / components | 200 / 6,025 | 13 / 415 |
+| At rest: a tick of the strips, eight a second | 42.7 ms | 1.5 ms |
+| A device added to a track in view: the change heard / shown at the next tick | 0.20 / 84.4 ms | 0.25 / 0.5 to 4.2 ms |
+| A device added to a track out of view: the same | 0.24 / 171 ms | 0.29 to 0.68 / 0.9 to 2.0 ms |
+| A fader's drag: a step / the next tick | 19.7 / 18.1 ms | 0.10 to 0.63 / 1.1 to 2.5 ms |
+| Scrolled a strip sideways | 0.02 ms | 1.6 to 2.7 ms, a strip made as it comes into view |
+| The scroll bar's thumb dragged end to end in 60 events: each event / the worst | | 6.9 / 11.1 ms; 9.2 / 33.7 ms under a heavier load |
+| ... each event with what it left for the next turns of the message loop | | 9.7 ms; 18.4 ms under the heavier load |
+
+What is left of a tick, about 0.1 ms a strip, is the model's lookups of each strip's values by ID (known bug 122).
+
+The thumb's drag was measured after the review's round (2026-11-15), whose first version made every strip a jump brought
+into view, and deleted every one it took out, at once: 10.5 ms an event and 24 to 34 ms at the worst, over a frame. A jump
+now makes and deletes what 6 ms of a frame can bear (two strips at least), the rest at the next turns of the message
+loop; a strip also reads its channel once as it is made (twice before). Under load the two strips it always makes can
+take a frame by themselves.
+### Benchmark: the playlist of 200 tracks and 4,800 clips
+
+200 tracks, each with 24 clips of 4 bars and 16 notes (4,800 clips, 76,800 notes), in a playlist 1600 by 900 pixels,
+its plans not compiled, as above. Measured the same day, the same way.
+
+| What | Before | After |
+|---|---|---|
+| A note added to a clip in view: the work / asked to repaint | 306 ms / 1400 x 900 px | 2.9 to 3.0 ms / the clip, 384 x 47 px |
+| A note added to a clip out of view | 302 ms / 1400 x 900 px | 3.5 to 3.7 ms / nothing |
+| A clip moved a beat, as a drag's step moves it | 294 ms / 1400 x 900 px | 3.5 to 3.9 ms / its row's part and the overview, 1400 x 184 px |
+| A wheel notch, scrolling down / up | 9.1 / 1.3 ms | 7.3 to 7.5 / 1.0 ms |
+| A track renamed | 326 ms | 130 ms |
+| A track added at the end | 384 ms | 162 ms |
+| Headers / clip components / components | 200 / 72 / 1,506 | 19 / 72 / 239 |
+| The rows' scroll bar's thumb dragged top to bottom in 60 events: each event / the worst | | 4.5 / 7.9 ms; 6.1 / 17.0 ms under a heavier load |
+| ... each event with what it left for the next turns of the message loop | | 23.8 ms; 141 ms under the heavier load |
+What is left of a track renamed or added is the playlist reading every clip again (`getClips()`, about 0.6 ms a track
+of 24 clips, 122 ms for the 200), which is the model's lookups (known bug 122): a clip's information looks its track
+up by ID, and an audio clip itself three times. A clip moved still reads its own track's clips again (0.6 ms).
+
+A jump of the rows (the thumb dragged) makes the headers, automation lanes and clips that come into view as 6 ms of a
+frame can bear (four at least), the rest at the next turns of the message loop: before, the first version made them all
+at once, 16 ms an event and up to 230 ms. What it leaves is mostly the clips' notes read from the song
+(`getNoteShapes()`, about 0.45 ms a clip of 16 notes, the model's lookups again).
 ### Benchmark: a song scrolling continuously as it plays, each frame painted as the window paints it
 
 600 frames of the example song House Groove at 22 pixels a beat and 1920 x 1080, painted through Direct2D.
@@ -360,9 +411,15 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   by hand, a mute, a selection, the playhead moved or a save gives it none (`PlanCounter`);
 - a new plan keeps what didn't change: a note added on one track compiles that track's notes again and no other's,
   and every device sounds on;
-- the playlist of 200 tracks makes as many clip components as that of 20, and at most seven more components a track;
-- what an edit repaints in the playlist: nothing for a volume or a pan set by hand, and only its clip for a note added
-  (today it repaints every lane: a known exception, known bug 144, which fails once fixed);
+- the playlist of 200 tracks makes as many clip components, track headers and components in all as that of 20 (and
+  with every track's automation lane shown, as many components), and the mixer of 200 tracks as many strips and
+  components as that of 20;
+- what an edit repaints in the playlist: nothing for a volume or a pan set by hand, and only its clip for a note added;
+  in a playlist of 4,800 clips, a note added repaints its clip alone, or nothing if the clip is out of view, a clip
+  moved its old and new places and the overview, and a note added allocates less than twice what it does in one of
+  480 clips;
+- a device changed on one channel brings only that channel's strip up to date, a send switched before the fader the
+  return's too, and a send added every strip (where sound can go changed, which the send knobs follow);
 - the allocations a note added and a save make, at 16 and 64 tracks, grow no faster than the song, and a save writes
   the song's text once (`countAllocations()`, counted in Windows Debug builds only; elsewhere the case checks nothing
   and says so).

@@ -279,6 +279,14 @@ The top strip of the playlist's and the piano roll's rulers is for the loop; low
   press elsewhere centres that part and drags on from there, and the wheel scrolls.
 - **The tracks' scroll bar** lies over the right edge of the lanes ([window.md](window.md#design-language)).
 - The time line reaches to the end of everything on it, sections and chords included, with room after.
+- **A big song costs what is in view.** Only the clips in view, and the headers and automation lanes of the tracks in
+  view (and one more at either end, which the Tab key goes on to and scrolls into view), have components, made as they
+  scroll into view; a header or a lane stays while it is in use (its name typed, the tracks dragged by it, a point
+  dragged). A jump (a scroll bar's thumb dragged far) makes what part of a frame can bear, and the rest over the next
+  turns of the message loop. A change of a few clips (a note
+  added, a step of a drag) reads those clips' tracks again and repaints those clips alone, and the overview only if
+  what it shows of them moved. A screen reader hears the headers in view, and from the headers' column how many tracks
+  there are.
 
 | Command | Key | Does |
 | --- | --- | --- |

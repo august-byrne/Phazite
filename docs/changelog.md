@@ -152,6 +152,14 @@ too. A line names the bug's number in that list.
   workaround T8): a Release build makes nothing undefined of them.
 - **150 Full Screen** is switched in a test, in a real window on Windows, and the main window's tests are compiled
   and run on Linux as well.
+- **127 The mixer in large songs:** strips are made only for the channels in view, and a device's change brings only
+  its channel's strip up to date (a change of where sound can go, every strip's send knobs): a mixer of 200 tracks
+  opens in 17 ms instead of 546, and its ticks take 1.5 ms instead of 43. A send that would make a loop is never
+  made, whatever offers it.
+- **144 The playlist in large songs:** track headers and automation lanes have components only for the rows in view,
+  and a note added or a clip dragged reads and repaints only the clips it changed: 3 ms instead of 300 in a song of
+  4,800 clips. The song's changes name the clips, tracks and channels they touched (`SongChanges`). A jump of the
+  mixer or the playlist makes what comes into view over the next turns of the message loop, never stalling a frame.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

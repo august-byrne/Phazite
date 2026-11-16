@@ -86,7 +86,7 @@ struct ChannelStrip::SendSlot : public juce::Component
 };
 
 //==============================================================================
-ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContext)
+ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContext, TrackID shown)
     : commands (bridge),
       context (projectContext),
       instrument (DeviceSlots::Kind::instrument, projectContext, bridge),
@@ -152,7 +152,7 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
     addChildComponent (arm);
 
     context.addListener (this);
-    setTrack ({});
+    setTrack (shown); // once: a strip made as its channel scrolls into view reads it once
     startTimerHz (8);
 }
 
@@ -196,14 +196,23 @@ void ChannelStrip::setRelated (bool isRelated)
 
 void ChannelStrip::songChanged (const SongChanges& changes)
 {
-    // Shown at the next tick: a fader dragged on another strip changes the song as often as the mouse moves.
-    refreshDue = refreshDue || changes.tracks || changes.devices;
-    needDue = needDue || changes.clips; // notes that have no instrument to play them
+    // Shown at the next tick: a fader dragged on another strip changes the song as often as the mouse moves. Of the devices'
+    // changes, only those in this channel, or in a send to it, which it lists (tracks' changes can rename what it shows:
+    // where it goes, what sends to it).
+    refreshDue = refreshDue || changes.tracks || (changes.devices && changes.deviceChannels.mayInclude (track));
+    needDue = needDue || (changes.clips && changes.clipTracks.mayInclude (track)); // notes that have no instrument to play them
+}
+
+void ChannelStrip::focusOfChildComponentChanged (FocusChangeType cause)
+{
+    if (cause == focusChangedByTabKey && hasKeyboardFocus (true) && onFocusedByKeys != nullptr)
+        onFocusedByKeys();
 }
 
 void ChannelStrip::refresh()
 {
     refreshDue = needDue = false;
+    ++refreshes;
     const auto shownColour = channel.has_value() ? channel->colour : juce::Colour();
     channel = getChannel (context, track);
 

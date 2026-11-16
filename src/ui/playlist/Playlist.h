@@ -173,11 +173,50 @@ private:
     juce::Component pinnedClips, scrollingClips;
 
     std::vector<Row> rows;
-    std::unordered_map<TrackID, int> rowOf;              // rows[i] by its track
-    juce::OwnedArray<TrackHeader> headers;               // headers[i] shows rows[i]
-    juce::OwnedArray<AutomationLaneHeader> laneHeaders;  // the rows' lanes, in their order
-    juce::OwnedArray<AutomationLaneView> laneViews;      // laneViews[i] goes with laneHeaders[i]
-    AutomationShape paintShape = AutomationShape::sine;  // what the Paint tool draws in a lane
+    std::unordered_map<TrackID, int> rowOf; // rows[i] by its track
+
+    // The headers of the rows in view, by their tracks: every pinned row's, and the scrolling rows' the view shows, with one
+    // more at either end, which the Tab key goes on to (scrolling it into view), as a list that shows a window of its rows. A
+    // song can have hundreds of tracks: a header is made as its row comes into view, and goes as it leaves, but not while it
+    // is in use (it has the keyboard focus, as while its name is typed, or the mouse is pressed on it, as while it is dragged).
+    // A screen reader hears the headers in view, and from the headers' column how many tracks there are and which show.
+    std::unordered_map<TrackID, std::unique_ptr<TrackHeader>> headers;
+    void showOnHeader (TrackHeader&, const Row&) const; // the row's track, selected or not, faded while it moves
+
+    // Which of the rows' headers and lanes have components (headers, laneHeaders and laneViews): those the view shows, top to
+    // bottom, and one more at either end; every pinned one.
+    struct ItemsInView
+    {
+        std::vector<bool> headers;            // by row
+        std::vector<std::vector<bool>> lanes; // by row, then by lane
+    };
+
+    ItemsInView findItemsInView() const;
+
+    // The headers, lanes and clips made in one go as the view jumps (a scroll bar's thumb dragged far): at most what part of a
+    // frame can bear, the rest a turn of the message loop later, and so on (makeRestLater()), so that a jump never stalls a frame.
+    // A MakingPass counts them while it lives; without one (a rebuild), everything in view is made at once.
+    struct MakingPass;
+    static constexpr double makingBudgetMs = 6.0;
+    static constexpr int alwaysMade = 4;
+    bool budgeted = false, makingLeft = false, restPosted = false;
+    double makeUntil = 0.0;
+    int madeThisPass = 0;
+    bool mayMakeComponent();
+    void makeRestLater();
+    void layOutHeaders (const ItemsInView&); // after the rows were laid out or scrolled
+
+    // The Tab key gave a track's header, or one of its lanes', the keys: it scrolls into view.
+    void focusedByKeys (TrackID, std::optional<ParameterRef> lane);
+    void scrollToShowSpan (const Row&, int top, int height); // a part of a scrolling row, from its top, all of it in view
+
+    // The lanes in view, as the headers are: laneViews[i] goes with laneHeaders[i], in no order.
+    juce::OwnedArray<AutomationLaneHeader> laneHeaders;
+    juce::OwnedArray<AutomationLaneView> laneViews;
+    const LaneRow* findLaneRow (TrackID, const ParameterRef&) const;
+    AutomationLaneView* findLaneView (TrackID, const ParameterRef&) const;
+    std::optional<std::pair<TrackID, ParameterRef>> findShownLaneOf (const ParameterRef&) const; // in view or not
+    AutomationShape paintShape = AutomationShape::sine;                                          // what the Paint tool draws in a lane
     std::optional<std::vector<ParameterRef>> knownLanes; // the lanes shown when they were built last: none for a new project
 
     // The clips on the rows, row by row as the model lists them, which the tools find and select, and where each is in that
@@ -266,7 +305,7 @@ private:
     // The automation lanes (PlaylistAutomation.cpp).
     void refreshLanes(); // the rows' lanes as the model has them now, laid out; it scrolls to show a lane shown just now
     void rebuildLanes(); // their headers and views, keeping those of lanes still shown
-    void layOutLanes();
+    void layOutLanes (const ItemsInView&);
     void updateLanes(); // their colors, modes, selected points and curves
     void noteLanes();   // after the lanes were built: one shown since the last time scrolls into view
     void showLaneMenu (TrackID, const ParameterRef&, bool onPoint = false); // a lane's right-click menu (makeLaneMenu())
@@ -284,8 +323,9 @@ private:
     void updateVerticalScrollBar();
 
     // The clips.
-    void rebuildClips(); // the clips on the rows, as they are now
-    void layOutClips();  // a component for each clip in view, where it is
+    void rebuildClips();                        // the clips on the rows, as they are now
+    void showChangedClips (const SongChanges&); // those a change was in, and their tracks' rows, as they are now
+    void layOutClips();                         // a component for each clip in view, where it is
     std::unique_ptr<ClipComponent> makeClipComponent (const ClipInfo&);
     void waveformLoaded (ClipID);                                        // more of an audio clip's waveform loaded: its component paints it
     int getZOrderFor (const juce::Component& layer, size_t index) const; // after the clips before it in the list
@@ -339,6 +379,13 @@ private:
     void addTrackAtEnd (bool folder);
     void showAddTrackMenu();
 
+    // What the overview shows of each track's clips (its marks' places in time, colours and whether they are faint), kept
+    // between its pictures, read again only for the tracks a change of clips was in: a picture of thousands of clips read
+    // them all from the song at each step of a drag. True if the tracks' marks are other than they were.
+    mutable std::unordered_map<TrackID, std::vector<OverviewMark>> overviewMarks;
+    std::vector<OverviewMark> readOverviewMarks (TrackID) const;
+    bool refreshOverviewMarks (const std::vector<TrackID>&);
+
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;       // the lanes'
     std::vector<OverviewMark> getOverviewMarks() const override; // each track's clips, a row each
@@ -357,6 +404,7 @@ private:
     bool trackDraggedOut (TrackHeader&, const juce::MouseEvent&) override;
     void trackDragEnded (TrackHeader&, const juce::MouseEvent&) override;
     void trackHeightChanged() override; // the row's height, as the model keeps it now
+    void headerFocusedByKeys (TrackID) override;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection or the range changed
     void handleAsyncUpdate() override { rebuild(); }

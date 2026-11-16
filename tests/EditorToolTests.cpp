@@ -94,6 +94,8 @@ TEST_CASE ("A Shift+click or Ctrl+click on a track far from the one selected lea
         for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
             if (bar->isVertical())
                 bar->setCurrentRangeStart (y, juce::sendNotificationSync);
+
+        phazite::test::deliverChanges(); // the headers a jump leaves for later, before the next click (Playlist.h)
     };
     auto scrolled = 0.0;
 

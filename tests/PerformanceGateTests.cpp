@@ -25,8 +25,10 @@
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Devices.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -36,8 +38,12 @@
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/MixerView.h"
+#include "ui/playlist/TrackHeader.h"
 
 #include <map>
+#include <stdexcept>
 
 using phazite::test::at;
 using phazite::test::lasting;
@@ -192,20 +198,176 @@ TEST_CASE ("Performance gate: the playlist makes components for what is in view,
                 REQUIRE (phazite::insertMidiClip (*screen.song, track, { at (c * 16.0), at (c * 16.0 + 16.0) }, nullptr).isValid());
 
         phazite::test::deliverChanges();
-        return std::pair (phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist).size(),
-                          phazite::test::findAll<juce::Component> (screen.playlist).size());
+        return std::tuple (phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist).size(),
+                           phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist).size(),
+                           phazite::test::findAll<juce::Component> (screen.playlist).size());
     };
 
-    const auto [smallClips, smallComponents] = countFor (20);
-    const auto [bigClips, bigComponents] = countFor (200);
-    MESSAGE ("20 tracks: " << smallClips << " clip components, " << smallComponents << " components; 200 tracks: " << bigClips
-                           << " clip components, " << bigComponents << " components");
+    const auto [smallClips, smallHeaders, smallComponents] = countFor (20);
+    const auto [bigClips, bigHeaders, bigComponents] = countFor (200);
+    MESSAGE ("20 tracks: " << smallClips << " clip components, " << smallHeaders << " headers, " << smallComponents
+                           << " components; 200 tracks: " << bigClips << " clip components, " << bigHeaders << " headers, " << bigComponents
+                           << " components");
     CHECK (smallClips > 0);
     CHECK (bigClips == smallClips);
 
-    // Each track's header is a few components (its name, its switches, its peak bar), made for every track whether in view
-    // or not (measured: 7 a track, 2026-11-14): no more than that.
-    CHECK (bigComponents - smallComponents <= 7 * 180);
+    // The headers of the tracks in view, and of one more at either end, which the Tab key goes on to: as many for 200 tracks
+    // as for 20, which don't all fit either. (They were made for every track, seven components each, known bug 144 until
+    // 2026-11-15.)
+    CHECK (smallHeaders < 20);
+    CHECK (bigHeaders == smallHeaders);
+    CHECK (bigComponents == smallComponents);
+}
+
+TEST_CASE ("Performance gate: the playlist makes the automation lanes' components for what is in view, however many tracks")
+{
+    // Every track's volume lane shown, of 20 tracks and of 200: the lanes' headers and curves of those in view (they were made
+    // for every lane, the reviewer's finding on known bug 144, 2026-11-15).
+    const auto countFor = [] (int numTracks)
+    {
+        phazite::test::PlaylistScreen screen;
+
+        for (const auto track : phazite::ensureTracks (*screen.song, numTracks))
+        {
+            const auto volume = phazite::getVolume (screen.context, track);
+            phazite::showAutomationLane (volume);
+            phazite::addAutomationPoint (screen.context, volume.getRef(), { at (2.0), 0.5f });
+        }
+
+        phazite::test::deliverChanges();
+        return phazite::test::findAll<juce::Component> (screen.playlist).size();
+    };
+
+    const auto small = countFor (20), big = countFor (200);
+    MESSAGE ("Components, every track's volume lane shown: 20 tracks " << small << ", 200 tracks " << big);
+    CHECK (big == small);
+}
+
+TEST_CASE ("Performance gate: the mixer makes strips for what is in view, however many tracks")
+{
+    // The same mixer, in the same window, of 20 tracks and of 200, each with an EQ: the strips in view, and one more at
+    // either end, which the Tab key goes on to. (Every channel had a strip, its timer ticking eight times a second, known
+    // bug 127 until 2026-11-15.)
+    const auto countFor = [] (int numTracks)
+    {
+        auto song = phazite::createSong();
+
+        for (const auto track : phazite::ensureTracks (*song, numTracks))
+            REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, dev::Equalizer::typeID)).isValid());
+
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
+        setSong (context, song.get());
+        phazite::CommandRegistry registry;
+        phazite::ui::CommandBridge commands { registry };
+        phazite::ui::MixerView mixer { commands, context };
+        phazite::test::TestWindow window { mixer, 1000, 600 };
+        phazite::test::deliverChanges();
+        const auto counts = std::pair (phazite::test::findAll<phazite::ui::ChannelStrip> (mixer).size(),
+                                       phazite::test::findAll<juce::Component> (mixer).size());
+        setSong (context, nullptr);
+        return counts;
+    };
+
+    const auto [smallStrips, smallComponents] = countFor (20);
+    const auto [bigStrips, bigComponents] = countFor (200);
+    MESSAGE ("20 tracks: " << smallStrips << " strips, " << smallComponents << " components; 200 tracks: " << bigStrips << " strips, "
+                           << bigComponents << " components");
+    CHECK (smallStrips > 0);
+    CHECK (smallStrips < 20);
+    CHECK (bigStrips == smallStrips);
+    CHECK (bigComponents == smallComponents);
+}
+
+TEST_CASE ("Performance gate: a device changed on one channel among many brings only its strip up to date")
+{
+    // Every strip brought itself up to date at a change of any channel's devices (known bug 127 until 2026-11-15): now only
+    // the changed channel's, and the return a changed send goes to. Each strip shows what is due at its next tick.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 6);
+    const auto reverb = phazite::addReturnTrack (*song, "Reverb", nullptr);
+    REQUIRE (reverb.isValid());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 1400, 600 };
+    phazite::test::deliverChanges();
+
+    const auto stripOf = [&mixer] (phazite::TrackID track) -> phazite::ui::ChannelStrip&
+    {
+        for (auto* strip : phazite::test::findAll<phazite::ui::ChannelStrip> (mixer))
+            if (strip->getTrack() == track)
+                return *strip;
+
+        FAIL ("no strip shows the track");
+        throw std::logic_error ("unreachable");
+    };
+
+    REQUIRE (phazite::test::findAll<phazite::ui::ChannelStrip> (mixer).size() == 7); // every channel in view
+
+    // What each strip has done since: brought itself up to date, or has that due.
+    const auto refreshes = [&]
+    {
+        std::map<std::uint64_t, int> counts;
+
+        for (auto* strip : phazite::test::findAll<phazite::ui::ChannelStrip> (mixer))
+            counts[strip->getTrack().getRaw()] = strip->getRefreshCount() + (strip->isRefreshDue() ? 1 : 0);
+
+        return counts;
+    };
+
+    const auto onlyThese = [&] (const std::function<void()>& change, std::vector<phazite::TrackID> expected)
+    {
+        phazite::test::deliverChanges();
+        const auto before = refreshes();
+        change();
+        phazite::test::deliverChanges();
+
+        // Wait for the changed strips to show it.
+        for (const auto track : expected)
+            CHECK (phazite::test::runTimersUntil ([&] { return ! stripOf (track).isRefreshDue(); }));
+
+        const auto after = refreshes();
+
+        for (const auto& [raw, count] : after)
+        {
+            const auto track = phazite::TrackID::fromRaw (raw);
+            const auto changed = std::find (expected.begin(), expected.end(), track) != expected.end();
+            INFO ("the strip of track " << (juce::int64) raw);
+            CHECK (count == before.at (raw) + (changed ? 1 : 0));
+        }
+    };
+
+    SUBCASE ("an effect added")
+    {
+        onlyThese (
+            [&]
+            { REQUIRE (phazite::insertDeviceState (*song, tracks[2], phazite::makeOwnDeviceState (*song, dev::Delay::typeID)).isValid()); },
+            { tracks[2] });
+    }
+
+    std::vector<phazite::TrackID> everyChannel (tracks.begin(), tracks.end());
+    everyChannel.push_back (reverb);
+
+    SUBCASE ("a send added: where sound can go changed, which every strip's send knobs follow")
+    {
+        onlyThese ([&] { REQUIRE (phazite::addSend (*song, tracks[3], reverb, false).isValid()); }, everyChannel);
+    }
+
+    SUBCASE ("a send switched before the fader, which its return lists")
+    {
+        const auto send = phazite::addSend (*song, tracks[3], reverb, false);
+        REQUIRE (send.isValid());
+        phazite::test::deliverChanges();
+
+        for (const auto track : everyChannel)
+            REQUIRE (phazite::test::runTimersUntil ([&] { return ! stripOf (track).isRefreshDue(); }));
+
+        onlyThese ([&] { phazite::setPreFader (*song, send, true); }, { tracks[3], reverb });
+    }
+
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("Performance gate: what an edit repaints in the playlist")
@@ -232,11 +394,9 @@ TEST_CASE ("Performance gate: what an edit repaints in the playlist")
     const std::vector<Edit> edits {
         { "a track's volume set by hand", [&] { phazite::getVolume (screen.context, tracks[1]).setValue (0.5f); }, nothing, nullptr },
         { "a track's pan set by hand", [&] { phazite::getPan (screen.context, tracks[1]).setValue (0.5f); }, nothing, nullptr },
+        // Its clip alone (every lane repainted, known bug 144 until 2026-11-15).
         { "a note added", [&] { phazite::addNote (screen.context, clips[1], 60, at (2.0), lasting (1.0), 100); },
-          [&] { return screen.boundsOf (clips[1]); },
-          // Playlist::songChanged() lays out every clip again and repaints all the lanes for any change in the clips' group of
-          // changes, a note's included.
-          "every change of a clip repaints all the lanes" },
+          [&] { return screen.window.getLocalArea (screen.lanes, screen.boundsOf (clips[1])); }, nullptr },
     };
 
     for (const auto& edit : edits)
@@ -261,6 +421,97 @@ TEST_CASE ("Performance gate: what an edit repaints in the playlist")
         {
             CHECK (within);
         }
+    }
+}
+
+TEST_CASE ("Performance gate: a note added to one clip among thousands shows that clip again, and no other")
+{
+    // A playlist of 200 tracks, each with 24 clips of 4 bars: a note added, or a clip moved, read every clip of the song again
+    // and repainted every clip in view and all the lanes (known bug 144 until 2026-11-15). Its plans aren't compiled (the
+    // session lent, as to a render), so that what is counted is the playlist's.
+    const auto playlistOf = [] (phazite::test::PlaylistScreen& screen, int numTracks)
+    {
+        auto* session = phazite::getSession (screen.context);
+        REQUIRE (session != nullptr);
+        session->lendToRender (true);
+        std::vector<std::vector<phazite::ClipID>> clips;
+
+        for (const auto track : phazite::ensureTracks (*screen.song, numTracks))
+        {
+            auto& onTrack = clips.emplace_back();
+
+            for (int c = 0; c < 24; ++c)
+                onTrack.push_back (phazite::insertMidiClip (*screen.song, track, { at (c * 16.0), at (c * 16.0 + 16.0) }, nullptr));
+        }
+
+        phazite::test::deliverChanges();
+        return clips;
+    };
+
+    SUBCASE ("what it repaints")
+    {
+        phazite::test::PlaylistScreen screen;
+        const auto clips = playlistOf (screen, 200);
+        auto* overview = phazite::test::findComponentWithTitle (screen.playlist, "Overview");
+        REQUIRE (overview != nullptr);
+        const auto inWindow = [&screen] (juce::Rectangle<int> inLanes) { return screen.window.getLocalArea (screen.lanes, inLanes); };
+
+        const auto repaintedBy = [&screen] (const std::function<void()>& edit)
+        {
+            screen.window.takeRepaintedArea();
+            edit();
+            phazite::test::deliverChanges();
+            return screen.window.takeRepaintedArea().getBounds();
+        };
+
+        // In view: its clip alone.
+        const auto clip = clips[1][1];
+        const auto bounds = inWindow (screen.boundsOf (clip));
+        REQUIRE_FALSE (bounds.isEmpty());
+        CHECK (bounds.expanded (2).contains (
+            repaintedBy ([&] { phazite::addNote (screen.context, clip, 60, at (2.0), lasting (1.0), 100); })));
+
+        // Out of view: nothing.
+        REQUIRE (screen.boundsOf (clips[150][20]).isEmpty());
+        CHECK (repaintedBy ([&] { phazite::addNote (screen.context, clips[150][20], 60, at (2.0), lasting (1.0), 100); }).isEmpty());
+
+        // A clip moved a beat: where it was, where it is, and the overview of the song, which shows it.
+        const auto moved = clips[2][0];
+        const auto before = inWindow (screen.boundsOf (moved));
+        const auto track = screen.get (moved).track;
+        const auto repainted = repaintedBy ([&] { phazite::moveClip (screen.context, moved, at (1.0), track); });
+        const auto allowed = before.getUnion (inWindow (screen.boundsOf (moved))).expanded (2);
+        const auto overviewArea = screen.window.getLocalArea (overview, overview->getLocalBounds());
+        CHECK (allowed.getUnion (overviewArea).contains (repainted));
+        CHECK (repainted.intersects (allowed));
+    }
+
+    SUBCASE ("what it allocates, however big the song")
+    {
+        if (! phazite::test::AudioThreadMonitor::isAvailable())
+        {
+            MESSAGE ("Allocations aren't counted in this build (AudioThreadMonitor.h): nothing checked here.");
+            return;
+        }
+
+        const auto countFor = [&] (int numTracks)
+        {
+            phazite::test::PlaylistScreen screen;
+            const auto clips = playlistOf (screen, numTracks);
+            return phazite::test::countAllocations (
+                       [&]
+                       {
+                           phazite::addNote (screen.context, clips[1][1], 72, at (2.5), lasting (0.25), 100);
+                           phazite::test::deliverChanges();
+                       })
+                .value_or (0);
+        };
+
+        const auto small = countFor (20), big = countFor (200);
+        MESSAGE ("Allocations, a note added, 20 tracks / 200 tracks of 24 clips: " << small << " / " << big);
+
+        // Ten times the clips: about the same work.
+        CHECK (big < small * 2);
     }
 }
 

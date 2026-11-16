@@ -39,6 +39,11 @@ plug-in's own window opens too.
 - The returns come last, together, set apart by a gap, with a slim column after them whose "+" adds a return.
 - The master is on the right.
 - The mixer has no toolbar or row of its own.
+- The strips scroll sideways. Only the channels in view have strips, and one more at either end, which the Tab key
+  goes on to and scrolls into view, as a list shows a window of its rows: a song of hundreds of tracks costs the
+  mixer what a dozen do. A strip stays while it is in use (a fader dragged, a value typed) as the mixer scrolls; a
+  jump makes what part of a frame can bear, and the rest over the next turns of the message loop. A
+  screen reader hears the strips in view, and from the channels' view how many channels there are and which show.
 
 ## A strip, top to bottom
 
@@ -120,6 +125,10 @@ One small switch, a light, in a track's playlist header, its mixer strip and the
 - **A send gives the return a copy.** The track still plays through its own Out, and the return's effect plays
   alongside it. To run several tracks' whole sound through one effect, they go into a bus instead. The tooltips of the
   send knobs, + Send, the returns' "+" and the Out button say so.
+- A strip has a send knob for each return its sound can go to without coming back to it; a send that changes where
+  sound goes takes away or brings back the other strips' knobs. A send whose sound would come back through sends and
+  buses is never made (a loop, which the engine can't play); one that comes back only through a sidechain is made, and
+  the sidechain goes (below).
 
 ## Folders are buses
 

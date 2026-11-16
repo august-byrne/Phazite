@@ -5,6 +5,7 @@
 #include "model/arrangement/TimelineModel.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace phazite::ui
@@ -421,6 +422,7 @@ void Playlist::showProject()
     shownClips.clear();
     shownSubRows.clear();
     clipIndex.clear();
+    overviewMarks.clear();
     rows.clear();
     rowOf.clear();
     cancelPendingUpdate();
@@ -488,13 +490,30 @@ void Playlist::songChanged (const SongChanges& changes)
         chordLaneHeader.update();
     }
 
-    // The overview of the whole song: its tracks and their clips.
-    if (changes.tracks || changes.clips || changes.tempo)
-        overviewContentChanged();
+    // A change of a few clips (a note added, a clip dragged a step) shows those clips again, and their tracks' rows; any other
+    // change of clips, or one that moves them all, shows every one again.
+    const auto fewClips =
+        changes.clips && ! changes.changedClips.any && ! changes.clipTracks.any && ! changes.tracks && ! changes.tempo && ! changes.devices;
+
+    // The overview of the whole song: its tracks and their clips, after the rows show them (it takes theirs from them), read
+    // again for the tracks a few clips were on, and painted again if what it shows of them moved.
+    const auto showOverview = [this, &changes, fewClips]
+    {
+        if (changes.tracks || changes.tempo || (changes.clips && ! fewClips))
+        {
+            overviewMarks.clear();
+            overviewContentChanged();
+        }
+        else if (fewClips && refreshOverviewMarks (changes.clipTracks.named))
+        {
+            overviewContentChanged();
+        }
+    };
 
     if (changes.tracks)
     {
         rebuild(); // a name, color, mute or solo, or tracks added, deleted or moved
+        showOverview();
         return;
     }
 
@@ -504,7 +523,12 @@ void Playlist::songChanged (const SongChanges& changes)
         trackHeightChanged();
 
     // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
-    if (changes.clips || changes.tempo || changes.devices)
+    if (fewClips)
+    {
+        clipsBehind = false;
+        showChangedClips (changes);
+    }
+    else if (changes.clips || changes.tempo || changes.devices)
     {
         clipsBehind = false;
         rebuildClips();
@@ -515,8 +539,10 @@ void Playlist::songChanged (const SongChanges& changes)
     if (changes.tempo)
         ruler.repaint();
 
-    if (changes.clips || changes.tempo || changes.sections)
+    if ((changes.clips && ! fewClips) || changes.tempo || changes.sections)
         lanes->repaint();
+
+    showOverview();
 }
 
 //==============================================================================
@@ -539,17 +565,76 @@ std::vector<TimelineEditor::OverviewMark> Playlist::getOverviewMarks() const
         if (canHoldClips (context, track))
             tracks.push_back (track);
 
+    // What the rows hold, as they were read last, in their tracks' colours; the tracks in collapsed folders, which have no
+    // rows, from the song.
+    if (overviewMarks.empty())
+    {
+        for (const auto& row : rows)
+            overviewMarks[row.track.id] = {};
+
+        for (const auto& clip : shownClips)
+            if (const auto row = getRowOf (clip.track); row >= 0)
+                overviewMarks[clip.track].push_back ({ clip.range.getStart().inBeats(), clip.range.getEnd().inBeats(), 0.0f, 1.0f,
+                                                       rows[(size_t) row].track.colour, clip.muted });
+    }
+
     for (size_t row = 0; row < tracks.size(); ++row)
     {
-        const auto shown = getTrackRow (context, tracks[row]);
-        const auto colour = shown.has_value() ? shown->colour : juce::Colours::grey;
+        auto found = overviewMarks.find (tracks[row]);
+
+        if (found == overviewMarks.end())
+            found = overviewMarks.emplace (tracks[row], readOverviewMarks (tracks[row])).first;
+
         const auto top = (float) row / (float) tracks.size(), bottom = (float) (row + 1) / (float) tracks.size();
 
-        for (const auto& clip : getClips (context, tracks[row]))
-            marks.push_back ({ clip.range.getStart().inBeats(), clip.range.getEnd().inBeats(), top, bottom, colour, clip.muted });
+        for (auto mark : found->second)
+        {
+            mark.top = top;
+            mark.bottom = bottom;
+            marks.push_back (mark);
+        }
     }
 
     return marks;
+}
+
+std::vector<TimelineEditor::OverviewMark> Playlist::readOverviewMarks (TrackID track) const
+{
+    // In its colour, its row's place in the overview set as the marks are given (getOverviewMarks()).
+    std::vector<OverviewMark> marks;
+    const auto shown = getTrackRow (context, track);
+    const auto colour = shown.has_value() ? shown->colour : juce::Colours::grey;
+
+    for (const auto& clip : getClips (context, track))
+        marks.push_back ({ clip.range.getStart().inBeats(), clip.range.getEnd().inBeats(), 0.0f, 1.0f, colour, clip.muted });
+
+    return marks;
+}
+
+bool Playlist::refreshOverviewMarks (const std::vector<TrackID>& tracks)
+{
+    const auto same = [] (const OverviewMark& a, const OverviewMark& b)
+    { return juce::exactlyEqual (a.start, b.start) && juce::exactlyEqual (a.end, b.end) && a.colour == b.colour && a.faint == b.faint; };
+
+    auto changed = false;
+
+    for (const auto track : tracks)
+    {
+        const auto found = overviewMarks.find (track);
+
+        // A track the overview hasn't read is read with the others.
+        if (found == overviewMarks.end())
+        {
+            changed = true;
+            continue;
+        }
+
+        auto fresh = readOverviewMarks (track);
+        changed = changed || ! std::equal (fresh.begin(), fresh.end(), found->second.begin(), found->second.end(), same);
+        found->second = std::move (fresh);
+    }
+
+    return changed;
 }
 
 BeatRange Playlist::getContentRange() const
@@ -561,6 +646,7 @@ BeatRange Playlist::getContentRange() const
 
 void Playlist::timelineChanged()
 {
+    const MakingPass pass (*this); // a jump along the song makes its clips' components a part of a frame at a time
     // Where files dragged over the lanes would go: the beat under the pointer, which the view moving (following the playhead)
     // changes without a move of the mouse, which alone told it before, so that the line slid away from where a drop went.
     if (fileDropBeat.has_value())

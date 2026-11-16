@@ -3,8 +3,10 @@
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clipboard.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/arrangement/internal/Transients.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
@@ -68,7 +70,66 @@ namespace
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
             if (state.isValid())
+            {
+                pending.deviceChannels.any = true; // which plug-ins' channels isn't said
                 add (pending.devices);
+            }
+        }
+
+        //==============================================================================
+        // Where the changes were (SongChanges::changedClips, clipTracks, deviceChannels): an item without an ID could be any.
+        // A drag changes one item many times in a row, named once; the lists are made exact as they are delivered.
+        template <typename ID>
+        static void name (ChangedItems<ID>& items, ID id)
+        {
+            if (! id.isValid())
+                items.any = true;
+            else if (items.named.empty() || items.named.back() != id)
+                items.named.push_back (id);
+        }
+
+        template <typename ID>
+        static void makeExact (ChangedItems<ID>& items)
+        {
+            std::sort (items.named.begin(), items.named.end());
+            items.named.erase (std::unique (items.named.begin(), items.named.end()), items.named.end());
+        }
+
+        // A clip, on the track whose element holds it (its parent).
+        void nameClip (const juce::ValueTree& clip, const juce::ValueTree& track)
+        {
+            name (pending.changedClips, getClipID (clip));
+            name (pending.clipTracks, isTrackElement (track) ? getTrackID (track) : TrackID());
+        }
+
+        // The channel whose element holds a device, a send or a container's chain, at any depth; and a send's return, whose
+        // strip lists the tracks that send to it.
+        void nameChannelOf (const juce::ValueTree& changed)
+        {
+            auto channel = changed;
+
+            while (channel.isValid() && ! isTrackElement (channel) && ! channel.hasType (schema::MASTER))
+                channel = channel.getParent();
+
+            name (pending.deviceChannels, channel.isValid() ? getTrackID (channel) : TrackID());
+
+            if (changed.hasType (schema::SEND))
+                name (pending.deviceChannels, TrackID::fromRaw ((std::uint64_t) (juce::int64) changed[schema::sendTo]));
+        }
+
+        // Whether an element added or removed changes where sound can go: a send, or a device whose sidechain listens to a
+        // track (in a container too). Every strip's send knobs follow the whole routing (a send that would make a loop has
+        // none), so then any channel may show other sends: rare edits, not drags.
+        static bool changesRouting (const juce::ValueTree& element)
+        {
+            if (element.hasType (schema::SEND) || element.hasProperty (schema::deviceSidechain))
+                return true;
+
+            for (const auto& child : element)
+                if (changesRouting (child))
+                    return true;
+
+            return false;
         }
 
         // The group a change to this element, or to something in it, belongs to.
@@ -98,11 +159,17 @@ namespace
 
                 // Clips, with their notes.
                 if (element.hasType (schema::CLIP))
+                {
+                    nameClip (element, element.getParent());
                     return add (pending.clips);
+                }
 
                 // Devices, on a track's element or the master's.
                 if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::SEND))
+                {
+                    nameChannelOf (element);
                     return add (pending.devices);
+                }
 
                 if (element.hasType (schema::TEMPOMAP))
                     return add (pending.tempo);
@@ -121,6 +188,9 @@ namespace
 
         void handleAsyncUpdate() override
         {
+            makeExact (pending.changedClips);
+            makeExact (pending.clipTracks);
+            makeExact (pending.deviceChannels);
             const auto changes = std::exchange (pending, {});
             listeners.call ([&changes] (ProjectContext::Listener& l) { l.songChanged (changes); });
         }
@@ -139,9 +209,22 @@ namespace
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
             else if (child.hasType (schema::CLIP))
+            {
+                nameClip (child, parent);
                 add (pending.clips);
+            }
             else if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
+            {
+                nameChannelOf (parent);
+
+                if (child.hasType (schema::SEND))
+                    name (pending.deviceChannels, TrackID::fromRaw ((std::uint64_t) (juce::int64) child[schema::sendTo]));
+
+                if (changesRouting (child))
+                    pending.deviceChannels.any = true;
+
                 add (pending.devices);
+            }
             else if (isTrackElement (child))
                 add (pending.tracks);
             else
@@ -171,7 +254,10 @@ namespace
                 if (isDevice
                     && (passed.hasType (schema::DEVICE) || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)
                         || passed.hasType (schema::CHAIN)))
+                {
+                    nameChannelOf (parent);
                     return add (pending.devices);
+                }
             }
         }
 
@@ -180,7 +266,16 @@ namespace
             // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
             // shows of it.
             if (switchesSidechain (tree, property))
+            {
+                pending.deviceChannels.any = true; // where sound can go, as changesRouting()
                 return add (pending.devices);
+            }
+
+            // A sidechain listening to another track, or a send to another return, changes where sound can go: any channel's
+            // send knobs may change (changesRouting()).
+            if ((tree.hasType (schema::DEVICE) && property == schema::deviceSidechain)
+                || (tree.hasType (schema::SEND) && property == schema::sendTo))
+                pending.deviceChannels.any = true;
 
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
             // makes one at each move (docs/archive/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
@@ -201,7 +296,10 @@ namespace
 
             // A track frozen or played live again changes what its devices show too (their controls are off while frozen).
             if (tree.hasType (schema::TRACK) && property == schema::trackFrozen)
+            {
+                nameChannelOf (tree);
                 add (pending.devices);
+            }
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.
             if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
@@ -214,8 +312,14 @@ namespace
         {
             // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
             // to its default, which takes its VALUES away (keepValueSetByHand()).
-            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
-                mark (child);
+            if (child.hasType (schema::VALUES) || child.hasType (schema::VALUE))
+                return;
+
+            if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
+                && changesRouting (child))
+                pending.deviceChannels.any = true;
+
+            mark (child);
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
         {

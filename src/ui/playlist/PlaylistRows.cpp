@@ -29,27 +29,12 @@ std::vector<TrackRow> Playlist::getShownRows() const
 
 void Playlist::rebuild()
 {
-    // The headers of tracks that are still shown are kept, in the tracks' new order. Tracks in collapsed folders
-    // aren't shown. The master shows under them while it has automation lanes.
-    juce::OwnedArray<TrackHeader> newHeaders;
+    // Tracks in collapsed folders aren't shown. The master shows under them while it has automation lanes.
     rows.clear();
     rowOf.clear();
 
     for (const auto& track : getShownRows())
     {
-        auto* header = getHeaderFor (track.id);
-
-        if (header != nullptr)
-        {
-            headers.removeObject (header, false);
-        }
-        else
-        {
-            header = new TrackHeader (*this, context, track);
-            headerContent.addAndMakeVisible (header);
-        }
-
-        newHeaders.add (header);
         rowOf[track.id] = (int) rows.size();
         rows.push_back ({ track });
 
@@ -57,7 +42,9 @@ void Playlist::rebuild()
             rows.back().lanes.push_back ({ lane });
     }
 
-    headers.swapWith (newHeaders); // newHeaders now holds the hidden or deleted tracks' headers, and deletes them
+    // The headers of tracks that are still shown are kept; the hidden or deleted tracks' go. Those of the rows that come into
+    // view are made as the rows are laid out (layOutHeaders()).
+    std::erase_if (headers, [this] (const auto& entry) { return ! rowOf.contains (entry.first); });
 
     rebuildLanes();
     rebuildClips();
@@ -98,13 +85,6 @@ void Playlist::layOutRows()
             row.lanesHeight += lane.height;
         }
 
-        auto* header = headers[(int) i];
-        auto& parent = row.track.pinned ? pinnedHeaders : headerContent;
-
-        if (header->getParentComponent() != &parent)
-            parent.addAndMakeVisible (header);
-
-        header->setBounds (0, top, headerWidth, row.height);
         top += row.getTotalHeight();
     }
 
@@ -130,7 +110,190 @@ void Playlist::layOutRows()
     pinnedClips.setBounds (0, 0, lanes->getWidth(), pinnedHeight);
     scrollingClips.setBounds (0, pinnedHeight, lanes->getWidth(), std::max (0, lanes->getHeight() - pinnedHeight));
 
-    setScrollY (scrollY); // keeps it in range, and moves the headers and clips with it
+    setScrollY (scrollY); // keeps it in range, and moves the headers and clips with it, making those that come into view
+}
+
+Playlist::ItemsInView Playlist::findItemsInView() const
+{
+    // The scrolling rows' headers and lanes, top to bottom: those the view shows, and one more at either end, which the Tab key
+    // goes on to. The pinned ones are in their band, always in view.
+    ItemsInView inView;
+    inView.headers.assign (rows.size(), false);
+    inView.lanes.resize (rows.size());
+
+    struct Item
+    {
+        size_t row;
+        int lane; // -1 for the row's header
+        int top, height;
+    };
+
+    std::vector<Item> items;
+
+    for (size_t i = 0; i < rows.size(); ++i)
+    {
+        const auto& row = rows[i];
+        inView.lanes[i].assign (row.lanes.size(), false);
+
+        if (row.track.pinned)
+        {
+            inView.headers[i] = true;
+
+            for (size_t j = 0; j < row.lanes.size(); ++j)
+                inView.lanes[i][j] = row.lanes[j].height > 0;
+
+            continue;
+        }
+
+        items.push_back ({ i, -1, row.top, row.height });
+
+        for (size_t j = 0; j < row.lanes.size(); ++j)
+            if (row.lanes[j].height > 0)
+                items.push_back ({ i, (int) j, row.top + row.lanes[j].top, row.lanes[j].height });
+    }
+
+    const auto visibleHeight = lanes->getHeight() - pinnedHeight;
+    auto first = -1, last = -1;
+
+    for (int k = 0; k < (int) items.size(); ++k)
+    {
+        if (items[(size_t) k].top + items[(size_t) k].height > scrollY && items[(size_t) k].top < scrollY + visibleHeight)
+        {
+            first = first < 0 ? k : first;
+            last = k;
+        }
+    }
+
+    if (first < 0)
+        return inView;
+
+    for (auto k = std::max (0, first - 1); k <= std::min ((int) items.size() - 1, last + 1); ++k)
+    {
+        const auto& item = items[(size_t) k];
+
+        if (item.lane < 0)
+            inView.headers[item.row] = true;
+        else
+            inView.lanes[item.row][(size_t) item.lane] = true;
+    }
+
+    return inView;
+}
+
+void Playlist::layOutHeaders (const ItemsInView& inView)
+{
+    const auto isInView = [&inView] (int i) { return (bool) inView.headers[(size_t) i]; };
+    // Those of rows that left go, but not while they are in use: a name being typed, a header dragged while the tracks
+    // scroll.
+    std::erase_if (headers,
+                   [&] (const auto& entry)
+                   {
+                       return ! isInView (rowOf.at (entry.first)) && ! entry.second->hasKeyboardFocus (true)
+                              && ! entry.second->isMouseButtonDown (true);
+                   });
+
+    auto shownCount = 0;
+
+    for (int i = 0; i < (int) rows.size(); ++i)
+    {
+        const auto& row = rows[(size_t) i];
+
+        if (! isInView (i))
+            continue;
+
+        ++shownCount;
+
+        // A header made as its row comes into view shows its track as it is, and nothing of another.
+        if (! headers.contains (row.track.id) && mayMakeComponent())
+        {
+            auto header = std::make_unique<TrackHeader> (static_cast<TrackHeader::Owner&> (*this), context, row.track);
+            showOnHeader (*header, row);
+            headers.emplace (row.track.id, std::move (header));
+        }
+    }
+
+    for (const auto& [track, header] : headers)
+    {
+        const auto& row = rows[(size_t) rowOf.at (track)];
+        auto& parent = row.track.pinned ? pinnedHeaders : headerContent;
+
+        if (header->getParentComponent() != &parent)
+            parent.addAndMakeVisible (*header);
+
+        header->setBounds (0, row.top, headerWidth, row.height);
+    }
+
+    // What a screen reader hears of the headers' column: how many tracks there are, and how many have headers here.
+    const auto described = rows.empty() ? juce::String ("No tracks")
+                                        : juce::String (rows.size()) + " tracks; the headers of the " + juce::String (shownCount)
+                                              + " in view are here, and the arrow keys select the others, which then scroll into view";
+
+    if (headerColumn.getDescription() != described)
+        headerColumn.setDescription (described);
+}
+
+void Playlist::showOnHeader (TrackHeader& header, const Row& row) const
+{
+    header.update (row.track, selection.isSelected (row.track.id));
+
+    // While the selected tracks are dragged by their headers, theirs are faint (fadeMovingHeaders()).
+    if (headersFaded)
+    {
+        const auto selected = selection.getTracks();
+        const auto id = row.track.id;
+        const auto moves = std::any_of (selected.begin(), selected.end(),
+                                        [this, id] (TrackID track) { return track == id || isInside (context, id, track); });
+        header.setAlpha (moves ? TrackDropTint::moving : 1.0f);
+    }
+}
+
+void Playlist::headerFocusedByKeys (TrackID track)
+{
+    focusedByKeys (track, std::nullopt);
+}
+
+void Playlist::focusedByKeys (TrackID track, std::optional<ParameterRef> lane)
+{
+    // The track's header, or one of its lanes, all of it in view; after the focus has moved (this is called as it moves), so
+    // that nothing goes in the middle of that.
+    juce::MessageManager::callAsync (
+        [safe = juce::Component::SafePointer<Playlist> (this), track, lane]
+        {
+            if (safe == nullptr)
+                return;
+
+            const auto index = safe->getRowOf (track);
+
+            if (index < 0)
+                return;
+
+            const auto& row = safe->rows[(size_t) index];
+
+            if (! lane.has_value())
+            {
+                safe->scrollToShowSpan (row, 0, row.height);
+                return;
+            }
+
+            for (const auto& each : row.lanes)
+                if (each.lane.parameter == *lane)
+                    safe->scrollToShowSpan (row, each.top, each.height);
+        });
+}
+
+void Playlist::scrollToShowSpan (const Row& row, int top, int height)
+{
+    // Pinned rows are always in view.
+    if (row.track.pinned)
+        return;
+
+    const auto visibleHeight = lanes->getHeight() - pinnedHeight;
+    const auto spanTop = row.top + top;
+
+    if (spanTop < scrollY)
+        setScrollY (spanTop);
+    else if (spanTop + height > scrollY + visibleHeight)
+        setScrollY (spanTop + height - visibleHeight);
 }
 
 void Playlist::trackHeightChanged()
@@ -157,8 +320,8 @@ void Playlist::trackHeightChanged()
 
 void Playlist::updateHeaders()
 {
-    for (int i = 0; i < headers.size(); ++i)
-        headers[i]->update (rows[(size_t) i].track, selection.isSelected (rows[(size_t) i].track.id));
+    for (const auto& [track, header] : headers)
+        header->update (rows[(size_t) rowOf.at (track)].track, selection.isSelected (track));
 }
 
 int Playlist::getRowTop (const Row& row) const
@@ -211,21 +374,56 @@ int Playlist::getRowOf (TrackID track) const
 
 TrackHeader* Playlist::getHeaderFor (TrackID track) const
 {
-    for (auto* header : headers)
-        if (track.isValid() && header->getTrack() == track)
-            return header;
+    const auto found = headers.find (track);
+    return found != headers.end() ? found->second.get() : nullptr;
+}
 
-    return nullptr;
+bool Playlist::mayMakeComponent()
+{
+    // A few at least in each pass, so that the rest comes, and a step of a scroll, which brings a few into view, never waits.
+    if (! budgeted || madeThisPass < alwaysMade || juce::Time::getMillisecondCounterHiRes() < makeUntil)
+    {
+        ++madeThisPass;
+        return true;
+    }
+
+    makingLeft = true;
+    return false;
+}
+
+void Playlist::makeRestLater()
+{
+    if (std::exchange (restPosted, true))
+        return;
+
+    juce::MessageManager::callAsync (
+        [safe = juce::Component::SafePointer<Playlist> (this)]
+        {
+            if (safe == nullptr)
+                return;
+
+            safe->restPosted = false;
+            // What is in view laid out again, making more of it (the components made repaint themselves).
+            const MakingPass pass (*safe);
+            const auto inView = safe->findItemsInView();
+            safe->layOutHeaders (inView);
+            safe->layOutClips();
+            safe->layOutLanes (inView);
+        });
 }
 
 void Playlist::setScrollY (int newScrollY)
 {
+    const MakingPass pass (*this);
+
     // There is room for one more track under the last, to scroll to.
     const auto maxScroll = std::max (0, contentHeight + TrackHeight::standard - (lanes->getHeight() - pinnedHeight));
     scrollY = juce::jlimit (0, maxScroll, newScrollY);
     headerContent.setTopLeftPosition (0, -scrollY);
+    const auto inView = findItemsInView();
+    layOutHeaders (inView);
     layOutClips();
-    layOutLanes();
+    layOutLanes (inView);
     lanes->repaint();
     updateVerticalScrollBar();
 }
@@ -297,6 +495,91 @@ void Playlist::rebuildClips()
         component->showClip (shownClips[clipIndex.at (id)]);
 }
 
+void Playlist::showChangedClips (const SongChanges& changes)
+{
+    // The rows of the tracks the clips were on or went to are read again, their clips' sub-rows with them; every other row's
+    // clips are as they were (a song can hold thousands, which took a fraction of a second to read, at every note added and
+    // every step of a drag). The components of the clips that changed show them as they are now, and those of clips that went
+    // go, with their waveforms; layOutClips() places the rest and makes those that come into view.
+    const auto& tracks = changes.clipTracks.named;
+    const auto isChanged = [&tracks] (TrackID track) { return std::binary_search (tracks.begin(), tracks.end(), track); };
+    std::vector<ClipInfo> clipsNow;
+    std::vector<ClipSubRow> subRowsNow;
+    clipsNow.reserve (shownClips.size());
+    subRowsNow.reserve (shownSubRows.size());
+    size_t old = 0;
+
+    for (const auto& row : rows)
+    {
+        // The row's clips as they were, together in the list (rebuildClips()).
+        const auto start = old;
+
+        while (old < shownClips.size() && shownClips[old].track == row.track.id)
+            ++old;
+
+        if (! isChanged (row.track.id))
+        {
+            for (auto i = start; i < old; ++i)
+            {
+                clipsNow.push_back (std::move (shownClips[i]));
+                subRowsNow.push_back (shownSubRows[i]);
+            }
+
+            continue;
+        }
+
+        auto clips = getClips (context, row.track.id);
+        const auto subRows = getClipSubRows (clips);
+
+        for (size_t i = 0; i < clips.size(); ++i)
+        {
+            clipsNow.push_back (std::move (clips[i]));
+            subRowsNow.push_back (subRows[i]);
+        }
+
+        crossfadeSpots.erase (row.track.id); // found again as the mouse comes over the track
+    }
+
+    // Where each clip is in the list now: the clips that changed may have gone, and the others moved along it.
+    shownClips = std::move (clipsNow);
+    shownSubRows = std::move (subRowsNow);
+
+    for (const auto clip : changes.changedClips.named)
+        clipIndex.erase (clip);
+
+    for (size_t i = 0; i < shownClips.size(); ++i)
+        clipIndex.insert_or_assign (shownClips[i].id, i);
+
+    for (const auto clip : changes.changedClips.named)
+    {
+        if (const auto found = clipIndex.find (clip); found == clipIndex.end())
+        {
+            clipComponents.erase (clip);
+            waveforms.erase (clip);
+        }
+        else if (const auto component = clipComponents.find (clip); component != clipComponents.end())
+        {
+            // In its track's look, which is another's if it moved to another track (its colour, frozen or not, heard or not).
+            component->second->showClip (shownClips[found->second]);
+            showLookOf (*component->second);
+        }
+    }
+
+    // A folder's row shows its tracks' clips, at any depth (a track in a collapsed folder too, which has no row of its own).
+    for (auto& [folder, summary] : folderSummaries)
+    {
+        if (std::none_of (tracks.begin(), tracks.end(), [this, id = folder] (TrackID track) { return isInside (context, track, id); }))
+            continue;
+
+        summary = getFolderSummary (context, folder);
+
+        if (const auto row = getRowOf (folder); row >= 0)
+            lanes->repaint (lanes->getRowArea (rows[(size_t) row]));
+    }
+
+    layOutClips();
+}
+
 void Playlist::layOutClips()
 {
     // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them out of the pinned
@@ -324,6 +607,9 @@ void Playlist::layOutClips()
             continue;
 
         auto kept = clipComponents.extract (clip.id);
+
+        if (kept.empty() && ! mayMakeComponent())
+            continue;
         auto& component = kept.empty() ? *inView.emplace (clip.id, makeClipComponent (clip)).first->second
                                        : *inView.insert (std::move (kept)).position->second;
 

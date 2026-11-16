@@ -6,6 +6,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -16,6 +17,8 @@
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/StripParts.h"
 #include "ui/theme/DesignTokens.h"
+
+#include <stdexcept>
 
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
 {
@@ -229,5 +232,185 @@ TEST_CASE ("The mixer has no row of its own: a slim column after the returns add
     CHECK (strips[0]->isRelated());
 
     selection.clear();
+    setSong (context, nullptr);
+}
+
+namespace
+{
+// A mixer of many tracks in a window that shows a few of them, as the app has it.
+struct BigMixer
+{
+    explicit BigMixer (int numTracks)
+    {
+        tracks = phazite::ensureTracks (*song, numTracks);
+        song->getUndoManager().clearUndoHistory();
+        setSong (context, song.get());
+        phazite::test::dispatchPendingMessages();
+        channels = dynamic_cast<juce::Viewport*> (phazite::test::findComponentWithTitle (mixer, "Channels"));
+        REQUIRE (channels != nullptr);
+    }
+
+    ~BigMixer() { setSong (context, nullptr); }
+
+    phazite::ui::ChannelStrip* stripOf (phazite::TrackID track)
+    {
+        for (auto* strip : phazite::test::findAll<phazite::ui::ChannelStrip> (mixer))
+            if (strip->getTrack() == track)
+                return strip;
+
+        return nullptr;
+    }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    std::vector<phazite::TrackID> tracks;
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 900, 600 };
+    juce::Viewport* channels = nullptr;
+};
+} // namespace
+
+TEST_CASE ("The mixer makes strips as their channels scroll into view, and keeps the one whose fader is dragged while it scrolls away")
+{
+    BigMixer screen (40);
+
+    // The channels in view and one more, not the last; a screen reader hears how many there are.
+    CHECK (phazite::test::findAll<phazite::ui::ChannelStrip> (screen.mixer).size() < 12);
+    REQUIRE (screen.stripOf (screen.tracks.front()) != nullptr);
+    CHECK (screen.stripOf (screen.tracks.back()) == nullptr);
+    CHECK (screen.channels->getDescription().contains ("of 40"));
+
+    // The first track's fader dragged up, and the mixer scrolled to its end meanwhile, as the wheel would scroll it.
+    juce::Component::SafePointer<phazite::ui::ChannelStrip> first (screen.stripOf (screen.tracks.front()));
+    auto* fader = phazite::test::findComponentWithTitle (*first, "Volume");
+    REQUIRE (fader != nullptr);
+    const auto before = phazite::getVolume (screen.context, screen.tracks.front()).getValue();
+    phazite::test::Mouse mouse (*fader);
+    const auto centre = fader->getLocalBounds().getCentre();
+    mouse.press (centre);
+    mouse.dragTo (centre.translated (0, -20));
+    screen.channels->setViewPosition (screen.channels->getViewedComponent()->getWidth(), 0);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.stripOf (screen.tracks.back()) != nullptr);
+    CHECK (first != nullptr); // kept, with its fader, while it is dragged
+    mouse.dragTo (centre.translated (0, -40));
+    mouse.release();
+    const auto after = phazite::getVolume (screen.context, screen.tracks.front()).getValue();
+    CHECK (after > before);
+
+    // One undo step, which puts it back.
+    phazite::undo (*screen.song);
+    CHECK (juce::exactlyEqual (phazite::getVolume (screen.context, screen.tracks.front()).getValue(), before));
+
+    // Once it is let go, and the keys have gone elsewhere, its strip goes as the mixer scrolls; back in view, the channel has
+    // a strip again, which shows it as it is now.
+    REQUIRE (first != nullptr);
+    screen.mixer.grabKeyboardFocus();
+    screen.channels->setViewPosition (screen.channels->getViewPositionX() - 1, 0);
+    CHECK (first == nullptr);
+    screen.channels->setViewPosition (0, 0);
+    phazite::test::dispatchPendingMessages();
+    auto* again = screen.stripOf (screen.tracks.front());
+    REQUIRE (again != nullptr);
+    auto* name = phazite::test::findAll<juce::Label> (*again).getFirst();
+    REQUIRE (name != nullptr);
+    CHECK (name->getText() == phazite::getChannel (screen.context, screen.tracks.front())->name);
+}
+
+TEST_CASE ("The Tab key goes on from the last strip in view to the next channel's, which scrolls into view")
+{
+    BigMixer screen (40);
+    const auto view = screen.channels->getViewArea();
+    const auto lastWhole = view.getRight() / phazite::ui::ChannelStrip::width - 1; // no returns: no gap
+    auto* last = screen.stripOf (screen.tracks[(size_t) lastWhole]);
+    REQUIRE (last != nullptr);
+    REQUIRE (view.contains (last->getBounds()));
+    auto* fader = phazite::test::findComponentWithTitle (*last, "Volume");
+    REQUIRE (fader != nullptr);
+    fader->grabKeyboardFocus();
+
+    const auto next = screen.tracks[(size_t) lastWhole + 1];
+    const auto nextHasFocus = [&] { return screen.stripOf (next) != nullptr && screen.stripOf (next)->hasKeyboardFocus (true); };
+
+    for (int i = 0; i < 60 && ! nextHasFocus(); ++i)
+        screen.window.pressKey (juce::KeyPress (juce::KeyPress::tabKey));
+
+    REQUIRE (nextHasFocus());
+    phazite::test::dispatchPendingMessages(); // it scrolls into view as the focus has moved
+    CHECK (screen.channels->getViewArea().contains (screen.stripOf (next)->getBounds()));
+    CHECK (screen.stripOf (screen.tracks[(size_t) lastWhole + 2]) != nullptr); // the one after it, for the Tab key to go on to
+}
+
+TEST_CASE ("A send that would make a loop isn't made, whatever offers it")
+{
+    // Returns R1, R2 and R3, R1 sending to R3 and R2 to R1: R2's sound reaches R3, so a send from R3 to R2 would bring it back.
+    auto song = phazite::createSong();
+    const auto r1 = phazite::addReturnTrack (*song, "R1", nullptr);
+    const auto r2 = phazite::addReturnTrack (*song, "R2", nullptr);
+    const auto r3 = phazite::addReturnTrack (*song, "R3", nullptr);
+    REQUIRE (phazite::addSend (*song, r1, r3, false).isValid());
+    REQUIRE (phazite::addSend (*song, r2, r1, false).isValid());
+    CHECK_FALSE (phazite::addSend (*song, r3, r2, false).isValid());
+    CHECK_FALSE (phazite::addSend (*song, r3, r1, false).isValid());
+    CHECK (phazite::getSends (*song, r3).empty());
+
+    // Without the loop, it is made.
+    const auto track = phazite::ensureTracks (*song, 1)[0];
+    CHECK (phazite::addSend (*song, track, r2, false).isValid());
+}
+
+TEST_CASE ("When a send makes a loop of another's, the mixer takes that strip's knob away, and a knob left turning makes none")
+{
+    // Returns R1, R2 and R3, R1 sending to R3: R3's strip has knobs to send to R1 and R2.
+    auto song = phazite::createSong();
+    const auto r1 = phazite::addReturnTrack (*song, "R1", nullptr);
+    const auto r2 = phazite::addReturnTrack (*song, "R2", nullptr);
+    const auto r3 = phazite::addReturnTrack (*song, "R3", nullptr);
+    REQUIRE (phazite::addSend (*song, r1, r3, false).isValid());
+    song->getUndoManager().clearUndoHistory();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, song.get());
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::MixerView mixer { commands, context };
+    phazite::test::TestWindow window { mixer, 900, 700 };
+    phazite::test::dispatchPendingMessages();
+
+    const auto stripOf = [&mixer] (phazite::TrackID track) -> phazite::ui::ChannelStrip&
+    {
+        for (auto* strip : phazite::test::findAll<phazite::ui::ChannelStrip> (mixer))
+            if (strip->getTrack() == track)
+                return *strip;
+
+        FAIL ("no strip shows the track");
+        throw std::logic_error ("unreachable");
+    };
+
+    const auto hasKnob = [&] (phazite::TrackID on, const juce::String& to)
+    { return phazite::test::findComponentWithTitle (stripOf (on), "Send to " + to) != nullptr; };
+
+    REQUIRE (hasKnob (r3, "R2"));
+    auto stale = phazite::getSendLevelTo (context, r3, r2); // as R3's knob holds it
+    REQUIRE (stale.isValid());
+
+    // R2's knob to R1 turned, which makes the send: R2's sound now reaches R3, so R3's knob to R2 goes.
+    auto toR1 = phazite::getSendLevelTo (context, r2, r1);
+    toR1.beginGesture();
+    toR1.setValue (0.5f);
+    toR1.endGesture();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getSends (*song, r2).size() == 1);
+    CHECK (phazite::test::runTimersUntil ([&] { return ! stripOf (r3).isRefreshDue(); }));
+    CHECK_FALSE (hasKnob (r3, "R2"));
+
+    // A knob that was still there, turned, makes no send: the send would bring R2's sound back to it.
+    stale.beginGesture();
+    stale.setValue (0.5f);
+    stale.endGesture();
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getSends (*song, r3).empty());
+
     setSong (context, nullptr);
 }
