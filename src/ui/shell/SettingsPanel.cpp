@@ -202,10 +202,6 @@ MidiSettings::MidiSettings (EngineContext& e, ComputerKeyboard& keyboard, const 
 
     noInputsLabel.setText ("No MIDI devices found. Connect a MIDI keyboard: it shows up here within a few seconds.",
                            juce::dontSendNotification);
-    keyboardHelp.setText ("A S D F G H J K L ; play the white keys from middle C, and W E T Y U O P the black keys. "
-                          "Z and X change the octave, C and V the velocity. Hold Shift for single-key shortcuts.",
-                          juce::dontSendNotification);
-
     for (auto* label : { &noInputsLabel, &keyboardHelp, &routingLabel })
     {
         label->setJustificationType (juce::Justification::topLeft);
@@ -241,6 +237,7 @@ void MidiSettings::rebuild()
     }
 
     noInputsLabel.setVisible (inputButtons.isEmpty());
+    showKeyboardHelp();
     keyboardButton.setToggleState (computerKeyboard.isEnabled(), juce::dontSendNotification);
 
     juce::String routing ("Live MIDI plays no track yet: it goes to the first track with an instrument.");
@@ -250,6 +247,22 @@ void MidiSettings::rebuild()
 
     routingLabel.setText (routing, juce::dontSendNotification);
     resized();
+}
+
+void MidiSettings::showKeyboardHelp()
+{
+    // The keys as the layout in use types them, again each time the tab shows: the layout may have changed since.
+    keyboardHelp.setText (computerKeyboard.getWhiteKeysText() + " play the white keys from middle C, and "
+                              + computerKeyboard.getBlackKeysText() + " the black keys. " + computerKeyboard.getOctaveKeysText()
+                              + " change the octave, " + computerKeyboard.getVelocityKeysText()
+                              + " the velocity. Hold Shift for single-key shortcuts.",
+                          juce::dontSendNotification);
+}
+
+void MidiSettings::visibilityChanged()
+{
+    if (isVisible())
+        showKeyboardHelp();
 }
 
 void MidiSettings::paint (juce::Graphics& g)
@@ -279,9 +292,11 @@ void MidiSettings::resized()
 }
 
 //==============================================================================
-ShortcutSettings::ShortcutSettings (CommandBridge& commands, std::function<void (const juce::String&)> chooseKeymap)
-    : editor (commands.getKeyMappings(), true)
+ShortcutSettings::ShortcutSettings (CommandBridge& commands, const ComputerKeyboard& computerKeyboard,
+                                    std::function<void (const juce::String&)> chooseKeymap)
+    : editor (commands, computerKeyboard)
 {
+    setTitle ("Shortcuts");
     keymapLabel.setText ("Keymap", juce::dontSendNotification);
     keymapLabel.attachToComponent (&keymapBox, true);
 
@@ -290,6 +305,7 @@ ShortcutSettings::ShortcutSettings (CommandBridge& commands, std::function<void 
     for (int i = 0; i < keymaps.size(); ++i)
         keymapBox.addItem (keymaps[i].name, i + 1);
 
+    keymapBox.setTitle ("Keymap");
     keymapBox.setText (commands.getKeymap().name, juce::dontSendNotification);
     keymapBox.setTooltip ("Which app's shortcuts to start from. Your own changes are kept for each keymap.");
     keymapBox.onChange = [this, choose = std::move (chooseKeymap)] { choose (keymapBox.getText()); };
@@ -307,7 +323,7 @@ void ShortcutSettings::resized()
 {
     auto area = getLocalBounds().reduced (Space::l);
     auto top = area.removeFromTop (controlHeight);
-    keymapBox.setBounds (top.withTrimmedLeft (80).withWidth (220));
+    keymapBox.setBounds (top.withTrimmedLeft (ShortcutsTint::keymapLabelWidth).withWidth (ShortcutsTint::keymapBoxWidth));
     area.removeFromTop (Space::m);
     editor.setBounds (area);
 }
@@ -326,6 +342,6 @@ SettingsPanel::SettingsPanel (EngineContext& engine, CommandBridge& commands, Co
     // The Engine saves the audio settings' changes in its settings.
     addTab ("Audio", background, new AudioSettings (engine, context), true);
     addTab ("MIDI", background, new MidiSettings (engine, computerKeyboard, context), true);
-    addTab ("Shortcuts", background, new ShortcutSettings (commands, std::move (chooseKeymap)), true);
+    addTab ("Shortcuts", background, new ShortcutSettings (commands, computerKeyboard, std::move (chooseKeymap)), true);
 }
 } // namespace phazite::ui

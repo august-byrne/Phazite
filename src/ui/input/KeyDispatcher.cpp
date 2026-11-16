@@ -43,28 +43,71 @@ namespace
     }
 } // namespace
 
-KeyDispatcher::KeyDispatcher (CommandBridge& bridge)
-    : commands (bridge)
+KeyDispatcher::KeyDispatcher (CommandBridge& bridge, const KeyboardLayout& keyboardLayout)
+    : commands (bridge),
+      layout (keyboardLayout)
 {
+}
+
+std::vector<KeyDispatcher::Match> KeyDispatcher::findMatches (const juce::KeyPress& pressed) const
+{
+    // JUCE gives a key's code as the layout types it, without Shift on Windows and with it on Linux, and AltGr as Alt (JUCE
+    // workarounds W47 and W48, docs/juce-workarounds.md). Each command's keys are looked at first: whether it is enabled
+    // is asked only of the commands found (findCommand()).
+    if (isTypedWithAltGr (pressed, layout))
+        return {};
+
+    const auto& registry = commands.getRegistry();
+    const auto key = getShortcutKey (pressed, layout);
+    const auto digit = getDigitRowKey (pressed, layout);
+    const auto modifiers = pressed.getModifiers();
+    const auto typed = pressed.getTextCharacter();
+    const auto canMatchTyped = typed > ' ' && ! modifiers.isCtrlDown() && ! modifiers.isCommandDown() && ! modifiers.isAltDown();
+    std::vector<Match> found;
+
+    for (const auto way : { Way::asItIs, Way::asDigit, Way::byCharacter })
+    {
+        if ((way == Way::asDigit && digit == key) || (way == Way::byCharacter && ! canMatchTyped))
+            continue;
+
+        for (int i = 0; i < registry.getNumCommands(); ++i)
+        {
+            const auto* command = registry.getCommand (i);
+
+            for (const auto& shortcut : commands.getKeyPresses (command->id))
+            {
+                if (way == Way::asItIs ? shortcut == key : way == Way::asDigit ? shortcut == digit : getTypedCharacter (shortcut) == typed)
+                {
+                    found.push_back ({ command, shortcut, way });
+                    break;
+                }
+            }
+        }
+
+        if (! found.empty())
+            break;
+    }
+
+    return found;
+}
+
+const Command* KeyDispatcher::findCommand (const juce::KeyPress& key, bool enabledOnly) const
+{
+    // The way that finds shortcuts decides among every command, so that a key whose command can't run now does nothing,
+    // rather than run what it means another way.
+    const Command* best = nullptr;
+
+    for (const auto& match : findMatches (key))
+        if ((best == nullptr || match.command->keyPriority > best->keyPriority)
+            && (! enabledOnly || CommandRegistry::isEnabled (*match.command)))
+            best = match.command;
+
+    return best;
 }
 
 const Command* KeyDispatcher::findCommandForKey (const juce::KeyPress& key) const
 {
-    const auto& registry = commands.getRegistry();
-    const Command* found = nullptr;
-
-    for (int i = 0; i < registry.getNumCommands(); ++i)
-    {
-        const auto& command = *registry.getCommand (i);
-
-        if (found != nullptr && command.keyPriority <= found->keyPriority)
-            continue;
-
-        if (commands.getKeyPresses (command.id).contains (key) && CommandRegistry::isEnabled (command))
-            found = &command;
-    }
-
-    return found;
+    return findCommand (key, true);
 }
 
 bool KeyDispatcher::keyPressed (const juce::KeyPress& key, juce::Component*)
@@ -160,7 +203,7 @@ bool KeyDispatcher::invokeWithoutShift (const juce::KeyPress& key)
     if (! modifiers.isShiftDown() || modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown())
         return false;
 
-    if (commands.getKeyMappings().findCommandForKeyPress (key) != 0)
+    if (findShortcutOf (key) != nullptr)
         return false; // Shift and the key have a command of their own
 
     if (const auto* command = findCommandForKey (juce::KeyPress (key.getKeyCode())))

@@ -41,7 +41,7 @@ track.moveUp
 track.moveDown
 track.mute
 track.solo
-track.taller | alt + =
+track.taller | alt + =, alt + +
 track.shorter | alt + -
 section.add
 section.outline.pop
@@ -163,7 +163,7 @@ view.resetViewPlaces
 view.detachLeftPanel
 view.detachInspector
 view.detachEditor
-view.zoomIn | =, numpad +
+view.zoomIn | =, +, numpad +
 view.zoomOut | -, numpad -
 view.zoomToFit
 view.zoomToSelection

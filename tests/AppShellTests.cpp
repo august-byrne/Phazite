@@ -878,42 +878,12 @@ TEST_CASE ("Every control in the window has a name and a role for screen readers
         for (const auto device : devices)
             walk (screen.showInDevicesView (device), "Devices view, " + phazite::getDeviceName (*phazite::findSong (context), device));
 
-        // The controls known not to explain themselves yet, by the end of where they are, each found in each look (an entry
-        // that no control matches any more fails, so that the list goes once they explain themselves).
-        static const std::vector<std::pair<juce::String, juce::String>> knownSilent {
-            { "Project > Notes", "the project's notes field has no tooltip (src/ui/project/ProjectView.cpp)" },
-            { "Source Control > Graph", "the Graph pane's header is set with no help text (src/ui/versions/VersionsView.cpp)" },
-            { "EqEditor > Band On", "the EQ's band controls have no tooltips (src/ui/devices/EqEditor.cpp)" },
-            { "EqEditor > Band Shape", "as Band On" },
-            { "EqEditor > Slope", "as Band On" },
-            { "EqEditor > Frequency", "as Band On" },
-            { "EqEditor > Gain", "as Band On" },
-            { "EqEditor > Q", "as Band On" },
-            { "EqEditor > Output", "as Band On" },
-            { "Vinyl > Record > Low Cut", "the knobs at the band's ends have no tooltips (src/ui/devices/VinylEditor.cpp: makeKnob())" },
-            { "Vinyl > Record > High Cut", "as Vinyl's Low Cut" },
-            { "Delay > Echoes > Low Cut", "as Vinyl's (src/ui/devices/DelayEditor.cpp)" },
-            { "Delay > Echoes > High Cut", "as Vinyl's" },
-        };
-
-        juce::StringArray silent;
-
-        for (const auto& control : found.silent)
-            if (std::none_of (knownSilent.begin(), knownSilent.end(),
-                              [&control] (const auto& known) { return control.endsWith (known.first); }))
-                silent.add (control);
-
-        for (const auto& known : knownSilent)
-        {
-            CAPTURE (known.first.toStdString());
-            CHECK (std::any_of (found.silent.begin(), found.silent.end(),
-                                [&known] (const auto& control) { return control.endsWith (known.first); }));
-        }
-
+        // Known bug 146 until 2026-11-15: thirteen controls (a pane's header, the EQ's band controls, the Vinyl's and the Delay's
+        // band ends) said nothing in the hint bar. Every control explains itself now.
         INFO (found.nameless.joinIntoString ("\n").toStdString());
         CHECK (found.nameless.isEmpty());
-        INFO (silent.joinIntoString ("\n").toStdString());
-        CHECK (silent.isEmpty());
+        INFO (found.silent.joinIntoString ("\n").toStdString());
+        CHECK (found.silent.isEmpty());
     }
 
     screen.window.setSize (1280, 800);

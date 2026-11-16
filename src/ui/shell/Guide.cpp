@@ -40,9 +40,10 @@ namespace
     }
 } // namespace
 
-Guide::Guide (CommandBridge& bridge, Settings& s)
+Guide::Guide (CommandBridge& bridge, Settings& s, const ComputerKeyboard& computerKeyboard)
     : commands (bridge),
       settings (s),
+      keyboard (computerKeyboard),
       done (s.get (Settings::guideStepsDone))
 {
     commands.getRegistry().addListener (this);
@@ -117,12 +118,17 @@ juce::String Guide::getHint() const
         }
 
         case Step::playNotes:
+        {
+            // The keys as the layout in use types them at their places (KeyboardLayout.h).
+            const auto whiteKeys = keyboard.getWhiteKeysText();
+
             if (isComputerKeyboardOff (commands))
                 return "Try this: " + pressOr (commands, "input.computerKeyboard", "click the keyboard button at the top")
-                       + " to play notes on your computer keyboard, then A S D F G H J K L ; on a track with an instrument.";
+                       + " to play notes on your computer keyboard, then " + whiteKeys + " on a track with an instrument.";
 
-            return "Try this: select a track with an instrument and play it on your computer keyboard: A S D F G H J K L ; are the "
-                   "white keys, W E T Y U O P the black ones.";
+            return "Try this: select a track with an instrument and play it on your computer keyboard: " + whiteKeys
+                   + " are the white keys, " + keyboard.getBlackKeysText() + " the black ones.";
+        }
 
         case Step::addSound:
             return "Try this: drag an instrument or a sound from the browser on the left into the playlist, or open an example song "

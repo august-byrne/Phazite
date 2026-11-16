@@ -1,0 +1,150 @@
+# Every key press of the US layout that runs a command in the FL Studio keymap: the press (its modifiers, its key code, what it types), the way it matched (as it is, as its digit, by what it types) and the commands of that way. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+[Windows]
+shift+4 '$' | as it is | view.zoomToFit
+9 '9' | as it is | clip.reverse
+shift+0 ')' | as it is | view.centreOnPlayhead
+shift+q 'q' | as it is | edit.quantize
+alt+q | as it is | note.quantizeSettings
+ctrl+alt+q | as it is | edit.quantize
+e 'e' | as it is | tool.select
+r 'r' | as it is | transport.record
+ctrl+r | as it is | project.export
+t 't' | as it is | tool.mute
+ctrl+t | as it is | input.computerKeyboard
+ctrl+u | as it is | note.chop
+alt+u | as it is | note.chopSettings
+ctrl+o | as it is | project.open
+p 'p' | as it is | tool.draw
+ctrl+p | as it is | transport.countIn
+ctrl+a | as it is | edit.selectAll, note.selectAll
+ctrl+shift+a | as it is | automation.automateLastTouched
+alt+a | as it is | note.arpeggiateSettings
+s 's' | as it is | tool.slip
+ctrl+s | as it is | project.save
+ctrl+shift+s | as it is | project.saveAs
+alt+s | as it is | note.strumSettings
+d 'd' | as it is | tool.delete
+ctrl+d | as it is | edit.deselectAll
+ctrl+k | as it is | view.commandPalette
+ctrl+l | as it is | note.legato, transport.loopSelection
+z 'z' | as it is | tool.zoom
+ctrl+z | as it is | edit.undoOrRedo
+ctrl+alt+z | as it is | edit.undo
+ctrl+x | as it is | edit.cut
+c 'c' | as it is | tool.slice
+ctrl+c | as it is | edit.copy
+ctrl+shift+c | as it is | transport.capture
+ctrl+alt+c | as it is | track.bounceInPlace
+ctrl+v | as it is | edit.paste
+b 'b' | as it is | tool.paint
+ctrl+b | as it is | edit.duplicate
+n 'n' | as it is | version.compare
+ctrl+n | as it is | version.save
+ctrl+m | as it is | transport.metronome
+alt+m | as it is | edit.mute
+spacebar | as it is | transport.playStop
+ctrl+spacebar | as it is | transport.playPause
+return | as it is | note.applyTransform
+escape | as it is | note.cancelTransform, note.deselectAll, tool.smart
+backspace | as it is | grid.snap
+delete | as it is | edit.delete
+ctrl+delete | as it is | edit.removeTime
+insert | as it is | edit.split
+ctrl+insert | as it is | edit.insertTime
+home | as it is | transport.goToStart
+page up | as it is | view.zoomIn
+page down | as it is | view.zoomOut
+shift+cursor left | as it is | edit.nudgeLeft
+shift+cursor right | as it is | edit.nudgeRight
+shift+cursor up | as it is | automation.raisePoints, note.transposeUp
+ctrl+cursor up | as it is | automation.raisePointsMore, note.octaveUp, track.selectPrevious
+alt+cursor up | as it is | track.moveUp
+shift+cursor down | as it is | automation.lowerPoints, note.transposeDown
+ctrl+cursor down | as it is | automation.lowerPointsMore, note.octaveDown, track.selectNext
+alt+cursor down | as it is | track.moveDown
+F2 | as it is | edit.rename
+F5 | as it is | view.playlist
+F6 | as it is | view.instrument
+shift+F6 | as it is | view.effects
+F7 | as it is | view.pianoRoll
+F8 | as it is | device.add
+alt+F8 | as it is | view.toggleLeftPanel
+F9 | as it is | view.mixer
+F10 | as it is | options.midiSettings
+F12 | as it is | view.maximizeSong
+[Linux]
+shift+$ '$' | as it is | view.zoomToFit
+9 '9' | as it is | clip.reverse
+shift+) ')' | as it is | view.centreOnPlayhead
+shift+q 'q' | as it is | edit.quantize
+alt+q 'q' | as it is | note.quantizeSettings
+ctrl+alt+q | as it is | edit.quantize
+e 'e' | as it is | tool.select
+r 'r' | as it is | transport.record
+ctrl+r | as it is | project.export
+t 't' | as it is | tool.mute
+ctrl+t | as it is | input.computerKeyboard
+ctrl+u | as it is | note.chop
+alt+u 'u' | as it is | note.chopSettings
+ctrl+o | as it is | project.open
+p 'p' | as it is | tool.draw
+ctrl+p | as it is | transport.countIn
+ctrl+a | as it is | edit.selectAll, note.selectAll
+ctrl+shift+a | as it is | automation.automateLastTouched
+alt+a 'a' | as it is | note.arpeggiateSettings
+s 's' | as it is | tool.slip
+ctrl+s | as it is | project.save
+ctrl+shift+s | as it is | project.saveAs
+alt+s 's' | as it is | note.strumSettings
+d 'd' | as it is | tool.delete
+ctrl+d | as it is | edit.deselectAll
+ctrl+k | as it is | view.commandPalette
+ctrl+l | as it is | note.legato, transport.loopSelection
+z 'z' | as it is | tool.zoom
+ctrl+z | as it is | edit.undoOrRedo
+ctrl+alt+z | as it is | edit.undo
+ctrl+x | as it is | edit.cut
+c 'c' | as it is | tool.slice
+ctrl+c | as it is | edit.copy
+ctrl+shift+c | as it is | transport.capture
+ctrl+alt+c | as it is | track.bounceInPlace
+ctrl+v | as it is | edit.paste
+b 'b' | as it is | tool.paint
+ctrl+b | as it is | edit.duplicate
+n 'n' | as it is | version.compare
+ctrl+n | as it is | version.save
+ctrl+m | as it is | transport.metronome
+alt+m 'm' | as it is | edit.mute
+spacebar | as it is | transport.playStop
+ctrl+spacebar | as it is | transport.playPause
+return | as it is | note.applyTransform
+escape | as it is | note.cancelTransform, note.deselectAll, tool.smart
+backspace | as it is | grid.snap
+delete | as it is | edit.delete
+ctrl+delete | as it is | edit.removeTime
+insert | as it is | edit.split
+ctrl+insert | as it is | edit.insertTime
+home | as it is | transport.goToStart
+page up | as it is | view.zoomIn
+page down | as it is | view.zoomOut
+shift+cursor left | as it is | edit.nudgeLeft
+shift+cursor right | as it is | edit.nudgeRight
+shift+cursor up | as it is | automation.raisePoints, note.transposeUp
+ctrl+cursor up | as it is | automation.raisePointsMore, note.octaveUp, track.selectPrevious
+alt+cursor up | as it is | track.moveUp
+shift+cursor down | as it is | automation.lowerPoints, note.transposeDown
+ctrl+cursor down | as it is | automation.lowerPointsMore, note.octaveDown, track.selectNext
+alt+cursor down | as it is | track.moveDown
+F2 | as it is | edit.rename
+F5 | as it is | view.playlist
+F6 | as it is | view.instrument
+shift+F6 | as it is | view.effects
+F7 | as it is | view.pianoRoll
+F8 | as it is | device.add
+alt+F8 | as it is | view.toggleLeftPanel
+F9 | as it is | view.mixer
+F10 | as it is | options.midiSettings
+F12 | as it is | view.maximizeSong
+shift+0 '0' | as it is | view.centreOnPlayhead
+shift+4 '4' | as it is | view.zoomToFit
+9 '9' | as it is | clip.reverse

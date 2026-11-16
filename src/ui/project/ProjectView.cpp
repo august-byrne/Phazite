@@ -394,6 +394,9 @@ juce::TextEditor& ProjectView::getNotesField() noexcept
 
 void ProjectView::refreshTooltips()
 {
+    notesSection.setTooltip ("Folds the notes written about the song, or shows them again");
+    audioSection.setTooltip ("Folds the song's audio files, or shows them again");
+    pluginSection.setTooltip ("Folds the song's plug-ins, or shows them again");
     notesField->setTooltip ("Notes about the song, kept in it: what it is, ideas, lyrics, what is left to do");
     audioList.setTooltip ("The audio files the song plays, with the tracks that play them; a missing one says so");
     pluginList.setTooltip ("The plug-ins the song holds, on their tracks, and any that crashed, aren't installed or are off");

@@ -78,6 +78,53 @@ juce::StringArray CommandBridge::getShortcutDescriptions (const juce::String& id
     return descriptions;
 }
 
+juce::Array<juce::KeyPress> CommandBridge::getDefaultKeyPresses (const juce::String& id) const
+{
+    juce::Array<juce::KeyPress> keys;
+
+    if (const auto found = keymap.keys.find (id); found != keymap.keys.end())
+        for (const auto& description : found->second)
+            if (const auto key = juce::KeyPress::createFromDescription (description); key.isValid())
+                keys.addIfNotAlreadyThere (key);
+
+    return keys;
+}
+
+bool CommandBridge::addKey (const juce::String& id, const juce::KeyPress& key)
+{
+    // JUCE's addKeyPress() leaves the key with the other commands that have it (only its editor's button takes it from
+    // them), but adds it again to a command that has it, if another has it too.
+    const auto commandID = getCommandID (id);
+
+    if (commandID == 0 || ! key.isValid())
+        return false;
+
+    if (! getKeyPresses (id).contains (key))
+        getKeyMappings().addKeyPress (commandID, key);
+
+    return getKeyPresses (id).contains (key);
+}
+
+void CommandBridge::removeKey (const juce::String& id, const juce::KeyPress& key)
+{
+    const auto commandID = getCommandID (id);
+    const auto index = getKeyPresses (id).indexOf (key);
+
+    if (commandID != 0 && index >= 0)
+        getKeyMappings().removeKeyPress (commandID, index);
+}
+
+void CommandBridge::resetKeys (const juce::String& id)
+{
+    if (const auto commandID = getCommandID (id); commandID != 0)
+        getKeyMappings().resetToDefaultMapping (commandID);
+}
+
+void CommandBridge::resetAllKeys()
+{
+    getKeyMappings().resetToDefaultMappings();
+}
+
 //==============================================================================
 void CommandBridge::getAllCommands (juce::Array<juce::CommandID>& ids)
 {

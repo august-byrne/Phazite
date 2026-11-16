@@ -45,7 +45,7 @@ The Welcome window opens the first time Phazite starts. Everything in it is opti
 | Key | What it does |
 |---|---|
 | **Space** | Plays and stops. |
-| **M** (**Ctrl+T** with FL Studio's shortcuts) | Turns the computer keyboard into a piano: A S D F G H J K L ; for the white keys, W E T Y U O P for the black ones. A MIDI keyboard plays as soon as it is plugged in. |
+| **M** (**Ctrl+T** with FL Studio's shortcuts) | Turns the computer keyboard into a piano: A S D F G H J K L ; for the white keys, W E T Y U O P for the black ones (the keys in those places on other layouts). A MIDI keyboard plays as soon as it is plugged in. |
 | **Ctrl+K** | Finds any command by name, and shows its keys. |
 | **Ctrl+S** | Saves. The first time, Phazite asks for a name and suggests `Documents\Phazite\Projects`; from then on, Auto Save keeps the project saved. |
 | **Ctrl+Alt+S** (**Ctrl+N** with FL Studio's shortcuts) | Commits the song in Source Control, the branch icon down the left, with a message. |

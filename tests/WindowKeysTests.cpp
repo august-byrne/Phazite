@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The main window's keys (ui/input/WindowKeys.h): which listener gets a key first, the Shift rule, and letting held keys
 // go when the window loses the keyboard.
+#include "TestKeyboardLayouts.h"
 #include "UiTestHelpers.h"
 #include "ui/input/WindowKeys.h"
 
@@ -46,8 +47,8 @@ struct Keys
     juce::StringArray ran, released;
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry }; // with Phazite's keymap
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
+    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     juce::Component content;
     KeysWindow window { content };
     std::unique_ptr<phazite::ui::WindowKeys> windowKeys;
@@ -98,13 +99,13 @@ TEST_CASE ("Letters typed into a text field play no notes, even typed quickly, e
 {
     // The owner heard notes now and then while typing (2026-11-12): the field takes keys going down, and lets those
     // coming up pass on to the window, whose computer keyboard then found the next letter down.
-    std::set<int> down; // the keys held
+    phazite::test::SimulatedLayout layout; // the US layout, with the keys held
+    auto& down = layout.down;
     std::vector<juce::MidiMessage> sent;
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::ComputerKeyboard keyboard { [&sent] (const juce::MidiMessage& m) { sent.push_back (m); },
-                                             [&down] (int key) { return down.count (key) > 0; } };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, layout };
+    phazite::ui::ComputerKeyboard keyboard { [&sent] (const juce::MidiMessage& m) { sent.push_back (m); }, layout };
     juce::Component content;
     juce::TextEditor field;
     content.addAndMakeVisible (field);

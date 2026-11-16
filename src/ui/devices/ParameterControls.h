@@ -71,6 +71,10 @@ private:
 // A parameter's name without the words before it that its part's title has already said.
 juce::String getShownName (const juce::String& name, const juce::String& partTitle);
 
+// What a parameter's control says in the hint bar (its tooltip): what it ranges over and where it starts, and for a knob how
+// to work it. Every control of a device's parameter says it, the grid's and those an editor places itself.
+juce::String describeParameter (const devices::ParameterInfo&, const ParameterHandle&);
+
 //==============================================================================
 // A switch as a button with its text, down while the switch is on, for a row of a part's own controls (an FM operator's
 // Fixed, the sampler's Reverse): a click switches it, as one undo step. Titled with the parameter's name; the

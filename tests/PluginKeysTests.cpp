@@ -53,8 +53,8 @@ struct PluginScreen
     int plays = 0, paints = 0;
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
+    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     phazite::ui::PluginKeys keys { shortcutKeys, computerKeyboard };
     GreedyEditor editor;
     phazite::test::TestWindow window { editor, 300, 200 };

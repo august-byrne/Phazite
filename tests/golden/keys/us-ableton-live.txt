@@ -1,0 +1,240 @@
+# Every key press of the US layout that runs a command in the Ableton Live keymap: the press (its modifiers, its key code, what it types), the way it matched (as it is, as its digit, by what it types) and the commands of that way. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).
+[Windows]
+1 '1' | as it is | tool.smart
+ctrl+1 | as it is | grid.finer
+2 '2' | as it is | tool.draw
+ctrl+2 | as it is | grid.coarser
+3 '3' | as it is | tool.paint
+ctrl+3 | as it is | grid.triplets
+ctrl+alt+3 | as it is | view.pianoRoll
+4 '4' | as it is | tool.slice
+ctrl+4 | as it is | grid.snap
+ctrl+alt+4 | as it is | view.instrument
+5 '5' | as it is | tool.slip
+ctrl+5 | as it is | grid.adaptive
+6 '6' | as it is | tool.mute
+7 '7' | as it is | tool.delete
+8 '8' | as it is | tool.select
+9 '9' | as it is | tool.zoom
+0 '0' | as it is | edit.mute
+ctrl+0 | as it is | view.interfaceNormal
+- '-' | as it is | view.zoomOut
+ctrl+- | as it is | view.interfaceSmaller
+alt+- | as it is | track.shorter
+= '=' | as it is | view.zoomIn
+shift+= '+' | by what it types | view.zoomIn
+ctrl+= | as it is | view.interfaceLarger
+alt+= | as it is | track.taller
+w 'w' | as it is | view.zoomToFit
+e 'e' | as it is | tool.slice
+ctrl+e | as it is | edit.split, note.chop
+r 'r' | as it is | clip.reverse
+ctrl+r | as it is | edit.rename
+ctrl+shift+r | as it is | project.export
+ctrl+t | as it is | track.add
+ctrl+alt+t | as it is | track.addReturn
+ctrl+y | as it is | edit.redo
+u 'u' | as it is | track.collapse
+ctrl+u | as it is | edit.quantize
+ctrl+shift+u | as it is | note.quantizeSettings
+alt+u | as it is | track.collapseAll
+ctrl+i | as it is | edit.insertTime
+ctrl+alt+i | as it is | view.toggleInspector
+o 'o' | as it is | transport.metronome
+ctrl+o | as it is | project.open
+a 'a' | as it is | automation.showLanes
+ctrl+a | as it is | edit.selectAll, note.selectAll
+s 's' | as it is | track.solo
+ctrl+s | as it is | project.save
+ctrl+shift+s | as it is | project.saveAs
+ctrl+alt+s | as it is | version.save
+ctrl+d | as it is | edit.duplicate
+ctrl+f | as it is | view.searchBrowser
+ctrl+shift+f | as it is | view.followPlayback
+ctrl+alt+shift+f | as it is | track.freeze
+ctrl+g | as it is | device.group, track.groupIntoFolder
+ctrl+shift+g | as it is | device.ungroup, track.ungroup
+ctrl+j | as it is | clip.consolidate
+ctrl+k | as it is | view.commandPalette
+ctrl+l | as it is | transport.loopSelection
+ctrl+alt+l | as it is | view.toggleEditor
+z 'z' | as it is | view.zoomToSelection
+ctrl+z | as it is | edit.undo
+ctrl+shift+z | as it is | edit.redo
+x 'x' | as it is | view.zoomBack
+ctrl+x | as it is | edit.cut
+c 'c' | as it is | track.arm
+ctrl+c | as it is | edit.copy
+ctrl+v | as it is | edit.paste
+b 'b' | as it is | tool.draw
+ctrl+b | as it is | track.bounceInPlace
+ctrl+alt+b | as it is | view.toggleLeftPanel
+n 'n' | as it is | version.compare
+ctrl+n | as it is | project.new
+m 'm' | as it is | input.computerKeyboard
+ctrl+alt+m | as it is | view.mixer
+ctrl+, | as it is | options.settings
+shift+/ '?' | as it is | view.hoverHelp
+spacebar | as it is | transport.playStop
+shift+spacebar | as it is | transport.playPause
+return | as it is | note.applyTransform
+ctrl+return | as it is | note.applyTransform
+escape | as it is | note.cancelTransform, note.deselectAll, tool.smart
+backspace | as it is | edit.delete
+delete | as it is | edit.delete
+ctrl+shift+delete | as it is | edit.removeTime
+home | as it is | transport.goToStart
+end | as it is | transport.goToEnd
+cursor left | as it is | edit.nudgeLeft
+shift+cursor left | as it is | note.shorten
+cursor right | as it is | edit.nudgeRight
+shift+cursor right | as it is | note.lengthen
+cursor up | as it is | automation.raisePoints, note.transposeUp, track.selectPrevious
+shift+cursor up | as it is | automation.raisePointsMore, note.octaveUp
+ctrl+cursor up | as it is | clip.previousTake
+cursor down | as it is | automation.lowerPoints, note.transposeDown, track.selectNext
+shift+cursor down | as it is | automation.lowerPointsMore, note.octaveDown
+ctrl+cursor down | as it is | clip.nextTake
++ '+' | as it is | view.zoomIn
+shift++ '+' | by what it types | view.zoomIn
+ctrl++ | as it is | view.interfaceLarger
+alt++ | as it is | track.taller
+- '-' | as it is | view.zoomOut
+shift+- '-' | by what it types | view.zoomOut
+ctrl+- | as it is | view.interfaceSmaller
+alt+- | as it is | track.shorter
+shift+/ '/' | as it is | view.hoverHelp
+F8 | as it is | device.add
+F9 | as it is | transport.record
+F10 | as it is | view.menus
+F11 | as it is | view.fullScreen
+shift+F11 | as it is | view.maximizePanel
+ctrl+numpad 0 | as it is | view.interfaceNormal
+[Linux]
+1 '1' | as it is | tool.smart
+ctrl+1 | as it is | grid.finer
+2 '2' | as it is | tool.draw
+ctrl+2 | as it is | grid.coarser
+3 '3' | as it is | tool.paint
+ctrl+3 | as it is | grid.triplets
+ctrl+alt+3 | as it is | view.pianoRoll
+4 '4' | as it is | tool.slice
+ctrl+4 | as it is | grid.snap
+ctrl+alt+4 | as it is | view.instrument
+5 '5' | as it is | tool.slip
+ctrl+5 | as it is | grid.adaptive
+6 '6' | as it is | tool.mute
+7 '7' | as it is | tool.delete
+8 '8' | as it is | tool.select
+9 '9' | as it is | tool.zoom
+0 '0' | as it is | edit.mute
+ctrl+0 | as it is | view.interfaceNormal
+- '-' | as it is | view.zoomOut
+ctrl+- | as it is | view.interfaceSmaller
+alt+- '-' | as it is | track.shorter
+= '=' | as it is | view.zoomIn
+shift++ '+' | by what it types | view.zoomIn
+ctrl+= | as it is | view.interfaceLarger
+alt+= '=' | as it is | track.taller
+w 'w' | as it is | view.zoomToFit
+e 'e' | as it is | tool.slice
+ctrl+e | as it is | edit.split, note.chop
+r 'r' | as it is | clip.reverse
+ctrl+r | as it is | edit.rename
+ctrl+shift+r | as it is | project.export
+ctrl+t | as it is | track.add
+ctrl+alt+t | as it is | track.addReturn
+ctrl+y | as it is | edit.redo
+u 'u' | as it is | track.collapse
+ctrl+u | as it is | edit.quantize
+ctrl+shift+u | as it is | note.quantizeSettings
+alt+u 'u' | as it is | track.collapseAll
+ctrl+i | as it is | edit.insertTime
+ctrl+alt+i | as it is | view.toggleInspector
+o 'o' | as it is | transport.metronome
+ctrl+o | as it is | project.open
+a 'a' | as it is | automation.showLanes
+ctrl+a | as it is | edit.selectAll, note.selectAll
+s 's' | as it is | track.solo
+ctrl+s | as it is | project.save
+ctrl+shift+s | as it is | project.saveAs
+ctrl+alt+s | as it is | version.save
+ctrl+d | as it is | edit.duplicate
+ctrl+f | as it is | view.searchBrowser
+ctrl+shift+f | as it is | view.followPlayback
+ctrl+alt+shift+f | as it is | track.freeze
+ctrl+g | as it is | device.group, track.groupIntoFolder
+ctrl+shift+g | as it is | device.ungroup, track.ungroup
+ctrl+j | as it is | clip.consolidate
+ctrl+k | as it is | view.commandPalette
+ctrl+l | as it is | transport.loopSelection
+ctrl+alt+l | as it is | view.toggleEditor
+z 'z' | as it is | view.zoomToSelection
+ctrl+z | as it is | edit.undo
+ctrl+shift+z | as it is | edit.redo
+x 'x' | as it is | view.zoomBack
+ctrl+x | as it is | edit.cut
+c 'c' | as it is | track.arm
+ctrl+c | as it is | edit.copy
+ctrl+v | as it is | edit.paste
+b 'b' | as it is | tool.draw
+ctrl+b | as it is | track.bounceInPlace
+ctrl+alt+b | as it is | view.toggleLeftPanel
+n 'n' | as it is | version.compare
+ctrl+n | as it is | project.new
+m 'm' | as it is | input.computerKeyboard
+ctrl+alt+m | as it is | view.mixer
+ctrl+, | as it is | options.settings
+shift+? '?' | as it is | view.hoverHelp
+spacebar | as it is | transport.playStop
+shift+spacebar | as it is | transport.playPause
+return | as it is | note.applyTransform
+ctrl+return | as it is | note.applyTransform
+escape | as it is | note.cancelTransform, note.deselectAll, tool.smart
+backspace | as it is | edit.delete
+delete | as it is | edit.delete
+ctrl+shift+delete | as it is | edit.removeTime
+home | as it is | transport.goToStart
+end | as it is | transport.goToEnd
+cursor left | as it is | edit.nudgeLeft
+shift+cursor left | as it is | note.shorten
+cursor right | as it is | edit.nudgeRight
+shift+cursor right | as it is | note.lengthen
+cursor up | as it is | automation.raisePoints, note.transposeUp, track.selectPrevious
+shift+cursor up | as it is | automation.raisePointsMore, note.octaveUp
+ctrl+cursor up | as it is | clip.previousTake
+cursor down | as it is | automation.lowerPoints, note.transposeDown, track.selectNext
+shift+cursor down | as it is | automation.lowerPointsMore, note.octaveDown
+ctrl+cursor down | as it is | clip.nextTake
++ '+' | as it is | view.zoomIn
+shift++ '+' | by what it types | view.zoomIn
+ctrl++ | as it is | view.interfaceLarger
+alt++ | as it is | track.taller
+- '-' | as it is | view.zoomOut
+shift+- '-' | by what it types | view.zoomOut
+ctrl+- | as it is | view.interfaceSmaller
+alt+- | as it is | track.shorter
+shift+/ '/' | as it is | view.hoverHelp
+F8 | as it is | device.add
+F9 | as it is | transport.record
+F10 | as it is | view.menus
+F11 | as it is | view.fullScreen
+shift+F11 | as it is | view.maximizePanel
+0 '0' | as it is | edit.mute
+ctrl+0 | as it is | view.interfaceNormal
+1 '1' | as it is | tool.smart
+ctrl+1 | as it is | grid.finer
+2 '2' | as it is | tool.draw
+ctrl+2 | as it is | grid.coarser
+3 '3' | as it is | tool.paint
+ctrl+3 | as it is | grid.triplets
+ctrl+alt+3 | as it is | view.pianoRoll
+4 '4' | as it is | tool.slice
+ctrl+4 | as it is | grid.snap
+ctrl+alt+4 | as it is | view.instrument
+5 '5' | as it is | tool.slip
+ctrl+5 | as it is | grid.adaptive
+6 '6' | as it is | tool.mute
+7 '7' | as it is | tool.delete
+8 '8' | as it is | tool.select
+9 '9' | as it is | tool.zoom

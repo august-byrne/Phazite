@@ -2,6 +2,7 @@
 // The guide in the hint bar (roadmap step 1.9, src/ui/shell/Guide.h): the next step a newcomer could try, with the keys of
 // the keymap in use, each step gone once it is done in any way, and kept done in the settings.
 #include "TestHelpers.h"
+#include "TestKeyboardLayouts.h"
 #include "model/commands/CommandRegistry.h"
 #include "services/Settings.h"
 #include "ui/input/CommandBridge.h"
@@ -28,6 +29,7 @@ struct GuideSetup
     phazite::Settings settings; // in memory
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     bool keyboardOn = true;
 };
 } // namespace
@@ -35,7 +37,7 @@ struct GuideSetup
 TEST_CASE ("The guide suggests one step at a time, each gone once it is done, in any way")
 {
     GuideSetup s;
-    phazite::ui::Guide guide (s.commands, s.settings);
+    phazite::ui::Guide guide (s.commands, s.settings, s.keyboard);
 
     // Something to play first, as a new project starts empty.
     CHECK (guide.getNextStep() == Step::addSound);
@@ -68,7 +70,7 @@ TEST_CASE ("The guide suggests one step at a time, each gone once it is done, in
     CHECK (guide.getHint().isEmpty());
 
     // The settings keep what was done, for the next session.
-    phazite::ui::Guide later (s.commands, s.settings);
+    phazite::ui::Guide later (s.commands, s.settings, s.keyboard);
     CHECK_FALSE (later.getNextStep().has_value());
     CHECK (s.settings.get (phazite::Settings::guideStepsDone) == juce::StringArray { "addSound", "playNotes", "play", "record", "export" });
 }
@@ -76,7 +78,7 @@ TEST_CASE ("The guide suggests one step at a time, each gone once it is done, in
 TEST_CASE ("The guide skips what recording shows was done, says how to turn the computer keyboard on, and can be turned off")
 {
     GuideSetup s;
-    phazite::ui::Guide guide (s.commands, s.settings);
+    phazite::ui::Guide guide (s.commands, s.settings, s.keyboard);
     guide.addCommands (s.registry);
 
     guide.markDone (Step::addSound);
@@ -102,4 +104,19 @@ TEST_CASE ("The guide skips what recording shows was done, says how to turn the 
 
     s.registry.invoke ("help.guide");
     CHECK (guide.getHint().contains ("export the song"));
+}
+
+TEST_CASE ("The guide names the computer keyboard's keys as the layout in use types them")
+{
+    // On AZERTY the white keys are Q S D F G H J K L, without M, which turns the computer keyboard off there.
+    GuideSetup s;
+    const auto azerty = phazite::test::SimulatedLayout::azerty();
+    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {}, azerty };
+    s.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("Phazite")); // M turns it off
+    keyboard.leaveKeysOf (&s.commands);
+    phazite::ui::Guide guide (s.commands, s.settings, keyboard);
+    guide.markDone (Step::addSound);
+
+    CHECK (guide.getHint().contains (
+        "play it on your computer keyboard: Q S D F G H J K L are the white keys, Z E T Y U O P the black ones."));
 }

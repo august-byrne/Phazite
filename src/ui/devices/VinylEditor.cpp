@@ -101,6 +101,7 @@ public:
             *knob = makeKnob (index);
             *attachment = std::make_unique<ParameterAttachment> (**knob);
             (*attachment)->setParameter (device.getParameter (getInfo (index).id));
+            (*knob)->setTooltip (describeParameter (getInfo (index), device.getParameter (getInfo (index).id)));
             addAndMakeVisible (**knob);
         }
 

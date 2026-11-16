@@ -66,8 +66,8 @@ struct Studio
 
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
+    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     phazite::ui::PluginKeys keys { shortcutKeys, computerKeyboard };
     juce::Component editor;
     phazite::test::TestWindow window { editor, 300, 200 }; // the plug-in's window

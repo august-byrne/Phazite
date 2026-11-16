@@ -1149,6 +1149,7 @@ void VersionsView::refreshTooltips()
     branchButton->setTooltip (
         withShortcut (commands, "The branch the song is on: click to check out another, or to create one", "version.pickBranch"));
     moreButton.setTooltip ("More Actions: commit, changes, branches, DAWproject, clean up");
+    historySection->setTooltip ("The song's commits as a graph: each on its branch's line, where branches part and where they merge");
     historyList.setTooltip ("Every commit, newest first, each on its branch's line: click one to show what it changed");
     localSection->setTooltip ("The song as it was while it differed from its last commit, kept without asking: as the project opened, "
                               "every few minutes while it changed, and before what made it another");

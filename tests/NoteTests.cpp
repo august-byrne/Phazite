@@ -583,7 +583,7 @@ TEST_CASE ("The note commands act on the selected notes, and take the arrow keys
     keymap.keys["note.transposeUp"] = { "cursor up" };
     phazite::ui::CommandBridge commands { n.registry };
     commands.setKeymap (keymap);
-    const phazite::ui::KeyDispatcher keys { commands };
+    const phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     CHECK (keys.findCommandForKey (juce::KeyPress (juce::KeyPress::upKey))->id == juce::String ("note.transposeUp"));
 
     n.selection.deselectAll();

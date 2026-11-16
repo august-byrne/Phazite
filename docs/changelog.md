@@ -92,6 +92,19 @@ too. A line names the bug's number in that list.
 - **134 The effects' control steps** (the Phaser, the Flanger, the Chorus and the EQ; the Synth's are still open) go
   by the song's own grid (`dsp::ControlGrid`), so what they play no longer depends on how the samples are cut into
   blocks, and a loop's second pass, a start anywhere and a wake from sleep play what an export plays.
+- **110 The Shortcuts tab is Phazite's own,** after VS Code's Keyboard Shortcuts editor: search by a command's name or
+  by a key pressed (Record Keys), a row for each key with its source, and a key given to a command stays with every
+  other command that has it: the card says who else has the key, which of them runs when, and what a key the
+  dispatcher matches another way would take from whom.
+- **112 Other keyboard layouts:** the computer keyboard plays by the keys' places on any layout (the key that turns it
+  off stays that command's); a key means what is printed on it first, then its digit where it sits at a digit's
+  place (AZERTY's `&` is 1), then the character it types (keys that type = or + zoom; Ctrl++ and Alt++ added); a
+  character typed with AltGr runs no Alt shortcut. On six layouts every command of the three keymaps has a key (one
+  of Live's on Spanish excepted, and said in the guide), and what every key press of the US layout runs is a golden
+  file (`tests/golden/keys/`).
+- **146 Every control explains itself in the hint bar:** the EQ's band controls, the Vinyl's and the Delay's band
+  ends, and the Project and Source Control panes' headers have their tooltips, and the walk of every control now
+  fails on any that has none.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

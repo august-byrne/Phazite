@@ -24,33 +24,32 @@ namespace
         label->setInterceptsMouseClicks (false, false);
         return label;
     }
-
-    // What a parameter's control says in the hint bar: what it ranges over and where it starts, and for a knob how to work it.
-    juce::String describe (const devices::ParameterInfo& parameter, const ParameterHandle& handle)
-    {
-        const auto name = toString (parameter.name);
-
-        if (parameter.unit == devices::Unit::choice)
-        {
-            juce::StringArray choices;
-
-            for (const auto& choice : parameter.choices)
-                choices.add (toString (choice));
-
-            const auto first = (int) std::lround (parameter.defaultValue - parameter.minimum);
-            return name + ": " + choices.joinIntoString (", ")
-                   + (juce::isPositiveAndBelow (first, choices.size()) ? ", " + choices[first] + " at first" : juce::String());
-        }
-
-        if (parameter.unit == devices::Unit::toggle)
-            return name + ": on or off, " + (parameter.defaultValue > 0.5f ? "on" : "off") + " at first";
-
-        return name + ": from " + handle.getText (parameter.minimum) + " to " + handle.getText (parameter.maximum) + ", "
-               + handle.getText (parameter.defaultValue)
-               + " at first. Drag up or down, or click it and type a value; double-click for where it started, or right-click to "
-                 "automate or modulate it";
-    }
 } // namespace
+
+juce::String describeParameter (const devices::ParameterInfo& parameter, const ParameterHandle& handle)
+{
+    const auto name = toString (parameter.name);
+
+    if (parameter.unit == devices::Unit::choice)
+    {
+        juce::StringArray choices;
+
+        for (const auto& choice : parameter.choices)
+            choices.add (toString (choice));
+
+        const auto first = (int) std::lround (parameter.defaultValue - parameter.minimum);
+        return name + ": " + choices.joinIntoString (", ")
+               + (juce::isPositiveAndBelow (first, choices.size()) ? ", " + choices[first] + " at first" : juce::String());
+    }
+
+    if (parameter.unit == devices::Unit::toggle)
+        return name + ": on or off, " + (parameter.defaultValue > 0.5f ? "on" : "off") + " at first";
+
+    return name + ": from " + handle.getText (parameter.minimum) + " to " + handle.getText (parameter.maximum) + ", "
+           + handle.getText (parameter.defaultValue)
+           + " at first. Drag up or down, or click it and type a value; double-click for where it started, or right-click to "
+             "automate or modulate it";
+}
 
 juce::String getShownName (const juce::String& name, const juce::String& partTitle)
 {
@@ -110,7 +109,7 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
         const auto& parameter = info->parameters[(size_t) index];
         const auto fullName = toString (parameter.name);
         auto handle = device.getParameter (parameter.id);
-        const auto help = describe (parameter, handle);
+        const auto help = describeParameter (parameter, handle);
         auto control = std::make_unique<Control>();
         control->id = parameter.id;
         control->name =
@@ -194,7 +193,7 @@ void ParameterControls::showParameters (const DeviceHandle& device, const std::v
         auto& control = *controls[n];
         const auto fullName = toString (parameter.name);
         auto handle = device.getParameter (parameter.id);
-        const auto help = describe (parameter, handle);
+        const auto help = describeParameter (parameter, handle);
         control.id = parameter.id;
 
         if (control.box != nullptr)

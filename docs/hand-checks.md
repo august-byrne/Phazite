@@ -178,6 +178,12 @@ the [changelog](changelog.md).
 | G32b | Compressor on a loud loop with Drive at 50 %: switch its character between Clean, FET, VCA, Opto and Tube while it plays; automate Drive from 0 to 60 % on a beat with Tube | No jump in level and no thump at a switch; the drive is there on the beat | |
 | G34 | Vinyl with Bass Mono at 100 Hz on a bass line and a bright sound: Mix at 50 %, then turned from 0 % to 30 % and back, then Bass Mono switched on and off | Neither the bass around 100 Hz nor the highs hollow out against Mix at 100 %, and nothing clicks | |
 | G74 | Multiband on a full mix: switch a band's saturation on and off while it plays | No click | |
+| G110 | Help > Keyboard Shortcuts: type "undo"; turn on Record Keys and press Up; select Select Track Above, Add Key..., press Ctrl+Shift+K, Assign; restart Phazite | The rows narrow as you type; Up lists Select Track Above, Transpose Up and Raise Automation Points; the card says who else has the key; Up still selects tracks; the new key is still there after the restart | |
+| G112a | Windows set to French (AZERTY), computer keyboard off: press `&`, Ctrl+`&`, `-`, Shift+6; turn the computer keyboard on (M) and play Q S D ... L, then M | Smart Tool, finer grid, zoom out, Mute Tool; the notes rise in the piano's shape; M turns the computer keyboard off | |
+| G112b | German layout (QWERTZ): press `+`, Shift+0, Ctrl++, Alt++; AltGr with `+`; computer keyboard on: the key labelled Z, then Y | Zoom in twice, larger interface, taller tracks; AltGr types `~` and runs nothing; Z plays G#4, Y moves the octave down | |
+| G112c | Czech layout with the Ableton Live keymap: Ctrl+Alt+3, then Ctrl+Alt+Shift+3; the `+` key; Shift with it. Spanish: Ctrl+Alt+4 | Ctrl+Alt+3 does nothing (a dead key), Ctrl+Alt+Shift+3 shows the piano roll; `+` zooms in; Shift with it is the Smart Tool. On Spanish Ctrl+Alt+4 does nothing and View > Instrument works | |
+| G112d | Linux, X11: `setxkbmap us,de`, German active, computer keyboard on: the key labelled Z, then Y; number pad `*`. Then `setxkbmap us,cz` (or `us,ru`), switch to it, open Settings > MIDI and press the key right of L | Z plays G#4, Y moves the octave down, number pad `*` runs nothing; the help names that layout's letters and the key plays E5 | |
+| G146 | Hover the EQ's Frequency knob, the Vinyl's Low Cut, the Graph header in Source Control and the Project view's Notes header | The hint bar describes each, in words that fit (the owner may reword them: open question 56) | |
 
 ## Known bugs that need an ear or a real plug-in
 

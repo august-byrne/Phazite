@@ -69,7 +69,7 @@
     "track.bounceInPlace": [ "command + B" ],
     "track.selectPrevious": [ "cursor up" ],
     "track.selectNext": [ "cursor down" ],
-    "track.taller": [ "alt + =" ],
+    "track.taller": [ "alt + =", "alt + +" ],
     "track.shorter": [ "alt + -" ],
     "project.new": [ "command + N" ],
     "project.open": [ "command + O" ],
@@ -91,7 +91,7 @@
     "view.fullScreen": [ "F11" ],
     "view.searchBrowser": [ "command + F" ],
     "device.add": [ "F8" ],
-    "view.zoomIn": [ "=", "numpad +" ],
+    "view.zoomIn": [ "=", "+", "numpad +" ],
     "view.zoomOut": [ "-", "numpad -" ],
     "view.zoomToFit": [ "W" ],
     "view.zoomToSelection": [ "Z" ],
@@ -104,7 +104,7 @@
     "grid.adaptive": [ "command + 5" ],
     "input.computerKeyboard": [ "M" ],
     "options.settings": [ "command + ," ],
-    "view.interfaceLarger": [ "command + =", "command + numpad +" ],
+    "view.interfaceLarger": [ "command + =", "command + +", "command + numpad +" ],
     "view.interfaceSmaller": [ "command + -", "command + numpad -" ],
     "view.interfaceNormal": [ "command + 0", "command + numpad 0" ]
   }

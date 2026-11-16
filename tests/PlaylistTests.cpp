@@ -136,7 +136,7 @@ struct PlaylistScreen
     phazite::RangeSelection& range = getRangeSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry }; // with the default keymap
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
     phazite::ui::Playlist playlist { commands, context };
     phazite::test::TestWindow window { playlist, 1000, 600 };
     juce::Component* lanes = nullptr;

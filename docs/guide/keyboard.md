@@ -9,9 +9,25 @@ Phazite comes with three keymaps: **Phazite** (the default), **FL Studio** and *
 those apps' manuals. You choose one on the first page of the Welcome window, and change it later in **Keymap**, in the
 menu of the gear at the bottom left.
 
-**Keyboard Shortcuts** (in the Help menu and the gear's menu) lists every command with its keys and changes them. Each
-keymap keeps its own changes. **Ctrl+K** finds any command by name and shows its keys, so a command without a key is
-always one search away.
+**Ctrl+K** finds any command by name and shows its keys, so a command without a key is always one search away.
+
+## Changing keys
+
+**Keyboard Shortcuts** (in the Help menu and the gear's menu) lists every command, a row for each of its keys, with
+where the key comes from: the keymap, or **User** for your own.
+
+- **Search** by a command's name or by a key's name ("undo", "Ctrl+Z"). To find what a key does, click the keyboard
+  button beside the search (**Record Keys**) and press the key: every command it runs shows.
+- **Change a key** with **Change Key...**, **Enter**, a double-click or the pencil on the selected row, and give a command
+  another with **Add Key...**. Press the keys in the card that opens (Escape and Enter count as keys there), then
+  **Tab** to **Assign**. Before you assign it, the card says which other commands have the key and which of them runs
+  when.
+- **A key can have several commands.** Giving a command a key takes it from no other: as with the arrow keys below, the
+  command that can act runs.
+- **Remove Key** (or **Delete**) takes a key from its command alone. **Reset** gives the selected command its keymap's
+  keys again, and **Reset All**, clicked twice, every command.
+
+Each keymap keeps your changes to it, saved as you make them.
 
 ## How the keys work
 
@@ -28,6 +44,19 @@ always one search away.
 - **Over a plug-in's window,** Play / Stop, Play / Pause, A/B Compare and Automate Last Touched Parameter still work,
   and so does the computer keyboard.
 - **In a text field,** the keys type. A click anywhere outside the field gives them back to the shortcuts.
+- **On any keyboard layout.** A key is first what is printed on it: letters are the letters marked on the keys, and a
+  key marked - or + zooms out or in wherever it is. A key of the digit row that no shortcut takes as printed is its
+  digit, and where the layout types the digits with Shift, Shift with it is the digit too. So on French AZERTY the &
+  key is 1 and Ctrl with it Ctrl+1, the - key zooms out, and the Mute Tool is **Shift+6** (the key that types 6); on
+  Czech the + key zooms in, the Smart Tool is **Shift+1**, and the finer grid **Ctrl+Shift+1**. **=** works however
+  your layout types it, and **+** zooms in too, so **Ctrl++** and **Alt++** work where **=** needs Shift (German,
+  Spanish, Nordic). A key typed with AltGr runs no shortcut. Left Ctrl and left Alt with a key run its command, and,
+  where the layout has an AltGr character on that key, Windows also takes them for AltGr and types that character
+  (into a text field, if one has the keys).
+- **Ableton Live's Ctrl+Alt digits.** Where AltGr and a digit is a dead key, Windows sends no key at all for Ctrl+Alt
+  and that digit. On Spanish, **Ctrl+Alt+4** (Instrument) doesn't work: use **View > Instrument**, or give it a key of
+  your own in Keyboard Shortcuts. On Czech, where every digit's AltGr is a dead key, **Ctrl+Alt+3** (Piano Roll) and
+  **Ctrl+Alt+4** (Instrument) are **Ctrl+Alt+Shift+3** and **Ctrl+Alt+Shift+4**, as Czech types its digits with Shift.
 
 ## The computer keyboard plays notes
 
@@ -35,12 +64,17 @@ always one search away.
 transport bar) turns your typing keyboard into a piano that plays the selected track's instrument. It starts off, so
 that the single-letter shortcuts work.
 
-| Keys | Play |
+| Keys (US layout) | Play |
 |---|---|
 | **A S D F G H J K L ;** | The white keys |
 | **W E T Y U O P** | The black keys |
 | **Z**, **X** | An octave down, an octave up |
 | **C**, **V** | Quieter, louder |
+
+The keys are taken by where they are, so the piano keeps its shape on any layout: on French AZERTY the white keys are
+**Q S D F G H J K L** and **W** goes an octave down (**M**, right of L, still turns the computer keyboard off); on
+German QWERTZ the black keys are **W E T Z U O P** and **Y** goes an octave down. The MIDI settings name the keys as
+your layout types them.
 
 While it plays notes, **Shift** and a letter run that letter's shortcut (**Shift+P** for the Draw tool, for example).
 The digits **1** to **9** pick the tools either way, in the keymaps that have them.
@@ -108,7 +142,7 @@ with **Ctrl+K** or give them one in Keyboard Shortcuts.
 | Collapse All | **Alt+U** | – | **Alt+U** |
 | Select Track Above | **Up** | **Ctrl+Up** | **Up** |
 | Select Track Below | **Down** | **Ctrl+Down** | **Down** |
-| Taller Tracks | **Alt+=** | – | **Alt+=** |
+| Taller Tracks | **Alt+=**, **Alt++** | – | **Alt+=**, **Alt++** |
 | Shorter Tracks | **Alt+-** | – | **Alt+-** |
 | Add Return Track | – | – | **Ctrl+Alt+T** |
 | Arm Track | – | – | **C** |
@@ -215,13 +249,13 @@ with **Ctrl+K** or give them one in Keyboard Shortcuts.
 | Effects | **Shift+F6** | **Shift+F6** | – |
 | Playlist | **F5** | **F5** | – |
 | Mixer | **F9** | **F9** | **Ctrl+Alt+M** |
-| Zoom In | **=**, **Numpad +** | **Page up** | **=**, **Numpad +** |
+| Zoom In | **=**, **+**, **Numpad +** | **Page up** | **=**, **+**, **Numpad +** |
 | Zoom Out | **-**, **Numpad -** | **Page down** | **-**, **Numpad -** |
 | Follow Playback | **Ctrl+Shift+F** | – | **Ctrl+Shift+F** |
 | Center on Playhead | – | **Shift+0** | – |
 | Full Screen | **F11** | – | **F11** |
 | Hover Help | – | – | **Shift+/** |
-| Larger Interface | **Ctrl+=**, **Ctrl+Numpad +** | – | **Ctrl+=**, **Ctrl+Numpad +** |
+| Larger Interface | **Ctrl+=**, **Ctrl++**, **Ctrl+Numpad +** | – | **Ctrl+=**, **Ctrl++**, **Ctrl+Numpad +** |
 | Normal Interface Size | **Ctrl+0**, **Ctrl+Numpad 0** | – | **Ctrl+0**, **Ctrl+Numpad 0** |
 | Smaller Interface | **Ctrl+-**, **Ctrl+Numpad -** | – | **Ctrl+-**, **Ctrl+Numpad -** |
 | Maximize the Upper Panel | – | **F12** | – |

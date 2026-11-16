@@ -89,7 +89,8 @@ private:
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume };
-    int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
+    int shownKeyboardState = -1;          // what the keyboard button shows, to update it only on changes
+    juce::uint32 shownKeyboardLayout = 0; // and the layout its tooltip names the keys of (KeyboardLayout::getFingerprint())
 
     // A/B (version.compare): a press hears the last commit's bounce in place of the song, at the same point and as loud, and
     // another the song again; lit while it is heard, or bounced to be. And beside it what is heard ("Hearing: Verse 2"), or

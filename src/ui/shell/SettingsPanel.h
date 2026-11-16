@@ -2,6 +2,7 @@
 // The settings window's content: the Audio, MIDI and Shortcuts tabs.
 #pragma once
 
+#include "ShortcutsEditor.h"
 #include "model/engine/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/input/CommandBridge.h"
@@ -86,15 +87,20 @@ private:
     juce::ToggleButton keyboardButton { "Play notes with the computer keyboard" };
 
     void rebuild();
+    void showKeyboardHelp(); // the computer keyboard's keys, as the layout in use types them
+    void visibilityChanged() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override { rebuild(); } // devices changed
 };
 
 //==============================================================================
-// The Shortcuts tab: the keymap, and every command's keys.
+// The Shortcuts tab: the keymap, and every command's keys (ShortcutsEditor.h).
 class ShortcutSettings : public juce::Component
 {
 public:
-    ShortcutSettings (CommandBridge&, std::function<void (const juce::String& keymapName)> chooseKeymap);
+    ShortcutSettings (CommandBridge&, const ComputerKeyboard&, std::function<void (const juce::String& keymapName)> chooseKeymap);
+
+    ShortcutsEditor& getEditor() noexcept { return editor; }
+    juce::ComboBox& getKeymapBox() noexcept { return keymapBox; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -102,7 +108,7 @@ public:
 private:
     juce::Label keymapLabel;
     juce::ComboBox keymapBox;
-    juce::KeyMappingEditorComponent editor;
+    ShortcutsEditor editor;
 };
 
 //==============================================================================

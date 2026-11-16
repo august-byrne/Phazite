@@ -45,13 +45,15 @@ The base controls and what the left panel's views share.
 
 | File | What it holds |
 |---|---|
-| `CommandBridge.*` | The commands as JUCE's menus, key mappings and shortcuts editor see them. |
-| `KeyDispatcher.*` | The keys that run commands: priorities, held keys, the Shift rule, keys over plug-in windows. |
+| `CommandBridge.*` | The commands as JUCE's menus and key mappings see them, and the user's changes to their keys. |
+| `KeyDispatcher.*` | The keys that run commands: priorities, held keys, the Shift rule, keys over plug-in windows, keys on other layouts. |
+| `KeyShares.*` | What else a key does, as the shortcuts editor says it: the other commands it runs, which runs when, the computer keyboard's notes. |
+| `KeyboardLayout.*` | The keys by their places, and what the layout in use types at each (JUCE workarounds W47, W48). |
 | `Keymap.*` | The keymaps. |
 | `KeymapStore.*` | The user's changes to the keymaps, kept in the settings. |
 | `CommandUI.*` | Menus and tooltips that show commands with their shortcuts. |
 | `LibraryDrag.*` | What a dragged browser item carries, or a track dragged into the browser. |
-| `ComputerKeyboard.*` | The computer keyboard as a MIDI keyboard. |
+| `ComputerKeyboard.*` | The computer keyboard as a MIDI keyboard, by the keys' places. |
 | `WindowKeys.*` | The main window's keys: the computer keyboard is asked before the shortcuts. |
 | `PluginKeys.*` | Lets play, stop and the computer keyboard work over plug-in windows. |
 | `TextFieldRelease.*` | Gives the keys back to the shortcuts when a press lands outside the text field that has them. |
@@ -212,6 +214,7 @@ The window's content and everything around the views.
 | `Panels.*` | The two areas of views, one over the other: by default the Playlist and Mixer tabs over the clip editor's tab (which shows the piano roll or the audio clip editor as the selection asks) and the Instrument and Effects tabs (the Devices view's two pages). Each view moves between the areas by its tab, and the settings keep where. |
 | `PanelLayout.*` | Which panels show, which one fills the window and their sizes, with the buttons in each panel's corner. |
 | `SettingsPanel.*` | The settings window's tabs. |
+| `ShortcutsEditor.*` | The Shortcuts tab's list, as VS Code's Keyboard Shortcuts editor: search by name or key, the keys of every command, changed in a card that says what else a key does. |
 | `Welcome.*` | The welcome window. |
 | `NewProjectPanel.*` | The new-project window. |
 | `ExportPanel.*` | The export window, for the song or its stems. |

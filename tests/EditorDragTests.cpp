@@ -142,7 +142,7 @@ struct AudioScreen
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
-    phazite::ui::KeyDispatcher keys { commands };
+    phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     phazite::ui::AudioClipEditor editor { commands, context };
     phazite::test::TestWindow window { editor, 1000, 400 };
 };

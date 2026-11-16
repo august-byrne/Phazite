@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EqEditor.h"
 #include "DeviceTint.h"
+#include "ParameterControls.h"
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -453,6 +455,7 @@ EqEditor::EqEditor (const DeviceHandle& handle)
 
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));
+    outputKnob.setTooltip (describeParameter (getInfo (Eq::outputParameter), device.getParameter (getInfo (Eq::outputParameter).id)));
     applyDeviceTint (*this, device);
 
     selectBand (selectedBand);
@@ -522,6 +525,16 @@ void EqEditor::selectBand (int band)
     bandButtons[selectedBand]->setToggleState (true, juce::dontSendNotification);
 
     const auto handleOf = [this] (Eq::Field field) { return device.getParameter (getInfo (indexOf (selectedBand, field)).id); };
+
+    // Each control says in the hint bar what the band's parameter is, as the grids' controls do.
+    for (auto [control, field] : { std::pair<juce::SettableTooltipClient*, Eq::Field> { &onButton, Eq::on },
+                                   { &typeBox, Eq::type },
+                                   { &slopeBox, Eq::slope },
+                                   { &frequencyKnob, Eq::frequency },
+                                   { &gainKnob, Eq::gain },
+                                   { &qKnob, Eq::q } })
+        control->setTooltip (describeParameter (getInfo (indexOf (selectedBand, field)), handleOf (field)));
+
     onAttachment.setParameter (handleOf (Eq::on));
     typeAttachment.setParameter (handleOf (Eq::type));
     slopeAttachment.setParameter (handleOf (Eq::slope));

@@ -164,7 +164,7 @@ struct PlaylistScreen
     ProjectContext context { getEngineContext() }; // the open project, as the app has it
     CommandRegistry registry;
     ui::CommandBridge commands { registry }; // with the default keymap
-    ui::KeyDispatcher keys { commands };
+    ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     ui::Playlist playlist { commands, context };
     TestWindow window { playlist, 1000, 600 };
     juce::Component* lanes = nullptr;
@@ -263,7 +263,7 @@ struct PianoRollScreen
     ProjectContext context { getEngineContext() };
     CommandRegistry registry;
     ui::CommandBridge commands { registry };
-    ui::KeyDispatcher keys { commands };
+    ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     ui::PianoRoll pianoRoll { commands, context };
     TestWindow window { pianoRoll, 1176, 564 };
     juce::Component* notes = nullptr;

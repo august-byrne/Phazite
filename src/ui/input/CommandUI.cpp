@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandUI.h"
 #include "model/arrangement/TrackColours.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
@@ -8,12 +9,19 @@ juce::String withShortcut (const CommandBridge& commands, const juce::String& te
 {
     // Up to two keys, such as a tool's letter and its digit.
     const auto keys = commands.getShortcutDescriptions (commandID);
-    return keys.isEmpty() ? text : text + " (" + keys.joinIntoString (" or ", 0, 2) + ")";
+    return keys.isEmpty() ? text : text + " (" + showKeyCharacters (keys.joinIntoString (" or ", 0, 2)) + ")";
 }
 
 juce::String formatKey (const juce::String& description)
 {
-    auto parts = juce::StringArray::fromTokens (description, "+", {});
+    // JUCE puts " + " between the modifiers and the key, which can be "+" itself ("ctrl + +").
+    juce::StringArray parts;
+    auto rest = showKeyCharacters (description).trim(); // "#e9" as "É"
+
+    for (; rest.contains (" + "); rest = rest.fromFirstOccurrenceOf (" + ", false, false))
+        parts.add (rest.upToFirstOccurrenceOf (" + ", false, false));
+
+    parts.add (rest);
     parts.trim();
     parts.removeEmptyStrings();
 

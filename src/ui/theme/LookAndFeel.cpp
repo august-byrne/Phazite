@@ -2,8 +2,6 @@
 #include "LookAndFeel.h"
 #include "Popups.h"
 
-#include <juce_gui_extra/juce_gui_extra.h> // KeyMappingEditorComponent
-
 namespace phazite::ui
 {
 namespace
@@ -148,8 +146,6 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::ComboBox::focusedOutlineColourId, p.focus);
     setColour (juce::BubbleComponent::backgroundColourId, p.surfaceRaised); // a slider's value while dragging
     setColour (juce::BubbleComponent::outlineColourId, p.border);
-    setColour (juce::KeyMappingEditorComponent::backgroundColourId, p.surface);
-    setColour (juce::KeyMappingEditorComponent::textColourId, p.text);
     setColour (juce::TreeView::backgroundColourId, p.surface);
     setColour (juce::TreeView::linesColourId, p.border);
     setColour (juce::TreeView::selectedItemBackgroundColourId, p.selected);
@@ -611,11 +607,11 @@ void LookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<in
     const auto font = getPopupMenuFont();
     g.setFont (font);
 
-    if (shortcutKeyText.isNotEmpty())
+    if (const auto shortcut = showKeyCharacters (shortcutKeyText); shortcut.isNotEmpty())
     {
         g.setColour (ink.withMultipliedAlpha (Popup::shortcutAlpha));
-        g.drawText (shortcutKeyText, content, juce::Justification::centredRight, true);
-        content.removeFromRight (juce::TextLayout::getStringWidth (font, shortcutKeyText) + (float) Popup::itemTextInset);
+        g.drawText (shortcut, content, juce::Justification::centredRight, true);
+        content.removeFromRight (juce::TextLayout::getStringWidth (font, shortcut) + (float) Popup::itemTextInset);
     }
 
     g.setColour (ink);
@@ -914,15 +910,75 @@ juce::Colour drawListRow (juce::Graphics& g, const juce::Component& list, juce::
     return selected ? p.textBright : p.text;
 }
 
+juce::juce_wchar toKeyCapCase (juce::juce_wchar c)
+{
+    auto upper = juce::CharacterFunctions::toUpperCase (c);
+
+    if (upper >= 0xe0 && upper <= 0xfe && upper != 0xf7)
+        upper -= 0x20;
+
+    return upper;
+}
+
+namespace
+{
+    // A key JUCE writes by its number ("#e9") as its character; any other key as it is.
+    juce::String showKeyCharacter (const juce::String& key)
+    {
+        const auto hex = key.substring (1);
+
+        if (key.startsWithChar ('#') && hex.isNotEmpty() && hex.containsOnly ("0123456789abcdefABCDEF"))
+            return juce::String::charToString (toKeyCapCase ((juce::juce_wchar) hex.getHexValue32()));
+
+        return key;
+    }
+} // namespace
+
+juce::StringArray splitKeyCaps (const juce::String& shortcut)
+{
+    // At each "+" that ends a key: not one that is the key itself ("Ctrl++", "ctrl + +"), nor numpad's ("Numpad +").
+    juce::StringArray keys;
+    juce::String current;
+
+    for (const auto c : shortcut)
+    {
+        const auto trimmed = current.trim();
+
+        if (c == '+' && trimmed.isNotEmpty() && ! (current.endsWithChar (' ') && trimmed.equalsIgnoreCase ("numpad")))
+        {
+            keys.add (showKeyCharacter (trimmed));
+            current.clear();
+        }
+        else
+        {
+            current += juce::String::charToString (c);
+        }
+    }
+
+    if (current.trim().isNotEmpty())
+        keys.add (showKeyCharacter (current.trim()));
+
+    return keys;
+}
+
+juce::String showKeyCharacters (const juce::String& description)
+{
+    if (! description.containsChar ('#'))
+        return description;
+
+    juce::StringArray parts;
+    parts.addTokens (description, " ", {});
+
+    for (auto& part : parts)
+        part = showKeyCharacter (part);
+
+    return parts.joinIntoString (" ");
+}
+
 float drawKeyCaps (juce::Graphics& g, const Palette& p, const juce::String& shortcut, juce::Rectangle<float> area, juce::Colour text)
 {
-    // From the last key leftwards ("Ctrl+Shift+P": P, then Shift, then Ctrl); a key that is "+" itself stays one.
-    auto keys = juce::StringArray::fromTokens (shortcut, "+", {});
-    keys.removeEmptyStrings();
-
-    if (shortcut.endsWith ("++") || shortcut == "+")
-        keys.add ("+");
-
+    // From the last key leftwards ("Ctrl+Shift+P": P, then Shift, then Ctrl).
+    const auto keys = splitKeyCaps (shortcut);
     const auto font = juce::Font (juce::FontOptions (KeyCap::textSize));
     g.setFont (font);
     auto right = area.getRight();

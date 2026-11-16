@@ -316,23 +316,26 @@ void TopBar::updateKeyboardButton()
     const bool on = computerKeyboard.isEnabled();
     const auto lowestNote = computerKeyboard.getLowestNote(), velocity = computerKeyboard.getVelocity();
     const auto state = (on ? 1 : 0) + 2 * lowestNote + 256 * velocity; // lowestNote < 128
+    const auto layout = computerKeyboard.getLayout().getFingerprint(); // the tooltip names the keys as the layout types them
 
-    if (state == shownKeyboardState)
+    if (state == shownKeyboardState && layout == shownKeyboardLayout)
         return;
+
+    shownKeyboardLayout = layout;
 
     shownKeyboardState = state;
     const auto from = juce::MidiMessage::getMidiNoteName (lowestNote, true, true, 4); // C4 is middle C
 
     keyboardButton.setToggleState (on, juce::dontSendNotification);
     keyboardButton.setButtonText (on ? from : juce::String ("Off"));
-    keyboardButton.setTooltip (withShortcut (commands,
-                                             on ? "The computer keyboard plays notes: A S D F G H J K L ; from " + from
-                                                      + ", and W E T Y U O P the black keys. Z and X change the octave, C and V the "
-                                                        "velocity (now "
-                                                      + juce::String (velocity)
-                                                      + "). Hold Shift for single-key shortcuts. Click to turn it off"
-                                                : juce::String ("Click to play notes with the computer keyboard"),
-                                             "input.computerKeyboard"));
+    keyboardButton.setTooltip (
+        withShortcut (commands,
+                      on ? "The computer keyboard plays notes: " + computerKeyboard.getWhiteKeysText() + " from " + from + ", and "
+                               + computerKeyboard.getBlackKeysText() + " the black keys. " + computerKeyboard.getOctaveKeysText()
+                               + " change the octave, " + computerKeyboard.getVelocityKeysText() + " the velocity (now "
+                               + juce::String (velocity) + "). Hold Shift for single-key shortcuts. Click to turn it off"
+                         : juce::String ("Click to play notes with the computer keyboard"),
+                      "input.computerKeyboard"));
 }
 
 bool TopBar::isEditing (const NumberField& field) const

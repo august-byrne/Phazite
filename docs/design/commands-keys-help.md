@@ -130,11 +130,42 @@ Rules for every keymap:
 - A keymap must not give Shift and a letter a different command than the letter alone (see the computer keyboard,
   below).
 - Default keys belong in the keymap files, not in code.
+- Keys work on every layout, matched in three ways, the first that finds any shortcut deciding among every command,
+  enabled or not: as the key is printed (Ctrl+Z is the key marked Z, on QWERTZ too; AZERTY's - key zooms out, Czech's
+  + key zooms in), Shift with a digit key where the layout types digits with Shift being the digit typed with Shift
+  (AZERTY's Ctrl, Shift and & is Ctrl+Shift+1, on Windows and Linux alike); else, on the digit row, as its digit, so AZERTY's & key is 1 and Ctrl with it Ctrl+1, and where the
+  layout types the digits with Shift, Shift with a digit key is the digit alone (AZERTY's Mute Tool is Shift+6, Czech's
+  finer grid Ctrl+Shift+1); else, for a key that isn't a letter or a digit, without Ctrl, Alt or Cmd, by the character
+  it types, whatever Shift that took ("=" is Shift+0 on QWERTZ, "?" Shift+ß). A key typed with AltGr runs no shortcut.
+  A test walks every key of six layouts (US, AZERTY, QWERTZ, Czech, Spanish, Swedish) and finds a key for every command
+  of each keymap. Zooming in is "=" and "+", so that
+  Ctrl and Alt with it (the interface's size, the tracks' height) need no Shift on QWERTZ, Spanish and Nordic layouts,
+  where "+" has a key of its own.
 
 ## Changing keys
 
-The settings' **Shortcuts** tab (Help > Keyboard Shortcuts) lists every command with its keys and changes them. Each
-keymap keeps its own changes, saved in the settings by the command's id.
+The settings' **Shortcuts** tab (Help > Keyboard Shortcuts) is Phazite's own, after VS Code's Keyboard Shortcuts
+editor:
+
+- A search over every command, by its name, category, id or key ("undo", "Ctrl+Z"); with **Record Keys** (the keyboard
+  button beside it) on, a key pressed in the search finds every command it runs, as the window's keys find them.
+- A row for each of a command's keys (one for a command without), with the command, the key in key caps, and where the
+  key comes from: the keymap's name, or **User** for the user's own (a command whose keymap keys were taken away says
+  User on its row without a key). Under the list, the selected command's description and what else its key does.
+- **Change Key...** (Enter, a double-click, or the pencil on the selected row) and **Add Key...** open a card that asks
+  for the key: every key pressed while it has the keys is taken, Escape and Enter too; Tab goes round to **Assign** and
+  **Cancel**, and Escape there closes it. Before the key is assigned, the card says what else the key does: "2 other
+  commands have this key", which of them runs when (the one with the higher priority whenever it can; of two with the
+  same, the one registered first where both can), which commands it runs now another way (as its digit, or by the
+  character it types) and would lose it, and what the key does while the computer keyboard plays notes. The key is
+  kept as it is printed, without what Caps Lock made it type (AZERTY's Ctrl and & key as Ctrl+&, which then runs the
+  command before Finer Grid's Ctrl+1, as the card says). A key JUCE gives no code (Pause, the volume keys) and the keys
+  the system needs (Alt+F4, Alt+Tab) aren't taken; another keymap chosen meanwhile closes the card.
+- A key given to a command stays with every other command that has it: commands share keys on purpose (below), and
+  nothing is taken away from them.
+- **Remove Key** (Delete) takes a key from its command alone; **Reset** gives the selected command its keymap's keys
+  again; **Reset All**, clicked twice, gives every command its keymap's keys again.
+- Each keymap keeps its own changes, saved in the settings by the command's id as each is made.
 
 ## Keys that depend on what is selected
 
@@ -167,13 +198,19 @@ used last.
 track's instrument as a MIDI keyboard does. It starts off, so that the tools' letters work; a button on the transport
 bar and M (Ctrl+T in FL Studio's keymap) turn it on, and Phazite remembers the choice.
 
-| Keys | What they do |
+| Keys (US layout) | What they do |
 | --- | --- |
 | A S D F G H J K L ; | The white keys, from middle C |
 | W E T Y U O P | The black keys |
 | Z, X | An octave down, up |
 | C, V | Velocity down, up, in steps of 20 (from 100) |
 
+- It takes the keys by their places on the keyboard, whatever the layout types there, as Ableton Live and Bitwig Studio
+  do: on AZERTY the white keys are Q S D F G H J K L (M turns it off) and the octave goes down with W, on QWERTZ the black keys are
+  W E T Z U O P and the octave goes down with Y. The help in the MIDI settings, the transport bar's tooltip and the
+  guide name the keys as the layout in use types them.
+- The key that turns it off (M in Phazite's keymap) is that command's even at a note's place: on AZERTY the place right
+  of L types M, and plays no note.
 - It takes only keys pressed without Shift, Ctrl, Alt or Cmd, and never keys typed into a text field.
 - **Shift and a letter run that letter's single-key shortcut** while the computer keyboard plays notes (the tools'
   letters, for example). With the computer keyboard off, the letters alone run them. The digits 1 to 9 pick the tools
@@ -286,10 +323,12 @@ Help > Lessons, and the welcome window's last page, start one of five short less
 - `src/ui/input/CommandBridge.h`, `KeyDispatcher.h`, `CommandUI.h`: the commands as menus and keys reach them, the
   keys' priorities, and menu items that show shortcuts.
 - `src/ui/input/Keymap.h`, `KeymapStore.h`; `resources/keymaps/phazite.json`, `fl_studio.json`, `ableton_live.json`.
-- `src/ui/input/ComputerKeyboard.h`, `WindowKeys.h`, `PluginKeys.h`, `TextFieldRelease.h`.
+- `src/ui/input/ComputerKeyboard.h`, `KeyboardLayout.h` (the keys' places), `WindowKeys.h`, `PluginKeys.h`,
+  `TextFieldRelease.h`; `KeyShares.h` (what else a key does, as the shortcuts editor says it).
 - `src/model/arrangement/internal/Clipboard.h`: Cut, Copy and Paste.
 - `src/app/MainWindow.cpp`: the menu bar (`getMenuForIndex()`); `src/ui/shell/ActivityBar.h`: the gear's menu.
-- `src/ui/shell/CommandPalette.h`, `SettingsPanel.h` (the Shortcuts tab), `HintBar.h`, `Lessons.h`, `LessonCard.h`.
+- `src/ui/shell/CommandPalette.h`, `SettingsPanel.h` and `ShortcutsEditor.h` (the Shortcuts tab), `HintBar.h`,
+  `Lessons.h`, `LessonCard.h`.
 - `tests/golden/commands/app-catalogue.txt`: every command the app registers, in order, with its keys.
-- Tests: `tests/CommandTests.cpp`, `CommandGoldenTests.cpp`, `ShortcutTests.cpp`, `WindowKeysTests.cpp`,
+- Tests: `tests/CommandTests.cpp`, `CommandGoldenTests.cpp`, `ShortcutTests.cpp`, `ShortcutsEditorTests.cpp`, `WindowKeysTests.cpp`,
   `ComputerKeyboardTests.cpp`, `TextFieldReleaseTests.cpp`, `ClipboardTests.cpp`, `LessonsTests.cpp`.

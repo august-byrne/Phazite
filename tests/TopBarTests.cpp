@@ -53,7 +53,7 @@ struct TopBarScreen
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge bridge { registry };
-    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     phazite::ui::TopBar topBar { bridge, keyboard, context };
     const int windowHeight;
     phazite::test::TestWindow window { topBar, 1200, windowHeight };

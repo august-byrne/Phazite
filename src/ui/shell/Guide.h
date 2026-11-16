@@ -7,6 +7,7 @@
 
 #include "services/Settings.h"
 #include "ui/input/CommandBridge.h"
+#include "ui/input/ComputerKeyboard.h"
 
 #include <optional>
 
@@ -28,7 +29,8 @@ public:
 
     static constexpr int numSteps = 5;
 
-    Guide (CommandBridge&, Settings&);
+    // The computer keyboard names its keys in the tips, as the layout in use types them.
+    Guide (CommandBridge&, Settings&, const ComputerKeyboard&);
     ~Guide() override;
 
     // The first step not done yet, or nothing once every step is.
@@ -52,6 +54,7 @@ public:
 private:
     CommandBridge& commands;
     Settings& settings;
+    const ComputerKeyboard& keyboard;
     juce::StringArray done; // the steps done, by name: the settings' list, read once (only the guide writes it)
 
     void commandAdded (const Command&) override {}

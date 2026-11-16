@@ -95,8 +95,9 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
       session (s),
       lookAndFeel (lf),
       services (appServices),
-      computerKeyboard ([&audio = getAudioIO (appServices.engineContext)] (const juce::MidiMessage& m) { audio.playLive (m); }),
-      shortcutKeys (bridge),
+      computerKeyboard ([&audio = getAudioIO (appServices.engineContext)] (const juce::MidiMessage& m) { audio.playLive (m); },
+                        ui::getSystemLayout()),
+      shortcutKeys (bridge, ui::getSystemLayout()),
       pluginWindowServices { s.getContext(), appServices.library, appServices.settings, {} }
 {
     // Phazite's own title bar on Windows (ui/shell/TitleBar.h), in the bar Windows would draw: the content fills the window,
@@ -159,6 +160,7 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 #endif
 
     // Shortcuts work anywhere in the window, and the computer keyboard gets its letters before they do.
+    computerKeyboard.leaveKeysOf (&commands); // the key that turns it off stays that command's
     windowKeys = std::make_unique<ui::WindowKeys> (*this, shortcutKeys, computerKeyboard);
     commands.getCommandManager().getKeyMappings()->addChangeListener (this);
 
@@ -530,8 +532,9 @@ void MainWindow::addCommands()
     registry.add ({ .id = "input.computerKeyboard",
                     .name = "Play Notes with the Computer Keyboard",
                     .category = "Input",
-                    .description = "A S D F G H J K L ; play the white keys, W E T Y U O P the black keys; Z and X change "
-                                   "the octave, C and V the velocity. Hold Shift for single-key shortcuts.",
+                    .description = "Plays the selected track's instrument from the typing keyboard: the middle row of letters "
+                                   "plays the white keys and the row above the black ones, by where the keys are, and the row "
+                                   "below changes the octave and the velocity. Hold Shift for single-key shortcuts.",
                     .synonyms = { "typing keyboard", "qwerty", "musical typing", "piano", "midi" },
                     .perform = [this] { computerKeyboard.setEnabled (! computerKeyboard.isEnabled()); },
                     .isTicked = [this] { return computerKeyboard.isEnabled(); } });

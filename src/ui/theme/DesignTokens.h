@@ -283,6 +283,19 @@ namespace KeyCap
     inline constexpr float fill = 0.17f;
 } // namespace KeyCap
 
+// The shortcuts editor (ui/shell/ShortcutsEditor.h), as VS Code's Keyboard Shortcuts editor: a row's pencil so big at its
+// left; the command's column this share of the rest, the key's what is left beside the source's, so wide; the record button
+// so wide beside the search; the lines of help under the list so many; and the card that asks for a key so wide, so far
+// inside, over the editor washed in its background this opaque. The keymap's list at the top so wide, after its label.
+namespace ShortcutsTint
+{
+    inline constexpr int pencil = 16, sourceWidth = 96, recordWidth = 32, helpLines = 3;
+    inline constexpr float commandShare = 0.55f;
+    inline constexpr int captureWidth = 440, captureInset = 16;
+    inline constexpr float scrim = 0.7f;
+    inline constexpr int keymapLabelWidth = 80, keymapBoxWidth = 220;
+} // namespace ShortcutsTint
+
 // The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h, TitleBar.h, StatusBar.h).
 namespace Shell
 {

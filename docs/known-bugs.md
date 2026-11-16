@@ -91,6 +91,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`ProjectSession::withPluginStates()`, `src/app/ProjectSession.cpp`); a session that ends during that wait ends
   Phazite before the question. The autosave holds the changes. Fix: answer the session's end by going on without the
   states at once. Left by S1.4.
+- **177. Over a plug-in's window, a shortcut on the digit row doesn't match on layouts where that row types other
+  characters** (AZERTY, Czech): the keys sent to plug-in windows (`PluginKeys::getWantedKeys()`) are the keymaps' keys
+  as written, not matched the three ways the window's own keys are (`KeyDispatcher::findMatches()`). Today only Space
+  and other keys off the digit row run over plug-ins, so nothing shows. Fix: have the helper ask with the
+  dispatcher's matching, or send the digit row's forms too. Seen while known bug 112 was fixed.
 
 ## Devices and playback
 
@@ -226,30 +231,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   as the song loads, before any number is read from it, take a property whose text has an exponent that long for one
   out of its range (`makeConsistent()`, `src/model/project/Project.cpp`), the same for the versions' pieces and a
   DAWproject's attributes; and have the fuzzer write such exponents (`makeExtremeNumber()`, `tests/Fuzzer.cpp`).
-
-## Window, shell and keys
-
-- **110. The shortcuts editor takes away keys that commands share on purpose.** Giving a command a key that another
-  has removes it from every other command; Phazite's keymap shares ten keys by design (Esc, Up and Down among them),
-  and a shared key can't be set up again. There is no search either. Why: the editor is JUCE's
-  `KeyMappingEditorComponent` (`src/ui/shell/SettingsPanel.h`). Fix: a list of Phazite's own, searched by name and
-  key, that shows every command on a key and allows the keys that priorities tell apart. Checked in the code
-  (2026-11-14, stage 1): JUCE's `ChangeKeyButton` asks to reassign a key another command has, then calls
-  `removeKeyPress (key)`, which takes it from every command, and the editor has no hook to change that (only
-  `shouldCommandBeIncluded()`, `isCommandReadOnly()` and `getDescriptionForKeyPress()` are virtual), so the fix is the
-  editor of Phazite's own the entry describes, larger than a small bug's fix (ui-shell-browser 4).
-- **112. On keyboards other than the US layout the musical keyboard is scrambled and some shortcuts can't be
-  reached.** On AZERTY the piano's shape breaks; on QWERTZ Y and Z swap and the top note needs Shift; "=" needs Shift
-  on German and French layouts, so Zoom In and its like never match. Why: the note keys are characters, mapped through
-  the layout in use (`src/ui/input/ComputerKeyboard.cpp`, `resources/keymaps/phazite.json`). Fix: map the musical
-  keyboard by the keys' places; bind zooming to "+" too. Not yet checked (ui-core-mixer-app 8).
-- **146. Thirteen controls have no tooltip,** so the hint bar says nothing over them: the Project view's Notes field,
-  the header of Source Control's Graph, seven of the EQ editor's band controls (Band On, Band Shape, Slope, Frequency,
-  Gain, Q, Output), and the Low Cut and High Cut knobs of the Vinyl and of the Delay (`src/ui/project/ProjectView.cpp`,
-  `src/ui/versions/VersionsView.cpp`, `src/ui/devices/EqEditor.cpp`, `src/ui/devices/VinylEditor.cpp`,
-  `src/ui/devices/DelayEditor.cpp`). The walk of every control (`tests/AppShellTests.cpp`) lists them in `knownSilent`
-  and fails once one has a tooltip, so take each out of the list with its fix. Their wording waits for an answer
-  ([open-questions.md](open-questions.md), row 56).
+- **179. A project another tool wrote with booleans as "true" and "false", or an ID as "12.0", opens as changed.**
+  Phazite writes "1" and "0" and whole IDs; both forms play alike, but the versions compare the text, so such a file
+  equal to its last commit shows changes and takes an "As opened" snapshot (numbers with a range are put into
+  Phazite's form since known bug 25's fix; `keepInRange()`, `src/model/project/Project.cpp`). Fix: as the song
+  loads, write each boolean and ID property as Phazite writes it, from one table of them. Seen while known bug 25
+  was fixed.
 
 ## Slow on the message thread
 
@@ -308,6 +295,11 @@ its fix.
   the 100-track benchmark before and after.
 
 ## Tests
+
+- **178. `tests/LiveInputTests.cpp` fails a timing check on a loaded machine** ("Every live note sounds, however long
+  the message thread was busy", `isNear (samples, first, slack)` at line 362): it failed four times in runs beside
+  other builds on 2026-11-15 and passed each time alone. A test waits for a condition, never for a time: its slack
+  is a time. Fix: measure the notes' places against the blocks played, not against the clock.
 
 - **153. In a Debug build an assertion that fires on the audio thread writes to the log** (`JUCE_LOG_ASSERTIONS`, which
   the tests' assertion net needs): a string made and a file written there, which the real-time audit then counts. No

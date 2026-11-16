@@ -35,6 +35,7 @@ struct AppScreen
         addSongCommands (registry, session.getContext(), renders);
         session.addCommands (registry, renders);
         shell.addCommands (registry);
+        keyboard.leaveKeysOf (&commands); // as MainWindow does
 
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
         { callback (suggested); };
@@ -57,11 +58,11 @@ struct AppScreen
     RenderHost renders; // the main window's part
     CommandRegistry registry;
     ui::CommandBridge commands { registry };
-    ui::KeyDispatcher shortcutKeys { commands };
+    ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
     ProjectSession session { getEngineContext(), services.recentProjects, temp.folder.getChildFile ("Projects"),
                              temp.folder.getChildFile ("Unsaved") };
     juce::Array<juce::MidiMessage> keyboardSent; // what the computer keyboard played, in order
-    ui::ComputerKeyboard keyboard { [this] (const juce::MidiMessage& message) { keyboardSent.add (message); } };
+    ui::ComputerKeyboard keyboard { [this] (const juce::MidiMessage& message) { keyboardSent.add (message); }, phazite::ui::getUsLayout() };
     ui::AppShell shell { services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
                          services.settings,      services.soundPack, services.library, *services.previewer };
     TestWindow window { shell, 1280, 800 };

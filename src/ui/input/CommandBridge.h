@@ -34,6 +34,17 @@ public:
     juce::Array<juce::KeyPress> getKeyPresses (const juce::String& id) const;
     juce::StringArray getShortcutDescriptions (const juce::String& id) const;
 
+    // A command's keys as the keymap gives them, before the user's changes.
+    juce::Array<juce::KeyPress> getDefaultKeyPresses (const juce::String& id) const;
+
+    // The user's changes, as the shortcuts editor makes them. A key given to a command stays with every other command that
+    // has it: commands share keys on purpose, the one with the highest keyPriority running (KeyDispatcher). The settings
+    // keep each change as the bridge's key mappings tell of it (KeymapStore.h).
+    bool addKey (const juce::String& id, const juce::KeyPress&); // whether the command has the key now (not one not valid)
+    void removeKey (const juce::String& id, const juce::KeyPress&);
+    void resetKeys (const juce::String& id); // the keymap's keys again
+    void resetAllKeys();
+
     juce::ApplicationCommandManager& getCommandManager() noexcept { return commandManager; }
     juce::KeyPressMappingSet& getKeyMappings() const noexcept { return *commandManager.getKeyMappings(); }
 

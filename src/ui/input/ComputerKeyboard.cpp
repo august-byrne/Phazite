@@ -4,40 +4,11 @@
 #include <algorithm>
 #include <string_view>
 
-// Last, so that its macros can't change the headers above.
-#if JUCE_WINDOWS
- #ifndef NOMINMAX
-  #define NOMINMAX
- #endif
- #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
- #endif
- #include <windows.h>
-#endif
-
 namespace phazite::ui
 {
-namespace
-{
-    // Whether a key was down when the key message being handled was sent. JUCE's KeyPress::isKeyCurrentlyDown() reads the
-    // key as it is now (GetAsyncKeyState() on Windows): a quick tap is over by then if the UI thread was busy until after
-    // it, and played no note (docs/archive/performance-audit.md, U6). GetKeyState() keeps step with the messages instead, so the
-    // tap plays its note late rather than never. Elsewhere JUCE keeps the keys' state from the messages itself.
-    // JUCE workaround W23 (docs/juce-workarounds.md).
-    bool wasKeyDown (int keyCode)
-    {
-#if JUCE_WINDOWS
-        const auto scanned = VkKeyScanW ((WCHAR) keyCode) & 0xff;
-        return (GetKeyState (scanned != 0xff ? scanned : keyCode) & 0x8000) != 0;
-#else
-        return juce::KeyPress::isKeyCurrentlyDown (keyCode);
-#endif
-    }
-} // namespace
-
-ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send, std::function<bool (int)> keyReader)
+ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send, const KeyboardLayout& keyboardLayout)
     : sendMessage (std::move (send)),
-      isKeyDown (keyReader != nullptr ? std::move (keyReader) : std::function<bool (int)> (wasKeyDown))
+      layout (keyboardLayout)
 {
     static_assert (std::string_view (noteKeys).size() == numNoteKeys);
     heldNotes.fill (-1);
@@ -46,6 +17,27 @@ ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&
 ComputerKeyboard::~ComputerKeyboard()
 {
     releaseAll();
+}
+
+void ComputerKeyboard::leaveKeysOf (const CommandBridge* bridge)
+{
+    commands = bridge;
+}
+
+bool ComputerKeyboard::isLeft (const juce::KeyPress& key) const
+{
+    return commands != nullptr && commands->getKeyPresses ("input.computerKeyboard").contains (key);
+}
+
+bool ComputerKeyboard::isLeft (char place) const
+{
+    const auto typed = layout.getCharacter (place, false);
+    return typed != 0 && isLeft (juce::KeyPress ((int) typed));
+}
+
+juce::String ComputerKeyboard::describe (const char* places) const
+{
+    return describePlaces (places, layout, [this] (char place) { return isLeft (place); });
 }
 
 void ComputerKeyboard::setEnabled (bool shouldBeEnabled)
@@ -74,7 +66,7 @@ void ComputerKeyboard::releaseAll()
     controlKeysDown.fill (false);
 }
 
-bool ComputerKeyboard::update (const std::function<bool (int)>& keyIsDown, juce::ModifierKeys modifiers, bool keyWentDown)
+bool ComputerKeyboard::update (const std::function<bool (char)>& keyIsDown, juce::ModifierKeys modifiers, bool keyWentDown)
 {
     if (! enabled)
         return false;
@@ -87,7 +79,7 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& keyIsDown, juce:
 
     for (size_t i = 0; i < heldNotes.size(); ++i)
     {
-        const bool down = keyIsDown (noteKeys[i]);
+        const bool down = keyIsDown (noteKeys[i]) && ! isLeft (noteKeys[i]);
         const bool pressed = down && ! noteKeysDown[i];
         noteKeysDown[i] = down;
         auto& held = heldNotes[i];
@@ -113,7 +105,7 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& keyIsDown, juce:
     // Z, X, C and V act once per press, not again while held down.
     for (size_t i = 0; i < controlKeys.size(); ++i)
     {
-        const bool down = keyIsDown (controlKeys[i]);
+        const bool down = keyIsDown (controlKeys[i]) && ! isLeft (controlKeys[i]);
         const bool pressed = down && ! controlKeysDown[i];
         controlKeysDown[i] = down;
 
@@ -153,11 +145,22 @@ bool ComputerKeyboard::keyPressed (const juce::KeyPress& key, juce::Component*)
 
 bool ComputerKeyboard::takesKey (const juce::KeyPress& key) const
 {
-    if (! enabled || isShortcut (key.getModifiers()))
+    return enabled && usesKey (key);
+}
+
+bool ComputerKeyboard::usesKey (const juce::KeyPress& key) const
+{
+    if (isShortcut (key.getModifiers()) || isLeft (key))
         return false;
 
+    // What the layout types at each place is the key code JUCE gives its key (JUCE workarounds W47 and W48).
     const auto character = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) key.getKeyCode());
-    const auto isCharacter = [character] (char c) { return (juce::juce_wchar) c == character; };
+    // Or, on Linux, the place's keysym, which JUCE gives where it can't make a character of it (W48).
+    const auto isCharacter = [this, character, code = key.getKeyCode()] (char place)
+    {
+        const auto other = layout.getOtherKeyCode (place);
+        return layout.getCharacter (place, false) == character || (other != 0 && other == code);
+    };
 
     return std::any_of (noteKeys, noteKeys + numNoteKeys, isCharacter) || std::any_of (controlKeys.begin(), controlKeys.end(), isCharacter);
 }
@@ -169,12 +172,14 @@ std::vector<juce::KeyPress> ComputerKeyboard::getKeys() const
     if (! enabled)
         return keys;
 
-    for (int i = 0; i < numNoteKeys; ++i)
-        keys.emplace_back ((int) noteKeys[i]);
+    const auto add = [this, &keys] (char place)
+    {
+        if (const auto typed = layout.getCharacter (place, false); typed != 0 && ! isLeft (place))
+            keys.emplace_back ((int) typed);
+    };
 
-    for (const auto key : controlKeys)
-        keys.emplace_back ((int) key);
-
+    std::for_each (noteKeys, noteKeys + numNoteKeys, add);
+    std::for_each (controlKeys.begin(), controlKeys.end(), add);
     return keys;
 }
 
@@ -184,7 +189,8 @@ bool ComputerKeyboard::keyStateChanged (bool keyWentDown, juce::Component*)
     // (juce::TextEditor::keyStateChanged()): a letter typed before the last one was let go, as quick typing does, is
     // down as that one comes up, and played its note. So keys start notes only as they go down, and never while a text
     // field has the keys.
-    return update (isKeyDown, juce::ModifierKeys::getCurrentModifiersRealtime(), keyWentDown && ! isTyping());
+    return update ([this] (char place) { return layout.isDown (place); }, juce::ModifierKeys::getCurrentModifiersRealtime(),
+                   keyWentDown && ! isTyping());
 }
 
 bool ComputerKeyboard::isShortcut (juce::ModifierKeys modifiers)

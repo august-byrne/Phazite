@@ -432,8 +432,8 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
     keymap.name = "Test";
     keymap.keys["transport.playStop"] = { "spacebar" };
     commands.setKeymap (keymap);
-    phazite::ui::KeyDispatcher shortcutKeys { commands };
-    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {} };
+    phazite::ui::KeyDispatcher shortcutKeys { commands, phazite::ui::getUsLayout() };
+    phazite::ui::ComputerKeyboard computerKeyboard { [] (const juce::MidiMessage&) {}, phazite::ui::getUsLayout() };
     phazite::ui::PluginKeys keys { shortcutKeys, computerKeyboard };
     phazite::ui::setPluginKeys (&keys);
 

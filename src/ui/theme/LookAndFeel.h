@@ -160,6 +160,16 @@ juce::Colour drawListRow (juce::Graphics&, const juce::Component& list, juce::Re
 // and ending at its right, its text in that colour: the width it took.
 float drawKeyCaps (juce::Graphics&, const Palette&, const juce::String& shortcut, juce::Rectangle<float> area, juce::Colour text);
 
+// A shortcut's keys, each as its cap shows it ("Ctrl", "Numpad +", "+"), from JUCE's description ("ctrl + +") or a sentence's
+// ("Ctrl++"); a key JUCE writes by its number ("#e9", for é and every character from 176 on) as its character.
+juce::StringArray splitKeyCaps (const juce::String& shortcut);
+
+// A character as a key's cap shows it, in upper case: towupper() in the C locale leaves Latin-1's letters (é, ö) as they are.
+juce::juce_wchar toKeyCapCase (juce::juce_wchar);
+
+// A shortcut's description with each key JUCE writes by its number ("#e9") as its character ("É"), as menus show it.
+juce::String showKeyCharacters (const juce::String& description);
+
 // A place, or a rectangle's edges, moved to the nearest of the screen's pixels at the context's scale, so that a shape filled
 // there, or an outline drawn half its width inside it, isn't smeared across two pixels at its edges.
 float snapToPixels (juce::Graphics&, float);

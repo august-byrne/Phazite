@@ -880,6 +880,10 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/ComputerKeyboard.h
     src/ui/input/KeyDispatcher.cpp
     src/ui/input/KeyDispatcher.h
+    src/ui/input/KeyShares.cpp
+    src/ui/input/KeyShares.h
+    src/ui/input/KeyboardLayout.cpp
+    src/ui/input/KeyboardLayout.h
     src/ui/input/Keymap.cpp
     src/ui/input/Keymap.h
     src/ui/input/KeymapStore.cpp
@@ -983,6 +987,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/RenderPanel.h
     src/ui/shell/SettingsPanel.cpp
     src/ui/shell/SettingsPanel.h
+    src/ui/shell/ShortcutsEditor.cpp
+    src/ui/shell/ShortcutsEditor.h
     src/ui/shell/StatusBar.cpp
     src/ui/shell/StatusBar.h
     src/ui/shell/TempoStretchPanel.cpp
@@ -1380,6 +1386,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SettingsTests.cpp
         tests/ShippedProgramsTests.cpp
         tests/ShortcutTests.cpp
+        tests/ShortcutsEditorTests.cpp
         tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
         tests/SongCheck.cpp
@@ -1402,6 +1409,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestAudioDevice.h
         tests/TestClips.h
         tests/TestDevices.h
+        tests/TestKeyboardLayouts.h
         tests/TestPlugin.cpp
         tests/TestPlugin.h
         tests/TempoLaneTests.cpp

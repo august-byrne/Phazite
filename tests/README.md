@@ -28,6 +28,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | `RenderHarness.h` | A song rendered offline through Phazite's engine, always the same way; its fingerprint (the RMS and peak level of each 100 ms block on each side), compared with a golden one or another render's. |
 | `GoldenFiles.h` | Golden files: what Phazite makes, compared with the files committed in `golden/`, each difference listed. |
 | `TestDevices.h` | Devices of the tests' own that Phazite's engine plays as its own: a gain, an instrument that plays its notes' velocity, a delay with latency, an effect that plays its sidechain. |
+| `TestKeyboardLayouts.h` | Keyboard layouts for tests: the US layout, French AZERTY, German QWERTZ, Czech, Spanish and Swedish, as what each types at the keys' places, with their dead keys and the keys held; `ShortcutTests.cpp` walks each one's keys to find a key for every command of each keymap. |
 | `TestPlugin.h` | The stand-in for a plug-in (a VST3): the effect of `host/TestPlugins.h`, in versions as an update makes them, which loads in the tests' helper as every plug-in does. |
 | `SandboxedPlugins.h` | While one lives, the test engine knows the tests' stand-ins as if a scan had found them, each loading into the tests' helper. |
 | `TestAudioDevice.h` | An audio device of a type of its own on JUCE's device manager, its blocks played when a test asks. |
@@ -65,7 +66,7 @@ What a change must keep true, and where each net is:
 | Work per edit doesn't grow | `PerformanceGateTests.cpp`, in every ctest run: the plans compiled for each edit (`PlanCounter`), what a new plan keeps, the playlist's components and what an edit repaints, the allocations of an edit and a save as the song grows (`countAllocations()`, in Windows Debug and Linux builds) | A change that does more per edit fails here on any machine; one that does less lowers the counts with it ([docs/performance.md](../docs/performance.md#the-gates)) |
 | The main window | `MainWindowTests.cpp` (Windows only): the real `MainWindow` on no screen through `MainWindow::Surroundings` and `createHeadlessPeer()`: its menus against the commands, every dialog in each theme, the themes, sizes and keymaps, closing with and without unsaved changes, and the devices' and plug-ins' windows | A new menu item, dialog or window command gets its case there |
 | Every view paints | `PaintTests.cpp`, on `PaintCheck.h`: every view painted in each theme over the representative song with a track for each of Phazite's own devices; nothing stored | A new view is painted there |
-| Every control explains itself | `AppShellTests.cpp`: the screen-reader walk and the tooltip walk run in three themes at three sizes over the representative song; 13 controls without a tooltip are listed in `knownSilent` (known bug 146) | Give a new control a title and a tooltip; take a control out of `knownSilent` with its fix |
+| Every control explains itself | `AppShellTests.cpp`: the screen-reader walk and the tooltip walk run in three themes at three sizes over the representative song, and fails on any control without a title, or without a tooltip or a description | Give a new control a title and a tooltip |
 | The keymaps' Shift rule | `AppShellTests.cpp`: no built-in keymap gives Shift and a letter another command than the letter alone | A keymap's new shortcut keeps the rule |
 
 ## host/

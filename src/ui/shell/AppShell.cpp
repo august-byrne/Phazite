@@ -133,7 +133,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       devices (bridge, context),
       statusBar (engine, bridge, context),
       activityBar (bridge, context),
-      guide (bridge, s),
+      guide (bridge, s, keyboard),
       lessons (bridge, context, s)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it

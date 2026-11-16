@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Shortcuts (src/ui/input): the keymaps and the user's changes to them, the bridge between the commands and JUCE's
 // command manager, and the keys that run commands.
+#include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestKeyboardLayouts.h"
 #include "model/commands/CommandRegistry.h"
 #include "services/Settings.h"
 #include "ui/input/CommandBridge.h"
+#include "ui/input/CommandUI.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/KeymapStore.h"
+
+#include <set>
 
 namespace
 {
@@ -213,7 +218,7 @@ TEST_CASE ("Shift and a letter run that letter's shortcut, unless they have thei
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     commands.setKeymap (keymap);
-    phazite::ui::KeyDispatcher keys { commands };
+    phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     registry.add (makeCommand ("test.tool", "Tool", [&tool] { ++tool; }));
     registry.add (makeCommand ("test.n", "N"));
     registry.add (makeCommand ("test.shiftN", "Shift N", [&shifted] { ++shifted; }));
@@ -246,7 +251,7 @@ TEST_CASE ("When commands share a key, the enabled one with the highest priority
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     commands.setKeymap (keymap);
-    phazite::ui::KeyDispatcher keys { commands };
+    phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
     registry.add (makeCommand ("test.selectTrack", "Select Track Above", [&tracks] { ++tracks; }));
 
     auto transpose = makeCommand ("test.transpose", "Transpose Up", [&notes] { ++notes; });
@@ -269,6 +274,196 @@ TEST_CASE ("When commands share a key, the enabled one with the highest priority
     CHECK_FALSE (keys.keyPressed (juce::KeyPress (juce::KeyPress::downKey), nullptr)); // no command at all
 }
 
+TEST_CASE ("On other layouts the digit row's keys are its digits, and the zoom keys are the keys that type = and +")
+{
+    // Known bug 112 until 2026-11-15: AZERTY types the digits with Shift, so the tools' digits and Ctrl+1 to 5 couldn't be
+    // reached, and QWERTZ types = with Shift, so Zoom In and its like never matched. The keys are those JUCE gives on
+    // Windows (the key code what the layout types at the key without Shift, the text what was typed), and on Linux (the key
+    // code what was typed).
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry }; // Phazite's keymap
+
+    for (const auto* id : { "tool.smart", "tool.mute", "tool.select", "tool.delete", "grid.finer", "view.zoomIn", "view.zoomOut",
+                            "view.interfaceLarger", "track.taller", "view.zoomToFit", "view.hoverHelp" })
+        registry.add (makeCommand (id, id));
+
+    const auto none = juce::ModifierKeys(), shift = juce::ModifierKeys (juce::ModifierKeys::shiftModifier),
+               ctrl = juce::ModifierKeys (juce::ModifierKeys::commandModifier), alt = juce::ModifierKeys (juce::ModifierKeys::altModifier);
+    const auto run = [] (const phazite::ui::KeyDispatcher& keys, juce::KeyPress key)
+    {
+        const auto* command = keys.findCommandForKey (key);
+        return command != nullptr ? command->id : juce::String();
+    };
+
+    // AZERTY: the & key is 1, alone and with Ctrl; Shift with it types 1, which is 1 too. What is printed on a key comes
+    // first: its - key zooms out, and Shift with it, which types 6, is the Mute tool's.
+    const auto azerty = phazite::test::SimulatedLayout::azerty();
+    const phazite::ui::KeyDispatcher onAzerty { commands, azerty };
+    CHECK (run (onAzerty, juce::KeyPress ('&', none, '&')) == "tool.smart");
+    CHECK (run (onAzerty, juce::KeyPress ('&', ctrl, 0)) == "grid.finer");
+    CHECK (run (onAzerty, juce::KeyPress ('1', shift, '1')) == "tool.smart");
+    CHECK (run (onAzerty, juce::KeyPress ('-', none, '-')) == "view.zoomOut");
+    CHECK (run (onAzerty, juce::KeyPress ('6', shift, '6')) == "tool.mute");
+    CHECK (run (onAzerty, juce::KeyPress ('=', none, '=')) == "view.zoomIn");
+
+    // QWERTZ: the + key zooms in, and so does Shift+0, which types =; Ctrl and Alt with the + key are Ctrl++ and Alt++.
+    const auto qwertz = phazite::test::SimulatedLayout::qwertz();
+    const phazite::ui::KeyDispatcher onQwertz { commands, qwertz };
+    CHECK (run (onQwertz, juce::KeyPress ('+', none, '+')) == "view.zoomIn");
+    CHECK (run (onQwertz, juce::KeyPress ('0', shift, '=')) == "view.zoomIn");
+    CHECK (run (onQwertz, juce::KeyPress ('=', shift, '=')) == "view.zoomIn"); // as Linux gives it
+    CHECK (run (onQwertz, juce::KeyPress ('+', ctrl, 0)) == "view.interfaceLarger");
+    CHECK (run (onQwertz, juce::KeyPress ('+', alt, 0)) == "track.taller");
+    CHECK (run (onQwertz, juce::KeyPress (0xdf, none, 0xdf)).isEmpty()); // ß has no command
+
+    // AltGr, which JUCE reports as Alt, types a character of its own with the + key (~): no shortcut runs. Alt with it
+    // alone is Alt++. AZERTY's AltGr and = (}) the same.
+    CHECK (run (onQwertz, juce::KeyPress ('+', alt, '~')).isEmpty());
+    CHECK (run (onQwertz, juce::KeyPress ('+', alt, '+')) == "track.taller");
+    CHECK (run (onAzerty, juce::KeyPress ('=', alt, '}')).isEmpty());
+    CHECK (run (onAzerty, juce::KeyPress ('=', alt, 0)) == "track.taller");
+
+    // Czech: the digit row's first key is printed + and zooms in; Shift with it types 1, the Smart Tool's.
+    auto czech = phazite::test::SimulatedLayout();
+    czech.differs = { { '1', { '+', '1' } }, { '2', { 0x11b, '2' } } };
+    const phazite::ui::KeyDispatcher onCzech { commands, czech };
+    CHECK (run (onCzech, juce::KeyPress ('+', none, '+')) == "view.zoomIn");
+    CHECK (run (onCzech, juce::KeyPress ('1', shift, '1')) == "tool.smart");
+
+    // The US layout: = zooms in, and so does Shift with it, which types +.
+    const phazite::ui::KeyDispatcher onUs { commands, phazite::ui::getUsLayout() };
+    CHECK (run (onUs, juce::KeyPress ('=', none, '=')) == "view.zoomIn");
+    CHECK (run (onUs, juce::KeyPress ('=', shift, '+')) == "view.zoomIn");
+    CHECK (run (onUs, juce::KeyPress ('+', none, '+')) == "view.zoomIn"); // the number pad's +, as JUCE gives it on Windows
+    CHECK (run (onUs, juce::KeyPress ('-', none, '-')) == "view.zoomOut");
+
+    // Linux gives the number pad's * and / as themselves, with no Shift: not the 8 and the 7 that Shift types them on.
+    CHECK (run (onUs, juce::KeyPress ('*', none, '*')).isEmpty());
+    CHECK (run (onQwertz, juce::KeyPress ('/', none, '/')).isEmpty());
+
+    // FL Studio's Shift+4, as Linux gives it ($), and Ableton Live's Shift+/ for ?, which QWERTZ types with Shift+ß.
+    commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
+    CHECK (run (onUs, juce::KeyPress ('$', shift, '$')) == "view.zoomToFit");
+    CHECK (run (onUs, juce::KeyPress ('4', shift, '$')) == "view.zoomToFit");
+    commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("Ableton Live"));
+    CHECK (run (onQwertz, juce::KeyPress (0xdf, shift, '?')) == "view.hoverHelp");
+    CHECK (run (onUs, juce::KeyPress ('/', shift, '?')) == "view.hoverHelp");
+}
+
+TEST_CASE ("The way that finds a key's shortcuts decides among every command, and only those found are asked if they are enabled")
+{
+    // A key whose command can't run now does nothing, rather than run what it means another way: US Shift+= given to a
+    // command that is off doesn't zoom in by the + it types.
+    int asked = 0;
+    bool canFit = false;
+    phazite::ui::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["view.zoomIn"] = { "+" };
+    keymap.keys["test.fit"] = { "shift + =" };
+    keymap.keys["test.other"] = { "F5" };
+
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    commands.setKeymap (keymap);
+
+    for (int i = 0; i < 50; ++i)
+    {
+        auto command = makeCommand ("test.filler" + juce::String (i), "Filler");
+        command.isEnabled = [&asked] { return ++asked > 0; };
+        registry.add (std::move (command));
+    }
+
+    auto fit = makeCommand ("test.fit", "Fit");
+    fit.isEnabled = [&canFit, &asked]
+    {
+        ++asked;
+        return canFit;
+    };
+    registry.add (std::move (fit));
+    registry.add (makeCommand ("view.zoomIn", "Zoom In"));
+    registry.add (makeCommand ("test.other", "Other"));
+
+    const phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
+    const juce::KeyPress shiftEquals ('=', juce::ModifierKeys::shiftModifier, '+');
+    asked = 0; // the bridge asked each command as it was added, for JUCE's menus
+    CHECK (keys.findCommandForKey (shiftEquals) == nullptr);
+    CHECK (asked == 1); // the one command found, not the 50 others
+    CHECK (keys.findShortcutOf (shiftEquals)->id == "test.fit");
+    canFit = true;
+    CHECK (keys.findCommandForKey (shiftEquals)->id == "test.fit");
+
+    // A key of no command asks none.
+    asked = 0;
+    CHECK (keys.findCommandForKey (juce::KeyPress (juce::KeyPress::F6Key)) == nullptr);
+    CHECK (asked == 0);
+}
+
+TEST_CASE ("Shift with a digit key, where the layout types digits with Shift, is the digit typed with Shift on Windows and Linux alike")
+{
+    // On AZERTY Windows gives Ctrl, Shift and the & key as & with Ctrl and Shift, Linux as 1 with them: both are Ctrl+Shift+1,
+    // which a user's own key for it then gets.
+    const auto azerty = phazite::test::SimulatedLayout::azerty();
+    const auto ctrlShift = juce::ModifierKeys (juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier);
+    const auto expected = juce::KeyPress ('1', ctrlShift, 0);
+    CHECK (phazite::ui::getShortcutKey (juce::KeyPress ('&', ctrlShift, 0), azerty) == expected);   // Windows
+    CHECK (phazite::ui::getShortcutKey (juce::KeyPress ('1', ctrlShift, '1'), azerty) == expected); // Linux
+
+    phazite::ui::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["test.mine"] = { "command + shift + 1" };
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    commands.setKeymap (keymap);
+    registry.add (makeCommand ("test.mine", "Mine"));
+    const phazite::ui::KeyDispatcher keys { commands, azerty };
+    CHECK (keys.findCommandForKey (juce::KeyPress ('&', ctrlShift, 0)) != nullptr);
+    CHECK (keys.findCommandForKey (juce::KeyPress ('1', ctrlShift, '1')) != nullptr);
+}
+
+TEST_CASE ("AltGr's characters are told apart from Alt with a key, with Shift too and whatever case Windows gives the code in")
+{
+    const auto qwertz = phazite::test::SimulatedLayout::qwertz();
+    const auto alt = juce::ModifierKeys (juce::ModifierKeys::altModifier);
+    const auto altShift = juce::ModifierKeys (juce::ModifierKeys::altModifier | juce::ModifierKeys::shiftModifier);
+
+    CHECK_FALSE (phazite::ui::isTypedWithAltGr (juce::KeyPress (0xd6, alt, 0xf6), qwertz)); // Alt and ö, its code Ö
+    CHECK_FALSE (phazite::ui::isTypedWithAltGr (juce::KeyPress ('+', alt, '+'), qwertz));
+    CHECK_FALSE (phazite::ui::isTypedWithAltGr (juce::KeyPress ('+', altShift, '*'), qwertz)); // Alt, Shift and the + key
+    CHECK (phazite::ui::isTypedWithAltGr (juce::KeyPress ('+', alt, '~'), qwertz));
+    CHECK (phazite::ui::isTypedWithAltGr (juce::KeyPress ('+', altShift, 0xaf), qwertz)); // AltGr, Shift and the + key: ¯
+}
+
+TEST_CASE ("Shift and a letter whose own command can't run now don't run the letter's")
+{
+    int letter = 0;
+    phazite::ui::Keymap keymap;
+    keymap.name = "Test";
+    keymap.keys["test.n"] = { "N" };
+    keymap.keys["test.shiftN"] = { "shift + N" };
+
+    phazite::CommandRegistry registry;
+    phazite::ui::CommandBridge commands { registry };
+    commands.setKeymap (keymap);
+    phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
+    registry.add (makeCommand ("test.n", "N", [&letter] { ++letter; }));
+    auto shifted = makeCommand ("test.shiftN", "Shift N");
+    shifted.isEnabled = [] { return false; };
+    registry.add (std::move (shifted));
+
+    CHECK_FALSE (keys.invokeWithoutShift (juce::KeyPress ('N', juce::ModifierKeys::shiftModifier, 'N')));
+    CHECK (letter == 0);
+}
+
+TEST_CASE ("A key that is + itself is written as one")
+{
+    CHECK (juce::KeyPress::createFromDescription ("+") == juce::KeyPress ('+'));
+    CHECK (juce::KeyPress::createFromDescription ("command + +") == juce::KeyPress ('+', juce::ModifierKeys::commandModifier, 0));
+    CHECK (phazite::ui::formatKey (juce::KeyPress ('+', juce::ModifierKeys::commandModifier, 0).getTextDescription()) == "Ctrl++");
+    CHECK (phazite::ui::formatKey ("+") == "+");
+    CHECK (phazite::ui::formatKey ("ctrl + shift + R") == "Ctrl+Shift+R");
+    CHECK (phazite::ui::formatKey ("numpad +") == "Numpad +");
+}
+
 TEST_CASE ("A held key runs its command once, unless the command takes a step")
 {
     // Holding Space used to start and stop playing over and over as the key repeated.
@@ -282,7 +477,7 @@ TEST_CASE ("A held key runs its command once, unless the command takes a step")
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     commands.setKeymap (keymap);
-    phazite::ui::KeyDispatcher keys { commands };
+    phazite::ui::KeyDispatcher keys { commands, phazite::ui::getUsLayout() };
 
     auto toggle = makeCommand ("test.toggle", "Toggle", [&toggles] { ++toggles; });
     toggle.keyReleased = [&releases] { ++releases; };
@@ -357,4 +552,259 @@ TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap
     // Number-pad keys are read as such, not as the character they type.
     CHECK (juce::KeyPress::createFromDescription ("command + numpad +")
            == juce::KeyPress (juce::KeyPress::numberPadAdd, juce::ModifierKeys::commandModifier, 0));
+}
+
+namespace
+{
+// How JUCE gives key presses: on Windows a key's code is what is printed on it (a digit typed stays the digit), its text
+// what it types without Ctrl or Alt, a dead key gives no press without Ctrl or Alt, and the number pad's digits are
+// numberPad0 to 9 (docs/juce-workarounds.md, W47); on Linux the code is what the key types, Shift included (with Ctrl,
+// the keysym at that level), a dead key gives no press at all, and the number pad's digits are the digits (W48).
+enum class System
+{
+    windows,
+    linux
+};
+
+// The key presses a layout can make: each key of the main block (and the ISO key) with no modifier, Shift, Ctrl, Alt and
+// their mixes, Ctrl and Alt being AltGr's (left Ctrl and left Alt type AltGr's character where the layout has one, and
+// give no press where it is a dead key); and the keys every layout has (Space, the arrows, the F keys, the number pad,
+// whose + - * / are those characters).
+std::vector<juce::KeyPress> getKeyPressesOf (const phazite::test::SimulatedLayout& layout, System system)
+{
+    using Mods = juce::ModifierKeys;
+    const int combos[] = { 0,
+                           Mods::shiftModifier,
+                           Mods::ctrlModifier,
+                           Mods::ctrlModifier | Mods::shiftModifier,
+                           Mods::altModifier,
+                           Mods::altModifier | Mods::shiftModifier,
+                           Mods::ctrlModifier | Mods::altModifier,
+                           Mods::ctrlModifier | Mods::altModifier | Mods::shiftModifier };
+    std::vector<juce::KeyPress> presses;
+
+    for (const auto place : juce::String ("1234567890-=qwertyuiop[]asdfghjkl;'`\\zxcvbnm,./<"))
+    {
+        const auto p = (char) place;
+        const auto plain = layout.getCharacter (p, false), shifted = layout.getCharacter (p, true);
+
+        if (plain == 0)
+            continue;
+
+        for (const auto flags : combos)
+        {
+            const Mods mods (flags);
+            const auto shift = mods.isShiftDown();
+            const auto ctrl = mods.isCtrlDown(), alt = mods.isAltDown();
+            const auto altGr = system == System::windows && ctrl && alt && ! shift; // Linux has an AltGr key of its own
+            const auto deadAtLevel = shift ? layout.deadShifted.count (p) > 0 : layout.dead.count (p) > 0;
+            const auto level = shift && shifted != 0 ? shifted : plain;
+
+            // A dead key gives Windows no press without Ctrl or Alt, nor with AltGr where AltGr's level is dead too; Linux
+            // none at all.
+            if (altGr ? layout.deadAltGr.count (p) > 0 : deadAtLevel && (system == System::linux || (! ctrl && ! alt)))
+                continue;
+
+            if (system == System::windows)
+            {
+                const auto text = altGr ? layout.getAltGrCharacter (p) : ! ctrl && ! alt ? level : (juce::juce_wchar) 0;
+                const auto code = juce::CharacterFunctions::isDigit (text) && ! altGr ? text : plain;
+                presses.emplace_back ((int) code, mods, text);
+            }
+            else
+            {
+                presses.emplace_back ((int) level, mods, ctrl ? (juce::juce_wchar) 0 : level);
+            }
+        }
+    }
+
+    std::vector<int> everywhere { juce::KeyPress::spaceKey,
+                                  juce::KeyPress::returnKey,
+                                  juce::KeyPress::escapeKey,
+                                  juce::KeyPress::backspaceKey,
+                                  juce::KeyPress::deleteKey,
+                                  juce::KeyPress::insertKey,
+                                  juce::KeyPress::homeKey,
+                                  juce::KeyPress::endKey,
+                                  juce::KeyPress::pageUpKey,
+                                  juce::KeyPress::pageDownKey,
+                                  juce::KeyPress::leftKey,
+                                  juce::KeyPress::rightKey,
+                                  juce::KeyPress::upKey,
+                                  juce::KeyPress::downKey,
+                                  '+',
+                                  '-',
+                                  '*',
+                                  '/' };
+
+    for (int f = 0; f < 12; ++f)
+        everywhere.push_back (juce::KeyPress::F1Key + f);
+
+    for (int n = 0; n < 10; ++n)
+        everywhere.push_back (system == System::windows ? juce::KeyPress::numberPad0 + n : '0' + n);
+
+    for (const auto code : everywhere)
+    {
+        for (const auto flags : combos)
+        {
+            const Mods mods (flags);
+            const auto typesItself = code == ' ' || (code >= '*' && code <= '9');
+            presses.emplace_back (code, mods, typesItself && ! mods.isCtrlDown() && ! mods.isAltDown() ? (juce::juce_wchar) code : 0);
+        }
+    }
+
+    return presses;
+}
+
+// A key press as the golden files write it: its modifiers and key, and what it types.
+juce::String describePress (const juce::KeyPress& press)
+{
+    const auto mods = press.getModifiers();
+    const auto code = press.getKeyCode();
+    juce::String text;
+
+    if (mods.isCtrlDown())
+        text << "ctrl+";
+
+    if (mods.isAltDown())
+        text << "alt+";
+
+    if (mods.isShiftDown())
+        text << "shift+";
+
+    text << (code > ' ' && code < 0x7f ? juce::String::charToString ((juce::juce_wchar) code) : juce::KeyPress (code).getTextDescription());
+
+    if (const auto typed = press.getTextCharacter(); typed > ' ' && typed < 0x7f)
+        text << " '" << juce::String::charToString (typed) << "'";
+    else if (typed > 0x7f)
+        text << " '#" << juce::String::toHexString ((int) typed) << "'";
+
+    return text;
+}
+
+struct NamedLayout
+{
+    const char* name;
+    phazite::test::SimulatedLayout layout;
+};
+
+std::vector<NamedLayout> getLayoutStandIns()
+{
+    return { { "US", {} },
+             { "AZERTY", phazite::test::SimulatedLayout::azerty() },
+             { "QWERTZ", phazite::test::SimulatedLayout::qwertz() },
+             { "Czech", phazite::test::SimulatedLayout::czech() },
+             { "Spanish", phazite::test::SimulatedLayout::spanish() },
+             { "Swedish", phazite::test::SimulatedLayout::swedish() } };
+}
+} // namespace
+
+TEST_CASE ("On every layout stand-in, every command a keymap gives a key has a key press that runs it")
+{
+    // What the layouts' keys can't reach, by keymap and layout, with why: a key that layout doesn't have.
+    struct Unreachable
+    {
+        const char* keymap;
+        const char* layout;
+        const char* command;
+        const char* why;
+    };
+
+    static const std::vector<Unreachable> known {
+        { "Ableton Live", "Spanish", "view.instrument",
+          "Ctrl+Alt+4: AltGr and 4 is a dead key (~), which gives no key press, and Shift with it is another key (Ctrl+Alt+Shift+4)" },
+    };
+
+    for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
+    {
+        phazite::CommandRegistry registry;
+        phazite::ui::CommandBridge commands { registry };
+        commands.setKeymap (keymap);
+
+        for (const auto& entry : keymap.keys)
+            registry.add (makeCommand (entry.first, entry.first));
+
+        for (const auto& named : getLayoutStandIns())
+        {
+            for (const auto system : { System::windows, System::linux })
+            {
+                const phazite::ui::KeyDispatcher keys { commands, named.layout };
+                std::set<juce::String> reached;
+
+                for (const auto& press : getKeyPressesOf (named.layout, system))
+                    for (const auto& match : keys.findMatches (press))
+                        reached.insert (match.command->id);
+
+                juce::StringArray unreachable;
+
+                for (const auto& entry : keymap.keys)
+                {
+                    const auto isKnown = std::any_of (
+                        known.begin(), known.end(), [&] (const Unreachable& u)
+                        { return keymap.name == u.keymap && juce::String (named.name) == u.layout && entry.first == u.command; });
+
+                    if (! entry.second.isEmpty() && reached.count (entry.first) == 0 && ! isKnown)
+                        unreachable.add (entry.first + " (" + entry.second.joinIntoString (", ") + ")");
+                }
+
+                CAPTURE (keymap.name.toStdString());
+                CAPTURE (std::string (named.name));
+                CAPTURE (std::string (system == System::windows ? "Windows" : "Linux"));
+                INFO (unreachable.joinIntoString ("; ").toStdString());
+                CHECK (unreachable.isEmpty());
+            }
+        }
+    }
+}
+
+TEST_SUITE ("golden")
+{
+    TEST_CASE ("Golden keys: what every key press of the US layout runs, in each keymap, as Windows and Linux give the presses")
+    {
+        // A change that makes a key of the US layout run another command, or none, changes these files: it must be meant.
+        for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
+        {
+            phazite::CommandRegistry registry;
+            phazite::ui::CommandBridge commands { registry };
+            commands.setKeymap (keymap);
+
+            for (const auto& entry : keymap.keys)
+                registry.add (makeCommand (entry.first, entry.first));
+
+            const phazite::test::SimulatedLayout us;
+            const phazite::ui::KeyDispatcher keys { commands, us };
+            juce::StringArray lines { "# Every key press of the US layout that runs a command in the " + keymap.name
+                                      + " keymap: the press (its modifiers, its key code, what it types), the way it matched "
+                                        "(as it is, as its digit, by what it types) and the commands of that way. Regenerate "
+                                        "with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md)." };
+
+            for (const auto system : { System::windows, System::linux })
+            {
+                lines.add (system == System::windows ? "[Windows]" : "[Linux]");
+
+                for (const auto& press : getKeyPressesOf (us, system))
+                {
+                    const auto matches = keys.findMatches (press);
+
+                    if (matches.empty())
+                        continue;
+
+                    juce::StringArray ids;
+
+                    for (const auto& match : matches)
+                        ids.add (match.command->id);
+
+                    const auto way = matches[0].way == phazite::ui::KeyDispatcher::Way::asItIs    ? "as it is"
+                                     : matches[0].way == phazite::ui::KeyDispatcher::Way::asDigit ? "as its digit"
+                                                                                                  : "by what it types";
+                    lines.add (describePress (press) + " | " + way + " | " + ids.joinIntoString (", "));
+                }
+            }
+
+            const auto file = "keys/us-" + keymap.name.toLowerCase().replace (" ", "-") + ".txt";
+            phazite::test::checkGoldenText (file, lines.joinIntoString ("\n") + "\n",
+                                            [] (const juce::String& expected, const juce::String& actual)
+                                            { return phazite::test::compareLines (expected, actual, 40); });
+        }
+    }
 }

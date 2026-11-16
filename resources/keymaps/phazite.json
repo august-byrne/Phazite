@@ -65,7 +65,7 @@
     "track.collapseAll": [ "alt + U" ],
     "track.selectPrevious": [ "cursor up" ],
     "track.selectNext": [ "cursor down" ],
-    "track.taller": [ "alt + =" ],
+    "track.taller": [ "alt + =", "alt + +" ],
     "track.shorter": [ "alt + -" ],
     "project.new": [ "command + N" ],
     "project.open": [ "command + O" ],
@@ -88,7 +88,7 @@
     "device.add": [ "F8" ],
     "view.playlist": [ "F5" ],
     "view.mixer": [ "F9" ],
-    "view.zoomIn": [ "=", "numpad +" ],
+    "view.zoomIn": [ "=", "+", "numpad +" ],
     "view.zoomOut": [ "-", "numpad -" ],
     "view.followPlayback": [ "command + shift + F" ],
     "grid.finer": [ "command + 1" ],
@@ -98,7 +98,7 @@
     "grid.adaptive": [ "command + 5" ],
     "input.computerKeyboard": [ "M" ],
     "options.settings": [ "command + ," ],
-    "view.interfaceLarger": [ "command + =", "command + numpad +" ],
+    "view.interfaceLarger": [ "command + =", "command + +", "command + numpad +" ],
     "view.interfaceSmaller": [ "command + -", "command + numpad -" ],
     "view.interfaceNormal": [ "command + 0", "command + numpad 0" ]
   }
