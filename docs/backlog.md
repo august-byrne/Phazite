@@ -75,6 +75,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
+| Renders name the plug-ins they rendered without: an export, a freeze, a bounce or a DAWproject export plays a plug-in that is missing on this computer, kept off after a crash, or crashed while loading as if it weren't there, and says nothing (it names only plug-ins still loading); the report should name them, for the open song and for an old version's own instances alike | `src/model/project/Export.cpp` | S | 5 | known bug 166's review |
 | The helper's platform code for macOS, and its Linux code tried by a person: the watch of the parent that ends a helper with Phazite, and shared memory unlinked once opened, are built and run only by the tests | `src/host/core/Platform.cpp` | S | — | plugin-hosting 15 |
 | About twenty VST3s tried by hand | `docs/hand-checks.md` | M | 3 | product-gaps 7 |
 | Channels, pitch bend, controllers and pressure to plug-ins, SysEx, and MIDI out of them | `src/model/plugins/SandboxedProcessor.cpp` | L | 5 | plugin-hosting 7, product-gaps 2 |

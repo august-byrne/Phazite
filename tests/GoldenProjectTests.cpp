@@ -49,6 +49,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/ProjectContents.h"
 #include "model/project/ProjectContext.h"
@@ -614,6 +615,10 @@ void addRepresentativeContent (phazite::Project& project, phazite::ProjectContex
             phazite::chooseInstrument (context, bells, type);
 
     REQUIRE (phazite::getInstrument (context, bells).has_value());
+
+    // (It loads in the background, as a plug-in added does: waited for, so that the freeze below renders it.)
+    phazite::findPluginInstance (song, phazite::getInstrument (context, bells)->id);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
 
     addSongSettings (song, context, tracks, recorded.folder);
     freeze (context, recorded.voice);

@@ -304,6 +304,21 @@ too. A line names the bug's number in that list.
 - **A new project's first save always copies in the background**, however small: the window no longer waits for a
   commit being written, a file another program holds for a moment is tried again, and the progress window shows only
   after a second.
+- **166 Nothing waits for a plug-in.** Plug-ins added, reloaded or brought back by an undo load in the background;
+  their windows stay open while a plug-in comes back, wait for an editor as long as its helper lives, and stop
+  waiting at a second click; their states, their values' texts and the values typed into them are asked without
+  waiting. A typed value is read by the plug-in alone, never guessed: the window is held with its one hold for work,
+  says so after a second, Escape gives it up, and it is dropped after an undo but not because the song records. A
+  reload sends the plug-in what the song changed meanwhile.
+- **177 Shortcuts over a plug-in's window work on any keyboard layout**, matched by the key's place.
+- **181 What a helper tells is checked as it comes in**: numbers, texts and sizes; a scan's list (a shell file's
+  thousands of plug-ins are all found, and what is left out is said); the helper's process ID; floods of values and
+  gestures, each gesture paired; and parameter IDs, made unique by their order among twins.
+- **180 The plug-in tests no longer measure against the wall clock** either: the plug-ins' time limits read the clock
+  tests hold, a promise that something doesn't wait is checked by what a wait would have changed, and only the tests
+  of hangs set short hang limits.
+- **A plug-in's window closed opens again** for a plug-in that makes its own editor (the helper told it that its
+  editor went).
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

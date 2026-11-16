@@ -227,6 +227,7 @@ TEST_CASE ("An old version's bounce is its song alone, rendered in the backgroun
 
     // The same as an export of that version's song, brought back, written as a bounce is.
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, quiet); }));
+    s.waitForPlugins(); // its plug-in, back, loads in the background
     phazite::ExportSettings settings;
     settings.format = phazite::ExportSettings::Format::flac;
     settings.bitDepth = 16;

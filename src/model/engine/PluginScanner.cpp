@@ -2,7 +2,9 @@
 #include "internal/PluginScanner.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "sandbox/client/Helper.h"
+#include "sandbox/core/PluginInfo.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 
@@ -79,12 +81,18 @@ namespace
 
                 if (const auto answer = scanning->request (request, secondsEach * 1000))
                 {
-                    sandbox::MessageReader reader (*answer);
+                    juce::String leftOut;
+                    auto found = readScannedPlugins (*answer, &leftOut);
 
-                    for (auto count = reader.readInt(); --count >= 0;)
-                        if (const auto xml = juce::parseXML (reader.readString()))
-                            if (juce::PluginDescription description; description.loadFromXml (*xml))
-                                result.add (new juce::PluginDescription (description));
+                    // Said where the scan's problems are shown (the plug-in list's window), never left out silently.
+                    if (leftOut.isNotEmpty())
+                    {
+                        juce::Logger::writeToLog ("Plug-in scan: " + fileOrIdentifier + ": " + leftOut);
+                        host.noteScanProblem (fileOrIdentifier + ": " + leftOut);
+                    }
+
+                    while (! found.isEmpty())
+                        result.add (found.removeAndReturn (0));
 
                     return true;
                 }
@@ -155,5 +163,60 @@ void usePluginScannerWithTimeLimit (PluginHost& host)
     auto scanner = std::make_unique<Scanner> (host, pluginScanSecondsEach);
     host.setScanCanceller ([current = scanner.get()] { current->cancel(); });
     host.getKnownPlugins().setCustomScanner (std::move (scanner));
+}
+
+juce::OwnedArray<juce::PluginDescription> readScannedPlugins (const juce::MemoryBlock& answer, juce::String* leftOut)
+{
+    // A count no larger than a file holds nor than the answer's bytes could (each XML at least its end), each description
+    // read only from XML of a size a description has, with its texts cut to what Phazite keeps (they go into the plug-in
+    // list and the settings). What that leaves out is said, never left out silently (the review of known bug 181: a shell
+    // file's hundreds of plug-ins past 256 went unsaid).
+    sandbox::MessageReader reader (answer);
+    const auto told = std::max (0, (int) reader.readInt());
+    const auto count = std::min ({ told, maxScannedPlugins, (int) std::min<juce::int64> (reader.getNumBytesLeft(), 1 << 30) });
+    juce::OwnedArray<juce::PluginDescription> found;
+    auto unreadable = 0;
+
+    for (int i = 0; i < count && reader.getNumBytesLeft() > 0; ++i)
+    {
+        const auto text = reader.readString();
+        auto read = false;
+
+        if (text.length() <= maxScannedXml)
+        {
+            if (const auto xml = juce::parseXML (text))
+            {
+                if (juce::PluginDescription description; description.loadFromXml (*xml))
+                {
+                    for (auto* field : { &description.name, &description.descriptiveName, &description.pluginFormatName,
+                                         &description.category, &description.manufacturerName, &description.version })
+                        *field = sandbox::keepText (*field);
+
+                    description.fileOrIdentifier = sandbox::keepText (description.fileOrIdentifier, maxScannedPath);
+                    found.add (new juce::PluginDescription (description));
+                    read = true;
+                }
+            }
+        }
+
+        unreadable += read ? 0 : 1;
+    }
+
+    if (leftOut != nullptr)
+    {
+        *leftOut = {};
+
+        if (const auto missing = told - found.size(); missing > 0)
+        {
+            *leftOut = juce::String (missing) + " of the " + juce::String (told) + " plug-ins it holds left out";
+
+            if (told > maxScannedPlugins)
+                *leftOut << " (Phazite takes " << maxScannedPlugins << " from a file at most)";
+            else if (unreadable > 0)
+                *leftOut << " (" << unreadable << " described in a way Phazite can't read)";
+        }
+    }
+
+    return found;
 }
 } // namespace phazite

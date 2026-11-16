@@ -274,8 +274,13 @@ TEST_CASE ("A VST3 effect's parameters are found by the VST3's own IDs, set by h
     CHECK (invertInfo.numSteps == 2);
     CHECK (invertInfo.isBoolean);
     CHECK (instance.getParameters()[invert]->isBoolean());
-    CHECK (instance.describeValue (invert, 0.0f) == "Off");
-    CHECK (instance.describeValue (invert, 1.0f) == "On");
+    // (Asked of its helper without waiting, known once it has answered.)
+    for (const auto& [value, text] : { std::pair (0.0f, "Off"), std::pair (1.0f, "On") })
+    {
+        instance.describeValue (invert, value);
+        CHECK (phazite::test::dispatchMessagesUntil ([&, value = value, text = text]
+                                                     { return instance.describeValue (invert, value) == text; }));
+    }
 
     // Set by hand to half, and automated from 1 down to 0 over two seconds (four beats at 120): on its curve as it plays.
     const phazite::ParameterRef gain { effect, gainID };
@@ -402,11 +407,15 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     // Its helper gone, as one that crashes, and the plug-in reloaded: as it was.
     instance->getRemote().getHelper().kill();
     REQUIRE (phazite::test::dispatchMessagesUntil ([instance] { return instance->hasCrashed(); }));
-    CHECK_FALSE (phazite::reloadDevice (song.context, effect).has_value());
+    // (In the background, waited for here.)
+    auto reloaded = std::make_shared<std::optional<std::optional<juce::String>>>();
+    phazite::reloadDevice (song.context, effect, [reloaded] (std::optional<juce::String> problem) { *reloaded = problem; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([reloaded] { return reloaded->has_value(); }));
+    CHECK_FALSE (reloaded->value().has_value());
     REQUIRE_FALSE (instance->hasCrashed());
     CHECK (instance->getCurrentProgram() == 1);
-    const auto reloaded = instance->getRemote().getState (stateMilliseconds);
-    REQUIRE (reloaded.has_value());
-    CHECK (readTrim (*reloaded) == doctest::Approx (0.25f));
+    const auto reloadedState = instance->getRemote().getState (stateMilliseconds);
+    REQUIRE (reloadedState.has_value());
+    CHECK (readTrim (*reloadedState) == doctest::Approx (0.25f));
     CHECK (levelNow() == doctest::Approx (quarter).epsilon (0.002));
 }

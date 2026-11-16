@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -61,6 +62,18 @@ namespace
         return outcome;
     }
 
+    // Each history's moves by hand (countHistoryMoves()), by its undo manager (message thread only).
+    std::map<const juce::UndoManager*, std::uint64_t>& getHistoryMoves()
+    {
+        static std::map<const juce::UndoManager*, std::uint64_t> moves;
+        return moves;
+    }
+
+    void noteHistoryMove (const juce::UndoManager& undoManager)
+    {
+        ++getHistoryMoves()[&undoManager];
+    }
+
     // "Undo Change Volume": the verb with the name of the step, when there is a step and it is named.
     juce::String withStep (const juce::String& verb, bool hasStep, const juce::String& step)
     {
@@ -70,15 +83,24 @@ namespace
 
 // The song's history takes a step back or forth: what plays follows the song (its playback session listens to it), values set
 // by hand included. What a trial tries is kept first, so that an undo takes it back, as a step that can be redone.
+std::uint64_t countHistoryMoves (const Song& song)
+{
+    const auto& moves = getHistoryMoves();
+    const auto found = moves.find (&song.getUndoManager());
+    return found != moves.end() ? found->second : 0;
+}
+
 void undo (Song& song)
 {
     Trial::keepOpenTrial (song.getUndoManager());
+    noteHistoryMove (song.getUndoManager());
     song.getUndoManager().undo();
 }
 
 void redo (Song& song)
 {
     Trial::keepOpenTrial (song.getUndoManager());
+    noteHistoryMove (song.getUndoManager());
     song.getUndoManager().redo();
 }
 
@@ -146,6 +168,7 @@ UndoStep::UndoStep (juce::UndoManager& manager, const juce::String& stepName)
     if (! joinsOuterStep)
     {
         Trial::keepOpenTrial (undoManager);
+        noteHistoryMove (undoManager);
         undoManager.beginNewTransaction (name);
         begun = true;
     }
@@ -202,6 +225,7 @@ Gesture::Gesture (Song& s, const juce::String& name)
     auto& undoManager = song.getUndoManager();
     jassert (! isInGesture (undoManager)); // one at a time for a song
     Trial::keepOpenTrial (undoManager);
+    noteHistoryMove (undoManager);
     undoManager.beginNewTransaction (name);
     getOpenGestures().push_back (&undoManager);
 }
@@ -312,6 +336,7 @@ void Trial::apply (const std::function<void()>& change, bool fromStart)
         // Another trial of the history with changes is kept first, closed, so that each has its own step: begun alongside it,
         // each counted the other's changes as its own, and one kept or put back the other's with its own (2026-11-14).
         keepOpenTrial (*undoManager);
+        noteHistoryMove (*undoManager);
         undoManager->beginNewTransaction (name);
         begun = true;
     }

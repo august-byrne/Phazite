@@ -11,6 +11,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -45,13 +46,23 @@ public:
     float getValue() const;
     float getBaseValue() const;
 
-    // How the device itself writes a value ("-6.0 dB"), for plug-ins that aren't Phazite's own.
+    // How the device itself writes a value ("-6.0 dB"), for plug-ins that aren't Phazite's own: a plug-in's as its helper
+    // wrote it last, asked again without waiting where it hasn't written that value (known bug 166), whenKnown called once, on
+    // the message thread, as its answer comes (never for a text known already, nor for any but a plug-in's parameter).
     juce::String getText (float value) const;
+    juce::String getText (float value, std::function<void()> whenKnown) const;
 
     // Reads a value as getText() writes it, or as someone might type it in its units ("-6 dB", "30% left", "1.2k", a choice's
-    // name): a plug-in's as the plug-in itself reads text. Kept to its range; nothing if it can't be read, or for a parameter
-    // that isn't there.
+    // name). Kept to its range; nothing if it can't be read, is no number (known bug 181), or for a parameter that isn't
+    // there. A plug-in's isn't read by the first at all, and is read as the plug-in itself reads text by the second, which
+    // asks its helper without waiting (known bug 166) and calls back once it has, however long that takes while the helper
+    // lives (at once for any other parameter): with none if the song's history moved meanwhile (an undo, a redo, another
+    // step begun) or the parameter has gone, as what it was typed for may be other then, or if the plug-in or its helper went
+    // first. What changes the song as it plays (automation written, a take recorded) doesn't drop it. Never a number the
+    // plug-in didn't give.
     std::optional<float> readText (const juce::String&) const;
+    void readText (const juce::String&, std::function<void (std::optional<float>)> then) const;
+    bool readsTextLater() const; // whether the second calls back later: a plug-in's parameter, its plug-in loaded
 
     // For a parameter of one of Phazite's own devices: its description (unit, choices), so that controls show it as
     // its unit says. Nothing for other plug-ins.

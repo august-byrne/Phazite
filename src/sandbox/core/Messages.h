@@ -17,7 +17,7 @@ namespace phazite::sandbox
 // have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
 inline constexpr const char* helperErrorsID = "PhaziteSandboxErrors";
-inline constexpr std::int32_t protocolVersion = 7;
+inline constexpr std::int32_t protocolVersion = 8;
 
 enum class MessageType : std::int32_t
 {
@@ -44,8 +44,10 @@ enum class MessageType : std::int32_t
     setParameter,  // instance, parameter, value: a value set by hand
     placeEditor,   // instance, a window of Phazite's (its native handle; 0 to hide it), x, y, width, height: the editor shown
                    // in it there, in the window's pixels (as the screen counts them)
-    setEditorKeys, // instance, whether the plug-in gets every key, how many keys, and each key's code and modifiers: the
-                   // keys Phazite takes over the plug-in's editor
+    setEditorKeys, // instance, whether the plug-in gets every key, how many keys, and each key's code and modifiers; then how
+                   // many places, and each place's scan code and modifiers (-1: a place it takes with none): the keys Phazite
+                   // takes over the plug-in's editor, which a key that has a place (Windows) matches by its place alone, else
+                   // by its code
     playLive,      // instance: a render has given it back, and it plays live from now on (the helper tells the plug-in)
 
     // The helper's notices.
@@ -55,7 +57,8 @@ enum class MessageType : std::int32_t
     stateChanged,          // instance, its program: something besides its parameters changed in it (its program, perhaps)
     parametersChanged,     // instance, its parameters (PluginInfo.h): their list changed
     editorResized,         // instance, width, height: the plug-in resized its editor itself
-    editorKey,             // instance, whether it went down, its code and modifiers: a key Phazite takes, in the editor
+    editorKey,             // instance, whether it went down, its code, modifiers and scan code (0 for none): a key Phazite takes,
+                           // in the editor
 
     reply = 100 // an answer: its fields are the request's
 };

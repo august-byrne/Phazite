@@ -4,6 +4,7 @@
 #include "sandbox/client/Helper.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
@@ -106,6 +107,18 @@ void PluginHost::cancelScan()
 {
     if (scanCanceller != nullptr)
         scanCanceller();
+}
+
+void PluginHost::noteScanProblem (const juce::String& problem)
+{
+    const std::lock_guard held (scanProblemsLock);
+    scanProblems.add (problem);
+}
+
+juce::StringArray PluginHost::takeScanProblems()
+{
+    const std::lock_guard held (scanProblemsLock);
+    return std::exchange (scanProblems, {});
 }
 
 void PluginHost::setHelperProgram (const juce::File& helperProgram)
@@ -475,43 +488,28 @@ std::unique_ptr<SandboxedInstance> PluginHost::createInstance (const juce::Plugi
     return makeInstance (opened);
 }
 
-bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
+PluginHost::Reopening PluginHost::describeReopening (SandboxedInstance& instance, const juce::MemoryBlock& state)
 {
-    const auto& description = instance.getDescription();
-    auto running = getHelper (getHelperKey (description), error);
-
-    if (running == nullptr)
-        return false;
-
-    // As it was: at the rate it was last prepared for (crashed or not) with its channel's limits, for the longest block it
-    // was last prepared for, from the state it last had (the values it tells as it opens are those); where that left
-    // another program, its program, then the state again, so that the program never overrides the settings (as open()
-    // does).
-    auto limits = instance.getRemote().getChannel().getLimits();
-    limits.maxSamples = std::max ({ limits.maxSamples, smallestChannel, instance.getPreparedBlockSize() });
-    const auto programNow = instance.getRemote().getProgram();
-    const auto& state = instance.getLastState();
+    // As it was: at the rate it was last prepared for (crashed or not), for the longest block it was last prepared for or
+    // its channel takes, from the state given (the values it tells as it opens are those); where that leaves another
+    // program, its program, then the state again (as open() does).
+    const auto blockSize =
+        std::max ({ instance.getRemote().getChannel().getLimits().maxSamples, smallestChannel, instance.getPreparedBlockSize() });
     const auto rate = instance.getPreparedRate() > 0.0 ? instance.getPreparedRate() : 44100.0;
-    auto remote = open (*running, description, state, rate, limits, error);
+    return { instance.getDescription(), state, instance.getRemote().getProgram(), rate, blockSize };
+}
 
-    if (remote == nullptr)
+bool PluginHost::replaceRemote (SandboxedInstance& instance, Opened& opened, double sampleRate, juce::String& error)
+{
+    if (opened.remote == nullptr)
     {
-        if (! running->helper->isRunning())
-            keepOffAfterCrash (description, error);
-
+        error = opened.error;
         return false;
     }
 
-    if (! remote->getInfo().programs.empty() && remote->getProgram() != programNow)
-    {
-        remote->setProgram (programNow, SandboxedInstance::getStateMilliseconds());
-
-        if (state.getSize() > 0)
-            remote->setState (state, SandboxedInstance::getStateMilliseconds());
-    }
-
-    const auto id = remote->getID();
-    instance.replaceRemote (std::move (remote), rate, running, running->unlist (id));
+    auto running = std::static_pointer_cast<Running> (opened.running);
+    const auto id = opened.remote->getID();
+    instance.replaceRemote (std::move (opened.remote), sampleRate, running, running->unlist (id));
     track (*running, id, instance);
     sendChangeMessage();
     return true;

@@ -62,11 +62,19 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     // play nothing: nothing is rendered without it.
     if (setup.session != nullptr)
     {
+        // The plug-ins the song holds now, among them one it got a moment ago (a version brought back), which loads in the
+        // background as any plug-in added does (known bug 166): rendered before it was, it played silence.
+        setup.session->getPlugins().sync();
+
         if (const auto loading = setup.session->getPlugins().getLoading(); ! loading.isEmpty())
             whyNot = loading.joinIntoString (", ") + (loading.size() == 1 ? " is" : " are")
                      + " still loading. Render again once the project's plug-ins have loaded.";
 
         setup.session->lendToRender (true);
+
+        // A render plays each plug-in whole from its first block: one that came in a moment ago, in the background, which
+        // live playback fades in, joins it late no more (else the render's own processor of it faded its first 5 ms in).
+        setup.session->getPlugins().forgetJoinsLate();
     }
 
     // Each job compiled as its turn comes (known bug 125: an export of stems compiled them all here, and held them all): the

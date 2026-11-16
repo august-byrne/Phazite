@@ -11,6 +11,7 @@
 #include "model/project/internal/Export.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/components/ParameterText.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/AboutPanel.h"
 #include "ui/shell/CleanUpPanel.h"
@@ -23,6 +24,7 @@
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
 #include <array>
+#include <utility>
 
 namespace phazite
 {
@@ -63,7 +65,8 @@ namespace
     // The plug-ins scanning found, in the plug-in list's window (JUCE's), which keeps the folders it scans in Phazite's
     // settings file (none for services with their settings in memory); the services keep the list there (AppServices.h).
     // A scan under way stops as the window closes.
-    class PluginList final : public juce::PluginListComponent
+    class PluginList final : public juce::PluginListComponent,
+                             private juce::Timer
     {
     public:
         PluginList (PluginHost& h, juce::PropertiesFile* settingsFile)
@@ -72,6 +75,8 @@ namespace
                                          true), // allow plug-ins that load asynchronously (AUv3)
               host (h)
         {
+            host.takeScanProblems(); // those of a scan before this window
+            startTimerHz (problemChecksPerSecond);
         }
 
         // Before JUCE's list waits for its scanning thread to finish: for up to a minute, and then its thread pool ends a
@@ -83,7 +88,28 @@ namespace
         }
 
     private:
+        static constexpr int problemChecksPerSecond = 4;
         PluginHost& host;
+        juce::StringArray problems; // the scan's, shown as it ends
+
+        // What the scan left out of the files it scanned (a shell file's list cut short), said as JUCE's own window says
+        // which files failed, once the scan has ended, rather than left out silently (the review of known bug 181).
+        void timerCallback() override
+        {
+            problems.addArray (host.takeScanProblems());
+
+            if (problems.isEmpty() || isScanning())
+                return;
+
+            juce::AlertWindow::showAsync (
+                juce::MessageBoxOptions()
+                    .withIconType (juce::MessageBoxIconType::WarningIcon)
+                    .withTitle ("Scan complete")
+                    .withMessage ("Some plug-ins in these files were left out:\n\n" + std::exchange (problems, {}).joinIntoString ("\n"))
+                    .withButton ("OK", 0)
+                    .withAssociatedComponent (this),
+                nullptr);
+        }
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginList)
     };
@@ -169,6 +195,11 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     // Play and stop, and the computer keyboard, work over plug-in windows too.
     pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
+
+    // A value typed into a plug-in's control holds the window while the plug-in reads it: the project's hold for work, the
+    // window's one hold (InputHold.h).
+    ui::setTypedValueHold ([&context = session.getContext()] (const juce::String& title, ProjectContext::Cancel cancel)
+                           { return context.holdForWork (title, std::move (cancel)); });
 
     // Plug-in windows' menus save and load presets, and keep their key switches in the settings; a drum sampler's pads in its
     // own window swap their sounds from the browser. The devices' windows open over this one, for the project open.
@@ -273,6 +304,8 @@ MainWindow::~MainWindow()
 
     setPluginWindowServices (nullptr);
     ui::setPluginKeys (nullptr);
+    ui::setTypedValueHold ({});
+    session.letGoOfRenderHost(); // the work holding the window cancelled, and no wait's window ended on this after
     ui::setClipWaveformMaker ({});
     pluginKeys = nullptr;
     commands.getCommandManager().getKeyMappings()->removeChangeListener (this);

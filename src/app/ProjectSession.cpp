@@ -151,8 +151,8 @@ namespace
     // still waiting its turn.
     struct WorkShown final : ProjectContext::WorkHold
     {
-        WorkShown (TrackRenderHost* host, std::shared_ptr<WorkWait> w)
-            : renders (host),
+        WorkShown (std::shared_ptr<TrackRenderHost*> host, std::shared_ptr<WorkWait> w)
+            : renders (std::move (host)),
               wait (std::move (w))
         {
         }
@@ -161,11 +161,13 @@ namespace
         {
             wait->over = true;
 
-            if (wait->shown && renders != nullptr)
-                renders->renderFinished (wait->title, juce::Result::ok()); // which deletes its window, or takes it out of the queue
+            // The host as it is now: none once the main window has gone (it may go first, at a quit: the wait's hold lives on in
+            // what keeps it, a value typed into a plug-in's control in its instance's ask, which goes with the session).
+            if (auto* host = *renders; wait->shown && host != nullptr)
+                host->renderFinished (wait->title, juce::Result::ok()); // which deletes its window, or takes it out of the queue
         }
 
-        TrackRenderHost* renders;
+        std::shared_ptr<TrackRenderHost*> renders;
         std::shared_ptr<WorkWait> wait;
     };
 
@@ -1461,7 +1463,7 @@ std::unique_ptr<ProjectContext::WorkHold> ProjectSession::holdForWork (const juc
     wait->title = title;
     wait->cancel = std::move (cancel);
     wait->progress = std::move (progress);
-    auto hold = std::make_unique<WorkShown> (renders, wait);
+    auto hold = std::make_unique<WorkShown> (rendersNow, wait);
     std::erase_if (workWaits, [] (const std::weak_ptr<void>& w) { return w.expired(); });
     workWaits.push_back (wait);
 
@@ -1482,9 +1484,17 @@ void ProjectSession::afterPluginStatesGate (std::function<void()> then)
         then();
 }
 
+void ProjectSession::letGoOfRenderHost()
+{
+    cancelWork(); // what holds the window told first, while the host is there to take the windows' progress back
+    renders = nullptr;
+    *rendersNow = nullptr;
+}
+
 void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& host)
 {
     renders = &host;
+    *rendersNow = &host;
 
     // A command that reads the plug-ins' states runs once they are in, as everything does that reads them (the context's
     // gate: gatePluginStates()).

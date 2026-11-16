@@ -8,6 +8,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
@@ -271,6 +272,7 @@ DeviceID TestSong::setInstrument (TrackID track, const char* typeID)
     chooseInstrument (context, track, findDeviceType (typeID));
     const auto instrument = getInstrument (context, track);
     REQUIRE (instrument.has_value());
+    waitForPlugins();
     return instrument->id;
 }
 
@@ -279,7 +281,20 @@ DeviceID TestSong::addEffect (TrackID track, const char* typeID)
     phazite::addEffect (context, track, findDeviceType (typeID));
     const auto effects = getEffects (context, track);
     REQUIRE (! effects.empty());
+    waitForPlugins();
     return effects.back().id;
+}
+
+void TestSong::waitForPlugins()
+{
+    // A plug-in added opens in the background, as the song's do as it opens (model/plugins/internal/PluginInstances.h):
+    // once its session has heard of it, then until none loads.
+    auto& song = project->getSong();
+
+    if (auto* session = findSession (song))
+        session->update();
+
+    REQUIRE (dispatchMessagesUntil ([&song] { return getPluginsLoading (song).isEmpty(); }));
 }
 
 void TestSong::setParameter (DeviceID device, const juce::String& parameterID, float value)

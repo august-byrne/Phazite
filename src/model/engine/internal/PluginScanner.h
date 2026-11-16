@@ -21,4 +21,13 @@ class PluginHost;
 // the plug-in host's list (PluginHost::getKnownPlugins()), which its cancelScan() stops, which createEngineContext() sets.
 std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (PluginHost&, int secondsEach = pluginScanSecondsEach);
 void usePluginScannerWithTimeLimit (PluginHost&);
+
+// What a helper's answer to a scan says a file holds, as Phazite takes it (known bug 181): no more plug-ins than the
+// answer's bytes could hold, nor than maxScannedPlugins (several thousand: a shell file, as Waves' WaveShell, holds
+// hundreds), each description's XML of maxScannedXml characters at most, and its texts (name, maker, category, version,
+// identifier) cut to what Phazite keeps. What that leaves out of what the helper told is said in leftOut ("12 of the 9000
+// plug-ins it holds left out (...)"), empty when nothing is; the scan notes it with the host (PluginHost::noteScanProblem()),
+// which the plug-in list's window shows.
+inline constexpr int maxScannedPlugins = 8192, maxScannedXml = 65536, maxScannedPath = 4096;
+juce::OwnedArray<juce::PluginDescription> readScannedPlugins (const juce::MemoryBlock& answer, juce::String* leftOut = nullptr);
 } // namespace phazite

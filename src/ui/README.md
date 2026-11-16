@@ -29,7 +29,7 @@ The base controls and what the left panel's views share.
 | `Controls.h` | The base controls: `ui::Knob`, with the ring of its modulation; `ui::Fader`, with the scale of its decibels beside it in the mixer's strips; `ui::FaderScale`; `ui::LevelMeter`, on that scale beside a fader. Knobs and faders are `ui::ValueSlider`s, which take a value typed in a field over them or their readout. `ui::ParameterAttachment` links a control to a `phazite::ParameterHandle`. |
 | `ModulatorDrag.h` | What a modulator dragged onto a knob carries. |
 | `ValueText.h` | How values read as text, and how typed text reads as values: decibels, pan, a parameter's units. |
-| `ParameterText.*` | A parameter's value as text, read back as typed. |
+| `ParameterText.*` | A parameter's value as text, read back as typed (a plug-in's by the plug-in, the window's input held meanwhile). |
 | `TypedField.*` | The field a value is typed in, over a control or an automation point. |
 | `ArmButton.*`, `TrackSwitch.*` | A track's arm switch, and its one switch for mute and solo, in its header and its mixer strip. |
 | `PeakBar.*` | The strip down a track header's right edge that shows how loud the track plays now. |

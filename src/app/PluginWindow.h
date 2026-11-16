@@ -13,6 +13,7 @@
 // DeviceWindows is.
 #pragma once
 
+#include "SandboxedEditor.h"
 #include "model/base/IDs.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -34,7 +35,8 @@ class Settings;
 // Closing a plug-in's window stores what the plug-in changed in it into the song, outside the undo history. The main
 // window owns the app's. Message thread only.
 class DeviceWindows final : public DeviceWindowHost,
-                            private ProjectContext::Listener
+                            private ProjectContext::Listener,
+                            private juce::Timer // the plug-ins' windows opening
 {
 public:
     // New windows open over a window (the main window), the first time; without one, over the window in front.
@@ -42,9 +44,13 @@ public:
     ~DeviceWindows() override;
 
     // A device's window, shown, or brought to the front if it shows: nothing for a device that has none to show (a plug-in
-    // that didn't load, or makes no editor, a frozen device, a container).
+    // that didn't load, or makes no editor, a frozen device, a container). A plug-in's opens without the message thread
+    // waiting (known bug 166): once the plug-in has loaded, if it still loads, and once its helper has made its editor,
+    // which it is asked for then. Meanwhile it is opening: shown again, nothing more is asked; closed, or its device gone or
+    // frozen, or another project opened, it doesn't open.
     void show (DeviceID) override;
     bool isOpen (DeviceID) const override;
+    bool isOpening (DeviceID) const override;
     void close (DeviceID) override;
     void closeAll();
 
@@ -56,7 +62,22 @@ private:
     juce::Component* const openOver;
     std::map<DeviceID, std::unique_ptr<juce::DocumentWindow>> windows;
 
+    // A plug-in's window to open: its editor asked for, once the plug-in has loaded, of that instance as reloaded so often.
+    struct Opening
+    {
+        std::unique_ptr<SandboxedEditorRequest> request;
+        std::shared_ptr<SandboxedInstance> instance;
+        int generation = 0;
+    };
+
+    std::map<DeviceID, Opening> opening;
+    static constexpr int lookMilliseconds = 20; // how often what opens is looked at
+
     juce::Point<int> choosePosition (const juce::Component& window) const;
+    void place (DeviceID, std::unique_ptr<juce::DocumentWindow>);
+    void lookAtOpening();
+    void editorMade (DeviceID, std::unique_ptr<SandboxedEditor>);
+    void timerCallback() override;
     void projectChanged() override { closeAll(); }
 
     JUCE_DECLARE_NON_COPYABLE (DeviceWindows)

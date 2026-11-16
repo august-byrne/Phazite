@@ -14,6 +14,7 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -113,8 +114,11 @@ struct DeviceSlot
     bool frozen = false;
 
     // A plug-in whose helper went (a crash, or a hang it was ended for), or that crashed its helper as it loaded: it plays
-    // nothing (an effect lets its sound through) until it is reloaded (reloadDevice()).
+    // nothing (an effect silences its sound) until it is reloaded (reloadDevice()). And one still loading, in the background
+    // (as its project opened, as it was added or brought back by an undo, or as it is reloaded), silent in its place until it
+    // has (known bug 166).
     bool crashed = false;
+    bool loading = false;
 
     // It can listen to another track (a sidechain): the one it hears, if any, with its name and colour (none for Phazite's
     // compressor while it compresses, its key kept for when it ducks: internal/Sidechain.h, hearsSidechain()).
@@ -141,13 +145,18 @@ void removeDevice (ProjectContext&, DeviceID);
 // effects or its container's devices, as one undo step. (A track's instrument is replaced by chooseInstrument().)
 void replaceEffect (ProjectContext&, DeviceID, const DeviceType&);
 // A device's window (DeviceSlot::opensWindow, popsOut), shown, or brought to the front if it shows; and whether it shows
-// (its close button puts it back into the Devices view). Nothing for a device without one.
+// (its close button puts it back into the Devices view). Nothing for a device without one. A plug-in's shows once its
+// editor is made, which its helper is asked for without waiting (known bug 166), once the plug-in has loaded if it still
+// loads: meanwhile its window is opening (a second show changes nothing; closing it, or the device going, drops it).
 void showDeviceWindow (ProjectContext&, DeviceID);
 bool isDeviceWindowOpen (const ProjectContext&, DeviceID);
+bool isDeviceWindowOpening (const ProjectContext&, DeviceID);
 
 // A crashed plug-in (DeviceSlot::crashed) loaded again, in a new helper, from the state it last had, as it was: not an
-// undo step, as nothing of the song changes. Returns why it didn't load, or nothing if it did.
-std::optional<juce::String> reloadDevice (ProjectContext&, DeviceID);
+// undo step, as nothing of the song changes. In the background (known bug 166): the device shows it loading meanwhile, and
+// then is called on the message thread once it has reloaded (nothing) or failed (why). Nothing is called for a device that
+// isn't crashed, or that goes (or whose project closes) first.
+void reloadDevice (ProjectContext&, DeviceID, std::function<void (std::optional<juce::String> problem)> then);
 
 // Whether its last reload opened it from the settings the project holds, rather than from those it had as it crashed: it
 // crashed again soon after the reload before, from its own (PluginInstances::reload()), which its notice says; the next tries its own.

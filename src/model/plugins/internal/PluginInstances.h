@@ -10,9 +10,10 @@
 // of its devices' states (Song::setDeviceStateStore()) is this one's while it lives. Message thread only, but for what it
 // opens in the background.
 //
-// Nothing here keeps the message thread waiting for a helper as a project opens, saves or closes (known bugs 69 and 89):
-// the plug-ins a song holds as it opens (the first sync()) open in the background, each in its helper, beside each other,
-// the song playing meanwhile without them, each coming in as it is ready (the session's plan made again); a save asks
+// Nothing here keeps the message thread waiting for a helper (known bugs 69, 89 and 166): every plug-in a session's song
+// holds opens in the background, each in its helper, beside each other (those it holds as it opens, one added, one an undo
+// brings back, one scanning finds, one reloaded), the song playing meanwhile without it (silent in its place), each coming in
+// as it is ready (the session's plan made again) with what the song set it to meanwhile; a save asks
 // them all for their states at once and writes once the answers are in or their time is up (whenStatesIn()), a plug-in
 // that doesn't answer keeping the state it last gave (getOlderStates() names it); a store that isn't a save (a copy, a
 // commit, a preset, a window closed) writes what each gave last, asking those that may have changed, and a plug-in that
@@ -20,6 +21,7 @@
 // of closes in its helper, which goes on a thread of the host's, without anything waiting for either (PluginHost.h).
 #pragma once
 
+#include "PluginHost.h"
 #include "SandboxedInstance.h"
 #include "model/base/IDs.h"
 #include "model/devices/ParameterRef.h"
@@ -47,20 +49,22 @@ public:
     PluginInstances (Song&, PluginHost&, double sampleRate);
     ~PluginInstances() override;
 
-    // A device's instance, made from its element if it isn't yet (so that a device just added has one at once); nullptr for a
-    // device that isn't a plug-in, or one that doesn't load (still loading, missing, crashed as it loaded, or off:
+    // A device's instance, its opening begun from its element if it hasn't begun (in the background once the session has
+    // synced; at once for a song no session plays, whose render, on a thread of its own, has its own instances); nullptr for
+    // a device that isn't a plug-in, or one that doesn't load (still loading, missing, crashed as it loaded, or off:
     // getStatus()).
     std::shared_ptr<SandboxedInstance> find (DeviceID);
 
-    // Makes the instances of the plug-ins the song holds and has none for, and lets go of those it no longer holds. The first,
-    // as the song opens, opens them in the background (the song's session's), and so do those after it while any still
-    // loads; later, one the song gets (back) opens at once, as a plug-in added does.
+    // Begins to open the plug-ins the song holds and has none for, in the background (the song's session's: known bug 166,
+    // one added or brought back by an undo opened while the message thread waited), and lets go of those it no longer holds,
+    // abandoning any still opening.
     void sync();
 
-    // How a plug-in plays: in its helper; still loading, in the background, as the song opened; crashed (its helper went, a
-    // crash or a hang it was ended for, and it keeps the state it last had); crashed as it loaded, which keeps it off until it
-    // is reloaded; missing (not installed here, until scanning finds it); or off, while plug-ins don't load after a crash of
-    // Phazite's (PluginHost::setLoadsPlugins()). Nothing for a device that isn't a plug-in.
+    // How a plug-in plays: in its helper; still loading, in the background (as the song opened, as it was added or brought
+    // back, or as it is reloaded); crashed (its helper went, a crash or a hang it was ended for, and it keeps the state it
+    // last had); crashed as it loaded, which keeps it off until it is reloaded; missing (not installed here, until scanning
+    // finds it); or off, while plug-ins don't load after a crash of Phazite's (PluginHost::setLoadsPlugins()). Nothing for a
+    // device that isn't a plug-in.
     enum class Status
     {
         playing,
@@ -71,10 +75,12 @@ public:
         off
     };
 
-    // Whether any plug-in is still loading, or one; and which, by the names the song gives them.
+    // Whether any plug-in is still loading, or one; and which, by the names the song gives them. And what to do once none is,
+    // called on the message thread (at once if none is), each once, unless this goes first.
     bool isLoading() const;
     bool isLoading (DeviceID) const;
     juce::StringArray getLoading() const;
+    void whenLoaded (std::function<void()>);
 
     // The plug-ins' states asked for at once, without waiting: every plug-in's (a save by hand, closing), or those whose state
     // may have changed since they last gave or were given it (Auto Save). Then called back once on the message thread, with
@@ -95,9 +101,13 @@ public:
 
     std::optional<Status> getStatus (DeviceID);
 
-    // A crashed plug-in opened again: in a new helper from the state it last had, or, one that crashed as it loaded,
-    // loaded again from the song; false, with why, if it didn't load. Its windows make its editor again (getGeneration()).
-    bool reload (DeviceID, juce::String& error);
+    // A crashed plug-in opened again, in the background (known bug 166: the message thread waited for its helper to start and
+    // the plug-in to open): in a new helper from the state it last had, or, one that crashed as it loaded, loaded again from
+    // the song; loading meanwhile (getStatus()). False, calling nothing, for one that isn't crashed or is reloading; else
+    // then is called once it has reloaded (true) or failed (false, with why), unless the device or this goes first. Its
+    // windows make its editor again (getGeneration()).
+    using Reloaded = std::function<void (bool reloaded, const juce::String& error)>;
+    bool reload (DeviceID, Reloaded then);
     int getGeneration (DeviceID) const; // one more at each reload
 
     // Whether the last reload of a crashed one opened it from the state the song holds, rather than its own last: it crashed
@@ -140,6 +150,10 @@ public:
     // The sample rate new instances open at (the engine's).
     void setSampleRate (double);
 
+    // A render begins: the plug-ins that came in a moment ago fade in no more as the first processor made of them plays
+    // (SandboxedInstance::joinLate()), the render's.
+    void forgetJoinsLate();
+
 private:
     struct Opening; // a plug-in opening in the background
 
@@ -166,13 +180,14 @@ private:
     bool storing = false; // while it writes into the song, which it doesn't take back from it
     bool synced = false;  // the first sync() done
     std::vector<std::function<void (bool)>> waitingForStates;
-    std::set<DeviceID> broughtBack; // plug-ins an undo or a redo gave the song back, not opened yet
+    std::vector<std::function<void()>> waitingForLoads;
 
-    bool opensInBackground (DeviceID) const; // besides the first sync()'s: one an undo or redo brings back while others load
-    void callWaiting (bool allIn);           // what waits for the states, each once
+    void callWaiting (bool allIn); // what waits for the states, each once
 
-    Entry* open (DeviceID, const juce::ValueTree& deviceState, bool inBackground = false);
+    Entry* open (DeviceID, const juce::ValueTree& deviceState, bool inBackground, Reloaded then = {});
+    void startOpening (Entry&, std::shared_ptr<Opening>, const PluginHost::Reopening&);
     void finishOpening (DeviceID, Entry&);
+    void finishReloading (DeviceID, Entry&);
     void setUp (SandboxedInstance&, const juce::ValueTree& deviceState, const juce::MemoryBlock& openedFrom, int openedProgram);
     void listen (DeviceID, SandboxedInstance&);
     void store (const std::vector<DeviceID>&);
@@ -222,10 +237,11 @@ private:
 
 // A song's plug-in instance by its device's ID, through its session (none while no session plays it, nor for a device that
 // isn't a plug-in or doesn't load); whether a plug-in doesn't play because it crashed (its helper went, or it crashed as it
-// loaded); and its reload (PluginInstances::reload()), after which the engine is given the song again.
+// loaded); and its reload (PluginInstances::reload(), in the background: the engine is given the song again once it is
+// in).
 SandboxedInstance* findPluginInstance (const Song&, DeviceID);
 bool hasCrashed (const Song&, DeviceID);
-bool reloadPlugin (Song&, DeviceID, juce::String& error);
+bool reloadPlugin (Song&, DeviceID, PluginInstances::Reloaded then);
 
 // How a song's plug-in plays (PluginInstances::getStatus()), through its session: nothing without one, or for a device
 // that isn't a plug-in.

@@ -34,9 +34,10 @@ class Editor::Holder final : public juce::Component,
 {
 public:
     Holder (juce::AudioPluginInstance& plugin, std::function<void (int, int)> onResized,
-            std::function<void (bool, const juce::KeyPress&)> onKey)
+            std::function<void (bool, const juce::KeyPress&, int)> onKey)
         : resizedByPlugin (std::move (onResized)),
           keyCaught (std::move (onKey)),
+          hosted (plugin),
           editor (plugin.createEditorAndMakeActive())
     {
         setOpaque (true);
@@ -58,6 +59,14 @@ public:
     {
         std::erase (getOpen(), this);
         forEachComponent (*this, [this] (juce::Component& component) { component.removeKeyListener (this); });
+
+        // The plug-in told first, as whoever deletes an editor tells it (AudioProcessorEditor's destructor asks for it): else
+        // a processor that makes its own editor (the tests' stand-ins) kept it as its active one and made none again, so
+        // that its window, closed, never opened again. JUCE's hosted VST3 window tells it itself, which this repeats
+        // harmlessly.
+        if (editor != nullptr)
+            hosted.editorBeingDeleted (editor.get());
+
         editor = nullptr; // before the plug-in can go
     }
 
@@ -102,15 +111,32 @@ public:
         setVisible (true);
     }
 
-    void setKeys (bool all, std::vector<juce::KeyPress> wanted)
+    void setKeys (bool all, std::vector<juce::KeyPress> wanted, std::vector<std::pair<int, int>> wantedPlaces)
     {
         getsEveryKey = all;
         keys = std::move (wanted);
+        places = std::move (wantedPlaces);
     }
 
-    bool takes (const juce::KeyPress& key) const { return ! getsEveryKey && std::find (keys.begin(), keys.end(), key) != keys.end(); }
+    // By its place where it has one (its scan code), as Phazite matched it in its own layout, and then by that alone: the
+    // code, as this helper's layout names the key, may mean another key to Phazite's, whose layout may be another (one
+    // switched to while the plug-in's window had the keys), and taken so the key would reach neither (the second review of
+    // known bug 177). By its code where it has no place (Space, the arrows, a key Phazite's layout has no character at).
+    bool takes (const juce::KeyPress& key, int scanCode = 0) const
+    {
+        if (getsEveryKey)
+            return false;
 
-    void tellKey (bool isDown, const juce::KeyPress& key) { keyCaught (isDown, key); }
+        const auto isPlace = [scanCode] (const auto& place) { return scanCode != 0 && place.first == scanCode; };
+
+        if (std::any_of (places.begin(), places.end(), isPlace))
+            return std::any_of (places.begin(), places.end(), [&key, &isPlace] (const auto& place)
+                                { return isPlace (place) && place.second == key.getModifiers().getRawFlags(); });
+
+        return std::find (keys.begin(), keys.end(), key) != keys.end();
+    }
+
+    void tellKey (bool isDown, const juce::KeyPress& key, int scanCode) { keyCaught (isDown, key, scanCode); }
 
     // The open editor a native window is in, if any.
     static Holder* findHolder ([[maybe_unused]] void* nativeWindow)
@@ -128,11 +154,13 @@ public:
 
 private:
     std::function<void (int, int)> resizedByPlugin;
-    std::function<void (bool, const juce::KeyPress&)> keyCaught;
+    std::function<void (bool, const juce::KeyPress&, int)> keyCaught;
+    juce::AudioPluginInstance& hosted;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     std::int64_t parent = 0;
     bool getsEveryKey = false, keyHeld = false;
     std::vector<juce::KeyPress> keys;
+    std::vector<std::pair<int, int>> places;
 
     static std::vector<Holder*>& getOpen()
     {
@@ -168,7 +196,7 @@ private:
             return false;
 
         keyHeld = true;
-        keyCaught (true, key);
+        keyCaught (true, key, 0);
         return true;
     }
 
@@ -177,7 +205,7 @@ private:
         if (! isDown && keyHeld && ! getsEveryKey)
         {
             keyHeld = false;
-            keyCaught (false, {});
+            keyCaught (false, {}, 0);
         }
 
         return false;
@@ -218,11 +246,14 @@ private:
             auto* holder = findHolder (message.hwnd);
             const auto key = toKeyPress ((UINT) message.wParam);
 
-            if (holder == nullptr || ! holder->takes (key))
+            // Its place: the scan code of a key that isn't an extended one (a place of the keyboard's main block).
+            const auto scanCode = (message.lParam & (1 << 24)) != 0 ? 0 : (int) ((message.lParam >> 16) & 0xff);
+
+            if (holder == nullptr || ! holder->takes (key, scanCode))
                 return;
 
             // Phazite gets the key, and the plug-in doesn't.
-            holder->tellKey (isDown, key);
+            holder->tellKey (isDown, key, scanCode);
             message.message = WM_NULL;
         }
 
@@ -258,7 +289,7 @@ private:
 };
 
 Editor::Editor (juce::AudioPluginInstance& plugin, std::function<void (int, int)> resized,
-                std::function<void (bool, const juce::KeyPress&)> key)
+                std::function<void (bool, const juce::KeyPress&, int)> key)
     : holder (std::make_unique<Holder> (plugin, std::move (resized), std::move (key)))
 {
 }
@@ -285,8 +316,8 @@ void Editor::place (std::int64_t window, juce::Rectangle<int> area)
     holder->place (window, area);
 }
 
-void Editor::setKeys (bool getsEveryKey, std::vector<juce::KeyPress> keys)
+void Editor::setKeys (bool getsEveryKey, std::vector<juce::KeyPress> keys, std::vector<std::pair<int, int>> places)
 {
-    holder->setKeys (getsEveryKey, std::move (keys));
+    holder->setKeys (getsEveryKey, std::move (keys), std::move (places));
 }
 } // namespace phazite::host

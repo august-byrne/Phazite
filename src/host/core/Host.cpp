@@ -283,13 +283,14 @@ void Host::openEditor (std::int64_t id, MessageWriter& answer)
             send (notice);
         };
 
-        const auto key = [this, id] (bool isDown, const juce::KeyPress& pressed)
+        const auto key = [this, id] (bool isDown, const juce::KeyPress& pressed, int scanCode)
         {
             MessageWriter notice (MessageType::editorKey, 0);
             notice.add (id)
                 .add (isDown)
                 .add ((std::int32_t) pressed.getKeyCode())
-                .add ((std::int32_t) pressed.getModifiers().getRawFlags());
+                .add ((std::int32_t) pressed.getModifiers().getRawFlags())
+                .add ((std::int32_t) scanCode);
             send (notice);
         };
 
@@ -341,7 +342,10 @@ void Host::setEditorKeys (MessageReader& reader)
 {
     const auto id = reader.readInt64();
     const auto getsEveryKey = reader.readBool();
-    std::vector<juce::KeyPress> keys ((size_t) std::max (0, reader.readInt()));
+    // Each count no more than what is left of the message could hold (two ints an item).
+    const auto readCount = [&reader]
+    { return (size_t) juce::jlimit ((juce::int64) 0, reader.getNumBytesLeft() / 8, (juce::int64) reader.readInt()); };
+    std::vector<juce::KeyPress> keys (readCount());
 
     for (auto& key : keys)
     {
@@ -349,8 +353,16 @@ void Host::setEditorKeys (MessageReader& reader)
         key = juce::KeyPress (code, juce::ModifierKeys (reader.readInt()), 0);
     }
 
+    std::vector<std::pair<int, int>> places (readCount());
+
+    for (auto& [scanCode, modifiers] : places)
+    {
+        scanCode = reader.readInt();
+        modifiers = reader.readInt();
+    }
+
     if (const auto found = editors.find (id); found != editors.end())
-        found->second->setKeys (getsEveryKey, std::move (keys));
+        found->second->setKeys (getsEveryKey, std::move (keys), std::move (places));
 }
 
 void Host::prepareInstance (MessageReader& reader, MessageWriter& answer)

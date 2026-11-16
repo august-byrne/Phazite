@@ -288,7 +288,7 @@ public:
                        + ": off, as the project was opened after Phazite closed unexpectedly. Open it again to turn its "
                          "plug-ins on";
             case PluginState::loading:
-                return who + ": loading, as the project opened. It plays once it has loaded";
+                return who + ": loading. It plays once it has loaded, and is silent meanwhile";
             case PluginState::playing:
             default:
                 return who + ". Click to show it";

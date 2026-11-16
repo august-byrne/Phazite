@@ -221,6 +221,11 @@ the [changelog](changelog.md).
 | G183 | Drop a drum-kit preset saved with its sounds outside the project onto a track; then swap kit presets and click a knob on another device | The window holds still, a big kit shows "Loading ..." with Cancel after a second (Cancel leaves nothing), then the kit appears and its pads play; the tried kit stays, and shortly after Undo shows "Copy Sounds into the Project" | |
 | G-save | Make a new project, add a short sound, Save; then the same with the sound held open by another program that locks it | It saves as before, with no progress window, the title showing the new name within a moment; with the file locked the save fails naming that file, and nothing is left in the projects folder | |
 | G-chips | In a big sound library, click the Type chip, then type in the search and click Key | Each menu opens at once with counts for what shows | |
+| G177 | With a plug-in's window focused, switch the keyboard layout (to AZERTY, say), then press Space, the & key and a Shift shortcut | Play and stop and the shortcuts run, and the plug-in gets the other keys | |
+| G166a | Open a big, slow plug-in's window; click its button again while it opens, then once more | After 5 s the button says it is still opening; the second click stops waiting; the third opens it | |
+| G166b | Type a value into a plug-in's knob while its helper is busy; then type one while recording, and with a track in Write | After a second a window says Phazite is waiting for the plug-in, and Esc or its Cancel shows the old value; while recording or writing the typed value lands | |
+| G181 | Scan a shell plug-in file (Waves' WaveShell) | All its plug-ins are listed | |
+| G165L | Linux: open a plug-in's window and close it | It closes at once, the plug-in keeps running, and it opens again | |
 
 ## Performance on other machines
 

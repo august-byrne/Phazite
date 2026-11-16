@@ -44,6 +44,11 @@ public:
     void cancelScan();
     void setScanCanceller (std::function<void()> cancel) { scanCanceller = std::move (cancel); }
 
+    // What a scan left out of a file it scanned, said rather than left out silently (a list cut short: the scanner notes it
+    // from its thread), and taken by the plug-in list's window, which shows it (app/MainWindow.cpp). Any thread.
+    void noteScanProblem (const juce::String&);
+    juce::StringArray takeScanProblems();
+
     // The helper program it starts: PhaziteHost next to the app, unless given another (the tests' helper).
     void setHelperProgram (const juce::File&);
     const juce::File& getHelperProgram() const noexcept { return program; }
@@ -92,9 +97,21 @@ public:
     // How many plug-ins are being opened in a plug-in's helper now, for the tests.
     int getNumLoading (const juce::PluginDescription&);
 
-    // An instance whose helper went, opened again in a new one from the state it last had; false, with why, if it
-    // didn't open.
-    bool reload (SandboxedInstance&, juce::String& error);
+    // An instance whose helper went, opened again in a new one, as open() opens a plug-in (in the background: known bug 166,
+    // the message thread waited for the helper to start and the plug-in to open), then given what open() opened in place of
+    // the remote it had, at the rate it was opened at (the instance's prepared rate): false, with why, if it didn't open.
+    // What it is opened from: its plug-in, the state given, its program, and its channel for its prepared rate and block.
+    struct Reopening
+    {
+        juce::PluginDescription description;
+        juce::MemoryBlock state;
+        int program = -1;
+        double sampleRate = 0.0;
+        int blockSize = 0;
+    };
+
+    static Reopening describeReopening (SandboxedInstance&, const juce::MemoryBlock& state);
+    bool replaceRemote (SandboxedInstance&, Opened&, double sampleRate, juce::String& error);
 
     // Whether plug-ins load as projects open (docs/archive/performance-audit.md, R2): while this is off, the plug-ins of a project
     // that opens stay as they were saved, unloaded and silent, so that one that crashes as it loads can't take Phazite down
@@ -127,6 +144,8 @@ private:
     juce::KnownPluginList knownPlugins;
     juce::AudioPluginFormatManager formats;
     std::function<void()> scanCanceller;
+    std::mutex scanProblemsLock;
+    juce::StringArray scanProblems;
     juce::File program;
     int messageHangMilliseconds, audioHangMilliseconds, loadMilliseconds, quitMilliseconds;
     bool loads = true;

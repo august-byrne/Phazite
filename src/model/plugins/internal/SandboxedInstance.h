@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -52,6 +53,10 @@ public:
     bool hasCrashed() const noexcept { return crashed.load (std::memory_order_acquire); }
     void helperLost();
     std::function<void()> onLost;
+
+    // Whether the helper it is in now still runs, asked later from anywhere on the message thread, after this has gone too
+    // (a socket of its editor's that waits for the helper's window to leave it: app/SandboxedEditor.h).
+    std::function<bool()> watchHelper() const;
 
     // Its plug-in opened again in another helper (at a sample rate, for its channel's limits), in place of the one whose
     // helper went, with what keeps that helper and what it calls as it goes: the song's instances, what the engine plays and
@@ -105,15 +110,26 @@ public:
 
     // Its parameters, by their places in the plug-in's list: as the helper told them as it opened (their own IDs, names,
     // steps and defaults); one's place by its own ID (-1 for none); its value now, from 0 to 1; a value set by hand, which
-    // goes to the helper at once, unless Phazite's engine moves the parameter (then it goes with the engine's blocks); how
-    // a value reads, as the plug-in says, and the value text reads as ("-6 dB"), as the plug-in reads it (each within a
-    // quarter of a second, else as a number). Message thread.
+    // goes to the helper at once, unless Phazite's engine moves the parameter (then it goes with the engine's blocks), and
+    // none that is no number (known bug 181). Message thread.
     const std::vector<sandbox::ParameterInfo>& getParameterInfos() const noexcept { return remote->getInfo().parameters; }
     int findParameter (const juce::String& ownID) const;
     float getParameterValue (int parameter) const;
     void setParameterValue (int parameter, float value);
-    juce::String describeValue (int parameter, float value) const;   // not getParameterText(), which would hide JUCE's
-    float readValue (int parameter, const juce::String& text) const; // from 0 to 1
+
+    // How a value reads, as the plug-in writes it, and the value a text reads as ("-6 dB"), from 0 to 1, as the plug-in reads
+    // it: each asked of its helper without waiting (known bug 166: each kept the message thread a quarter of a second at
+    // most). A value's text the plug-in wrote before comes at once; else the value as a number, with the helper asked (one
+    // value of a parameter at a time, the newest asked for meanwhile next), and whenKnown called once, on the message thread,
+    // as its answer comes or doesn't come in a state's time (getStateMilliseconds()), so that what shows it asks again. A text
+    // read calls back once the plug-in has read it, however long that takes while its helper lives, with none for what it
+    // reads as no number (known bug 181) or if its helper goes first: never a number the plug-in didn't give (the review of
+    // known bug 166: a text read as a value from 0 to 1 set "-6 dB" to the bottom). What is still to come as this goes, or leaves its song (answerTextsAsGone(), which what
+    // plays it may still hold), is answered with nothing, a message later. Message thread.
+    juce::String describeValue (int parameter, float value, std::function<void()> whenKnown = {}); // not getParameterText()
+    void readValue (int parameter, const juce::String& text, std::function<void (std::optional<float>)> then);
+    void answerTextsAsGone();
+    bool isAskingTexts() const noexcept { return ! textAsks.empty() || ! valueAsks.empty(); } // for the tests
 
     // What the plug-in changes itself, told on the message thread: a value of its own, as its window or a program of its own
     // set it (and as it opens again after a crash), by the parameter's place; what its own window grabs and lets go of, a
@@ -127,7 +143,7 @@ public:
     // What its editor in the helper tells (message thread), for the editor's window in Phazite: its new size, as the
     // plug-in resized it; and a key Phazite takes over it, down or let go, by its code and modifiers (JUCE's).
     std::function<void (int width, int height)> onEditorResized;
-    std::function<void (bool isDown, int keyCode, int modifiers)> onEditorKey;
+    std::function<void (bool isDown, int keyCode, int modifiers, int scanCode)> onEditorKey;
 
     // How long a block of so many samples may take in real time before it is late: as long as it lasts, but a millisecond
     // at least (or as long as the longest block of the device's, where that is shorter), so that a block the engine cut
@@ -229,6 +245,11 @@ public:
     static void setStateMilliseconds (int) noexcept;
     static int getStateMilliseconds() noexcept;
 
+    // How long a channel for another rate may take to come before the helper is taken for hung (a minute; shorter in the
+    // tests).
+    static void setPrepareMilliseconds (int) noexcept;
+    static int getPrepareMilliseconds() noexcept;
+
 private:
     class Parameter;
 
@@ -276,15 +297,25 @@ private:
 
     // What came from the helper, for the message thread.
     juce::CriticalSection lock;
-    std::vector<std::pair<int, float>> changedByPlugin;
-    std::vector<std::pair<int, bool>> gesturesByPlugin;
+    std::vector<std::pair<int, float>> changedByPlugin; // each parameter's last value, once, in the order they first came
+    std::vector<int> changedSlots;                      // each parameter's place there, or -1
+    // Each parameter's gesture as the helper told it last between two turns, and whether it began one meanwhile, as values
+    // are kept: nothing dropped, however many came, so that every begin is paired with its end (the second review of known
+    // bug 181: an end dropped past a cap left a gesture begun, and Touch writing).
+    struct GestureTold
+    {
+        bool pending = false, begun = false, sawBegin = false;
+    };
+
+    std::vector<GestureTold> gesturesTold; // by parameter
+    std::vector<int> gesturesByPlugin;     // the parameters told, each once, in the order they first came
     bool latencyCame = false, stateCame = false, lossCame = false;
     int latency = 0;
 
     struct EditorKey
     {
         bool isDown = false;
-        int keyCode = 0, modifiers = 0;
+        int keyCode = 0, modifiers = 0, scanCode = 0;
     };
 
     std::vector<EditorKey> editorKeys;
@@ -305,7 +336,46 @@ private:
 
     EndedGestures endedGestures { *this };
     std::vector<int> gesturesToEnd;
+    std::vector<bool> inGesture; // each parameter's, as JUCE was told it (message thread)
     void endGestures();
+
+    // The texts asked of the helper (describeValue(), readValue()), until their answers come, looked at a hundred times a
+    // second while any is to come; and the values' texts the plug-in wrote, by parameter and value (forgotten all at once
+    // past a few thousand), and the last of each parameter's.
+    struct TextAsk
+    {
+        int parameter = 0;
+        float value = 0.0f;
+        std::shared_ptr<sandbox::Helper::Reply> reply;
+        double since = 0.0;
+        std::vector<std::function<void()>> whenKnown;
+        std::optional<float> next; // the value asked for since, which is asked once this answer is in
+    };
+
+    struct ValueAsk
+    {
+        juce::String text;
+        std::shared_ptr<sandbox::Helper::Reply> reply;
+        double since = 0.0;
+        std::function<void (std::optional<float>)> then;
+    };
+
+    struct TextAnswers final : juce::Timer
+    {
+        explicit TextAnswers (SandboxedInstance& o)
+            : owner (o)
+        {
+        }
+
+        void timerCallback() override { owner.takeTextAnswers(); }
+        SandboxedInstance& owner;
+    };
+
+    std::vector<TextAsk> textAsks; // one for each parameter at most
+    std::vector<ValueAsk> valueAsks;
+    std::map<std::pair<int, float>, juce::String> texts;
+    TextAnswers textAnswers { *this };
+    void takeTextAnswers();
 
     void parameterChanged (int index, float value) override;
     void gestureChanged (int index, bool starting) override;
@@ -313,7 +383,7 @@ private:
     void stateChanged() override;
     void parametersChanged (const std::vector<sandbox::ParameterInfo>&) override {}
     void editorResized (int width, int height) override;
-    void editorKey (bool isDown, int keyCode, int modifiers) override;
+    void editorKey (bool isDown, int keyCode, int modifiers, int scanCode) override;
     void handleAsyncUpdate() override;
     void timerCallback() override; // a channel that waits for the helper's block
 

@@ -78,6 +78,20 @@ namespace
     }
 } // namespace
 
+unsigned int getPlaceScanCode (char place)
+{
+    return getScanCode (place);
+}
+
+char findPlaceOfScanCode (unsigned int scanCode)
+{
+    for (const auto& [character, code] : scanCodes)
+        if (code == scanCode && scanCode != 0)
+            return character;
+
+    return 0;
+}
+
 juce::uint32 KeyboardLayout::getFingerprint() const
 {
     // Unsigned, so that it wraps rather than overflows.

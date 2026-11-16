@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace phazite::host
@@ -24,7 +25,7 @@ public:
     // The plug-in's editor, made now, with what it tells: its size as the plug-in changes it, and a key Phazite takes,
     // down or let go. Check isOpen(): a plug-in may make none.
     Editor (juce::AudioPluginInstance&, std::function<void (int width, int height)> resized,
-            std::function<void (bool isDown, const juce::KeyPress&)> key);
+            std::function<void (bool isDown, const juce::KeyPress&, int scanCode)> key);
     ~Editor();
 
     bool isOpen() const noexcept;
@@ -34,8 +35,10 @@ public:
     // Shown in a window of Phazite's (its native handle), at a place in its pixels; hidden with none.
     void place (std::int64_t window, juce::Rectangle<int> area);
 
-    // The keys Phazite takes over it, and whether the plug-in gets every key instead.
-    void setKeys (bool getsEveryKey, std::vector<juce::KeyPress>);
+    // The keys Phazite takes over it, by their codes, and by their places (scan codes) with their modifiers (JUCE's raw
+    // flags), which a key is matched by where its place is known (Windows), whatever this thread's layout; and whether the
+    // plug-in gets every key instead.
+    void setKeys (bool getsEveryKey, std::vector<juce::KeyPress>, std::vector<std::pair<int, int>> places);
 
     class Holder;
 

@@ -63,6 +63,12 @@ public:
     // default, for none. A drag with Shift, a value typed and automation fall between them.
     void setDragStep (double);
 
+    // Where it is set, what is typed is read by it rather than by valueFromTextFunction, which may call back later (a
+    // plug-in's value, read by the plug-in's helper without the message thread waiting: known bug 166): the value then set as
+    // a value typed is (none for text it couldn't read), and the slider showing what was typed meanwhile.
+    std::function<void (const juce::String& typed, std::function<void (std::optional<double>)> set)> readTypedText;
+
+    juce::String getTextFromValue (double) override;
     double snapValue (double attemptedValue, DragMode) override;
     bool keyPressed (const juce::KeyPress&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -85,10 +91,12 @@ private:
     std::unique_ptr<TypedField> valueField; // while it is open, and until a message after it closed
     juce::Component::SafePointer<juce::Component> readout;
     std::unique_ptr<ReadoutClicks> readoutClicks;
+    juce::String typedBeingRead; // what was typed, while readTypedText reads it
 
     bool canTypeValue() const;
     void typeInTextBox (const juce::String& typed);                          // a NumberField's own
     void applyTypedText (const juce::String&);                               // what the field said
+    void applyTypedValue (double);                                           // as JUCE's text box sets one
     juce::Rectangle<int> getValueFieldTarget (const juce::Component&) const; // what it covers, in that component's coordinates
 };
 

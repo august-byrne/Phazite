@@ -11,7 +11,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | `TestMain.cpp` | The test runner: doctest inside a JUCE environment. On Windows it ends the program once every static object has gone (JUCE's leak detector has checked each class), with main()'s result, without the C runtime's teardown, during which a thread the graphics driver started once crashed it (known bug 182). |
 | `StallReport.h` | Where the tests are when a test case takes too long: with `PHAZITE_TEST_STALL_SECONDS` set, its name and (on Windows) the tests' thread's stack, written every so many seconds, for a test file that reaches ctest's limit in CI. |
 | `TestHelpers.h` | The shared includes and helpers; every test file includes it: among them `RenderHost` (runs freezes, bounces and the progress windows of work the window holds for, a first save's copy among them, as the main window does, letting go of the render before it uses what the render said) and `linkFolder()` (a junction on Windows, a symbolic link elsewhere); and `hangTimeout`, how long `runTimersUntil()` and `dispatchMessagesUntil()` wait for a condition unless told otherwise: two minutes, which only a hang reaches; and `HeldClock`, which holds still the clock Phazite reads its timeouts and the CPU meters' and the engine's times by (`src/devices/core/Clock.h`), moved on only by the test. |
-| `TestSong.h` | A project in a temporary folder, open in a project context of its own, with the app's commands, for building a song through the model as the UI does. `finished()` runs a command of the versions that reads whole songs on the history's thread first (a switch, a checkout, a merge's list, a restore) and waits until what it read is taken in. |
+| `TestSong.h` | A project in a temporary folder, open in a project context of its own, with the app's commands, for building a song through the model as the UI does. `finished()` runs a command of the versions that reads whole songs on the history's thread first (a switch, a checkout, a merge's list, a restore) and waits until what it read is taken in; a plug-in it adds is waited for as it loads in the background (`waitForPlugins()`). |
 | `TestClips.h` | MIDI clips, audio clips and notes made through the model, by the song and IDs, for a song made without a project (`phazite::createSong()`). |
 | `SongIDs.h` | A song's IDs checked: every item's once in the song, a note's once in its clip, and what names an item naming one the song has; with the known exceptions of a song being edited (known bugs 102 and 143). |
 | `SongCheck.h` | `checkSong()` and `findSongProblems()`: a song checked for consistency, as any song Phazite loads must be, by rules written from `Schema.h`'s comments, apart from the loader's code (place, id, names, key, kind, range, path). |
@@ -30,7 +30,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | `TestDevices.h` | Devices of the tests' own that Phazite's engine plays as its own: a gain, an instrument that plays its notes' velocity, a delay with latency, an effect of any latency (Test Latency, for delay compensation), an effect that plays its sidechain. |
 | `TestKeyboardLayouts.h` | Keyboard layouts for tests: the US layout, French AZERTY, German QWERTZ, Czech, Spanish and Swedish, as what each types at the keys' places, with their dead keys and the keys held; `ShortcutTests.cpp` walks each one's keys to find a key for every command of each keymap. |
 | `TestPlugin.h` | The stand-in for a plug-in (a VST3): the effect of `host/TestPlugins.h`, in versions as an update makes them, which loads in the tests' helper as every plug-in does. |
-| `SandboxedPlugins.h` | While one lives, the test engine knows the tests' stand-ins as if a scan had found them, each loading into the tests' helper. |
+| `SandboxedPlugins.h` | While one lives, the test engine knows the tests' stand-ins as if a scan had found them, each loading into the tests' helper, which is taken for hung only after `hangTimeout` (a hang's test sets the short limits itself: `useShortHangLimits()`). |
 | `TestAudioDevice.h` | An audio device of a type of its own on JUCE's device manager, its blocks played when a test asks. |
 | `HostedDevice.h` | The tests' audio device opened as the app opens one, for tests and benchmarks that process blocks themselves on a thread of their own; `playLiveNote()` plays a live note between two blocks and measures it by the engine's clock: where the engine plays it and when it sounds, and where it took it to have come against the wall clock read on both sides, which no load on the machine moves. |
 | `RealTimePlayback.h` | Playing in real time through the tests' audio device, for tests that need an audio device with inputs. |
@@ -76,7 +76,11 @@ What a change must keep true, and where each net is:
 
 The tests' helper program, `phazite_test_host`, which every plug-in in the tests loads in (its path is
 `PHAZITE_TEST_HOST`): it hosts VST3s and the stand-ins of `host/TestPlugins.h`, a format of their own, "Test"
-(`host/TestFormats.cpp`). `host/SandboxTestHelpers.h` opens the stand-ins in a helper and plays blocks through them;
+(`host/TestFormats.cpp`), among them a slow one (held by a gate as it is made, gives its state, writes or reads a value's
+text, makes its editor, or goes), shell files that hold a thousand plug-ins and more than Phazite takes from a file, and
+one that tells nonsense (values that are no number, texts of any length, two
+parameter IDs that are the same once cut to 128 characters). `host/SandboxTestHelpers.h`
+opens the stand-ins in a helper and plays blocks through them;
 `host/ThreadCpu.h` gives a thread's CPU time for the benchmarks.
 
 ## Suites that ctest skips

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RemoteInstance.h"
 
+#include <algorithm>
+
 namespace phazite::sandbox
 {
 namespace
@@ -54,7 +56,7 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce
 
     MessageReader reader (*answer);
     const auto opened = reader.readBool();
-    const auto why = reader.readString();
+    const auto why = readText (reader);
 
     if (! opened)
     {
@@ -168,23 +170,26 @@ bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
     return helper.request (message, timeoutMilliseconds).has_value();
 }
 
-std::optional<RemoteInstance::EditorSize> RemoteInstance::openEditor (int timeoutMilliseconds)
+std::shared_ptr<Helper::Reply> RemoteInstance::askToOpenEditor()
 {
     auto message = helper.makeRequest (MessageType::openEditor);
     message.add (id);
-    const auto answer = helper.request (message, timeoutMilliseconds);
+    return helper.send (message);
+}
 
-    if (! answer.has_value())
+std::optional<RemoteInstance::EditorSize> RemoteInstance::readEditor (const Helper::Reply& reply)
+{
+    if (! reply.isDone() || reply.getReply().isEmpty())
         return {};
 
-    MessageReader reader (*answer);
+    MessageReader reader (reply.getReply());
 
     if (! reader.readBool())
         return {};
 
     EditorSize size;
-    size.width = reader.readInt();
-    size.height = reader.readInt();
+    size.width = readEditorSide (reader);
+    size.height = readEditorSide (reader);
     size.isResizable = reader.readBool();
     return size;
 }
@@ -196,20 +201,35 @@ void RemoteInstance::placeEditor (std::int64_t window, int x, int y, int width, 
     helper.post (message);
 }
 
-void RemoteInstance::closeEditor (int timeoutMilliseconds)
+void RemoteInstance::closeEditor()
 {
     auto message = helper.makeRequest (MessageType::closeEditor);
     message.add (id);
-    helper.request (message, timeoutMilliseconds);
+    helper.post (message);
 }
 
-void RemoteInstance::setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys)
+std::shared_ptr<Helper::Reply> RemoteInstance::askToCloseEditor()
+{
+    // Its answer comes once the helper has closed it; it holds off no hang (the helper closes it at once, and a window of
+    // Phazite's that waits for it gives up in time).
+    auto message = helper.makeRequest (MessageType::closeEditor);
+    message.add (id);
+    return helper.send (message, false);
+}
+
+void RemoteInstance::setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys,
+                                    const std::vector<std::pair<int, int>>& places)
 {
     MessageWriter message (MessageType::setEditorKeys, 0);
     message.add (id).add (getsEveryKey).add ((std::int32_t) keys.size());
 
     for (const auto& [code, modifiers] : keys)
         message.add ((std::int32_t) code).add ((std::int32_t) modifiers);
+
+    message.add ((std::int32_t) places.size());
+
+    for (const auto& [scanCode, modifiers] : places)
+        message.add ((std::int32_t) scanCode).add ((std::int32_t) modifiers);
 
     helper.post (message);
 }
@@ -228,30 +248,51 @@ void RemoteInstance::setParameter (int index, float value)
     helper.post (message);
 }
 
-std::optional<juce::String> RemoteInstance::getParameterText (int index, float value, int timeoutMilliseconds)
+std::shared_ptr<Helper::Reply> RemoteInstance::askParameterText (int index, float value)
 {
+    // Answered at once by a helper whose message thread answers: one that doesn't is ended for it, as for its heartbeat.
     auto message = helper.makeRequest (MessageType::parameterText);
     message.add (id).add ((std::int32_t) index).add ((double) value);
-    const auto answer = helper.request (message, timeoutMilliseconds);
+    return helper.send (message, false);
+}
 
-    if (! answer.has_value())
+std::shared_ptr<Helper::Reply> RemoteInstance::askParameterValue (int index, const juce::String& text)
+{
+    auto message = helper.makeRequest (MessageType::parameterValue);
+    message.add (id).add ((std::int32_t) index).add (keepText (text));
+    return helper.send (message, false);
+}
+
+std::optional<juce::String> RemoteInstance::readParameterText (const Helper::Reply& reply)
+{
+    if (! reply.isDone() || reply.getReply().isEmpty())
         return {};
 
-    MessageReader reader (*answer);
-    return reader.readString();
+    MessageReader reader (reply.getReply());
+    return readText (reader);
+}
+
+std::optional<float> RemoteInstance::readParameterValue (const Helper::Reply& reply)
+{
+    if (! reply.isDone() || reply.getReply().isEmpty())
+        return {};
+
+    MessageReader reader (reply.getReply());
+    return readUnitValue (reader);
+}
+
+std::optional<juce::String> RemoteInstance::getParameterText (int index, float value, int timeoutMilliseconds)
+{
+    const auto reply = askParameterText (index, value);
+    reply->wait (timeoutMilliseconds);
+    return readParameterText (*reply);
 }
 
 std::optional<float> RemoteInstance::getParameterValue (int index, const juce::String& text, int timeoutMilliseconds)
 {
-    auto message = helper.makeRequest (MessageType::parameterValue);
-    message.add (id).add ((std::int32_t) index).add (text);
-    const auto answer = helper.request (message, timeoutMilliseconds);
-
-    if (! answer.has_value())
-        return {};
-
-    MessageReader reader (*answer);
-    return (float) reader.readDouble();
+    const auto reply = askParameterValue (index, text);
+    reply->wait (timeoutMilliseconds);
+    return readParameterValue (*reply);
 }
 
 void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
@@ -260,10 +301,10 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
 
     // Its latency and program, kept whoever listens.
     if (type == MessageType::latencyChanged && told == nullptr)
-        latency = notice.readInt();
+        latency = keepLatency (notice.readInt());
 
     if (type == MessageType::stateChanged && told == nullptr)
-        program = notice.readInt();
+        program = std::max (0, (int) notice.readInt());
 
     if (told == nullptr)
         return;
@@ -273,7 +314,10 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::parameterChanged:
         {
             const auto index = notice.readInt();
-            told->parameterChanged (index, (float) notice.readDouble());
+
+            if (const auto value = readUnitValue (notice))
+                told->parameterChanged (index, *value);
+
             break;
         }
 
@@ -293,7 +337,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         }
 
         case MessageType::stateChanged:
-            program = notice.readInt();
+            program = std::max (0, (int) notice.readInt());
             told->stateChanged();
             break;
 
@@ -303,8 +347,8 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
 
         case MessageType::editorResized:
         {
-            const auto width = notice.readInt();
-            told->editorResized (width, notice.readInt());
+            const auto width = readEditorSide (notice);
+            told->editorResized (width, readEditorSide (notice));
             break;
         }
 
@@ -312,7 +356,8 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         {
             const auto isDown = notice.readBool();
             const auto code = notice.readInt();
-            told->editorKey (isDown, code, notice.readInt());
+            const auto modifiers = keepModifiers (notice.readInt());
+            told->editorKey (isDown, code, modifiers, juce::jlimit (0, 0xff, (int) notice.readInt()));
             break;
         }
 

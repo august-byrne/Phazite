@@ -94,6 +94,10 @@ public:
     DeviceID addEffect (TrackID, const char* typeID);
     void setParameter (DeviceID, const juce::String& parameterID, float value);
 
+    // Waits for the song's plug-ins to load, which they do in the background (one added, or brought back by an undo, too):
+    // setInstrument() and addEffect() wait so for a plug-in they add.
+    void waitForPlugins();
+
     // The mixer: a track's volume in decibels and its pan from -1 to 1, and their parameters, for automation and modulation.
     void setVolume (TrackID, float decibels);
     void setPan (TrackID, float pan);

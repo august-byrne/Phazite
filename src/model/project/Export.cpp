@@ -323,10 +323,27 @@ namespace
             file.getParentDirectory().createDirectory();
             renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
 
-            // A song no session plays: its plug-ins in instances of its own.
+            // A song no session plays: its plug-ins in instances of its own, opened in the background (the review of known bug
+            // 166: the render's start opened each while the message thread waited), and the render begun once they are in, each
+            // played whole from its first block (not faded in as live playback does one that comes in late).
             if (findSession (song) == nullptr && pluginHost != nullptr)
+            {
                 ownPlugins = std::make_unique<PluginInstances> (song, *pluginHost, settings.sampleRate);
+                ownPlugins->sync();
+                ownPlugins->whenLoaded (
+                    [this, &song, settings]
+                    {
+                        ownPlugins->forgetJoinsLate();
+                        start (song, settings);
+                    });
+                return;
+            }
 
+            start (song, settings);
+        }
+
+        void start (Song& song, const ExportSettings& settings)
+        {
             // Played into floats, written into the file, and measured on the render thread before the message thread hears.
             const OfflineRender::Job job { floats.getFile(), toSeconds (song, getExportRange (song).getEnd()), tailSeconds, std::nullopt };
             renderer = std::make_unique<OfflineRender> (

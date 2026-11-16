@@ -136,6 +136,21 @@ struct DeviceSlots::Slot : public juce::Component
             return;
         }
 
+        // One still loading in the background says so (known bug 166): it plays once it has loaded, silent meanwhile.
+        if (device.loading)
+        {
+            nameButton.setButtonText (device.name + " - Loading");
+            nameButton.setTitle (device.name + ", loading");
+            nameButton.setTooltip ("Loading: it plays once it has loaded, and is silent meanwhile. Click to open its window once "
+                                   "it has; right-click for its other actions");
+            nameButton.setColour (juce::TextButton::textColourOffId, getPalette (*this).textMuted);
+            power.setToggleState (device.isOn, juce::dontSendNotification);
+            power.setEnabled (! device.frozen);
+            nameButton.setAlpha (1.0f);
+            repaint();
+            return;
+        }
+
         nameButton.removeColour (juce::TextButton::textColourOffId);
         nameButton.setButtonText (device.name);
         nameButton.setTitle (device.name);
@@ -458,29 +473,39 @@ int getPlacesMoved (const std::vector<DeviceID>& order, DeviceID device, int ins
 //==============================================================================
 void reloadDevice (ProjectContext& context, DeviceID device, juce::Component& target)
 {
-    // What shows the device shows it loaded as the plug-in host tells (ProjectContext's devices); one that didn't load says
-    // why.
-    if (const auto problem = phazite::reloadDevice (context, device))
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
-                                          .withIconType (juce::MessageBoxIconType::WarningIcon)
-                                          .withTitle ("The plug-in didn't reload")
-                                          .withMessage (*problem)
-                                          .withButton ("OK", 0)
-                                          .withAssociatedComponent (&target),
-                                      nullptr);
+    // In the background (known bug 166): what shows the device shows it loading, then loaded, as the plug-in host tells
+    // (ProjectContext's devices); one that didn't load says why, once it is done, over what asked while that is there.
+    phazite::reloadDevice (context, device,
+                           [&context, device, safeTarget = juce::Component::SafePointer<juce::Component> (&target),
+                            project = context.getProjectNumber()] (std::optional<juce::String> problem)
+                           {
+                               // Nothing for another project, whose devices can have the same IDs.
+                               if (safeTarget == nullptr || context.getProjectNumber() != project)
+                                   return;
 
-    // One that crashed again before anything changed since it was reloaded opens from what the project holds, rather than
-    // from the settings it may have crashed for.
-    else if (phazite::wasReloadedFromProject (context, device))
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
-                                          .withIconType (juce::MessageBoxIconType::InfoIcon)
-                                          .withTitle ("The plug-in reloaded from the project")
-                                          .withMessage ("It crashed again a moment after it was reloaded, so it opened with the "
-                                                        "settings the project holds, not with its own last ones, which the next "
-                                                        "Reload tries again.")
-                                          .withButton ("OK", 0)
-                                          .withAssociatedComponent (&target),
-                                      nullptr);
+                               if (problem.has_value())
+                                   juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                                     .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                                     .withTitle ("The plug-in didn't reload")
+                                                                     .withMessage (*problem)
+                                                                     .withButton ("OK", 0)
+                                                                     .withAssociatedComponent (safeTarget.getComponent()),
+                                                                 nullptr);
+
+                               // One that crashed again before anything changed since it was reloaded opens from what the project holds, rather
+                               // than from the settings it may have crashed for.
+                               else if (phazite::wasReloadedFromProject (context, device))
+                                   juce::AlertWindow::showAsync (
+                                       juce::MessageBoxOptions()
+                                           .withIconType (juce::MessageBoxIconType::InfoIcon)
+                                           .withTitle ("The plug-in reloaded from the project")
+                                           .withMessage ("It crashed again a moment after it was reloaded, so it opened with the "
+                                                         "settings the project holds, not with its own last ones, which the "
+                                                         "next Reload tries again.")
+                                           .withButton ("OK", 0)
+                                           .withAssociatedComponent (safeTarget.getComponent()),
+                                       nullptr);
+                           });
 }
 
 void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const DeviceSlot& device, DevicePlace place, TrackID track,

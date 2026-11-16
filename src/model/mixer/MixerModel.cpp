@@ -149,6 +149,7 @@ DeviceSlot makeDeviceSlot (const ProjectContext& context, DeviceID id)
              .windowOpen = popsOut (*song, id) && windows != nullptr && windows->isOpen (id),
              .frozen = isFrozenDevice (*song, id),
              .crashed = hasCrashed (*song, id),
+             .loading = getPluginStatus (*song, id) == PluginInstances::Status::loading,
              .hasSidechain = hasSidechain (*song, id),
              .sidechain = hearsSidechain (*song, id) ? describeSidechainSource (*song, id) : SidechainChoice() };
 }
@@ -444,17 +445,19 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
     removeDevice (*song, id);
 }
 
-std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
+void reloadDevice (ProjectContext& context, DeviceID id, std::function<void (std::optional<juce::String>)> then)
 {
     auto* song = findSong (context);
 
     if (song == nullptr || ! hasCrashed (*song, id))
-        return {};
+        return;
 
-    if (juce::String error; ! reloadPlugin (*song, id, error))
-        return error.isNotEmpty() ? error : juce::String ("It didn't load.");
-
-    return {};
+    reloadPlugin (*song, id,
+                  [then = std::move (then)] (bool reloaded, const juce::String& error)
+                  {
+                      if (then != nullptr)
+                          then (reloaded ? std::nullopt : std::optional (error.isNotEmpty() ? error : juce::String ("It didn't load.")));
+                  });
 }
 
 bool wasReloadedFromProject (ProjectContext& context, DeviceID id)
@@ -477,6 +480,12 @@ bool isDeviceWindowOpen (const ProjectContext& context, DeviceID id)
 {
     auto* windows = getDeviceWindows (context);
     return windows != nullptr && windows->isOpen (id);
+}
+
+bool isDeviceWindowOpening (const ProjectContext& context, DeviceID id)
+{
+    auto* windows = getDeviceWindows (context);
+    return windows != nullptr && windows->isOpening (id);
 }
 
 DeviceHandle getDeviceHandle (ProjectContext& context, DeviceID id)

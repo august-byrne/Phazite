@@ -17,6 +17,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <memory>
+
 namespace phazite
 {
 class TrackRender;
@@ -177,6 +179,10 @@ public:
     void cancelWork();
     bool cancelHeldWork(); // Escape while the window holds, before a progress window shows: true if it cancelled any
 
+    // The host of the renders' and the waits' windows (addCommands()') going: the work cancelled first (cancelWork()), and no
+    // window of a wait shown or ended on it after. The main window calls it as it goes.
+    void letGoOfRenderHost();
+
     // How long the work that holds the window waits before its progress window shows (tests: 0, at the next turn).
     void setWorkShownAfter (int milliseconds) noexcept { workShownAfter = milliseconds; }
 
@@ -204,8 +210,9 @@ private:
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
-    TrackRenderHost* renders = nullptr;                      // addCommands()'
-    std::unique_ptr<TrackRender> firstSave;                  // a first save's copy, until it is over
+    TrackRenderHost* renders = nullptr;                                                          // addCommands()'
+    std::shared_ptr<TrackRenderHost*> rendersNow = std::make_shared<TrackRenderHost*> (nullptr); // the same, for a wait's window
+    std::unique_ptr<TrackRender> firstSave;                                                      // a first save's copy, until it is over
     std::unique_ptr<ProjectContext::WorkHold> firstSaveHold; // the window's hold while it runs (holdForWork())
 
     // A file double-clicked while a dialog was open, opened once none is.

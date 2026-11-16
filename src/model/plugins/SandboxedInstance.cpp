@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SandboxedInstance.h"
+#include "devices/core/Clock.h"
 #include "model/base/Json.h"
 #include "model/transport/TempoValues.h"
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <thread>
 #include <utility>
 
@@ -17,11 +19,15 @@ namespace
     // How long a channel for another rate may take to come, which the helper makes after whatever it does before (opening
     // another plug-in, which may take a minute): after that the helper is taken for hung, as its answer holds off the
     // heartbeat (sandbox/client/Helper.h).
-    constexpr int prepareMilliseconds = 60000;
+    constexpr int defaultPrepareMilliseconds = 60000;
+    std::atomic<int> prepareMilliseconds { defaultPrepareMilliseconds };
     constexpr double quietMilliseconds = 250.0;          // how long a plug-in that said it changed is left alone before it is asked
     constexpr double latestAskMilliseconds = 1000.0;     // how long after its first change it is asked at the latest
     constexpr double answerSpacing = 10.0;               // and no sooner after its last ask than so many times its last answer took
-    constexpr int textMilliseconds = 250;                // how a value reads, for a tooltip or a field
+    constexpr int textLookMilliseconds = 10;             // how often the answers to the texts asked are looked at
+    constexpr size_t textsKept = 4096;                   // the values' texts kept at most, before they are forgotten
+    constexpr size_t maxCallsWaiting = 64;               // the calls one text asked keeps at most, for those that show it
+    constexpr size_t maxNoticesWaiting = 1024;           // a plug-in's editor's keys kept at most between turns
     constexpr int smallestChannel = 4096;                // the longest block a channel takes at least
     constexpr std::int64_t smallestDeadline = 1'000'000; // a millisecond, which a round trip to the helper takes well within
     constexpr std::int64_t waitNanoseconds = 50'000'000; // how long a wait for a block goes before it looks whether to go on
@@ -67,6 +73,9 @@ public:
 
     void setValue (float newValue) override
     {
+        if (! std::isfinite (newValue)) // known bug 181
+            return;
+
         value.store (newValue, std::memory_order_relaxed);
 
         if (juce::MessageManager::existsAndIsCurrentThread())
@@ -101,22 +110,16 @@ public:
     bool isBoolean() const override { return boolean; }
     bool isAutomatable() const override { return automatable; }
 
+    // As the plug-in wrote it last, asked without waiting (describeValue()).
     juce::String getText (float normalised, int maximumLength) const override
     {
-        if (auto text = owner.remote->getParameterText (index, normalised, textMilliseconds); text.has_value() && ! owner.hasCrashed())
-            return text->substring (0, maximumLength);
-
-        return juce::String (normalised, 2).substring (0, maximumLength);
+        return owner.describeValue (index, normalised).substring (0, maximumLength);
     }
 
-    // As the plug-in reads text ("-6 dB"), within a quarter of a second, else as a number.
-    float getValueForText (const juce::String& text) const override
-    {
-        if (auto read = owner.remote->getParameterValue (index, text, textMilliseconds); read.has_value() && ! owner.hasCrashed())
-            return juce::jlimit (0.0f, 1.0f, *read);
-
-        return juce::jlimit (0.0f, 1.0f, readFloat (text, getValue())); // "1e300" too; no finite number ("inf", "1e999"): as it is
-    }
+    // JUCE's, which can't wait for the plug-in (known bug 166: it waited for its helper; Phazite reads a value typed through
+    // readValue(), which asks the plug-in): as a number from 0 to 1, else the value it has ("1e300" too; no finite number,
+    // "inf" or "1e999": as it is). Phazite never sets a value read so.
+    float getValueForText (const juce::String& text) const override { return juce::jlimit (0.0f, 1.0f, readFloat (text, getValue())); }
 
     // A value set while a block played, once (on the thread that plays the next).
     bool takePending (float& newValue) noexcept
@@ -153,11 +156,16 @@ SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> i
 
     for (size_t i = 0; i < info.parameters.size(); ++i)
     {
+        // Each ID once, as the helper's info was read (sandbox::readParameters(): known bug 181).
         auto parameter = std::make_unique<Parameter> (*this, (int) i, info.parameters[i]);
         parameters.push_back (parameter.get());
-        places[info.parameters[i].id] = (int) i;
+        places.emplace (info.parameters[i].id, (int) i);
         addHostedParameter (std::move (parameter));
     }
+
+    changedSlots.assign (parameters.size(), -1);
+    gesturesTold.assign (parameters.size(), {});
+    gesturesByPlugin.reserve (parameters.size());
 
     setLatencySamples (latency);
     remote->setListener (this);
@@ -175,6 +183,8 @@ SandboxedInstance::~SandboxedInstance()
 {
     // Told of no more, then closed in its helper (remote), then its helper let go of (keepHelper).
     stopTimer();
+    textAnswers.stopTimer();
+    answerTextsAsGone();
 
     if (onGone != nullptr)
         onGone();
@@ -210,6 +220,16 @@ void SandboxedInstance::helperLost()
     }
 
     triggerAsyncUpdate();
+}
+
+std::function<bool()> SandboxedInstance::watchHelper() const
+{
+    // The helper lives as long as what keeps it (the plug-in host's), which this lets go of as it goes.
+    return [kept = std::weak_ptr<void> (keepHelper), helper = &remote->getHelper()]
+    {
+        const auto running = kept.lock();
+        return running != nullptr && helper->isRunning();
+    };
 }
 
 void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> newRemote, double openedAtRate, std::shared_ptr<void> keep,
@@ -300,19 +320,139 @@ float SandboxedInstance::getParameterValue (int parameter) const
 
 void SandboxedInstance::setParameterValue (int parameter, float value)
 {
-    if (juce::isPositiveAndBelow (parameter, (int) parameters.size()))
+    // Not a value that is no number, which jlimit() passes on (known bug 181).
+    if (juce::isPositiveAndBelow (parameter, (int) parameters.size()) && std::isfinite (value))
         parameters[(size_t) parameter]->setValue (juce::jlimit (0.0f, 1.0f, value));
 }
 
-juce::String SandboxedInstance::describeValue (int parameter, float value) const
+juce::String SandboxedInstance::describeValue (int parameter, float value, std::function<void()> whenKnown)
 {
-    return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getText (value, 1024)
-                                                                         : juce::String();
+    if (! juce::isPositiveAndBelow (parameter, (int) parameters.size()))
+        return {};
+
+    if (! std::isfinite (value))
+        value = parameters[(size_t) parameter]->getValue();
+
+    value = juce::jlimit (0.0f, 1.0f, value);
+
+    if (const auto known = texts.find ({ parameter, value }); known != texts.end())
+        return known->second;
+
+    // Asked of the helper without waiting (known bug 166), one value of a parameter at a time, the newest asked for meanwhile
+    // next (a knob turned while the helper is busy asks for none it has left); meanwhile the value as a number, never another
+    // value's text as if it were this one's, which the hint bar and a screen reader would read too.
+    if (! hasCrashed())
+    {
+        auto asked =
+            std::find_if (textAsks.begin(), textAsks.end(), [parameter] (const TextAsk& ask) { return ask.parameter == parameter; });
+
+        if (asked == textAsks.end())
+        {
+            textAsks.push_back (
+                { parameter, value, remote->askParameterText (parameter, value), devices::Clock::getMilliseconds(), {}, {} });
+            asked = std::prev (textAsks.end());
+            textAnswers.startTimer (textLookMilliseconds);
+        }
+        else if (! juce::exactlyEqual (asked->value, value))
+        {
+            asked->next = value;
+        }
+
+        if (whenKnown != nullptr && asked->whenKnown.size() < maxCallsWaiting)
+            asked->whenKnown.push_back (std::move (whenKnown));
+    }
+
+    return juce::String (value, 2);
 }
 
-float SandboxedInstance::readValue (int parameter, const juce::String& text) const
+void SandboxedInstance::readValue (int parameter, const juce::String& text, std::function<void (std::optional<float>)> then)
 {
-    return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getValueForText (text) : 0.0f;
+    if (then == nullptr)
+        return;
+
+    if (! juce::isPositiveAndBelow (parameter, (int) parameters.size()) || hasCrashed())
+    {
+        then (std::nullopt); // never a number the plug-in didn't give (the review of known bug 166)
+        return;
+    }
+
+    valueAsks.push_back ({ text, remote->askParameterValue (parameter, text), devices::Clock::getMilliseconds(), std::move (then) });
+    textAnswers.startTimer (textLookMilliseconds);
+}
+
+void SandboxedInstance::takeTextAnswers()
+{
+    // Each answer that came, or that won't (its helper gone, or past its time: a value's text a state's time, a value read
+    // a typed value's), taken out before what waits for it is called, which may ask again.
+    const auto now = devices::Clock::getMilliseconds();
+    std::vector<std::function<void()>> calls;
+
+    for (auto it = textAsks.begin(); it != textAsks.end();)
+    {
+        auto& ask = *it;
+
+        if (! ask.reply->isDone() && ! hasCrashed() && now - ask.since < (double) getStateMilliseconds())
+        {
+            ++it;
+            continue;
+        }
+
+        if (const auto text = sandbox::RemoteInstance::readParameterText (*ask.reply))
+        {
+            if (texts.size() >= textsKept)
+                texts.clear();
+
+            texts[{ ask.parameter, ask.value }] = *text;
+        }
+
+        // What waits is told whether its text came or not: one that didn't asks again as it shows the value once more.
+        calls.insert (calls.end(), ask.whenKnown.begin(), ask.whenKnown.end());
+
+        if (const auto next = ask.next; next.has_value() && ! hasCrashed() && ! texts.contains ({ ask.parameter, *next }))
+        {
+            ask = { ask.parameter, *next, remote->askParameterText (ask.parameter, *next), now, {}, {} };
+            ++it;
+        }
+        else
+        {
+            it = textAsks.erase (it);
+        }
+    }
+
+    for (auto it = valueAsks.begin(); it != valueAsks.end();)
+    {
+        if (! it->reply->isDone() && ! hasCrashed())
+        {
+            ++it;
+            continue;
+        }
+
+        // The plug-in's answer, checked as it came (RemoteInstance.h), waited for as long as its helper lives and answers;
+        // none if its helper went (never a number the plug-in didn't give: the review of known bug 166).
+        const auto came = it->reply->isDone() && ! it->reply->getReply().isEmpty();
+        calls.push_back ([then = std::move (it->then),
+                          value = came ? sandbox::RemoteInstance::readParameterValue (*it->reply) : std::nullopt] { then (value); });
+        it = valueAsks.erase (it);
+    }
+
+    if (textAsks.empty() && valueAsks.empty())
+        textAnswers.stopTimer();
+
+    // Last, nothing of this touched after them: what they do may let go of it.
+    for (const auto& call : calls)
+        call();
+}
+
+void SandboxedInstance::answerTextsAsGone()
+{
+    // Each ask still to come answered with nothing, a message later (this is going): a text read reads as none, and a
+    // value's text is shown as a number again, asked of the instance in its place (known bug 166's review).
+    for (auto& ask : std::exchange (valueAsks, {}))
+        juce::MessageManager::callAsync ([then = std::move (ask.then)] { then (std::nullopt); });
+
+    for (auto& ask : std::exchange (textAsks, {}))
+        for (auto& tell : ask.whenKnown)
+            juce::MessageManager::callAsync (std::move (tell));
 }
 
 void SandboxedInstance::setMovedByEngine (int parameter, bool isMoved)
@@ -498,7 +638,7 @@ bool SandboxedInstance::finishPreparing (const std::atomic<bool>* cancelled)
         if (prepareAsked != nullptr)
             prepareAsked->reply->wait (waitMilliseconds);
 
-        if (sandbox::getNanoseconds() - since > (std::int64_t) prepareMilliseconds * 1'000'000)
+        if (sandbox::getNanoseconds() - since > (std::int64_t) prepareMilliseconds.load() * 1'000'000)
         {
             remote->getHelper().reportHung();
             return false;
@@ -531,7 +671,7 @@ void SandboxedInstance::timerCallback()
     }
     else if (const auto waited = sandbox::getNanoseconds() - preparingSince;
              (prepareAsked == nullptr && waited > (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000)
-             || (prepareAsked != nullptr && waited > (std::int64_t) prepareMilliseconds * 1'000'000))
+             || (prepareAsked != nullptr && waited > (std::int64_t) prepareMilliseconds.load() * 1'000'000))
     {
         // A block kept as long as a hang takes, or a channel the helper doesn't make in time.
         remote->getHelper().reportHung();
@@ -728,7 +868,7 @@ bool SandboxedInstance::isStateOlder() const noexcept
 void SandboxedInstance::noteStateChange() noexcept
 {
     ++stateChanges;
-    changedAt = juce::Time::getMillisecondCounterHiRes();
+    changedAt = devices::Clock::getMilliseconds();
 
     if (firstUnaskedChangeAt <= 0.0)
         firstUnaskedChangeAt = changedAt;
@@ -747,7 +887,7 @@ bool SandboxedInstance::shouldBeAsked() const noexcept
     // Once it has been quiet for a moment, or at the latest a second after the first change it hasn't been asked about, as
     // changes go on (a plug-in that reports a value of its own all the time: an LFO's, a meter's); and no more often than ten
     // times as long as its last answer took (a state of tens of megabytes costs both sides each time).
-    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto now = devices::Clock::getMilliseconds();
     const auto due =
         now - changedAt >= quietMilliseconds || (firstUnaskedChangeAt > 0.0 && now - firstUnaskedChangeAt >= latestAskMilliseconds);
     return stateAsked == nullptr && isStateUnasked() && due && now - stateAskedSince >= answerSpacing * lastAnswerMilliseconds;
@@ -782,7 +922,7 @@ void SandboxedInstance::askState (Ask which, bool unasked)
     stateAskedAt = stateChanges;
     firstUnaskedChangeAt = 0.0;
     editorMovesAtAsk = editorMoves;
-    stateAskedSince = juce::Time::getMillisecondCounterHiRes();
+    stateAskedSince = devices::Clock::getMilliseconds();
 }
 
 bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
@@ -790,14 +930,14 @@ bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
     if (stateAsked == nullptr)
         return true;
 
-    if (const auto now = juce::Time::getMillisecondCounterHiRes(); ! stateAsked->isDone() && waitUntil > now)
+    if (const auto now = devices::Clock::getMilliseconds(); ! stateAsked->isDone() && waitUntil > now)
         stateAsked->wait ((int) std::ceil (waitUntil - now));
 
     if (stateAsked->isDone())
     {
         // As it was when it was asked: changed since, it is asked again at the next save; and so is one whose window is open,
         // or was shown or closed meanwhile.
-        lastAnswerMilliseconds = juce::Time::getMillisecondCounterHiRes() - stateAskedSince;
+        lastAnswerMilliseconds = devices::Clock::getMilliseconds() - stateAskedSince;
         ++answers;
 
         if (auto taken = sandbox::RemoteInstance::readState (*stateAsked))
@@ -815,7 +955,7 @@ bool SandboxedInstance::takeAskedState (double waitUntil, bool giveUp)
         return true;
     }
 
-    if (giveUp || juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())
+    if (giveUp || devices::Clock::getMilliseconds() - stateAskedSince >= (double) stateMilliseconds.load())
     {
         stateMissedAt = stateAskedAt; // given up on: the helper is taken for hung if it still doesn't answer
         stateAsked = nullptr;
@@ -831,13 +971,23 @@ void SandboxedInstance::takeAskedStateIfIn()
     // sandbox/client/Helper.h); what else asked for it (Auto Save, a save, a store) gives it up itself.
     if (stateAsked != nullptr
         && (stateAsked->isDone()
-            || (stateAskedUnasked && juce::Time::getMillisecondCounterHiRes() - stateAskedSince >= (double) stateMilliseconds.load())))
+            || (stateAskedUnasked && devices::Clock::getMilliseconds() - stateAskedSince >= (double) stateMilliseconds.load())))
         takeAskedState (0.0, true);
 }
 
 void SandboxedInstance::setStateMilliseconds (int milliseconds) noexcept
 {
     stateMilliseconds = milliseconds > 0 ? milliseconds : defaultStateMilliseconds;
+}
+
+void SandboxedInstance::setPrepareMilliseconds (int milliseconds) noexcept
+{
+    prepareMilliseconds = milliseconds > 0 ? milliseconds : defaultPrepareMilliseconds;
+}
+
+int SandboxedInstance::getPrepareMilliseconds() noexcept
+{
+    return prepareMilliseconds.load();
 }
 
 int SandboxedInstance::getStateMilliseconds() noexcept
@@ -848,9 +998,27 @@ int SandboxedInstance::getStateMilliseconds() noexcept
 //==============================================================================
 void SandboxedInstance::parameterChanged (int index, float value)
 {
+    // Checked as it came (RemoteInstance::handleNotice()); here too, as nothing past this may see what isn't a number.
+    if (! std::isfinite (value))
+        return;
+
+    // The last of each parameter's alone until the message thread takes them (known bug 181's review: a helper that told
+    // values without end grew this, and each wrote the song): one for each parameter at most.
     {
         const juce::ScopedLock locked (lock);
-        changedByPlugin.emplace_back (index, value);
+
+        if (! juce::isPositiveAndBelow (index, (int) changedSlots.size()))
+            return;
+
+        if (auto& slot = changedSlots[(size_t) index]; slot >= 0)
+        {
+            changedByPlugin[(size_t) slot].second = value;
+        }
+        else
+        {
+            slot = (int) changedByPlugin.size();
+            changedByPlugin.emplace_back (index, value);
+        }
     }
 
     triggerAsyncUpdate();
@@ -860,7 +1028,20 @@ void SandboxedInstance::gestureChanged (int index, bool starting)
 {
     {
         const juce::ScopedLock locked (lock);
-        gesturesByPlugin.emplace_back (index, starting);
+
+        if (! juce::isPositiveAndBelow (index, (int) gesturesTold.size()))
+            return;
+
+        auto& told = gesturesTold[(size_t) index];
+
+        if (! told.pending)
+        {
+            told = { true, starting, false };
+            gesturesByPlugin.push_back (index);
+        }
+
+        told.begun = starting;
+        told.sawBegin = told.sawBegin || starting;
     }
 
     triggerAsyncUpdate();
@@ -897,11 +1078,15 @@ void SandboxedInstance::editorResized (int width, int height)
     triggerAsyncUpdate();
 }
 
-void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers)
+void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers, int scanCode)
 {
     {
         const juce::ScopedLock locked (lock);
-        editorKeys.push_back ({ isDown, keyCode, modifiers });
+
+        if (editorKeys.size() >= maxNoticesWaiting)
+            return;
+
+        editorKeys.push_back ({ isDown, keyCode, modifiers, scanCode });
     }
 
     triggerAsyncUpdate();
@@ -910,7 +1095,13 @@ void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers)
 void SandboxedInstance::handleAsyncUpdate()
 {
     std::vector<std::pair<int, float>> changes;
-    std::vector<std::pair<int, bool>> gestures;
+    struct Told
+    {
+        int index;
+        bool begun, sawBegin;
+    };
+
+    std::vector<Told> gestures;
     std::vector<EditorKey> keys;
     std::optional<std::pair<int, int>> newEditorSize;
     bool newLatency = false, newState = false, lost = false;
@@ -919,7 +1110,16 @@ void SandboxedInstance::handleAsyncUpdate()
     {
         const juce::ScopedLock locked (lock);
         changes.swap (changedByPlugin);
-        gestures.swap (gesturesByPlugin);
+
+        for (const auto& [index, value] : changes)
+            changedSlots[(size_t) index] = -1;
+
+        for (const auto index : std::exchange (gesturesByPlugin, {}))
+        {
+            auto& told = gesturesTold[(size_t) index];
+            gestures.push_back ({ index, told.begun, told.sawBegin });
+            told = {};
+        }
         keys.swap (editorKeys);
         std::swap (newEditorSize, editorSize);
         std::swap (newLatency, latencyCame);
@@ -931,28 +1131,46 @@ void SandboxedInstance::handleAsyncUpdate()
     // Its editor's keys first, as they came: they play.
     for (const auto& key : keys)
         if (onEditorKey != nullptr)
-            onEditorKey (key.isDown, key.keyCode, key.modifiers);
+            onEditorKey (key.isDown, key.keyCode, key.modifiers, key.scanCode);
 
     if (newEditorSize.has_value() && onEditorResized != nullptr)
         onEditorResized (newEditorSize->first, newEditorSize->second);
 
-    // As the helper told them: the gestures that begin, the values, then (a message later) the gestures that end.
-    for (const auto& [index, starting] : gestures)
+    // As the helper told them: the gestures that begin, the values, then (a message later) the gestures that end. Each
+    // parameter's in turn, whatever the helper tells (known bug 181's review: two begun, or one ended that wasn't begun,
+    // reached JUCE as they came), from the last it told of each since the last turn: one begun again before its end has gone
+    // on is the same gesture; one begun and ended meanwhile begins and ends.
+    inGesture.resize (parameters.size(), false);
+
+    for (const auto& told : gestures)
     {
+        const auto index = told.index;
+
         if (! juce::isPositiveAndBelow (index, (int) parameters.size()))
             continue;
 
-        if (starting)
+        const auto ending = std::find (gesturesToEnd.begin(), gesturesToEnd.end(), index);
+
+        if (told.begun && inGesture[(size_t) index])
         {
+            if (ending != gesturesToEnd.end())
+                gesturesToEnd.erase (ending);
+
+            continue;
+        }
+
+        if (! inGesture[(size_t) index] && (told.begun || told.sawBegin))
+        {
+            inGesture[(size_t) index] = true;
             parameters[(size_t) index]->beginChangeGesture();
 
             if (onGesture != nullptr)
                 onGesture (index, true);
         }
-        else
-        {
+
+        if (! told.begun && inGesture[(size_t) index]
+            && std::find (gesturesToEnd.begin(), gesturesToEnd.end(), index) == gesturesToEnd.end())
             gesturesToEnd.push_back (index);
-        }
     }
 
     // A value it tells again as it was (many plug-ins do, as their windows open) changes nothing, nor is an unsaved change.
@@ -995,6 +1213,10 @@ void SandboxedInstance::endGestures()
 {
     for (const auto index : std::exchange (gesturesToEnd, {}))
     {
+        if (! inGesture[(size_t) index])
+            continue;
+
+        inGesture[(size_t) index] = false;
         parameters[(size_t) index]->endChangeGesture();
 
         if (onGesture != nullptr)

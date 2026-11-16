@@ -77,7 +77,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | `AudioDevices.h` | The audio devices as Phazite chooses and describes them: a Bluetooth output, the first run's low-latency setup. |
 | `AudioDeviceWatch.h` | The audio devices plugged in while Phazite runs, watched, with the switch to one. |
 | `internal/AudioIO.h` | Opens the audio devices and the MIDI inputs through JUCE's device manager, as Phazite's settings keep them, with the recordings' options. |
-| `internal/PluginScanner.h` | The plug-in scan, in the helper program, with a time limit for each file. |
+| `internal/PluginScanner.h` | The plug-in scan, in the helper program, with a time limit for each file, and what a helper says a file holds read with limits (`readScannedPlugins()`). |
 | `EngineContext.h` | The engine context as the UI reaches it: the audio devices, how busy the engine is, the MIDI inputs. It owns the audio device, the plug-in host and Phazite's engine on the device. |
 | `internal/EngineContext.h` | The engine context as the app and the tests make it: `phazite::createEngineContext()`. |
 
@@ -231,7 +231,7 @@ Plug-ins hosted in helper processes, the only way Phazite hosts them.
 
 | File | What it holds |
 |---|---|
-| `internal/PluginHost.h` | The host that starts one helper for each plug-in file and makes its instances, which the engine context owns, opening them in the background beside each other as a project opens and ending each helper that goes on a thread of its own: the plug-ins scanning found, the reload of one that crashed, the plug-ins kept off that crashed as they loaded, and none loaded after a crash of Phazite's until the user says (`setLoadsPlugins()`). |
-| `internal/PluginInstances.h` | A song's plug-ins, each an instance by its device's ID, made from the song and kept in step with it, which its playback session owns and which stores their states into the song: loaded in the background as the song opens, and asked for their states at once, without the message thread waiting, as it saves. |
+| `internal/PluginHost.h` | The host that starts one helper for each plug-in file and makes its instances, which the engine context owns, opening them in the background beside each other as a project opens and ending each helper that goes on a thread of its own: the plug-ins scanning found and what it left out of a file (`takeScanProblems()`), the reload of one that crashed, the plug-ins kept off that crashed as they loaded, and none loaded after a crash of Phazite's until the user says (`setLoadsPlugins()`). |
+| `internal/PluginInstances.h` | A song's plug-ins, each an instance by its device's ID, made from the song and kept in step with it, which its playback session owns and which stores their states into the song: loaded in the background as the song opens, as one is added, brought back or reloaded (a render of a song no session plays waits for them with `whenLoaded()`), and asked for their states at once, without the message thread waiting, as it saves. |
 | `internal/SandboxedInstance.h` | Each instance as a plug-in instance of JUCE's. |
 | `internal/SandboxedProcessor.h` | What Phazite's engine plays of it: a block whole through its channel, with a deadline. |

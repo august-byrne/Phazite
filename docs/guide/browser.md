@@ -139,6 +139,8 @@ Instruments and Effects, in the **+ Instrument** and **+ Effect** menus and in t
   crashed plug-in's slot reads "*name* - Crashed" and plays nothing (an effect's sound fades out); click the slot,
   or choose **Reload** in its menu, to open it again as it was. The Project view lists crashed plug-ins too
   ([The window](window.md#the-left-panel)).
+- **A plug-in loads in the background,** as you add it, as Undo brings it back and as it reloads: its slot reads
+  "*name* - Loading" until it has, and it is silent meanwhile. Phazite never waits for it; you can go on working.
 - **A plug-in's window** opens from its slot's menu (**Open Window**) or its window button in the Devices view. Its
   **Plug-in** menu has **Save Preset...**, **Load Preset**, and **Send All Keys to the Plug-in**, for a plug-in that
   needs the keys Phazite otherwise keeps for itself (play and stop, and the computer keyboard).

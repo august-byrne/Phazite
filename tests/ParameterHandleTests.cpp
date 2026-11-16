@@ -5,6 +5,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -26,6 +27,15 @@ phazite::DeviceID addReverb (phazite::Song& song)
                                                     phazite::makeOwnDeviceState (song, phazite::devices::Reverb::typeID));
     REQUIRE (reverb.isValid());
     return reverb;
+}
+
+// A value typed, as a plug-in reads it in its helper, which it is asked without waiting: waited for here.
+std::optional<float> readAsPlugin (const phazite::ParameterHandle& handle, const juce::String& text)
+{
+    auto read = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText (text, [read] (std::optional<float> value) { *read = value; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([read] { return read->has_value(); }));
+    return **read;
 }
 } // namespace
 
@@ -54,12 +64,15 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK (handle.getRange().end == doctest::Approx (1.0f));
     CHECK (handle.getDefaultValue().value_or (-1.0f) == doctest::Approx (0.5f));
     CHECK (handle.getValue() == doctest::Approx (0.5f));
-    CHECK (handle.getText (0.25f) == juce::String ("25 %")); // as the plug-in writes it, in its helper
-    CHECK_FALSE (handle.getInfo().has_value());              // not one of Phazite's own devices
+    CHECK_FALSE (handle.getInfo().has_value()); // not one of Phazite's own devices
+
+    // As the plug-in writes it, in its helper, which it is asked without waiting: the text it wrote, once it has.
+    handle.getText (0.25f);
+    CHECK (phazite::test::dispatchMessagesUntil ([&handle] { return handle.getText (0.25f) == juce::String ("25 %"); }));
 
     // And text typed as the plug-in reads it, in its helper: a percentage, where a number alone would be the whole range's.
-    CHECK (handle.readText ("75 %").value_or (-1.0f) == doctest::Approx (0.75f));
-    CHECK (handle.readText ("40").value_or (-1.0f) == doctest::Approx (0.4f));
+    CHECK (readAsPlugin (handle, "75 %").value_or (-1.0f) == doctest::Approx (0.75f));
+    CHECK (readAsPlugin (handle, "40").value_or (-1.0f) == doctest::Approx (0.4f));
 
     // When the project closes, the handle finds nothing and changes nothing.
     phazite::setSong (context, nullptr);

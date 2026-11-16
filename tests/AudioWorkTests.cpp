@@ -915,10 +915,20 @@ TEST_CASE ("The window's hold takes the keys but not from a field being typed in
     window.pressKey (juce::KeyPress (juce::KeyPress::spaceKey));
     CHECK (passed.isEmpty());
     CHECK (field.getText() == juce::String ("-1"));
+
+    // Escape is the hold's cancel all the same, as the wait's title says from the start (the review of known bug 166: held
+    // while a field had the keys, it reached nothing until the progress window showed); not the field's: its edit stays.
+    field.setText ("-12", false);
+    window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    REQUIRE (passed.size() == 1);
+    CHECK (passed[0] == juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (field.getText() == juce::String ("-12"));
+    CHECK (field.hasKeyboardFocus (true));
+    passed.clear();
     hold.releaseInput();
     CHECK (field.hasKeyboardFocus (true));
     CHECK (lost.count == 0);
-    CHECK (field.getText() == juce::String ("-1"));
+    CHECK (field.getText() == juce::String ("-12"));
     field.removeListener (&lost);
 }
 

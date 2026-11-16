@@ -83,10 +83,16 @@ void InputHold::holdInput()
     focusBefore = juce::Component::getCurrentlyFocusedComponent();
 
     // In its window, to take the keys there; not while a text field has them, whose edit stays open, and whose keys (Space
-    // among them) then do nothing: they reach the holder, as the field is under it, and go no further.
+    // among them) then do nothing: they reach the holder, as the field is under it, and go no further. Escape always goes
+    // on, as the hold's cancel (a wait's title says "Press Esc to stop waiting" from its start: the review of known bug 166),
+    // and is the field's no more than any other key.
     const auto typing = isTyping();
     const auto takesKeys = window != nullptr && window->isShowing() && ! typing;
-    holder = std::make_unique<Holder> (typing ? nullptr : passKey, keysChanged);
+    auto escapeOnly = passKey == nullptr
+                          ? nullptr
+                          : std::function<bool (const juce::KeyPress&)> ([pass = passKey] (const juce::KeyPress& key)
+                                                                         { return key == juce::KeyPress::escapeKey && pass (key); });
+    holder = std::make_unique<Holder> (typing ? std::move (escapeOnly) : passKey, keysChanged);
 
     if (takesKeys)
     {

@@ -12,8 +12,10 @@
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedInstance.h"
 
+#include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 
 namespace phazite
 {
@@ -48,8 +50,9 @@ namespace
 
     // A value as getParameterText() writes it, or as it may be typed in the same units: a fader's decibels ("-6.00 dB",
     // "-inf") as the fader's position, a pan as a fraction, as written ("0.300 Left"), or as a percentage ("30% left", "30 L"),
-    // a crossover's hertz ("1.2k"), a choice by its name, any other as a number; a plug-in's as the plug-in reads it.
-    std::optional<float> readParameterText (const Song& song, const FoundParameter& parameter, const juce::String& typed)
+    // a crossover's hertz ("1.2k"), a choice by its name, any other as a number; a plug-in's not at all, which the plug-in
+    // reads itself (ParameterHandle::readText() with a call).
+    std::optional<float> readParameterText (const FoundParameter& parameter, const juce::String& typed)
     {
         auto t = typed.trim().toLowerCase();
 
@@ -113,14 +116,55 @@ namespace
                 return readNumber (t);
 
             case ParameterSource::plugin:
-                if (auto* instance = findPluginInstance (song, parameter.ref.device))
-                    if (const auto index = instance->findParameter (parameter.ref.parameter); index >= 0)
-                        return instance->readValue (index, typed);
-
-                return readNumber (t);
+                return {}; // the plug-in reads it (readText() with a call), never Phazite (the review of known bug 166)
         }
 
         return {};
+    }
+
+    // Whether a song's history has moved since this was made, for an answer that comes later than what it answers: an undo or
+    // a redo (any change the song hears while its history undoes or redoes, a gesture's roll-back too), or a step begun by
+    // hand (countHistoryMoves()). Not what changes the song as it plays (automation written, a take that grows, a plug-in's
+    // own change, a state written, a window's place kept): the review of known bug 166, a value typed while the song
+    // recorded was dropped.
+    struct HistoryWatch final : private juce::ValueTree::Listener
+    {
+        explicit HistoryWatch (Song& watched)
+            : song (&watched),
+              state (watched.getState()),
+              moves (countHistoryMoves (watched))
+        {
+            state.addListener (this);
+        }
+
+        ~HistoryWatch() override { state.removeListener (this); }
+
+        bool hasMoved() const { return undone || song == nullptr || countHistoryMoves (*song) != moves; }
+
+    private:
+        juce::WeakReference<Song> song;
+        juce::ValueTree state;
+        const std::uint64_t moves;
+        bool undone = false;
+
+        void heard() { undone = undone || song == nullptr || song->getUndoManager().isPerformingUndoRedo(); }
+
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { heard(); }
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { heard(); }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { heard(); }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { heard(); }
+        void valueTreeRedirected (juce::ValueTree&) override { heard(); }
+
+        JUCE_DECLARE_NON_COPYABLE (HistoryWatch)
+    };
+
+    // A value read, kept to a range: none for one that is no number (known bug 181: jlimit() passes NaN on).
+    std::optional<float> keepInRange (std::optional<float> value, const juce::NormalisableRange<float>& range)
+    {
+        if (! value.has_value() || ! std::isfinite (*value))
+            return {};
+
+        return juce::jlimit (range.start, range.end, *value);
     }
 } // namespace
 
@@ -319,20 +363,64 @@ float ParameterHandle::getBaseValue() const
 
 juce::String ParameterHandle::getText (float value) const
 {
+    return getText (value, {});
+}
+
+juce::String ParameterHandle::getText (float value, std::function<void()> whenKnown) const
+{
     const auto* parameter = impl != nullptr ? impl->find() : nullptr;
-    return parameter != nullptr ? getParameterText (*impl->song.get(), *parameter, value) : juce::String();
+    return parameter != nullptr ? getParameterText (*impl->song.get(), *parameter, value, std::move (whenKnown)) : juce::String();
 }
 
 std::optional<float> ParameterHandle::readText (const juce::String& text) const
 {
     const auto* parameter = impl != nullptr ? impl->find() : nullptr;
-    const auto value = parameter != nullptr ? readParameterText (*impl->song.get(), *parameter, text) : std::nullopt;
+    const auto value = parameter != nullptr ? readParameterText (*parameter, text) : std::nullopt;
+    return keepInRange (value, getRange());
+}
 
-    if (! value.has_value())
-        return {};
+bool ParameterHandle::readsTextLater() const
+{
+    const auto* parameter = impl != nullptr ? impl->find() : nullptr;
 
-    const auto range = getRange();
-    return juce::jlimit (range.start, range.end, *value);
+    if (parameter == nullptr || parameter->source != ParameterSource::plugin)
+        return false;
+
+    auto* instance = findPluginInstance (*impl->song.get(), parameter->ref.device);
+    return instance != nullptr && instance->findParameter (parameter->ref.parameter) >= 0;
+}
+
+void ParameterHandle::readText (const juce::String& text, std::function<void (std::optional<float>)> then) const
+{
+    if (then == nullptr)
+        return;
+
+    // A plug-in's as the plug-in reads it, asked of its helper without waiting (known bug 166).
+    if (const auto* parameter = impl != nullptr ? impl->find() : nullptr;
+        parameter != nullptr && parameter->source == ParameterSource::plugin)
+    {
+        if (auto* instance = findPluginInstance (*impl->song.get(), parameter->ref.device))
+        {
+            if (const auto index = instance->findParameter (parameter->ref.parameter); index >= 0)
+            {
+                // Its answer taken only if the song's history hasn't moved since (an undo, a redo, another step) and the
+                // parameter is still there (the review of known bug 166: what it would be set on may be other by then).
+                // What changes the song as it plays (automation written, a take) leaves it alone.
+                auto watch = std::make_shared<HistoryWatch> (*impl->song.get());
+                instance->readValue (index, text,
+                                     [song = impl->song, wanted = parameter->ref, range = getRange(), then = std::move (then),
+                                      watch] (std::optional<float> value)
+                                     {
+                                         auto* in = song.get();
+                                         const auto stillThere = in != nullptr && locateParameter (*in, wanted).has_value();
+                                         then (watch->hasMoved() || ! stillThere ? std::nullopt : keepInRange (value, range));
+                                     });
+                return;
+            }
+        }
+    }
+
+    then (readText (text));
 }
 
 std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const
@@ -369,7 +457,8 @@ void ParameterHandle::beginGesture()
 
 void ParameterHandle::setValue (float value)
 {
-    if (impl == nullptr || impl->song.get() == nullptr)
+    // Nothing for a value that is no number (known bug 181), not even an undo step.
+    if (impl == nullptr || impl->song.get() == nullptr || ! std::isfinite (value))
         return;
 
     const auto* found = impl->find();

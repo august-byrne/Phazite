@@ -12,6 +12,8 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 
+#include <cmath>
+
 namespace phazite
 {
 namespace
@@ -288,7 +290,7 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
     return { parameter.source, {}, {}, {}, {} };
 }
 
-juce::String getParameterText (const Song& song, const FoundParameter& parameter, float value)
+juce::String getParameterText (const Song& song, const FoundParameter& parameter, float value, std::function<void()> whenKnown)
 {
     switch (parameter.source)
     {
@@ -326,7 +328,7 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
 
         case ParameterSource::plugin:
             if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
-                return instance->describeValue (index, value);
+                return instance->describeValue (index, value, std::move (whenKnown));
 
             return juce::String (value, 2);
     }

@@ -45,9 +45,10 @@ namespace
     class StandInParameter final : public juce::HostedAudioProcessorParameter
     {
     public:
-        StandInParameter (juce::String ownID, juce::String parameterName, float defaultValue)
+        StandInParameter (juce::String ownID, juce::String parameterName, float defaultValue, juce::String parameterLabel = {})
             : id (std::move (ownID)),
               name (std::move (parameterName)),
+              label (std::move (parameterLabel)),
               initial (defaultValue),
               value (defaultValue)
         {
@@ -64,15 +65,32 @@ namespace
                 whenSet (newValue);
         }
 
-        std::function<void (float)> whenSet; // what a stand-in does as it is set
+        std::function<void (float)> whenSet;                // what a stand-in does as it is set
+        std::function<void()> beforeText;                   // and before it writes or reads a value's text
+        std::function<juce::String (float)> textOf;         // its own text for a value, in place of a percentage
+        std::function<float (const juce::String&)> valueOf; // and its own reading of one
         float getDefaultValue() const override { return initial; }
         juce::String getName (int maximumLength) const override { return name.substring (0, maximumLength); }
-        juce::String getLabel() const override { return {}; }
-        juce::String getText (float v, int) const override { return juce::String (juce::roundToInt (v * 100.0f)) + " %"; }
-        float getValueForText (const juce::String& text) const override { return text.getFloatValue() / 100.0f; }
+        juce::String getLabel() const override { return label; }
+
+        juce::String getText (float v, int) const override
+        {
+            if (beforeText != nullptr)
+                beforeText();
+
+            return textOf != nullptr ? textOf (v) : juce::String (juce::roundToInt (v * 100.0f)) + " %";
+        }
+
+        float getValueForText (const juce::String& text) const override
+        {
+            if (beforeText != nullptr)
+                beforeText();
+
+            return valueOf != nullptr ? valueOf (text) : text.getFloatValue() / 100.0f;
+        }
 
     private:
-        const juce::String id, name;
+        const juce::String id, name, label;
         const float initial;
         std::atomic<float> value;
     };
@@ -130,9 +148,9 @@ namespace
         }
 
     protected:
-        StandInParameter* add (const char* ownID, const char* name, float defaultValue)
+        StandInParameter* add (const juce::String& ownID, const juce::String& name, float defaultValue, const juce::String& label = {})
         {
-            auto parameter = std::make_unique<StandInParameter> (ownID, name, defaultValue);
+            auto parameter = std::make_unique<StandInParameter> (ownID, name, defaultValue, label);
             auto* added = parameter.get();
             addHostedParameter (std::move (parameter));
             return added;
@@ -383,6 +401,32 @@ namespace
         {
             crash = add ("20", "Crash", 0.0f);
             notNumbers = add ("21", "NaN", 0.0f);
+
+            // What isn't a number, and texts of any length, as a plug-in may tell them (known bug 181): its Wild, whose default
+            // is NaN, whose name and label run on, whose text for any value is a hundred thousand characters long, and which
+            // reads any text as NaN; and its Nonsense, which, set by Phazite, sets the Wild to NaN (from a half up) or
+            // to an infinity (below), then its Told to the value it was set to, telling the host of both, in that order.
+            const auto endless = juce::String::repeatedString ("x", 100000);
+            wild = add ("23", juce::String::repeatedString ("Wild ", 2000), std::numeric_limits<float>::quiet_NaN(),
+                        juce::String::repeatedString ("dB", 5000));
+            wild->textOf = [endless] (float) { return endless; };
+            wild->valueOf = [] (const juce::String&) { return std::numeric_limits<float>::quiet_NaN(); };
+            told = add ("24", "Told", 0.0f);
+
+            // Two whose IDs run on past what Phazite keeps of one, and are the same in what it keeps.
+            const auto longID = juce::String::repeatedString ("9", 200);
+            add (longID + "1", "Twin", 0.0f);
+            add (longID + "2", "Twin Too", 0.0f);
+
+            add ("22", "Nonsense", 0.0f)->whenSet = [this] (float value)
+            {
+                if (value <= 0.0f)
+                    return;
+
+                wild->setValueNotifyingHost (value >= 0.5f ? std::numeric_limits<float>::quiet_NaN()
+                                                           : std::numeric_limits<float>::infinity());
+                told->setValueNotifyingHost (value);
+            };
         }
 
         using StandIn::processBlock;
@@ -400,6 +444,8 @@ namespace
     private:
         StandInParameter* crash = nullptr;
         StandInParameter* notNumbers = nullptr;
+        StandInParameter* wild = nullptr;
+        StandInParameter* told = nullptr;
     };
 
     class TestHang final : public StandIn
@@ -421,8 +467,16 @@ namespace
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
         {
+            // Keeping the block, it leaves a file while it does (TestPlugins::getHangKeeping()), for a test to see it has begun.
+            if (hang->getValue() <= 0.5f)
+                return;
+
+            TestPlugins::getHangKeeping().create();
+
             while (hang->getValue() > 0.5f)
                 juce::Thread::sleep (1);
+
+            TestPlugins::getHangKeeping().deleteFile();
         }
 
     private:
@@ -648,6 +702,7 @@ namespace
             : StandIn (which, stereoEffect())
         {
             level = add ("60", "Level", 1.0f);
+            level->beforeText = [] { waitAtSlowGate(); }; // as a plug-in slow to write or read a value's text
             TestPlugins::getSlowWaiting (which).create();
             waitAtSlowGate();
         }
@@ -658,6 +713,13 @@ namespace
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override { buffer.applyGain (level->getValue()); }
 
         void prepareToPlay (double, int) override { prepared = true; }
+
+        // As a plug-in slow to make its editor.
+        juce::AudioProcessorEditor* createEditor() override
+        {
+            waitAtSlowGate();
+            return StandIn::createEditor();
+        }
 
         void getStateInformation (juce::MemoryBlock& data) override
         {
@@ -750,6 +812,19 @@ namespace
 
             if (file == TestPlugins::crashesScanned)
                 crashNow();
+
+            if (file == TestPlugins::shellScanned || file == TestPlugins::hugeShellScanned)
+            {
+                const auto size = file == TestPlugins::shellScanned ? TestPlugins::shellSize : TestPlugins::hugeShellSize;
+
+                for (int i = 1; i <= size; ++i)
+                {
+                    auto* description = results.add (new juce::PluginDescription (TestPlugins::getDescription (Kind::effect)));
+                    description->name = "Test Shell " + juce::String (i);
+                    description->fileOrIdentifier = file;
+                    description->uniqueId = i;
+                }
+            }
 
             for (const auto kind : TestPlugins::kinds)
                 if (file == describe (kind).file)
@@ -856,6 +931,11 @@ juce::File TestPlugins::getSlowGate (bool closing)
 {
     return juce::File::getSpecialLocation (juce::File::tempDirectory)
         .getChildFile (closing ? "PhaziteTestSlowClosingGate" : "PhaziteTestSlowGate");
+}
+
+juce::File TestPlugins::getHangKeeping()
+{
+    return getSlowGate().getSiblingFile ("PhaziteTestHangKeeping");
 }
 
 juce::File TestPlugins::getSlowWaiting (Kind kind)

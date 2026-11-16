@@ -692,7 +692,11 @@ target_compile_definitions(phazite_core PRIVATE
     JUCE_PLUGINHOST_AU=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
-    JUCE_STRICT_REFCOUNTEDPOINTER=1)
+    JUCE_STRICT_REFCOUNTEDPOINTER=1
+    # JUCE's check that a parameter's ID fits AAX (31 characters, each once when cut there), which its comment offers to
+    # turn off: a hosted plug-in's parameters have the IDs that plug-in gave them, of any length (a VST3's are numbers,
+    # the tests' stand-ins' words), and Phazite is no AAX plug-in.
+    JUCE_DISABLE_CAUTIOUS_PARAMETER_ID_CHECKING=1)
 
 # In Debug builds a JUCE assertion goes through juce::Logger::writeToLog() (JUCE_LOG_ASSERTIONS, documented in
 # juce_core.h), so that the current logger hears it: the app's log file records it, and the tests' harness fails the

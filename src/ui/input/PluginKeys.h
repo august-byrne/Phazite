@@ -16,6 +16,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace phazite::ui
@@ -31,9 +32,26 @@ public:
     ~PluginKeys() override;
 
     // Whether a key goes to Phazite rather than to the plug-in; and those keys, for a plug-in's window in a helper
-    // process, which catches them there (app/SandboxedEditor.h): they change as the computer keyboard is switched.
+    // process, which catches them there (app/SandboxedEditor.h): the keys as the keymaps and the computer keyboard have them,
+    // and every key of the layout in use, in each form the helper names a key by (its character without Shift, as Windows
+    // gives it; with Shift, as Linux does), that the dispatcher's own matching takes for one of them (known bug 177: AZERTY's
+    // & key for a shortcut on 1, by its digit's place). They change as the computer keyboard is switched, the keymap
+    // changes, and another layout is switched to; worked out again only then.
     bool wants (const juce::KeyPress&) const;
     std::vector<juce::KeyPress> getWantedKeys() const;
+
+    // The same keys by their places (scan codes, as KeyboardLayout.h has them) and modifiers (JUCE's raw flags), which a
+    // helper on Windows matches a key by, whatever its own thread's layout (the review of known bug 177); and every other
+    // place with placeWantedByNone for its modifiers, as a helper matches a key that has a place by its place alone (its
+    // second review: by a code its own layout gave it, a key could be taken that meant another to Phazite).
+    static constexpr int placeWantedByNone = -1;
+    std::vector<std::pair<unsigned int, int>> getWantedPlaces() const;
+
+    // A key a helper hands back, by its code and modifiers, and its place where the helper told it (its scan code; 0 for
+    // none), as a key pressed in Phazite's own window is: by what this layout types at its place, where it has one, and with
+    // the character the layout types at it, where it types one (no Ctrl, Alt or Command held), so that a shortcut matched by
+    // the character a key types matches it too.
+    juce::KeyPress makeHandedBackKey (int keyCode, int modifiers, unsigned int scanCode = 0) const;
 
     // Listens to a plug-in's window and everything in it (call it again when the window's content changes), or
     // stops.
@@ -72,6 +90,12 @@ private:
     ComputerKeyboard& computerKeyboard;
     std::vector<Watched> windows;
     std::vector<OwnWindow> ownWindows;
+
+    // The keys wanted, as last worked out, and what they were worked out from: the keys as written, and the layout's
+    // characters at its places.
+    mutable std::vector<juce::KeyPress> wanted, wantedFrom;
+    mutable std::vector<std::pair<unsigned int, int>> wantedPlaces;
+    mutable juce::String wantedLayout;
 
     const Watched* findWatched (const juce::Component*) const; // the watched one a component is in
     WindowKeys* findOwnWindow (const juce::Component&) const;

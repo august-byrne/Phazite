@@ -37,7 +37,15 @@ public:
     juce::uint32 getFingerprint() const;
 
     static constexpr const char* digitRow = "1234567890";
+
+    // Every place a layout types a character at, by the US layout's character there.
+    static constexpr const char* places = "1234567890-=qwertyuiop[]asdfghjkl;'`\\zxcvbnm,./<";
 };
+
+// A place's scan code (PC set 1, as Windows gives it; 0 for a place it doesn't know), and the place of a scan code (0 for
+// none): what a key is told by between processes whose layouts may differ (a plug-in's helper's: PluginKeys.h).
+unsigned int getPlaceScanCode (char place);
+char findPlaceOfScanCode (unsigned int scanCode);
 
 // The layout the operating system uses now, following a switch of layouts as it is made; the US layout where it can't
 // tell (Linux without a display; macOS, until Phazite builds there). Only the app's own parts read it: tests give the US

@@ -10,7 +10,10 @@
  #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
  #endif
+// clang-format off: tlhelp32.h needs windows.h first
  #include <windows.h>
+ #include <tlhelp32.h>
+// clang-format on
 #else
  #include <unistd.h>
 #endif
@@ -100,6 +103,63 @@ namespace
 #endif
     }
 } // namespace
+
+bool Helper::isOwnChild (std::int64_t told, const juce::File& started)
+{
+    if (told <= 0 || told > 0xffffffffLL)
+        return false;
+
+#if JUCE_WINDOWS
+    // A process of this one's (its parent this), running that program.
+    const auto id = (DWORD) told;
+    auto isChild = false;
+
+    if (auto* snapshot = CreateToolhelp32Snapshot (TH32CS_SNAPPROCESS, 0); snapshot != INVALID_HANDLE_VALUE)
+    {
+        PROCESSENTRY32W entry {};
+        entry.dwSize = sizeof (entry);
+
+        for (auto more = Process32FirstW (snapshot, &entry); more; more = Process32NextW (snapshot, &entry))
+        {
+            if (entry.th32ProcessID == id)
+            {
+                isChild = entry.th32ParentProcessID == GetCurrentProcessId();
+                break;
+            }
+        }
+
+        CloseHandle (snapshot);
+    }
+
+    if (! isChild)
+        return false;
+
+    auto* process = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, FALSE, id);
+
+    if (process == nullptr)
+        return false;
+
+    wchar_t path[MAX_PATH * 4] = {};
+    auto size = (DWORD) (sizeof (path) / sizeof (path[0]));
+    const auto named = QueryFullProcessImageNameW (process, 0, path, &size) != 0;
+    CloseHandle (process);
+    return named && juce::File (juce::String (path, (size_t) size)) == started;
+#elif JUCE_LINUX || JUCE_BSD
+    // Its parent this, as /proc says ("pid (name) state ppid ..."; the name may hold spaces and brackets), and its program.
+    const auto folder = juce::File ("/proc").getChildFile (juce::String (told));
+    const auto stat = folder.getChildFile ("stat").loadFileAsString();
+    const auto afterName = stat.fromLastOccurrenceOf (")", false, false).trim();
+    const auto fields = juce::StringArray::fromTokens (afterName, " ", {});
+
+    if (fields.size() < 2 || fields[1].getLargeIntValue() != (juce::int64) getpid())
+        return false;
+
+    return folder.getChildFile ("exe").getLinkedTarget() == started.getLinkedTarget();
+#else
+    juce::ignoreUnused (started);
+    return true; // macOS: Phazite doesn't build there yet, and nothing takes the ID there
+#endif
+}
 
 class Helper::Pipe final : public juce::InterprocessConnection
 {
@@ -284,8 +344,14 @@ bool Helper::start (int timeoutMilliseconds)
 
         if (reader.readInt() == protocolVersion)
         {
-            processID = reader.readInt64();
-            endWithThisProcess (processID);
+            // Taken only if it is the child this started, running the program: a helper's word is no more trusted than the
+            // plug-in in it (known bug 181's review: another process's ID would have been put in the job that ends its
+            // processes as Phazite ends).
+            if (const auto told = reader.readInt64(); isOwnChild (told, program))
+            {
+                processID = told;
+                endWithThisProcess (processID);
+            }
             lost = false; // from now on a loss is told
 
             if (running)

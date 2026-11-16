@@ -41,6 +41,10 @@ public:
     // itself (host/core/Host.h).
     std::int64_t getProcessID() const noexcept { return processID.load(); }
 
+    // Whether a process ID is a child of this process's running a program: the only ID a helper's hello is taken for (0
+    // stays its ID otherwise: it isn't put in the job, and watches for Phazite to go itself).
+    static bool isOwnChild (std::int64_t told, const juce::File& started);
+
     // A request's message, under a number of its own, for its fields; then sent with request(), which waits for its
     // answer (the reply, read with MessageReader), or none if it didn't come within the time or the helper went.
     MessageWriter makeRequest (MessageType type) { return { type, makeNumber() }; }
@@ -59,10 +63,14 @@ public:
         bool wait (int timeoutMilliseconds) { return answered.wait ((double) timeoutMilliseconds) && isDone(); }
         const juce::MemoryBlock& getReply() const noexcept { return reply; } // once done
 
+        // From now on the helper is taken for hung if its message thread doesn't answer the heartbeat meanwhile (any thread):
+        // what waited for something that may take long (a plug-in's editor made) without giving up on it.
+        void stopHoldingOffHang() noexcept { holdsOffHang.store (false); }
+
     private:
         friend class Helper;
         std::int64_t request = 0;
-        bool holdsOffHang = true;
+        std::atomic<bool> holdsOffHang { true };
         juce::WaitableEvent answered { true }; // stays signalled once it is
         juce::MemoryBlock reply;
         std::atomic<bool> done { false };

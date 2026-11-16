@@ -7,6 +7,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 
+#include <cstdint>
 #include <functional>
 
 namespace phazite
@@ -15,6 +16,12 @@ namespace phazite
 // included.
 void undo (Song&);
 void redo (Song&);
+
+// How many times a song's history has moved by hand, its own alone (another song's, an export's of an old version, is
+// none of it): a step begun (an UndoStep that joins none, a gesture, a trial), an undo or a redo; not the steps recording
+// begins as the song plays (RecordingStep). An answer that comes later than what it answers compares it with the count it
+// was asked at (a value typed into a plug-in's control: ParameterHandle). Message thread.
+std::uint64_t countHistoryMoves (const Song&);
 
 // Whether the song has a change to undo, or an undone change to redo.
 bool canUndo (const Song&);

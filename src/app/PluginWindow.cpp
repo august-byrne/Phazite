@@ -329,7 +329,9 @@ namespace
     class PluginWindow final : public DeviceWindowFrame
     {
     public:
-        PluginWindow (DeviceWindows& windows, ProjectContext& context, Song& s, DeviceID d)
+        // With its editor, made already (DeviceWindows::show()), of its instance as reloaded so many times.
+        PluginWindow (DeviceWindows& windows, ProjectContext& context, Song& s, DeviceID d, std::unique_ptr<SandboxedEditor> made,
+                      int madeGeneration)
             : DeviceWindowFrame (windows, s, d),
               menu (context, d, *this)
         {
@@ -338,11 +340,11 @@ namespace
             header = new PluginWindowHeader (context, d, menu);
             setMenuBarComponent (header);
 
-            if (auto* session = findSession (s))
+            if (made != nullptr)
             {
-                auto& plugins = session->getPlugins();
-                auto found = plugins.find (d);
-                showEditorOf (std::move (found), plugins.getGeneration (d));
+                instance = made->getInstance();
+                generation = madeGeneration;
+                setEditor (std::move (made));
             }
         }
 
@@ -355,12 +357,13 @@ namespace
                 if (auto* session = findSession (*shown))
                     session->getPlugins().store (id);
 
+            remaking = nullptr;
             setEditor (nullptr);
             header = nullptr;
             setMenuBar (nullptr); // before the menu goes, the header with it
         }
 
-        bool hasEditor() const override { return editor != nullptr; }
+        bool hasEditor() const override { return editor != nullptr || remaking != nullptr || getContentComponent() == &loadingNote; }
         void updateKeys() { menu.updateKeys(); }
 
     private:
@@ -369,13 +372,44 @@ namespace
         std::shared_ptr<SandboxedInstance> instance; // what the editor shows
         int generation = 0;                          // the instance's reloads, as the editor was made
         std::unique_ptr<SandboxedEditor> editor;
+        std::unique_ptr<SandboxedEditorRequest> remaking; // the editor of another instance, or of one reloaded, to come
+        juce::Label loadingNote;                          // in its place while another instance loads
 
+        // Another instance's editor (the song got the device back), or the same one's after it was reloaded, asked of its
+        // helper without waiting (known bug 166): the window shows nothing of the plug-in meanwhile, and goes if none comes.
         void showEditorOf (std::shared_ptr<SandboxedInstance> newInstance, int newGeneration)
         {
+            remaking = nullptr;
             setEditor (nullptr); // first: the editor going lets go of the instance's callbacks, which the next one takes
             instance = std::move (newInstance);
             generation = newGeneration;
-            setEditor (createSandboxedEditor (instance));
+            remaking = requestSandboxedEditor (instance,
+                                               [this] (std::unique_ptr<SandboxedEditor> made)
+                                               {
+                                                   remaking = nullptr;
+
+                                                   if (made == nullptr)
+                                                       owner.close (id); // deletes this
+                                                   else
+                                                       setEditor (std::move (made));
+                                               });
+        }
+
+        // While another instance of it loads: no editor, a word that says so in its place, at the window's size.
+        void showLoading()
+        {
+            if (getContentComponent() == &loadingNote)
+                return;
+
+            remaking = nullptr;
+            setEditor (nullptr);
+            instance = nullptr;
+            generation = -1;
+            loadingNote.setText (getName() + " is loading. Its window shows once it has.", juce::dontSendNotification);
+            loadingNote.setTitle ("Loading");
+            loadingNote.setJustificationType (juce::Justification::centred);
+            ui::setThemeColour (loadingNote, juce::Label::textColourId, &ui::Palette::textMuted);
+            setContentNonOwned (&loadingNote, false);
         }
 
         void setEditor (std::unique_ptr<SandboxedEditor> newEditor)
@@ -405,6 +439,15 @@ namespace
         {
             auto* session = findSession (shown);
             auto current = session != nullptr ? session->getPlugins().find (id) : nullptr;
+
+            // Another instance of it still loading, in the background, as the song got the device back (a version brought
+            // back, Discard, a branch switched to in place): the window stays, saying so, and shows its editor once it is
+            // in (the review of known bug 166: it closed).
+            if (current == nullptr && session != nullptr && getPluginStatus (shown, id) == PluginInstances::Status::loading)
+            {
+                showLoading();
+                return true;
+            }
 
             if (current == nullptr)
                 return false;
@@ -540,22 +583,136 @@ void DeviceWindows::show (DeviceID id)
     if (song == nullptr || ! findDeviceState (*song, id).isValid() || isFrozenDevice (*song, id))
         return;
 
-    // A plug-in's own editor, or one of Phazite's own devices' out of the Devices view. Containers show there only.
-    std::unique_ptr<DeviceWindowFrame> window;
+    // Asked again while it opens: the wait given up (a helper alive that never makes the editor kept it for ever: the second
+    // review of known bug 166), its editor dropped if it comes; the next ask asks again.
+    if (opening.contains (id))
+    {
+        close (id);
+        return;
+    }
 
+    // A plug-in's own editor, once the plug-in has loaded, if it still loads, and its helper has made the editor, which it
+    // is asked for without waiting (known bug 166); or one of Phazite's own devices' out of the Devices view. Containers show
+    // there only.
     if (opensWindow (*song, id))
-        window = std::make_unique<PluginWindow> (*this, context, *song, id);
-    else if (popsOut (*song, id))
-        window = std::make_unique<DeviceWindow> (*this, context, *song, id);
+    {
+        opening[id] = {};
+        lookAtOpening();
+        return;
+    }
 
-    if (window == nullptr || ! window->hasEditor())
-        return; // a plug-in that didn't load, or makes no editor
+    if (popsOut (*song, id))
+        place (id, std::make_unique<DeviceWindow> (*this, context, *song, id));
+}
+
+void DeviceWindows::place (DeviceID id, std::unique_ptr<juce::DocumentWindow> made)
+{
+    auto* window = dynamic_cast<DeviceWindowFrame*> (made.get());
+    auto* song = findSong (context);
+
+    if (window == nullptr || song == nullptr || ! window->hasEditor())
+        return; // a plug-in that makes no editor
 
     const auto kept = getWindowPosition (*song, id);
     window->place (openOver, kept.has_value() ? *kept : choosePosition (*window));
     window->setVisible (true);
     window->toFront (false);
-    windows[id] = std::move (window);
+    windows[id] = std::move (made);
+}
+
+bool DeviceWindows::isOpening (DeviceID id) const
+{
+    return opening.contains (id);
+}
+
+void DeviceWindows::lookAtOpening()
+{
+    // Each plug-in's window to open: dropped once its device has gone or is frozen, or once its plug-in didn't load or makes
+    // no editor; its editor asked for once its plug-in has loaded; and the window shown once the editor has come.
+    auto* song = findSong (context);
+    auto* session = song != nullptr ? findSession (*song) : nullptr;
+
+    for (auto it = opening.begin(); it != opening.end();)
+    {
+        const auto id = it->first;
+        auto& waiting = it->second;
+
+        if (song == nullptr || session == nullptr || ! findDeviceState (*song, id).isValid() || isFrozenDevice (*song, id))
+        {
+            it = opening.erase (it);
+            continue;
+        }
+
+        // The instance asked for no longer the song's (an undo or a redo replaced it, or it was reloaded): its editor dropped
+        // as it comes (the helper closes it), and the instance there is now asked once it has loaded (the review of known bug
+        // 166: a window opened on the old one, whose turns went nowhere).
+        auto& plugins = session->getPlugins();
+
+        if (waiting.request != nullptr && (plugins.find (id) != waiting.instance || plugins.getGeneration (id) != waiting.generation))
+            waiting = {};
+
+        if (waiting.request == nullptr)
+        {
+            if (getPluginStatus (*song, id) == PluginInstances::Status::loading)
+            {
+                ++it;
+                continue;
+            }
+
+            waiting.instance = plugins.find (id);
+            waiting.generation = plugins.getGeneration (id);
+            waiting.request = requestSandboxedEditor (waiting.instance, [this, id] (std::unique_ptr<SandboxedEditor> made)
+                                                      { editorMade (id, std::move (made)); });
+
+            if (waiting.request == nullptr)
+            {
+                it = opening.erase (it); // one that didn't load, crashed, or has no editor
+                continue;
+            }
+        }
+
+        ++it;
+    }
+
+    if (opening.empty())
+        stopTimer();
+    else if (! isTimerRunning())
+        startTimer (lookMilliseconds);
+}
+
+void DeviceWindows::editorMade (DeviceID id, std::unique_ptr<SandboxedEditor> made)
+{
+    // Its request goes first (this is its call): what it made is the window's from now on, if its instance is still the
+    // song's, as reloaded as often; else it is dropped, and the one there is now asked for its own.
+    const auto found = opening.find (id);
+    const auto generation = found != opening.end() ? found->second.generation : 0;
+    const auto asked = found != opening.end() ? found->second.instance : nullptr;
+    opening.erase (id);
+    auto* song = findSong (context);
+    auto* session = song != nullptr ? findSession (*song) : nullptr;
+
+    if (session == nullptr || ! findDeviceState (*song, id).isValid())
+        return;
+
+    // Whatever came, editor or none, of an instance the song no longer has (an undo or a redo replaced it before the timer
+    // looked, or its helper refused one it was closing): the instance there now is asked once it has loaded.
+    if (session->getPlugins().find (id) != asked || session->getPlugins().getGeneration (id) != generation)
+    {
+        made = nullptr;
+        opening[id] = {};
+        lookAtOpening();
+        return;
+    }
+
+    if (made == nullptr)
+        return;
+
+    place (id, std::make_unique<PluginWindow> (*this, context, *song, id, std::move (made), generation));
+}
+
+void DeviceWindows::timerCallback()
+{
+    lookAtOpening();
 }
 
 juce::Point<int> DeviceWindows::choosePosition (const juce::Component& window) const
@@ -580,6 +737,8 @@ bool DeviceWindows::isOpen (DeviceID id) const
 
 void DeviceWindows::close (DeviceID id)
 {
+    opening.erase (id); // one still to open doesn't: the editor its helper makes is closed there
+
     const auto found = windows.find (id);
 
     if (found == windows.end())
@@ -593,6 +752,9 @@ void DeviceWindows::close (DeviceID id)
 
 void DeviceWindows::closeAll()
 {
+    opening.clear();
+    stopTimer();
+
     while (! windows.empty())
         close (windows.begin()->first);
 }

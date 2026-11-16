@@ -24,7 +24,11 @@ struct TestPlugins
                         // the keys' pressure turns its notes down, the channel's all of them and a note's (aftertouch) its own: by
                         // half at full pressure, by nothing at none
         crash,          // an effect that crashes as it plays a block while its Crash ("20") is on, and plays what isn't a number
-                        // (NaN) in place of its sound while its NaN ("21") is on
+                        // (NaN) in place of its sound while its NaN ("21") is on; its Wild ("23") has NaN for its default, a name
+                        // and a label thousands of characters long, a text of 100,000 for any value, and reads any text as
+                        // NaN; its Nonsense ("22"), set, tells the host the Wild is NaN (from 0.5 up) or an infinity (below),
+                        // then that its Told ("24") is the value it was set to; and two parameters whose IDs, 201 characters
+                        // long, differ only in their last
         hang,           // an effect that plays nothing back while its Hang ("30") is on: it loops for ever; and its Stall ("31")
                         // stops the thread that turns it on for ever (the helper's message thread, set by hand)
         latency,        // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so
@@ -38,7 +42,8 @@ struct TestPlugins
         midiLog,        // an instrument that plays nothing and keeps, as its state, the MIDI messages it was given since it was last
                         // reset (as playback starts and jumps), up to 4096 of them (TestPlugins::readMidiLog())
         slow,           // an effect that passes its sound at its Level ("60"), and waits while a slow gate is shut
-        slowToo,        // (getSlowGate()): as it is made and as its state is taken, or as it goes; the second in a file of its own,
+        slowToo,        // (getSlowGate()): as it is made, as its state is taken, as it makes its editor and as its Level's text
+                        // is written or read, or as it goes; the second in a file of its own,
         slowSibling,    // the third in the first's file (one helper for both, as a file of several plug-ins has). Each crashes as
                         // it is made from a state whose Level is below 0, and takes its Level as its own window would, telling the
                         // host, from a state with a second value of 1 after it
@@ -54,6 +59,9 @@ struct TestPlugins
     static juce::File getSlowGate (bool closing = false);
     static juce::File getSlowBulk(); // while it is there, a slow stand-in's state is 20 MB larger, as one with samples in it
     static juce::File getSlowWaiting (Kind);
+
+    // The file the hanging stand-in leaves while it keeps a block (its Hang on), for a test to see it has begun to keep one.
+    static juce::File getHangKeeping();
 
     // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time
     // signature, whether the song played, and where the bar it is in starts, in quarter notes, and which bar that is; each
@@ -81,6 +89,12 @@ struct TestPlugins
     // Files of the format that hang for ever and crash as they are scanned, which hold no plug-in.
     static constexpr const char* hangsScanned = "PhaziteTestHangScanned";
     static constexpr const char* crashesScanned = "PhaziteTestCrashScanned";
+
+    // Shell files, as Waves' WaveShell is one: each scanned as holding so many plug-ins ("Test Shell 1" to "Test Shell n",
+    // which can't be made).
+    static constexpr const char* shellScanned = "PhaziteTestShellScanned";
+    static constexpr const char* hugeShellScanned = "PhaziteTestHugeShellScanned";
+    static constexpr int shellSize = 1000, hugeShellSize = 9000;
 
     // One made in the tests' own process, as the format makes it (for tests that play it here to compare), in a version of
     // it (the effect's: 1, Gain and Tone; 2, Tone, Gain and Drive; 3, Tone alone), which the format takes from the

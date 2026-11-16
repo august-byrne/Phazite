@@ -316,10 +316,18 @@ void Playlist::AutomationLaneView::typeValue (int index)
         const auto values = handle.getRange();
         return juce::StringArray { getValueText ((float) values.start), getValueText ((float) values.end) };
     };
+    // A plug-in's value as the plug-in reads it, once its helper has (known bug 166): the lane shows the points as they were
+    // meanwhile.
     valueField->onApply = [this, indices] (const juce::String& text)
     {
-        if (const auto value = parseParameterText (handle, kind, text))
-            setAutomationPointValues (playlist.context, parameter, indices, *value);
+        parseParameterText (handle, kind, text,
+                            [safeThis = juce::Component::SafePointer<AutomationLaneView> (this), typedFor = parameter, indices,
+                             project = playlist.context.getProjectNumber()] (std::optional<float> value)
+                            {
+                                if (safeThis != nullptr && value.has_value() && safeThis->parameter == typedFor
+                                    && safeThis->playlist.context.getProjectNumber() == project)
+                                    setAutomationPointValues (safeThis->playlist.context, typedFor, indices, *value);
+                            });
     };
     valueField->onFinished = [safeThis = juce::Component::SafePointer<AutomationLaneView> (this)]
     {

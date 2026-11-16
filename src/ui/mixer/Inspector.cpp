@@ -296,12 +296,36 @@ namespace
         {
             textFromValueFunction = [this] (double value)
             {
+                if (beingRead.isNotEmpty())
+                    return beingRead;
+
                 const auto text = format (value);
                 return highest - lowest > getStep() / 1000.0 ? text + " to " + format (value + highest - lowest) : text;
             };
 
             valueFromTextFunction = [this] (const juce::String& text)
             {
+                // Read later where it is (a plug-in's value, which its helper reads without the message thread waiting: known
+                // bug 166), then set: the field shows what was typed meanwhile, then the value's text.
+                if (parseLater != nullptr)
+                {
+                    beingRead = text;
+                    parseLater (text,
+                                [safeThis = juce::Component::SafePointer<MultiField> (this), text] (std::optional<double> value)
+                                {
+                                    if (safeThis == nullptr || safeThis->beingRead != text)
+                                        return;
+
+                                    safeThis->beingRead = {};
+
+                                    if (value.has_value())
+                                        safeThis->set (*value);
+
+                                    safeThis->updateText();
+                                });
+                    return getValue();
+                }
+
                 typed = parse (text);
 
                 // A value typed that JUCE's slider takes for the field's (the lowest item's) changes no slider value, so the
@@ -406,11 +430,16 @@ namespace
         std::function<void (double amount)> change = [] (double) {};
         std::function<void (double value)> set = [] (double) {};
 
+        // Where set, what is typed is read by it in place of parse, calling back later (above); its call must come after
+        // it has returned.
+        std::function<void (const juce::String&, std::function<void (std::optional<double>)>)> parseLater;
+
     private:
         ProjectContext& context;
         const juce::String dragName;
         std::unique_ptr<SongGesture> gesture;
         std::optional<double> typed; // the value typed, until it is set
+        juce::String beingRead;      // what was typed, while parseLater reads it
         double lowest = 0.0, highest = 0.0;
         double shown = 0.0;    // the lowest, as the items have it, which a change is from
         double dragFrom = 0.0; // the field's value as the drag started
@@ -1215,11 +1244,28 @@ namespace
             { moveAutomationPoints (context, parameter, indices, BeatDuration::fromBeats (value - earliest), 0.0f); };
 
             valueField.setTooltip ("The points' value: drag or scroll to move them all, or type one for all of them");
-            valueField.format = [this] (double value) { return getValueText ((float) value); };
+            // A plug-in's as it writes and reads them, asked of its helper without waiting (known bug 166): the field shows its
+            // text again once it has come, and sets a value typed once the plug-in has read it.
+            valueField.format = [this] (double value)
+            {
+                return formatParameterText (handle, getParameterKind(), (float) value,
+                                            [safeField = juce::Component::SafePointer<MultiField> (&valueField)]
+                                            {
+                                                if (safeField != nullptr)
+                                                    safeField->updateText();
+                                            });
+            };
             valueField.parse = [this] (const juce::String& text) { return parseValue (text); };
             valueField.change = [this] (double amount)
             { moveAutomationPoints (context, parameter, indices, {}, toFloat (amount, noNumber)); };
             valueField.set = [this] (double value) { setAutomationPointValues (context, parameter, indices, toFloat (value, noNumber)); };
+
+            if (handle.readsTextLater())
+                valueField.parseLater = [this] (const juce::String& text, std::function<void (std::optional<double>)> then)
+                {
+                    parseParameterText (handle, getParameterKind(), text, [then = std::move (then)] (std::optional<float> value)
+                                        { then (value.has_value() ? std::optional ((double) *value) : std::nullopt); });
+                };
 
             curveField.setTooltip ("How the line after each point bends: 0% is straight, up to 100% either way");
             curveField.format = [] (double bend) { return juce::String (juce::roundToInt (bend * 100.0)) + "%"; };

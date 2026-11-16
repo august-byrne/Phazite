@@ -20,8 +20,9 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 | A plug-in's state kept as its `.vstpreset` | Built | Not yet tried by a person with a preset going to another DAW and back |
 | Notes ended on Stop, whatever the plug-in takes | Built | |
 | A plug-in that fails during an export, freeze or bounce fails it | Built | |
-| Plug-ins opened, saved and closed without the window waiting for them | Built | A plug-in added, or brought back by an undo once the project's have loaded, still opens while the window waits |
-| Stores, preparing and plug-in windows closed without the window waiting | Built | |
+| Plug-ins opened, added, reloaded, saved and closed without the window waiting for them | Built | |
+| Stores, preparing, plug-in windows opened and closed, and values' texts without the window waiting | Built | Linux's window closing not yet tried on a Linux desktop |
+| What a plug-in tells checked where it comes in: no value that is no number, no text of any length | Built | |
 | A slow plug-in waited for in a render, named after 5 seconds, with Cancel | Built | |
 | A plug-in's window as large as the plug-in at any Interface Size | Built | |
 | A choice of how plug-ins share helpers | Declined | One helper for each plug-in file measured cheap enough |
@@ -86,7 +87,9 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 - **What shows:** the plug-in's slot reads "*name* - Crashed" in the danger colour. It plays nothing: an effect's
   sound fades out, as for a late block.
 - **Reloading:** a click on the slot, or **Reload** in its menu, opens the plug-in again in a new helper with the
-  state the song holds for it: the state it was last given or last asked for. Its window makes its editor again.
+  state the song holds for it: the state it was last given or last asked for. It reloads in the background, as a
+  project's plug-ins load: its slot reads "*name* - Loading" meanwhile, it stays silent, and one that doesn't reload says
+  why once it is done. Its window makes its editor again.
 - **A plug-in that crashes its helper as it loads stays off,** at the next start too, until it is reloaded by hand,
   so that it can't take time from every project that holds it. The settings keep that list.
 - **A missing plug-in** (not installed on this computer) stays in the song as it was saved, silent, until scanning
@@ -104,14 +107,16 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 
 ## Opening, saving and closing
 
-Phazite's window never waits for a plug-in as a project opens, saves or closes, as most DAWs' windows do.
+Phazite's window never waits for a plug-in as a project opens, saves or closes, as a plug-in is added, reloaded or its
+window opens, or as its values' texts are written and read, as most DAWs' windows do.
 
 - **Opening:** the plug-ins of a project that opens load in the background, one at a time in each helper and the
   helpers beside each other, each plug-in's time limit counted from when its own load begins. The song is there at once,
   and plays and edits meanwhile; each plug-in comes in as it is ready, its sound fading in over 5 milliseconds. The
-  Project view lists each as "loading" until it has. A plug-in the song gets back meanwhile (an undo) loads in the
-  background too; one added opens at once, as a plug-in added always has. One that a closed project or an undo no
-  longer holds is abandoned before it opens, or closed as soon as it has.
+  Project view lists each as "loading" until it has, and its slot reads "*name* - Loading". A plug-in added, one the song
+  gets back (an undo, a redo), one scanning finds and one reloaded load in the background in the same way, whenever they
+  come; what the song gives it meanwhile (a preset's state, an undo's) is what it comes in with. One that a closed project
+  or an undo no longer holds is abandoned before it opens, or closed as soon as it has.
 - **What is heard while a project loads:** a plug-in still loading is silent in its place, as a late or crashed one is:
   an instrument plays nothing, and an effect silences what passes through it (an effect that can't play is silent, never
   dry), so the strip it is on is silent until it has loaded (on the master, the whole song: right for a limiter). A
@@ -119,7 +124,9 @@ Phazite's window never waits for a plug-in as a project opens, saves or closes, 
 - **A helper that crashes as a plug-in loads** marks that plug-in as one that crashes as it loads; another plug-in that
   was in the same helper, or loading in it, is tried once more in a fresh helper first.
 - **Renders:** an export, a freeze or a bounce started while plug-ins still load fails at its start, naming them ("*name*
-  is still loading. Render again once the project's plug-ins have loaded.").
+  is still loading. Render again once the project's plug-ins have loaded."), one the song got a moment before included. A
+  render of a song no session plays (an older commit's bounce, a DAWproject of an old version) opens its own plug-ins in
+  the background the same way, and begins once they are in.
 - **Saving:** a save asks every plug-in for its state at once, and writes once all have answered, or once a plug-in has
   taken 10 seconds; one that hasn't answered keeps the state it last gave, and a notice names it. The save is never lost
   over one plug-in. A save or a close that waits more than a second shows the progress window, "Waiting for the
@@ -203,19 +210,52 @@ one (an older commit's bounce) gets plug-in instances of its own.
   saved or copied. It is outside the undo history, and a change made in the plug-in's window counts as an unsaved
   change. A VST3's state is kept as the format's own preset file, a `.vstpreset`.
 - **Latency** that a plug-in reports goes into the song's delay compensation ([engine.md](engine.md)).
+- **A value's text and a value typed** are asked of the helper without waiting: a value's text the plug-in wrote before
+  shows at once, else the value as a number until the answer comes (never another value's text), one value of a parameter
+  asked at a time, the newest asked for meanwhile next. A value typed is read by the plug-in while the window takes no
+  input (the window's one hold, as for work that waits: play and stop still pass), for as long as that takes while its
+  helper lives, the field showing what was typed meanwhile; after a second a progress window says Phazite waits for the
+  plug-in, and Escape or its Cancel stops waiting (the value dropped, the old text shown again, a late answer
+  dropped too). Phazite never sets a number the plug-in didn't give. The value is set only if the song's history
+  hasn't moved meanwhile (an undo, a redo, another step) and the parameter is still there, and dropped otherwise, or if
+  its plug-in or its helper has gone; what changes the song as it plays (automation written, a take recorded) leaves it
+  alone.
+- **What a plug-in tells is checked where it comes in:** a value that is no number (NaN, an infinity) is no change, a
+  value past either end is at that end, every text (a name, a label, a program's name, a value's text) is 256 characters
+  at most (an ID 128, each once: the first of IDs then the same keeps it, a later one is named by its order among them,
+  "gain#2", as are one with none, "#1", and one named as the engine's mix, "mix#2"), an editor's side 16,384 pixels at
+  most, a count never more than its message holds (a scan's 8,192 plug-ins from a file at most, what is past that said
+  in the plug-in list's window), the values and gestures a helper tells between two turns of the message loop the last
+  of each parameter (a gesture begun and ended meanwhile begins and ends, each begin paired with its end), its editor's
+  keys a thousand at most, and the process ID its hello tells taken only if it is the child Phazite started, running the
+  helper program. A plug-in may tell nonsense; nothing past the helper's messages sees it.
 
 ## Plug-in windows
 
 A plug-in's editor is a window of its helper's, shown inside a window of Phazite's, which the helper places over it
 again as it moves or is resized. It is as large on the screen as the plug-in makes it, whatever the Interface Size, and
 fitted again as that changes. Phazite never calls into the helper's window, so a helper that hangs can't hang
-Phazite's window. On Windows the helper's window sits in a window of Phazite's own (a socket) and tells Phazite's window
-nothing of what happens in it; as the plug-in's window closes, the socket is taken out of Phazite's window, hidden, and
-the helper is asked to close its editor without anything waiting, the socket going once the helper's window has left
-it. A window destroyed with a child of another process's in it waits for that process's thread, which kept Phazite 2
-seconds at every close, and as long as a hung helper lived. The keys Phazite takes over a plug-in window (play, stop,
-the computer keyboard) are handed back by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
-([commands-keys-help.md](commands-keys-help.md)).
+Phazite's window. The window opens once the helper has made the editor, which it is asked for without waiting (and once
+the plug-in has loaded, if it still loads), for as long as the helper lives (a big editor may take long; after 30 seconds a
+helper whose message thread doesn't answer is taken for hung); meanwhile the device's window button shows it opening, and
+says so after a few seconds; a second click stops waiting (an editor that comes then is dropped, and the next click asks
+again), and closing it or deleting the device drops it. An editor
+made for an instance the song no longer has (an undo replaced it meanwhile) is dropped, and the instance there now asked.
+An open window whose device comes back as another instance (a version brought back, Discard, a branch switched to in
+place) stays, saying the plug-in loads, and shows its editor once it is in. The helper's window sits in a window of Phazite's own (a
+socket) and tells Phazite's window nothing of what happens in it; as the plug-in's window closes, the socket is taken
+out of Phazite's window, hidden, and the helper is asked to close its editor without anything waiting, the socket going
+once the helper's window has left it. A window destroyed with a child of another process's in it waits for that
+process's thread on Windows, which kept Phazite 2 seconds at every close, and as long as a hung helper lived; on Linux
+the close waited up to 2 seconds for the helper to take its window out, which Linux's socket, an X window of Phazite's
+own, makes needless: it is taken out of Phazite's window as soon as the editor stops showing, and goes only once the
+helper's window has left it or the helper has gone (without a display to make one with, the close waits as before). The
+keys Phazite takes over a plug-in window (play, stop, the computer keyboard) are handed back by the helper, unless **Send
+All Keys to the Plug-in** is on for that plug-in ([commands-keys-help.md](commands-keys-help.md)): the helper is told
+each in every form a key of the layout in use comes in that Phazite's own window matches it by (AZERTY's & key for a
+shortcut on 1), again as another layout is switched to, and on Windows by its place (its scan code) too, Shift forms
+included: the helper matches a key that has a place by its place alone and hands it back by it, whatever its own
+thread's layout, so that a key it took always means to Phazite what Phazite asked for.
 
 ## Decisions
 

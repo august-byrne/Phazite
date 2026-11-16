@@ -73,6 +73,10 @@ DeviceID TestPlugin::add (Song& song, TrackID track)
 {
     const auto id = insertDeviceState (song, track, makeDeviceState (song, makeDeviceType (getDescription())));
     REQUIRE (id.isValid());
+
+    // It loads in the background, as a plug-in added does (model/plugins/internal/PluginInstances.h): waited for here.
+    findPluginInstance (song, id);
+    REQUIRE (dispatchMessagesUntil ([&] { return getPluginStatus (song, id) != PluginInstances::Status::loading; }));
     return id;
 }
 

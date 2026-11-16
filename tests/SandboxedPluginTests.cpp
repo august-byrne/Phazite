@@ -11,6 +11,7 @@
 #include "TestKeyboardLayouts.h"
 #include "TestSong.h"
 #include "app/AppCommands.h"
+#include "app/PluginWindow.h"
 #include "app/ProjectSession.h"
 #include "app/SandboxedEditor.h"
 #include "app/SessionEnd.h"
@@ -19,10 +20,12 @@
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/Json.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PluginScanner.h"
@@ -41,14 +44,18 @@
 #include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
+#include "model/project/Export.h"
 #include "model/project/NewProject.h"
+#include "model/project/internal/Export.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
+#include "ui/components/ParameterText.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
@@ -56,6 +63,7 @@
 #include "ui/input/Keymap.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/DeviceSlots.h"
 #include "ui/shell/RenderPanel.h"
 #include "ui/versions/BranchPicker.h"
 
@@ -63,6 +71,8 @@
 #include <atomic>
 #include <functional>
 #include <limits>
+#include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <thread>
@@ -114,12 +124,74 @@ phazite::SandboxedInstance& getSandboxed (TestSong& song, phazite::DeviceID devi
     return *sandboxed;
 }
 
-// How long the message thread was kept by something it did, in milliseconds.
+// How long the message thread was kept by something it did, in milliseconds: printed, or a promise that it didn't wait for
+// what it would have waited for, checked against about half the long limit of that wait (known bug 180: never against a
+// time a busy machine can reach).
 double timeKept (const std::function<void()>& done)
 {
     const auto since = juce::Time::getMillisecondCounterHiRes();
     done();
     return juce::Time::getMillisecondCounterHiRes() - since;
+}
+
+// Once a device's helper has taken what was sent to it before (a value set, a state given): it takes its pipe's messages
+// in turn, so a round trip after them, its state asked and answered, comes after them (known bug 180: a wait for a time).
+void helperHasTaken (TestSong& song, phazite::DeviceID device)
+{
+    REQUIRE (getSandboxed (song, device).getRemote().getState (phazite::test::hangTimeout).has_value());
+}
+
+// Once the hanging stand-in keeps a block (its Hang on, the block played: host/TestPlugins.h).
+bool waitForBlockKept()
+{
+    return phazite::test::dispatchMessagesUntil ([] { return phazite::test::TestPlugins::getHangKeeping().existsAsFile(); });
+}
+
+// A plug-in's editor, asked of its helper as a plug-in's window asks for it, without waiting, and waited for here: none for
+// one that makes none.
+std::unique_ptr<phazite::SandboxedEditor> makeEditor (std::shared_ptr<phazite::SandboxedInstance> instance)
+{
+    struct Made
+    {
+        bool done = false;
+        std::unique_ptr<phazite::SandboxedEditor> editor;
+    };
+
+    auto made = std::make_shared<Made>();
+    auto request = phazite::requestSandboxedEditor (std::move (instance),
+                                                    [made] (std::unique_ptr<phazite::SandboxedEditor> editor)
+                                                    {
+                                                        made->editor = std::move (editor);
+                                                        made->done = true;
+                                                    });
+
+    if (request == nullptr)
+        return nullptr;
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([made] { return made->done; }));
+    return std::move (made->editor);
+}
+
+// A crashed plug-in reloaded as its slot's click reloads it, in the background, and waited for here: why it didn't load, if
+// it didn't.
+std::optional<juce::String> reloadAndWait (TestSong& song, phazite::DeviceID device)
+{
+    struct Reloaded
+    {
+        bool done = false;
+        std::optional<juce::String> problem;
+    };
+
+    auto reloaded = std::make_shared<Reloaded>();
+    phazite::reloadDevice (song.context, device,
+                           [reloaded] (std::optional<juce::String> problem)
+                           {
+                               reloaded->problem = std::move (problem);
+                               reloaded->done = true;
+                           });
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([reloaded] { return reloaded->done; }));
+    return reloaded->problem;
 }
 
 #if JUCE_WINDOWS
@@ -206,7 +278,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings as the project saves, and t
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
     song.setParameter (effect, effectGain, 0.5f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+    helperHasTaken (song, effect); // its helper has its gain
 
     // Its state, as the project stores it: the gain the helper's plug-in has.
     juce::MemoryBlock state;
@@ -531,6 +603,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return phazite::getMixerChannels (song.context).tracks.size() == 2; }));
     const auto copy = phazite::getMixerChannels (song.context).tracks[1];
     REQUIRE (phazite::getEffects (song.context, copy).size() == 1);
+    song.waitForPlugins(); // the copy's, which loads in the background
     CHECK (&getSandboxed (song, phazite::getEffects (song.context, copy)[0].id) != instance);
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
     CHECK (levelNow() == doctest::Approx (half + 6.02f).epsilon (0.002));
@@ -540,6 +613,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     phazite::removeDevice (song.context, effect);
     CHECK (levelNow() == doctest::Approx (toneLevel).epsilon (0.002));
     phazite::undo (getSong (song));
+    song.waitForPlugins(); // brought back, it loads in the background
     CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
 
     // A preset of it, saved at half and loaded into it again at full.
@@ -609,7 +683,8 @@ TEST_CASE ("What a plug-in in a helper tells of itself that changes nothing is n
     };
 
     tell (gainNow, toneNow, restart);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 1000); // what it told has come and gone
+    phazite::test::dispatchPendingMessages(); // what it told came with its answer (the helper sends it before),
+    phazite::test::dispatchPendingMessages(); // and what that tells a message later
     CHECK_FALSE (song.getProject().hasUnsavedChanges());
     CHECK (getSong (song).getChangesOutsideHistory() == 0);
 
@@ -649,7 +724,7 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
     // Its editor, as a plug-in window makes it, as large as the plug-in's own, in a window on the screen.
     auto* session = phazite::getSession (song.context);
     REQUIRE (session != nullptr);
-    auto editor = phazite::createSandboxedEditor (session->getPlugins().find (effect));
+    auto editor = makeEditor (session->getPlugins().find (effect));
     REQUIRE (editor != nullptr);
     CHECK (editor->getWidth() == 300);
     CHECK (editor->getHeight() == 200);
@@ -686,10 +761,12 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
 
     // With Send All Keys to the Plug-in on, the plug-in gets it.
     keys.setSendsAllKeys (window, true);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 600); // the editor tells the helper
+    editor->tickNow();             // the editor tells the helper,
+    helperHasTaken (song, effect); // which has taken it
     const auto before = plays;
     PostMessageW (child, WM_KEYDOWN, VK_SPACE, 0);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 500);
+    // An absence: it isn't handed back while the message loop turns for a stretch (which a busy machine can only make miss).
+    phazite::test::dispatchMessagesUntil ([&] { return plays != before; }, 500);
     CHECK (plays == before);
 
     keys.unwatch (window);
@@ -818,6 +895,7 @@ TEST_CASE ("Stopped, a plug-in in a helper hears where the playhead is in every 
 TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, says it crashed, and reloads as it was")
 {
     SandboxedPlugins sandboxed;
+    SandboxedPlugins::useShortHangLimits(); // a hang's test
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
@@ -847,7 +925,7 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
     juce::MemoryBlock last;
     instance->getStateInformation (last);
     const auto lastHang = juce::MemoryInputStream (last, false).readFloat();
-    CHECK_FALSE (phazite::reloadDevice (song.context, hanging).has_value());
+    CHECK_FALSE (reloadAndWait (song, hanging).has_value());
     CHECK (&getSandboxed (song, hanging) == instance);
     CHECK_FALSE (instance->hasCrashed());
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
@@ -862,6 +940,7 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
 TEST_CASE ("A plug-in whose helper's message thread stops answering is ended for it, and nothing of Phazite's waits")
 {
     SandboxedPlugins sandboxed;
+    SandboxedPlugins::useShortHangLimits(); // a hang's test
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
@@ -903,7 +982,7 @@ TEST_CASE ("A plug-in that crashes its helper as it loads stays off, another of 
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 0);
 
     // Reloaded, it loads again, crashes again, and says so.
-    const auto problem = phazite::reloadDevice (song.context, crashing);
+    const auto problem = reloadAndWait (song, crashing);
     REQUIRE (problem.has_value());
     CHECK (problem->contains ("crashed"));
     CHECK (SandboxedPlugins::getHost().getCrashedWhileLoading().contains (identity));
@@ -954,6 +1033,31 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&] { return effectButton() != nullptr && effectButton()->getButtonText() == "Test Crash"; }));
     CHECK_FALSE (getSandboxed (song, crashing).hasCrashed());
+}
+
+TEST_CASE ("A shell file's hundreds of plug-ins are all found; what is past what Phazite takes from a file is said, not left out silently")
+{
+    // The review of known bug 181: a file's plug-ins past 256 were left out without a word (Waves' WaveShell holds hundreds).
+    using phazite::test::TestPlugins;
+    auto& host = SandboxedPlugins::getHost();
+    auto scanner = phazite::createPluginScanner (host, phazite::pluginScanSecondsEach);
+    const auto format = TestPlugins::createFormat();
+    juce::OwnedArray<juce::PluginDescription> found;
+    host.takeScanProblems();
+
+    CHECK (scanner->findPluginTypesFor (*format, found, TestPlugins::shellScanned));
+    CHECK (found.size() == TestPlugins::shellSize);
+    CHECK (host.takeScanProblems().isEmpty());
+
+    found.clear();
+    CHECK (scanner->findPluginTypesFor (*format, found, TestPlugins::hugeShellScanned));
+    CHECK (found.size() == phazite::maxScannedPlugins);
+    const auto problems = host.takeScanProblems();
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].startsWith (TestPlugins::hugeShellScanned));
+    CHECK (problems[0].contains (juce::String (TestPlugins::hugeShellSize - phazite::maxScannedPlugins) + " of the "
+                                 + juce::String (TestPlugins::hugeShellSize)));
+    scanner->scanFinished();
 }
 
 TEST_CASE ("The plug-in scan finds what a file holds in a helper, and leaves out one that hangs or crashes it, each in its time")
@@ -1014,11 +1118,13 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
 
     // What it keeps: the state it last gave, at once; and the project saves as it would.
     juce::MemoryBlock state;
-    CHECK (timeKept ([&] { getSandboxed (song, crashing).getStateInformation (state); }) < 1000.0);
+    // (a wait for its gone helper would last a state's time: half of that tells them apart however busy the machine is)
+    const auto stateLimit = (double) phazite::SandboxedInstance::getStateMilliseconds();
+    CHECK (timeKept ([&] { getSandboxed (song, crashing).getStateInformation (state); }) < stateLimit / 2.0);
     CHECK (state == getSandboxed (song, crashing).getLastState());
     const auto savedAt = juce::Time::getMillisecondCounterHiRes();
     song.saveWithPluginStates();
-    CHECK (juce::Time::getMillisecondCounterHiRes() - savedAt < 2000.0);
+    CHECK (juce::Time::getMillisecondCounterHiRes() - savedAt < stateLimit / 2.0);
 }
 
 TEST_CASE ("A plug-in opened from its project keeps the settings the project holds when it crashes: saved again, and reloaded")
@@ -1029,7 +1135,7 @@ TEST_CASE ("A plug-in opened from its project keeps the settings the project hol
     TestSong song;
     const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
     song.setParameter (effect, effectGain, 0.5f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+    helperHasTaken (song, effect); // its helper has its gain
 
     // Saved and opened again: the plug-in opens from the settings the project holds, its Gain at half.
     song.reopen();
@@ -1049,7 +1155,7 @@ TEST_CASE ("A plug-in opened from its project keeps the settings the project hol
     CHECK (getStored() == stored);
 
     // Reloaded, it has them: its Gain at half, as the plug-in in its new helper says.
-    CHECK_FALSE (phazite::reloadDevice (song.context, effect).has_value());
+    CHECK_FALSE (reloadAndWait (song, effect).has_value());
     REQUIRE_FALSE (instance.hasCrashed());
     const auto state = instance.getRemote().getState (10000);
     REQUIRE (state.has_value());
@@ -1071,7 +1177,7 @@ TEST_CASE ("A plug-in that crashes as its track is frozen fails the render, whic
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto effect = song.addEffect (track, "PhaziteTestCrash");
     song.setParameter (effect, crashCrash, 1.0f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // its helper has it before the render's first block
+    helperHasTaken (song, effect); // its helper has it before the render's first block
 
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);
@@ -1096,12 +1202,13 @@ TEST_CASE ("A render waits for a plug-in that keeps its block as long as it take
     // seconds), though it may only be slow. Now it waits, as REAPER's and Bitwig's do, and the render's window names the
     // plug-in, so that the user can cancel it.
     SandboxedPlugins sandboxed;
+    SandboxedPlugins::useShortHangLimits(); // a hang's test
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto slow = song.addEffect (track, "PhaziteTestHang");
     song.setParameter (slow, hangHang, 1.0f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // its helper has it before the render's first block
+    helperHasTaken (song, slow); // its helper has it before the render's first block
 
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);
@@ -1131,16 +1238,13 @@ TEST_CASE ("A render waits for a plug-in that keeps its block as long as it take
 TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for the plug-in")
 {
     SandboxedPlugins sandboxed;
-
-    // For the helper it starts: no block is taken for a hang within the case (only a hang's limit on), however busy the
-    // machine.
-    SandboxedPlugins::getHost().setHangLimits (SandboxedPlugins::messageHangMilliseconds, phazite::test::hangTimeout);
+    phazite::test::TestPlugins::getHangKeeping().deleteFile();
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto hanging = song.addEffect (track, "PhaziteTestHang");
     song.setParameter (hanging, hangHang, 1.0f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+    helperHasTaken (song, hanging); // its helper has it before the render's first block
 
     // The engine at 48 kHz, and the freeze at 44.1 kHz (the tests have no audio device, whose rate a freeze would take).
     // The freeze waits for the plug-in, which keeps the render's first block. Cancelled, the plug-in is prepared for the
@@ -1153,7 +1257,7 @@ TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for 
     song.context.getSongSelection().selectOnly (track);
     phazite::toggleFreeze (song.context, host);
     REQUIRE (host.render != nullptr);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 500);
+    REQUIRE (waitForBlockKept()); // the render's first block, which the plug-in keeps
     REQUIRE (host.finished.isEmpty());
 
     // Cancelled, as its window's Cancel and quitting do: at once, not once the plug-in is taken for hung.
@@ -1167,7 +1271,7 @@ TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for 
 
     // The plug-in lets go of the block (its Hang off), and plays on.
     song.setParameter (hanging, hangHang, 0.0f);
-    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+    helperHasTaken (song, hanging); // its helper has it
     CHECK_FALSE (getSandboxed (song, hanging).hasCrashed());
     EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
@@ -1285,7 +1389,7 @@ TEST_CASE ("What a plug-in plays that isn't a number never reaches the mix: its 
     phazite::test::dispatchPendingMessages();
     const auto state = getSandboxed (song, effect).getRemote().getState (10000);
     REQUIRE (state.has_value());
-    REQUIRE (state->getSize() == 8);
+    REQUIRE (state->getSize() >= 8); // its Crash and its NaN first, then its other parameters
     juce::MemoryInputStream values (*state, false);
     CHECK (values.readFloat() == 0.0f);
     REQUIRE (values.readFloat() == 1.0f);
@@ -1486,9 +1590,14 @@ TEST_CASE ("A plug-in that crashed in a render at another rate is reloaded at th
     played.processor->prepare (48000.0, 256);
     CHECK (played.instance->getPreparedRate() == doctest::Approx (48000.0));
 
-    // Reloaded: at 48 kHz, where A4 is 440 Hz (not 220 Hz, as from a synth at 96 kHz).
+    // Reloaded, as a reload opens it in the background (here, waited for): at 48 kHz, where A4 is 440 Hz (not 220 Hz, as
+    // from a synth at 96 kHz).
+    auto& host = SandboxedPlugins::getHost();
+    const auto reopening = phazite::PluginHost::describeReopening (*played.instance, played.instance->getLastState());
+    CHECK (reopening.sampleRate == doctest::Approx (48000.0));
+    auto opened = host.open (reopening.description, reopening.state, reopening.program, reopening.sampleRate, reopening.blockSize);
     juce::String error;
-    REQUIRE_MESSAGE (SandboxedPlugins::getHost().reload (*played.instance, error), error);
+    REQUIRE_MESSAGE (host.replaceRemote (*played.instance, opened, reopening.sampleRate, error), error);
     juce::AudioBuffer<float> audio (2, 48 * 256);
     audio.clear();
     const std::vector<Note> note { { Note::Type::noteOn, 0, 69, 0.8f } };
@@ -1554,7 +1663,10 @@ TEST_CASE ("A render's first block waits for a block of live playback the plug-i
             renderedBlock = true;
         });
 
+    // An absence: the render's block doesn't come while the plug-in keeps the live one (a stretch of the message loop, which a
+    // busy machine can only make miss, never fail).
     phazite::test::dispatchMessagesUntil ([&renderedBlock] { return renderedBlock.load(); }, 200);
+    CHECK_FALSE (renderedBlock.load());
     played.instance->setParameterValue (played.instance->findParameter (hangHang), 0.0f);
     render.join();
     CHECK (rendered.getSample (0, 255) == doctest::Approx (0.5f));
@@ -1565,7 +1677,6 @@ TEST_CASE ("A render's first block waits for a block of live playback the plug-i
 TEST_CASE ("A block through JUCE's processBlock() notices a helper that has gone at once, not at the hang limit")
 {
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (SandboxedPlugins::messageHangMilliseconds, 20000); // for the helper it starts
     Played played (phazite::test::TestPlugins::Kind::crash);
 
     // Its Crash on: the block crashes its helper.
@@ -1575,7 +1686,7 @@ TEST_CASE ("A block through JUCE's processBlock() notices a helper that has gone
     juce::MidiBuffer midi;
     const auto from = juce::Time::getMillisecondCounterHiRes();
     played.instance->processBlock (buffer, midi);
-    CHECK (juce::Time::getMillisecondCounterHiRes() - from < 10000.0);
+    CHECK (juce::Time::getMillisecondCounterHiRes() - from < phazite::test::hangTimeout / 2.0); // the hang limit is the long one
     CHECK (played.instance->hasCrashed());
 }
 
@@ -1678,7 +1789,7 @@ using Status = phazite::PluginInstances::Status;
 
 // How long a test waits for what it waits for, at most: long, as the tests' waits are, for a loaded machine; it waits for
 // conditions, never for time.
-constexpr int longWait = 120000;
+constexpr int longWait = phazite::test::hangTimeout;
 
 // A slow stand-ins' gate (host/TestPlugins.h), for being made and giving a state or for closing: shut while this lives,
 // unless opened, and open again as it goes; the files they leave as they begin to wait cleared first.
@@ -1701,6 +1812,40 @@ struct SlowGate
     const bool closing;
 };
 
+// The app's hold for a value typed into a plug-in's control, as the main window sets it (the project's hold for work, the
+// window's one hold: src/app/InputHold.h), for as long as this lives: the title its wait's window shows, and its cancel,
+// which a test calls as Escape (ProjectSession::cancelHeldWork()) or the window's Cancel does.
+struct TypedValueHold
+{
+    explicit TypedValueHold (TestSong& s)
+        : song (s)
+    {
+        song.context.setWorkHolder (
+            [this] (const juce::String& shown, phazite::ProjectContext::Cancel cancel, phazite::ProjectContext::Progress)
+            {
+                title = shown;
+                escape = std::move (cancel);
+                return std::make_unique<phazite::ProjectContext::WorkHold>();
+            });
+        phazite::ui::setTypedValueHold ([this] (const juce::String& shown, phazite::ProjectContext::Cancel cancel)
+                                        { return song.context.holdForWork (shown, std::move (cancel)); });
+    }
+
+    ~TypedValueHold()
+    {
+        phazite::ui::setTypedValueHold ({});
+        song.context.setWorkHolder ({});
+    }
+
+    bool isHolding() const { return song.context.isHoldingForWork(); }
+
+    TestSong& song;
+    juce::String title;
+    phazite::ProjectContext::Cancel escape;
+
+    JUCE_DECLARE_NON_COPYABLE (TypedValueHold)
+};
+
 // So many turns of the message loop (each a dispatch of what waits, as the window's paints and timers come), while what a
 // test waits for may come meanwhile: whether all of them came.
 bool turnMessageLoop (int turns)
@@ -1710,12 +1855,17 @@ bool turnMessageLoop (int turns)
 }
 
 // A slow stand-in at the end of a track's effects, as a device list adds one, by its description (the slow one and its
-// sibling share a "file", which TestSong::addEffect() finds devices by).
+// sibling share a "file", which TestSong::addEffect() finds devices by); waited for as it loads in the background, unless
+// the gate is shut, when it loads on.
 phazite::DeviceID addSlow (TestSong& song, phazite::TrackID track, Kind kind = Kind::slow)
 {
     phazite::addEffect (song.context, track, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (kind)));
     const auto effects = phazite::getEffects (song.context, track);
     REQUIRE (! effects.empty());
+
+    if (! phazite::test::TestPlugins::getSlowGate().existsAsFile())
+        song.waitForPlugins();
+
     return effects.back().id;
 }
 } // namespace
@@ -1763,9 +1913,11 @@ TEST_CASE (
     CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
     CHECK (phazite::getPluginsLoading (opened).size() == 2);
 
-    // A plug-in added meanwhile opens at once, as a plug-in added does: its window or a preset has it straight away.
-    const auto added = song.addEffect (track, "PhaziteTestEffect");
-    CHECK (phazite::findPluginInstance (opened, added) != nullptr);
+    // A plug-in added meanwhile loads in the background too (known bug 166), beside them: it comes in while they still load.
+    phazite::addEffect (song.context, track, song.findDeviceType ("PhaziteTestEffect"));
+    const auto added = phazite::getEffects (song.context, track).back().id;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::findPluginInstance (opened, added) != nullptr; }, longWait));
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
 
     // A render started meanwhile says why it can't, rather than render without them.
     phazite::test::RenderHost host;
@@ -1789,12 +1941,841 @@ TEST_CASE (
     CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel - 6.02f - 6.0f).epsilon (0.002));
 }
 
+TEST_CASE ("A plug-in added, or brought back by an undo, loads in the background: nothing waits for it, and what the song gives "
+           "it meanwhile reaches it")
+{
+    // Known bug 166: a plug-in added, or brought back by an undo once the project's plug-ins had loaded, opened while the
+    // message thread waited for it, up to the load limit of a minute.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
+    auto& opened = getSong (song);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+
+    // Shut: it can't be made until the gate opens. Added, and the song's plan made again, without the message thread waiting
+    // for it: it shows as loading, and loads.
+    SlowGate gate;
+    phazite::DeviceID slow;
+    const auto kept = timeKept (
+        [&]
+        {
+            slow = addSlow (song, track);
+            session->update();
+        });
+    MESSAGE ("The message thread was kept for " << kept << " ms");
+    // (structural: it returned while the gate keeps the plug-in from being made, which it would never have done had it
+    // waited for it; it says loading)
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+    CHECK (phazite::getEffects (song.context, track).back().loading);
+    CHECK (phazite::getPluginsLoading (opened) == juce::StringArray ("Test Slow"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([] { return phazite::test::TestPlugins::getSlowWaiting (Kind::slow).existsAsFile(); },
+                                                   longWait));
+
+    // A render started meanwhile says why it can't, rather than render without it.
+    phazite::test::RenderHost host;
+    song.context.getSongSelection().selectOnly (track);
+    phazite::toggleFreeze (song.context, host);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, longWait));
+    CHECK (host.finished[0].contains ("still loading"));
+    CHECK_FALSE (phazite::isFrozen (song.context, track));
+
+    // Taken away by an undo while it loads, it is abandoned; brought back by the redo, it loads again, without waiting.
+    phazite::undo (opened);
+    session->update();
+    CHECK_FALSE (phazite::getPluginStatus (opened, slow).has_value());
+    CHECK (phazite::getPluginsLoading (opened).isEmpty());
+    const auto keptForRedo = timeKept (
+        [&]
+        {
+            phazite::redo (opened);
+            session->update();
+        });
+    MESSAGE ("The message thread was kept for " << keptForRedo << " ms"); // structural: returned while the gate is shut
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+
+    // A state the song gives it meanwhile (as a preset loaded into it does): its Level at a quarter.
+    juce::MemoryOutputStream given;
+    given.writeFloat (0.25f);
+    phazite::findDeviceState (opened, slow)
+        .setProperty (phazite::schema::pluginState, phazite::writeBytes (given.getMemoryBlock()), nullptr);
+
+    // Open: it comes in with it, and the one the undo abandoned never comes in.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&opened] { return phazite::getPluginsLoading (opened).isEmpty(); }, longWait));
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::playing);
+    CHECK_FALSE (phazite::getEffects (song.context, track).back().loading);
+    const auto state = getSandboxed (song, slow).getRemote().getState (longWait); // the plug-in's own, its Level first
+    REQUIRE (state.has_value());
+    CHECK (juce::MemoryInputStream (*state, false).readFloat() == doctest::Approx (0.25f));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [] { return SandboxedPlugins::getHost().getNumLoading (phazite::test::TestPlugins::getDescription (Kind::slow)) == 0; }, longWait));
+
+    // Deleted while it loads: nothing comes of it.
+    gate.shut();
+    const auto deleted = addSlow (song, track);
+    session->update();
+    REQUIRE (phazite::getPluginStatus (opened, deleted) == Status::loading);
+    phazite::removeDevice (song.context, deleted);
+    session->update();
+    CHECK_FALSE (phazite::getPluginStatus (opened, deleted).has_value());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [] { return SandboxedPlugins::getHost().getNumLoading (phazite::test::TestPlugins::getDescription (Kind::slow)) == 0; }, longWait));
+    CHECK (turnMessageLoop (20));
+    CHECK (phazite::getPluginsLoading (opened).isEmpty());
+
+    // A project closed while one loads waits for it neither (structural: closed while the gate is shut, which a wait for the
+    // plug-in would never have been).
+    gate.shut();
+    auto other = std::make_unique<TestSong>();
+    addSlow (*other, other->firstTrack);
+    phazite::getSession (other->context)->update();
+    REQUIRE (phazite::getPluginsLoading (getSong (*other)).size() == 1);
+    const auto keptForClose = timeKept ([&other] { other = nullptr; });
+    MESSAGE ("Closing kept the message thread for " << keptForClose << " ms");
+    // Still loading in its helper, which a close that waited for it (until the load's time ran out, its helper ended) leaves not.
+    CHECK (SandboxedPlugins::getHost().getNumLoading (phazite::test::TestPlugins::getDescription (Kind::slow)) > 0);
+}
+
+TEST_CASE ("A crashed plug-in reloads in the background: nothing waits for its helper or for it, and it shows as loading meanwhile")
+{
+    // Known bug 166: a reload waited for a new helper to start (up to 20 seconds) and the plug-in to open in it.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto track = song.firstTrack;
+    const auto slow = addSlow (song, track);
+    song.waitForPlugins();
+    auto& opened = getSong (song);
+    auto& plugins = phazite::getSession (song.context)->getPlugins();
+    auto& instance = getSandboxed (song, slow);
+
+    const auto crash = [&]
+    {
+        instance.getRemote().getHelper().kill();
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getEffects (song.context, track).back().crashed; }, longWait));
+    };
+
+    crash();
+    const auto generation = plugins.getGeneration (slow);
+
+    // Shut: its new helper starts, but the plug-in can't be made in it. Reloaded, and the message thread waits for none of it.
+    SlowGate gate;
+    auto reloaded = std::make_shared<std::optional<std::optional<juce::String>>>();
+    const auto kept = timeKept (
+        [&] { phazite::reloadDevice (song.context, slow, [reloaded] (std::optional<juce::String> problem) { *reloaded = problem; }); });
+    MESSAGE ("The message thread was kept for " << kept << " ms");
+    // (structural: it returned while the gate keeps the plug-in from being made, which it would never have done had it
+    // waited for it; it says loading)
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+    CHECK (phazite::getEffects (song.context, track).back().loading);
+    CHECK_FALSE (phazite::getEffects (song.context, track).back().crashed);
+    CHECK (phazite::getPluginsLoading (opened) == juce::StringArray ("Test Slow"));
+
+    // Asked again meanwhile, nothing more happens; nothing is said until it is in.
+    auto again = std::make_shared<bool> (false);
+    phazite::reloadDevice (song.context, slow, [again] (std::optional<juce::String>) { *again = true; });
+    CHECK (turnMessageLoop (50));
+    CHECK_FALSE (reloaded->has_value());
+
+    // Open: it is in, the same instance, its windows told to make their editors again.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([reloaded] { return reloaded->has_value(); }, longWait));
+    CHECK_FALSE (reloaded->value().has_value());
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::playing);
+    CHECK (&getSandboxed (song, slow) == &instance);
+    CHECK (plugins.getGeneration (slow) == generation + 1);
+    CHECK (turnMessageLoop (10));
+    CHECK_FALSE (*again);
+
+    // A state the song gives it while it reloads (as a preset loaded into it does: its Level at a fifth), which reached only
+    // the crashed instance then: it plays it once it is in, not what it reloaded from (the review of known bug 166).
+    crash();
+    gate.shut();
+    auto withPreset = std::make_shared<std::optional<std::optional<juce::String>>>();
+    phazite::reloadDevice (song.context, slow, [withPreset] (std::optional<juce::String> problem) { *withPreset = problem; });
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
+    juce::MemoryOutputStream preset;
+    preset.writeFloat (0.2f);
+    phazite::findDeviceState (opened, slow)
+        .setProperty (phazite::schema::pluginState, phazite::writeBytes (preset.getMemoryBlock()), &opened.getUndoManager());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([withPreset] { return withPreset->has_value(); }, longWait));
+    REQUIRE_FALSE (withPreset->value().has_value());
+    const auto playing = instance.getRemote().getState (longWait);
+    REQUIRE (playing.has_value());
+    CHECK (juce::MemoryInputStream (*playing, false).readFloat() == doctest::Approx (0.2f));
+
+    // Reloaded from its own state (its Level at 0.7, set in its window and not yet in the song's), with a preset loaded
+    // and undone meanwhile: the song's state is as it was, but not what the plug-in reloaded from, which Phazite no longer
+    // holds; it plays the song's, which Phazite holds (the second review of known bug 166: it played its own, while saves
+    // recorded the song's).
+    phazite::PluginInstances::setSoonAfterReload (0.0); // from its own, not the song's, though it crashed soon after a reload
+    const auto writeLevel = [] (float level)
+    {
+        juce::MemoryOutputStream written;
+        written.writeFloat (level);
+        return written.getMemoryBlock();
+    };
+    const auto own = writeLevel (0.7f);
+    instance.setStateInformation (own.getData(), (int) own.getSize());
+    crash();
+    gate.shut();
+    auto undone = std::make_shared<std::optional<std::optional<juce::String>>>();
+    phazite::reloadDevice (song.context, slow, [undone] (std::optional<juce::String> problem) { *undone = problem; });
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
+    {
+        const phazite::UndoStep step (opened, "Load Preset");
+        phazite::findDeviceState (opened, slow)
+            .setProperty (phazite::schema::pluginState, phazite::writeBytes (writeLevel (0.4f)), &opened.getUndoManager());
+    }
+    phazite::undo (opened);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([undone] { return undone->has_value(); }, longWait));
+    REQUIRE_FALSE (undone->value().has_value());
+    const auto afterUndo = instance.getRemote().getState (longWait);
+    REQUIRE (afterUndo.has_value());
+    CHECK (juce::MemoryInputStream (*afterUndo, false).readFloat() == doctest::Approx (0.2f));
+    CHECK (juce::MemoryInputStream (instance.getLastState(), false).readFloat() == doctest::Approx (0.2f));
+    phazite::PluginInstances::setSoonAfterReload (-1.0);
+
+    // Deleted while it reloads: nothing is said of it, and nothing comes of it.
+    crash();
+    gate.shut();
+    auto told = std::make_shared<bool> (false);
+    phazite::reloadDevice (song.context, slow, [told] (std::optional<juce::String>) { *told = true; });
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
+    phazite::removeDevice (song.context, slow);
+    phazite::getSession (song.context)->update();
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [] { return SandboxedPlugins::getHost().getNumLoading (phazite::test::TestPlugins::getDescription (Kind::slow)) == 0; }, longWait));
+    CHECK (turnMessageLoop (20));
+    CHECK_FALSE (*told);
+    CHECK (phazite::getPluginsLoading (opened).isEmpty());
+}
+
+TEST_CASE ("A plug-in's value's text and a value typed are asked of its helper without waiting, and shown and set once they come")
+{
+    // Known bug 166: each waited up to a quarter of a second for the helper, and showed or read a number after that.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    song.waitForPlugins();
+    const auto handle = phazite::getParameter (song.context, { slow, "60" });
+    REQUIRE (handle.exists());
+    REQUIRE (handle.readsTextLater());
+
+    // Shut: the plug-in can't write its text. Asked, the value shows as a number meanwhile, and nothing waits for it.
+    SlowGate gate;
+    auto known = std::make_shared<int> (0);
+    juce::String text;
+    const auto kept = timeKept ([&] { text = handle.getText (0.5f, [known] { ++*known; }); });
+    MESSAGE ("The message thread was kept for " << kept << " ms");
+    CHECK (text == juce::String ("0.50"));
+    CHECK (getSandboxed (song, slow).isAskingTexts()); // returned while its answer is still to come: it waited for none of it
+
+    // A value typed, which the plug-in reads once it can: nothing is set meanwhile.
+    auto read = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("25 %", [read] (std::optional<float> value) { *read = value; }); // returns before it is read (below)
+    CHECK (turnMessageLoop (50));
+    CHECK (*known == 0);
+    CHECK_FALSE (read->has_value());
+
+    // Open: the text comes, and is known from then on; the value typed is read as the plug-in reads it.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([known, read] { return *known == 1 && read->has_value(); }, longWait));
+    CHECK (handle.getText (0.5f) == juce::String ("50 %"));
+    REQUIRE (read->value().has_value());
+    CHECK (*read->value() == doctest::Approx (0.25f));
+
+    // A value it hasn't written yet shows as a number meanwhile, never another value's text as if it were this one's (the
+    // review of known bug 166: "50 %" stood for 0.75 for as long as the helper was busy). Turned through many values while
+    // the helper is busy, only the newest is asked next.
+    gate.shut();
+    CHECK (handle.getText (0.75f) == juce::String ("0.75"));
+
+    for (int step = 1; step <= 20; ++step)
+        handle.getText (0.75f + 0.01f * (float) step);
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&handle] { return handle.getText (0.75f) == juce::String ("75 %"); }, longWait));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&handle] { return handle.getText (0.95f) == juce::String ("95 %"); }, longWait));
+    CHECK (handle.getText (0.8f) == juce::String ("0.80")); // passed over: asked only now
+
+    // An answer that doesn't come in a state's time still tells what waits, so that it asks again: not before that time (the
+    // clock Phazite reads it by held still), and once it has passed.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! getSandboxed (song, slow).isAskingTexts(); }, longWait));
+    {
+        phazite::test::HeldClock clock;
+        gate.shut();
+        auto told = std::make_shared<bool> (false);
+        CHECK (handle.getText (0.3f, [told] { *told = true; }) == juce::String ("0.30"));
+        clock.advance (phazite::SandboxedInstance::getStateMilliseconds() - 1.0);
+        CHECK (turnMessageLoop (20));
+        CHECK_FALSE (*told);
+        clock.advance (1.0);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([told] { return *told; }, longWait));
+        CHECK (handle.getText (0.3f) == juce::String ("0.30"));
+        gate.open();
+    }
+
+    // A value typed whose answer comes after an undo is set on nothing: the song isn't as it was typed for.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! getSandboxed (song, slow).isAskingTexts(); }, longWait));
+    song.setVolume (song.firstTrack, -6.0f); // what the undo takes back
+    gate.shut();
+    auto afterUndo = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("25 %", [afterUndo] (std::optional<float> value) { *afterUndo = value; });
+    phazite::undo (getSong (song));
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([afterUndo] { return afterUndo->has_value(); }, longWait));
+    CHECK_FALSE (afterUndo->value().has_value());
+}
+
+TEST_CASE ("A value typed into a plug-in's parameter holds the window's input until it is read, and comes back if its plug-in goes")
+{
+    // The review of known bug 166: a value typed was set whenever the answer came, on whatever was there then; and one whose
+    // plug-in went was never answered, its control showing the typed text for ever.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    const auto handle = phazite::getParameter (song.context, { slow, "60" });
+    REQUIRE (handle.readsTextLater());
+    TypedValueHold hold (song); // the app's, as its main window sets it
+
+    // Read by the plug-in, as a control reads one typed: the window takes no input meanwhile, and does again once it is in.
+    SlowGate gate;
+    auto read = std::make_shared<std::optional<std::optional<float>>>();
+    phazite::ui::readTypedValue (handle, "40 %", [read] (std::optional<float> value) { *read = value; });
+    CHECK (hold.isHolding());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([read] { return read->has_value(); }, longWait));
+    CHECK (read->value().value_or (-1.0f) == doctest::Approx (0.4f));
+    CHECK_FALSE (hold.isHolding());
+
+    // Points moved between the typing and the answer (by hand, from another window: a step of its own):
+    // the points it was typed for aren't as they were, and nothing is set.
+    const phazite::ParameterRef level { slow, "60" };
+    song.addAutomation (level, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (4.0), 0.5f } });
+    gate.shut();
+    auto moved = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("90 %", [moved] (std::optional<float> value) { *moved = value; });
+    phazite::moveAutomationPoints (song.context, level, { 0 }, phazite::BeatDuration::fromBeats (1.0), 0.0f);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([moved] { return moved->has_value(); }, longWait));
+    CHECK_FALSE (moved->value().has_value());
+
+    // Its plug-in taken away before the answer: answered with nothing, a message after it went.
+    gate.shut();
+    auto gone = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("10 %", [gone] (std::optional<float> value) { *gone = value; });
+    phazite::removeDevice (song.context, slow);
+    phazite::getSession (song.context)->update();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([gone] { return gone->has_value(); }, longWait));
+    CHECK_FALSE (gone->value().has_value());
+}
+
+TEST_CASE ("A value typed into a plug-in's control waits for as long as the plug-in takes, held as work is, and Escape gives it up")
+{
+    // The second review of known bug 166: after a quarter of a second the text was read as a value from 0 to 1 ("-6 dB" the
+    // bottom, "440 Hz" the top) and set, as an undo step; and the window's input was held unseen. Now the window's one hold
+    // for work holds it, whose window shows the wait after a second, and whose Escape or Cancel gives it up.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    const auto handle = phazite::getParameter (song.context, { slow, "60" });
+    REQUIRE (handle.readsTextLater());
+    const auto before = handle.getValue();
+    const auto lastStep = phazite::describeUndo (&getSong (song));
+    TypedValueHold hold (song);
+
+    // Shut: it waits, held, its wait named for the window that shows it.
+    SlowGate gate;
+    auto read = std::make_shared<std::optional<std::optional<float>>>();
+    auto calls = std::make_shared<int> (0);
+    phazite::ui::readTypedValue (handle, "40 %",
+                                 [read, calls] (std::optional<float> value)
+                                 {
+                                     *read = value;
+                                     ++*calls;
+                                 });
+    CHECK (hold.isHolding());
+    CHECK (hold.title == "Waiting for the plug-in to read the value. Press Esc to stop waiting.");
+    CHECK (turnMessageLoop (20));
+    CHECK_FALSE (read->has_value());
+    REQUIRE (hold.escape != nullptr);
+
+    // Escape: given up, the value dropped, the hold let go; the plug-in's answer, coming later, dropped too.
+    hold.escape ({});
+    REQUIRE (read->has_value());
+    CHECK_FALSE (read->value().has_value());
+    CHECK_FALSE (hold.isHolding());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! getSandboxed (song, slow).isAskingTexts(); }, longWait));
+    CHECK (turnMessageLoop (5));
+    CHECK (*calls == 1);
+    CHECK (handle.getValue() == doctest::Approx (before));
+    CHECK (phazite::describeUndo (&getSong (song)) == lastStep);
+
+    // Its helper gone before the plug-in read it: dropped, never a number Phazite read itself.
+    gate.shut();
+    auto lost = std::make_shared<std::optional<std::optional<float>>>();
+    phazite::ui::readTypedValue (handle, "40 %", [lost] (std::optional<float> value) { *lost = value; });
+    getSandboxed (song, slow).getRemote().getHelper().kill();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([lost] { return lost->has_value(); }, longWait));
+    CHECK_FALSE (lost->value().has_value());
+    CHECK_FALSE (hold.isHolding());
+    CHECK (handle.getValue() == doctest::Approx (before));
+}
+
+TEST_CASE ("A value typed into a plug-in's control lands while a take records and Write writes, and not after an undo")
+{
+    // The second review of known bug 166: any change of the song while the plug-in read the value dropped it, and the song
+    // changes all the time as it records (a take growing, automation written).
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    const auto handle = phazite::getParameter (song.context, { slow, "60" });
+    REQUIRE (handle.readsTextLater());
+    auto& model = getSong (song);
+
+    // A take recording on an instrument's track, from the computer's live input.
+    const auto keys = song.addTrack ("Keys");
+    song.setInstrument (keys, "phaziteSynth");
+    phazite::routeLiveMidiInput (model);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    const auto countIn = audio.isCountInOn();
+    audio.setCountInOn (false);
+    const juce::ScopeGuard countInBack { [&audio, countIn] { audio.setCountInOn (countIn); } };
+    EnginePlayback playback;
+    playback.play (0.01);
+    phazite::startRecording (model);
+    REQUIRE (phazite::isRecording (model));
+
+    SlowGate gate;
+    auto whileRecording = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("40 %", [whileRecording] (std::optional<float> value) { *whileRecording = value; });
+    playback.play (0.1);
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    playback.play (0.25);
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    playback.play (0.25);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([whileRecording] { return whileRecording->has_value(); }, longWait));
+    CHECK (whileRecording->value().value_or (-1.0f) == doctest::Approx (0.4f));
+    phazite::stopRecording (model);
+
+    // Write on another track's pan (as the window's input is held, nothing is turned by hand meanwhile: its pass writes the
+    // pan's value from where playback started), its pass written into the song as playback stops, while the plug-in reads.
+    const auto other = song.addTrack ("Other");
+    const auto panLane = song.getPanParameter (other);
+    song.addAutomation (panLane, { { phazite::BeatPosition(), -0.5f }, { phazite::BeatPosition::fromBeats (16.0), -0.5f } });
+    phazite::getPan (song.context, other).setValue (0.25f);
+    phazite::setAutomationMode (song.context, other, phazite::AutomationMode::write);
+    const auto pointsBefore = phazite::getAutomationPoints (song.context, panLane);
+    phazite::playOrStop (model);
+    playback.play (0.25);
+    gate.shut();
+    auto whileWriting = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("30 %", [whileWriting] (std::optional<float> value) { *whileWriting = value; });
+    playback.play (0.5);
+    phazite::stopAndReturn (model);
+    const auto pointsAfter = phazite::getAutomationPoints (song.context, panLane);
+    CHECK ((pointsAfter.size() != pointsBefore.size()
+            || ! std::equal (pointsAfter.begin(), pointsAfter.end(), pointsBefore.begin(),
+                             [] (const auto& a, const auto& b) { return juce::exactlyEqual (a.value, b.value); })));
+    CHECK_FALSE (whileWriting->has_value());
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([whileWriting] { return whileWriting->has_value(); }, longWait));
+    CHECK (whileWriting->value().value_or (-1.0f) == doctest::Approx (0.3f));
+
+    // A step of another song's meanwhile (an export's own song of an old version, another project's): this song's history
+    // hasn't moved, and it lands (the review of known bug 166: one count for every song's history dropped it).
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! getSandboxed (song, slow).isAskingTexts(); }, longWait));
+    gate.shut();
+    auto whileAnotherSong = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("25 %", [whileAnotherSong] (std::optional<float> value) { *whileAnotherSong = value; });
+    auto another = phazite::createSong();
+    {
+        const phazite::UndoStep step (*another, "Add Track");
+        phazite::ensureTracks (*another, 2);
+    }
+    phazite::undo (*another);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([whileAnotherSong] { return whileAnotherSong->has_value(); }, longWait));
+    CHECK (whileAnotherSong->value().value_or (-1.0f) == doctest::Approx (0.25f));
+
+    // An undo between the typing and the answer: what it was typed for may be other, and nothing is set.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! getSandboxed (song, slow).isAskingTexts(); }, longWait));
+    song.setVolume (song.firstTrack, -6.0f); // what the undo takes back
+    gate.shut();
+    auto afterUndo = std::make_shared<std::optional<std::optional<float>>>();
+    handle.readText ("20 %", [afterUndo] (std::optional<float> value) { *afterUndo = value; });
+    phazite::undo (model);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([afterUndo] { return afterUndo->has_value(); }, longWait));
+    CHECK_FALSE (afterUndo->value().has_value());
+}
+
+TEST_CASE ("What isn't a number, and texts of any length, from a plug-in never get past where they come in")
+{
+    // Known bug 181: jlimit() passed NaN on, and what the helper told was taken as it came.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto crash = song.addEffect (song.firstTrack, "PhaziteTestCrash");
+    auto& instance = getSandboxed (song, crash);
+    const auto wild = instance.findParameter ("23"), told = instance.findParameter ("24");
+    REQUIRE (wild >= 0);
+    REQUIRE (told >= 0);
+
+    // As it opened: its default and value that are NaN taken as 0, and its name and label that run on kept short.
+    const auto& info = instance.getParameterInfos()[(size_t) wild];
+    CHECK (info.defaultValue == 0.0f);
+    CHECK (info.value == 0.0f);
+    CHECK (info.name.length() <= phazite::sandbox::maxTextLength);
+    CHECK (info.label.length() <= phazite::sandbox::maxTextLength);
+    CHECK (instance.getParameterValue (wild) == 0.0f);
+
+    // NaN, then an infinity, told by the plug-in as values of its own: neither changes anything, and what it told after them
+    // comes as it was.
+    auto wildHandle = phazite::getParameter (song.context, { crash, "23" });
+    REQUIRE (wildHandle.exists());
+
+    for (const auto nonsense : { 0.75f, 0.25f })
+    {
+        CAPTURE (nonsense);
+        song.setParameter (crash, "22", nonsense);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance.getParameterValue (told), nonsense); },
+                                                       longWait));
+        CHECK (instance.getParameterValue (wild) == 0.0f);
+        CHECK (std::isfinite (wildHandle.getValue()));
+    }
+
+    // Its text for any value is a hundred thousand characters long: kept to what Phazite takes.
+    auto known = std::make_shared<bool> (false);
+    wildHandle.getText (0.5f, [known] { *known = true; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([known] { return *known; }, longWait));
+    CHECK (wildHandle.getText (0.5f).length() == phazite::sandbox::maxTextLength);
+
+    // What it reads as an infinity is no value; nor is a number typed past what a float holds, nor a value set that is no number.
+    auto read = std::make_shared<std::optional<std::optional<float>>>();
+    wildHandle.readText ("1", [read] (std::optional<float> value) { *read = value; });
+    REQUIRE (phazite::test::dispatchMessagesUntil ([read] { return read->has_value(); }, longWait));
+    CHECK_FALSE (read->value().has_value());
+    CHECK_FALSE (wildHandle.readText ("1" + juce::String::repeatedString ("0", 400)).has_value());
+    CHECK_FALSE (phazite::readFiniteDouble ("1e99999").has_value());
+
+    const auto lastStep = phazite::describeUndo (&getSong (song));
+    wildHandle.setValue (std::numeric_limits<float>::quiet_NaN());
+    instance.setParameterValue (wild, std::numeric_limits<float>::infinity());
+    CHECK (phazite::describeUndo (&getSong (song)) == lastStep);
+    CHECK (instance.getParameterValue (wild) == 0.0f);
+    CHECK_FALSE (phazite::findDeviceState (getSong (song), crash).getChildWithProperty (phazite::schema::valueParameter, "23").isValid());
+}
+
+TEST_CASE ("A helper that floods Phazite with what it tells keeps a value for each parameter until the window takes them")
+{
+    // Known bug 181's review: every value a helper told was kept and written into the song, one after another, however many.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto crash = song.addEffect (song.firstTrack, "PhaziteTestCrash");
+    auto& instance = getSandboxed (song, crash);
+    const auto told = instance.findParameter ("24");
+    REQUIRE (told >= 0);
+
+    // Two IDs the same once cut to what Phazite keeps: the first is found by it.
+    const auto cut = juce::String::repeatedString ("9", phazite::sandbox::maxIDLength);
+    const auto& infos = instance.getParameterInfos();
+    const auto first = std::find_if (infos.begin(), infos.end(), [&cut] (const auto& info) { return info.id == cut; });
+    REQUIRE (first != infos.end());
+    CHECK (instance.findParameter (cut) == (int) std::distance (infos.begin(), first));
+    CHECK (instance.findParameter (cut + "#2") == instance.findParameter (cut) + 1); // the other by its order among its twins
+    std::set<juce::String> ids;                                                      // every ID once, as JUCE and the engine need
+
+    for (const auto& info : infos)
+        CHECK (ids.insert (info.id).second);
+
+    // A hundred thousand values of one parameter, told between two turns of the message loop: one change of the song's. And
+    // its gesture begun, ten thousand gestures of another, then its end: begun and ended, each paired, nothing left held
+    // (the second review: past a cap of a turn's gestures its end was dropped, and Touch kept writing).
+    auto& model = getSong (song);
+    const auto changesBefore = model.getChangesOutsideHistory (crash.getRaw());
+    const auto other = instance.findParameter ("23");
+    REQUIRE (other >= 0);
+    std::map<int, int> heldGestures;
+    const auto listening = instance.onGesture;
+    instance.onGesture = [&heldGestures, listening] (int parameter, bool starting)
+    {
+        heldGestures[parameter] += starting ? 1 : -1;
+
+        if (listening != nullptr)
+            listening (parameter, starting);
+    };
+
+    const auto tell = [&instance] (phazite::sandbox::MessageType type, int parameter, auto value)
+    {
+        phazite::sandbox::MessageWriter notice (type, 0);
+        notice.add (instance.getRemote().getID()).add ((std::int32_t) parameter).add (value);
+        const auto block = notice.take(); // which the reader reads in place
+        phazite::sandbox::MessageReader reader (block);
+        juce::ignoreUnused (phazite::sandbox::RemoteInstance::readNoticeInstance (reader));
+        instance.getRemote().handleNotice (reader.getType(), reader);
+    };
+
+    const auto kept = timeKept (
+        [&]
+        {
+            for (int i = 0; i < 100000; ++i)
+                tell (phazite::sandbox::MessageType::parameterChanged, told, (double) (i % 100) / 100.0 + 0.001);
+
+            tell (phazite::sandbox::MessageType::gesture, told, true);
+
+            for (int i = 0; i < 10000; ++i)
+                tell (phazite::sandbox::MessageType::gesture, other, i % 2 == 0);
+
+            tell (phazite::sandbox::MessageType::gesture, told, false);
+        });
+    MESSAGE ("Telling them took " << kept << " ms");
+    const auto turn = timeKept ([] { phazite::test::dispatchPendingMessages(); });
+    MESSAGE ("The turn of the message loop that took them took " << turn << " ms");
+    CHECK (instance.getParameterValue (told) == doctest::Approx (0.991f));
+    CHECK (model.getChangesOutsideHistory (crash.getRaw()) - changesBefore <= 2);
+    CHECK (turnMessageLoop (5)); // the ends, a message later
+    CHECK (heldGestures[told] == 0);
+    CHECK (heldGestures[other] == 0);
+    instance.onGesture = listening;
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("A plug-in's window opens without waiting for its helper to make its editor, nor for the plug-in to load")
+{
+    // Known bug 166: opening a plug-in's window waited for its helper to make the editor, up to 10 seconds.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    const auto hanging = song.addEffect (song.firstTrack, "PhaziteTestHang");
+    phazite::DeviceWindows windows (song.context);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+
+    // Asked for, it opens once the helper has made its editor; asked again meanwhile, the wait is given up (a helper alive
+    // that never made it kept it for ever: the second review), and asked once more, it opens.
+    phazite::showDeviceWindow (song.context, effect);
+    CHECK (phazite::isDeviceWindowOpening (song.context, effect));
+    CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, effect));
+    phazite::showDeviceWindow (song.context, effect);
+    CHECK_FALSE (phazite::isDeviceWindowOpening (song.context, effect));
+    CHECK (turnMessageLoop (20));
+    CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, effect)); // what it made for the wait given up is dropped
+    phazite::showDeviceWindow (song.context, effect);
+    CHECK (phazite::isDeviceWindowOpening (song.context, effect));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::isDeviceWindowOpen (song.context, effect); }, longWait));
+    CHECK_FALSE (phazite::isDeviceWindowOpening (song.context, effect));
+    windows.close (effect);
+
+    // A helper whose message thread has stopped: its window asked for keeps the message thread for nothing; asked again while
+    // it opens, it doesn't open.
+    auto& instance = getSandboxed (song, hanging);
+    song.setParameter (hanging, hangStall, 1.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance.getRemote().getState (50).has_value(); }, longWait));
+    const auto kept = timeKept ([&] { phazite::showDeviceWindow (song.context, hanging); });
+    MESSAGE ("The message thread was kept for " << kept << " ms");
+    CHECK (kept < phazite::test::hangTimeout / 2.0); // a wait for the stalled helper would last until it is ended
+    CHECK (turnMessageLoop (20));
+    CHECK (phazite::isDeviceWindowOpening (song.context, hanging));
+    phazite::showDeviceWindow (song.context, hanging); // asked again: the wait given up, as its button says
+    CHECK_FALSE (phazite::isDeviceWindowOpening (song.context, hanging));
+
+    // Ended (its hang's limit the tests' long one: ended here), it has no window to open.
+    instance.getRemote().getHelper().kill();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.hasCrashed(); }, longWait));
+    phazite::showDeviceWindow (song.context, hanging);
+    CHECK_FALSE (phazite::isDeviceWindowOpening (song.context, hanging));
+    CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, hanging));
+
+    // One still loading opens once it has loaded; one deleted meanwhile never opens.
+    SlowGate gate;
+    const auto slow = addSlow (song, song.firstTrack);
+    session->update();
+    phazite::showDeviceWindow (song.context, slow);
+    CHECK (phazite::isDeviceWindowOpening (song.context, slow));
+    const auto deleted = addSlow (song, song.firstTrack, Kind::slowToo);
+    session->update();
+    phazite::showDeviceWindow (song.context, deleted);
+    CHECK (phazite::isDeviceWindowOpening (song.context, deleted));
+    phazite::removeDevice (song.context, deleted);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::isDeviceWindowOpening (song.context, deleted); }, longWait));
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::isDeviceWindowOpen (song.context, slow); }, longWait));
+    CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, deleted));
+    windows.closeAll();
+}
+#endif
+
+TEST_CASE ("A plug-in's slot in the mixer says it loads while it does; a click asks for its window, which opens once it has")
+{
+    // The review of known bug 166: nothing tested a slot while its plug-in loaded.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto track = song.firstTrack;
+    auto& opened = getSong (song);
+    phazite::CommandRegistry registry;
+    registry.add ({ .id = "device.show", .name = "Show Device", .perform = [] {} });
+    phazite::ui::CommandBridge commands { registry };
+    phazite::ui::ChannelStrip strip { commands, song.context };
+    phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
+    strip.setTrack (track);
+    phazite::DeviceWindows windows (song.context);
+
+    const auto slotButton = [&strip]() -> juce::TextButton*
+    {
+        if (auto* group = phazite::test::findComponentWithTitle (strip, "Effects"))
+            for (auto* button : phazite::test::findAll<juce::TextButton> (*group))
+                if (button->isVisible() && button->getButtonText().startsWith ("Test Slow"))
+                    return button;
+
+        return nullptr;
+    };
+
+    // Added while it can't be made: its slot says it loads.
+    SlowGate gate;
+    const auto slow = addSlow (song, track);
+    phazite::getSession (song.context)->update();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return slotButton() != nullptr && slotButton()->getButtonText() == "Test Slow - Loading"; }, longWait));
+
+    // A click on it asks for its window, which waits for it to load; a preset loaded meanwhile is what it comes in with.
+    phazite::test::Mouse mouse (*slotButton());
+    mouse.click (slotButton()->getLocalBounds().getCentre());
+    CHECK (phazite::isDeviceWindowOpening (song.context, slow));
+    juce::MemoryOutputStream preset;
+    preset.writeFloat (0.6f);
+    phazite::findDeviceState (opened, slow)
+        .setProperty (phazite::schema::pluginState, phazite::writeBytes (preset.getMemoryBlock()), &opened.getUndoManager());
+
+    // In: its slot shows its name, the preset plays, and its window opens.
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return slotButton() != nullptr && slotButton()->getButtonText() == "Test Slow"; },
+                                                   longWait));
+    // Asked without the message thread waiting: the helper, putting the editor it makes into Phazite's window meanwhile,
+    // may wait for it.
+    const auto asked = getSandboxed (song, slow).getRemote().askState();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&asked] { return asked->isDone(); }, longWait));
+    const auto state = phazite::sandbox::RemoteInstance::readState (*asked);
+    REQUIRE (state.has_value());
+    CHECK (juce::MemoryInputStream (*state, false).readFloat() == doctest::Approx (0.6f));
+#if JUCE_WINDOWS
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::isDeviceWindowOpen (song.context, slow); }, longWait));
+#endif
+    windows.closeAll();
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("A plug-in's window stays while its device comes back as another instance, and opens on the instance the song has")
+{
+    // The review of known bug 166: an open window closed as its device came back (a version brought back, Discard, a branch
+    // switched to in place), now that the new instance loads in the background; and a window still opening could open on an
+    // instance the song no longer had, whose turns went nowhere.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    auto& opened = getSong (song);
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    phazite::DeviceWindows windows (song.context);
+
+    const auto shownInstance = [&windows, slow]() -> phazite::SandboxedInstance*
+    {
+        auto* window = windows.findWindow (slow);
+        auto* editor = window != nullptr ? dynamic_cast<phazite::SandboxedEditor*> (window->getContentComponent()) : nullptr;
+        return editor != nullptr ? editor->getInstance().get() : nullptr;
+    };
+
+    // Asked for while the plug-in makes its editor (held at the gate), and replaced meanwhile: the window opens on the
+    // instance the song has.
+    SlowGate gate;
+    gate.open();
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&] { return ! phazite::findPluginInstance (opened, slow)->isAskingState(); }, longWait));
+    gate.shut();
+    phazite::showDeviceWindow (song.context, slow);
+    CHECK (phazite::isDeviceWindowOpening (song.context, slow));
+    CHECK (turnMessageLoop (10));
+    phazite::removeDevice (song.context, slow);
+    session->update(); // its instance goes
+    phazite::undo (opened);
+    session->update();
+    CHECK (phazite::getPluginStatus (opened, slow) == Status::loading);
+    CHECK (turnMessageLoop (10));
+    CHECK (phazite::isDeviceWindowOpening (song.context, slow));
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return shownInstance() != nullptr && shownInstance() == phazite::findPluginInstance (opened, slow); }, longWait));
+
+    // Open; then the device taken away and brought back, its new instance held as it loads: the window stays, saying so,
+    // and shows the new instance's editor once it is in.
+    gate.shut();
+    phazite::removeDevice (song.context, slow);
+    session->update(); // its instance goes
+    phazite::undo (opened);
+    session->update();
+    REQUIRE (phazite::getPluginStatus (opened, slow) == Status::loading);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            auto* window = windows.findWindow (slow);
+            return window != nullptr && phazite::test::findComponentWithTitle (*window, "Loading") != nullptr;
+        },
+        longWait));
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return shownInstance() != nullptr && shownInstance() == phazite::findPluginInstance (opened, slow); }, longWait));
+    windows.closeAll();
+}
+#endif
+
+TEST_CASE ("A render of a song no session plays opens its plug-ins in the background, and begins once they are in")
+{
+    // The review of known bug 166: an old version's bounce, or its DAWproject, opened each of its own plug-ins while the
+    // message thread waited.
+    SandboxedPlugins sandboxed;
+    phazite::test::TemporaryFolder folder;
+    auto old = phazite::createSong();
+    const auto track = phazite::ensureTracks (*old, 1).front();
+    REQUIRE (phazite::test::addMidiClip (*old, track, { phazite::test::at (0.0), phazite::test::at (4.0) }).isValid());
+    phazite::insertDeviceState (
+        *old, track, phazite::makeDeviceState (*old, phazite::makeDeviceType (phazite::test::TestPlugins::getDescription (Kind::slow))));
+    REQUIRE (phazite::findSession (*old) == nullptr);
+
+    SlowGate gate;
+    std::optional<phazite::ExportReport> report;
+    std::unique_ptr<phazite::SongExport> exporting;
+    phazite::ExportSettings settings;
+    const auto kept = timeKept (
+        [&]
+        {
+            exporting = phazite::startBackgroundExport (*old, SandboxedPlugins::getHost(), folder.folder.getChildFile ("Old.wav"), settings,
+                                                        [&report] (const phazite::ExportReport& r) { report = r; });
+        });
+    MESSAGE ("The message thread was kept for " << kept << " ms");
+    CHECK (phazite::test::dispatchMessagesUntil ([] { return phazite::test::TestPlugins::getSlowWaiting (Kind::slow).existsAsFile(); }));
+    // (structural: it returned while the gate keeps its plug-in from being made, which it would never have done had it waited)
+    CHECK (turnMessageLoop (20));
+    CHECK_FALSE (report.has_value());
+
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, longWait));
+    CHECK (report->result.wasOk());
+}
+
 TEST_CASE ("A save asks slow plug-ins for their states at once while the message loop turns; Auto Save asks those that changed")
 {
     // Known bugs 69 and 89: a save asked every plug-in for its state in turn, on the message thread, and Auto Save did so a
     // second after each change, whether a plug-in had changed or not.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto track = song.firstTrack;
     const auto slow = addSlow (song, track);
@@ -1979,7 +2960,7 @@ TEST_CASE ("A plug-in's editor fits its plug-in at any Interface Size: as large 
         REQUIRE (session != nullptr);
 
         // In Phazite's units, the plug-in's 300 by 200 at this Interface Size.
-        auto editor = phazite::createSandboxedEditor (session->getPlugins().find (effect));
+        auto editor = makeEditor (session->getPlugins().find (effect));
         REQUIRE (editor != nullptr);
         CHECK (editor->getWidth() == juce::roundToInt (300.0f / scale));
         CHECK (editor->getHeight() == juce::roundToInt (200.0f / scale));
@@ -2030,7 +3011,7 @@ TEST_CASE ("Auto Save asks a plug-in whose window was open for its state, though
     auto& instance = getSandboxed (song, effect);
 
     // Its window shown and closed; its gain changed in it without a word to Phazite.
-    REQUIRE (phazite::createSandboxedEditor (session->getPlugins().find (effect)) != nullptr);
+    REQUIRE (makeEditor (session->getPlugins().find (effect)) != nullptr);
     juce::MemoryOutputStream unsaid;
     unsaid.writeFloat (0.3f); // its gain
     unsaid.writeFloat (0.5f); // its tone
@@ -2062,7 +3043,7 @@ TEST_CASE ("Closing a plug-in's window keeps the message thread for no helper, o
         CAPTURE (hangs);
         const auto id = hangs ? hanging : effect;
         auto& instance = getSandboxed (song, id);
-        auto editor = phazite::createSandboxedEditor (session->getPlugins().find (id));
+        auto editor = makeEditor (session->getPlugins().find (id));
         REQUIRE (editor != nullptr);
         auto window = std::make_unique<juce::Component>();
         window->setSize (400, 300);
@@ -2093,7 +3074,8 @@ TEST_CASE ("Closing a plug-in's window keeps the message thread for no helper, o
         window = nullptr;
         const auto kept = juce::Time::getMillisecondCounterHiRes() - closing;
         MESSAGE ("The message thread was kept for " << kept << " ms");
-        CHECK (kept < 500.0);
+        if (hangs)
+            CHECK (kept < phazite::test::hangTimeout / 2.0); // a wait for the stalled helper would last until it is ended
 
         // Not destroyed with Phazite's window: the helper that hangs still has it, out of sight.
         if (hangs)
@@ -2102,7 +3084,11 @@ TEST_CASE ("Closing a plug-in's window keeps the message thread for no helper, o
             CHECK_FALSE (IsWindowVisible (helperWindow));
         }
 
-        // The helper closes its window as it is asked, and plays on; or goes with it, ended for its hang.
+        // The helper closes its window as it is asked, and plays on; or, stalled, goes with it as it is ended (its hang's
+        // limit the tests' long one: ended here).
+        if (hangs)
+            instance.getRemote().getHelper().kill();
+
         REQUIRE (
             phazite::test::dispatchMessagesUntil ([&] { return ! IsWindow (helperWindow) && instance.hasCrashed() == hangs; }, longWait));
 
@@ -2152,7 +3138,7 @@ TEST_CASE ("A key a plug-in's editor doesn't take reaches Phazite's window throu
     auto* session = phazite::getSession (song.context);
     REQUIRE (session != nullptr);
     auto& instance = getSandboxed (song, hanging);
-    auto editor = phazite::createSandboxedEditor (session->getPlugins().find (hanging));
+    auto editor = makeEditor (session->getPlugins().find (hanging));
     REQUIRE (editor != nullptr);
     auto window = std::make_unique<juce::Component>();
     window->setSize (400, 300);
@@ -2182,7 +3168,8 @@ TEST_CASE ("A key a plug-in's editor doesn't take reaches Phazite's window throu
     // The helper's message thread stopped; the window loses its native window before the editor goes: nothing waits.
     song.setParameter (hanging, hangStall, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance.getRemote().getState (50).has_value(); }, longWait));
-    CHECK (timeKept ([&window] { window->removeFromDesktop(); }) < 500.0);
+    // (a wait for the stalled helper would last until it is ended, which only the end of this case does)
+    CHECK (timeKept ([&window] { window->removeFromDesktop(); }) < phazite::test::hangTimeout / 2.0);
     CHECK (IsWindow (helperWindow)); // out of sight, in the socket taken out first
     CHECK (timeKept (
                [&]
@@ -2190,7 +3177,8 @@ TEST_CASE ("A key a plug-in's editor doesn't take reaches Phazite's window throu
                    editor = nullptr;
                    window = nullptr;
                })
-           < 500.0);
+           < phazite::test::hangTimeout / 2.0);
+    instance.getRemote().getHelper().kill(); // ended here (its hang's limit the tests' long one), its window with it
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! IsWindow (helperWindow) && instance.hasCrashed(); }, longWait));
 }
 #endif
@@ -2246,7 +3234,6 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     // Known bug 166: a store for a copy, a commit, a snapshot or a preset waited for the plug-ins whose states may have
     // changed, up to 10 seconds.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto track = song.firstTrack;
     const auto slow = addSlow (song, track);
@@ -2262,7 +3249,7 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     // Set again, while it can't answer: the store goes on at once with the state it gave last, and asks it.
     SlowGate gate;
     instance.setParameterValue (level, 0.25f);
-    CHECK (timeKept ([&] { session->getPlugins().storeTrack (track); }) < 1000.0);
+    session->getPlugins().storeTrack (track); // returned while the plug-in can't answer: it waited for none of it (below)
     auto device = phazite::findDeviceState (getSong (song), slow);
     CHECK (readLevel (device[phazite::schema::pluginState]) == doctest::Approx (0.5f));
     CHECK (instance.isAskingState());
@@ -2277,6 +3264,7 @@ TEST_CASE ("A store that isn't a save waits for no plug-in: what it gave last is
     CHECK (readLevel (device[phazite::schema::pluginState]) == doctest::Approx (0.25f));
     phazite::undo (getSong (song));
     CHECK (readLevel (phazite::findDeviceState (getSong (song), slow)[phazite::schema::pluginState]) == doctest::Approx (0.25f));
+    song.waitForPlugins(); // brought back, it loads in the background
     auto& back = getSandboxed (song, slow);
     CHECK (back.getParameterValue (back.findParameter ("60")) == doctest::Approx (0.25f));
 }
@@ -2286,7 +3274,6 @@ TEST_CASE ("A plug-in prepared for another sample rate waits for no helper: it i
     // Known bug 166: the message thread waited for the helper to make the channel, behind whatever else it did, up to 10
     // seconds.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto slow = addSlow (song, song.firstTrack);
     auto& instance = getSandboxed (song, slow);
@@ -2297,7 +3284,7 @@ TEST_CASE ("A plug-in prepared for another sample rate waits for no helper: it i
     // The helper busy giving a state it can't, while its gate is shut: the channel asked for comes after it.
     SlowGate gate;
     instance.askState (phazite::SandboxedInstance::Ask::all);
-    CHECK (timeKept ([&] { instance.prepareToPlay (otherRate, 512); }) < 1000.0);
+    instance.prepareToPlay (otherRate, 512); // returned while the helper can't answer: it waited for none of it (below)
     CHECK (instance.isPreparing());
     CHECK (turnMessageLoop (10));
     CHECK (instance.isPreparing());
@@ -2336,7 +3323,6 @@ TEST_CASE ("A command that reads the plug-ins' states runs once one changed in i
     // Known bug 166 (the review): stores no longer waited, and nothing but a save and a close asked first, so that a track
     // duplicated, or a commit made, at once after a knob was turned in a plug-in's window held its state before.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto track = song.firstTrack;
     const auto slow = addSlow (song, track);
@@ -2407,7 +3393,6 @@ TEST_CASE ("Delete of notes waits for no plug-in; a macro, Bring Back and a pres
     // The review of known bug 166: the flag was on the command, not on what is selected, so Delete of notes waited for a
     // plug-in that said it changed; and a macro ran its steps without the gate.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto track = song.firstTrack;
     const auto slow = addSlow (song, track);
@@ -2494,7 +3479,6 @@ TEST_CASE ("Save As straight after a change in a plug-in's window holds it; whil
     // The review of known bug 166: Save As, which opens the copy, held the state before; and the window took edits while a
     // command waited for the plug-ins' states, before its progress window showed.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     phazite::test::TemporaryFolder temp;
     juce::File file;
     phazite::DeviceID slow;
@@ -2600,7 +3584,6 @@ TEST_CASE ("A store's answer that comes late shows as a change to commit; an old
     // counted, so the answer, written in later, showed as no change; and an answer of an instance an undo had replaced was
     // given to the new one over its own changes.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto slow = addSlow (song, song.firstTrack);
     auto& instance = getSandboxed (song, slow);
@@ -2651,6 +3634,10 @@ TEST_CASE ("An answer of a plug-in an undo replaced leaves the new instance's ow
     plugins.sync();
     phazite::undo (getSong (song));
     plugins.sync();
+
+    // (Brought back, it loads in the background, known bug 166: the old one's answer may come first, written into the element
+    // it opens from, or after it is in, as here before.)
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return plugins.find (effect) != nullptr; }));
     auto* back = plugins.find (effect).get();
     REQUIRE (back != nullptr);
     REQUIRE (back != &old);
@@ -2682,43 +3669,53 @@ TEST_CASE ("A plug-in that keeps telling changes is asked at the latest a second
         ~Bulk() { phazite::test::TestPlugins::getSlowBulk().deleteFile(); }
     } bulk;
 
-    // Set all the time, from Phazite (a value set by hand counts as a change, as one the plug-in tells does), until it has
-    // answered twice.
+    // On the clock Phazite reads its asks by, held still (known bug 180: judged by the wall clock, a busy machine moved
+    // them): set all the time, from Phazite (a value set by hand counts as a change, as one the plug-in tells does).
+    phazite::test::HeldClock clock;
     const auto level = instance.findParameter ("60");
     const auto answersBefore = instance.countAnswers();
-    const auto started = juce::Time::getMillisecondCounterHiRes();
-    double firstAt = 0.0, secondAt = 0.0, firstTook = 0.0;
     auto value = 0.0f;
-    REQUIRE (phazite::test::dispatchMessagesUntil (
-        [&]
+    const auto change = [&]
+    {
+        value = value > 0.9f ? 0.1f : value + 0.01f;
+        instance.setParameterValue (level, value);
+        phazite::test::dispatchPendingMessages();
+    };
+    const auto changeFor = [&] (double milliseconds)
+    {
+        for (auto passed = 0.0; passed < milliseconds; passed += 100.0)
         {
-            value = value > 0.9f ? 0.1f : value + 0.01f;
-            instance.setParameterValue (level, value);
-            const auto now = juce::Time::getMillisecondCounterHiRes() - started;
+            clock.advance (std::min (100.0, milliseconds - passed));
+            change();
+        }
+    };
 
-            if (instance.countAnswers() == answersBefore + 1 && firstAt <= 0.0)
-            {
-                firstAt = now;
-                firstTook = instance.getLastAnswerMilliseconds();
-            }
+    // Never quiet, it is asked at the latest a second after its first change, not before.
+    SlowGate gate; // its answer held, for as long as the test says it takes
+    change();
+    changeFor (999.0);
+    CHECK_FALSE (instance.isAskingState());
+    changeFor (1.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.isAskingState(); }));
 
-            if (instance.countAnswers() >= answersBefore + 2)
-                secondAt = now;
-
-            return secondAt > 0.0;
-        },
-        longWait));
+    // Its answer takes 300 ms (on the clock): the next ask no sooner than ten times that after the first, though a second
+    // after the first change since has passed long before.
+    clock.advance (300.0);
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.countAnswers() == answersBefore + 1; }, longWait));
+    CHECK (instance.getLastAnswerMilliseconds() == doctest::Approx (300.0));
+    gate.shut();
+    changeFor (3000.0 - 300.0 - 1.0);
+    CHECK_FALSE (instance.isAskingState());
+    changeFor (1.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.isAskingState(); }));
+    gate.open();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.countAnswers() == answersBefore + 2; }, longWait));
 
     // What the message thread pays for an answer: its 20 MB copied out of the reply (as readState() does).
     REQUIRE (instance.getLastState().getSize() > 20u * 1024 * 1024);
     const auto copied = timeKept ([&instance] { juce::MemoryBlock copy (instance.getLastState()); });
-    MESSAGE ("20 MB state: asked while changes went on, its first answer in after " << firstAt << " ms (it took " << firstTook
-                                                                                    << " ms in all, the helper's part with "
-                                                                                       "the pipe), the next "
-                                                                                    << (secondAt - firstAt) << " ms later; " << copied
-                                                                                    << " ms of the message thread's to copy it");
-    CHECK (firstAt < 1000.0 + firstTook + 2000.0);        // at the latest a second after the first change, and the answer
-    CHECK (secondAt - firstAt >= 10.0 * firstTook * 0.9); // no sooner than ten times as long as an answer takes
+    MESSAGE ("20 MB state: " << copied << " ms of the message thread's to copy it");
 }
 
 TEST_CASE ("A plug-in that crashes again after a reload, before anything of it changed, reloads from what the project holds")
@@ -2747,14 +3744,14 @@ TEST_CASE ("A plug-in that crashes again after a reload, before anything of it c
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.hasCrashed(); }));
 
     // Reloaded from its own: its Hang on.
-    CHECK_FALSE (phazite::reloadDevice (song.context, hanging).has_value());
+    CHECK_FALSE (reloadAndWait (song, hanging).has_value());
     CHECK_FALSE (phazite::wasReloadedFromProject (song.context, hanging));
     CHECK (instance.getParameterValue (hang) == doctest::Approx (1.0f));
 
     // Ended again before anything changed: reloaded from what the song holds, its Hang off, and its notice says so.
     instance.getRemote().getHelper().kill();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.hasCrashed(); }));
-    CHECK_FALSE (phazite::reloadDevice (song.context, hanging).has_value());
+    CHECK_FALSE (reloadAndWait (song, hanging).has_value());
     CHECK (phazite::wasReloadedFromProject (song.context, hanging));
     CHECK (instance.getParameterValue (hang) == doctest::Approx (0.0f));
 
@@ -2763,7 +3760,7 @@ TEST_CASE ("A plug-in that crashes again after a reload, before anything of it c
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! instance.isStateUnasked() && ! instance.isAskingState(); }));
     instance.getRemote().getHelper().kill();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return instance.hasCrashed(); }));
-    CHECK_FALSE (phazite::reloadDevice (song.context, hanging).has_value());
+    CHECK_FALSE (reloadAndWait (song, hanging).has_value());
     CHECK_FALSE (phazite::wasReloadedFromProject (song.context, hanging));
     CHECK (instance.getParameterValue (hang) == doctest::Approx (0.5f));
 }
@@ -2773,7 +3770,6 @@ TEST_CASE ("A save waits for its own asks alone, and asks again, once, a plug-in
     // The review of known bug 166: a save counted asks it didn't make, which could hold it off without end; and one whose
     // earlier answer predated it took that answer for its own.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     const auto slow = addSlow (song, song.firstTrack);
     auto& instance = getSandboxed (song, slow);
@@ -2820,7 +3816,6 @@ TEST_CASE ("A render waits for a plug-in's channel for its rate, cancelled at on
     // The review of known bug 166: a render cancelled while it waited for a plug-in's channel for its rate kept the message
     // thread up to a minute; and one that began while an earlier channel was still to come played the plug-in as silence.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
@@ -2841,8 +3836,13 @@ TEST_CASE ("A render waits for a plug-in's channel for its rate, cancelled at on
         phazite::test::RenderHost host;
         phazite::toggleFreeze (song.context, host);
         REQUIRE (host.render != nullptr);
-        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return host.render->getWait().has_value(); }, longWait));
-        CHECK (timeKept ([&host] { host.render = nullptr; }) < 3000.0);
+        // It waits for the channel, which the helper can't make while its gate is shut (named once it has waited as long as a
+        // block takes to be a hang, which the tests' long limit puts past the prepare's minute: not waited for here).
+        CHECK (turnMessageLoop (10));
+        REQUIRE (host.render != nullptr);
+        REQUIRE (host.finished.isEmpty());
+        // (a wait for the channel would last the prepare's minute: half a minute tells them apart however busy the machine)
+        CHECK (timeKept ([&host] { host.render = nullptr; }) < 30000.0);
         CHECK_FALSE (phazite::isFrozen (song.context, track));
     }
 
@@ -2992,7 +3992,6 @@ TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for 
     // A quit (a close) and then Ctrl+S, while a plug-in answers: the close opens another project, and the save, which was
     // for the one closed, saves nothing else.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     phazite::test::TemporaryFolder temp;
     juce::File file;
     phazite::DeviceID slow;
@@ -3071,7 +4070,6 @@ TEST_CASE ("The computer's session ending asks the save question at once, a clos
 {
     // Known bug 168: Windows shutting down while a close waited for a plug-in's settings ended Phazite before its question.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds); // none ended for its waits
     phazite::test::TemporaryFolder temp;
     juce::File file;
     phazite::DeviceID slow;
@@ -3160,7 +4158,6 @@ struct SlowSession
 {
     SlowSession()
     {
-        SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds);
         juce::String error;
 
         {
@@ -3355,7 +4352,6 @@ TEST_CASE ("A preset loaded or a chain duplicated or a change staged straight af
     // The review of known bug 166: these went around the gate: a preset's load stored what the plug-in gave last, so its
     // Undo lost the change; a chain's copy and a staged change held the state before.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds);
     TestSong song;
     const auto track = song.firstTrack;
     const auto slow = addSlow (song, track);
@@ -3438,7 +4434,6 @@ TEST_CASE ("A branch merged from the branch picker straight after a change in a 
     // The review of known bug 166: the picker's Merge started the merge at once, finding its clashes against the state the
     // plug-in gave before the change, where version.merge's command waits for it.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds);
     TestSong song;
     const auto slow = addSlow (song, song.firstTrack);
     REQUIRE (phazite::test::dispatchMessagesUntil (
@@ -3494,7 +4489,6 @@ TEST_CASE ("A reload falls back to the song's state only for a crash soon after 
     // The review of known bug 166: a plug-in that crashed again any time after a reload, untouched, reopened from the song,
     // the user's own settings gone; and a reload that failed lost them for the next try.
     SandboxedPlugins sandboxed;
-    SandboxedPlugins::getHost().setHangLimits (longWait, SandboxedPlugins::audioHangMilliseconds);
     TestSong song;
     const auto slow = addSlow (song, song.firstTrack);
     song.saveWithPluginStates(); // the song holds its Level at 1
@@ -3517,20 +4511,20 @@ TEST_CASE ("A reload falls back to the song's state only for a crash soon after 
     // Long after a reload (the time set to none): its own, again.
     phazite::PluginInstances::setSoonAfterReload (0.0);
     crash();
-    CHECK_FALSE (phazite::reloadDevice (song.context, slow).has_value());
+    CHECK_FALSE (reloadAndWait (song, slow).has_value());
     crash();
-    CHECK_FALSE (phazite::reloadDevice (song.context, slow).has_value());
+    CHECK_FALSE (reloadAndWait (song, slow).has_value());
     CHECK_FALSE (phazite::wasReloadedFromProject (song.context, slow));
     CHECK (instance.getParameterValue (level) == doctest::Approx (0.5f));
 
     // Soon after: the song's, which the notice says; and the next reload its own again.
     phazite::PluginInstances::setSoonAfterReload (longWait);
     crash();
-    CHECK_FALSE (phazite::reloadDevice (song.context, slow).has_value());
+    CHECK_FALSE (reloadAndWait (song, slow).has_value());
     CHECK (phazite::wasReloadedFromProject (song.context, slow));
     CHECK (instance.getParameterValue (level) == doctest::Approx (1.0f));
     crash();
-    CHECK_FALSE (phazite::reloadDevice (song.context, slow).has_value());
+    CHECK_FALSE (reloadAndWait (song, slow).has_value());
     CHECK_FALSE (phazite::wasReloadedFromProject (song.context, slow));
     CHECK (instance.getParameterValue (level) == doctest::Approx (0.5f));
 
@@ -3539,7 +4533,7 @@ TEST_CASE ("A reload falls back to the song's state only for a crash soon after 
     {
         SlowGate gate;
         SandboxedPlugins::getHost().setLoadMilliseconds (300);
-        CHECK (phazite::reloadDevice (song.context, slow).has_value());
+        CHECK (reloadAndWait (song, slow).has_value());
         SandboxedPlugins::getHost().setLoadMilliseconds (phazite::PluginHost::defaultLoadMilliseconds);
     }
 
@@ -3612,4 +4606,64 @@ TEST_CASE ("A helper ended before it starts never starts: Phazite quitting while
     helper.kill();
     CHECK_FALSE (helper.start (longWait));
     CHECK_FALSE (helper.isRunning());
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("A plug-in's window closed opens again, as often as it is asked for")
+{
+    // The helper kept a stand-in's editor as its active one after its window closed, and made none again.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto slow = addSlow (song, song.firstTrack);
+    phazite::DeviceWindows windows (song.context);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        phazite::showDeviceWindow (song.context, slow);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::isDeviceWindowOpening (song.context, slow); }, longWait));
+        CHECK (phazite::isDeviceWindowOpen (song.context, slow));
+        windows.close (slow);
+    }
+}
+#endif
+
+TEST_CASE ("A render whose plug-in's channel doesn't come in the prepare's time fails, naming it, and the plug-in reloads")
+{
+    // The time-out path a render takes when the helper doesn't make a channel (the helper taken for hung, ended), which a test
+    // reached once only past the prepare's minute, under the tests' long hang limits: its render ends, its message names the
+    // plug-in, nothing it held is touched after, and the plug-in reloads and is frozen.
+    struct PrepareLimit
+    {
+        PrepareLimit() { phazite::SandboxedInstance::setPrepareMilliseconds (2000); }
+        ~PrepareLimit() { phazite::SandboxedInstance::setPrepareMilliseconds (0); }
+    } limit;
+
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto slow = addSlow (song, track);
+    auto& instance = getSandboxed (song, slow);
+    CHECK (turnMessageLoop (10));
+    const auto rate = instance.getRemote().getSampleRate();
+    song.context.getSongSelection().selectOnly (track);
+
+    {
+        SlowGate gate; // the helper busy giving a state, the channel asked for behind it
+        instance.askState (phazite::SandboxedInstance::Ask::all);
+        instance.prepareToPlay (juce::exactlyEqual (rate, 96000.0) ? 48000.0 : 96000.0, 512);
+        phazite::test::RenderHost host;
+        phazite::toggleFreeze (song.context, host);
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, longWait));
+        CHECK (host.render == nullptr);
+        CHECK (host.finished[0].contains ("Test Slow"));
+        CHECK_FALSE (phazite::isFrozen (song.context, track));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }, longWait));
+    }
+
+    CHECK_FALSE (reloadAndWait (song, slow).has_value());
+    phazite::test::RenderHost host;
+    phazite::toggleFreeze (song.context, host);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, longWait));
+    CHECK (phazite::isFrozen (song.context, track));
 }

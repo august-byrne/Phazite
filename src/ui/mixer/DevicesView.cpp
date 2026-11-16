@@ -2,6 +2,7 @@
 #include "DevicesView.h"
 #include "ContainerEditor.h"
 #include "StripParts.h"
+#include "devices/core/Clock.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/ContainerModel.h"
@@ -39,6 +40,61 @@ namespace
     constexpr int dragThreshold = 5;                     // pixels a press on a name moves before it carries the device
     constexpr int pathHeight = controlHeight + Space::s; // where a container's device is, along its top, with a line under it
     constexpr int separatorWidth = 14;                   // between its steps: "›"
+    constexpr int openingChecksPerSecond = 10;           // how often a plug-in's window button looks whether it has opened
+
+    //==============================================================================
+    // A plug-in's window button: it opens the plug-in's own window, shows while the window is opening that it is (known
+    // bug 166: the plug-in still loads, or its helper makes its editor, which nothing waits for), looking ten times a second
+    // until it has opened (or was dropped), and, clicked again meanwhile, stops waiting (a helper that never makes the
+    // editor: the second review).
+    class PluginWindowButton final : public IconButton,
+                                     private juce::Timer
+    {
+    public:
+        PluginWindowButton (ProjectContext& c, DeviceID d)
+            : IconButton ("Open its window", Icon::detach),
+              context (c),
+              id (d)
+        {
+            setClickingTogglesState (false);
+            showOpening (false);
+            onClick = [this]
+            {
+                showDeviceWindow (context, id);
+                showOpening (isDeviceWindowOpening (context, id));
+            };
+        }
+
+    private:
+        ProjectContext& context;
+        const DeviceID id;
+
+        void showOpening (bool opening)
+        {
+            // What is happening, and, after a few seconds, that the plug-in takes long (a big editor, or a helper busy loading).
+            if (opening && openingSince <= 0.0)
+                openingSince = devices::Clock::getMilliseconds();
+            else if (! opening)
+                openingSince = 0.0;
+
+            const auto slow = opening && devices::Clock::getMilliseconds() - openingSince > slowOpeningMilliseconds;
+            setToggleState (opening, juce::dontSendNotification);
+            setTooltip (! opening ? "Opens the plug-in's own window, with all its controls"
+                        : slow    ? "Still opening. Click to stop waiting."
+                                  : "Opening the plug-in's own window: it shows once the plug-in has loaded and made it. Click to "
+                                    "stop waiting.");
+
+            if (opening)
+                startTimerHz (openingChecksPerSecond);
+            else
+                stopTimer();
+        }
+
+        double openingSince = 0.0; // as it began to open (devices::Clock::getMilliseconds()), or 0
+        static constexpr double slowOpeningMilliseconds = 5000.0;
+
+        void timerCallback() override { showOpening (isDeviceWindowOpening (context, id)); }
+    };
 
     //==============================================================================
     // A plug-in's key knobs, which the model offers, each named (its mix is in its slot): its own controls are in its window.
@@ -313,11 +369,7 @@ struct DevicesView::Slot : public juce::Component
         // A plug-in's own window; or one of Phazite's own in a window of its own when the user wants, which then shows it:
         // beside the column, a word says so meanwhile (app/PluginWindow.h).
         if (device.opensWindow)
-        {
-            windowButton = std::make_unique<IconButton> ("Open its window", Icon::detach);
-            windowButton->setTooltip ("Opens the plug-in's own window, with all its controls");
-            windowButton->onClick = [this] { showDeviceWindow (view.context, shown.id); };
-        }
+            windowButton = std::make_unique<PluginWindowButton> (view.context, device.id);
         else if (device.popsOut)
         {
             windowButton = std::make_unique<IconButton> ("Open in a window", Icon::detach);
@@ -864,11 +916,7 @@ struct DevicesView::ContainerFrame : public juce::Component
         }
 
         if (device->opensWindow)
-        {
-            windowButton = std::make_unique<IconButton> ("Open its window", Icon::detach);
-            windowButton->setTooltip ("Opens the plug-in's own window, with all its controls");
-            windowButton->onClick = [this] { showDeviceWindow (context, device->id); };
-        }
+            windowButton = std::make_unique<PluginWindowButton> (context, device->id);
         else if (device->popsOut)
         {
             windowButton = std::make_unique<IconButton> ("Open in a window", Icon::detach);

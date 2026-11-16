@@ -167,6 +167,14 @@ struct Screen
 
         phazite::addEffect (context, track (1), find ("phaziteReverb"));
 
+        // (The plug-in loads in the background, as one added does: waited for.)
+        REQUIRE (phazite::test::dispatchMessagesUntil (
+            [this]
+            {
+                const auto slots = phazite::getEffects (context, track (0));
+                return std::none_of (slots.begin(), slots.end(), [] (const phazite::DeviceSlot& slot) { return slot.loading; });
+            }));
+
         registry.add ({ .id = "device.show",
                         .name = "Show Device",
                         .perform = [this]

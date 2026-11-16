@@ -2038,6 +2038,45 @@ PluginParameterValues VersionHistory::readPluginParameters() const
     return values;
 }
 
+void VersionHistory::recordLoadedPlugins()
+{
+    // A plug-in of the last commit's that was still loading, in the background, as it was made (or as the project opened)
+    // had no values then: those it opened with are its values then (the state it opened from is the one the commit holds),
+    // so that a knob turned after, in Phazite, shows as a change (the review of known bug 166).
+    std::vector<juce::ValueTree> plugins;
+    findPlugins (song.getState(), plugins);
+
+    for (const auto& plugin : plugins)
+    {
+        const auto device = readID (plugin[schema::deviceID]);
+        const auto isIn = [device] (const juce::ValueTree& songThen)
+        {
+            std::vector<juce::ValueTree> found;
+            findPlugins (songThen, found);
+            return std::any_of (found.begin(), found.end(),
+                                [device] (const juce::ValueTree& then) { return readID (then[schema::deviceID]) == device; });
+        };
+
+        const auto missingBefore = ! baselineParameters.contains (device) && baseline.isValid() && isIn (baseline);
+        const auto missingStaged = ! stagedParameters.contains (device) && staged.isValid() && isIn (staged);
+        auto* instance = missingBefore || missingStaged ? findPluginInstance (song, DeviceID::fromRaw (device)) : nullptr;
+
+        if (instance == nullptr)
+            continue;
+
+        std::vector<PluginParameterValue> opened;
+
+        for (const auto& info : instance->getParameterInfos())
+            opened.push_back ({ info.id, info.name, info.value });
+
+        if (missingBefore)
+            baselineParameters[device] = opened;
+
+        if (missingStaged)
+            stagedParameters[device] = opened;
+    }
+}
+
 //==============================================================================
 void VersionHistory::setBaseline (juce::ValueTree baselineSong, PluginParameterValues parameters, ReportCounts reported)
 {
@@ -2232,6 +2271,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
 
     if (! dirtyTracks.empty())
     {
+        recordLoadedPlugins();
         const auto parameters = readPluginParameters();
         const auto reported = findReported (reportedAtStaged, song.getDeviceChangesOutsideHistory());
         const PluginValues values { &stagedParameters, &parameters, &reported };

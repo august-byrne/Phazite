@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Controls.h"
 #include "ModulatorDrag.h"
+#include "ParameterText.h"
 #include "TypedField.h"
 #include "ValueText.h"
 #include "devices/core/Clock.h"
@@ -142,19 +143,50 @@ void ValueSlider::typeInTextBox (const juce::String& typed)
 
 void ValueSlider::applyTypedText (const juce::String& text)
 {
+    // Read later, where it is (known bug 166): what was typed shows meanwhile, then the value's text.
+    if (readTypedText != nullptr)
+    {
+        typedBeingRead = text;
+        updateText();
+        readTypedText (text,
+                       [safeThis = juce::Component::SafePointer<ValueSlider> (this), text] (std::optional<double> read)
+                       {
+                           if (safeThis == nullptr || safeThis->typedBeingRead != text)
+                               return; // gone, or typed again since
+
+                           safeThis->typedBeingRead = {};
+
+                           if (read.has_value())
+                               safeThis->applyTypedValue (*read);
+
+                           safeThis->updateText();
+                       });
+        return;
+    }
+
     // A slider that reads no units reads numbers alone: JUCE would read text without one as 0.
     if (valueFromTextFunction == nullptr && ! text.containsAnyOf ("0123456789"))
         return;
 
+    applyTypedValue (getValueFromText (text));
+}
+
+void ValueSlider::applyTypedValue (double typed)
+{
     // As JUCE's own text box sets what is typed in it (Slider::Pimpl::textChanged()): between a drag's start and end, which
     // an attachment makes one undo step.
-    const auto value = snapValue (getValueFromText (text), notDragging);
+    const auto value = snapValue (typed, notDragging);
 
     if (! juce::approximatelyEqual (value, getValue()))
     {
         const ScopedDragNotification drag (*this);
         setValue (value, juce::sendNotificationSync);
     }
+}
+
+juce::String ValueSlider::getTextFromValue (double value)
+{
+    return typedBeingRead.isNotEmpty() ? typedBeingRead : juce::Slider::getTextFromValue (value);
 }
 
 juce::Rectangle<int> ValueSlider::getValueFieldTarget (const juce::Component& parent) const
@@ -841,12 +873,32 @@ void ParameterAttachment::showDeviceText()
     if (const auto info = handle.getInfo())
     {
         showAsParameter (slider, *info);
+
+        if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+            valueSlider->readTypedText = nullptr;
     }
     else
     {
-        slider.textFromValueFunction = [this] (double value) { return handle.getText ((float) value); };
+        // A plug-in's as it writes and reads them, asked of its helper without waiting (known bug 166): its text shown again
+        // once it has come, and a value typed set once the plug-in has read it.
+        slider.textFromValueFunction = [this] (double value)
+        {
+            return handle.getText ((float) value,
+                                   [safeSlider = juce::Component::SafePointer<juce::Slider> (&slider)]
+                                   {
+                                       if (safeSlider != nullptr)
+                                           safeSlider->updateText();
+                                   });
+        };
         slider.valueFromTextFunction = [this] (const juce::String& text)
         { return (double) handle.readText (text).value_or ((float) slider.getValue()); };
+
+        if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+            valueSlider->readTypedText = [this] (const juce::String& text, std::function<void (std::optional<double>)> set)
+            {
+                readTypedValue (handle, text, [set = std::move (set)] (std::optional<float> value)
+                                { set (value.has_value() ? std::optional ((double) *value) : std::nullopt); });
+            };
     }
 
     slider.updateText();

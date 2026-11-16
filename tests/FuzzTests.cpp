@@ -18,6 +18,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
+#include "model/engine/internal/PluginScanner.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/DawProject.h"
@@ -36,6 +37,7 @@
 #include <juce_cryptography/juce_cryptography.h>
 
 #include <cstring>
+#include <limits>
 #include <unordered_map>
 
 namespace
@@ -754,36 +756,192 @@ TEST_CASE ("Fuzz: what a helper tells of a plug-in is read within its message, w
     write (changed, info.parameters);
     MessageWriter block (MessageType::getState, 9);
     block.add (fuzz::toBlock ("state bytes"));
-    const std::vector seeds { opened.take(), changed.take(), block.take() };
 
-    fuzz::run ("helper messages", seeds, fuzz::Shape::bytes, 3000,
+    // What isn't a number in every numeric field, a number past a float's range, and texts of any length (known bug 181): a
+    // plug-in that tells nonsense, as it opens and as it changes.
+    constexpr auto notANumber = std::numeric_limits<double>::quiet_NaN(), infinite = std::numeric_limits<double>::infinity();
+    const auto endless = juce::String::repeatedString ("x", 20000);
+    PluginInfo wild = info;
+    wild.name = endless;
+    wild.tailSeconds = notANumber;
+    wild.parameters[0] = { endless, endless, endless, (float) notANumber, (float) infinite, std::numeric_limits<int>::max(), false, true };
+    wild.parameters[1].defaultValue = (float) -infinite;
+    wild.parameters[2].value = (float) notANumber;
+    wild.programs = { endless };
+    MessageWriter wildOpened (MessageType::reply, 8);
+    wildOpened.add (true).add (endless);
+    write (wildOpened, wild);
+    MessageWriter wildChanged (MessageType::parametersChanged, 0);
+    wildChanged.add ((std::int64_t) 3);
+    write (wildChanged, wild.parameters);
+
+    std::vector seeds { opened.take(), changed.take(), block.take(), wildOpened.take(), wildChanged.take() };
+
+    for (const auto value : { notANumber, infinite, -infinite, 1.0e300, -1.0e300, 0.5 })
+    {
+        MessageWriter valueChanged (MessageType::parameterChanged, 0); // as the helper tells a value of the plug-in's own
+        valueChanged.add ((std::int64_t) 3).add ((std::int32_t) 1).add (value);
+        seeds.push_back (valueChanged.take());
+        MessageWriter valueRead (MessageType::parameterValue, 11); // as an answer to a text typed is read
+        valueRead.add (value);
+        seeds.push_back (valueRead.take());
+    }
+
+    MessageWriter text (MessageType::parameterText, 12); // as an answer to a value's text is read
+    text.add (endless);
+    MessageWriter resized (MessageType::editorResized, 0);
+    resized.add ((std::int64_t) 3).add (std::numeric_limits<std::int32_t>::max()).add (std::numeric_limits<std::int32_t>::min());
+    MessageWriter key (MessageType::editorKey, 0);
+    key.add ((std::int64_t) 3).add (true).add ((std::int32_t) 'a').add ((std::int32_t) -1);
+    seeds.push_back (text.take());
+    seeds.push_back (resized.take());
+    seeds.push_back (key.take());
+
+    // A value as Phazite takes it: from 0 to 1, or none.
+    const auto isUnitValue = [] (std::optional<float> value) { return ! value.has_value() || (*value >= 0.0f && *value <= 1.0f); };
+
+    fuzz::run (
+        "helper messages", seeds, fuzz::Shape::bytes, 3000,
+        [isUnitValue] (const juce::MemoryBlock& input) -> std::string
+        {
+            MessageReader reader (input);
+
+            switch (reader.getType())
+            {
+                case MessageType::parametersChanged:
+                {
+                    juce::ignoreUnused (reader.readInt64());
+                    const auto parameters = readParameters (reader);
+
+                    if (parameters.size() > input.getSize())
+                        return "more parameters than bytes";
+
+                    for (const auto& parameter : parameters)
+                        if (! isUnitValue (parameter.defaultValue) || ! isUnitValue (parameter.value) || parameter.numSteps < 0
+                            || parameter.numSteps > maxSteps || parameter.id.length() > maxIDLength
+                            || parameter.name.length() > maxTextLength || parameter.label.length() > maxTextLength)
+                            return "a parameter beyond what Phazite takes";
+
+                    return {};
+                }
+
+                case MessageType::getState:
+                    return reader.readBlock().getSize() > input.getSize() ? "a block larger than its message" : "";
+
+                case MessageType::parameterChanged:
+                    juce::ignoreUnused (reader.readInt64(), reader.readInt());
+                    return isUnitValue (readUnitValue (reader)) ? "" : "a value beyond 0 to 1, or no number";
+
+                case MessageType::parameterValue:
+                    return isUnitValue (readUnitValue (reader)) ? "" : "a value read beyond 0 to 1, or no number";
+
+                case MessageType::parameterText:
+                    return readText (reader).length() > maxTextLength ? "a text longer than Phazite takes" : "";
+
+                case MessageType::editorResized:
+                {
+                    juce::ignoreUnused (reader.readInt64());
+                    const auto width = readEditorSide (reader), height = readEditorSide (reader);
+                    return width < 1 || height < 1 || width > maxEditorSide || height > maxEditorSide ? "a side beyond an editor's" : "";
+                }
+
+                case MessageType::editorKey:
+                {
+                    juce::ignoreUnused (reader.readInt64(), reader.readBool(), reader.readInt());
+                    const auto modifiers = keepModifiers (reader.readInt());
+                    return (modifiers & ~0x0f) != 0 ? "a key held with a mouse button" : "";
+                }
+
+                case MessageType::hello:
+                case MessageType::heartbeat:
+                case MessageType::openInstance:
+                case MessageType::closeInstance:
+                case MessageType::prepareInstance:
+                case MessageType::setState:
+                case MessageType::stats:
+                case MessageType::setProgram:
+                case MessageType::openEditor:
+                case MessageType::closeEditor:
+                case MessageType::scan:
+                case MessageType::quit:
+                case MessageType::setParameter:
+                case MessageType::placeEditor:
+                case MessageType::setEditorKeys:
+                case MessageType::playLive:
+                case MessageType::gesture:
+                case MessageType::latencyChanged:
+                case MessageType::stateChanged:
+                case MessageType::reply:
+                    break;
+            }
+
+            juce::ignoreUnused (reader.readBool());
+
+            if (readText (reader).length() > maxTextLength)
+                return "a reason longer than Phazite takes";
+
+            const auto read = readPluginInfo (reader);
+
+            if (read.parameters.size() + read.programs.size() > input.getSize())
+                return "more parameters and programs than bytes";
+
+            if (read.latencySamples < 0 || read.latencySamples > maxLatencySamples || ! std::isfinite (read.tailSeconds)
+                || read.tailSeconds < 0.0 || read.numInputChannels < 0 || read.numInputChannels > 64 || read.numOutputChannels < 0
+                || read.numOutputChannels > 64)
+                return "a number beyond what a plug-in can have";
+
+            if (read.name.length() > maxTextLength)
+                return "a name longer than Phazite takes";
+
+            for (const auto& parameter : read.parameters)
+                if (! isUnitValue (parameter.defaultValue) || ! isUnitValue (parameter.value) || parameter.name.length() > maxTextLength)
+                    return "a parameter beyond what Phazite takes";
+
+            for (const auto& program : read.programs)
+                if (program.length() > maxTextLength)
+                    return "a program's name longer than Phazite takes";
+
+            return {};
+        });
+}
+
+TEST_CASE ("Fuzz: what a helper's scan says a file holds is read within its message, in counts and texts Phazite keeps")
+{
+    // Known bug 181's review: the count was read as it came (up to 2^31 turns), and every description's texts went into the
+    // plug-in list and the settings at any length.
+    using namespace phazite::sandbox;
+    juce::PluginDescription plugin;
+    plugin.name = "Plug-in";
+    plugin.pluginFormatName = "VST3";
+    plugin.manufacturerName = "Maker";
+    plugin.fileOrIdentifier = "C:/Plug-ins/Plug-in.vst3";
+    plugin.uniqueId = 7;
+    const auto xmlOf = [] (const juce::PluginDescription& description)
+    { return description.createXml()->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine()); };
+
+    MessageWriter two (MessageType::reply, 3);
+    two.add ((std::int32_t) 2).add (xmlOf (plugin)).add (xmlOf (plugin));
+
+    auto endless = plugin;
+    endless.name = endless.manufacturerName = endless.category = juce::String::repeatedString ("x", 5000);
+    endless.fileOrIdentifier = juce::String::repeatedString ("y", 6000);
+    MessageWriter longOne (MessageType::reply, 4);
+    longOne.add ((std::int32_t) std::numeric_limits<std::int32_t>::max()).add (xmlOf (endless));
+    const std::vector seeds { two.take(), longOne.take() };
+
+    fuzz::run ("scan answers", seeds, fuzz::Shape::bytes, 2000,
                [] (const juce::MemoryBlock& input) -> std::string
                {
-                   MessageReader reader (input);
+                   const auto found = phazite::readScannedPlugins (input);
 
-                   if (reader.getType() == MessageType::parametersChanged)
-                   {
-                       juce::ignoreUnused (reader.readInt64());
+                   if (found.size() > phazite::maxScannedPlugins || found.size() > (int) input.getSize())
+                       return "more plug-ins than a file or its message holds";
 
-                       if (readParameters (reader).size() > input.getSize())
-                           return "more parameters than bytes";
-
-                       return {};
-                   }
-
-                   if (reader.getType() == MessageType::getState)
-                       return reader.readBlock().getSize() > input.getSize() ? "a block larger than its message" : "";
-
-                   juce::ignoreUnused (reader.readBool(), reader.readString());
-                   const auto read = readPluginInfo (reader);
-
-                   if (read.parameters.size() + read.programs.size() > input.getSize())
-                       return "more parameters and programs than bytes";
-
-                   if (read.latencySamples < 0 || read.latencySamples > maxLatencySamples || ! std::isfinite (read.tailSeconds)
-                       || read.tailSeconds < 0.0 || read.numInputChannels < 0 || read.numInputChannels > 64 || read.numOutputChannels < 0
-                       || read.numOutputChannels > 64)
-                       return "a number beyond what a plug-in can have";
+                   for (const auto* description : found)
+                       if (description->name.length() > maxTextLength || description->manufacturerName.length() > maxTextLength
+                           || description->category.length() > maxTextLength
+                           || description->fileOrIdentifier.length() > phazite::maxScannedPath)
+                           return "a text longer than Phazite keeps";
 
                    return {};
                });

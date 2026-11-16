@@ -14,6 +14,7 @@
 #include "model/base/Song.h"
 #include "model/devices/ParameterRef.h"
 
+#include <functional>
 #include <optional>
 
 namespace phazite
@@ -103,7 +104,10 @@ std::optional<FoundParameter> locateParameter (const Song&, const ParameterRef&)
 bool isStillThere (const Song&, const FoundParameter&);
 
 ParameterDescription describeParameter (const Song&, const FoundParameter&);
-juce::String getParameterText (const Song&, const FoundParameter&, float value);
+
+// How a value reads; a plug-in's as its helper wrote it last, asked again without waiting (SandboxedInstance::describeValue():
+// whenKnown called as its answer comes).
+juce::String getParameterText (const Song&, const FoundParameter&, float value, std::function<void()> whenKnown = {});
 float getValueSetByHand (const Song&, const FoundParameter&);
 void setValueSetByHand (Song&, const FoundParameter&, float value);
 float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);

@@ -446,6 +446,38 @@ TEST_CASE ("A plug-in's knob set to its default by Phazite's controls keeps no v
     CHECK (TestPlugin::getGain (*phazite::findSong (s.context), plugin) == doctest::Approx (1.0f));
 }
 
+TEST_CASE ("A plug-in still loading as a version is kept shows a knob turned after it has loaded as a change since that version")
+{
+    // The review of known bug 166: a commit made while a plug-in loaded (in the background, as one added does) kept no
+    // values of its knobs, and one turned in Phazite after it had loaded showed as no change.
+    TestPlugin testPlugin;
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+
+    // Added from settings whose Gain is a quarter, and kept as a version while it still loads.
+    juce::MemoryOutputStream state;
+    state.writeFloat (0.25f); // its Gain
+    state.writeFloat (0.5f);  // its Tone
+    auto device = phazite::makeDeviceState (song, phazite::makeDeviceType (TestPlugin::getDescription()));
+    device.setProperty (schema::pluginState, phazite::writeBytes (state.getMemoryBlock()), nullptr);
+    phazite::DeviceID plugin;
+
+    {
+        const phazite::UndoStep step (song, "Add the stand-in");
+        plugin = phazite::insertDeviceState (song, s.firstTrack, device);
+    }
+
+    phazite::findPluginInstance (song, plugin); // its load begun
+    REQUIRE (phazite::getPluginStatus (song, plugin) == phazite::PluginInstances::Status::loading);
+    keepVersion (s.context);
+    s.waitForPlugins();
+    CHECK (describeChanges (s.context) == "");
+
+    // Its Gain set to its default by a control after it has loaded, which leaves no value in the song: a change all the same.
+    s.setParameter (plugin, TestPlugin::gainID, 1.0f);
+    CHECK (describeChanges (s.context).contains ("Gain 25%"));
+}
+
 TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip muted and unmuted, is no change since the last version")
 {
     TestSong s;

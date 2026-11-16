@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <thread>
 
 // Last, so that its macros can't change the headers above.
@@ -97,7 +98,7 @@ struct Told final : sandbox::RemoteInstance::Listener
     void stateChanged() override { ++states; }
     void parametersChanged (const std::vector<sandbox::ParameterInfo>&) override {}
     void editorResized (int, int) override {}
-    void editorKey (bool, int, int) override {}
+    void editorKey (bool, int, int, int) override {}
 };
 
 bool waitFor (const std::function<bool()>& condition, int milliseconds = phazite::test::hangTimeout)
@@ -239,6 +240,20 @@ TEST_CASE ("A block answered late stays the helper's: the next finds the channel
     release = true;
     helper.join();
     CHECK_FALSE (engineSide->isBusy());
+}
+
+TEST_CASE ("A helper's process ID is taken only as that of the child Phazite started, running its program")
+{
+    // Known bug 181's review: the ID a helper told in its hello was put in the job that ends its processes with Phazite's,
+    // whatever process it named.
+    TestHelper helper;
+    const auto id = helper.get().getProcessID();
+    CHECK (id != 0);
+    CHECK (sandbox::Helper::isOwnChild (id, phazite::test::getTestHost()));
+    CHECK_FALSE (sandbox::Helper::isOwnChild (id, phazite::test::getTestHost().getSiblingFile ("NotTheHelper.exe")));
+    CHECK_FALSE (sandbox::Helper::isOwnChild (0, phazite::test::getTestHost()));
+    CHECK_FALSE (sandbox::Helper::isOwnChild (-1, phazite::test::getTestHost()));
+    CHECK_FALSE (sandbox::Helper::isOwnChild (std::numeric_limits<std::int64_t>::max(), phazite::test::getTestHost()));
 }
 
 TEST_CASE ("A plug-in opens in a helper from its description, with its parameters by their own IDs, and plays a block")

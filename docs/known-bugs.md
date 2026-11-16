@@ -27,28 +27,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Plug-ins
 
-- **166. What is left of the message thread waiting for plug-ins.** A plug-in added, or brought back by an undo once
-  the project's plug-ins have loaded, opens while the message thread waits (`PluginInstances::open()` →
-  `host.createInstance`, up to the load limit of 60 s); Reload waits for the helper to start and the plug-in to open
-  (`PluginInstances::reload()`, 20 s and more); opening a plug-in's window waits for the helper to make its editor
-  (`createSandboxedEditor()` → `openEditor`, up to 10 s); a parameter's text and a typed value wait up to 250 ms each
-  (`Parameter::getText()`, `getValueForText()`); and on Linux and macOS closing a plug-in's window still waits up to
-  2 s (the window that takes the helper's is Windows' only). Stores, saves, closes, preparing for another rate and
-  closing a window on Windows wait for none since 2026-11-15. Fix: the added plug-in opens in the background as a
-  project's do (shown as loading, silent meanwhile, its window opening when it is ready); the editor and the texts
-  asked without waiting, shown when the answer comes.
-- **181. A plug-in's value that is not a number gets in unchecked.** `jlimit` passes NaN on
-  (`src/model/plugins/SandboxedInstance.cpp`, about lines 108, 110 and 295; `src/model/devices/ParameterHandle.cpp`,
-  about 333; `Parameters.cpp`, about 395); what the helper sends is stored as it comes (about 844); the plug-in's
-  text is read with `getFloatValue()`, which can overflow on a long exponent; and a double past a float's range is
-  cast in `src/sandbox/core/PluginInfo.cpp` (about 47) and `RemoteInstance.cpp` (about 259). Fix: `std::isfinite`
-  where each value comes in, and `readFloat()` (`src/model/base/Json.h`) for the texts. Seen while known bug 148
-  was fixed.
-- **177. Over a plug-in's window, a shortcut on the digit row doesn't match on layouts where that row types other
-  characters** (AZERTY, Czech): the keys sent to plug-in windows (`PluginKeys::getWantedKeys()`) are the keymaps' keys
-  as written, not matched the three ways the window's own keys are (`KeyDispatcher::findMatches()`). Today only Space
-  and other keys off the digit row run over plug-ins, so nothing shows. Fix: have the helper ask with the
-  dispatcher's matching, or send the digit row's forms too. Seen while known bug 112 was fixed.
+- **185. Linux: a plug-in's window shows blank after JUCE destroys or remakes the native window it is in.** The
+  editor's area stays empty until the window is closed and opened again. Why: X destroys every child of a destroyed
+  window, and the editor hears of the change (`componentPeerChanged()`) only after JUCE has destroyed its old window,
+  so the socket and the helper's window in it are gone before Phazite can take them out (JUCE workaround W52). This
+  happens when a peer is remade (`setAlwaysOnTop()` on Linux, `setUsingNativeTitleBar()`, a change of style flags) or
+  the window is deleted with the editor still in it; no plug-in window of Phazite's does any of these while an editor
+  is in it today. Fix: Phazite notices that the helper's window has gone and asks the helper for its editor again in
+  the new socket (as a reload remakes editors), with a Linux CI test that remakes the peer under an open editor; or
+  JUCE tells a component before its peer is destroyed. Found by the review of known bug 165's Linux side
+  (2026-11-16); never seen, and the Linux code is not yet compiled by CI.
 
 ## Devices and playback
 
@@ -62,15 +50,3 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
-
-## Tests
-
-- **180. The plug-in tests still compare against the wall clock.** The rest of the tests no longer do (2026-11-16);
-  what is left is in `tests/SandboxedPluginTests.cpp` and `tests/SandboxedPlugins.h`: the stand-ins' hang limits of one
-  and two seconds for every test; bounds on "doesn't wait" (`timeKept (...) < 500` and the like: closing a plug-in's
-  window failed at 856 ms and 2.8 s under load, a crashed plug-in's state, a save, `processBlock`, a render's
-  cancel); waits for a time that stand for a condition (`dispatchMessagesUntil (false, N)`); and the spacing of a
-  large state's answers measured on the real clock. Fix: the short limits only in the tests of hangs, with the
-  stand-in stalling until released; each bound against a long limit for the wait it guards, or a structural check;
-  each time wait made its condition; the spacing judged on the clock a test holds (`devices::Clock`), as
-  `tests/README.md` says ("Real time without the wall clock").

@@ -699,6 +699,8 @@ TEST_CASE ("A device's window and a plug-in's window open, show their device, an
     CHECK (eqContent->getEditor() != nullptr);
     CHECK (phazite::isDeviceWindowOpen (song.context, eq));
 
+    // A plug-in's once its helper has made its editor, which it is asked for without waiting (known bug 166).
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return windows.findWindow (plugin) != nullptr; }));
     auto* pluginWindow = windows.findWindow (plugin);
     REQUIRE (pluginWindow != nullptr);
     CHECK (pluginWindow->isShowing());
@@ -1165,4 +1167,25 @@ TEST_CASE ("A read of the versions and audio work, one after the other: each win
     CHECK (phazite::getCurrentBranch (context)->id == idea);
     CHECK (phazite::getClips (context, track).empty());
     work.setShowAfter (phazite::AudioWork::showAfterMilliseconds);
+}
+
+TEST_CASE ("The main window closed while a wait holds it cancels the wait first, and nothing reaches the window after")
+{
+    // The review of known bug 166: a quit that skips systemRequestedQuit() destroyed the main window while a wait's hold lived
+    // on (a value typed into a plug-in's control keeps it in its instance's ask, which goes with the session, after the
+    // window): its progress window, still to show, was then shown on, or ended on, the window that had gone.
+    MainScreen screen;
+    auto& context = screen.session.getContext();
+    screen.session.setWorkShownAfter (0); // its window at the next turn of the message loop
+    auto cancelled = false;
+    auto hold = context.holdForWork ("Waiting for the test", [&cancelled] (const juce::String&) { cancelled = true; });
+
+    // Closed before its window shows: the wait told first, and its window never shown on the one that went; the hold goes
+    // after the window, as the session's own does.
+    screen.window = nullptr;
+    CHECK (cancelled);
+    dispatchPendingMessages();
+    hold = nullptr;
+    dispatchPendingMessages();
+    CHECK_FALSE (context.isHoldingForWork());
 }

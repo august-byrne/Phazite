@@ -75,6 +75,7 @@ struct DeviceWindowHost
     virtual ~DeviceWindowHost() = default;
     virtual void show (DeviceID) = 0;
     virtual bool isOpen (DeviceID) const = 0;
+    virtual bool isOpening (DeviceID) const { return false; } // shown, but not in view yet: a plug-in's whose editor is to come
     virtual void close (DeviceID) = 0;
 };
 

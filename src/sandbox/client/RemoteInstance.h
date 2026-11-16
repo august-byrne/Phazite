@@ -30,7 +30,7 @@ public:
         virtual void stateChanged() = 0;
         virtual void parametersChanged (const std::vector<ParameterInfo>&) = 0;
         virtual void editorResized (int width, int height) = 0;
-        virtual void editorKey (bool isDown, int keyCode, int modifiers) = 0;
+        virtual void editorKey (bool isDown, int keyCode, int modifiers, int scanCode) = 0;
     };
 
     // Opened in the helper, from the plug-in's description (JUCE's XML for it) and state (empty for its own defaults), at
@@ -80,35 +80,49 @@ public:
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }
     bool setProgram (int index, int timeoutMilliseconds);
 
-    // Its editor, a window of the helper's (getInfo().hasEditor): made, with its size and whether it can be resized, or
-    // none; shown in a window of Phazite's (by its native handle) at a place in its pixels, or hidden with no window (no
-    // waiting); and closed, within the time (0: asked without waiting). And the keys Phazite takes over it, by their codes
-    // and modifiers (JUCE's), which the helper
-    // hands back as the listener's editorKey(), unless the plug-in gets every key.
+    // Its editor, a window of the helper's (getInfo().hasEditor): asked to be made without waiting (known bug 166), then read
+    // from the answer once it is done, with its size (each side as readEditorSide() keeps it) and whether it can be resized,
+    // or none; shown in a window of Phazite's (by its native handle) at a place in its pixels, or hidden with no window (no
+    // waiting); and closed, without waiting, or asked to close with its answer to come once the helper has closed it (what a
+    // window that holds the helper's waits for, a little at a time, before it goes). And the keys Phazite takes over it, by
+    // their codes and modifiers (JUCE's), and by their places (scan codes) and modifiers, which the helper matches a key by
+    // where it can tell its place, whatever its own layout; it hands them back as the listener's editorKey(), with the
+    // place's scan code where it has one (0 for none), unless the plug-in gets
+    // every key.
     struct EditorSize
     {
         int width = 0, height = 0;
         bool isResizable = false;
     };
 
-    std::optional<EditorSize> openEditor (int timeoutMilliseconds);
+    std::shared_ptr<Helper::Reply> askToOpenEditor();
+    static std::optional<EditorSize> readEditor (const Helper::Reply&);
     void placeEditor (std::int64_t window, int x, int y, int width, int height);
-    void closeEditor (int timeoutMilliseconds);
-    void setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys);
+    void closeEditor();
+    std::shared_ptr<Helper::Reply> askToCloseEditor();
+    void setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys, const std::vector<std::pair<int, int>>& places);
 
     // Told that a render has given it back: it plays live from now on (Phazite doesn't wait for it).
     void playLive();
 
-    // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), how the plug-in writes a value of a parameter, and the
-    // value it reads text as ("-6 dB"), from 0 to 1.
+    // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), how the plug-in writes a value of a parameter (a text
+    // of maxTextLength characters at most), and the value it reads text as ("-6 dB"), from 0 to 1 (none for what is no
+    // number): each asked without waiting (known bug 166), and read from its answer once it is done (none if none came);
+    // or, for the tests, within the time.
     void setParameter (int index, float value);
+    std::shared_ptr<Helper::Reply> askParameterText (int index, float value);
+    std::shared_ptr<Helper::Reply> askParameterValue (int index, const juce::String& text);
+    static std::optional<juce::String> readParameterText (const Helper::Reply&);
+    static std::optional<float> readParameterValue (const Helper::Reply&);
     std::optional<juce::String> getParameterText (int index, float value, int timeoutMilliseconds);
     std::optional<float> getParameterValue (int index, const juce::String& text, int timeoutMilliseconds);
 
     // Its listener (nullptr for none), set before it can tell anything.
     void setListener (Listener* newListener) noexcept { listener = newListener; }
 
-    // One of the helper's notices for it, read past its instance's ID: on the pipe's thread.
+    // One of the helper's notices for it, read past its instance's ID: on the pipe's thread. Each field checked as it comes
+    // (PluginInfo.h; known bug 181): a value that is no number is no change, and a size, a key's modifiers, a latency or a
+    // program is kept within what it can be.
     void handleNotice (MessageType, MessageReader&);
 
     // The instance a notice is for, read from it.

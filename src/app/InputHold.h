@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The window's one hold on its input (the model's InputHolder, model/project/ProjectContext.h), for whatever must
 // keep the user from changing the project while it waits: a command waiting for the plug-ins' states (ProjectSession's
-// gate), the work of a command that reads much of an audio file, and whatever else takes it (a ProjectContext's hold for
-// work to come: each holdInput() is matched by a releaseInput()).
+// gate), the work of a command that reads much of an audio file, a value typed into a plug-in's control while the plug-in
+// reads it (ui/components/ParameterText.h, through the context's hold for work), and whatever else takes it (a
+// ProjectContext's hold for work to come: each holdInput() is matched by a releaseInput()).
 //
 // What it stops: every mouse event and key on every window of Phazite. It is a modal component of its own that never
 // shows (JUCE keeps input from every component under a modal one): an invisible speck in the window it is given, which
 // takes the keys there unless a text field has them (so that a value half typed into a field isn't committed: the field
-// keeps its edit, and gets the keys again after; its keys meanwhile, Space among them, do nothing).
+// keeps its edit, and gets the keys again after; its keys meanwhile, Space among them, do nothing, but Escape, below).
 //
 // What it passes: the keys of the few commands that change nothing in the song, its history or its files, those that run
 // while a mouse button is down too (play and stop, the tools, the editors' zoom: setWindow()'s passKey,
 // ui::KeyDispatcher::keyPressedWhileHeld()), so that a recording or the song can be stopped while it holds; and every
 // key's going down or up to keysChanged (ui::KeyDispatcher::keyStateChanged()), so that one of those keys let go and
-// pressed again runs again. Escape is none of them: it is taken and does nothing until a progress window shows.
+// pressed again runs again. Escape is none of them: it goes to passKey always, a text field's keys or not, as the hold's cancel
+// (ProjectSession::cancelHeldWork(), below), never the field's.
 //
 // Holds are counted: it is let go of at the releaseInput() that matches the last holdInput(), so a hold begun while
 // another holds keeps it held across both. One begun only after another was released holds afresh: ProjectSession's wait

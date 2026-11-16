@@ -5,6 +5,7 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "devices/synth/Synth.h"
 #include "engine/nodes/Channel.h"
@@ -20,6 +21,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -360,6 +362,15 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, and its settings as t
     REQUIRE (effects.size() == 1);
     const auto id = effects[0].id;
     const auto element = phazite::findDeviceState (song, id);
+
+    // (It loads in the background, as a plug-in added does: waited for, until what plays the song plays it.)
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&tracks, &song, id]
+        {
+            auto* device = tracks.findPlayedDevice (id);
+            return phazite::getPluginStatus (song, id) == phazite::PluginInstances::Status::playing && device != nullptr
+                   && phazite::devices::findParameter (device->getDeviceInfo(), phazite::devices::mixParameterID) >= 0;
+        }));
 
     // Which plug-in it is, as scanning found it.
     CHECK (element[schema::deviceType].toString() == "plugin");

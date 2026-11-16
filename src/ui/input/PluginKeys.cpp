@@ -2,7 +2,10 @@
 #include "PluginKeys.h"
 #include "ComputerKeyboard.h"
 #include "KeyDispatcher.h"
+#include "KeyboardLayout.h"
 #include "WindowKeys.h"
+
+#include <algorithm>
 
 namespace phazite::ui
 {
@@ -56,7 +59,132 @@ std::vector<juce::KeyPress> PluginKeys::getWantedKeys() const
     auto keys = shortcuts.getKeysOverPlugins();
     const auto playing = computerKeyboard.getKeys();
     keys.insert (keys.end(), playing.begin(), playing.end());
-    return keys;
+
+    // The layout as its places type, without Shift and with it.
+    const auto& layout = shortcuts.getLayout();
+    juce::String typed;
+
+    for (const auto* place = KeyboardLayout::places; *place != 0; ++place)
+        typed << juce::String::charToString (layout.getCharacter (*place, false))
+              << juce::String::charToString (layout.getCharacter (*place, true));
+
+    if (keys == wantedFrom && typed == wantedLayout)
+        return wanted;
+
+    // Every key of a place, with the modifiers of a key wanted, and Shift too or not (Shift and AZERTY's & is 1), in the forms a
+    // helper names it by, kept where the dispatcher's matching takes it for a command that works over plug-ins, or the computer
+    // keyboard takes it (known bug 177).
+    std::vector<int> modifierSets;
+
+    for (const auto& key : keys)
+    {
+        const auto flags = key.getModifiers().getRawFlags();
+
+        for (const auto set : { flags, flags ^ juce::ModifierKeys::shiftModifier })
+            if (std::find (modifierSets.begin(), modifierSets.end(), set) == modifierSets.end())
+                modifierSets.push_back (set);
+    }
+
+    auto found = keys;
+    std::vector<std::pair<unsigned int, int>> places;
+
+    const auto isWanted = [this] (const juce::KeyPress& candidate)
+    {
+        const auto asHandedBack = makeHandedBackKey (candidate.getKeyCode(), candidate.getModifiers().getRawFlags());
+        const auto matches = shortcuts.findMatches (asHandedBack);
+        const auto overPlugins =
+            std::any_of (matches.begin(), matches.end(), [] (const auto& match) { return match.command->overPlugins; });
+
+        return overPlugins || computerKeyboard.takesKey (asHandedBack);
+    };
+
+    const auto add = [&found] (const juce::KeyPress& candidate)
+    {
+        if (std::find (found.begin(), found.end(), candidate) == found.end())
+            found.push_back (candidate);
+    };
+
+    for (const auto* place = KeyboardLayout::places; *place != 0; ++place)
+    {
+        const auto plain = layout.getCharacter (*place, false), shifted = layout.getCharacter (*place, true);
+        const auto scanCode = getPlaceScanCode (*place);
+        auto anyWanted = false;
+
+        for (const auto set : modifierSets)
+        {
+            if (plain == 0)
+                break;
+
+            // By its character as this layout types it, and by its place, which a helper whose layout is another matches
+            // it by (the review of known bug 177); a Shift form by its place too (its second review: it was in the code
+            // list alone, which a helper whose layout is another matches as another key).
+            const juce::ModifierKeys modifiers (set);
+            auto byPlace = false;
+
+            if (const juce::KeyPress byCharacter ((int) plain, modifiers, 0); isWanted (byCharacter))
+            {
+                add (byCharacter);
+                byPlace = true;
+            }
+
+            if (const juce::KeyPress byShifted ((int) shifted, modifiers, 0);
+                modifiers.isShiftDown() && shifted != 0 && shifted != plain && isWanted (byShifted))
+            {
+                add (byShifted);
+                byPlace = true;
+            }
+
+            if (byPlace && scanCode != 0)
+                places.emplace_back (scanCode, set);
+
+            anyWanted = anyWanted || byPlace;
+        }
+
+        // Every other place said to be one, wanted with no modifiers (placeWantedByNone): a helper matches a key with a place by
+        // its place alone, never by a code its own layout gives it.
+        if (! anyWanted && scanCode != 0)
+            places.emplace_back (scanCode, placeWantedByNone);
+    }
+
+    wantedFrom = std::move (keys);
+    wantedLayout = typed;
+    wanted = std::move (found);
+    wantedPlaces = std::move (places);
+    return wanted;
+}
+
+std::vector<std::pair<unsigned int, int>> PluginKeys::getWantedPlaces() const
+{
+    getWantedKeys(); // worked out with them
+    return wantedPlaces;
+}
+
+juce::KeyPress PluginKeys::makeHandedBackKey (int keyCode, int modifiers, unsigned int scanCode) const
+{
+    const juce::ModifierKeys held (modifiers);
+    juce::juce_wchar typed = 0;
+
+    // A key told by its place: what this layout types there, as Phazite's own window would have it, whatever the helper's
+    // layout typed (the review of known bug 177: a layout switched to while the plug-in's window had the keys).
+    if (const auto place = findPlaceOfScanCode (scanCode); place != 0)
+        if (const auto plain = shortcuts.getLayout().getCharacter (place, false); plain != 0)
+            keyCode = (int) plain;
+
+    if (! held.isCtrlDown() && ! held.isAltDown() && ! held.isCommandDown() && keyCode > ' ' && keyCode <= 0xffff)
+    {
+        const auto& layout = shortcuts.getLayout();
+        const auto code = juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) keyCode);
+
+        for (const auto* place = KeyboardLayout::places; *place != 0 && typed == 0; ++place)
+        {
+            const auto plain = layout.getCharacter (*place, false), shifted = layout.getCharacter (*place, true);
+
+            if (plain != 0 && (code == plain || (shifted != 0 && code == shifted)))
+                typed = held.isShiftDown() ? shifted : plain;
+        }
+    }
+
+    return juce::KeyPress (keyCode, held, typed);
 }
 
 void PluginKeys::watch (juce::Component& window)

@@ -893,13 +893,29 @@ namespace
             if (session != nullptr)
                 song.storeDeviceStates();
 
-            // A song no session plays (an old version's): its plug-ins in instances of its own, in the background.
+            // A song no session plays (an old version's): its plug-ins in instances of its own, in the background, opened there
+            // too (the review of known bug 166: the render's start opened each while the message thread waited), the export
+            // begun once they are in, each played whole from its first block (not faded in as live playback does one that comes
+            // in late).
             if (session == nullptr && pluginHost != nullptr)
             {
                 ownPlugins = std::make_unique<PluginInstances> (song, *pluginHost, bounceRate);
-                instances = ownPlugins.get();
+                ownPlugins->sync();
+                ownPlugins->whenLoaded (
+                    [this, comment]
+                    {
+                        ownPlugins->forgetJoinsLate();
+                        begin (ownPlugins.get(), comment);
+                    });
+                return;
             }
 
+            begin (instances, comment);
+        }
+
+        void begin (PluginInstances* instances, const juce::String& comment)
+        {
+            auto* session = findSession (song);
             content = describeDawProject (song, title, comment);
             std::vector<OfflineRender::Job> jobs;
             const auto end = toSeconds (song, getSongEnd (song));

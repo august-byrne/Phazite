@@ -688,6 +688,7 @@ public:
     PluginParameterValues readPluginParameters() const;
 
 private:
+    void recordLoadedPlugins(); // the values of those that weren't known yet at the last commit, as they opened
     void timerCallback() override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
 
