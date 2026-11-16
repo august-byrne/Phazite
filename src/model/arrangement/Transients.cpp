@@ -128,7 +128,7 @@ std::optional<std::vector<double>> Transients::analyse (const juce::File& file, 
             }
 
             const auto sample = sum / (float) every;
-            silent = silent && sample == 0.0f;
+            silent = silent && juce::exactlyEqual (sample, 0.0f);
 
             if (count < most)
                 kept[count++] = sample;

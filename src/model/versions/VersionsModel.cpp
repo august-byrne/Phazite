@@ -1035,8 +1035,8 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
             made->whenNotCopying (
                 [&context, branch]
                 {
-                    if (auto* history = findHistory (context))
-                        history->deleteBranch (branch);
+                    if (auto* found = findHistory (context))
+                        found->deleteBranch (branch);
                 });
     };
 
@@ -1844,8 +1844,8 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
                                       "folder, which Abort Merge would need. Make room on the drive, or check that the folder can be "
                                       "written to, then Merge again.");
 
-                    if (auto* history = findHistory (context))
-                        history->mergeFailure = why; // said where a merge says its problems, its list kept
+                    if (auto* found = findHistory (context))
+                        found->mergeFailure = why; // said where a merge says its problems, its list kept
 
                     return VersionHistory::Taken::refused (why);
                 }

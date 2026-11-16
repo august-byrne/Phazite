@@ -1130,7 +1130,7 @@ TEST_CASE ("A ring's reset touches none of its memory, whatever its size; what i
 
         after.reset();
         played = play (after, 40);
-        const auto heard = std::count_if (played.begin(), played.end(), [] (float sample) { return sample == 7.0f; });
+        const auto heard = std::count_if (played.begin(), played.end(), [] (float sample) { return juce::exactlyEqual (sample, 7.0f); });
         CHECK (heard == 0);
 
         for (int i = 0; i < 2000; ++i)

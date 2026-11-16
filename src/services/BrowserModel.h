@@ -61,10 +61,10 @@ struct BrowserContents
 // any don't show.
 struct BrowserFilters
 {
-    juce::String type;         // a sound's type, as Library::getSoundTypes() names them ("Kick"), but "Loop"
-    std::optional<bool> loops; // loops, or one-shots
-    std::optional<int> tempo;  // in beats per minute, as a sound's tags give it
-    std::optional<SoundKey> key;
+    juce::String type {};         // a sound's type, as Library::getSoundTypes() names them ("Kick"), but "Loop"
+    std::optional<bool> loops {}; // loops, or one-shots
+    std::optional<int> tempo {};  // in beats per minute, as a sound's tags give it
+    std::optional<SoundKey> key {};
 
     bool isEmpty() const noexcept { return type.isEmpty() && ! loops.has_value() && ! tempo.has_value() && ! key.has_value(); }
 
@@ -79,10 +79,10 @@ struct BrowserFilters
 // slowest, keys from C, each root alone, major, then minor.
 struct FilterOptions
 {
-    std::vector<std::pair<juce::String, int>> types;
+    std::vector<std::pair<juce::String, int>> types {};
     int loops = 0, oneShots = 0;
-    std::vector<std::pair<int, int>> tempos;
-    std::vector<std::pair<SoundKey, int>> keys;
+    std::vector<std::pair<int, int>> tempos {};
+    std::vector<std::pair<SoundKey, int>> keys {};
 };
 
 // A sound's tempo, from its tags ("120 BPM"); none for one whose tags give none.

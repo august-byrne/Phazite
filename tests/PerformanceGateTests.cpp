@@ -1306,9 +1306,9 @@ TEST_CASE (
                                      elsewhere.folder.getChildFile ("Unsaved"));
     juce::String offered;
     session.askWhichCopy =
-        [&offered] (const juce::String&, const juce::String&, const juce::String& commit, std::function<void (int)> answer)
+        [&offered] (const juce::String&, const juce::String&, const juce::String& commitOffered, std::function<void (int)> answer)
     {
-        offered = commit;
+        offered = commitOffered;
         answer (0);
     };
     const auto openBefore = phazite::VersionStore::countSongsRead();

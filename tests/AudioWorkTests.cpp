@@ -242,7 +242,7 @@ TEST_CASE ("A job that reads for long shows its progress window, whose Cancel st
     REQUIRE (phazite::test::runTimersUntil ([&window] { return window.render != nullptr; }));
     CHECK (window.render->getTitle() == juce::String ("Holding"));
     // As its read says, once its thread has begun (the window may show before it, at 0).
-    CHECK (phazite::test::runTimersUntil ([&window] { return window.render->getProgress() == 0.5f; }));
+    CHECK (phazite::test::runTimersUntil ([&window] { return juce::exactlyEqual (window.render->getProgress(), 0.5f); }));
     window.render->cancel(); // as its Cancel does, before its window deletes it
     window.render = nullptr;
     REQUIRE (phazite::test::runTimersUntil ([&work] { return ! work.isBusy(); }));

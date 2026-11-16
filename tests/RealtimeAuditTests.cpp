@@ -2095,7 +2095,7 @@ TEST_SUITE ("realtime-audit")
 
         // And controllers, the bend and the keys' pressure in the chords, which each time round, each jump and the start
         // chase (Engine.h).
-        for (const auto [beat, kind, number, value] :
+        for (const auto& [beat, kind, number, value] :
              { std::tuple (0.05, phazite::ControlKind::controller, 1, 90), std::tuple (0.1, phazite::ControlKind::pitchWheel, 0, 10000),
                std::tuple (0.15, phazite::ControlKind::channelPressure, 0, 70), std::tuple (0.15, phazite::ControlKind::aftertouch, 64, 60),
                std::tuple (2.1, phazite::ControlKind::controller, 64, 127), std::tuple (5.0, phazite::ControlKind::controller, 1, 20) })

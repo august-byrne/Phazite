@@ -228,10 +228,10 @@ private:
     // that what was played made.
     struct PlayedNotes
     {
-        std::vector<Played> notes;
+        std::vector<Played> notes {};
         std::int64_t from = 0, to = 0;
         bool looped = false;
-        std::vector<PlayedControl> controls, carried, released;
+        std::vector<PlayedControl> controls {}, carried {}, released {};
         int endPedal = 0, endBend = 8192, endPressure = 0; // the pedal's, the bend's and the channel pressure's at its end
     };
 

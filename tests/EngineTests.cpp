@@ -1970,7 +1970,7 @@ TEST_CASE ("A file at another rate made ready for where it plays from next plays
 
     for (int channel = 0; channel < 2; ++channel)
         for (int i = 0; i < expected.getNumSamples(); ++i)
-            different += expected.getSample (channel, i) != played.getSample (channel, i) ? 1 : 0;
+            different += juce::exactlyEqual (expected.getSample (channel, i), played.getSample (channel, i)) ? 0 : 1;
 
     CHECK (different == 0);
 
@@ -2145,7 +2145,7 @@ struct LandingPlayer
     // How many of the samples played aren't silent.
     static int countSounding (const std::vector<float>& out)
     {
-        return (int) std::count_if (out.begin(), out.end(), [] (float sample) { return sample != 0.0f; });
+        return (int) std::count_if (out.begin(), out.end(), [] (float sample) { return ! juce::exactlyEqual (sample, 0.0f); });
     }
 
     static constexpr int block = 128;
@@ -2179,7 +2179,7 @@ TEST_CASE ("A jump among clips at another rate is held, silent, for whole blocks
     // Where they part (the landing, after the 3 ms fade out), the held one is silent for whole blocks, then the same.
     size_t landing = 0;
 
-    while (landing < heldOut.size() && heldOut[landing] == atOnceOut[landing])
+    while (landing < heldOut.size() && juce::exactlyEqual (heldOut[landing], atOnceOut[landing]))
         ++landing;
 
     REQUIRE (landing < heldOut.size());
@@ -2191,10 +2191,10 @@ TEST_CASE ("A jump among clips at another rate is held, silent, for whole blocks
         auto same = landing + shift + 2000 <= heldOut.size();
 
         for (size_t i = 0; same && i < shift; ++i)
-            same = heldOut[landing + i] == 0.0f;
+            same = juce::exactlyEqual (heldOut[landing + i], 0.0f);
 
         for (size_t i = 0; same && i < 2000; ++i)
-            same = heldOut[landing + shift + i] == atOnceOut[landing + i];
+            same = juce::exactlyEqual (heldOut[landing + shift + i], atOnceOut[landing + i]);
 
         if (same)
             blocksHeld = k;
@@ -2254,10 +2254,10 @@ TEST_CASE ("Held where a jump landed, the playhead waits there, a take starts th
     held.play (40);
     held.player.locate (15.0);
     const auto fading = held.play (2); // the fade out, and held
-    CHECK (std::all_of (fading.end() - 100, fading.end(), [] (float sample) { return sample == 0.0f; }));
+    CHECK (std::all_of (fading.end() - 100, fading.end(), [] (float sample) { return juce::exactlyEqual (sample, 0.0f); }));
     held.player.locate (25.0);
     const auto taken = held.play (1);
-    CHECK (std::any_of (taken.begin(), taken.end(), [] (float sample) { return sample != 0.0f; }));
+    CHECK (std::any_of (taken.begin(), taken.end(), [] (float sample) { return ! juce::exactlyEqual (sample, 0.0f); }));
     held.play (20);
     const auto beatsPerBlock = LandingPlayer::block / 24000.0;
     CHECK (held.player.getPlayheadBeat() >= 25.0 + 20 * beatsPerBlock - 1.0e-9);
@@ -2310,7 +2310,7 @@ TEST_CASE ("A jump during a count-in isn't held: the song starts on time after i
     played.insert (played.end(), rest.begin(), rest.end());
 
     const auto songStart = (std::ptrdiff_t) (750 * LandingPlayer::block);
-    REQUIRE (std::any_of (expected.begin() + songStart, expected.end(), [] (float sample) { return sample != 0.0f; }));
+    REQUIRE (std::any_of (expected.begin() + songStart, expected.end(), [] (float sample) { return ! juce::exactlyEqual (sample, 0.0f); }));
     CHECK (std::equal (expected.begin() + songStart, expected.end(), played.begin() + songStart));
 }
 
@@ -2336,7 +2336,7 @@ TEST_CASE ("Live notes taken into the block a hold starts in, after where it sta
 
     held.player.playLive (2, { dev::NoteEvent::Type::noteOn, 0, 60, 1.0f });
     const auto landedIn = held.play (1);
-    CHECK (std::all_of (landedIn.begin() + 16, landedIn.end(), [] (float sample) { return sample == 0.0f; })); // held
+    CHECK (std::all_of (landedIn.begin() + 16, landedIn.end(), [] (float sample) { return juce::exactlyEqual (sample, 0.0f); })); // held
     CHECK (held.instrument->starts.empty());
 
     // And one played while it is held.

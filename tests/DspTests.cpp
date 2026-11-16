@@ -15,6 +15,8 @@
 #include "devices/dsp/Random.h"
 #include "devices/dynamics/TruePeak.h"
 
+#include <juce_dsp/juce_dsp.h>
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>

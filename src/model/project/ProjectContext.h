@@ -37,7 +37,7 @@ public:
 template <typename ItemID>
 struct ChangedItems
 {
-    std::vector<ItemID> named;
+    std::vector<ItemID> named {};
     bool any = false;
 
     bool mayInclude (ItemID id) const { return any || std::find (named.begin(), named.end(), id) != named.end(); }
@@ -63,13 +63,13 @@ struct SongChanges
 
     // With clips: the clips added, changed (their notes included) or removed, and the tracks they were on or went to (both of
     // a clip moved to another track).
-    ChangedItems<ClipID> changedClips;
-    ChangedItems<TrackID> clipTracks;
+    ChangedItems<ClipID> changedClips {};
+    ChangedItems<TrackID> clipTracks {};
 
     // With devices: the channels (tracks, folders, returns and the master) whose devices or sends changed, and the returns
     // those sends go to; any of them after a plug-in's helper went or one was reloaded, and after a change of where sound can
     // go (a send added or removed, a sidechain's source), which every strip's send knobs follow.
-    ChangedItems<TrackID> deviceChannels;
+    ChangedItems<TrackID> deviceChannels {};
 };
 
 class ProjectContext

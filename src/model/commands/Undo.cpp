@@ -145,8 +145,8 @@ juce::String describeUndoOrRedo (Song* song)
     return song != nullptr && canRedo (*song) ? describeRedo (song) : describeUndo (song);
 }
 
-UndoStep::UndoStep (Song& song, const juce::String& name)
-    : UndoStep (song.getUndoManager(), name)
+UndoStep::UndoStep (Song& song, const juce::String& stepName)
+    : UndoStep (song.getUndoManager(), stepName)
 {
 }
 

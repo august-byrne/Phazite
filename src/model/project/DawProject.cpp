@@ -1991,7 +1991,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
             auto state = readCommitSong (*store, piece);
             store->getPieces().closeFiles();
             auto audio = unpackDawProjectAudio (
-                *in, audioFolder, [import] { return import->stop.load(); }, [progress] (float done) { *progress = done; });
+                *in, audioFolder, [import] { return import->stop.load(); }, [progress] (float fraction) { *progress = fraction; });
 
             {
                 const std::scoped_lock held (import->lock);
@@ -2007,7 +2007,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         },
         [&context, import, done, saveProjectThen] (bool did)
         {
-            auto* history = getVersionHistory (context);
+            auto* historyNow = getVersionHistory (context);
 
             // The audio it unpacked that nothing plays taken away: all of it, where it didn't finish (as soon as it is done
             // unpacking, if it isn't yet).
@@ -2026,8 +2026,8 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
 
             if (did)
                 saveProjectThen ([] (bool) {});
-            else if (history != nullptr && import->branch.isNotEmpty())
-                history->whenNotCopying (
+            else if (historyNow != nullptr && import->branch.isNotEmpty())
+                historyNow->whenNotCopying (
                     [&context, import]
                     {
                         auto* making = getVersionHistory (context);
@@ -2053,7 +2053,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
                     });
 
             if (done != nullptr)
-                done (did, did ? import->said : juce::StringArray (history != nullptr ? history->readingProblem : juce::String()));
+                done (did, did ? import->said : juce::StringArray (historyNow != nullptr ? historyNow->readingProblem : juce::String()));
         },
         progress);
 }

@@ -707,7 +707,7 @@ int main (int argc, char** argv)
 
         // A test case outside a TEST_SUITE block takes the suite that doctest.h, as it is included, sets back to "" for the
         // file; that is a static initialiser, which MSVC ran after some of the file's own once an inline variable made at
-        // startup split them (DrumSampler's noSound, in AudioWorkTests.cpp), depending on how the program was linked. A test
+        // startup split them (DrumSampler's noSound was one, in AudioWorkTests.cpp), depending on how the program was linked. A test
         // case registered first had no suite, which doctest reads as a string under any --test-suite filter (the golden
         // tests, the audit, the benchmarks): the program crashed (2026-11-16). The tests open suites as blocks alone, so a
         // case outside one is in "", as doctest's own "set back" says; its suite isn't part of how doctest tells cases apart.

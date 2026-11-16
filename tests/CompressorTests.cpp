@@ -1548,8 +1548,8 @@ TEST_CASE ("Finding 2: a change of character while the drive is heard stays driv
 
     for (const auto driven : { 0.5f, 1.0f })
     {
-        for (const auto [from, to] : { std::pair { Character::clean, Character::tube }, std::pair { Character::tube, Character::clean },
-                                       std::pair { Character::clean, Character::opto }, std::pair { Character::fet, Character::tube } })
+        for (const auto& [from, to] : { std::pair { Character::clean, Character::tube }, std::pair { Character::tube, Character::clean },
+                                        std::pair { Character::clean, Character::opto }, std::pair { Character::fet, Character::tube } })
         {
             auto before = getDefaults();
             setCurve (before, curves::findShape ("No Compression")->points);

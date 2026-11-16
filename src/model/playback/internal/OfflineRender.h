@@ -87,8 +87,8 @@ private:
     struct Compiled
     {
         Job job;
-        std::unique_ptr<SongPlayer> player; // what its plan points at, kept to be let go of on the message thread
-        std::unique_ptr<engine::Plan> plan;
+        std::unique_ptr<SongPlayer> player {}; // what its plan points at, kept to be let go of on the message thread
+        std::unique_ptr<engine::Plan> plan {};
         std::vector<SandboxedProcessor*> plugins {};     // the plug-ins its plan plays, which its player keeps
         std::vector<const SandboxedProcessor*> heard {}; // those of them switched on as it was compiled
         double pluginTailSeconds = 0.0;                  // the longest tail its plug-ins report, asked as it was compiled

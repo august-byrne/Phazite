@@ -912,8 +912,8 @@ void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJob
                     if (auto* self = weak.get())
                         --self->pendingJobs;
 
-                    if (const auto copied = std::exchange (state->copied, nullptr); copied != nullptr)
-                        copied (outcome);
+                    if (const auto onCopied = std::exchange (state->copied, nullptr); onCopied != nullptr)
+                        onCopied (outcome);
                 });
         },
         Work::writes);
@@ -1105,8 +1105,8 @@ void VersionHistory::open()
 
             std::optional<std::pair<juce::String, Merge>> mergeRead;
 
-            if (const auto state = readMergeState (mergingElement))
-                mergeRead.emplace (getMergeKey (mergingElement), findMergeAgain (*shared, versionsRead, *state));
+            if (const auto mergeState = readMergeState (mergingElement))
+                mergeRead.emplace (getMergeKey (mergingElement), findMergeAgain (*shared, versionsRead, *mergeState));
 
             shared->getPieces().closeFiles();
             auto messages = shared->readMessages();

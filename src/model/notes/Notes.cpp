@@ -1418,7 +1418,7 @@ juce::String spellWithLetter (int letter, int pitchClass)
     if (difference > 6)
         difference -= 12;
 
-    auto name = juce::String::charToString (letterNames[letter]);
+    auto name = juce::String::charToString ((juce::juce_wchar) letterNames[letter]);
     name << juce::String::repeatedString (difference > 0 ? "#" : "b", std::abs (difference));
     return name;
 }

@@ -185,7 +185,7 @@ private:
     // thread takes it as a block begins (no sound given as a stand-in, noSound, so that what is pending is never nothing;
     // anyPending says there is something to take, so that a block doesn't look at all 512), what the audio thread plays,
     // and the blocks that ended with every hit on its layer's sound, after which what was swapped out before them can go.
-    inline static const Sound noSound {};
+    static const Sound noSound; // defined in the .cpp: Sound's member initializers need this class complete
     PerLayer<std::atomic<const Sound*>> pending {};
     PerLayer<const Sound*> current {};
     std::atomic<bool> anyPending { false };

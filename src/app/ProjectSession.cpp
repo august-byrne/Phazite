@@ -1159,23 +1159,23 @@ void ProjectSession::readCopiesThenOffer (const juce::File& file, const juce::St
     read->hold = context.holdForWork ("Reading the copies of \"" + file.getFileNameWithoutExtension() + "\"",
                                       [this, session, weakRead = std::weak_ptr<CopiesRead> (read), file, error] (const juce::String& why)
                                       {
-                                          const auto read = weakRead.lock();
+                                          const auto reading = weakRead.lock();
 
-                                          if (read == nullptr || read->over)
+                                          if (reading == nullptr || reading->over)
                                               return;
 
-                                          read->over = true;
-                                          read->stop = true;
-                                          auto hold = std::move (read->hold); // let go of at the end of this call
+                                          reading->over = true;
+                                          reading->stop = true;
+                                          auto hold = std::move (reading->hold); // let go of at the end of this call
 
                                           // A quit (why given): nothing more. A cancel: what was read, offered a message
                                           // later, once the progress window has gone.
                                           if (why.isEmpty())
                                               juce::MessageManager::callAsync (
-                                                  [this, session, read, file, error]
+                                                  [this, session, reading, file, error]
                                                   {
                                                       if (! session.expired())
-                                                          offerCopies (file, error, read->backupFile, read->backup, {}, {});
+                                                          offerCopies (file, error, reading->backupFile, reading->backup, {}, {});
                                                   });
                                       });
 

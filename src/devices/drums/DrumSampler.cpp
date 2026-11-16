@@ -234,6 +234,8 @@ const DeviceInfo DrumSampler::info { .typeID = typeID,
                                      .parameters = parameters,
                                      .findByID = findByID };
 
+const DrumSampler::Sound DrumSampler::noSound {};
+
 DrumSampler::DrumSampler()
 {
     for (int pad = 0; pad < numPads; ++pad)

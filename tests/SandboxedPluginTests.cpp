@@ -147,8 +147,9 @@ bool waitForBlockKept()
     return phazite::test::dispatchMessagesUntil ([] { return phazite::test::TestPlugins::getHangKeeping().existsAsFile(); });
 }
 
+#if JUCE_WINDOWS
 // A plug-in's editor, asked of its helper as a plug-in's window asks for it, without waiting, and waited for here: none for
-// one that makes none.
+// one that makes none. (On Windows alone, as the cases that open one: Linux CI has no display for a plug-in's window.)
 std::unique_ptr<phazite::SandboxedEditor> makeEditor (std::shared_ptr<phazite::SandboxedInstance> instance)
 {
     struct Made
@@ -171,6 +172,7 @@ std::unique_ptr<phazite::SandboxedEditor> makeEditor (std::shared_ptr<phazite::S
     REQUIRE (phazite::test::dispatchMessagesUntil ([made] { return made->done; }));
     return std::move (made->editor);
 }
+#endif
 
 // A crashed plug-in reloaded as its slot's click reloads it, in the background, and waited for here: why it didn't load, if
 // it didn't.

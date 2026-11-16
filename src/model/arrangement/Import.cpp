@@ -826,8 +826,8 @@ namespace
         {
             for (int i = 0; i < bring.files.size(); ++i)
             {
-                const auto share = [&progress, i, count = bring.files.size()] (float done)
-                { progress = ((float) i + juce::jlimit (0.0f, 1.0f, done)) / (float) count; };
+                const auto share = [&progress, i, count = bring.files.size()] (float fraction)
+                { progress = ((float) i + juce::jlimit (0.0f, 1.0f, fraction)) / (float) count; };
 
                 const auto copy = findOrCopy (bring.files[i], projectFile, shouldStop, share);
 

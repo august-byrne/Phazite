@@ -60,8 +60,8 @@ struct ImportedFile
 {
     juce::File file;
     FileKind kind = FileKind::other;
-    juce::File copy;
-    AudioFileInfo info;
+    juce::File copy {};
+    AudioFileInfo info {};
     bool wroteCopy = false;
     bool brought = false; // copied, or found the same by its content: remembered once the import keeps it (copyIntoProject())
 };
@@ -86,13 +86,13 @@ std::unique_ptr<AudioWork::Job> makeImportJob (const Song&, const juce::StringAr
 // alone), need no job: prepare and apply at once.
 struct FilesToBring
 {
-    juce::Array<juce::File> files;
-    juce::String title;              // as the progress window says it: "Copying Kick.wav"
-    juce::String problem;            // what the user is told when the change doesn't take them
-    std::function<void()> prepare;   // on the work's thread, after the copies: what else the change reads (a sampler's root key)
-    std::function<bool()> apply;     // the change: false if it couldn't be made (its device went meanwhile): nothing changes
-    std::function<void()> otherwise; // instead, if it is cancelled or another project opens (a Swap's trial put back)
-    bool forTheOpenTrial = false;    // it finishes the Swap's trial open now
+    juce::Array<juce::File> files {};
+    juce::String title {};              // as the progress window says it: "Copying Kick.wav"
+    juce::String problem {};            // what the user is told when the change doesn't take them
+    std::function<void()> prepare {};   // on the work's thread, after the copies: what else the change reads (a sampler's root key)
+    std::function<bool()> apply {};     // the change: false if it couldn't be made (its device went meanwhile): nothing changes
+    std::function<void()> otherwise {}; // instead, if it is cancelled or another project opens (a Swap's trial put back)
+    bool forTheOpenTrial = false;       // it finishes the Swap's trial open now
 };
 
 // What apply did at once, or true once its job started.

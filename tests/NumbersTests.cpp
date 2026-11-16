@@ -115,7 +115,7 @@ TEST_CASE ("A MIDI file timing its notes past any song's end imports them within
     // Its bar, counted.
     const auto end = phazite::getClipRange (*song, clip).getEnd();
     CHECK (end.inBeats() <= phazite::maxSongBeats + 8.0);
-    const phazite::Bars bars ({});
+    const phazite::Bars bars;
     CHECK (bars.getBarAt (end) >= 0);
     CHECK (bars.getBarAt (phazite::BeatPosition::fromBeats (1.0e300)) == phazite::Bars::maxBars); // counted on from without overflowing
     CHECK (bars.getBarAt (phazite::BeatPosition::fromBeats (-1.0e300)) == -phazite::Bars::maxBars);

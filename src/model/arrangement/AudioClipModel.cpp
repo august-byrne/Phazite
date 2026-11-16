@@ -99,8 +99,9 @@ namespace
 
                                 const auto part = getFilePart (clipState);
                                 return ! asIt
-                                       || (part.start == taken.part.start && part.end == taken.part.end
-                                           && getClipGain (*findSong (context), taken.id) == taken.gain);
+                                       || (juce::exactlyEqual (part.start, taken.part.start)
+                                           && juce::exactlyEqual (part.end, taken.part.end)
+                                           && juce::exactlyEqual (getClipGain (*findSong (context), taken.id), taken.gain));
                             });
     }
 
