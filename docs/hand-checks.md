@@ -159,6 +159,7 @@ the [changelog](changelog.md).
 
 | # | Check | Proves | Checked on |
 |---|---|---|---|
+| G-scroll | Help > Example Songs > House Groove, in a `windows-profile` or release build. Play it, and while it plays drag the thumb of the overview along the time bar's top, slowly and fast; turn the wheel with Shift held; drag the rows' scroll bar at the lanes' right edge; hold the middle button on the lanes and move | The song glides under a slow drag of the thumb rather than stepping, keeps up with a fast one, and rests sharp when the hand stops; the thumb stays under the pointer; the rows and the pan follow the pointer without stutter | |
 | G116 | Drag an EQ dot, a Multiband crossover and a reverb edge, each taken at the edge of its handle; click each once | No jump at the press; the handle follows the pointer's movement; a click changes nothing and adds nothing to Edit > Undo | |
 | G140 | Press Escape in the middle of a drag in a device's graph, and of a knob's modulation ring | The value goes back to where it was, and Edit > Undo has nothing new | |
 | G140b | On the Filter, turn the wheel, then at once drag the dot and press Escape | The dot goes back, and Edit > Undo shows "Change Drive" alone | |

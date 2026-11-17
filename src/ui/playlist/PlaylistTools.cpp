@@ -552,9 +552,10 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
     if (gesture->kind == Gesture::Kind::pan)
     {
         // The song moves with the pointer, sideways and up and down; while it plays, following pauses, as a scroll pauses it.
+        // At the display's next frame, straight there (TimelineEditor::scrollViewTo()): what is held stays under the pointer.
         pauseFollowing();
-        setViewStart (gesture->panViewStart - BeatDuration::fromBeats (e.getDistanceFromDragStartX() / getView().pixelsPerBeat));
-        setScrollY (gesture->startScrollY - e.getDistanceFromDragStartY());
+        scrollViewTo (gesture->panViewStart - BeatDuration::fromBeats (e.getDistanceFromDragStartX() / getView().pixelsPerBeat), false);
+        scrollRowsTo (gesture->startScrollY - e.getDistanceFromDragStartY());
         return;
     }
 

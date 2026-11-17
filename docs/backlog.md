@@ -159,6 +159,7 @@ and nothing is listed in both.
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | Automation lanes' drags scroll the view at its edges, and points are selected across lanes | `src/ui/playlist/PlaylistAutomation.cpp` | — | — | ui-timeline-editors 11 |
+| A drag held at the view's edge scrolls it once a frame, as scrolls by hand do (`TimelineEditor::scrollViewTo()`): `autoScroll()` moves the view at each of the mouse's reports that takes it a whole pixel on, up to its speed in pixels a second, and what is dragged is placed from the view as it is then | `src/ui/timeline/TimelineEditor.cpp` | S | — | the owner's scroll report, 2026-11-16 |
 | A clip dragged or drawn onto a track of the other kind is refused, as the design's rule says that audio and notes don't share a track | `src/ui/playlist/PlaylistTools.cpp` | — | — | ui-timeline-editors 8 |
 | The audio clip editor zooms and scrolls | `src/ui/audioclip/AudioClipEditor.cpp` | L | 5 | ui-timeline-editors 4 |
 | Controller, pitch-bend and pressure lanes in the piano roll, for what clips hold and play unseen, with note chance and grooves after them | `src/ui/pianoroll/PianoRollLanes.cpp` | L | 5 | ui-timeline-editors 3, product-gaps 9, model-arrangement 11 |

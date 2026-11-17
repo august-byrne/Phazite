@@ -91,6 +91,7 @@
 #include "ui/theme/Popups.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -2491,6 +2492,156 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
         tips = nullptr;
     }
 
+    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: the time bar's overview dragged, at each of the mouse's reports and at the display's frames"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // The owner, 2026-11-16: "when scrolling the horizontal bar on a playlist song, it can be visually choppy/laggy". The
+    // part in view dragged along the overview a pixel at each of the mouse's reports, as a hand moving it gives them, sixteen
+    // a frame (a mouse that reports a thousand times a second, a display at 60 Hz): each report's work on the message
+    // thread, a frame's own work, and its paint through Direct2D of what was asked to repaint. JUCE takes every report
+    // Windows gives, and a frame paints only once Windows has no report waiting, so a frame bears its paint and the work of
+    // every report since the last. First as it was until that day, each report moving the view (a window that gets no frames
+    // still does); then as the app does it, the view moved at the display's frames (TimelineEditor::scrollViewTo()).
+    juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
+    {
+        juce::Graphics g (frameImage);
+    }
+
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    phazite::ui::setClipWaveformMaker (phazite::getClipWaveformMaker());
+    juce::String report;
+
+    {
+        phazite::test::AppScreen screen;
+        screen.window.setSize (1920, 1080);
+        screen.session.openAtStartup();
+        REQUIRE (screen.registry.invoke ("help.example.houseGroove"));
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 2000);
+        auto* playlist = phazite::test::findAll<phazite::ui::Playlist> (screen.shell).getFirst();
+        auto* lanes = playlist != nullptr ? phazite::test::findComponentWithTitle (*playlist, "Tracks") : nullptr;
+        REQUIRE (lanes != nullptr);
+        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getParentComponent()->getWidth() / 22.0) });
+        phazite::test::dispatchPendingMessages();
+        auto* overviewFound = phazite::test::findComponentWithTitle (*playlist, "Overview");
+        REQUIRE (overviewFound != nullptr);
+        auto& overview = *overviewFound;
+
+        // A first paint, which makes the clips' pictures.
+        {
+            juce::Graphics g (frameImage);
+            screen.window.paintEntireComponent (g, false);
+        }
+
+        screen.window.takeRepaintedArea();
+
+        struct Times
+        {
+            std::vector<double> reports, frames, paints;
+            double songPixels = 0.0; // the song's pixels a pixel of the bar
+        };
+
+        // Along the overview and back, a pixel a report, a frame after each sixteen, and frames on until the view rests.
+        auto seconds = 100.0;
+        const auto run = [&] (bool atFrames)
+        {
+            constexpr int distance = 480, reportsPerFrame = 16;
+            const auto startX = 40, y = overview.getHeight() / 2;
+            Times times;
+            playlist->setScrollingAtFrames (atFrames);
+            phazite::test::Mouse mouse (overview);
+            mouse.setEventInterval (1);
+            mouse.press ({ startX, y });
+            phazite::test::dispatchPendingMessages();
+            screen.window.takeRepaintedArea();
+            const auto viewBefore = playlist->getView().start.inBeats();
+            auto farthest = viewBefore;
+
+            const auto frame = [&]
+            {
+                seconds += 1.0 / 60.0;
+                times.frames.push_back (millisecondsOf (
+                    [&]
+                    {
+                        playlist->showFrame (seconds);
+                        phazite::test::dispatchPendingMessages();
+                    }));
+                const auto repainted = screen.window.takeRepaintedArea();
+                juce::Graphics g (frameImage);
+
+                if (g.reduceClipRegion (repainted))
+                    times.paints.push_back (millisecondsOf ([&] { screen.window.paintEntireComponent (g, false); }));
+            };
+
+            for (int step = 1; step <= distance * 2; ++step)
+            {
+                const auto x = startX + (step <= distance ? step : distance * 2 - step);
+                times.reports.push_back (millisecondsOf (
+                    [&]
+                    {
+                        mouse.dragTo ({ x, y });
+                        phazite::test::dispatchPendingMessages();
+                    }));
+                farthest = std::max (farthest, playlist->getScrollTarget().inBeats());
+
+                if (step % reportsPerFrame == 0)
+                    frame();
+            }
+
+            mouse.release();
+
+            for (int rest = 0; rest < 30; ++rest)
+                frame();
+
+            playlist->setScrollingAtFrames (false);
+            times.songPixels = (farthest - viewBefore) * playlist->getView().pixelsPerBeat / distance;
+            return times;
+        };
+
+        const auto stats = [] (std::vector<double> values)
+        {
+            std::sort (values.begin(), values.end());
+            const auto mean = std::accumulate (values.begin(), values.end(), 0.0) / (double) std::max<size_t> (1, values.size());
+            return std::array<double, 3> { mean, values.empty() ? 0.0 : values[values.size() * 95 / 100],
+                                           values.empty() ? 0.0 : values.back() };
+        };
+
+        const auto atReports = run (false), atFrames = run (true);
+        report << "\nHouse Groove, 1920 x 1080, " << juce::String (playlist->getView().pixelsPerBeat, 1)
+               << " pixels a beat: the overview's part in view dragged. A pixel of the bar moves the song "
+               << juce::String (atReports.songPixels, 1) << " pixels.\n"
+               << "\n| Mean / 95th percentile / most | Each report moving the view | The view moved at the display's frames "
+                  "|\n|---|---|---|\n";
+
+        const auto row = [&] (const juce::String& what, std::vector<double> Times::* values)
+        {
+            const auto before = stats (atReports.*values), after = stats (atFrames.*values);
+            report << "| " << what << " | " << milliseconds (before[0]) << " / " << milliseconds (before[1]) << " / "
+                   << milliseconds (before[2]) << " | " << milliseconds (after[0]) << " / " << milliseconds (after[1]) << " / "
+                   << milliseconds (after[2]) << " |\n";
+        };
+
+        row ("A report of the mouse", &Times::reports);
+        row ("A frame's own work: the view moved, and what that posts", &Times::frames);
+        row ("A frame's paint, through Direct2D, of what was asked to repaint", &Times::paints);
+
+        for (const auto rate : { 125, 500, 1000 })
+        {
+            const auto each = rate / 60.0;
+            const auto load = [&] (const Times& times, int at)
+            { return each * stats (times.reports)[(size_t) at] + stats (times.frames)[(size_t) at] + stats (times.paints)[(size_t) at]; };
+            report << "| A frame's reports, work and paint at " << rate << " reports a second (" << juce::String (each, 1)
+                   << " a frame), of its 16.7 ms: mean / at the 95th percentiles | " << milliseconds (load (atReports, 0)) << " / "
+                   << milliseconds (load (atReports, 1)) << " | " << milliseconds (load (atFrames, 0)) << " / "
+                   << milliseconds (load (atFrames, 1)) << " |\n";
+        }
+    }
+
+    phazite::ui::setClipWaveformMaker ({});
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     MESSAGE (report);
 }

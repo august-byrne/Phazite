@@ -628,11 +628,12 @@ void PianoRoll::NoteGrid::mouseDrag (const juce::MouseEvent& e)
 
         case Gesture::Kind::pan:
         {
-            // The notes follow the pointer, as a page dragged by hand does.
+            // The notes follow the pointer, as a page dragged by hand does: at the display's next frame, straight there
+            // (TimelineEditor::scrollViewTo()).
             roll.pauseFollowing();
-            roll.setViewStart (gesture->panViewStart
-                               - BeatDuration::fromBeats (e.getDistanceFromDragStartX() / roll.getView().pixelsPerBeat));
-            roll.setScrollY (gesture->startScrollY - e.getDistanceFromDragStartY());
+            roll.scrollViewTo (
+                gesture->panViewStart - BeatDuration::fromBeats (e.getDistanceFromDragStartX() / roll.getView().pixelsPerBeat), false);
+            roll.scrollRowsTo (gesture->startScrollY - e.getDistanceFromDragStartY());
             break;
         }
 

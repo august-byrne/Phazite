@@ -1447,3 +1447,32 @@ TEST_CASE ("A drag of selected notes that ends where it began keeps them all sel
     mouse.click (screen.middleOf (first));
     CHECK (screen.getSelected() == std::vector { first });
 }
+
+TEST_CASE ("While the display's frames come, the piano roll's wheel scrolls its rows and its view once a frame")
+{
+    // As the playlist's (TimelineEditor::scrollViewTo(), scrollRowsTo()): the rows straight where the wheel took them at the
+    // next frame, the view gliding there.
+    PianoRollScreen screen;
+    screen.select (screen.addClip (0, 0.0, 4.0));
+    auto& roll = screen.pianoRoll;
+    roll.setScrollingAtFrames (true);
+    const auto rows = roll.getScrollY();
+    const auto start = roll.getView().start;
+    phazite::test::Mouse mouse (roll);
+    const auto centre = roll.getLocalBounds().getCentre();
+    mouse.wheel (centre, -0.1f);
+    mouse.wheel (centre, -0.1f, juce::ModifierKeys::shiftModifier);
+    CHECK (roll.getScrollY() == rows);
+    CHECK (roll.getView().start == start);
+    const auto target = roll.getScrollTarget();
+    REQUIRE (target > start);
+
+    roll.showFrame (100.0);
+    CHECK (roll.getScrollY() > rows);
+
+    for (int frame = 1; frame <= 30; ++frame)
+        roll.showFrame (100.0 + frame / 60.0);
+
+    CHECK (roll.getView().start == target);
+    CHECK (roll.getSubPixel() == 0.0f);
+}

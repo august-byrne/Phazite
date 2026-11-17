@@ -110,7 +110,9 @@ void Playlist::layOutRows()
     pinnedClips.setBounds (0, 0, lanes->getWidth(), pinnedHeight);
     scrollingClips.setBounds (0, pinnedHeight, lanes->getWidth(), std::max (0, lanes->getHeight() - pinnedHeight));
 
-    setScrollY (scrollY); // keeps it in range, and moves the headers and clips with it, making those that come into view
+    // Keeps it in range, and moves the headers and clips with it, making those that come into view: where the rows are, or
+    // were going (TimelineEditor::scrollRowsTo()).
+    setScrollY (getRowsTarget (scrollY));
 }
 
 Playlist::ItemsInView Playlist::findItemsInView() const
@@ -415,6 +417,7 @@ void Playlist::makeRestLater()
 void Playlist::setScrollY (int newScrollY)
 {
     const MakingPass pass (*this);
+    rowsPlaced(); // put there: a scroll by hand on its way is dropped
 
     // There is room for one more track under the last, to scroll to.
     const auto maxScroll = std::max (0, contentHeight + TrackHeight::standard - (lanes->getHeight() - pinnedHeight));

@@ -738,7 +738,7 @@ void Playlist::resized()
     verticalScrollBar.toFront (false);
 
     layOutRows();
-    setViewStart (getView().start);
+    setViewStart (getScrollTarget()); // where it is, or was going
 }
 
 void Playlist::showTempoLaneWithChanges()
@@ -814,8 +814,9 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     if (! juce::exactlyEqual (sideways, 0.0f))
         scrollByWheel (sideways);
 
-    if (! juce::exactlyEqual (upDown, 0.0f))
-        setScrollY (scrollY - takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest));
+    // From where the rows are going, should the turn before's scroll be on its way still (TimelineEditor::scrollRowsTo()).
+    if (const auto pixels = takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest); pixels != 0)
+        scrollRowsTo (getRowsTarget (scrollY) - pixels);
 }
 
 //==============================================================================

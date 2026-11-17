@@ -711,8 +711,8 @@ void PianoRoll::resized()
     verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));
     verticalScrollBar.toFront (false);
 
-    setScrollY (scrollY);
-    setViewStart (getView().start);
+    setScrollY (getRowsTarget (scrollY)); // where they are, or were going, and the view likewise
+    setViewStart (getScrollTarget());
 }
 
 void PianoRoll::layOutSettings()
@@ -803,8 +803,9 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
     if (! juce::exactlyEqual (sideways, 0.0f))
         scrollByWheel (sideways);
 
-    if (! juce::exactlyEqual (upDown, 0.0f))
-        setScrollY (scrollY - takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest));
+    // From where the rows are going, should the turn before's scroll be on its way still (TimelineEditor::scrollRowsTo()).
+    if (const auto pixels = takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest); pixels != 0)
+        scrollRowsTo (getRowsTarget (scrollY) - pixels);
 }
 
 bool PianoRoll::cancelDrag()

@@ -31,6 +31,7 @@ struct TimelineEditor::Overview : public juce::Component
     };
 
     juce::Range<double> getRange() const { return editor.horizontalScrollBar.getRangeLimit(); } // the time line's, as its scroll bar has it
+    // The part in view, or the part the view is on its way to (TimelineEditor::scrollViewTo()): where its thumb shows.
     juce::Range<double> getViewRange() const { return editor.horizontalScrollBar.getCurrentRange(); }
 
     float xFor (double beat) const
@@ -158,7 +159,7 @@ struct TimelineEditor::Overview : public juce::Component
             const auto length = getViewRange().getLength();
             const auto latest = std::max (whole.getStart(), whole.getEnd() - length);
             editor.pauseFollowing();
-            editor.setViewStart (
+            editor.scrollViewTo (
                 BeatPosition::fromBeats (juce::jlimit (whole.getStart(), latest, beatAt (e.position.x, whole) - length / 2.0)));
             drag = Drag::move;
         }
@@ -176,7 +177,9 @@ struct TimelineEditor::Overview : public juce::Component
 
         // Over the time line as the drag began, and within it. The view grows the time line as it moves past its end, so a
         // pointer read over the time line as it is now went further with each move: carried far past the strip's end, it
-        // took the view out to beats too far to draw, and Phazite froze (the owner, 2026-11-06).
+        // took the view out to beats too far to draw, and Phazite froze (the owner, 2026-11-06). The view goes where the
+        // pointer has taken its part of the overview at the display's next frame, gliding, and zooms there
+        // (TimelineEditor::scrollViewTo(), zoomViewTo()): once a frame, however often the mouse reports.
         const auto whole = rangeAtDragStart;
         const auto moved = beatAt (e.position.x, whole) - beatAtDragStart;
         editor.pauseFollowing();
@@ -184,7 +187,7 @@ struct TimelineEditor::Overview : public juce::Component
         if (drag == Drag::move)
         {
             const auto latest = std::max (whole.getStart(), whole.getEnd() - viewAtDragStart.getLength());
-            editor.setViewStart (BeatPosition::fromBeats (juce::jlimit (whole.getStart(), latest, viewAtDragStart.getStart() + moved)));
+            editor.scrollViewTo (BeatPosition::fromBeats (juce::jlimit (whole.getStart(), latest, viewAtDragStart.getStart() + moved)));
             return;
         }
 
@@ -196,7 +199,7 @@ struct TimelineEditor::Overview : public juce::Component
         else
             end = juce::jlimit (start + leastBeats, std::max (start + leastBeats, whole.getEnd()), end + moved);
 
-        editor.zoomTo ({ BeatPosition::fromBeats (start), BeatPosition::fromBeats (end) });
+        editor.zoomViewTo ({ BeatPosition::fromBeats (start), BeatPosition::fromBeats (end) });
     }
 
     void mouseUp (const juce::MouseEvent&) override

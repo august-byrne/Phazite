@@ -63,6 +63,7 @@ int PianoRoll::getRowAt (int y) const
 
 void PianoRoll::setScrollY (int newScrollY)
 {
+    rowsPlaced(); // put there: a scroll by hand on its way is dropped
     const auto maxScroll = std::max (0, getNumRows() * getRowHeight() - grid->getHeight());
     scrollY = juce::jlimit (0, maxScroll, newScrollY);
     updateVerticalScrollBar();

@@ -168,6 +168,27 @@ public:
     const TimelineView& getView() const noexcept { return view; }
     BeatPosition getTimeOrigin() const noexcept { return timeOrigin; }
     void setViewStart (BeatPosition);
+
+    // A scroll by hand: the overview's part in view dragged, the wheel, a pan. While the display's frames come
+    // (isScrollingAtFrames()), the view goes there at the next frame rather than now: a mouse reports up to a thousand times a
+    // second, each report moved the view, and a frame, which shows the last of them alone, waits until Windows has no
+    // report left (docs/performance.md, "the time bar's overview dragged": 7.5 ms of a frame's 16.7 at a thousand reports a
+    // second, the owner's mouse, 2026-11-16, most of it the scroll bar asking the song where it ends at each, which a move
+    // of the view at a frame no longer does). Gliding, it goes there over a few frames by parts of a
+    // pixel, as it follows the playhead continuously (getSubPixel()), and rests on a whole step: a pixel of the overview is
+    // several of the song, so that a slow drag moved the song in jumps. A pan goes straight there, what it holds staying
+    // under the pointer. Without frames (a window on no screen, the tests' unless they ask), the view goes there at once.
+    // setViewStart(), and so a zoom, drops a scroll on its way.
+    void scrollViewTo (BeatPosition, bool gliding = true);
+    BeatPosition getScrollTarget() const noexcept { return scrollTarget.value_or (view.start); } // where it is going, or is
+
+    // Whether scrolls by hand wait for the display's frames: from the first frame the display gives (showDisplayFrame(),
+    // which its frames call), until none came between two of the editor's ticks (a display asleep; what waits goes at once
+    // then). A test that gives the frames itself (showFrame()) says so with setScrollingAtFrames(), which no tick takes back.
+    bool isScrollingAtFrames() const noexcept { return framesComing; }
+    void setScrollingAtFrames (bool);
+    void showDisplayFrame (double seconds);
+
     void zoomAround (double x, double factor); // x from the left of the time line
     void zoom (double factor);                 // around the playhead if it is in view, otherwise the middle
     void zoomTo (BeatRange);
@@ -369,6 +390,18 @@ protected:
     virtual void gridChanged() {}
     // The vertical scroll bar was dragged; it is the derived class's to set up and use.
     virtual void verticalScrollBarMoved (double /*newRangeStart*/) {}
+
+    // A scroll of the rows by hand (their scroll bar, the wheel, a pan): at the next frame while the display's frames come,
+    // as scrollViewTo() and for its reason, else at once, through verticalScrollBarMoved(). The rows are by whole pixels, so
+    // they go straight there. getRowsTarget() is where they are going, for a scroll counted from where they are (the
+    // wheel's); the derived class's setter calls rowsPlaced() when it puts them elsewhere, which drops a scroll on its way.
+    void scrollRowsTo (int y);
+    int getRowsTarget (int current) const noexcept { return rowsTarget.value_or (current); }
+    void rowsPlaced() noexcept { rowsTarget.reset(); }
+
+    // A zoom by hand that comes at each of the mouse's reports (an end of the overview's part in view dragged): at the next
+    // frame, likewise.
+    void zoomViewTo (BeatRange);
     // Scrolls the content up (negative) or down by some pixels, for autoScroll(); returns true if it moved.
     virtual bool scrollVerticallyBy (int /*pixels*/) { return false; }
     // Where the playhead shows instead of the song's position, in song beats: the piano roll shows there where the
@@ -405,7 +438,7 @@ protected:
     static double getWheelNotches (float wheelDelta);
 
     void updatePlayhead();
-    void updateScrollBar();
+    void updateScrollBar(); // for the content's end as it is now (getContentRange()), and the view
     void updateGridControls();
 
     // The view scrolled or zoomed sideways by the user, as a scroll bar does it: following the playhead pauses (the playlist's
@@ -471,6 +504,21 @@ private:
     bool holdsPlayhead = false;            // scrolling continuously, the view moves under the playhead, which stays put
     double playheadX = 0.0;                // getPlayheadX()
     float subPixel = 0.0f;                 // getSubPixel()
+
+    // Scrolls by hand on their way (scrollViewTo(), scrollRowsTo(), zoomViewTo()), which the next frame takes.
+    std::optional<BeatPosition> scrollTarget; // a start the view can have: a whole step, within its limits
+    bool scrollGlides = false;                // whether it goes there over a few frames
+    std::optional<int> rowsTarget;
+    std::optional<BeatRange> zoomTarget;
+    bool framesComing = false;                       // isScrollingAtFrames()
+    bool framesSaid = false;                         // by setScrollingAtFrames(), whatever the ticks find
+    bool frameSinceTick = false;                     // a frame came since the editor's last tick
+    double lastFrameSeconds = 0.0;                   // the frame before's time
+    void placeView (BeatPosition, bool readContent); // setViewStart(), a scroll on its way kept; the content's end read again or not
+    BeatPosition getWholeStart (BeatPosition) const; // the start a view has that is given this one: a whole step, within its limits
+    void advanceScrolls (double seconds);            // a frame's share of them
+    void finishScrolls();                            // all of them, at once
+    void showViewInScrollBar();                      // the view, for the content's end as the scroll bar knows it
     FrameLog frameLog;
     void setSubPixel (float);                                          // moves the time line's parts left by it, in their windows
     TimelinePartWindow* findPartWindow (const juce::Component&) const; // the window a part added shows through

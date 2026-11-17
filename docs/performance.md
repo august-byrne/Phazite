@@ -743,7 +743,7 @@ at once, 16 ms an event and up to 230 ms. What it leaves is mostly the clips' no
 
 | Each frame | Mean / 95th percentile | From |
 |---|---|---|
-| Its work: the song's position shown, and what that posts | 0.38 / 0.55 ms | 2026-11-16 |
+| Its work: the song's position shown, and what that posts | 0.12 / 0.28 ms (0.38 / 0.55 ms until the scroll bar kept the content's end it had, the same day) | 2026-11-16 |
 | Its paint | 4.46 / 4.81 ms | 2026-11-16 |
 | ... of which the lanes, with their clips and automation lanes | 1.23 / 1.39 ms | 2026-11-16 |
 | ... of which the MIDI clips | 0.48 / 0.61 ms | 2026-11-16 |
@@ -787,6 +787,36 @@ paint stay near 2.5 ms); on the quiet machine the run of 2026-11-16 missed 0 or 
 The areas each frame asks to repaint are the same with the mouse moving as with it still, but for a header's small
 part as the mouse goes over it. A sampling of the message thread found the window's paint about a fifth of the paint's
 column, and the copy back the rest.
+
+### Benchmark: the time bar's overview dragged, at each of the mouse's reports and at the display's frames
+
+*The owner, 2026-11-16: "when scrolling the horizontal bar on a playlist song, it can be visually choppy/laggy", the
+song playing, either scroll bar dragged, in the release build.* House Groove at 22 pixels a beat and 1920 x 1080, the
+overview's part in view dragged 480 pixels along the bar and back, a pixel at each of the mouse's reports, sixteen
+reports a frame (a pixel of the bar moves the song 6.1 pixels). JUCE takes every report Windows gives (the owner's
+mouse gives up to a thousand a second), and a frame paints once no report is waiting: a frame bears its paint and the
+work of every report since the last.
+
+| `windows-profile`, 2026-11-16: mean / 95th percentile / most | Each report moving the view (until that day) | The view moved at the display's frames (now) |
+|---|---|---|
+| A report of the mouse | 0.45 / 0.62 / 1.64 ms | 0.02 / 0.06 / 1.61 ms |
+| A frame's own work: the view moved, and what that posts | 0.02 / 0.06 / 0.12 ms | 0.09 / 0.15 / 0.55 ms |
+| A frame's paint of what was asked to repaint | 3.94 / 6.01 / 6.82 ms | 3.33 / 5.80 / 6.88 ms |
+| A frame's reports, work and paint at 125 reports a second (2.1 a frame): mean / at the 95th percentiles | 4.90 / 7.36 ms | 3.47 / 6.07 ms |
+| ... at 500 (8.3 a frame) | 7.74 / 11.23 ms | 3.62 / 6.43 ms |
+| ... at 1,000 (16.7 a frame) | 11.53 / 16.39 ms | 3.82 / 6.91 ms |
+
+Two things made a report cost 0.45 ms, and neither was laying out or painting the song. Nine tenths of it was the
+scroll bar brought up to date at every move of the view: it asked the model where the content ends, which looks
+through the whole song (its clips, sections and chords; 0.39 ms for House Groove, more for a longer song). A move of
+the view at each frame (a scroll by hand on its way, the playhead followed continuously) now keeps the end the scroll
+bar has, which the editor's tick reads again a few times a second. And every report moved the view, fifteen of sixteen
+to a place no frame showed: a scroll by hand now says where the view is to go (`TimelineEditor::scrollViewTo()`,
+`scrollRowsTo()`), and the next frame takes it there, gliding sideways by parts of a pixel. `windows-debug`, before:
+5.73 ms a report and 24.3 ms a paint, 120 ms for a frame's worth at a thousand reports a second.
+
+At a thousand reports a second a frame's reports and paint took two thirds of its 16.7 ms on average before, and
+all of it at the 95th percentiles; now a quarter, and under half.
 
 ### Benchmark: starting up, and the window at rest
 

@@ -82,6 +82,10 @@ The engine's design is in [engine.md](engine.md). The parts that matter for spee
 - A view of many items, such as the playlist's clips, makes components only for those in view.
 - The playlist and the piano roll scroll continuously while they follow the playhead: what is on the time line moves
   by parts of a pixel, and what is beside it stays put.
+- **A scroll by hand costs a frame, not a report of the mouse.** A mouse reports up to a thousand times a second,
+  and JUCE hands on every report; the time line's editors keep where a drag of the overview or of the rows' scroll
+  bar, the wheel or a pan has taken the view, and move it there at the display's next frame, once
+  (`TimelineEditor::scrollViewTo()`). A window that gets no frames moves it at once.
 
 ## Off the message thread
 

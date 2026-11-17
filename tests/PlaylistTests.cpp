@@ -3399,3 +3399,209 @@ TEST_CASE ("Only the automation lanes in view have components; a point dragged i
     phazite::undo (screen.getSong());
     CHECK (phazite::getAutomationPoints (screen.context, volume)[0].value == doctest::Approx (0.5f));
 }
+
+//==============================================================================
+// Scrolls by hand while the display's frames come (TimelineEditor::scrollViewTo()). The owner, 2026-11-16: "when scrolling
+// the horizontal bar on a playlist song, it can be visually choppy/laggy", the song playing, either bar dragged, in the
+// release build: a mouse that reports a thousand times a second moved the view at each report.
+namespace
+{
+// Where the view is in the song's pixels, the part of a step its parts are shifted by counted in.
+double placeOf (const phazite::ui::Playlist& playlist)
+{
+    return playlist.getView().start.inBeats() * playlist.getView().pixelsPerBeat + (double) playlist.getSubPixel();
+}
+
+juce::ScrollBar* getTimelineScrollBar (phazite::ui::Playlist& playlist)
+{
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (playlist))
+        if (! bar->isVertical())
+            return bar;
+
+    return nullptr;
+}
+} // namespace
+
+TEST_CASE ("While the display's frames come, the overview's drag moves the view once a frame, gliding to where the pointer took it")
+{
+    PlaylistScreen screen;
+    REQUIRE (screen.addClip (0, 0.0, 4.0).isValid());
+    REQUIRE (screen.addClip (2, 32.0, 4.0).isValid());
+    phazite::test::dispatchPendingMessages();
+    auto* overview = phazite::test::findComponentWithTitle (screen.playlist, "Overview");
+    auto* timeline = getTimelineScrollBar (screen.playlist);
+    REQUIRE (overview != nullptr);
+    REQUIRE (timeline != nullptr);
+    auto& playlist = screen.playlist;
+    CHECK_FALSE (playlist.isScrollingAtFrames()); // a window on no screen: scrolls go at once, as every other test has them
+    playlist.setScrollingAtFrames (true);
+
+    // Sixteen of the mouse's reports, a pixel of the overview each, as a frame's are at a thousand a second: none moves the
+    // view, and the thumb, which shows where the view is going, goes with the pointer.
+    const auto before = playlist.getView().start;
+    const auto shown = timeline->getCurrentRange();
+    const juce::Point<int> thumb (juce::roundToInt (shown.getLength() / timeline->getRangeLimit().getLength() * overview->getWidth() / 2.0),
+                                  overview->getHeight() / 2);
+    phazite::test::Mouse mouse (*overview);
+    mouse.setEventInterval (1);
+    mouse.press (thumb);
+
+    for (int report = 1; report <= 16; ++report)
+        mouse.dragTo (thumb.translated (report, 0));
+
+    CHECK (playlist.getView().start == before);
+    const auto target = playlist.getScrollTarget();
+    CHECK (target > before);
+    CHECK (timeline->getCurrentRange().getStart() == doctest::Approx (target.inBeats()));
+    const auto targetPlace = target.inBeats() * playlist.getView().pixelsPerBeat;
+    REQUIRE (targetPlace - placeOf (playlist) > 20.0); // a pixel of the overview is several of the song
+
+    // The frames: each takes the view a share of the way, never back, between pixels (the view on whole steps, its parts
+    // shifted by the rest), until it rests on the target's whole step.
+    auto seconds = 100.0, last = placeOf (playlist);
+    auto frames = 0, between = 0;
+
+    while (playlist.getScrollTarget() != playlist.getView().start || playlist.getSubPixel() > 0.0f)
+    {
+        REQUIRE (++frames < 60);
+        seconds += 1.0 / 60.0;
+        playlist.showFrame (seconds);
+        const auto now = placeOf (playlist);
+        CHECK (now > last);
+        CHECK (now <= targetPlace);
+        CHECK (playlist.getSubPixel() >= 0.0f);
+        CHECK (playlist.getSubPixel() < (float) playlist.getViewStep());
+        CHECK (playlist.getView().start.inBeats() * playlist.getView().pixelsPerBeat
+               == doctest::Approx (std::round (playlist.getView().start.inBeats() * playlist.getView().pixelsPerBeat)));
+        between += playlist.getSubPixel() > 0.0f ? 1 : 0;
+        last = now;
+    }
+
+    CHECK (frames >= 4);  // it glides
+    CHECK (frames <= 20); // and is there within a third of a second
+    CHECK (between >= 2);
+    CHECK (playlist.getView().start == target);
+
+    // A frame more moves nothing, and the mouse let go leaves the view there.
+    playlist.showFrame (seconds + 1.0 / 60.0);
+    mouse.release();
+    CHECK (playlist.getView().start == target);
+    CHECK (playlist.getSubPixel() == 0.0f);
+
+    // The wheel, two notches before a frame: both counted, from where the view was going.
+    const auto centre = screen.lanesArea().getCentre();
+    phazite::test::Mouse wheel (playlist);
+    wheel.wheel (centre, -0.1f, juce::ModifierKeys::shiftModifier);
+    const auto afterOne = playlist.getScrollTarget();
+    CHECK (afterOne > target);
+    CHECK (playlist.getView().start == target);
+    wheel.wheel (centre, -0.1f, juce::ModifierKeys::shiftModifier);
+    CHECK ((playlist.getScrollTarget() - afterOne).inBeats() == doctest::Approx ((afterOne - target).inBeats()));
+
+    // The view put somewhere meanwhile (a zoom, a command) drops what was on its way.
+    playlist.setViewStart (before);
+    CHECK (playlist.getScrollTarget() == before);
+    playlist.showFrame (seconds + 2.0 / 60.0);
+    CHECK (playlist.getView().start == before);
+
+    // No longer waiting for frames, what waits goes at once.
+    wheel.wheel (centre, -0.1f, juce::ModifierKeys::shiftModifier);
+    CHECK (playlist.getView().start == before);
+    playlist.setScrollingAtFrames (false);
+    const auto scrolled = playlist.getView().start;
+    CHECK (scrolled > before);
+
+    // And a pan, the song held by the middle button, goes straight where the pointer took it at the next frame.
+    playlist.setScrollingAtFrames (true);
+    phazite::test::Mouse pan (*screen.lanes);
+    pan.press ({ 300, 20 }, juce::ModifierKeys::middleButtonModifier);
+    pan.dragTo ({ 280, 20 });
+    pan.dragTo ({ 270, 20 });
+    CHECK (playlist.getView().start == scrolled);
+    playlist.showFrame (seconds + 3.0 / 60.0);
+    CHECK ((playlist.getView().start - scrolled).inBeats() * playlist.getView().pixelsPerBeat == doctest::Approx (30.0));
+    CHECK (playlist.getSubPixel() == 0.0f);
+    pan.release();
+}
+
+TEST_CASE ("While the display's frames come, the rows' scroll bar and the wheel scroll the rows once a frame")
+{
+    PlaylistScreen screen;
+    phazite::ensureTracks (screen.getSong(), 30);
+    phazite::test::dispatchPendingMessages();
+    auto& playlist = screen.playlist;
+    auto* bar = getRowsScrollBar (playlist);
+    REQUIRE (bar != nullptr);
+    REQUIRE (bar->isVisible());
+
+    // How far the rows are scrolled: the track headers' holder, moved up by it.
+    auto* header = phazite::test::findAll<phazite::ui::TrackHeader> (playlist).getFirst();
+    REQUIRE (header != nullptr);
+    auto* headers = header->getParentComponent();
+    const auto scrolled = [headers] { return -headers->getY(); };
+    REQUIRE (scrolled() == 0);
+    playlist.setScrollingAtFrames (true);
+
+    // The bar moved three times before a frame, as the mouse's reports move it: the rows go where the last put them, once.
+    for (const auto y : { 40.0, 90.0, 120.0 })
+        bar->setCurrentRangeStart (y, juce::sendNotificationSync);
+
+    CHECK (scrolled() == 0);
+    playlist.showFrame (100.0);
+    CHECK (scrolled() == 120);
+    CHECK (bar->getCurrentRangeStart() == doctest::Approx (120.0));
+
+    // The wheel, two notches before a frame: both counted.
+    phazite::test::Mouse mouse (playlist);
+    const auto centre = screen.lanesArea().getCentre();
+    mouse.wheel (centre, -0.1f);
+    mouse.wheel (centre, -0.1f);
+    CHECK (scrolled() == 120);
+    playlist.showFrame (100.0 + 1.0 / 60.0);
+    const auto afterWheel = scrolled();
+    CHECK (afterWheel > 120);
+
+    // Without frames, a notch at once: half of the two, to the part of a pixel the wheel keeps from each turn for the next.
+    playlist.setScrollingAtFrames (false);
+    mouse.wheel (centre, -0.1f);
+    CHECK (std::abs ((scrolled() - afterWheel) * 2 - (afterWheel - 120)) <= 2);
+
+    // The mouse's pan of the rows, likewise once a frame.
+    playlist.setScrollingAtFrames (true);
+    const auto beforePan = scrolled();
+    phazite::test::Mouse pan (*screen.lanes);
+    pan.press ({ 300, 200 }, juce::ModifierKeys::middleButtonModifier);
+    pan.dragTo ({ 300, 180 });
+    pan.dragTo ({ 300, 170 });
+    CHECK (scrolled() == beforePan);
+    playlist.showFrame (100.0 + 2.0 / 60.0);
+    CHECK (scrolled() == beforePan + 30);
+
+    // Escape takes the pan back, what its last move asked for with it.
+    pan.dragTo ({ 300, 100 });
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    playlist.showFrame (100.0 + 3.0 / 60.0);
+    CHECK (scrolled() == beforePan);
+    pan.release();
+}
+
+TEST_CASE ("Scrolls by hand stop waiting for the display's frames once they stop coming")
+{
+    PlaylistScreen screen;
+    auto& playlist = screen.playlist;
+
+    // A frame of the display, as its vertical blank gives one: scrolls wait for the next from then on.
+    playlist.showDisplayFrame (100.0);
+    CHECK (playlist.isScrollingAtFrames());
+    const auto before = playlist.getView().start;
+    phazite::test::Mouse mouse (playlist);
+    mouse.wheel (screen.lanesArea().getCentre(), -0.1f, juce::ModifierKeys::shiftModifier);
+    const auto target = playlist.getScrollTarget();
+    REQUIRE (target > before);
+
+    // No more come (a display asleep): by the editor's second tick the view is where the wheel took it, and scrolls go at once.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&playlist] { return ! playlist.isScrollingAtFrames(); }));
+    CHECK (playlist.getView().start == target);
+    mouse.wheel (screen.lanesArea().getCentre(), -0.1f, juce::ModifierKeys::shiftModifier);
+    CHECK (playlist.getView().start > target);
+}

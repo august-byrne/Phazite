@@ -272,7 +272,10 @@ The top strip of the playlist's and the piano roll's rulers is for the loop; low
 
 - The grid adapts to the zoom (Adaptive Grid) or keeps one size; Triplet Grid divides beats into three. Snap is on by
   default; Alt leaves the grid during a drag.
-- Scrolling is smooth in both directions.
+- **Scrolling by hand** (the overview's thumb, the wheel, the rows' scroll bar, the middle button's pan) moves the
+  view at the display's frames, once for all the mouse reported since the last, not at each report. Sideways, the
+  overview and the wheel glide the view there over a few frames, by parts of a pixel, and it rests on a whole one;
+  the overview's thumb stays under the pointer meanwhile. The rows, and a pan, go straight where they were taken.
 - **The overview** is a strip along the top of the time bar: the whole time line in miniature, each track that holds
   clips a thin row with its clips in its colour, faint where muted, and the part in view a see-through thumb over
   them. It is the playlist's horizontal scroll bar. Dragging the thumb scrolls, dragging either of its ends zooms, a

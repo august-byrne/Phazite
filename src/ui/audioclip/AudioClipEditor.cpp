@@ -1093,6 +1093,6 @@ void AudioClipEditor::resized()
     if (info.has_value())
         fitView();
     else
-        setViewStart (getView().start);
+        setViewStart (getScrollTarget());
 }
 } // namespace phazite::ui
