@@ -30,6 +30,9 @@ Record having been pressed.
 | An input meter in the input list, and a clip mark at 0 dBFS | Planned | No roadmap step |
 | Hearing the input only inside the punch range | Planned | No roadmap step |
 | Several MIDI tracks armed at once | Planned | No roadmap step |
+| Resampling: an audio track records what another track, a bus or the master plays | Planned | Roadmap step S5.17 |
+| A key that drops the take being recorded and records it again | Planned | Roadmap step S5.5 |
+| A track that plays another track's notes | Planned | Roadmap step S7.6, with a MIDI input for each track |
 | Take lanes and comping | Planned | After v1, item 4 |
 | Audio Capture | Planned | After v1; no roadmap step |
 

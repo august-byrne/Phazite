@@ -31,6 +31,7 @@ clip is edited in the lower panel ([piano-roll.md](piano-roll.md)).
 | Overview strip as the horizontal scroll bar | Built | |
 | Zoom to Selection, Zoom Back | Built | |
 | Clip picker (a searchable list of every clip) | Planned | No roadmap step |
+| Linked tracks: a folder's tracks edited as one | Planned | Roadmap step S7.10 |
 | Audio and MIDI clips kept on separate tracks | Built | Dropped files go to a track of their kind, or a new one below, which the lanes show and the hint bar says; a clip dragged or drawn onto a track of the other kind (or a folder, a return, the master) stays where it can go, and the hint bar says why |
 
 ## What it shows

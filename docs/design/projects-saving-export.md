@@ -23,9 +23,9 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 | Files from others taken as untrusted | Partly built | A song is made consistent as it opens; a preset's sounds are not yet limited to the library's folders |
 | Format versions and upgrades of older projects | Planned | When compatibility starts; no roadmap step |
 | Export Song to WAV or FLAC, with Normalize | Built | |
-| Export to MP3 | Declined | WAV and FLAC only |
+| Export to MP3 | Planned | Before 1.0 (the owner, 2026-11-17): roadmap step S5.16 |
 | Stems | Built | |
-| Export of a range or of sections | Planned | No roadmap step |
+| Export of a range or of sections | Planned | A range or the loop: roadmap step S5.8; sections have no step |
 | Freeze Track | Built | |
 | Bounce in Place | Built | |
 | Clean Up Unused Audio | Built | |
@@ -350,7 +350,7 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 - Files are written whole or not at all, with a flush to the disk, because a failed write must never leave a cut
   file where a whole one was, nor pass for one that worked.
 - View state and how the song plays are saved but are not changes, so that scrolling or looping never asks to save.
-- No MP3 export: WAV and FLAC cover delivery without a lossy encoder to ship.
+- MP3 joins WAV and FLAC before 1.0 (the owner, 2026-11-17; it was declined before), for the drafts producers send.
 - Normalize is one gain and never limits; a mix that can't reach its target is reported, not squashed.
 - Tails end by silence measured against the devices' own tail lengths, with a cap, rather than a fixed length.
 - A plug-in that crashes or hangs fails the render rather than leaving a silent part in the file.
@@ -368,7 +368,7 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 - Format versions, upgrades of older projects and the handling of a newer Phazite's projects: Planned, when
   compatibility starts.
 - Export of a chosen range or of sections: Planned.
-- MP3 export: Declined.
+- MP3 export: Planned, before 1.0 (roadmap step S5.16), with an encoder under a compatible licence.
 - A DAWproject's plug-ins and sends imported into a new project: Planned, after v1.
 - Warp markers in DAWproject files: Planned.
 - Archives of a project that include its media: Planned, after v1.

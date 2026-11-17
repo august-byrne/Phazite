@@ -40,7 +40,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 1. Make a beat | Built: the playlist, sections and outlines, the piano roll, the mixer, the browser, the first devices, MIDI recording and Capture, export, the first launch. Its usability test with a newcomer and an FL Studio user has not been held. |
 | Phase 2. Finish a track | Built, and every step checked by hand by the owner: automation, modulators and macros, containers and presets, the audio clip editor, the chord lane, freeze and stems, more devices, the wavetable synth, time-stretching. |
 | Phase 3. Polish | Built: every plug-in in a helper process, audio recording, the performance and accessibility passes, three keymaps, help and lessons. Recording through an audio interface and a session with a screen reader are not checked. Chord suggestions, the sound generator and the usability rounds moved after 1.0. |
-| Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
+| Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 5, 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
 | The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16; in `main` since 2026-11-17): every entry but four that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stages 3 to 8 otherwise not started. |
@@ -49,6 +49,12 @@ would have found them are built, and the eight stages below are the plan for the
 
 Eight stages. A **beta** follows stage 5: it makes no promise that its projects open in later versions. **1.0** follows
 stage 8: from it on, a project opens in every later version.
+
+Added on 2026-11-17, after a comparison with another free DAW that people can already download: MP3 export
+(S5.16, the owner's decision), resampling (S5.17), presets heard in the browser (S5.18), linked tracks (S7.10), and
+what S5.5 and S7.6 gained. The release process (4.5) moved from stage 8 to stage 5, so that the beta is a release
+anyone can download. What the comparison left for later is under [After 1.0](#after-10) and in the
+[backlog](backlog.md).
 
 ### Stage 1. Safe: the bugs that lose work or sound
 
@@ -102,7 +108,7 @@ what they found is fixed or in known-bugs.md.
 | S5.2 | L | Wider notes: MIDI channel and program change, in the song and to plug-ins (the bend, controllers and pressure are built, and chased where playback starts) | A plug-in receives a pitch bend played live and one played from a clip |
 | S5.3 | L | Controllers recorded, played and edited in lanes beside the velocity lane | A sustain pedal recorded with a part shows in a lane, plays and can be deleted |
 | S5.4 | M | MIDI learn | A hardware knob moved after Learn turns the control clicked, and the link is kept |
-| S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
+| S5.5 | M | Recording keeps a note played just before the take starts; an input meter; pre-roll; a key that drops the take being recorded and records it again from where it began; takes that survive a full disk and a crash | A take cut off by ending Phazite is offered when the project reopens |
 | S5.6 | M | Arming never reopens the audio device; automation written where it is heard (held live notes end when the track changes: built in S1.1) | Arming a track during playback makes no gap in the sound |
 | S5.8 | M | MIDI import of every track of a file; MIDI export; range and loop export; project templates | A clip exported as a MIDI file and imported again holds the same notes |
 | S5.9 | M | Devices moved, copied, duplicated and deleted between tracks, by commands and by dragging | A device dragged to another strip keeps its automation and modulation |
@@ -112,8 +118,13 @@ what they found is fixed or in known-bugs.md.
 | S5.13 | L | The mixer: undo for the wheel, a decimal comma, several strips edited at once, menus from the keyboard, keyboards other than US | Each has a test through `TestWindow` |
 | S5.14 | L | Secondary windows that do not block; one Settings window; browser search on a large library | Search answers within a frame's time on 100,000 sounds |
 | S5.15 | L | Each layer a library of its own; file sizes counted; the solo rule in one place | `check-architecture.sh` counts files over the limit |
+| S5.16 | M | MP3 export, beside WAV and FLAC (the owner, 2026-11-17), with an encoder under a compatible licence in the notices | An exported MP3 plays in another player, and imported again its first note is where the song's is |
+| S5.17 | M | Resampling: an audio track records what another track, a bus or the master plays | A track armed with the master as its input records what is heard, placed to the sample |
+| S5.18 | M | Presets heard in the browser before they go into the song: an instrument's plays a phrase, an effect's a loop | A preset selected in the browser is heard, and the song is unchanged |
+| 4.5 | S | The release process: the version from the tag, release builds and the installer from CI, the changelog by version | A tag produces a release with the installer, its SHA-256 and `phazite-update.json` |
 
-**Beta.** The steps above are done, and stage 3's rows are checked.
+**Beta.** The steps above are done, stage 3's rows are checked, and the beta is a release made by 4.5 that anyone can
+download. Its installer is not signed yet (4.3 is in stage 8), which the release has to say.
 
 ### Stage 6. Deep: every device and editor to the standard of the best plug-ins
 
@@ -138,10 +149,11 @@ what they found is fixed or in known-bugs.md.
 | S7.3 | L | Multi-out plug-ins and MIDI channels | A multi-out drum plug-in plays each output on a strip of its own |
 | S7.4 | L | Routing: buses send to returns, sidechains inside containers, macros automated, any track or bus as an output | Each has a model test and plays in a golden render |
 | S7.5 | L | Note effects, and MIDI from plug-ins | An arpeggiator before an instrument plays in time, live and rendered |
-| S7.6 | L | MIDI output, clock out, a MIDI input for each track | A hardware synth plays a track's notes in time with the song |
+| S7.6 | L | MIDI output, clock out, a MIDI input for each track, which can be another track's notes | A hardware synth plays a track's notes in time with the song, and a second instrument track plays the notes of the first |
 | S7.7 | L | Take lanes and comping | A vocal is put together from three takes, each edit one undo step |
 | S7.8 | M | Time-signature changes along the song | A change added at a bar moves the bar lines, the metronome and the count-in |
 | S7.9 | L | Clips, notes and automation points reachable by a screen reader | Narrator reads the note under the keyboard's cursor |
+| S7.10 | L | Linked tracks: the tracks of a folder edited as one, so that a move, a trim, a split or a deletion of one track's clip is made to the others' at the same place | A split on one of four linked drum tracks splits all four, as one undo step |
 | 4.10 | XL | The Multisampler, as a plain SFZ player with one piano | The Grand Piano, picked in the browser, downloads its pack and plays from disk without a dropout; an SFZ file of the user's plays, listing what Phazite does not read |
 
 ### Stage 8. Release
@@ -150,7 +162,6 @@ what they found is fixed or in known-bugs.md.
 |---|---|---|---|
 | 4.3 | M | Code signing: the installer and its updates signed, and an update checked for the same signature | Windows shows the publisher and no SmartScreen warning |
 | 4.4 | L | The guide: a page for each view and each device, with pictures painted by tests | Every view and device has a page in [guide](guide/getting-started.md), and a keyboard reference |
-| 4.5 | S | The release process: the version from the tag, release builds and the installer from CI, the changelog by version | A tag produces a release with the installer, its SHA-256 and `phazite-update.json` |
 | A4 (part) | L | The text the user reads in a strings table | No user-facing string is left in C++ outside the table |
 | S8.1 | M | Release builds with symbols, and crash dumps the user can send | A crash in a release build gives a readable stack |
 | S8.2 | M | The compatibility promise: a format version in the file, a golden project for each release, newer files refused with a reason | The 1.0 golden project opens in every later build's tests |
@@ -172,7 +183,9 @@ Not in 1.0, in no fixed order. More, with reasons, is in the [backlog](backlog.m
   starts when a designer joins.
 - **Out of 1.0 by the plan:** video, notation, a clip launcher, scripting, CLAP, ARA, macOS with Audio Units,
   translations, Ableton Link and control surfaces.
-- **Declined:** MP3 export.
+- **From the comparison with another DAW (2026-11-17):** a catalogue of free plug-ins and sound packs installed from
+  inside Phazite, each pinned by its size and SHA-256, as Phazite Sounds are; vocal pitch correction; tools that write
+  notes in the piano roll (Euclidean rhythms and the like).
 
 ## Decisions still needed from the owner
 

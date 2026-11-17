@@ -24,7 +24,7 @@ and nothing is listed in both.
 | 2 | Caught | The test nets, and the docs put in order |
 | 3 | Checked | Checks by hand: [hand-checks.md](hand-checks.md) |
 | 4 | Decided | Decisions built: the versions cut down, backups kept by age, automation along a control's travel, mute and solo that silence the output only, files from others untrusted |
-| 5 | Wide | Wider notes and strips, warped clips heard at once, controllers recorded and edited, MIDI learn. Then a beta, with no promise that its projects open later |
+| 5 | Wide | Wider notes and strips, warped clips heard at once, controllers recorded and edited, MIDI learn, MP3 export, resampling, the release process. Then a beta anyone can download, with no promise that its projects open later |
 | 6 | Deep | Every built-in device and its editor brought to the best plug-ins' standard |
 | 7 | Professional | MIDI out, note effects, multi-out, comping, a cue mix, the Multisampler |
 | 8 | Release | A signed installer, the guide, crash reports, the promise of compatibility. Then 1.0 |
@@ -51,6 +51,7 @@ and nothing is listed in both.
 | A sampler's sound made ready (its hits found, its octaves made) in the background, not on the message thread | `src/model/devices/SamplerSound.cpp` | — | — | performance audit |
 | MP3 files: a test of where a click lands, then the encoder's delay and padding trimmed by the LAME tag | `src/model/engine/AudioFiles.cpp` | — | — | DSP audit |
 | A set of sounds to listen to for each device, and a verdict for each device once it is done | `src/devices/` | S each | 6 | plan |
+| Vocal pitch correction: a voice pulled to a key and scale or to notes played, as it plays, with its formants kept. After 1.0, and only at the standard stage 6 sets for a device | `src/devices/` | XL | — | comparison with another DAW, 2026-11-17 |
 
 ## Playback engine
 
@@ -111,6 +112,8 @@ and nothing is listed in both.
 | Take lanes and comping: a lane for each take under its track, a range of a lane played in the main lane with short crossfades, Next and Previous Take | `src/model/transport/RecordingModel.h` | L | 7 | recording audit, product-gaps 10 |
 | Warp commands (Warp From Here, Set 1.1.1 Here, Warp as a loop of so many bars), which need tempo detection, and a sensitivity for the hits found | `src/model/arrangement/AudioClipModel.h` | — | — | recording audit |
 | More bouncing: Paste Bounced Audio, and a selection of clips bounced to a new track | `src/model/mixer/FreezeModel.h` | — | — | recording audit |
+| Resampling: an audio track's input can be another track, a bus or the master, recorded as it is heard and placed to the sample (roadmap step S5.17) | `src/model/transport/AudioRecorder.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |
+| A key that drops the take being recorded and records it again from where it began, with no clip or file left of the dropped one | `src/model/transport/Take.cpp` | (M) | 5 | comparison with another DAW, 2026-11-17 |
 
 ### Arrangement
 
@@ -121,6 +124,7 @@ and nothing is listed in both.
 | Duplicate Track makes clips of its own, not clips linked to the original's (a decision to take) | `src/model/arrangement/Tracks.cpp` | — | — | model-arrangement 9 |
 | Warp markers written into and read from DAWproject files | `src/model/project/DawProject.cpp` | — | — | recording audit |
 | DAWproject import of what it now reports as left out: automation, sends, groups as folders, time-signature changes, clips with more than two warps | `src/model/project/DawProject.cpp` | M | — | plan |
+| Linked tracks: a folder's switch that makes a move, a trim, a split or a deletion of one track's clip happen to the clips at the same place on its other tracks, as one undo step, for takes recorded on several microphones (roadmap step S7.10) | `src/model/arrangement/Tracks.cpp` | L | 7 | comparison with another DAW, 2026-11-17 |
 
 ### Mixer, automation and presets
 
@@ -169,6 +173,7 @@ and nothing is listed in both.
 | A waveform's picture kept while a long clip crosses the view's edge, and clips not repainted for a knob turned while playing | `src/app/ClipWaveforms.cpp` | — | — | performance audit |
 | The displays ticked at the display's frames, with the views' own timers folded into that tick and the playback session's stopped while nothing plays (about 1 % of a core at rest) | `src/ui/components/DisplayTicker.h` | — | — | performance audit |
 | Frames that JUCE shows a frame late reported to JUCE with the measurements, if they bother anyone | `src/ui/timeline/FrameLog.cpp` | — | — | performance audit |
+| Tools that write notes in the piano roll: Euclidean rhythms, a seeded melody in the clip's scale, stacked chords, each with the transforms' preview. After 1.0 | `src/model/notes/Notes.cpp` | — | — | comparison with another DAW, 2026-11-17 |
 
 ### Device editors
 
@@ -182,6 +187,8 @@ and nothing is listed in both.
 | The wavetable's picture shows Warp, and controls show what the synth's own matrix does to them | `src/ui/devices/WavetableEditor.cpp` | — | 6 | ui-device-editors 12 |
 | The pages' bar overflows into a menu, and a part keeps its switch under tabs | `src/ui/devices/DeviceLayout.cpp` | — | 6 | ui-device-editors 14 |
 | The EQ's editor on the shared frame; no private timers, pixel sizes or alphas in single editors | `src/ui/devices/EqEditor.h` | — | 6 | ui-device-editors 15 |
+| Section titles in the editors written as the look says, in Title Case ([vscode-look.md](vscode-look.md)): the shared frame draws them in capitals | `src/ui/devices/DeviceLayout.cpp` | S | 6 | comparison with another DAW, 2026-11-17 |
+| Rules for where an editor puts things, written into the devices' design page and kept by every editor: one place for each parameter, the picture first with knobs beside it only for what it draws, the output at the bottom right of every page, and a modulated value shown dashed, not in another colour | `docs/design/devices.md` | M | 6 | comparison with another DAW, 2026-11-17 |
 
 ### Mixer and controls
 
@@ -193,12 +200,16 @@ and nothing is listed in both.
 | Right-click menus, and the rows' actions in the browser and Source Control, reached from the keyboard | `src/ui/components/Controls.cpp` | M | 5 | ui-core-mixer-app 7, ui-shell-browser 12 |
 | Fine drag switched by its key during a drag, and knob drags that go on past the screen's edge | `src/ui/components/Controls.cpp` | — | — | ui-core-mixer-app 12 |
 | Small ones: a theme colour that goes stale, a menu action that holds its component by a bare pointer, the system's settings for less motion and transparency followed | `src/ui/mixer/DeviceSlots.cpp` | — | — | ui-core-mixer-app 13 |
+| Numbers written one way everywhere, and checked by a test: a true minus sign, a thin space before the unit, an en dash in a range, and a fixed count of decimals for each unit | `src/ui/components/ValueText.cpp` | S | 5 | comparison with another DAW, 2026-11-17 |
+| Right-click menus in one grammar: a first row that names the object, groups in a fixed order with the clipboard's commands always in the same order, and what deletes last | `src/ui/components/Controls.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |
 
 ### Shell
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | The Account button, which does nothing, taken out of the activity bar until it does something | `src/ui/shell/ActivityBar.cpp` | — | — | ui-shell-browser 14 |
+| The top bar's readouts (position, tempo, time signature, grid) as plain large numbers with a small unit and no box of their own, and the transport's buttons in one well: it is the most boxed part of the window | `src/ui/shell/TopBar.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |
+| What is switched on or picked drawn apart from what is playing or recording: a soft tint of the accent for the first (Snap, the tool, Ghost Notes), the solid accent for the second alone, so that the eye finds what runs | `src/ui/theme/DesignTokens.h` | M | 5 | comparison with another DAW, 2026-11-17 |
 | Secondary windows that don't block the main one: Settings, the plug-in scan, Chord Progressions and the rest | `src/app/MainWindow.cpp` | M | 5 | ui-shell-browser 2, ui-core-mixer-app 6 |
 | One Settings window that holds what is spread over three tabs and four menus | `src/ui/shell/SettingsPanel.cpp` | L | 5 | ui-shell-browser 9 |
 | The text the user reads in a strings table, with one term and one spelling for each thing; with it the design tokens in a file a designer edits, and a gallery app (architecture phase A4) | `src/ui/theme/DesignTokens.h` | L | 8 | ui-shell-browser 11, docs 5 |
@@ -228,6 +239,8 @@ what is left of them, and what came up while they were built.
 | The drum machines' short and noise voices (rims, claves, maracas, guiro, tambourine, metal, the Trap and Percussion kits' own) pinned by their bands and lengths as the tuned voices are | `tests/DrumSynthesisTests.cpp` | — | — | Open | tests-audio 13 |
 | Mouse-driven tests of the mixer strip's controls (fader, pan, sends, Pre/Post, arm), the settings panel's MIDI and Shortcuts tabs, and the render panel | `tests/MixerViewTests.cpp` | — | — | Open | tests-ui 9, tests-ui 15 |
 | Golden renders regenerated one at a time, each with its reason, not all at once inside large commits | `tests/GoldenFiles.cpp` | — | — | Open | tests-infrastructure 10 |
+| A gate on instructions counted, for every push: each device and a few mixes rendered offline under Valgrind's Callgrind, for the commit `main` is at and for the push's, failing above a small rise (1 %, say). It gives the same count on every machine, where the benchmark gates measure time and run nightly | `tests/BenchmarkGates.cpp` | M | 7 | Open | comparison with another DAW, 2026-11-17 |
+| What the audio thread calls marked `[[clang::nonblocking]]` and checked as it compiles by Clang's `-Wfunction-effects` in the `linux-clang` build, beside the real-time audit's counts as it runs. Needs Clang 20 or newer; CI's is 18 | `src/engine/core/Engine.h` | M | — | Open | comparison with another DAW, 2026-11-17 |
 
 ## Docs
 
@@ -236,6 +249,9 @@ Stage 2 put the docs in order: pages that say what is, with the history in `arch
 | Item | Where | Size | Stage | Status | Source |
 |---|---|---|---|---|---|
 | The guide: a page for each device, once stage 6 has finished it, and the source control page written again once stage 4 cuts the feature down; the views have their pages | `docs/guide/` | L | 4, 6 | Open | product-gaps 15 |
+| The guide's pictures listed in one file (a name, the screen, the part to cut out, both themes) and painted from it by the site-pictures test, with a check that every picture a page names exists; each device's page on one template, opened from the device's menu | `tests/SitePictures.cpp` | M | 8 | Open | comparison with another DAW, 2026-11-17 |
+| A map from each feature to its guide page, with the version the page was checked against, and a check that fails when a feature has no page: today nothing but the rule keeps a page from going stale | `docs/guide/` | M | 8 | Open | comparison with another DAW, 2026-11-17 |
+| The website's download button for the visitor's system, with the version, the file's name and its size, beside the SHA-256 the page already shows; the version and its date at the top of the home page (the `phazite-site` repository, once 4.5 makes releases) | `docs/README.md` | S | 5 | Open | comparison with another DAW, 2026-11-17 |
 
 ## Product gaps
 
@@ -243,9 +259,12 @@ Stage 2 put the docs in order: pages that say what is, with the history in `arch
 |---|---|---|---|---|
 | The checks by hand: recording through an ASIO® interface, a MIDI keyboard, a DAWproject opened in another DAW | `docs/hand-checks.md` | — | 3 | product-gaps 7, docs 2 |
 | MIDI learn | `src/model/engine/AudioIO.cpp` | M | 5 | product-gaps 1 |
-| Export of a range or the loop, as MP3, and templates to start a project from | `src/model/project/Export.h` | M | 5 | product-gaps 11 |
+| Export of a range or the loop, and templates to start a project from | `src/model/project/Export.h` | M | 5 | product-gaps 11 |
+| MP3 export, beside WAV and FLAC (roadmap step S5.16): an encoder under a compatible licence chosen (LAME is LGPL), added to the notices and [third-party.md](third-party.md), a bit rate to choose, and the song's start kept where it is | `src/model/project/Export.h` | M | 5 | the owner, 2026-11-17; product-gaps 11 |
+| Presets heard in the browser before they go into the song: an instrument's preset plays a short phrase that fits its kind, an effect's plays on a loop, both rendered beside the song and never through it (roadmap step S5.18) | `src/ui/browser/Browser.cpp` | M | 5 | comparison with another DAW, 2026-11-17 |
+| A catalogue of free plug-ins and sound packs, installed, updated and removed from inside Phazite: each an archive pinned by its address, size and SHA-256 as Phazite Sounds are, never an installer that runs, and a project that misses one offers it. The plug-ins run in helpers as all do. After 1.0 | `src/services/SoundPack.cpp` | XL | — | comparison with another DAW, 2026-11-17 |
 | Note effects that play as notes come in (an arpeggiator, chords, a scale), and MIDI from plug-ins | `src/devices/core/DeviceInfo.h` | L | 7 | product-gaps 2 |
-| MIDI output, clock out, and a MIDI input for each track | `src/model/engine/AudioIO.cpp` | L | 7 | product-gaps 1 |
+| MIDI output, clock out, and a MIDI input for each track, which can be another track's notes, so that two instruments play one part | `src/model/engine/AudioIO.cpp` | L | 7 | product-gaps 1; comparison with another DAW, 2026-11-17 |
 | Any track or bus as a track's output | `src/model/mixer/MixerModel.h` | (M) | 7 | product-gaps 14 |
 | The Multisampler as a plain SFZ player with one piano; with it, sampled acoustic instruments | `src/devices/sampler/Sampler.cpp` | XL | 7 | product-gaps 6 |
 | Release work: crash reports with symbols, Linux tried, compatibility of projects from 1.0 on | `packaging/windows/Phazite.iss` | L | 8 | product-gaps 15, product-gaps 12 |

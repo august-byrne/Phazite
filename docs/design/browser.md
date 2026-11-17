@@ -19,6 +19,7 @@ name.
 | The selected sound's waveform and facts under the tree | Built | |
 | Loops previewed in the song's key | Planned | After v1, with the analysis below |
 | Previews through the selected track's devices | Planned | No roadmap step; Swap does it for a pad or a device |
+| A device's presets heard before they go into the song: an instrument's with a phrase, an effect's on a loop | Planned | Roadmap step S5.18 |
 | Drag and drop into the playlist, the mixer and a drum pad | Built | |
 | Enter or a double-click puts an item into the song | Built | |
 | Plug-in picker (F8) | Built | |
@@ -27,6 +28,7 @@ name.
 | Swap: a pad's sound or a device's preset tried in place | Built | Not for plug-ins' presets, wavetables, or a pad's layers after the first |
 | Phazite Sounds as an optional download | Built | No in-app download on Linux builds without curl |
 | Updating Phazite Sounds when a new version is pinned | Planned | No roadmap step |
+| A catalogue of free plug-ins and sound packs, each pinned by its size and SHA-256 | Planned | After v1 ([roadmap](../roadmap.md#after-10)) |
 | The user's sounds known by analysis; Show Similar; a pad's next similar sound | Planned | After v1 ([roadmap](../roadmap.md#after-10)) |
 | Tempo detection for loops whose names don't say | Planned | After v1, with the analysis |
 | Sample maps, recorded previews of plug-ins' presets, ratings | Declined | Divisive, or covered by favorites and collections |

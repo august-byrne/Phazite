@@ -74,7 +74,7 @@ VST is a registered trademark of Steinberg Media Technologies GmbH.
 ## Not yet
 
 - Exporting a chosen range or some sections only: planned.
-- MP3: not planned. WAV and FLAC cover delivery.
+- MP3: planned, before version 1.0.
 - A DAWproject's plug-ins and sends taken into a new project: planned.
 - Warp markers in DAWproject files: planned.
 - An archive of a project with all its files, to send to someone: planned.

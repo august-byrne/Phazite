@@ -26,6 +26,7 @@ warp markers. The tab is named for what it shows and follows the selection ([win
 | Stamp the chord lane's current chord | Declined | A chord made once is copied as easily |
 | Transforms with preview: quantize, legato, chop, transpose, strum, humanize, arpeggiate | Built | |
 | Transforms: flam, velocity scaling, reverse, flip | Planned | No roadmap step |
+| Tools that write notes: Euclidean rhythms, a melody in the scale | Planned | After version 1 ([roadmap](../roadmap.md#after-10)) |
 | Drum mode | Built | |
 | Overview strip as the horizontal scroll bar | Built | |
 | Song time in place of clip time | Planned | No roadmap step |
