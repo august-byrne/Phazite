@@ -1,7 +1,7 @@
 # Versions, cut down to what producers use
 
-*A design note (roadmap step S4.1). Proposed on 2026-11-17; it waits for the owner's approval. Steps S4.2 to S4.5
-build it, and [versions.md](versions.md) is rewritten from it as they do.*
+*A design note (roadmap step S4.1), approved by the owner on 2026-11-17 with both of its recommendations. Steps S4.2
+to S4.5 build it, and [versions.md](versions.md) is rewritten from it as they do.*
 
 The owner's decision (2026-11-13): versions serve one person's song first, and "there is git-style functionality
 that is really not needed for music makers and can be removed and the whole system can be simplified and optimized
@@ -69,13 +69,13 @@ named for collaboration. It becomes simpler in one way, below.
 U (untracked), A (staged) and "Index Added" go. A line is **A** added, **M** modified, **D** deleted or **C** in
 conflict, in the colours it has now.
 
-## What I recommend keeping, against the first plan: each computer's own records
+## What stays, against the first plan: each computer's own records
 
 The first plan parked them: each computer writes its own record of every branch, and from that follow a branch
 whose lines went their own way on two computers shown to merge again, a deleted branch staying deleted everywhere,
 and the newest computer's word winning for a renamed version.
 
-I recommend leaving this part as it is, and building nothing more on it until collaboration is designed.
+This part stays as it is, and nothing more is built on it until collaboration is designed (the owner, 2026-11-17).
 
 - A project folder kept in a synced folder and opened on a studio PC and a laptop is something producers do today.
   The per-computer files are what makes that safe: no file ever has two writers.
@@ -89,9 +89,9 @@ at a time, and that work saved on two at once is offered to merge.
 
 ## The words
 
-Today the view speaks git, as VS Code's Source Control does (the owner, 2026-11-05). Open question 1 asks whether
-that stays now that the feature is for producers. I recommend plain words for what a producer touches, and keeping
-**branch** and **merge**.
+Until now the view spoke git, as VS Code's Source Control does (the owner, 2026-11-05). Now that the feature is for
+producers, it takes plain words for what a producer touches, and keeps **branch** and **merge** (the owner,
+2026-11-17).
 
 - Every DAW that keeps versions says "version": Studio One's Versions, Cubase's and FL Studio's Save New Version,
   Logic's Alternatives. So do Figma and Google Docs ("version history").
@@ -102,7 +102,7 @@ that stays now that the feature is for producers. I recommend plain words for wh
 
 The layout stays VS Code's: the message field over the button, the sections that fold, the graph.
 
-| Today | Proposed |
+| Before | Now |
 | --- | --- |
 | Source Control (the view, the menu's title) | Versions |
 | Commit; Commit and Bounce | Save Version; Save Version and Bounce |
@@ -126,8 +126,6 @@ The layout stays VS Code's: the message field over the button, the sections that
 - Tooltips say what a command does in the song's terms; "git reset --soft" and the like go.
 - A branch is named as typed. Spaces no longer become dashes.
 - Command ids follow where they still say `commit` or `checkout`.
-
-If the owner keeps git's words, the rest of this note stands as it is: only this table is dropped.
 
 ## A history that cannot lose work (S4.3)
 
@@ -179,9 +177,9 @@ lets 29 days pass on a clock it sets, and recovers both.
   reverted alone, backup of the history to another folder, the cloud.
 - Declined, as before: tags, stash, rebase, squash, cherry-pick, blame, bisect.
 
-## What the owner is asked
+## What the owner decided (2026-11-17)
 
-1. **The words:** plain ones as in the table (recommended), or git's as now.
-2. **Each computer's records:** left as they are (recommended), or taken out as first planned.
-3. Anything else here that should be otherwise. Without a word on them, the rest is built as written: a
-   double-click hears a version, a version off every branch is kept 30 days, a merge takes every line.
+1. **The words:** plain ones, as in the table.
+2. **Each computer's records:** left as they are.
+3. The rest as written: a double-click hears a version, a version off every branch is kept 30 days, a merge takes
+   every line.

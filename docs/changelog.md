@@ -8,6 +8,12 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 4. Decided: the owner's decisions, built (from 2026-11-17)
+
+- **S4.1 The design note of the cut to versions:** [design/versions-cut.md](design/versions-cut.md) says what the
+  versions keep, what goes, the plain words the view takes and how a history cannot lose work; the owner approved
+  it with both of its recommendations (plain words; each computer's own records stay).
+
 ## After the known bugs' first push (2026-11-17)
 
 CI built the round's 36 commits for the first time and failed on every preset. What it found, and two tests that

@@ -92,8 +92,7 @@ what they found is fixed or in known-bugs.md.
 
 | Step | Size | What | Done when |
 |---|---|---|---|
-| S4.1 | S | A design note of the cut to source control | The owner has approved it |
-| S4.2 | L | Staging, the commit checked out on its own and a merge's ticked lines removed; each computer's records parked | The `version.stage*`, `version.checkout` and `version.backToBranch` commands are gone, and the goldens say so |
+| S4.2 | L | Staging, the commit checked out on its own and a merge's ticked lines removed; the view called Versions, in plain words ([the note](design/versions-cut.md)) | The `version.stage*`, `version.checkout` and `version.backToBranch` commands are gone, and the goldens say so |
 | S4.3 | M | A history that cannot lose work | No command leaves a commit unreachable without asking |
 | S4.4 | M | Housekeeping: unused pieces swept, Clean Up aware of Local History, Verify History checking audio | Verify reports a missing audio file |
 | S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
@@ -193,8 +192,6 @@ One line each; the rows, with what is built today, are in [open-questions.md](op
 
 | Decision | Needed before |
 |---|---|
-| Whether Source Control keeps git's words or takes plain ones | S4.2 |
-| The design note of the cut to source control | S4.2 |
 | What the activity bar holds beyond its three views | S5.14 |
 | Whether the Exciter and the Vinyl stay devices of their own | Stage 6 |
 | Whether the Multisampler stays in 1.0 | 4.10 |

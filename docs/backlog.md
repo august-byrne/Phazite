@@ -142,8 +142,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| A design note of what the versions are cut down to, for approval | `docs/design/versions.md` | S | 4 | plan |
-| The cut itself: staging, a commit checked out on its own and ticked merge lines removed, the per-computer records parked; plain words where git's words stand | `src/model/versions/VersionsModel.cpp` | L | 4 | ui-shell-browser 10, model-versions 12, source control audit |
+| The cut itself: staging, a commit checked out on its own and ticked merge lines removed; plain words where git's words stand ([the note](design/versions-cut.md)) | `src/model/versions/VersionsModel.cpp` | L | 4 | ui-shell-browser 10, model-versions 12, source control audit |
 | The store swept of what nothing names any more | `src/model/versions/PieceStore.cpp` | (M) | 4 | model-versions 7 |
 | Verify History checks the audio, the snapshots and the songs left on branches too | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 10 |
 | The open song tied to the commit it grew from | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 9 |
