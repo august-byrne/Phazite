@@ -652,6 +652,9 @@ namespace
 
         void getStateInformation (juce::MemoryBlock& data) override
         {
+            // With the lock its blocks are played under, as a plug-in guards what its state reads: after a reset, a block
+            // wrote the first entries again while this read them (ThreadSanitizer, CI, 2026-11-17).
+            const juce::ScopedLock lock (getCallbackLock());
             juce::MemoryOutputStream out (data, false);
             const auto kept = count.load (std::memory_order_acquire);
             out.writeInt (kept);
