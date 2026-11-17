@@ -3971,8 +3971,15 @@ TEST_CASE ("What waits for a song's plug-ins' states is told once, with not all 
     // A version switched to, or the project closed some other way, while a close waited: the close goes on.
     SandboxedPlugins sandboxed;
     TestSong song;
-    addSlow (song, song.firstTrack);
+    const auto slow = addSlow (song, song.firstTrack);
     auto& project = song.getProject();
+
+    // Its first state, asked as it joined the song, in before the gate shuts: an answer to that one, coming just after,
+    // was every answer what waits below asked for, and it was told at once with all of them (two of CI's Linux jobs in
+    // one run, 2026-11-17).
+    auto& instance = getSandboxed (song, slow);
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&instance] { return ! instance.isStateUnasked() && ! instance.isAskingState(); }, longWait));
     SlowGate gate;
     auto calls = 0;
     auto allIn = true;
