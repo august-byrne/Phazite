@@ -304,14 +304,17 @@ void TempoLane::paint (juce::Graphics& g)
         if (std::max (next, centre.x + radius) < (float) clip.getX())
             continue;
 
+        // The label keeps clear of the selected dot's size whether or not this one is selected, so that selecting a point
+        // doesn't move its tempo.
         const auto text = formatTempoNumber (tempos[(size_t) i].bpm);
         const auto textWidth = juce::GlyphArrangement::getStringWidth (font, text) + (float) Space::xs;
+        const auto labelGap = LaneTint::selectedPointRadius;
 
-        if (next - centre.x > textWidth + radius * 2.0f)
+        if (next - centre.x > textWidth + labelGap * 2.0f)
         {
             const auto textHeight = TextSize::small + 2.0f;
-            const auto above = centre.y - radius - textHeight >= 0.0f;
-            const juce::Rectangle<float> box (centre.x + radius, above ? centre.y - radius - textHeight : centre.y + 1.0f, textWidth,
+            const auto above = centre.y - labelGap - textHeight >= 0.0f;
+            const juce::Rectangle<float> box (centre.x + labelGap, above ? centre.y - labelGap - textHeight : centre.y + 1.0f, textWidth,
                                               textHeight);
 
             if (box.intersects (clip.toFloat()))

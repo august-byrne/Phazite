@@ -254,3 +254,33 @@ TEST_CASE ("A tempo change's menu types its tempo in a field over its point, as 
     phazite::undo (*screen.song);
     CHECK (screen.tempos()[0].bpm == doctest::Approx (120.0));
 }
+
+TEST_CASE ("A tempo change's number stays where it is as its point is selected")
+{
+    // The owner, 2026-11-16: "when i click on a automation point on the playlist, it's number jumps up because the selected
+    // bubble is bigger than the point itself". The number was placed from the dot's size, which grows as it is selected.
+    TempoScreen screen;
+    phazite::addTempoChange (*screen.song, beat (8.0), 140.0);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.lane->isVisible());
+
+    // Right of the selected dot and its ring, where the number is, the pixels before and after the click are the same.
+    const auto centre = screen.lane->getPointPosition (1);
+    const auto clear = (int) std::ceil (centre.x + phazite::ui::LaneTint::selectedPointRadius + phazite::ui::LaneTint::selectedRing) + 1;
+    const auto label = juce::Rectangle<int> (clear, 0, 48, screen.lane->getHeight());
+    const auto before = screen.lane->createComponentSnapshot (label);
+
+    phazite::test::Mouse mouse (*screen.lane);
+    mouse.click (screen.point (1));
+    mouse.moveTo ({ screen.point (1).x, screen.lane->getHeight() + 40 }); // off the lane, so that nothing shows for the pointer
+    phazite::test::dispatchPendingMessages();
+    const auto after = screen.lane->createComponentSnapshot (label);
+
+    auto differing = 0;
+
+    for (int y = 0; y < label.getHeight(); ++y)
+        for (int x = 0; x < label.getWidth(); ++x)
+            differing += before.getPixelAt (x, y) != after.getPixelAt (x, y) ? 1 : 0;
+
+    CHECK (differing == 0);
+}
