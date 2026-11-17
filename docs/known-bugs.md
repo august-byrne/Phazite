@@ -11,7 +11,7 @@ to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on 
 fixed (2026-11-15 and 16). That round fixed every entry but four, each of which says why it stays: one is
 the written reason of a test's exception, one waits for the owner's answer, one can only be built and tried on
 Linux, and one needs a file made by another program to show, and a saved value to fix. Each fix has a line in the
-[changelog](changelog.md), under "The known bugs".
+[changelog](changelog.md), under "The known bugs". 190, a test file that hung once on CI, came the day after (2026-11-17).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -61,3 +61,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
+
+## Tests
+
+- **190. `AppTests` ran into ctest's ten minutes once on CI's Clang build** (2026-11-17, at `2daaab85`; it passed in
+  the four GCC builds of the same run and in every run on Windows). Its output ends after the first two test cases,
+  cut off as ctest ended it, so where it hung isn't known: a wait in the tests gives up after two minutes, so this
+  was a thread that never came back or several waits in a row. CI's test steps now set
+  `PHAZITE_TEST_STALL_SECONDS`, so the next time says the test case. To fix: read that name, then the wait or the
+  thread it names.

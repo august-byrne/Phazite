@@ -84,23 +84,32 @@ TEST_CASE ("A MIDI file timing its notes past any song's end imports them within
 {
     // A file from others: each event as long after the last as MIDI's lengths can say, a hundred times over, a quarter note a
     // tick. The beats came in unclamped, ten billion along, past what an int counts in bars (Bars::getBarAt()).
-    juce::MidiMessageSequence sequence;
-    auto at = 0.0;
+    // Its bytes written here: juce::MidiFile's writer counts ticks in an int, which such times overflow (UBSan, CI,
+    // 2026-11-17).
+    juce::MemoryOutputStream events;
 
     for (int i = 0; i < 100; ++i)
-        sequence.addEvent (juce::MidiMessage::controllerEvent (1, 1, i), at += (double) 0x0fffffff);
+    {
+        const unsigned char controller[] = { 0xff, 0xff, 0xff, 0x7f, 0xb0, 1, (unsigned char) i }; // 0x0fffffff ticks on
+        events.write (controller, sizeof (controller));
+    }
 
-    sequence.addEvent (juce::MidiMessage::noteOn (1, 60, 0.8f), at);
-    sequence.addEvent (juce::MidiMessage::noteOff (1, 60), at + 1.0);
-    juce::MidiFile midi;
-    midi.setTicksPerQuarterNote (1);
-    midi.addTrack (sequence);
+    const unsigned char played[] = { 0x00, 0x90, 60, 102, 0x01, 0x80, 60, 0, 0x00, 0xff, 0x2f, 0x00 }; // on, off a tick on, the end
+    events.write (played, sizeof (played));
 
     phazite::test::TemporaryFolder temporary;
     const auto file = temporary.folder.getChildFile ("Far.mid");
     {
         juce::FileOutputStream stream (file);
-        REQUIRE (midi.writeTo (stream));
+        REQUIRE (stream.openedOk());
+        stream.write ("MThd", 4);
+        stream.writeIntBigEndian (6);
+        stream.writeShortBigEndian (0); // one track
+        stream.writeShortBigEndian (1);
+        stream.writeShortBigEndian (1); // a quarter note a tick
+        stream.write ("MTrk", 4);
+        stream.writeIntBigEndian ((int) events.getDataSize());
+        REQUIRE (stream.write (events.getData(), events.getDataSize()));
     }
 
     auto song = phazite::createSong();

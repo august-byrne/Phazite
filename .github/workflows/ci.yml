@@ -19,6 +19,11 @@ on:
 permissions:
   contents: read
 
+# A test case that runs this long says its name (and its stack, on Windows) every so many seconds: a test file that hangs
+# is ended at ctest's limit with nothing said of where it was (tests/StallReport.h).
+env:
+  PHAZITE_TEST_STALL_SECONDS: "300"
+
 concurrency: # a newer push to the same branch cancels the run that is still going
   group: ci-${{ github.ref }}
   cancel-in-progress: true

@@ -956,7 +956,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
                 continue;
 
             auto wanted = std::move (row->wantedOpenness);
-            auto waiting = std::move (row->afterFill);
+            auto waiting = std::exchange (row->afterFill, {}); // emptied, not moved from: more is added to it below
             row->setOpen (false);
             row->setOpen (true);
 
