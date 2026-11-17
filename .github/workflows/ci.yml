@@ -245,11 +245,13 @@ jobs:
         run: sh tools/ci-sanitizer-reports.sh "build/${{ matrix.preset }}/Testing/Temporary/LastTest.log"
 
   # Clang, the compiler macOS will build with, and its static analysis: the linux-clang preset, then clang-tidy with the
-  # checks .clang-tidy lists over Phazite's own files (tools/clang-tidy.sh; every finding fails the job), then the tests.
+  # checks .clang-tidy lists over the files of Phazite's own that the push changed (tools/clang-tidy.sh --since; every
+  # finding fails the job), then the tests. Over every file it takes more than half an hour on a runner's four
+  # processors, with nothing kept from run to run, and set the length of every run: the nightly workflow does that.
   clang:
     name: Linux (linux-clang, clang-tidy)
     runs-on: ubuntu-24.04
-    timeout-minutes: 150 # the build without the compiler cache, clang-tidy over every file, and the tests
+    timeout-minutes: 150 # the build without the compiler cache, clang-tidy over every file (a tag's), and the tests
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -310,11 +312,29 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ccache-linux-clang-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: clang-tidy
+      # Since main, for a branch or a pull request; since main's head before, for a push to main; and every file where
+      # there is nothing to compare with: a tag, a run started by hand, or a history that left main's more than 300
+      # commits ago (the checkout holds one commit, so both are fetched that far back).
+      - name: clang-tidy (what changed)
         if: ${{ !cancelled() }}
+        env:
+          PHAZITE_MAIN_BEFORE: ${{ github.event.before }}
         run: |
           echo "::add-matcher::.github/problem-matchers/gcc.json"
-          CLANG_TIDY=clang-tidy-18 sh tools/clang-tidy.sh build/linux-clang
+          since=
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            git fetch --no-tags --no-recurse-submodules --depth=300 origin main || true
+            since=$PHAZITE_MAIN_BEFORE
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ] || { [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = branch ]; }; then
+            git fetch --no-tags --no-recurse-submodules --depth=300 origin main "$GITHUB_SHA" || true
+            since=origin/main
+          fi
+          if [ -n "$since" ] && git merge-base "$since" HEAD > /dev/null 2>&1; then
+            CLANG_TIDY=clang-tidy-18 sh tools/clang-tidy.sh build/linux-clang --since "$since"
+          else
+            echo "Nothing to compare with: clang-tidy over every file."
+            CLANG_TIDY=clang-tidy-18 sh tools/clang-tidy.sh build/linux-clang
+          fi
 
       - name: Test
         if: ${{ !cancelled() }}

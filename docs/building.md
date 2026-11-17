@@ -204,11 +204,14 @@ The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or new
 | `linux-tsan` | RelWithDebInfo with ThreadSanitizer (data races) | `build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite` |
 | `linux-clang` | Debug with Clang (`clang` and `clang++` on the PATH; `sudo apt install -y clang clang-tidy`), without precompiled headers, for clang-tidy | `build/linux-clang/Phazite_artefacts/Debug/Phazite` |
 
-**clang-tidy.** [.clang-tidy](../.clang-tidy) lists a small set of checks for real bugs, each explained there, which Phazite's own code passes; CI's Clang job runs them over every file of `src/` and `tests/` and fails on any finding. To run them yourself, build `linux-clang`, then:
+**clang-tidy.** [.clang-tidy](../.clang-tidy) lists a small set of checks for real bugs, each explained there, which Phazite's own code passes; CI's Clang job runs them over the files of `src/` and `tests/` that a push changed since `main` and fails on any finding; the nightly workflow runs them over every file, which takes more than half an hour. To run them yourself, build `linux-clang`, then:
 
 ```bash
-CLANG_TIDY=clang-tidy sh tools/clang-tidy.sh build/linux-clang
+CLANG_TIDY=clang-tidy sh tools/clang-tidy.sh build/linux-clang               # every file
+CLANG_TIDY=clang-tidy sh tools/clang-tidy.sh build/linux-clang --since main  # what changed since main
 ```
+
+`--since` picks each `.cpp` that changed, uncommitted changes too, and for a header that changed the `.cpp` files of its name; a file that only includes a changed header waits for the nightly run.
 
 On Windows, the clang-tidy of VS Code's C/C++ extension reads an MSVC build's database, configured without precompiled headers (Git Bash, from the repository root; `phazite_data` makes the headers the build generates):
 

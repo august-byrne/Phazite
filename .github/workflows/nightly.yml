@@ -5,7 +5,8 @@
 # - the benchmark gates (tests/BenchmarkGates.cpp): each device's cost against a fixed reference workload, and the engine
 #   and the model with 100 tracks against 10, from windows-profile (an optimised build with symbols), against bounds
 #   stored in the test;
-# - every test file under MSVC's AddressSanitizer (windows-asan).
+# - every test file under MSVC's AddressSanitizer (windows-asan);
+# - clang-tidy over every file of Phazite's own (CI's Clang job runs it over what a push changed).
 # Jobs are set up as CI's (.github/workflows/ci.yml): actions pinned to full commit hashes, read-only permissions, the
 # compiler cache, the problem matchers. They take the compiler cache CI keeps for each preset and save none, so that CI's
 # caches stay CI's (windows-asan, which no CI job builds, keeps its own); they configure as CI does (warnings as errors, no
@@ -30,7 +31,7 @@ on:
         description: "Random songs for the text, pieces and apply-song checks"
         default: "1000"
       only:
-        description: "One job alone: long-run, benchmark-gates or windows-asan (empty: all of them)"
+        description: "One job alone: long-run, benchmark-gates, windows-asan or clang-tidy (empty: all of them)"
         default: ""
 
 permissions:
@@ -274,3 +275,62 @@ jobs:
         run: |
           echo "::add-matcher::.github/problem-matchers/tests.json"
           ctest --preset windows-asan
+
+  # clang-tidy, with the checks .clang-tidy lists, over every file of Phazite's own: what CI's Clang job leaves out, which
+  # runs it over the files a push changed (ci.yml). A file that only includes a header that changed is checked here, a
+  # night later. The linux-clang preset, built first for the headers the build makes, from the compiler cache CI keeps
+  # for it.
+  clang-tidy:
+    name: clang-tidy (every file)
+    if: ${{ !github.event.inputs.only || github.event.inputs.only == 'clang-tidy' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150 # more than half an hour of clang-tidy; without the compiler cache, the build is about as long again
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Restore the compiler cache (CI's)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-linux-clang-nightly-${{ github.run_id }}
+          restore-keys: ccache-linux-clang-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/ccache.tar.xz" https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-glibc.tar.xz
+          echo "bd1313f5316f594443dcb4113a4191c666ac6450e0cf016ff8cb8b080f46c160  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc/ccache" --dir "$RUNNER_TEMP/ccache" --zero-stats
+
+      - name: Install JUCE's Linux build dependencies, Clang and clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libfreetype-dev \
+              libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+              clang-18 clang-tidy-18
+          clang-tidy-18 --version
+
+      - name: Configure
+        run: cmake --preset linux-clang
+
+      - name: Build
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          cmake --build --preset linux-clang -- -k 0
+
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+
+      - name: clang-tidy
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          CLANG_TIDY=clang-tidy-18 sh tools/clang-tidy.sh build/linux-clang

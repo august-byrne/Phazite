@@ -33,6 +33,9 @@ CLAUDE.md ("Checks by stage", "Agents").
 - **189 An import cancelled once its branch is made:** two tests of it failed in some runs of a release build, the
   import done before the cancel; they hold the history's read of the switch where it starts (a seam that lets a count
   of reads start first).
+- **CI's clang-tidy runs over what a push changed:** over every file it took 36 minutes of each run, more than any
+  other job, with nothing kept from run to run. CI's Clang job checks the files changed since `main`
+  (`tools/clang-tidy.sh --since`), and the nightly workflow every file.
 
 ## The known bugs (from 2026-11-15)
 
