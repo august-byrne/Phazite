@@ -32,6 +32,13 @@
  #pragma comment(lib, "dbghelp.lib")
 #endif
 
+#if JUCE_LINUX
+ #include <execinfo.h>
+ #include <pthread.h>
+ #include <signal.h>
+ #include <unistd.h>
+#endif
+
 namespace phazite::test
 {
 namespace
@@ -137,6 +144,18 @@ namespace
         }
     }
 #endif
+
+#if JUCE_LINUX
+    // On Linux the tests' thread writes its own stack, asked with a signal: its frames as glibc finds them, named as far
+    // as the program exports its functions (JUCE's are; the rest are addresses). A test file that hung there said its
+    // test case's name and nothing of where it was (AppTests, CI, 2026-11-17: known bug 190).
+    void writeOwnStack (int)
+    {
+        void* frames[48];
+        const auto count = backtrace (frames, 48);
+        backtrace_symbols_fd (frames, count, STDERR_FILENO);
+    }
+#endif
 } // namespace
 
 struct StallReport::Watch
@@ -146,6 +165,18 @@ struct StallReport::Watch
     {
 #if PHAZITE_STALL_STACKS
         testsThread = OpenThread (THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, GetCurrentThreadId());
+#endif
+#if JUCE_LINUX
+        // What backtrace() loads at its first call, loaded now and not in the signal's handler; calls the signal
+        // interrupts start again (a test case that is only slow goes on as it was).
+        void* first[1];
+        backtrace (first, 1);
+        linuxTestsThread = pthread_self();
+        struct sigaction action = {};
+        action.sa_handler = writeOwnStack;
+        action.sa_flags = SA_RESTART;
+        sigemptyset (&action.sa_mask);
+        sigaction (SIGUSR2, &action, nullptr);
 #endif
         mark (nullptr, false);
         thread = std::thread ([this] { run(); });
@@ -226,6 +257,14 @@ struct StallReport::Watch
         }
 #endif
 
+#if JUCE_LINUX
+        std::fprintf (stderr, "  The tests' thread is at:
+");
+        std::fflush (stderr);
+        pthread_kill (linuxTestsThread, SIGUSR2);
+        std::this_thread::sleep_for (std::chrono::milliseconds (500)); // its handler writes meanwhile
+#endif
+
         std::fflush (stderr);
     }
 
@@ -237,6 +276,9 @@ struct StallReport::Watch
 
 #if PHAZITE_STALL_STACKS
     HANDLE testsThread = nullptr;
+#endif
+#if JUCE_LINUX
+    pthread_t linuxTestsThread {};
 #endif
 
     std::mutex mutex;

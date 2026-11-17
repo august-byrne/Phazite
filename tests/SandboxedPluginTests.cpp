@@ -2217,7 +2217,10 @@ TEST_CASE ("A plug-in's value's text and a value typed are asked of its helper w
         clock.advance (phazite::SandboxedInstance::getStateMilliseconds() - 1.0);
         CHECK (turnMessageLoop (20));
         CHECK_FALSE (*told);
-        clock.advance (1.0);
+
+        // Past the time, not onto it: the clock counts whole ticks, so the two moves together can come out a part of a tick
+        // short of it, where a held clock stays for good (the wait below ran out once, CI's linux-release, 2026-11-17).
+        clock.advance (2.0);
         REQUIRE (phazite::test::dispatchMessagesUntil ([told] { return *told; }, longWait));
         CHECK (handle.getText (0.3f) == juce::String ("0.30"));
         gate.open();

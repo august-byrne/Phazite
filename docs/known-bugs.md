@@ -64,9 +64,10 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **190. `AppTests` ran into ctest's ten minutes once on CI's Clang build** (2026-11-17, at `2daaab85`; it passed in
-  the four GCC builds of the same run and in every run on Windows). Its output ends after the first two test cases,
-  cut off as ctest ended it, so where it hung isn't known: a wait in the tests gives up after two minutes, so this
-  was a thread that never came back or several waits in a row. CI's test steps now set
-  `PHAZITE_TEST_STALL_SECONDS`, so the next time says the test case. To fix: read that name, then the wait or the
-  thread it names.
+- **190. `AppTests` runs into ctest's ten minutes in some runs on CI's Linux builds** (2026-11-17: once on the Clang
+  build, once under AddressSanitizer, of some twenty runs; never on Windows). The second time said where: in "Startup
+  opens the project Phazite was started with; after a crash it asks how only if that was the project open then", which
+  waits for nothing itself. So a call that should return doesn't: `ProjectSession::openAtStartup()` or a session
+  going, which wait for threads to end (the versions' history, the plug-ins' helpers, the audio work). On Linux a
+  stalled test case now writes its thread's stack too (`tests/StallReport.cpp`). To fix: read that stack at the next
+  occurrence; it names the wait that never ends, and whether the thread it waits for was ever woken.
