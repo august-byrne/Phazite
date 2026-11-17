@@ -65,6 +65,11 @@ public:
     void keyGoesDown();
     void releaseKeys();
 
+    // A frame of the display, at a time in seconds (the engine's clock's, devices/core/Clock.h): what follows the display's
+    // frames (juce::VBlankAttachment), as the playhead and the position do while the song plays, moves to where it is then.
+    // The tests' windows are on no screen, so they get a frame only when a test shows one.
+    void showFrame (double seconds);
+
     // Paints the window into an image, as the screen would: by the platform's renderer (Direct2D on Windows), or by another,
     // such as JUCE's software renderer, which Linux's windows paint with.
     juce::Image paintEverything (const juce::ImageType& renderer = juce::NativeImageType());

@@ -1411,6 +1411,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ShortcutsEditorTests.cpp
         tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
+        tests/SitePictures.cpp
         tests/SongCheck.cpp
         tests/SongCheck.h
         tests/SongIDs.h

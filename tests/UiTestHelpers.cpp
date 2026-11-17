@@ -171,6 +171,10 @@ namespace
         void setFullScreen (bool shouldBe) override { fullScreen = shouldBe; } // maximized, as a window says it is
         bool isFullScreen() const override { return fullScreen; }
         void setIcon (const juce::Image&) override {}
+
+        // A frame of the display, which a window on a screen gets from it: what follows the frames (a playhead while the
+        // song plays) moves to where it is at that time, in seconds.
+        void showFrame (double seconds) { callVBlankListeners (seconds); }
         bool contains (juce::Point<int> p, bool) const override { return bounds.withZeroOrigin().contains (p); }
         OptionalBorderSize getFrameSizeIfPresent() const override { return OptionalBorderSize (juce::BorderSize<int>()); }
 
@@ -261,6 +265,12 @@ void TestWindow::releaseKeys()
 {
     if (auto* peer = getPeer())
         peer->handleKeyUpOrDown (false);
+}
+
+void TestWindow::showFrame (double seconds)
+{
+    if (auto* peer = dynamic_cast<HeadlessPeer*> (getPeer()))
+        peer->showFrame (seconds);
 }
 
 juce::Image TestWindow::paintEverything (const juce::ImageType& renderer)

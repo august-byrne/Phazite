@@ -133,6 +133,7 @@ What still waits for an answer is in [open-questions.md](../open-questions.md).
 | Nothing confidential reaches the repository: the git hooks check every commit and push and are never skipped. | The repository is public, and a commit stays in its history. | [../../CONTRIBUTING.md](../../CONTRIBUTING.md) |
 | The build is free of warnings, with warnings as errors in CI on MSVC and GCC, and the code is formatted by clang-format. | A warning left alone hides the next one, and each compiler finds what the other does not. | [../building.md](../building.md) |
 | The user guide is written in this repository, and the website that publishes it is a repository of its own. | A change updates the guide's page in the same commit, and the site's packages stay out of Phazite's build. | [../guide/getting-started.md](../guide/getting-started.md) |
+| The website's pictures of Phazite are painted by a test in this repository (`tests/SitePictures.cpp`) and kept in the website's. | The home page's captions point at places in the pictures, so both change in one commit there; this repository's history doesn't grow by megabytes at each repaint; and the site is published without waiting for a change here to reach `main` (the owner, 2026-11-17). | [../../tests/README.md](../../tests/README.md) |
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH. VST is a registered trademark of Steinberg Media
 Technologies GmbH.

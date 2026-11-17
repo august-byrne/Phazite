@@ -8,8 +8,9 @@ map of the layers is [architecture.md](architecture.md).
 - [../README.md](../README.md): what Phazite is, a picture of the window, its status, the short build and first steps.
 - [guide/](guide/): the user guide, which Phazite's website publishes. The website is a repository of its own,
   `phazite-site` (Astro with Starlight on GitHub Pages, <https://august-byrne.github.io/phazite-site/>), whose build
-  copies the guide, the window's picture, the logo, `notices.json` and the icons from this repository, and fills its
-  Download page from the latest release's `phazite-update.json`. The pages are Markdown with Starlight's front matter
+  copies the guide, the logo, `notices.json` and the icons from this repository, and fills its Download page from the
+  latest release's `phazite-update.json`. It keeps its own pictures of the window and its parts, which the tests'
+  `site-pictures` suite paints into it. The pages are Markdown with Starlight's front matter
   (title, description, sidebar order) and relative links, which the site turns into its own pages or GitHub's. Each
   page's `description` says what it covers, from getting started to the keys, the views, recording, source control,
   troubleshooting, the FAQ and privacy.
