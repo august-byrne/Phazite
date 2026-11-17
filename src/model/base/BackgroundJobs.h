@@ -40,6 +40,10 @@ public:
     // Waits until no job waits or runs, however long that takes. Not on one of its own threads.
     void waitForAll() const;
 
+    // Whether the calling thread is one of its own, which runs its jobs: a job that waited for all of them there would
+    // wait for itself, without end.
+    bool isOnOwnThread() const;
+
     // Drops the jobs that wait, and waits for those that run, however long they take, asking them to stop first if
     // stopRunning. Not on one of its own threads.
     void removeAll (bool stopRunning);

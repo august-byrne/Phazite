@@ -19,6 +19,13 @@ CLAUDE.md ("Checks by stage", "Agents").
   there. A deletion put off deleted whatever was at its path when its turn came: a project made at the same path within
   that second lost its folder. No new project is given a path whose deletion is still to come, and the names for one
   second are told apart by a number looked for among those too.
+- **A history that went as its first read began left that read waiting for itself** (known bug 190): the read waits
+  for what earlier histories of its folder still write, on the threads kept for them, and its own thread was among
+  them once its history had gone. It never ended, and neither did whatever waited for the histories that went: a
+  test's folder as it goes (`AppTests` ran into ctest's ten minutes in some runs on CI's Linux builds, where a stalled
+  test now writes its stack, which named the wait), and Phazite as it quits, if a project closed in the instant its
+  history began to read. The jobs say whether the calling thread is one of their own
+  (`BackgroundJobs::isOnOwnThread()`), and no wait there counts them.
 - **A plug-in that joins the song is taken in when the changes are asked for,** not only at the history's next tick:
   the badge's count just after a project's plug-ins loaded is right, and no tick later compares every track again
   (known bug 187, which a performance gate showed in two runs of three).

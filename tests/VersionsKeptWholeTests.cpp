@@ -25,6 +25,8 @@
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
 
+#include <atomic>
+#include <memory>
 #include <thread>
 
 namespace
@@ -187,6 +189,49 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     CHECK (phazite::getSnapshots (s.context).size() == 1);
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     waitForVersionsFinished();
+}
+
+TEST_CASE ("A history that goes as its first read begins leaves nothing waiting without end: the read doesn't wait for its own thread")
+{
+    // Known bug 190: the read, begun before its history went and its thread was kept to finish its jobs, then waited for
+    // every thread kept for its folder, its own among them: for itself. It never ended, nor did whatever waited for the
+    // histories that went: the tests' folders as they go (AppTests ran into ctest's limit so in some runs on CI's Linux
+    // builds), and Phazite as it quits.
+    TestSong s;
+    s.addTrack ("Bass");
+    REQUIRE (waitForVersionHistory (s.context));
+    auto& song = s.getProject().getSong();
+    phazite::setSong (s.context, nullptr);
+    waitForVersionsFinished();
+
+    // Opened again, its first read held once it has begun; then closed with the read still running, so its thread is kept.
+    phazite::VersionHistory::holdFirstReadsForTests = true;
+    phazite::setSong (s.context, &song);
+    const auto held = dispatchMessagesUntil ([] { return phazite::VersionHistory::firstReadsHeldForTests.load() == 1; });
+    phazite::setSong (s.context, nullptr);
+    phazite::VersionHistory::holdFirstReadsForTests = false;
+    REQUIRE (held);
+
+    // What waits for the histories that went comes back.
+    auto returned = std::make_shared<std::atomic<bool>> (false);
+    std::thread waiter (
+        [returned]
+        {
+            phazite::waitForVersionsFinished();
+            returned->store (true);
+        });
+    const auto cameBack = dispatchMessagesUntil ([&returned] { return returned->load(); });
+    CHECK (cameBack);
+
+    if (cameBack)
+        waiter.join();
+    else
+        waiter.detach(); // it waits still, and nothing can end it
+
+    // And the project's next history reads its folder.
+    phazite::setSong (s.context, &song);
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Initial commit"));
 }
 
 TEST_CASE ("Closing doesn't wait for what the history reads: a read given as it closes never runs")

@@ -11,7 +11,7 @@ to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on 
 fixed (2026-11-15 and 16). That round fixed every entry but four, each of which says why it stays: one is
 the written reason of a test's exception, one waits for the owner's answer, one can only be built and tried on
 Linux, and one needs a file made by another program to show, and a saved value to fix. Each fix has a line in the
-[changelog](changelog.md), under "The known bugs". 190 and 191, two test files that failed in some runs on CI's Linux builds, came the day after (2026-11-17).
+[changelog](changelog.md), under "The known bugs". 191, a test file that fails in some runs on CI's Linux builds, came the day after (2026-11-17), with 190, which is fixed.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -64,13 +64,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **190. `AppTests` runs into ctest's ten minutes in some runs on CI's Linux builds** (2026-11-17: once on the Clang
-  build, once under AddressSanitizer, of some twenty runs; never on Windows). The second time said where: in "Startup
-  opens the project Phazite was started with; after a crash it asks how only if that was the project open then", which
-  waits for nothing itself. So a call that should return doesn't: `ProjectSession::openAtStartup()` or a session
-  going, which wait for threads to end (the versions' history, the plug-ins' helpers, the audio work). On Linux a
-  stalled test case now writes its thread's stack too (`tests/StallReport.cpp`). To fix: read that stack at the next
-  occurrence; it names the wait that never ends, and whether the thread it waits for was ever woken.
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
   crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
   its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter
@@ -79,3 +72,7 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   crashed on purpose. To fix: find which limit (the helper's start, or the
   plug-in's load in it) from the plug-in's status at that point, which the test should say when it fails; then either
   the tests' helper is given longer under the sanitizers, as the tests' waits are, or the load is asked for again.
+  Seen again the same day, under AddressSanitizer again (`main`'s own run of `7514292b`, whose branch run passed), in
+  "A project with slow plug-ins opens at once": of its two slow plug-ins, one never reached its gate in two minutes
+  and was no longer loading, so its load had ended without it. Both times the test case just before had crashed or
+  ended a helper on purpose, which points at the second cause: a load that meets a helper on its way out.

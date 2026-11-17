@@ -5,6 +5,12 @@
 
 namespace phazite
 {
+namespace
+{
+    // The jobs a thread runs, on each of their own threads (isOnOwnThread()).
+    thread_local const BackgroundJobs* jobsOfThisThread = nullptr;
+} // namespace
+
 // A thread that runs the jobs one after another, and sleeps while none waits.
 class BackgroundJobs::Worker final : public juce::Thread
 {
@@ -21,6 +27,8 @@ public:
 
     void run() override
     {
+        jobsOfThisThread = &owner;
+
         while (! threadShouldExit())
             if (! owner.runNext (*this))
                 wait (-1); // until add() or stopThread() wakes it: a wake that comes first isn't lost
@@ -70,6 +78,11 @@ void BackgroundJobs::waitForAll() const
 {
     std::unique_lock held (lock);
     finished.wait (held, [this] { return waiting.empty() && running.empty(); });
+}
+
+bool BackgroundJobs::isOnOwnThread() const
+{
+    return jobsOfThisThread == this;
 }
 
 void BackgroundJobs::removeAll (bool stopRunning)

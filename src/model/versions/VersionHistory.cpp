@@ -618,8 +618,9 @@ namespace
         }
 
         // Waits until the writes into a folder are done (into every folder, for none); but for those of the jobs a job that
-        // waits runs on, once they are kept here (a history that went as its job waited), which it would wait for itself.
-        void waitFor (const juce::File& folder, const BackgroundJobs* own = nullptr)
+        // waits runs on, once they are kept here (a history that went as its job began or waited), which it would wait for
+        // itself, without end: its first read did, and whatever waited for the histories that went with it (known bug 190).
+        void waitFor (const juce::File& folder)
         {
             std::vector<std::shared_ptr<BackgroundJobs>> waited;
 
@@ -627,7 +628,7 @@ namespace
                 const std::scoped_lock sl (lock);
 
                 for (const auto& each : kept)
-                    if ((folder == juce::File() || each.folder == folder) && each.jobs.get() != own)
+                    if ((folder == juce::File() || each.folder == folder) && ! each.jobs->isOnOwnThread())
                         waited.push_back (each.jobs);
             }
 
@@ -717,6 +718,8 @@ namespace
 } // namespace
 
 std::atomic<bool> VersionHistory::holdWritesForTests { false }, VersionHistory::holdReadsForTests { false };
+std::atomic<bool> VersionHistory::holdFirstReadsForTests { false };
+std::atomic<int> VersionHistory::firstReadsHeldForTests { 0 };
 std::atomic<int> VersionHistory::readsToStartForTests { -1 };
 
 int countVersionsBeingFinished()
@@ -881,11 +884,11 @@ void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJob
     // A write, which the history's thread runs even once it is handed on as the history goes (~VersionHistory()), so that its
     // callback always comes: copied, or told why not.
     run (
-        [copy = std::move (copy), state = folderCopy, weak = juce::WeakReference<VersionHistory> (this), own = thread.get()]() mutable
+        [copy = std::move (copy), state = folderCopy, weak = juce::WeakReference<VersionHistory> (this)]() mutable
         {
             // After what a history of the same folder that went before still writes into it (FinishingHistories), as open()'s
             // job reads it: those writes, queued before this copy on their own threads, are done before the folder is held.
-            FinishingHistories::get().waitFor (state->folder, own);
+            FinishingHistories::get().waitFor (state->folder);
 
             // The folder held from here, after every write given before this job (WholeFile.h: holdFolder()), until the copy is
             // over; none, if it is over before it began (the project closed, or the save was cancelled).
@@ -1001,6 +1004,17 @@ void VersionHistory::open()
         [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this),
          mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing, folderNow = folder]
         {
+            // Tests' seam: the read held here, begun, and counted while it is (holdFirstReadsForTests).
+            if (holdFirstReadsForTests.load())
+            {
+                ++firstReadsHeldForTests;
+
+                while (holdFirstReadsForTests.load())
+                    juce::Thread::sleep (1);
+
+                --firstReadsHeldForTests;
+            }
+
             // After what a history of the same folder that went before was still writing (a commit given as its project
             // closed), and what that wrote.
             FinishingHistories::get().waitFor (folderNow);

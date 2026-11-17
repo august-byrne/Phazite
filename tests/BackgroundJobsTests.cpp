@@ -22,6 +22,25 @@ void waitFor (const std::atomic<bool>& flag)
 }
 } // namespace
 
+TEST_CASE ("Background jobs say whether the calling thread is one of their own, which must not wait for them")
+{
+    BackgroundJobs jobs ("Phazite test jobs", 1, juce::Thread::Priority::normal);
+    BackgroundJobs others ("Phazite test jobs", 1, juce::Thread::Priority::normal);
+    std::atomic<bool> onOwn { false }, onOthers { true };
+
+    jobs.add (
+        [&jobs, &others, &onOwn, &onOthers] (const BackgroundJobs::ShouldStop&)
+        {
+            onOwn = jobs.isOnOwnThread();
+            onOthers = others.isOnOwnThread();
+        });
+
+    jobs.waitForAll();
+    CHECK (onOwn.load());
+    CHECK_FALSE (onOthers.load());
+    CHECK_FALSE (jobs.isOnOwnThread());
+}
+
 TEST_CASE ("Background jobs run in the order they come, one at a time on one thread")
 {
     BackgroundJobs jobs ("Phazite test jobs", 1, juce::Thread::Priority::normal);
