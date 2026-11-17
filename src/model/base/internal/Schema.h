@@ -517,9 +517,43 @@ juce::String getOrderGroup (const juce::ValueTree&);
 // what the other branch added.
 bool holdsID (const juce::ValueTree&, const juce::Identifier& property);
 
+// Where each element of a type Phazite knows goes, by its parent's type ("Child of" above), PHAZITE the song's own; and
+// whether Phazite knows a type: one it doesn't (a later build's, another tool's) is kept as it is, with everything in it
+// (model/project/internal/Project.h: makeConsistent()), and nothing reads it.
+const std::map<juce::String, juce::StringArray>& getPlaces();
+bool isKnownType (const juce::Identifier&);
+
 // What every ID of the song's is below: one at or past it (a file from others can hold any number) is none the song can
 // count on from, and is given anew as the song loads (model/project/internal/Project.h: makeConsistent()).
 inline constexpr std::uint64_t maxID = (std::uint64_t) 1 << 62;
+
+// Room to count on. A song whose largest ID (findLargestID()) or next ID reaches renumberMark, 3 * 2^60, 2^60 below
+// maxID, is given anew, once, as it loads, every ID at or past maxCountedID, 2^61, and below maxID (mustGiveIDsAnew()):
+// counted on from past every ID it holds below maxCountedID and every ID a name names below it; what named each naming
+// its new one, and a name at or past maxCountedID that names none of them left out; an alias group's notes given the same
+// new IDs in each of its clips; a track given a new ID no longer frozen; every merge waiting dropped. Any other song keeps
+// its IDs and its next ID as they are: as it loads, its next ID is below the mark (at most maxCountedID plus the IDs
+// given anew, where they were), and a session makes far fewer than the 2^60 IDs between.
+// The one way across, accepted in the known-bugs round (2026-11-16): a file whose largest ID or next ID is within one
+// session's count below the mark (another program's, or Phazite's own after a session on such a file) opens as it is,
+// what the session makes gets IDs at or past the mark, and the next opening gives every ID at or past maxCountedID anew,
+// once (tests/InconsistentProjectTests.cpp pins it). The song keeps all it holds: names follow, an alias group's clips
+// keep sharing their notes' IDs, and it holds together. What goes: a track's frozen state (freeze it again); a merge
+// waiting. Refused with its reason: Merge and Restore of the commits and Local History snapshots made after the crossing,
+// whose songs are given anew as they are read. Done wrong, not refused, against those made before the crossing (on that
+// file, before and in that session), which hold the IDs as they were: a track restored from one is the song's no
+// longer, so it comes back beside the track it was given anew as, and Restore of a track the song has takes it out as
+// one added since; a Merge whose parting is one of them matches none of the song's items and brings its tracks in again.
+// Either also takes on that commit's count of IDs, just below the mark (model/versions/ApplySong.cpp: countIDsPast()), so
+// that a later session can cross again and the opening after it gives anew again: once for each such Restore or Merge
+// (known bug 186, with what a refusal takes).
+// The first commit after lists every item given anew as changed, and the history keeps that commit's changes as such. A
+// branch switch to a commit made after the crossing gives its song new IDs as it is read, without the values of its
+// plug-ins' parameters, which the commit keeps by device ID (model/versions/SongPieces.cpp: joinSong()). No rule on the
+// IDs' values alone can close it: whatever it accepts has an edge a session can step past, and a second mark only moves
+// the edge.
+inline constexpr std::uint64_t maxCountedID = maxID / 2;
+inline constexpr std::uint64_t renumberMark = maxID - ((std::uint64_t) 1 << 60);
 bool namesID (const juce::ValueTree&, const juce::Identifier& property);
 
 // How a version's pieces split a song (model/versions/internal/SongPieces.h), which a reader needn't know: the elements its
@@ -1038,11 +1072,20 @@ namespace preset
 
 namespace phazite
 {
-// The largest ID in a part of the song that it can count on from (below schema::maxID): its items' (each kind's is named
-// "id": trackID, clipID, noteID, deviceID, chainID, sendID, modulatorID, sectionID), its channels' faders and VCAs, and its
-// alias groups (clipLink); on a note, any of those names. The one count of them: the song's (findNextID()) and the loader's
-// (makeConsistent()).
-std::uint64_t findLargestID (const juce::ValueTree&);
+// The largest ID a song counts in a part of it, below a bound (schema::maxID, or schema::maxCountedID as the song is given
+// its IDs anew): its items' (each kind's is named "id": trackID, clipID, noteID, deviceID, chainID, sendID, modulatorID,
+// sectionID), its channels' faders and VCAs, and its alias groups (clipLink), where its elements hold them
+// (schema::holdsID()). Inside an element of a type Phazite doesn't know (schema::isKnownType()), which the song keeps as
+// it is, only those below schema::maxCountedID: counted, so that no ID the song gives equals one a later Phazite would
+// find in there; but one at or past it, which the loader can't give anew, never raises the song's count nor makes it give
+// its IDs anew. The one count of them: the song's (findNextID()), the loader's (makeConsistent()), and the rule below.
+std::uint64_t findLargestID (const juce::ValueTree&, std::uint64_t below = schema::maxID);
+
+// Whether a song is given its IDs at or past schema::maxCountedID anew as it loads: the largest ID it counts
+// (findLargestID()), or its next ID, at or past schema::renumberMark. The loader (makeConsistent()) and the versions,
+// which refuse a commit whose song's IDs are given anew (model/versions/SongPieces.cpp), ask this one rule.
+bool mustGiveIDsAnew (const juce::ValueTree& song);
+bool mustGiveIDsAnew (std::uint64_t largestID, std::uint64_t nextID);
 
 // The ID a song gives next: past its count (nextID) and every ID it holds.
 std::uint64_t findNextID (const juce::ValueTree& song);

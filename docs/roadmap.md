@@ -43,7 +43,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 7 and 8. |
 | Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16, on the branch `known-bugs`, not yet pushed, so CI and Linux have not built it): every entry but three that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stages 3 to 8 otherwise not started. |
+| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16, on the branch `known-bugs`, not yet pushed, so CI and Linux have not built it): every entry but four that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stages 3 to 8 otherwise not started. |
 
 ## The plan from here
 
@@ -55,7 +55,7 @@ stage 8: from it on, a project opens in every later version.
 Built on Windows (2026-11-14): every step, S1.1 to S1.17, each in the [changelog](changelog.md), each bug with a test
 that failed before its fix, and each part's changes read by a reviewer whose findings are fixed too. What the steps
 left, and the numbered bugs of the audit and of the stages' own tests, were fixed in the round that followed
-(2026-11-15 and 16); the three entries still in [known-bugs.md](known-bugs.md) say why they stay.
+(2026-11-15 and 16); the four entries still in [known-bugs.md](known-bugs.md) say why they stay.
 
 ### Stage 2. Caught: the tests that would have found those bugs, and the docs
 

@@ -384,7 +384,9 @@ namespace
     // schema::versions::missing), which never reaches the song (ApplySong.h), is kept out of the checks meanwhile, inside an
     // element of a type they don't know, which they leave as it is, and put back in its place after.
     // Whether a song holds each item's ID once, and each clip each note's, every one of them one the checks keep (above 0,
-    // below 2^62): else they give some anew (Project.cpp: keepIDs()). What it keeps out of them aside.
+    // below 2^62), where the checks look (elements of the types Phazite knows: Schema.h, isKnownType()), and isn't one the
+    // checks give its IDs anew (Schema.h: mustGiveIDsAnew(), the loader's one rule): else they give some anew
+    // (Project.cpp: keepIDs()). What it keeps out of them aside.
     bool holdsEachIDOnce (const juce::ValueTree& song, const juce::Identifier& keptOut)
     {
         std::set<std::uint64_t> items;
@@ -399,7 +401,9 @@ namespace
         {
             for (const auto& child : element)
             {
-                if (child.hasType (keptOut))
+                // As the loader walks a song: what it keeps out, and an element of a type Phazite doesn't know, which it keeps
+                // as it is, with everything in it.
+                if (child.hasType (keptOut) || ! schema::isKnownType (child.getType()))
                     continue;
 
                 if (child.hasType (schema::CLIP))
@@ -421,7 +425,7 @@ namespace
         };
 
         visit (song);
-        return once;
+        return once && ! mustGiveIDsAnew (song);
     }
 
     void makeJoinedSongConsistent (juce::ValueTree& song, const juce::File& projectFolder, bool* idsGivenAnew)

@@ -30,6 +30,7 @@
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/AudioWork.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
@@ -45,6 +46,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationValues.h"
 #include "model/notes/NotesModel.h"
+#include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/playback/internal/SongPlayer.h"
@@ -1241,7 +1243,8 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
     // makeConsistent() goes through every element and number of a song as it opens (a project, a version's pieces joined):
     // its checks made a list of each element's properties, a set's node for each note's ID and a text for each number it
     // compared, several allocations a note (2026-11-16: a project of 40 tracks opened in 62 ms, 28 before). What is left is
-    // for each track, clip and device, which a song has far fewer of than notes.
+    // for each track, clip and device, which a song has far fewer of than notes. With what a song holds many of besides:
+    // controllers, automation points, warp markers, and aliases of clips.
     auto made = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*made, 8);
     auto notes = 0;
@@ -1252,7 +1255,27 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
 
         for (int step = 0; step < 500; ++step, ++notes)
             phazite::test::addMidiNote (*made, clip, 48 + step % 24, at (step * 0.25), lasting (0.2), 100);
+
+        for (int step = 0; step < 100; ++step)
+            phazite::addControl (*made, clip, at (step * 0.5), phazite::ControlKind::controller, 1, step);
+
+        const auto aliases = phazite::copyClips (*made, { clip }, true);
+        REQUIRE (aliases.size() == 1);
+        phazite::moveClip (*made, aliases.front(), at (128.0), track);
+
+        const phazite::ParameterRef volume { phazite::getFader (*made, track), phazite::getVolumeParameterID (*made, track) };
+
+        for (int point = 0; point < 100; ++point)
+            REQUIRE (phazite::addPoint (*made, volume, { at (point * 2.0), (point % 10) / 10.0f }) >= 0);
     }
+
+    phazite::test::TemporaryFolder temporary;
+    const auto sound = phazite::test::writeSound (temporary.folder.getChildFile ("Loop.wav"), 4.0);
+    const auto audio = phazite::test::addAudioClip (*made, tracks.front(), "Loop", sound, 300.0, 4.0);
+    REQUIRE (audio.isValid());
+
+    for (int marker = 1; marker < 20; ++marker)
+        REQUIRE (phazite::addWarpMarker (*made, audio, marker * 0.2));
 
     // As a project file holds it: every value text.
     juce::MemoryOutputStream text;
@@ -1265,8 +1288,25 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
     if (! allocations.has_value())
         return; // nothing counted on this build
 
-    INFO ("Allocations: " << *allocations << " for " << notes << " notes");
-    CHECK (*allocations * 10 < notes);
+    // Fewer than one for every ten of the elements a song holds many of: its notes, its controllers, its automation's
+    // points and its warp markers, an alias's included.
+    const std::function<int (const juce::ValueTree&)> countMany = [&countMany] (const juce::ValueTree& element)
+    {
+        auto count = 0;
+
+        for (const auto& child : element)
+            count += (child.hasType (phazite::schema::NOTE) || child.hasType (phazite::schema::CONTROL)
+                              || child.hasType (phazite::schema::POINT) || child.hasType (phazite::schema::WARP)
+                          ? 1
+                          : 0)
+                     + countMany (child);
+
+        return count;
+    };
+
+    const auto many = countMany (song.getState());
+    INFO ("Allocations: " << *allocations << " for " << many << " notes, controllers, points and warp markers (" << notes << " notes)");
+    CHECK (*allocations * 10 < many);
 
     // And Phazite's own song is left as it was written.
     juce::MemoryOutputStream after;

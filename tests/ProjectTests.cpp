@@ -930,8 +930,8 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     gone.setProperty (phazite::schema::noteVelocity, 2, nullptr);
     clipState.removeChild (gone, nullptr);
     setAllAndBack();
+    CHECK_FALSE (project->isWholeAsSaved());
     CHECK (project->hasUnsavedChanges());
-    CHECK (project->hasUnsavedChanges() == ! project->isWholeAsSaved());
 
     // The reverse: the note put back where it was, as it was, among as many notifications: nothing to save.
     REQUIRE (project->save().wasOk());
@@ -1145,6 +1145,56 @@ TEST_CASE ("A plug-in's state that Save a Copy As or an autosave stores, which t
     REQUIRE_FALSE (project->hasUnsavedChanges());
     pluginState = "C";
     REQUIRE (project->autosave().wasOk());
+    CHECK (project->hasUnsavedChanges());
+    CHECK (project->checkUnsavedChanges());
+
+    // A save whose write fails (a full disk, a file another program holds): the song holds the new state, the file not.
+    REQUIRE (project->save().wasOk());
+    REQUIRE_FALSE (project->hasUnsavedChanges());
+    pluginState = "D";
+
+    {
+        const phazite::WholeFileHook failing ([] (const juce::File&) { return false; });
+        CHECK (project->save().failed());
+    }
+
+    CHECK (project->hasUnsavedChanges());
+    CHECK (project->checkUnsavedChanges());
+
+    // A save in the background (Auto Save), a copy saved elsewhere while it writes: the background save's copy, the saved
+    // one once written, hasn't the state stored after it.
+    REQUIRE (project->save().wasOk());
+    phazite::setTrackName (song, track, "Changed again");
+    REQUIRE (project->hasUnsavedChanges());
+    juce::WaitableEvent letGo;
+    const auto file = project->getFile();
+
+    {
+        // Let go however this scope ends: a failed REQUIRE in it would leave the writer waiting, and the project for it.
+        struct LetGoAtEnd
+        {
+            juce::WaitableEvent& event;
+            ~LetGoAtEnd() { event.signal(); }
+        } const letGoAtEnd { letGo };
+
+        const phazite::WholeFileHook slow (
+            [&letGo, file] (const juce::File& written)
+            {
+                if (written == file)
+                    letGo.wait (-1);
+
+                return true;
+            });
+
+        project->saveInBackground();
+        REQUIRE (project->hasBackgroundSave());
+        pluginState = "E";
+        REQUIRE (project->saveCopyAs (temp.folder, "Copy 3", error) != juce::File());
+        letGo.signal();
+        REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }));
+    }
+
+    REQUIRE (project->finishBackgroundSave());
     CHECK (project->hasUnsavedChanges());
     CHECK (project->checkUnsavedChanges());
 }

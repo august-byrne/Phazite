@@ -20,6 +20,8 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/modulation/internal/Modulation.h"
+#include "model/notes/internal/Notes.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/DawProject.h"
@@ -213,10 +215,11 @@ TEST_CASE ("A number where no item's ID is, too large to count on from, leaves t
     CHECK (made < phazite::schema::maxID);
 }
 
-TEST_CASE ("The loader's checks alone leave the song's count of IDs past every ID it counts, a value on a note where an ID goes too")
+TEST_CASE ("The loader's checks alone leave the song's count of IDs past every ID it counts, as the song counts them")
 {
-    // The song counts "link", "fader" and "vca" on a note as IDs (Schema.h: findLargestID()), which another program's file
-    // may put there; makeConsistent() counted them otherwise, and left the count below one until its callers counted again.
+    // "link", "fader" and "vca" on a note, which another program's file may put there, hold no ID: the song counted them as
+    // IDs (Schema.h: findLargestID()) and makeConsistent() didn't, and left the count below one until its callers counted
+    // again. Now neither does.
     auto made = phazite::createSong();
     const auto track = phazite::ensureTracks (*made, 1).front();
     const auto clip = addMidiClip (*made, track, { at (0.0), at (4.0) }, "Notes");
@@ -235,7 +238,545 @@ TEST_CASE ("The loader's checks alone leave the song's count of IDs past every I
     phazite::makeConsistent (song);
     const auto counted = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
     CHECK (phazite::findNextID (song.getState()) <= counted);
-    CHECK (counted > 900000);
+    CHECK (counted < 900000);
+}
+
+TEST_CASE ("An ID too near the last a song can give opens given anew, and what is added after it is still there at the next opening")
+{
+    // A track's ID just below schema::maxID: counted on from, the song's next ID was maxID itself, so that every item made
+    // after it opened had an ID past what a song can hold, given anew at the next opening, with what named it (the send to a
+    // return, the lane and curve of a fader) left out. Now a song whose IDs reach schema::renumberMark is given every ID at
+    // or past maxCountedID anew, once, what named it (here the compressor ducking under the drums) naming the new one; any
+    // other keeps its IDs, those Phazite makes after it opened too, however its tracks and devices are ordered.
+    struct Case
+    {
+        std::uint64_t id;
+        bool givenAnew;
+    };
+
+    for (const auto [id, givenAnew] :
+         { Case { phazite::schema::maxID - 1, true }, Case { phazite::schema::renumberMark, true },
+           Case { phazite::schema::renumberMark - 1000000, false }, Case { phazite::schema::maxCountedID + 5, false },
+           Case { phazite::schema::maxCountedID - 1, false } })
+    {
+        INFO (juce::String ((juce::int64) id));
+        Edited edited;
+        auto project = edited.open (
+            [id] (juce::XmlElement& song)
+            {
+                auto* key = Edited::findTrack (song, "Drums");
+                const auto old = key->getStringAttribute ("id");
+                key->setAttribute ("id", juce::String ((juce::int64) id));
+                auto ducked = 0;
+                const std::function<void (juce::XmlElement&)> rename = [&] (juce::XmlElement& element)
+                {
+                    for (auto* child : element.getChildIterator())
+                    {
+                        if (child->getStringAttribute ("sidechain") == old)
+                        {
+                            child->setAttribute ("sidechain", juce::String ((juce::int64) id));
+                            ++ducked;
+                        }
+
+                        rename (*child);
+                    }
+                };
+
+                rename (song);
+                REQUIRE (ducked == 1);
+            });
+        REQUIRE (project != nullptr);
+        auto& song = project->getSong();
+        const auto next = (std::uint64_t) (juce::int64) song.getState()[schema::nextID];
+        CHECK (next < phazite::schema::renumberMark);
+
+        if (givenAnew)
+            CHECK (next < phazite::schema::maxCountedID); // counted on from below 2^61, the file's own IDs being small
+        else
+            CHECK (next == id + 1);
+
+        // By their names, as the IDs given anew aren't known here.
+        const auto findNamed = [] (const phazite::Song& s, const juce::String& name)
+        {
+            for (const auto each : phazite::getTrackIDs (s))
+                if (phazite::getTrackName (s, each) == name)
+                    return each;
+
+            return phazite::TrackID();
+        };
+
+        const auto findKey = [&findNamed] (const phazite::Song& s) { return findNamed (s, "Drums"); };
+
+        const auto findDucker = [] (const phazite::Song& s)
+        {
+            const auto devices = findAll (s.getState(), schema::DEVICE);
+            const auto found = std::find_if (devices.begin(), devices.end(),
+                                             [] (const juce::ValueTree& device) { return device.hasProperty (schema::deviceSidechain); });
+            return found != devices.end() ? phazite::readID ((*found)[schema::deviceSidechain]) : 0;
+        };
+
+        REQUIRE (findKey (song).isValid());
+        CHECK (findDucker (song) == findKey (song).getRaw());
+        CHECK ((findKey (song).getRaw() == id) == ! givenAnew);
+
+        // Added after it opened: a track with a send to a new return and its volume's lane and automation; then the tracks
+        // reordered and a device added to an earlier track, so that the order of the song's elements isn't the order its
+        // IDs were made in.
+        const auto track = phazite::addTrackAtEnd (song, false, nullptr);
+        phazite::setTrackName (song, track, "Added");
+        const auto returnTrack = phazite::addReturnTrack (song, "Return", nullptr);
+        REQUIRE (phazite::addSend (song, track, returnTrack, false).isValid());
+        const phazite::ParameterRef volume { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
+        phazite::showLane (song, track, volume);
+        REQUIRE (phazite::addPoint (song, volume, { at (1.0), 0.5f }) >= 0);
+        phazite::moveTracksAfter (song, { findNamed (song, "Lead") }, track);
+        REQUIRE (phazite::insertDeviceState (song, findNamed (song, "Audio"),
+                                             phazite::makeOwnDeviceState (song, phazite::devices::Compressor::typeID))
+                     .isValid());
+        REQUIRE (project->save().wasOk());
+
+        // Opened again, twice: all of it there, and each save the same as the one made before it opened.
+        const auto file = project->getFile();
+        project = nullptr;
+        auto previous = file.loadFileAsString();
+
+        for (int opening = 0; opening < 2; ++opening)
+        {
+            juce::String error;
+            const auto reopened = phazite::Project::open (file, false, error);
+            REQUIRE (reopened != nullptr);
+            auto& again = reopened->getSong();
+            checkSong (again);
+            const auto added = findNamed (again, "Added"), returned = findNamed (again, "Return");
+            REQUIRE (added.isValid());
+            REQUIRE (returned.isValid());
+            const auto sends = findAll (phazite::findTrackState (again, added), schema::SEND);
+            REQUIRE (sends.size() == 1);
+            CHECK (phazite::readID (sends.front()[schema::sendTo]) == returned.getRaw());
+            CHECK (findAll (phazite::findTrackState (again, added), schema::LANE).size() == 1);
+            const phazite::ParameterRef volumeAgain { phazite::getFader (again, added), phazite::getVolumeParameterID (again, added) };
+            CHECK (phazite::findCurveState (again, volumeAgain).getNumChildren() == 1);
+            CHECK (findDucker (again) == findKey (again).getRaw());
+            CHECK ((std::uint64_t) (juce::int64) again.getState()[schema::nextID] < phazite::schema::maxID);
+
+            REQUIRE (reopened->save().wasOk());
+            const auto text = file.loadFileAsString();
+            CHECK (text == previous);
+            previous = text;
+        }
+    }
+}
+
+namespace
+{
+// The tracks' and their clips' elements of a song, in order: a track's by its name.
+juce::ValueTree findNamedTrack (const phazite::Song& song, const juce::String& name)
+{
+    for (const auto& track : findAll (song.getState(), schema::TRACK))
+        if (track[schema::trackName].toString() == name)
+            return track;
+
+    return {};
+}
+} // namespace
+
+TEST_CASE ("Aliased clips whose notes' IDs are given anew as the song opens still follow each other")
+{
+    // The lead's clip and an alias of it, their alias group and their notes' IDs past schema::renumberMark: each note given
+    // the same new ID in both clips, as an edit of a note of one finds its twin in the other by its ID.
+    Edited edited;
+    const auto mark = (juce::int64) phazite::schema::renumberMark;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* clip = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            clip->setAttribute ("link", juce::String (mark + 50));
+
+            for (auto* note : clip->getChildWithTagNameIterator ("NOTE"))
+                note->setAttribute ("id", juce::String (mark + 7));
+
+            auto* alias = new juce::XmlElement (*clip);
+            alias->setAttribute ("id", juce::String (mark + 60));
+            alias->setAttribute ("start", "8");
+            Edited::findTrack (song, "Lead")->addChildElement (alias);
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    const auto clips = findAll (findNamedTrack (song, "Lead"), schema::CLIP);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0][schema::clipLink].toString() == clips[1][schema::clipLink].toString());
+    CHECK (phazite::readID (clips[0][schema::clipLink]) < phazite::schema::maxCountedID); // given anew, from below 2^61
+
+    const auto first = phazite::ClipID::fromRaw (phazite::readID (clips[0][schema::clipID]));
+    const auto second = phazite::ClipID::fromRaw (phazite::readID (clips[1][schema::clipID]));
+    const auto notes = phazite::getClipNotes (song, first);
+    REQUIRE (notes.size() == 1);
+    REQUIRE (phazite::getClipNotes (song, second).size() == 1);
+    CHECK (phazite::getClipNotes (song, second).front().id == notes.front().id);
+
+    // An edit of the one, the other the same.
+    phazite::moveNote (song, notes.front().getRef(), notes.front().start, 72);
+    CHECK (phazite::getClipNotes (song, second).front().pitch == 72);
+}
+
+TEST_CASE ("A track given a new ID as the song opens isn't frozen, as another track's frozen file can have its new name")
+{
+    // Frozen files are named by their tracks' IDs (model/mixer/internal/Freeze.h): a track given a new ID would play the file
+    // of the track that had that ID. Two frozen tracks with one ID, and two whose IDs reach schema::renumberMark, each with a
+    // frozen file of every ID the song would give anew.
+    for (const auto pastTheMark : { false, true })
+    {
+        INFO (juce::String (pastTheMark ? "past the mark" : "an ID twice"));
+        Edited edited;
+        const auto project = edited.open (
+            [&edited, pastTheMark] (juce::XmlElement& song)
+            {
+                auto* lead = Edited::findTrack (song, "Lead");
+                auto* drums = Edited::findTrack (song, "Drums");
+                const auto mark = (juce::int64) phazite::schema::renumberMark;
+
+                if (pastTheMark)
+                {
+                    lead->setAttribute ("id", juce::String (mark + 1));
+                    drums->setAttribute ("id", juce::String (mark + 2));
+                }
+                else
+                {
+                    drums->setAttribute ("id", lead->getStringAttribute ("id"));
+                }
+
+                lead->setAttribute ("frozen", "1");
+                drums->setAttribute ("frozen", "1");
+
+                // The files: of the IDs the song holds, and of every one it could give anew.
+                const auto cache = phazite::Project::getCacheFolder (edited.file);
+                REQUIRE (cache.createDirectory());
+
+                for (juce::int64 id = 1; id < 500; ++id)
+                    REQUIRE (cache.getChildFile ("Frozen " + juce::String (id) + ".wav").replaceWithText ("RIFF"));
+            });
+        REQUIRE (project != nullptr);
+        auto& song = project->getSong();
+        const auto lead = findNamedTrack (song, "Lead"), drums = findNamedTrack (song, "Drums");
+
+        if (pastTheMark)
+        {
+            CHECK_FALSE ((bool) lead[schema::trackFrozen]);
+            CHECK_FALSE ((bool) drums[schema::trackFrozen]);
+        }
+        else
+        {
+            CHECK ((bool) lead[schema::trackFrozen]); // the first keeps its ID, and its file
+            CHECK_FALSE ((bool) drums[schema::trackFrozen]);
+        }
+    }
+}
+
+TEST_CASE ("A name of no item, past the IDs a song counts on from, is left out as the song's IDs are given anew")
+{
+    // The compressor's sidechain names 2^61, which no item holds, in a song given its IDs anew from just below 2^61: the
+    // drums, past 2^61, get 2^61 itself, and the sidechain mustn't follow them there.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            const auto counted = (juce::int64) phazite::schema::maxCountedID;
+            auto* drums = Edited::findTrack (song, "Drums");
+            const auto old = drums->getStringAttribute ("id");
+            Edited::findTrack (song, "Lead")->setAttribute ("id", juce::String (counted - 1));
+            drums->setAttribute ("id", juce::String (counted + 3));
+            Edited::findTrack (song, "Audio")->setAttribute ("id", juce::String ((juce::int64) phazite::schema::renumberMark));
+            song.setAttribute ("nextID", "1");
+            auto renamed = 0;
+            const std::function<void (juce::XmlElement&)> rename = [&] (juce::XmlElement& element)
+            {
+                for (auto* child : element.getChildIterator())
+                {
+                    if (child->getStringAttribute ("sidechain") == old)
+                    {
+                        child->setAttribute ("sidechain", juce::String (counted));
+                        ++renamed;
+                    }
+
+                    rename (*child);
+                }
+            };
+
+            rename (song);
+            REQUIRE (renamed == 1);
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    CHECK (phazite::readID (findNamedTrack (song, "Drums")[schema::trackID]) == phazite::schema::maxCountedID);
+
+    for (const auto& device : findAll (song.getState(), schema::DEVICE))
+        CHECK_FALSE (device.hasProperty (schema::deviceSidechain));
+}
+
+TEST_CASE ("A file with an ID just below the mark opens as it is, and what its session made is given anew once, at the next opening")
+{
+    // The one way across the mark, accepted (Schema.h: renumberMark): the drums' ID just below it, so that the song's next
+    // ID is the mark itself and all the session makes is past it. The next opening gives it anew, once; the song keeps it all.
+    Edited edited;
+    const auto mark = (juce::int64) phazite::schema::renumberMark;
+    auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* drums = Edited::findTrack (song, "Drums");
+            const auto old = drums->getStringAttribute ("id");
+            drums->setAttribute ("id", juce::String (mark - 1));
+            auto renamed = 0;
+            const std::function<void (juce::XmlElement&)> rename = [&] (juce::XmlElement& element)
+            {
+                for (auto* child : element.getChildIterator())
+                {
+                    if (child->getStringAttribute ("sidechain") == old)
+                    {
+                        child->setAttribute ("sidechain", juce::String (mark - 1));
+                        ++renamed;
+                    }
+
+                    rename (*child);
+                }
+            };
+
+            rename (song);
+            REQUIRE (renamed == 1);
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    CHECK (phazite::readID (findNamedTrack (song, "Drums")[schema::trackID]) == (std::uint64_t) (mark - 1)); // as it is
+    CHECK (phazite::readID (song.getState()[schema::nextID]) == phazite::schema::renumberMark);
+
+    // Made in the session, past the mark: a track with a send to a new return, and its volume's lane and automation.
+    const auto track = phazite::addTrackAtEnd (song, false, nullptr);
+    phazite::setTrackName (song, track, "Added");
+    const auto returnTrack = phazite::addReturnTrack (song, "Return", nullptr);
+    REQUIRE (phazite::addSend (song, track, returnTrack, false).isValid());
+    const phazite::ParameterRef volume { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
+    phazite::showLane (song, track, volume);
+    REQUIRE (phazite::addPoint (song, volume, { at (1.0), 0.5f }) >= 0);
+    CHECK (track.getRaw() >= phazite::schema::renumberMark);
+    REQUIRE (project->save().wasOk());
+    const auto file = project->getFile();
+    project = nullptr;
+
+    juce::String afterFirst;
+
+    for (int opening = 0; opening < 2; ++opening)
+    {
+        juce::String error;
+        const auto reopened = phazite::Project::open (file, false, error);
+        REQUIRE (reopened != nullptr);
+        auto& again = reopened->getSong();
+        checkSong (again);
+
+        // Given anew, once: every ID at or past 2^61, the drums' and the session's, from below 2^61.
+        const auto drums = findNamedTrack (again, "Drums"), added = findNamedTrack (again, "Added"),
+                   returned = findNamedTrack (again, "Return");
+        REQUIRE (drums.isValid());
+        REQUIRE (added.isValid());
+        REQUIRE (returned.isValid());
+        CHECK (phazite::readID (drums[schema::trackID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::readID (added[schema::trackID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::readID (again.getState()[schema::nextID]) < phazite::schema::maxCountedID);
+
+        // All of it there, what named each naming it.
+        const auto sends = findAll (added, schema::SEND);
+        REQUIRE (sends.size() == 1);
+        CHECK (phazite::readID (sends.front()[schema::sendTo]) == phazite::readID (returned[schema::trackID]));
+        CHECK (findAll (added, schema::LANE).size() == 1);
+        const auto addedID = phazite::TrackID::fromRaw (phazite::readID (added[schema::trackID]));
+        const phazite::ParameterRef volumeAgain { phazite::getFader (again, addedID), phazite::getVolumeParameterID (again, addedID) };
+        CHECK (phazite::findCurveState (again, volumeAgain).getNumChildren() == 1);
+        const auto devices = findAll (again.getState(), schema::DEVICE);
+        CHECK (std::any_of (devices.begin(), devices.end(), [&drums] (const juce::ValueTree& device)
+                            { return phazite::readID (device[schema::deviceSidechain]) == phazite::readID (drums[schema::trackID]); }));
+
+        // And the same at every opening after the first.
+        REQUIRE (reopened->save().wasOk());
+        const auto text = file.loadFileAsString();
+
+        if (opening == 0)
+            afterFirst = text;
+        else
+            CHECK (text == afterFirst);
+    }
+}
+
+namespace
+{
+// Every attribute that holds or names an ID, of an element and those in it, whose value is one text, set to another.
+int renameValues (juce::XmlElement& element, const juce::String from,
+                  const juce::String& to) // from by value: it may be one of the attributes renamed
+{
+    static const juce::StringArray naming { "id", "fader", "vca", "link", "device", "sidechain", "to" };
+    auto renamed = 0;
+
+    for (int i = 0; i < element.getNumAttributes(); ++i)
+        if (naming.contains (element.getAttributeName (i)) && element.getAttributeValue (i) == from)
+        {
+            element.setAttribute (element.getAttributeName (i), to);
+            ++renamed;
+        }
+
+    for (auto* child : element.getChildIterator())
+        renamed += renameValues (*child, from, to);
+
+    return renamed;
+}
+} // namespace
+
+TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raises the song's count nor gives its IDs anew")
+{
+    // The loader keeps such an element as it is and gives nothing in it anew, so the song mustn't count it either: counted,
+    // it made the song give its IDs anew at every opening, or put its next ID at maxID, and every commit of it refused.
+    for (const auto id : { phazite::schema::maxID - 1, phazite::schema::renumberMark, phazite::schema::maxCountedID + 5 })
+    {
+        INFO (juce::String ((juce::int64) id));
+        Edited edited;
+        auto project = edited.open (
+            [id] (juce::XmlElement& song)
+            {
+                auto* future = song.createNewChildElement ("FUTURE");
+                future->createNewChildElement ("TRACK")->setAttribute ("id", juce::String ((juce::int64) id));
+            });
+        REQUIRE (project != nullptr);
+        auto& song = project->getSong();
+        CHECK (phazite::readID (song.getState()[schema::nextID]) < phazite::schema::maxCountedID);
+        CHECK (phazite::readID (findNamedTrack (song, "Lead")[schema::trackID]) == edited.lead.getRaw()); // nothing given anew
+
+        const auto track = phazite::addTrackAtEnd (song, false, nullptr);
+        phazite::setTrackName (song, track, "Added");
+        REQUIRE (project->save().wasOk());
+        const auto file = project->getFile();
+        project = nullptr;
+        auto previous = file.loadFileAsString();
+
+        for (int opening = 0; opening < 2; ++opening)
+        {
+            juce::String error;
+            const auto reopened = phazite::Project::open (file, false, error);
+            REQUIRE (reopened != nullptr);
+            checkSong (reopened->getSong());
+            CHECK (findNamedTrack (reopened->getSong(), "Added").isValid());
+            const auto future = reopened->getSong().getState().getChildWithName ("FUTURE");
+            CHECK (phazite::readID (future.getChild (0)[schema::trackID]) == id); // kept as it is
+            REQUIRE (reopened->save().wasOk());
+            const auto text = file.loadFileAsString();
+            CHECK (text == previous);
+            previous = text;
+        }
+    }
+}
+
+TEST_CASE ("IDs given anew as the song opens are counted on from past what a name of a deleted device still names")
+{
+    // A curve of a device deleted stays in the file and goes as the song opens. A song given its IDs anew, its saved count
+    // past 2^61 left out, counted on from the largest ID it holds below 2^61: the synth, past the mark, got the ID the
+    // curve names, and the deleted device's automation played on the synth.
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            const auto mark = (juce::int64) phazite::schema::renumberMark;
+            auto* synth = Edited::findTrack (song, "Lead")->getChildByName ("DEVICE");
+            REQUIRE (synth != nullptr);
+            REQUIRE (renameValues (song, synth->getStringAttribute ("id"), juce::String (mark)) >= 1);
+            song.setAttribute ("nextID", juce::String (mark));
+
+            // The largest ID it holds now below 2^61, and a curve of the deleted device that had the next one.
+            juce::int64 largest = 0;
+            const std::function<void (const juce::XmlElement&)> find = [&] (const juce::XmlElement& element)
+            {
+                for (const auto* name : { "id", "fader", "vca", "link" })
+                    if (const auto value = element.getStringAttribute (name).getLargeIntValue();
+                        value < (juce::int64) phazite::schema::maxCountedID)
+                        largest = std::max (largest, value);
+
+                for (const auto* child : element.getChildIterator())
+                    find (*child);
+            };
+
+            find (song);
+            auto* curve = song.getChildByName ("AUTOMATION")->createNewChildElement ("CURVE");
+            curve->setAttribute ("device", juce::String (largest + 1));
+            curve->setAttribute ("parameter", "cutoff");
+            auto* point = curve->createNewChildElement ("POINT");
+            point->setAttribute ("beat", "0");
+            point->setAttribute ("value", "1000");
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    const auto synth = findNamedTrack (song, "Lead").getChildWithName (schema::DEVICE);
+    REQUIRE (synth.isValid());
+
+    for (const auto& curve : findAll (song.getState(), schema::CURVE))
+        CHECK (phazite::readID (curve[schema::curveDevice]) != phazite::readID (synth[schema::deviceID]));
+}
+
+TEST_CASE ("Every merge waiting goes from a song given its IDs anew as it opens")
+{
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            Edited::findTrack (song, "Audio")->setAttribute ("id", juce::String ((juce::int64) phazite::schema::renumberMark));
+
+            for (int i = 0; i < 2; ++i)
+                song.createNewChildElement ("MERGING")->setAttribute ("lines", "song");
+        });
+    REQUIRE (project != nullptr);
+    CHECK_FALSE (project->getSong().getState().getChildWithName (schema::MERGING).isValid());
+}
+
+TEST_CASE ("A macro, and the master's fader and VCA, past the mark, are given anew, the master volume's curve following")
+{
+    // The master holds its fader's and its VCA's IDs as a track does; and a macro is an item. (A curve of a macro's parameter,
+    // which no Phazite makes, goes as every song opens: Automation.h, forgetCurvesOfGoneDevices().)
+    Edited edited;
+    auto& made = *phazite::findSong (edited.s.context);
+    const auto macro = phazite::addMacro (made, phazite::findTrackState (made, edited.lead), "Macro");
+    REQUIRE (macro.isValid());
+    const auto master = phazite::getMasterID (made);
+    REQUIRE (
+        phazite::addPoint (made, { phazite::getFader (made, master), phazite::getVolumeParameterID (made, master) }, { at (1.0), 0.5f })
+        >= 0);
+    REQUIRE (edited.s.getProject().save().wasOk());
+
+    const auto project = edited.open (
+        [macro] (juce::XmlElement& song)
+        {
+            const auto markHere = (juce::int64) phazite::schema::renumberMark;
+            const auto macroID = juce::String ((juce::int64) macro.getRaw());
+            REQUIRE (renameValues (song, macroID, juce::String (markHere + 3)) == 1);
+
+            auto* masterElement = song.getChildByName ("TRACKS")->getChildByName ("MASTER");
+
+            if (masterElement == nullptr)
+                masterElement = song.getChildByName ("MASTER");
+
+            REQUIRE (masterElement != nullptr);
+            REQUIRE (renameValues (song, masterElement->getStringAttribute ("fader"), juce::String (markHere + 10)) >= 2);
+            masterElement->setAttribute ("vca", juce::String (markHere + 11));
+        });
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+
+    // The macro, given anew.
+    const auto macros = findAll (findNamedTrack (song, "Lead"), schema::MACRO);
+    REQUIRE (macros.size() == 1);
+    const auto newMacro = phazite::readID (macros.front()[schema::modulatorID]);
+    CHECK (newMacro < phazite::schema::maxCountedID);
+
+    // The master's fader and VCA, given anew, its volume's curve following.
+    const auto masterID = phazite::getMasterID (song);
+    const auto masterState = phazite::findTrackState (song, masterID);
+    const auto fader = phazite::DeviceID::fromRaw (phazite::readID (masterState[schema::channelFader])); // not its VCA
+    CHECK (fader.getRaw() < phazite::schema::maxCountedID);
+    CHECK (phazite::readID (masterState[schema::channelVCA]) < phazite::schema::maxCountedID);
+    CHECK (phazite::findCurveState (song, { fader, phazite::schema::masterVolume }).getNumChildren() == 1);
 }
 
 TEST_CASE ("A device of a type Phazite hasn't is left out, with what names it")

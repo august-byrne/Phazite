@@ -146,9 +146,18 @@ TEST_CASE ("Fuzz: project files open as a song that holds together, or not at al
     REQUIRE (folder.createDirectory());
     const auto file = folder.getChildFile ("Fuzzed.phazite");
     const auto golden = getGoldenFolder();
+    // And the empty project with its track's ID just below the largest an ID can be (what only another program writes).
+    auto nearTheLast = juce::parseXML (golden.getChildFile ("projects/empty.xml"));
+    REQUIRE (nearTheLast != nullptr);
+    auto* track = nearTheLast->getChildByName ("TRACKS")->getChildByName ("TRACK");
+    REQUIRE (track != nullptr);
+    track->setAttribute ("id", juce::String ((juce::int64) (phazite::schema::maxID - 1)));
+    const auto nearTheLastText = nearTheLast->toString();
+
     const std::vector seeds { readBytes (golden.getChildFile ("projects/representative.xml")),
                               readBytes (golden.getChildFile ("projects/empty.xml")),
-                              readBytes (golden.getChildFile ("commands/script.xml")) };
+                              readBytes (golden.getChildFile ("commands/script.xml")),
+                              juce::MemoryBlock (nearTheLastText.toRawUTF8(), nearTheLastText.getNumBytesAsUTF8()) };
 
     fuzz::run ("project files", seeds, fuzz::Shape::xml, 300, [&] (const juce::MemoryBlock& input) { return openProject (file, input); });
 }

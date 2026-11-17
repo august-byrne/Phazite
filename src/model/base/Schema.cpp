@@ -3,25 +3,47 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
+#include <unordered_set>
 
 namespace phazite
 {
-std::uint64_t findLargestID (const juce::ValueTree& tree)
+namespace
 {
-    std::uint64_t largest = 0;
+    std::uint64_t findLargestIn (const juce::ValueTree& tree, std::uint64_t below, bool inUnknown)
+    {
+        std::uint64_t largest = 0;
 
-    // Where the element holds one, and one the song can count on from: a file from others may have "id" on an element
-    // that holds none, with any number in it.
-    for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink })
-        if (const auto* value = tree.getPropertyPointer (*property);
-            value != nullptr && (schema::holdsID (tree, *property) || tree.hasType (schema::NOTE)))
-            if (const auto id = (std::uint64_t) (juce::int64) *value; id < schema::maxID)
-                largest = std::max (largest, id);
+        // Where the element holds one (a note's own ID too: a note is an item), and one the song can count on from: a file
+        // from others may have "id" on an element that holds none, or "link" on a note, with any number in it. Inside an
+        // element of a type Phazite doesn't know, only below maxCountedID: the loader gives nothing in there anew.
+        const auto bound = inUnknown ? std::min (below, schema::maxCountedID) : below;
 
-    for (const auto& child : tree)
-        largest = std::max (largest, findLargestID (child));
+        for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA, &schema::clipLink })
+            if (const auto* value = tree.getPropertyPointer (*property); value != nullptr && schema::holdsID (tree, *property))
+                if (const auto id = (std::uint64_t) (juce::int64) *value; id < bound)
+                    largest = std::max (largest, id);
 
-    return largest;
+        for (const auto& child : tree)
+            largest = std::max (largest, findLargestIn (child, below, inUnknown || ! schema::isKnownType (child.getType())));
+
+        return largest;
+    }
+} // namespace
+
+std::uint64_t findLargestID (const juce::ValueTree& tree, std::uint64_t below)
+{
+    return findLargestIn (tree, below, ! schema::isKnownType (tree.getType()));
+}
+
+bool mustGiveIDsAnew (std::uint64_t largestID, std::uint64_t nextID)
+{
+    return largestID >= schema::renumberMark || nextID >= schema::renumberMark;
+}
+
+bool mustGiveIDsAnew (const juce::ValueTree& song)
+{
+    return mustGiveIDsAnew (findLargestID (song), readID (song[schema::nextID]));
 }
 
 namespace
@@ -38,6 +60,7 @@ std::uint64_t Song::makeID()
 {
     // From 1: no item's ID is 0.
     const auto id = std::max ((std::uint64_t) 1, readNextID (state));
+    jassert (id < schema::maxID); // a loaded song counts from at most schema::maxCountedID, 2^61 below it
     state.setProperty (schema::nextID, (juce::int64) (id + 1), nullptr);
     return id;
 }
@@ -302,6 +325,51 @@ namespace schema
             return rows;
         }
     } // namespace
+
+    const std::map<juce::String, juce::StringArray>& getPlaces()
+    {
+        static const std::map<juce::String, juce::StringArray> places {
+            { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE", "MERGING" } },
+            { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
+            { "TRACKS", { "TRACK" } },
+            { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
+            { "MASTER", { "LANES", "DEVICE", "CONTAINER", "MODULATOR" } },
+            { "LANES", { "LANE" } },
+            { "DEVICE", { "VALUES", "SOUNDS", "VALUE" } },
+            { "CONTAINER", { "CHAIN", "MACRO" } },
+            { "CHAIN", { "DEVICE" } },
+            { "MODULATOR", { "MODULATES", "VALUES" } },
+            { "MACRO", { "MODULATES" } },
+            { "AUTOMATION", { "CURVE" } },
+            { "CURVE", { "POINT" } },
+            { "SECTIONS", { "SECTION" } },
+            { "CHORDLANE", { "CHORD", "CHORDKEY" } },
+            { "CLIP", { "NOTE", "CONTROL", "WARP" } },
+        };
+        return places;
+    }
+
+    bool isKnownType (const juce::Identifier& type)
+    {
+        // By the type name's pooled text (juce::Identifier keeps one of each), without looking a text up: the loader asks
+        // this of every element of a song.
+        static const auto known = []
+        {
+            std::unordered_set<const void*> types { PHAZITE.getCharPointer().getAddress() };
+
+            for (const auto& [parent, children] : getPlaces())
+            {
+                types.insert (juce::Identifier (parent).getCharPointer().getAddress());
+
+                for (const auto& child : children)
+                    types.insert (juce::Identifier (child).getCharPointer().getAddress());
+            }
+
+            return types;
+        }();
+
+        return known.count (type.getCharPointer().getAddress()) > 0;
+    }
 
     bool isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
     {

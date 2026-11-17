@@ -788,6 +788,61 @@ TEST_CASE ("A song read from the versions' pieces holds together as a project fi
     juce::ignoreUnused (drums);
 }
 
+TEST_CASE ("A commit whose song holds an ID past 2^61 inside an element Phazite doesn't know is restored, nothing given anew")
+{
+    // The loader gives nothing in such an element anew, nor counts what is in it past 2^61 (Schema.h: findLargestID()); the
+    // versions judge the commit the same way, so it is no song given its IDs anew.
+    TestSong s;
+    s.addTrack ("Bass");
+    keepVersion (s.context, "Mine");
+
+    auto future = phazite::findSong (s.context)->getState().createCopy();
+    juce::ValueTree element ("FUTURE");
+    element.appendChild (
+        juce::ValueTree (phazite::schema::TRACK, { { phazite::schema::trackID, (juce::int64) (phazite::schema::maxID - 1) } }), nullptr);
+
+    // And one in there with the ID a track of the song holds: no ID held twice, as nothing in there is the song's.
+    const auto own = phazite::getTrackElements (future);
+    REQUIRE_FALSE (own.empty());
+    element.appendChild (juce::ValueTree (phazite::schema::TRACK, { { phazite::schema::trackID, own.back()[phazite::schema::trackID] } }),
+                         nullptr);
+    future.appendChild (element, nullptr);
+    const auto theirs = writeOthersCommit (s, future, "elsewhere");
+
+    REQUIRE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, theirs); }));
+    CHECK (phazite::getReadingProblem (s.context).isEmpty());
+    checkSong (*phazite::findSong (s.context));
+}
+
+TEST_CASE (
+    "A commit whose song's IDs are given anew as it is read, past the mark, is refused for Restore and Merge as one with an ID twice")
+{
+    // The loader gives a song whose IDs reach schema::renumberMark its IDs past 2^61 anew (Schema.h: mustGiveIDsAnew()),
+    // each reading on its own: what it holds can't be told from what the song has, as with an ID held twice.
+    TestSong s;
+    s.addTrack ("Bass");
+    keepVersion (s.context, "Mine");
+
+    auto hostile = phazite::findSong (s.context)->getState().createCopy();
+    auto tracks = phazite::getTrackElements (hostile);
+    REQUIRE_FALSE (tracks.empty());
+    tracks.back().setProperty (phazite::schema::trackID, (juce::int64) phazite::schema::renumberMark, nullptr);
+    const auto theirs = writeOthersCommit (s, hostile, "elsewhere");
+
+    SUBCASE ("Restored")
+    {
+        CHECK_FALSE (finished (s.context, [&] { return phazite::bringBackVersion (s.context, theirs); }));
+        CHECK (phazite::getReadingProblem (s.context).contains ("too large to count on from"));
+    }
+
+    SUBCASE ("Merged")
+    {
+        CHECK_FALSE (finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
+        CHECK (phazite::getReadingProblem (s.context).contains ("too large to count on from"));
+        CHECK_FALSE (phazite::isMerging (s.context));
+    }
+}
+
 TEST_CASE ("The loader's checks change nothing in a song Phazite wrote, read back from its pieces")
 {
     // A commit read back is what was committed, so that the changes and the badge see none after a checkout: the

@@ -348,6 +348,16 @@ too. A line names the bug's number in that list.
 - Each icon is parsed from its SVG once and copied for every button that shows it.
 - The playlist-and-mouse benchmark reports the window's own paint apart from the image read back from the graphics
   card, which the mouse never changed.
+- A Save whose write fails compares the plug-ins' states it stored, as Save a Copy As and an autosave do: with a
+  plug-in that changed its state without saying so, a later edit undone said "saved" and closing lost the state.
+- A file from another program with an ID just below 2^62 left no IDs to count on from, and each opening dropped the
+  sends, lanes and modulations of what was made since. A song whose IDs reach 3 * 2^60 now gets new IDs once, from
+  2^61 up, names following; every other song keeps its IDs as they are. A track given a new ID as its song loads is
+  no longer frozen, as its frozen file is found by its ID. The versions refuse a commit such a song is in for Merge
+  and Restore. An ID past 2^61 inside an element Phazite doesn't know, which stays as it is, counts nowhere. One edge
+  is accepted and written at `renumberMark` (`Schema.h`): a file with an ID within a session's count below the mark
+  is given anew at its next opening, with what that session made; what the versions do wrong after it is entered as
+  known bug 186.
 
 ## Stage 2, the last step: the first push (2026-11-15)
 

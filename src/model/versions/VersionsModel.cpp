@@ -155,8 +155,8 @@ namespace
     // beside the song's own, unseen (as a merge refuses such a commit).
     juce::String idsTwiceRefusal()
     {
-        return "Nothing was restored: that commit holds an ID twice, which no Phazite writes (another tool wrote it), so what it "
-               "holds can't be told from what the song has.";
+        return "Nothing was restored: that commit holds an ID twice, or IDs too large to count on from, which no Phazite writes "
+               "(another tool wrote it), so what it holds can't be told from what the song has.";
     }
 
     // Restore from This Commit, once the commit's song is read.
@@ -1518,8 +1518,9 @@ namespace
 
             if (worked->idsGivenAnew)
                 return VersionHistory::Taken::refused ("Nothing was merged: " + name
-                                                       + " or the commit both lines have holds an ID twice, which no Phazite writes "
-                                                         "(another tool wrote it), so what the two lines share can't be told apart.");
+                                                       + " or the commit both lines have holds an ID twice, or IDs too large to count "
+                                                         "on from, which no Phazite writes (another tool wrote it), so what the two "
+                                                         "lines share can't be told apart.");
 
             if (last == nullptr || last->id != start.head || version == nullptr || history->getMerging().has_value()
                 || history->preview.has_value())

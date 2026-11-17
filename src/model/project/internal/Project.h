@@ -45,7 +45,8 @@ inline constexpr double maxSongBeats = 1.0e6;
 // it doesn't know left as it is, with everything in it, to be written back (docs/project-format.md); a device or modulator
 // of a type Phazite has; every number Schema.h gives a range brought within it (a channel's volume, a tempo, a note's
 // pitch, places in beats up to a million), and every parameter's value set by hand and automation point within its
-// parameter's range; every item's ID its own and below 2^62; a lane, a curve or a modulation of something the song hasn't
+// parameter's range; every item's ID its own and below 2^62, and in a song whose IDs reach 3 * 2^60, every one at 2^61 or
+// past it given anew, what named it following (Schema.h: renumberMark); a lane, a curve or a modulation of something the song hasn't
 // left out, as a sidechain or a pad's sampler that isn't there, and a sidechain the model would refuse, a device hearing
 // its own track's sound round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()); no two elements of a parent with one key (Schema.h:
 // getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder
@@ -315,14 +316,15 @@ private:
     // An element noted here and then taken out of the song stays alive with what it holds until the next comparison (the
     // song's undo history keeps it anyway, for an undo to put back), and is no longer compared: where it was taken from
     // notified, and is compared whole. Bounded: at most mostToCompare notes, and past them only what is still in the song,
-    // each track or song's element once.
+    // each track or song's element once (dropping those taken out is for memory only: they compare as the same).
     std::vector<ToCompare> toCompare;
     bool comparingWhole = false; // past mostToCompare: each one's track, or the song's element, whole
     void clearToCompare();
 
     // What a store of the plug-ins' states wrote into the song without notifying (storeForSaving() while isWriting) where
-    // the project file doesn't get it (Save a Copy As, an autosave): the tracks and the master compared whole at the next
-    // check, as a plug-in may have changed its state without saying so.
+    // the project file doesn't get it (Save a Copy As, an autosave, a save whose write fails): the tracks and the master
+    // compared whole at the next check, as a plug-in may have changed its state without saying so. Kept while the project
+    // has unsaved changes, for a save in the background that may yet make an older copy the saved one.
     void compareStoredStates();
     bool isAsSaved (const ToCompare&) const;
     juce::ValueTree findSavedCopy (const juce::ValueTree& element) const;

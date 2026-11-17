@@ -490,8 +490,16 @@ std::vector<std::string> findSongProblems (const Song& song)
     for (const auto& problem : findIDProblems (state))
         checker.problems.push_back (problem);
 
-    if (findNextID (state) > (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0))
+    const auto next = (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0);
+
+    if (findNextID (state) > next)
         checker.problems.push_back ("id: the song's next ID is one it holds already");
+
+    // Room to count on (Schema.h: renumberMark): a song's next ID below the mark is kept as it loads, and one that reaches
+    // it, or an ID that does, makes the loader count on from below schema::maxCountedID; so a song's next ID is at most the
+    // mark once it has loaded, 2^60 below schema::maxID.
+    if (next > schema::renumberMark)
+        checker.problems.push_back ("id: the song's next ID leaves no room before the largest an ID can be");
 
     checker.checkItemIDs (state);
     checker.checkKeys (state);

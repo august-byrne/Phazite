@@ -132,9 +132,17 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
 - **Switches:** a switch written another way than Phazite writes it ("true", "false", "yes") is written as Phazite
   writes it, as it plays: "1", or "0" or none where Phazite leaves one that is off out; so that the versions, which
   compare text, see no change where there is none.
-- **IDs:** an item without an ID, or with one another item holds, gets a new one; IDs stay below 2^62, and `nextID`
-  is set past every ID the song holds. An ID written another way ("12.0", "012") is written as its whole number, as it
-  is read (one that reads as no ID, such as "+12", which reads as 0, gets a new one, and what names it is dropped).
+- **IDs:** an item without an ID, or with one another item holds, gets a new one (a track that does is no longer frozen,
+  as its frozen file is found by its ID); IDs stay below 2^62, and `nextID` is set past every ID the song holds (an ID
+  past 2^61 inside an element Phazite doesn't know, which stays as it is, isn't counted). A song whose IDs or `nextID`
+  reach 3 * 2^60 gets, once, a new ID for every one at 2^61 or past it (an item's, a fader's, a VCA's, an alias group's,
+  a note's, the same in each clip of its alias group), counted on from past every ID it holds or names below 2^61, and
+  what named each names its new one (a name of none of them goes); a merge waiting in it goes. Any other file's IDs and
+  `nextID` stay as they are, so a song can never run out of IDs. A file with IDs just below 3 * 2^60 (another program's,
+  or Phazite's after a session on one) opens as it is, and what that session made gets its new IDs at the next opening,
+  once (`renumberMark` in `src/model/base/internal/Schema.h` says what that costs, and known bug 186 what the versions
+  do wrong after it). An ID written another way ("12.0", "012") is written as its whole number, as it is read (one that
+  reads as no ID, such as "+12", which reads as 0, gets a new one, and what names it is dropped).
 - **References:** a lane, a curve or a modulation of a device the song hasn't, and a send to a return it hasn't, is left
   out, and a sidechain or a pad's
   track that names a device the song hasn't is cleared, and so is a sidechain the model would refuse: a device that

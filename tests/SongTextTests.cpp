@@ -210,17 +210,26 @@ TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite
     // Texts of every form: whole numbers of any size and sign, decimals with and without leading and trailing zeros, numbers
     // below 0.001 and past 10^15, floats' and doubles' own texts, and junk.
     juce::Random random (20261117);
-    auto taken = 0;
+    auto taken = 0, takenDecimals = 0;
 
     const auto make = [&random]() -> juce::String
     {
-        switch (random.nextInt (6))
+        switch (random.nextInt (7))
         {
+            case 6:
+            {
+                // A decimal as Phazite writes many: up to six digits, the point anywhere in or before them.
+                const auto digits = juce::String (1 + random.nextInt (999999));
+                const auto point = random.nextInt (digits.length());
+                const auto text = point == 0 ? "0." + juce::String::repeatedString ("0", random.nextInt (3)) + digits
+                                             : digits.substring (0, point) + "." + digits.substring (point);
+                return random.nextBool() ? "-" + text : text;
+            }
             case 0:
                 return juce::String (random.nextInt64() >> random.nextInt (64));
             case 1:
             {
-                auto text = juce::String (std::abs (random.nextInt64() % 10000000000LL));
+                auto text = juce::String (std::abs (random.nextInt64() % (juce::int64) std::pow (10.0, 1 + random.nextInt (9))));
                 const auto point = random.nextInt (text.length() + 3);
                 text = juce::String::repeatedString ("0", random.nextInt (3)) + text
                        + juce::String::repeatedString ("0", random.nextInt (3) == 0 ? 1 : 0);
@@ -248,13 +257,18 @@ TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite
     for (int i = 0; i < 200000; ++i)
     {
         const auto text = make();
-        taken += isNumberWrittenAsPhazite (text) ? 1 : 0;
+        const auto isTaken = isNumberWrittenAsPhazite (text);
+        taken += isTaken ? 1 : 0;
+        takenDecimals += isTaken && text.containsChar ('.') ? 1 : 0;
 
         if (! holds (text))
             FAIL_CHECK ("taken, but Phazite writes it otherwise: \"" << text << "\"");
     }
 
-    CHECK (taken > 20000);
+    // Both kinds taken many times, so that each rule is tried: the whole numbers', and the decimals'.
+    INFO ("taken: " << taken << ", of which decimals " << takenDecimals);
+    CHECK (taken - takenDecimals > 20000);
+    CHECK (takenDecimals > 10000);
 }
 
 TEST_CASE ("Bytes are written in standard base 64, and text that isn't base 64 reads as nothing")

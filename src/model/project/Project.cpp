@@ -500,51 +500,14 @@ namespace
     // again, on their own). A song Phazite saved itself is consistent already, and none of this changes it.
     namespace consistent
     {
-        // Where each element goes, by its parent's type (Schema.h: "Child of").
-        const std::map<juce::String, juce::StringArray>& getPlaces()
-        {
-            static const std::map<juce::String, juce::StringArray> places {
-                { "PHAZITE", { "LASTKEY", "TEMPOMAP", "PIANOROLL", "TRACKS", "MASTER", "AUTOMATION", "SECTIONS", "CHORDLANE", "MERGING" } },
-                { "TEMPOMAP", { "TEMPO", "TIMESIGNATURE" } },
-                { "TRACKS", { "TRACK" } },
-                { "TRACK", { "TRACK", "LANES", "DEVICE", "CONTAINER", "SEND", "MODULATOR", "MACRO", "CLIP" } },
-                { "MASTER", { "LANES", "DEVICE", "CONTAINER", "MODULATOR" } },
-                { "LANES", { "LANE" } },
-                { "DEVICE", { "VALUES", "SOUNDS", "VALUE" } },
-                { "CONTAINER", { "CHAIN", "MACRO" } },
-                { "CHAIN", { "DEVICE" } },
-                { "MODULATOR", { "MODULATES", "VALUES" } },
-                { "MACRO", { "MODULATES" } },
-                { "AUTOMATION", { "CURVE" } },
-                { "CURVE", { "POINT" } },
-                { "SECTIONS", { "SECTION" } },
-                { "CHORDLANE", { "CHORD", "CHORDKEY" } },
-                { "CLIP", { "NOTE", "CONTROL", "WARP" } },
-            };
-            return places;
-        }
+        using schema::getPlaces;
 
-        // Whether Phazite knows an element's type. One it doesn't (a later build's, another tool's) stays where it is, as it is, with
-        // everything in it, and is written back (docs/project-format.md): nothing reads it. Told by its name's pooled text
-        // (juce::Identifier keeps one of each), without looking a text up: what every walk of the loader asks of every element.
+        // Whether Phazite knows an element's type (Schema.h: schema::isKnownType()). One it doesn't (a later build's, another
+        // tool's) stays where it is, as it is, with everything in it, and is written back (docs/project-format.md): nothing
+        // reads it. What every walk of the loader asks of every element.
         bool isKnown (const juce::ValueTree& element)
         {
-            static const auto known = []
-            {
-                std::unordered_set<const void*> types { schema::PHAZITE.getCharPointer().getAddress() };
-
-                for (const auto& [parent, children] : getPlaces())
-                {
-                    types.insert (juce::Identifier (parent).getCharPointer().getAddress());
-
-                    for (const auto& child : children)
-                        types.insert (juce::Identifier (child).getCharPointer().getAddress());
-                }
-
-                return types;
-            }();
-
-            return known.count (element.getType().getCharPointer().getAddress()) > 0;
+            return schema::isKnownType (element.getType());
         }
 
         // Where each element goes, as getPlaces() has it, by the pooled texts of the types' names.
@@ -575,8 +538,11 @@ namespace
         // The furthest place in beats a song holds anything at, and in seconds of a file.
         constexpr double maxBeat = maxSongBeats, maxSeconds = 1.0e7, some = 1.0e-9;
 
-        // The IDs a song gives stay well below where counting them on would overflow.
+        // The IDs a song gives stay well below where counting them on would overflow (Schema.h): every ID below maxID (2^62);
+        // and where an ID or the next ID reaches renumberMark (3 * 2^60), every ID at or past maxCountedID (2^61) given anew,
+        // what names it following, counted on from below maxCountedID. Any other song keeps its IDs and its next ID.
         constexpr auto maxID = schema::maxID;
+        constexpr auto maxCountedID = schema::maxCountedID;
 
         // A number Schema.h gives a range, and what it becomes when it is no number at all: none (its default), or a value.
         struct Range
@@ -1012,6 +978,13 @@ namespace
             // of a type it doesn't know stays as it is (isKnown()).
             void keepPlaces (juce::ValueTree parent)
             {
+                // The words of the kinds, made once: not a list of texts for each controller.
+                static const juce::StringArray trackKinds { schema::trackIsTrack, schema::trackIsFolder, schema::trackIsReturn };
+                static const juce::StringArray clipKinds { schema::clipIsMidi, schema::clipIsAudio };
+                static const juce::StringArray controlKinds { schema::controlIsController, schema::controlIsPitchWheel,
+                                                              schema::controlIsChannelPressure, schema::controlIsAftertouch,
+                                                              schema::controlIsProgramChange };
+
                 for (auto i = parent.getNumChildren(); --i >= 0;)
                 {
                     auto child = parent.getChild (i);
@@ -1019,28 +992,21 @@ namespace
                     if (! isKnown (child))
                         continue;
 
-                    if (child.hasType (schema::TRACK)
-                        && ! juce::StringArray { schema::trackIsTrack, schema::trackIsFolder, schema::trackIsReturn }.contains (
-                            child[schema::trackKind].toString()))
+                    if (child.hasType (schema::TRACK) && ! trackKinds.contains (child[schema::trackKind].toString()))
                         child.setProperty (schema::trackKind,
                                            child.getChildWithName (schema::TRACK).isValid() ? schema::trackIsFolder : schema::trackIsTrack,
                                            nullptr);
 
-                    const auto belongs = belongsIn (parent.getType(), child.getType())
-                                         && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
-                                               && parent[schema::trackKind].toString() != schema::trackIsFolder)
-                                         && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() != schema::trackIsTrack)
-                                         && ! (child.hasType (schema::CLIP)
-                                               && ! juce::StringArray { schema::clipIsMidi, schema::clipIsAudio }.contains (
-                                                   child[schema::clipKind].toString()))
-                                         && ! ((child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
-                                               && parent[schema::clipKind].toString() != schema::clipIsMidi)
-                                         && ! (child.hasType (schema::WARP) && parent[schema::clipKind].toString() != schema::clipIsAudio)
-                                         && ! (child.hasType (schema::CONTROL)
-                                               && ! juce::StringArray { schema::controlIsController, schema::controlIsPitchWheel,
-                                                                        schema::controlIsChannelPressure, schema::controlIsAftertouch,
-                                                                        schema::controlIsProgramChange }
-                                                        .contains (child[schema::controlKind].toString()));
+                    const auto belongs =
+                        belongsIn (parent.getType(), child.getType())
+                        && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
+                              && parent[schema::trackKind].toString() != schema::trackIsFolder)
+                        && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() != schema::trackIsTrack)
+                        && ! (child.hasType (schema::CLIP) && ! clipKinds.contains (child[schema::clipKind].toString()))
+                        && ! ((child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+                              && parent[schema::clipKind].toString() != schema::clipIsMidi)
+                        && ! (child.hasType (schema::WARP) && parent[schema::clipKind].toString() != schema::clipIsAudio)
+                        && ! (child.hasType (schema::CONTROL) && ! controlKinds.contains (child[schema::controlKind].toString()));
 
                     if (! belongs)
                         parent.removeChild (i, nullptr);
@@ -1170,17 +1136,60 @@ namespace
                         keepNumbers (child);
             }
 
-            // Every item's ID its own, a note's in its clip; one that isn't, or none, given a new one. An alias group's too
-            // large to count on from goes, its clips each alone.
+            // Every item's ID its own, a note's in its clip; one that isn't, or none, given a new one; and a track whose ID is
+            // given anew unfrozen, as a frozen track's file is found by its track's ID (model/mixer/internal/Freeze.h), which
+            // may be another's. An alias group's past maxID goes, its clips each alone.
+            // Where the song is given its IDs anew (renumbering, Schema.h: mustGiveIDsAnew()), so is every ID at or past
+            // maxCountedID below maxID: an item's, a fader's or a VCA's, which what named it then names (renumbered,
+            // keepRenumberedNames()); an alias group's, all its clips in the new group (relinked); and a note's, the same new
+            // one in each clip of its alias group (linkedNotes), so that its clips keep following each other.
+            bool renumbering {};
+            std::map<std::uint64_t, std::uint64_t> renumbered {}, relinked {};
+            std::map<std::uint64_t, std::map<std::uint64_t, std::uint64_t>> linkedNotes {};
+
+            // The largest ID below a bound that a name names (schema::namesID()), anywhere in the song.
+            static std::uint64_t findLargestName (const juce::ValueTree& tree, std::uint64_t below)
+            {
+                std::uint64_t largest = 0;
+
+                for (int p = 0; p < tree.getNumProperties(); ++p)
+                    if (const auto property = tree.getPropertyName (p); mayHoldID (property) && schema::namesID (tree, property))
+                        if (const auto id = readID (tree[property]); id < below)
+                            largest = std::max (largest, id);
+
+                for (const auto& child : tree)
+                    largest = std::max (largest, findLargestName (child, below));
+
+                return largest;
+            }
+
+            bool isToGiveAnew (std::uint64_t id) const { return id == 0 || id >= maxID || (renumbering && id >= maxCountedID); }
+            bool isRenumbered (std::uint64_t id) const { return renumbering && id >= maxCountedID && id < maxID; }
+
             void keepIDs (juce::ValueTree tree, std::set<std::uint64_t>& seen)
             {
-                std::set<std::uint64_t> notes;
+                std::optional<std::set<std::uint64_t>> notes; // the clip's notes' IDs, made as a note is first checked one by one
+
+                // A clip's notes' new IDs by their old, where the song is given its IDs anew: its alias group's, or its own.
+                // Made only then, and only for a clip with a note to give anew.
+                std::optional<std::map<std::uint64_t, std::uint64_t>> ownNotes;
+
+                const auto getNotesGiven = [this, &tree, &ownNotes]() -> std::map<std::uint64_t, std::uint64_t>&
+                {
+                    if (tree.hasType (schema::CLIP) && tree.hasProperty (schema::clipLink))
+                        return linkedNotes[readID (tree[schema::clipLink])];
+
+                    if (! ownNotes.has_value())
+                        ownNotes.emplace();
+
+                    return *ownNotes;
+                };
 
                 // Whether its notes' IDs are each their own already, as nearly every clip's are: found by sorting them, without
                 // a set's node for each note.
                 std::optional<bool> notesAreTheirOwn;
 
-                const auto areTheirOwn = [&tree]
+                const auto areTheirOwn = [this, &tree]
                 {
                     std::vector<std::uint64_t> ids;
                     ids.reserve ((size_t) tree.getNumChildren());
@@ -1192,7 +1201,7 @@ namespace
 
                         const auto id = readID (child[schema::noteID]);
 
-                        if (id == 0 || id >= maxID)
+                        if (isToGiveAnew (id))
                             return false;
 
                         ids.push_back (id);
@@ -1208,8 +1217,21 @@ namespace
                         continue;
 
                     if (child.hasType (schema::CLIP) && child.hasProperty (schema::clipLink))
+                    {
                         if (const auto link = readID (child[schema::clipLink]); link == 0 || link >= maxID)
+                        {
                             child.removeProperty (schema::clipLink, nullptr);
+                        }
+                        else if (isRenumbered (link))
+                        {
+                            auto found = relinked.find (link);
+
+                            if (found == relinked.end())
+                                found = relinked.emplace (link, song.makeID()).first;
+
+                            child.setProperty (schema::clipLink, (juce::int64) found->second, nullptr);
+                        }
+                    }
 
                     if (child.hasType (schema::NOTE))
                     {
@@ -1219,12 +1241,34 @@ namespace
                         if (*notesAreTheirOwn)
                             continue;
 
-                        if (const auto id = readID (child[schema::noteID]); id == 0 || id >= maxID || ! notes.insert (id).second)
+                        const auto old = readID (child[schema::noteID]);
+                        auto id = old;
+
+                        if (isRenumbered (old))
                         {
-                            const auto made = song.makeID();
-                            notes.insert (made);
-                            child.setProperty (schema::noteID, (juce::int64) made, nullptr);
+                            auto& notesGiven = getNotesGiven();
+                            auto found = notesGiven.find (old);
+
+                            if (found == notesGiven.end())
+                                found = notesGiven.emplace (old, song.makeID()).first;
+
+                            id = found->second;
                         }
+                        else if (isToGiveAnew (old))
+                        {
+                            id = 0;
+                        }
+
+                        auto& noteIDs = notes.has_value() ? *notes : notes.emplace();
+
+                        if (id == 0 || ! noteIDs.insert (id).second)
+                        {
+                            id = song.makeID();
+                            noteIDs.insert (id);
+                        }
+
+                        if (id != old)
+                            child.setProperty (schema::noteID, (juce::int64) id, nullptr);
 
                         continue;
                     }
@@ -1234,15 +1278,55 @@ namespace
                         if (! schema::holdsID (child, *property) || (property != &schema::trackID && ! child.hasProperty (*property)))
                             continue;
 
-                        if (const auto id = readID (child[*property]); id == 0 || id >= maxID || ! seen.insert (id).second)
+                        if (const auto id = readID (child[*property]); isToGiveAnew (id) || ! seen.insert (id).second)
                         {
                             const auto made = song.makeID();
                             seen.insert (made);
                             child.setProperty (*property, (juce::int64) made, nullptr);
+
+                            if (isRenumbered (id))
+                                renumbered.try_emplace (id, made); // the first of its ID's, as for an ID held twice
+
+                            if (property == &schema::trackID && child.hasType (schema::TRACK))
+                                child.removeProperty (schema::trackFrozen, nullptr);
                         }
                     }
 
-                    keepIDs (child, seen);
+                    if (child.getNumChildren() > 0) // no walk, nor the walk's sets, for each controller, point or marker
+                        keepIDs (child, seen);
+                }
+            }
+
+            // Where the song was given its IDs anew: what named one at or past maxCountedID names its new one, or nothing if
+            // none had it (then left out as any name of nothing is: keepSends(), keepNames()). A macro's curve, which would name the
+            // macro by its ID as its parameter too (model/devices/internal/Parameters.h), isn't followed: no modulator's
+            // parameter is automated, and such a curve goes as every song opens (Automation.h: forgetCurvesOfGoneDevices()).
+            void keepRenumberedNames (juce::ValueTree tree)
+            {
+                for (auto child : tree)
+                {
+                    if (! isKnown (child))
+                        continue;
+
+                    for (int p = 0; p < child.getNumProperties(); ++p)
+                    {
+                        const auto property = child.getPropertyName (p);
+
+                        if (! mayHoldID (property) || ! schema::namesID (child, property))
+                            continue;
+
+                        const auto old = readID (child[property]);
+
+                        if (! isRenumbered (old))
+                            continue;
+
+                        const auto found = renumbered.find (old);
+                        const auto now = found != renumbered.end() ? found->second : (std::uint64_t) 0;
+
+                        child.setProperty (property, writeIDLike (child[property], now), nullptr);
+                    }
+
+                    keepRenumberedNames (child);
                 }
             }
 
@@ -1468,11 +1552,34 @@ namespace
                 keepNumbers (state);
 
                 // The song's next ID past what it holds (not past an ID too large to count on from), counted as the song
-                // counts them (findLargestID(), findNextID()), then each its own.
+                // counts them (findLargestID(), findNextID()), then each its own. A song whose IDs reach the mark (Schema.h:
+                // renumberMark) counts on from below maxCountedID, its IDs past it given anew, and past every ID a name
+                // below it names (a curve of a device deleted, which goes as the song opens: no new ID may become what it
+                // names); every merge waiting in it (MERGING) goes, as its record names IDs inside its text, which nothing
+                // translates: a merge under way in a file with IDs past the mark is nobody's work.
                 const auto saved = readID (state[schema::nextID]);
-                state.setProperty (schema::nextID, (juce::int64) std::max (findLargestID (state) + 1, saved < maxID ? saved : 0), nullptr);
+                const auto largest = findLargestID (state);
+                renumbering = mustGiveIDsAnew (largest, saved);
+
+                if (renumbering)
+                {
+                    const auto counted = std::max (findLargestID (state, maxCountedID), findLargestName (state, maxCountedID));
+                    state.setProperty (schema::nextID, (juce::int64) std::max (counted + 1, saved < maxCountedID ? saved : 0), nullptr);
+
+                    for (auto merging = state.getChildWithName (schema::MERGING); merging.isValid();
+                         merging = state.getChildWithName (schema::MERGING))
+                        state.removeChild (merging, nullptr);
+                }
+                else
+                {
+                    state.setProperty (schema::nextID, (juce::int64) std::max (largest + 1, saved < maxID ? saved : 0), nullptr);
+                }
+
                 std::set<std::uint64_t> items;
                 keepIDs (state, items); // each new one from the song's next ID, which stays past every ID it holds
+
+                if (renumbering)
+                    keepRenumberedNames (state);
                 keepSends (state, items);
                 keepNames (state, items);
                 forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
@@ -1818,7 +1925,7 @@ bool Project::checkUnsavedChanges()
     }
 
     if (! holdTheSameProject (song->getState(), savedState))
-        return true;
+        return true; // changedSinceSave stays as it was, true
 
     // The song is as saved after all.
     changedSinceSave = changedSinceAutosave = false;
@@ -1842,6 +1949,7 @@ juce::Result Project::save()
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*song);
+        compareStoredStates(); // should the write fail, which leaves them out of the file (one that works forgets this)
 
         if (const auto written = writeProjectFile (song->getState(), file); written.failed())
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ": " + written.getErrorMessage());
@@ -1955,9 +2063,9 @@ bool Project::finishBackgroundSave()
     if (autosaveWriter->takeFailure())
         return false; // its changes are still to save
 
-    // What the file holds now: saved, unless the song changed since it was copied.
+    // What the file holds now: saved, unless the song changed since it was copied. What is noted to compare stays, compared
+    // with this copy at the next check: what a store wrote since without a notification (compareStoredStates()).
     savedState = written;
-    clearToCompare();
     changesOutsideHistory = outsideAtBackgroundSave;
 
     if (changeCount == changesAtBackgroundSave && song->getChangesOutsideHistory() == outsideAtBackgroundSave)
@@ -2332,14 +2440,16 @@ namespace
 
 void Project::compareStoredStates()
 {
-    if (changedSinceSave)
-        return;
-
+    // Noted while the project has unsaved changes too: a save in the background under way (finishBackgroundSave()) may yet
+    // make the copy it took the saved one, which this store came after.
     mayHaveChanged = true;
     const auto state = song->getState();
 
     for (const auto* type : { &schema::TRACKS, &schema::MASTER })
-        if (const auto element = state.getChildWithName (*type); element.isValid())
+        if (const auto element = state.getChildWithName (*type);
+            element.isValid()
+            && std::none_of (toCompare.begin(), toCompare.end(),
+                             [&element] (const ToCompare& each) { return each.element == element && each.property.isNull(); }))
             toCompare.push_back ({ element, {} });
 }
 
@@ -2398,7 +2508,9 @@ void Project::compareWithSavedState()
         changedSinceSave = changedSinceAutosave = true;
     }
 
-    if (! mayHaveChanged)
+    // Nothing to compare while the project has unsaved changes: what was noted waits, for a save in the background that may
+    // make what it wrote the saved copy (finishBackgroundSave()); a save clears it.
+    if (! mayHaveChanged || changedSinceSave)
         return;
 
     const auto same = std::all_of (toCompare.begin(), toCompare.end(), [this] (const ToCompare& entry) { return isAsSaved (entry); });
