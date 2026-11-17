@@ -36,9 +36,9 @@ the run of 2026-11-16.
 | Startup: under 3 seconds to a project that plays, on an SSD, with the plug-in scan in the background | What Phazite does itself takes under 0.2 s. The whole start, with the process and the audio device, is not timed |
 | Memory: long audio streams from disk rather than loading into memory | Yes |
 | A key to its sound in under 15 ms with a wired output | Not measured |
-| A stopped song of 20 tracks (a synth, an EQ, a compressor and a reverb each) costs under 2 % of a core | Yes, since 2026-11-16: 1.0 to 1.2 % on one thread, 0.6 to 0.8 % on four (7.5 % / 2.6 % before, its reverbs playing their tails from silence as it opened) |
+| A stopped song of 20 tracks (a synth, an EQ, a compressor and a reverb each) costs under 2 % of a core | Yes, since 2026-11-16: 0.94 % on one thread, 0.52 % on four, on a quiet machine (7.5 % / 2.6 % before, its reverbs playing their tails from silence as it opened) |
 | A parameter's change takes under 0.5 ms of the message thread | Yes |
-| The check for unsaved changes takes under 1 ms | Yes, since 2026-11-16: 0.01 ms after a notification that changes nothing and 0.04 ms after a note added and taken back, in the song of "the UI's work on a big song" (22 ms before that day's fix); 8 to 10 ms after a change of the tracks' list, which compares every track |
+| The check for unsaved changes takes under 1 ms | Yes, since 2026-11-16: 0.01 ms after a notification that changes nothing and 0.04 ms after a note added and taken back, in the song of "the UI's work on a big song" (22 ms before that day's fix); 8.3 ms after a change of the tracks' list, which compares every track |
 | An autosave keeps the message thread under 15 ms | Yes |
 
 ## Running the benchmarks
@@ -241,7 +241,7 @@ on one thread and on four.
 | Song | Stopped: 1 thread / 4 | Playing: 1 thread / 4 | From |
 |---|---|---|---|
 | 20 empty tracks | 0.39 % / 0.42 % | 0.39 % / 0.43 % | 2026-11-16 |
-| 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 1.02 to 1.17 % / 0.55 to 0.78 % | 43.0 % / 11.9 % | stopped: 2026-11-16, after the fix below; playing: the run of 2026-11-16 |
+| 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords | 0.94 % / 0.52 % | 41.8 % / 11.3 % | 2026-11-16, the last run, on a quiet machine, after the fix below |
 | 20 drum samplers, each a beat of a kick, a snare and sixteenth hats | 0.55 % / 0.39 % | 1.75 % / 0.84 % | 2026-11-16 |
 | 20 plug-in synths in one helper (the tests' stand-in), playing chords | 1.21 % / 1.03 % | 1.43 % / 1.73 % | 2026-11-16 |
 
@@ -524,10 +524,10 @@ changes each and ten keys' pressure: 0.037 % of a block of 128 at 48 kHz.
 
 | A song of 40 tracks and 10,240 notes, of Phazite's own devices | Time | From |
 |---|---|---|
-| Save, for a project file of 1,353 KB | 58.4 ms | 2026-11-16 |
-| Save again | 58.8 ms | 2026-11-16 |
-| Autosave | 43.2 ms | 2026-11-16 |
-| Open | 62.6 ms | 2026-11-16 |
+| Save, for a project file of 1,353 KB | 48.1 ms | 2026-11-16, the last run, on a quiet machine |
+| Save again | 54.6 ms | 2026-11-16, the last run, on a quiet machine |
+| Autosave | 39.8 ms | 2026-11-16, the last run, on a quiet machine |
+| Open | 47.9 ms | 2026-11-16, the last run, on a quiet machine (62.6 ms before that day's fix) |
 
 Open took 28 ms when the audit measured it (section 12, 2026-11-04). Since then the project file holds each property
 on a line of its own (2026-11-09: 1,353 KB for this song), whose parse by JUCE (`juce::XmlDocument`) and the tree made
@@ -544,7 +544,8 @@ second count of the song's IDs. Before and after, the two builds run in turns th
 |---|---|---|
 | Open, 40 tracks | 63.9 to 107.4 ms | 53.7 to 102.9 ms |
 | `makeConsistent()` of 100,000 notes, the median of 5 | 372.6 to 478.1 ms | 189.4 to 224.2 ms |
-| `joinSong()` of it, the median of 5 | 713.3 to 881.7 ms | 523.8 to 675.6 ms |
+$1
+On a quiet machine, the last run of 2026-11-16: Open 47.9 ms, `makeConsistent()` 179.1 ms, `joinSong()` 526.5 ms.
 
 What is left of an open is JUCE's parse and tree (about half), the checks' walks of every element (each a few
 properties looked up and read), and the song's first plan.
@@ -612,13 +613,13 @@ The message thread's work on a song of 16 tracks, 256 clips and 16,384 notes, in
 | ... of the playlist / of the piano roll | 0.23 / 0.15 ms | 2026-11-16 |
 | The check for unsaved changes after a notification that changes nothing: the first / the mean of 100 | 0.01 / 0.00 ms | 2026-11-16, after the fix |
 | ... after a note added and taken back (its clip compared) | 0.04 ms | 2026-11-16, after the fix |
-| ... after a track moved and moved back (every track compared) | 8.1 to 9.9 ms | 2026-11-16, after the fix |
-| Save | 91.2 ms | 2026-11-16 |
-| Autosave, on the message thread | 7.8 ms | 2026-11-16 |
-| A note moved a step, with what follows | 2.92 ms | 2026-11-16 |
+| ... after a track moved and moved back (every track compared) | 8.29 ms | 2026-11-16, the last run, on a quiet machine |
+| Save | 79.7 ms | 2026-11-16, the last run, on a quiet machine |
+| Autosave, on the message thread | 3.9 ms | 2026-11-16, the last run, on a quiet machine |
+| A note moved a step, with what follows | 3.62 ms | 2026-11-16, the last run, on a quiet machine |
 
 The note's row moves by 2 ms from run to run of one build. Save, which took 103 ms in section 12 and 145 ms in section
-16, took 91.2 ms on 2026-11-16.
+16, took 91.2 ms and then 79.7 ms in the two runs of 2026-11-16.
 
 The check for unsaved changes (the title's star and Auto Save ask it after every notification) took 22 ms in the run
 of 2026-11-16, 0.78 ms in section 7. Two causes, both older than the known-bugs round: since the versions came
@@ -791,11 +792,11 @@ column, and the copy back the rest.
 
 | What | Value | From |
 |---|---|---|
-| The services, the commands and the window's content, at startup | 20.0 ms | 2026-11-16 |
-| The first start's project opened and the window painted | 25.0 ms | 2026-11-16 |
-| The example song House Groove (64 bars) opened from Help and painted | 130.8 ms | 2026-11-16 |
+| The services, the commands and the window's content, at startup | 12.2 ms | 2026-11-16, the last run, on a quiet machine (20.0 ms in that day's first run: the row swings with the process's first fonts) |
+| The first start's project opened and the window painted | 22.3 ms | 2026-11-16, the last run, on a quiet machine |
+| The example song House Groove (64 bars) opened from Help and painted | 116.4 ms | 2026-11-16, the last run, on a quiet machine |
 | At rest for 5 seconds, an example song open and stopped: what was asked to repaint | nothing | 2026-11-16 |
-| At rest: the process's CPU | 1.87 % of a core | 2026-11-16 |
+| At rest: the process's CPU | 1.25 % of a core | 2026-11-16, the last run, on a quiet machine |
 | At rest: the message thread's CPU | 0.94 % of a core | 2026-11-16 |
 
 The services, the commands and the window's content took 12.7 ms in section 14 of the audit. That row is the first
