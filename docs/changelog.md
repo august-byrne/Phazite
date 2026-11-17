@@ -24,8 +24,9 @@ CLAUDE.md ("Checks by stage", "Agents").
   them once its history had gone. It never ended, and neither did whatever waited for the histories that went: a
   test's folder as it goes (`AppTests` ran into ctest's ten minutes in some runs on CI's Linux builds, where a stalled
   test now writes its stack, which named the wait), and Phazite as it quits, if a project closed in the instant its
-  history began to read. The jobs say whether the calling thread is one of their own
-  (`BackgroundJobs::isOnOwnThread()`), and no wait there counts them.
+  history began to read. A history's jobs wait only for the histories that had gone when the
+  job was given, so that none waits for its own thread, nor two histories of one folder for each other (which the
+  fix's review found); and the jobs assert that none of them waits for all of them (`BackgroundJobs::isOnOwnThread()`).
 - **A plug-in that joins the song is taken in when the changes are asked for,** not only at the history's next tick:
   the badge's count just after a project's plug-ins loaded is right, and no tick later compares every track again
   (known bug 187, which a performance gate showed in two runs of three).

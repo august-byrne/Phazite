@@ -617,22 +617,27 @@ namespace
             jobs->add ([] (const BackgroundJobs::ShouldStop&) { juce::MessageManager::callAsync ([] { get().reap(); }); });
         }
 
-        // Waits until the writes into a folder are done (into every folder, for none); but for those of the jobs a job that
-        // waits runs on, once they are kept here (a history that went as its job began or waited), which it would wait for
-        // itself, without end: its first read did, and whatever waited for the histories that went with it (known bug 190).
+        // The jobs kept for a folder now (for every folder, for none): those of its histories that have gone. What a
+        // history's own job waits for is those kept as the job was given, on the message thread, and no others: a job that
+        // waited for whatever was kept by the time it ran waited for its own jobs too, kept meanwhile as its history went,
+        // so for itself, without end (known bug 190: a first read, and whatever waited for the histories that went with
+        // it); or for those of a later history of the folder, whose job waited for it in turn.
+        std::vector<std::shared_ptr<BackgroundJobs>> getKept (const juce::File& folder)
+        {
+            const std::scoped_lock sl (lock);
+            std::vector<std::shared_ptr<BackgroundJobs>> jobs;
+
+            for (const auto& each : kept)
+                if (folder == juce::File() || each.folder == folder)
+                    jobs.push_back (each.jobs);
+
+            return jobs;
+        }
+
+        // Waits until the writes into a folder are done (into every folder, for none). Not on a thread it keeps.
         void waitFor (const juce::File& folder)
         {
-            std::vector<std::shared_ptr<BackgroundJobs>> waited;
-
-            {
-                const std::scoped_lock sl (lock);
-
-                for (const auto& each : kept)
-                    if ((folder == juce::File() || each.folder == folder) && ! each.jobs->isOnOwnThread())
-                        waited.push_back (each.jobs);
-            }
-
-            for (const auto& jobs : waited)
+            for (const auto& jobs : getKept (folder))
                 jobs->waitForAll();
         }
 
@@ -884,11 +889,14 @@ void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJob
     // A write, which the history's thread runs even once it is handed on as the history goes (~VersionHistory()), so that its
     // callback always comes: copied, or told why not.
     run (
-        [copy = std::move (copy), state = folderCopy, weak = juce::WeakReference<VersionHistory> (this)]() mutable
+        [copy = std::move (copy), state = folderCopy, weak = juce::WeakReference<VersionHistory> (this),
+         earlier = FinishingHistories::get().getKept (folder)]() mutable
         {
-            // After what a history of the same folder that went before still writes into it (FinishingHistories), as open()'s
-            // job reads it: those writes, queued before this copy on their own threads, are done before the folder is held.
-            FinishingHistories::get().waitFor (state->folder);
+            // After what the histories of the same folder that went before still write into it (FinishingHistories), as
+            // open()'s job reads it: those writes, queued before this copy on their own threads, are done before the folder
+            // is held.
+            for (const auto& jobs : earlier)
+                jobs->waitForAll();
 
             // The folder held from here, after every write given before this job (WholeFile.h: holdFolder()), until the copy is
             // over; none, if it is over before it began (the project closed, or the save was cancelled).
@@ -1002,7 +1010,8 @@ void VersionHistory::open()
     // song holds, if any, found again here rather than on the message thread.
     run (
         [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this),
-         mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing, folderNow = folder]
+         mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing,
+         earlier = FinishingHistories::get().getKept (folder)]
         {
             // Tests' seam: the read held here, begun, and counted while it is (holdFirstReadsForTests).
             if (holdFirstReadsForTests.load())
@@ -1015,9 +1024,10 @@ void VersionHistory::open()
                 --firstReadsHeldForTests;
             }
 
-            // After what a history of the same folder that went before was still writing (a commit given as its project
-            // closed), and what that wrote.
-            FinishingHistories::get().waitFor (folderNow);
+            // After what the histories of the same folder that went before this one opened were still writing (a commit
+            // given as its project closed), and what that wrote.
+            for (const auto& jobs : earlier)
+                jobs->waitForAll();
             shared->getPieces().readNewPacks();
 
             // Its packs joined into one once there are many, as each is read as the store opens; given up, the packs as

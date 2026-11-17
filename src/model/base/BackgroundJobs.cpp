@@ -76,6 +76,8 @@ int BackgroundJobs::getNumJobs() const
 
 void BackgroundJobs::waitForAll() const
 {
+    jassert (! isOnOwnThread()); // a job that waits for all of them waits for itself
+
     std::unique_lock held (lock);
     finished.wait (held, [this] { return waiting.empty() && running.empty(); });
 }
@@ -87,6 +89,8 @@ bool BackgroundJobs::isOnOwnThread() const
 
 void BackgroundJobs::removeAll (bool stopRunning)
 {
+    jassert (! isOnOwnThread()); // a job that waits for those that run waits for itself
+
     std::deque<Job> dropped; // what they hold goes once the lock is let go
 
     std::unique_lock held (lock);

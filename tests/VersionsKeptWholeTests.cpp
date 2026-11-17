@@ -191,12 +191,13 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     waitForVersionsFinished();
 }
 
-TEST_CASE ("A history that goes as its first read begins leaves nothing waiting without end: the read doesn't wait for its own thread")
+namespace
 {
-    // Known bug 190: the read, begun before its history went and its thread was kept to finish its jobs, then waited for
-    // every thread kept for its folder, its own among them: for itself. It never ended, nor did whatever waited for the
-    // histories that went: the tests' folders as they go (AppTests ran into ctest's limit so in some runs on CI's Linux
-    // builds), and Phazite as it quits.
+// So many histories of one project's folder, one after another, each gone once its first read has begun and is held
+// there (VersionHistory::holdFirstReadsForTests), so that its thread is kept to finish it; then the reads let go. What
+// waits for the histories that went must come back, and the project's next history read its folder.
+void checkNothingWaitsForHistoriesGoneAsTheyRead (int histories)
+{
     TestSong s;
     s.addTrack ("Bass");
     REQUIRE (waitForVersionHistory (s.context));
@@ -204,15 +205,19 @@ TEST_CASE ("A history that goes as its first read begins leaves nothing waiting 
     phazite::setSong (s.context, nullptr);
     waitForVersionsFinished();
 
-    // Opened again, its first read held once it has begun; then closed with the read still running, so its thread is kept.
     phazite::VersionHistory::holdFirstReadsForTests = true;
-    phazite::setSong (s.context, &song);
-    const auto held = dispatchMessagesUntil ([] { return phazite::VersionHistory::firstReadsHeldForTests.load() == 1; });
-    phazite::setSong (s.context, nullptr);
+    auto held = true;
+
+    for (int opened = 1; opened <= histories; ++opened)
+    {
+        phazite::setSong (s.context, &song);
+        held = held && dispatchMessagesUntil ([opened] { return phazite::VersionHistory::firstReadsHeldForTests.load() == opened; });
+        phazite::setSong (s.context, nullptr);
+    }
+
     phazite::VersionHistory::holdFirstReadsForTests = false;
     REQUIRE (held);
 
-    // What waits for the histories that went comes back.
     auto returned = std::make_shared<std::atomic<bool>> (false);
     std::thread waiter (
         [returned]
@@ -228,10 +233,26 @@ TEST_CASE ("A history that goes as its first read begins leaves nothing waiting 
     else
         waiter.detach(); // it waits still, and nothing can end it
 
-    // And the project's next history reads its folder.
     phazite::setSong (s.context, &song);
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (getVersionNames (s.context) == juce::StringArray ("Initial commit"));
+}
+} // namespace
+
+TEST_CASE ("A history that goes as its first read begins leaves nothing waiting without end: the read doesn't wait for its own thread")
+{
+    // Known bug 190: the read, begun before its history went and its thread was kept to finish its jobs, then waited for
+    // every thread kept for its folder, its own among them: for itself. It never ended, nor did whatever waited for the
+    // histories that went: the tests' folders as they go (AppTests ran into ctest's limit so in some runs on CI's Linux
+    // builds), and Phazite as it quits.
+    checkNothingWaitsForHistoriesGoneAsTheyRead (1);
+}
+
+TEST_CASE ("Two histories of one folder that go as their first reads begin don't wait for each other")
+{
+    // What the review of known bug 190's fix found: each read, leaving out its own thread, still waited for the other's,
+    // kept for the same folder meanwhile. A read waits only for the histories that had gone when its own opened.
+    checkNothingWaitsForHistoriesGoneAsTheyRead (2);
 }
 
 TEST_CASE ("Closing doesn't wait for what the history reads: a read given as it closes never runs")

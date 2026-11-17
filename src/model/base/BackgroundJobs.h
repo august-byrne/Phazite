@@ -41,7 +41,7 @@ public:
     void waitForAll() const;
 
     // Whether the calling thread is one of its own, which runs its jobs: a job that waited for all of them there would
-    // wait for itself, without end.
+    // wait for itself, without end (waitForAll() and removeAll() assert that it isn't).
     bool isOnOwnThread() const;
 
     // Drops the jobs that wait, and waits for those that run, however long they take, asking them to stop first if
