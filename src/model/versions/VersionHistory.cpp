@@ -2227,6 +2227,7 @@ void VersionHistory::unstageAll()
 const std::vector<SongChange>& VersionHistory::getChanges()
 {
     takeChangesOutsideHistory();
+    takePluginsJoined();
 
     if (changesReady)
         return changes;
@@ -2617,13 +2618,12 @@ void VersionHistory::takeChangesOutsideHistory()
     }
 }
 
-void VersionHistory::timerCallback()
+void VersionHistory::takePluginsJoined()
 {
-    followFolder();
-    takeChangesOutsideHistory();
-
     // A plug-in joining the song (one loaded in the background as the project opened): its knobs' values can be read from
-    // now on, which say whether a state that differs from the last commit's counts (SongDiff.h: PluginValues).
+    // now on, which say whether a state that differs from the last commit's counts (SongDiff.h: PluginValues). Taken in as
+    // the changes are asked for too, not only at a tick: what asks just after one joined compares with its values, and no
+    // tick later compares every track again.
     if (const auto loading = getPluginsLoading (song).size(); loading != pluginsLoadingSeen)
     {
         if (loading < pluginsLoadingSeen)
@@ -2631,6 +2631,13 @@ void VersionHistory::timerCallback()
 
         pluginsLoadingSeen = loading;
     }
+}
+
+void VersionHistory::timerCallback()
+{
+    followFolder();
+    takeChangesOutsideHistory();
+    takePluginsJoined();
 
     // An old version's bounce goes on, its progress shown, unless recording starts: it never runs while the song records.
     if (backgroundBounce != nullptr)

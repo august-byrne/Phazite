@@ -8,6 +8,25 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## After the known bugs' first push (2026-11-17)
+
+CI built the round's 36 commits for the first time and failed on every preset. What it found, and two tests that
+failed in some runs here, fixed on a branch that CI built before `main` moved; the rules that came of it are in
+CLAUDE.md ("Checks by stage", "Agents").
+
+- **A new project's folder deleted from under it:** a project not saved yet keeps its folder in `Unsaved Projects`,
+  named after the second it was made in, and a folder's deletion is put off while its project's history still writes
+  there. A deletion put off deleted whatever was at its path when its turn came: a project made at the same path within
+  that second lost its folder. No new project is given a path whose deletion is still to come, and the names for one
+  second are told apart by a number looked for among those too.
+- **A plug-in that joins the song is taken in when the changes are asked for,** not only at the history's next tick:
+  the badge's count just after a project's plug-ins loaded is right, and no tick later compares every track again
+  (known bug 187, which a performance gate showed in two runs of three).
+- **Tests that failed on CI and not here:** the editors take no frames from the display in the tests, where a window
+  on no screen got some on GitHub's Windows runners and scrolls by hand then waited for one in the middle of a test;
+  the golden project is saved as the app saves, once its plug-ins have given their states (known bug 188); a take is
+  written as far as its first click before its drive fills; and three lines that GCC refuses and MSVC and Clang don't.
+
 ## The known bugs (from 2026-11-15)
 
 The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed before the hand checks of stage 3. Each

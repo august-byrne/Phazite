@@ -562,8 +562,8 @@ namespace
 // the keysym at that level), a dead key gives no press at all, and the number pad's digits are the digits (W48).
 enum class System
 {
-    windows,
-    linux
+    onWindows,
+    onLinux
 };
 
 // The key presses a layout can make: each key of the main block (and the ISO key) with no modifier, Shift, Ctrl, Alt and
@@ -596,16 +596,16 @@ std::vector<juce::KeyPress> getKeyPressesOf (const phazite::test::SimulatedLayou
             const Mods mods (flags);
             const auto shift = mods.isShiftDown();
             const auto ctrl = mods.isCtrlDown(), alt = mods.isAltDown();
-            const auto altGr = system == System::windows && ctrl && alt && ! shift; // Linux has an AltGr key of its own
+            const auto altGr = system == System::onWindows && ctrl && alt && ! shift; // Linux has an AltGr key of its own
             const auto deadAtLevel = shift ? layout.deadShifted.count (p) > 0 : layout.dead.count (p) > 0;
             const auto level = shift && shifted != 0 ? shifted : plain;
 
             // A dead key gives Windows no press without Ctrl or Alt, nor with AltGr where AltGr's level is dead too; Linux
             // none at all.
-            if (altGr ? layout.deadAltGr.count (p) > 0 : deadAtLevel && (system == System::linux || (! ctrl && ! alt)))
+            if (altGr ? layout.deadAltGr.count (p) > 0 : deadAtLevel && (system == System::onLinux || (! ctrl && ! alt)))
                 continue;
 
-            if (system == System::windows)
+            if (system == System::onWindows)
             {
                 const auto text = altGr ? layout.getAltGrCharacter (p) : ! ctrl && ! alt ? level : (juce::juce_wchar) 0;
                 const auto code = juce::CharacterFunctions::isDigit (text) && ! altGr ? text : plain;
@@ -641,7 +641,7 @@ std::vector<juce::KeyPress> getKeyPressesOf (const phazite::test::SimulatedLayou
         everywhere.push_back (juce::KeyPress::F1Key + f);
 
     for (int n = 0; n < 10; ++n)
-        everywhere.push_back (system == System::windows ? juce::KeyPress::numberPad0 + n : '0' + n);
+        everywhere.push_back (system == System::onWindows ? juce::KeyPress::numberPad0 + n : '0' + n);
 
     for (const auto code : everywhere)
     {
@@ -726,7 +726,7 @@ TEST_CASE ("On every layout stand-in, every command a keymap gives a key has a k
 
         for (const auto& named : getLayoutStandIns())
         {
-            for (const auto system : { System::windows, System::linux })
+            for (const auto system : { System::onWindows, System::onLinux })
             {
                 const phazite::ui::KeyDispatcher keys { commands, named.layout };
                 std::set<juce::String> reached;
@@ -749,7 +749,7 @@ TEST_CASE ("On every layout stand-in, every command a keymap gives a key has a k
 
                 CAPTURE (keymap.name.toStdString());
                 CAPTURE (std::string (named.name));
-                CAPTURE (std::string (system == System::windows ? "Windows" : "Linux"));
+                CAPTURE (std::string (system == System::onWindows ? "Windows" : "Linux"));
                 INFO (unreachable.joinIntoString ("; ").toStdString());
                 CHECK (unreachable.isEmpty());
             }
@@ -778,9 +778,9 @@ TEST_SUITE ("golden")
                                         "(as it is, as its digit, by what it types) and the commands of that way. Regenerate "
                                         "with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md)." };
 
-            for (const auto system : { System::windows, System::linux })
+            for (const auto system : { System::onWindows, System::onLinux })
             {
-                lines.add (system == System::windows ? "[Windows]" : "[Linux]");
+                lines.add (system == System::onWindows ? "[Windows]" : "[Linux]");
 
                 for (const auto& press : getKeyPressesOf (us, system))
                 {

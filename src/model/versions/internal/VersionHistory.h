@@ -681,6 +681,7 @@ private:
     void changesMayDiffer(); // and works the changes out again, what is dirty of them
     void edited();           // the song changed as the changes count it
     void takeChangesOutsideHistory();
+    void takePluginsJoined();
 
 public:
     // The song's plug-ins' parameters' values as they are now, as their instances tell them, by their devices' IDs: what a

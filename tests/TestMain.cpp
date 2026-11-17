@@ -12,6 +12,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "ui/timeline/TimelineEditor.h"
 
 #include <algorithm>
 #include <array>
@@ -704,6 +705,10 @@ int main (int argc, char** argv)
 
         // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h).
         phazite::getPluginHost (*engineContext).setHelperProgram (juce::File (PHAZITE_TEST_HOST));
+
+        // The editors take no frames from the display: a scroll by hand goes at once in every test, on every machine
+        // (TimelineEditor.h says why).
+        phazite::ui::TimelineEditor::setDisplayFramesTaken (false);
 
         // A test case outside a TEST_SUITE block takes the suite that doctest.h, as it is included, sets back to "" for the
         // file; that is a static initialiser, which MSVC ran after some of the file's own once an inline variable made at

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 
 namespace phazite
 {
@@ -54,10 +55,32 @@ namespace
 
     // Deletes a folder of these, once no read given up (one stuck in the system) may still write into it (AudioWork.h). What
     // can't be deleted now (a file still open) goes at a later start (findProjectToRestore()).
+    // The folders whose deletion is still to come (deleteFolder() puts it off), by their paths, on the message thread: no
+    // new project is given one of these paths (UnsavedFolder::create()). A deletion put off deletes what is at its path
+    // when its turn comes: with the folder gone meanwhile (deleted by hand, or the tests' folder emptied) and a project
+    // made at the same path within the second its name is, it deleted that project's folder from under it (the tests, in
+    // a release build, 2026-11-17).
+    std::set<juce::String>& getPathsToDelete()
+    {
+        static std::set<juce::String> paths;
+        return paths;
+    }
+
     void deleteFolder (const juce::File& folder)
     {
         // Once nothing writes there: an audio file's read given up, nor a commit the project's history was writing as it closed.
-        AudioWork::whenNoneWritesInto (folder, [folder] { whenNoVersionsWriteInto (folder, [folder] { folder.deleteRecursively(); }); });
+        const auto path = folder.getFullPathName();
+        getPathsToDelete().insert (path);
+        AudioWork::whenNoneWritesInto (folder,
+                                       [folder, path]
+                                       {
+                                           whenNoVersionsWriteInto (folder,
+                                                                    [folder, path]
+                                                                    {
+                                                                        folder.deleteRecursively();
+                                                                        getPathsToDelete().erase (path);
+                                                                    });
+                                       });
     }
 
     // When a project was last changed, as far as a crash left it: its autosave, or the newest of the files it made or brought
@@ -92,14 +115,31 @@ juce::File getUnsavedProjectsFolder()
 
 std::unique_ptr<UnsavedFolder> UnsavedFolder::create (const juce::File& parentFolder)
 {
-    // Named after when it was made, which is all that tells two apart.
-    const auto folder = parentFolder.getNonexistentChildFile (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), {}, true);
-    auto lock = hold (folder);
+    // Named after when it was made, which is all that tells two apart, with a number after it for another made within the
+    // second: the first name that no folder has, that no deletion still to come has (getPathsToDelete()), and that no
+    // Phazite holds.
+    const auto name = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
+    constexpr int mostTried = 1000;
 
-    if (lock == nullptr || folder.createDirectory().failed())
-        return {};
+    for (int number = 1; number <= mostTried; ++number)
+    {
+        const auto folder = parentFolder.getChildFile (number == 1 ? name : name + " (" + juce::String (number) + ")");
 
-    return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (folder, std::move (lock)));
+        if (folder.exists() || getPathsToDelete().count (folder.getFullPathName()) > 0)
+            continue;
+
+        auto lock = hold (folder);
+
+        if (lock == nullptr)
+            continue;
+
+        if (folder.createDirectory().failed())
+            return {};
+
+        return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (folder, std::move (lock)));
+    }
+
+    return {};
 }
 
 juce::File UnsavedFolder::findProjectToRestore (const juce::File& parentFolder)

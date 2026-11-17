@@ -1316,7 +1316,7 @@ TEST_CASE ("FET's and Tube's colour at a working reduction is the whole curve, a
     {
         CAPTURE ((int) colour.character);
         constexpr double hertz = 200.0;
-        constexpr int numSamples = 96000;
+        static constexpr int numSamples = 96000; // static: GCC wants a local one captured in a lambda inside a lambda
         const auto sine = [] (int time) { return 0.9f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * time / testRate); };
 
         // Turning down about 6 dB, slowly, so that the gain hardly moves within a cycle.

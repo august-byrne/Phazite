@@ -11,7 +11,7 @@ to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on 
 fixed (2026-11-15 and 16). That round fixed every entry but four, each of which says why it stays: one is
 the written reason of a test's exception, one waits for the owner's answer, one can only be built and tried on
 Linux, and one needs a file made by another program to show, and a saved value to fix. Each fix has a line in the
-[changelog](changelog.md), under "The known bugs". 187 and 188, two tests that fail in some runs, were seen the day after
+[changelog](changelog.md), under "The known bugs". 189, a test that fails in some runs of a release build, was seen the day after
 (2026-11-17).
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
@@ -65,19 +65,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **187. `tests/PerformanceGateTests.cpp`, "the count of changes since the last commit compares nothing while nothing
-  changed, and one track for an edit of it", fails in some runs on a quiet machine** (two of three on 2026-11-17, in
-  a whole run and alone): after a note is added, 4,226 elements are compared where the whole song is 4,096, so the
-  whole song was compared once more beside the note's track. The count is the whole program's, and the test already
-  waits for the histories' threads before it measures. What compares the song then isn't known: the plug-in the test
-  adds giving its state late, the commit's own work ending, or a comparison Phazite really makes once too often after
-  the first edit that follows a commit, which the badge would then pay in the app too. To fix: record who asks for a
-  whole comparison between the test's two counts; then wait for that condition in the test, or take the comparison
-  out of Phazite if it is one it makes.
-- **188. `tests/GoldenProjectTests.cpp`, "one of each kind of track and every piece of Phazite data", failed once in
-  four runs** (2026-11-17, in a whole run): the stand-in plug-in's saved `state` held its values as it starts (0.5
-  and 0.5) where the golden file has the value the test set (0.5 and 0.25). The save wrote a state the plug-in gave
-  before the change reached it. Check the product first: if a Save just after a plug-in's value was set can write the
-  state from before it, a user loses that change with no notice; the save should ask for states after every change
-  it knows of has been sent to the helper. If only the test's order allows it, the test waits for the plug-in to hold
-  the value before it saves.
+- **189. `tests/DawProjectTests.cpp` cancels an import "once its branch is made" and fails in some runs of a release
+  build** (seen once, 2026-11-17, in "Changed in another DAW and imported back: a branch from its version with just those
+  changes, which merges"; "A DAWproject imported back unpacks its audio off the message thread, and one cancelled
+  leaves none of it" waits the same way): the tests' wait hands on every message that is waiting before it looks
+  again, so a fast build reads the switch and takes it in within the same turn, and the import is done before
+  `cancelReading()` is called. The cancel isn't at fault. To fix: a seam that holds the history's reads after a count
+  of them (as `holdReadsForTests` holds them all), so that the test lets the commit's read and the split through,
+  holds the switch's, cancels, and lets go.

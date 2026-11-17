@@ -189,6 +189,13 @@ public:
     void setScrollingAtFrames (bool);
     void showDisplayFrame (double seconds);
 
+    // Whether editors take the display's frames at all, for the whole program: the tests switch them off
+    // (tests/TestMain.cpp). A window on no screen gets frames on some machines and none on others (GitHub's Windows runners
+    // gave the tests' some, 2026-11-17, where a developer's PC gave none, and a scroll by hand then waited for a frame in
+    // the middle of a test), so every test's scrolls go at once on every machine; a test of the frames gives them itself
+    // (showFrame(), showDisplayFrame()) and says setScrollingAtFrames (true). Asked as an editor's project opens.
+    static void setDisplayFramesTaken (bool);
+
     void zoomAround (double x, double factor); // x from the left of the time line
     void zoom (double factor);                 // around the playhead if it is in view, otherwise the middle
     void zoomTo (BeatRange);

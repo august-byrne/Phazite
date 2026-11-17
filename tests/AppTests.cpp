@@ -241,7 +241,8 @@ TEST_CASE ("A new project starts as the new-project window chooses, with no trac
     CHECK (phazite::getSavedScaleName (key->scale) == "minor");
 
     // Without a key or an outline: an empty song at 120 BPM in 4/4.
-    REQUIRE (session.createProject ({}).wasOk());
+    const auto plain = session.createProject ({});
+    REQUIRE_MESSAGE (plain.wasOk(), plain.getErrorMessage().toStdString());
     auto* plainSong = findSong (session.getContext());
     REQUIRE (plainSong != nullptr);
     CHECK (phazite::getTempo (*plainSong) == doctest::Approx (120.0));

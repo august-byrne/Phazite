@@ -1192,6 +1192,11 @@ TEST_CASE ("A session that goes with a take still waiting for a drag places it, 
     studio.playback.play (1.0);
     auto* take = phazite::getSession (context)->getTake();
     REQUIRE (take != nullptr);
+
+    // Written as far as beat 1's click before the drive fills, as the tests above wait: the writing thread, late on a busy
+    // machine, had written less than a take keeps, and the session placed no clip (CI's release build, 2026-11-17).
+    const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (1.0), phazite::BeatPosition::fromBeats (1.25));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f; }));
     take->fillDrive(); // it would say "Recording stopped" as it is placed
     {
         auto volume = phazite::getVolume (context, track);

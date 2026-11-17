@@ -1227,6 +1227,13 @@ TEST_SUITE ("golden")
         addRepresentativeContent (*project, context, temp.folder.getChildFile ("Sounds"));
         phazite::test::dispatchPendingMessages();
 
+        // Saved as the app saves: once the plug-ins have given the states their last changes left (whenPluginStatesIn()).
+        // Without it a save wrote the state the stand-in gave before the value set by hand reached it, in some runs (known
+        // bug 188).
+        auto statesIn = false;
+        phazite::whenPluginStatesIn (project->getSong(), true, [&statesIn] (bool) { statesIn = true; });
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&statesIn] { return statesIn; }));
+
         // The autosave, and a copy saved as another project, are compared with the project's file below.
         REQUIRE (project->autosave().wasOk());
         const auto autosave = phazite::test::normaliseProject (
