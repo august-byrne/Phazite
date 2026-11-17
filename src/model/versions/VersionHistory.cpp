@@ -717,6 +717,7 @@ namespace
 } // namespace
 
 std::atomic<bool> VersionHistory::holdWritesForTests { false }, VersionHistory::holdReadsForTests { false };
+std::atomic<int> VersionHistory::readsToStartForTests { -1 };
 
 int countVersionsBeingFinished()
 {
@@ -818,9 +819,13 @@ void VersionHistory::run (std::function<void()> job, Work work)
         {
             if (! writes)
             {
-                // Tests' seam: a read held where it starts until let go (holdReadsForTests).
-                while (holdReadsForTests.load() && ! closingNow->load())
+                // Tests' seam: a read held where it starts until let go (holdReadsForTests), or once so many have started
+                // (readsToStartForTests; a history's reads start one after another, on its one thread).
+                while ((holdReadsForTests.load() || readsToStartForTests.load() == 0) && ! closingNow->load())
                     juce::Thread::sleep (1);
+
+                if (readsToStartForTests.load() > 0)
+                    --readsToStartForTests;
 
                 if (! closingNow->load())
                     job();

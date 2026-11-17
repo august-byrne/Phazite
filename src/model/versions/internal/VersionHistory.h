@@ -500,6 +500,11 @@ public:
     static std::atomic<bool> holdWritesForTests;
     static std::atomic<bool> holdReadsForTests; // and reads, each where it starts
 
+    // For tests: so many more reads start, and those after them are held where they start until this is set again (below
+    // 0: none is held). A test that stops what reads in steps between two of them (an import cancelled once its branch is
+    // made) counts the steps it lets through.
+    static std::atomic<int> readsToStartForTests;
+
 private:
     Song& song;
     juce::ValueTree state; // the song's, which this listens to

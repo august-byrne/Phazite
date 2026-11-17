@@ -598,6 +598,20 @@ TEST_CASE ("Import DAWproject opens one from elsewhere as a new untitled project
     CHECK (phazite::getTempo (session.getProject()->getSong()) == doctest::Approx (128.0));
 }
 
+namespace
+{
+// So many more of the histories' reads start, and those after them wait where they start, until this lets them go or goes
+// (VersionHistory::readsToStartForTests).
+struct ReadsHeldAfter
+{
+    explicit ReadsHeldAfter (int reads) { phazite::VersionHistory::readsToStartForTests = reads; }
+    ~ReadsHeldAfter() { letGo(); }
+    void letGo() const { phazite::VersionHistory::readsToStartForTests = -1; }
+
+    JUCE_DECLARE_NON_COPYABLE (ReadsHeldAfter)
+};
+} // namespace
+
 TEST_CASE ("Changed in another DAW and imported back: a branch from its version with just those changes, which merges")
 {
     TestSong s;
@@ -643,12 +657,16 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     };
 
     // Cancelled once its branch is made (found in review, known bug 126's round): nothing left of it, and told only then.
+    // The read of the switch to it held where it starts, after the commit's read and the split (readsToStartForTests): a
+    // release build had read and taken in the switch before the cancel, in some runs (known bug 189).
     const auto branches = phazite::getBranches (s.context).size();
+    const ReadsHeldAfter held (2);
     REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, told));
     CHECK_FALSE (imported.has_value());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getBranches (s.context).size() > branches; },
                                                    phazite::test::versionHistoryTimeout));
     phazite::getVersionHistory (s.context)->cancelReading();
+    held.letGo();
     REQUIRE (imported.has_value());
     CHECK_FALSE (*imported);
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
@@ -1071,10 +1089,13 @@ TEST_CASE ("A DAWproject imported back unpacks its audio off the message thread,
     const auto told = [&imported] (bool done, const juce::StringArray&) { imported = done; };
 
     // Cancelled once its branch is made, its audio unpacked by then: none of it left.
+    // The switch's read held where it starts, as above.
     const auto branches = phazite::getBranches (s.context).size();
+    const ReadsHeldAfter held (2);
     REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, told));
     REQUIRE (dispatchMessagesUntil ([&] { return phazite::getBranches (s.context).size() > branches; }, versionHistoryTimeout));
     phazite::getVersionHistory (s.context)->cancelReading();
+    held.letGo();
     REQUIRE (waitForVersionHistory (s.context));
     REQUIRE (imported.has_value());
     CHECK_FALSE (*imported);

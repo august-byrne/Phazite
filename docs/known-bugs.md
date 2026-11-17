@@ -11,8 +11,7 @@ to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on 
 fixed (2026-11-15 and 16). That round fixed every entry but four, each of which says why it stays: one is
 the written reason of a test's exception, one waits for the owner's answer, one can only be built and tried on
 Linux, and one needs a file made by another program to show, and a saved value to fix. Each fix has a line in the
-[changelog](changelog.md), under "The known bugs". 189, a test that fails in some runs of a release build, was seen the day after
-(2026-11-17).
+[changelog](changelog.md), under "The known bugs".
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -62,14 +61,3 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
-
-## Tests
-
-- **189. `tests/DawProjectTests.cpp` cancels an import "once its branch is made" and fails in some runs of a release
-  build** (seen once, 2026-11-17, in "Changed in another DAW and imported back: a branch from its version with just those
-  changes, which merges"; "A DAWproject imported back unpacks its audio off the message thread, and one cancelled
-  leaves none of it" waits the same way): the tests' wait hands on every message that is waiting before it looks
-  again, so a fast build reads the switch and takes it in within the same turn, and the import is done before
-  `cancelReading()` is called. The cancel isn't at fault. To fix: a seam that holds the history's reads after a count
-  of them (as `holdReadsForTests` holds them all), so that the test lets the commit's read and the split through,
-  holds the switch's, cancels, and lets go.

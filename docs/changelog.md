@@ -26,6 +26,9 @@ CLAUDE.md ("Checks by stage", "Agents").
   on no screen got some on GitHub's Windows runners and scrolls by hand then waited for one in the middle of a test;
   the golden project is saved as the app saves, once its plug-ins have given their states (known bug 188); a take is
   written as far as its first click before its drive fills; and three lines that GCC refuses and MSVC and Clang don't.
+- **189 An import cancelled once its branch is made:** two tests of it failed in some runs of a release build, the
+  import done before the cancel; they hold the history's read of the switch where it starts (a seam that lets a count
+  of reads start first).
 
 ## The known bugs (from 2026-11-15)
 
