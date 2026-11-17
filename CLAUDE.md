@@ -155,6 +155,26 @@ The code is layered so that the UI can change without touching the rules of edit
 - `tests/PerformanceGateTests.cpp` counts the work an edit makes (plans compiled, components, repaints, allocations) in every ctest run, so a change that makes Phazite do more per edit fails it on any machine; lower its counts with a change that does less. The benchmark gates (`--test-suite=benchmark-gate`) and the long run (`--test-suite=long-run`) run nightly (`.github/workflows/nightly.yml`), not in ctest.
 - The golden tests (`--test-suite=golden`) compare what Phazite saves, plays, ships as presets and registers as commands, and the formats' test vectors, with committed files (`tests/golden/`, `resources/presets/`). A refactoring must leave them as they are: if one fails, the behaviour changed, so fix the code. When a change is meant to alter them (a new or renamed project property, a new sound), run that suite with the environment variable PHAZITE_UPDATE_GOLDEN=1 (never in CI), read `git diff tests/golden` (and `resources/presets`) in full, and say in the commit message why they changed. Golden renders never use anything random.
 
+## Checks by stage
+
+Every check runs before a change reaches `main`, each once, at the stage that needs it (the owner's decision, 2026-11-17: a round that ran the whole ctest for every agent and every commit, six agents building at once, and pushed nothing for 36 commits spent a third of its time waiting on builds and tests, and CI then found what none of them could: GCC's own warnings and tests that fail only in the release build).
+- While changing code: build `phazite_tests` and run the test files of what changed (`ctest --preset windows-debug -R "<Name>Tests"`, or the test program with `--source-file=*<Name>*`), not the whole ctest.
+- Before handing a change over: those files, the nets its kind needs ("Before reporting work as done"), `sh tools/check-architecture.sh` and `sh tools/format.sh --check`.
+- Before a batch of changes is committed to the work branch: one whole build and `ctest --preset windows-debug`, with no other build or test running on the PC. A change of docs alone needs neither.
+- Work goes on a branch, pushed every few commits so that CI builds it on every preset (a compile error shows there in 10 to 15 minutes, the whole run in 35 to 50); don't wait for it, read it when the next batch is ready. `main` moves only by fast-forward to a commit whose CI run passed, and when the owner asks for it.
+- A test that fails in some runs is fixed before other work, or entered in `docs/known-bugs.md` the same day: every later run pays for it.
+- Benchmarks run only for performance work, before and after, on a quiet machine, with `main` built beside the branch: the numbers on `docs/performance.md` are a record, not a baseline.
+
+## Agents
+
+- An orchestrator runs at most three agents that build at once on this PC (8 cores): more make every build slower and the timing tests fail.
+- A fix agent builds `--target phazite_tests` and runs its area's test files and nets, never the whole ctest; the orchestrator runs that once for the batch.
+- A brief names the files and the bugs in scope. An agent reports what else it finds instead of fixing it, unless it is small and in its own files.
+- A fix that still fails after three attempts, or a review that still blocks after three rounds, is reported with what is known: the sound part is committed and the rest entered as a known bug.
+- Every change is read by one reviewer agent before it merges; a second read covers only what a blocking finding changed.
+- A test that fails beside other builds and passes alone is reported as that, not investigated by the agent.
+- Agents commit and push nothing; the orchestrator commits, and pushes work branches.
+
 ## Committing
 
 The repository will be public on GitHub, and a commit stays in its history even after a later commit deletes the file. The user's rule: nothing confidential may ever reach the remote. Before every commit:
@@ -165,11 +185,11 @@ The repository will be public on GitHub, and a commit stays in its history even 
 - Stage a new or changed hook with `git add --chmod=+x .githooks/<name>`: Windows records no executable bit, and git on Linux and macOS silently skips a hook without it. `git ls-files -s .githooks` must show mode 100755.
 - In WSL/Linux the hooks need gitleaks 8.19 or newer from its GitHub releases (Ubuntu's own package is 8.16) and `git config core.hooksPath .githooks` once per clone.
 - Commit messages: write them to a file and use `git commit -F <file>`. Windows PowerShell 5.1 splits a `-m` argument at embedded double quotes.
-- Never add a remote or push unless the user asks.
+- Work branches may be pushed without asking (the owner, 2026-11-17), after the diff of every commit on them was read as above. Never push `main`, push a tag, force a push or add a remote unless the user asks.
 
 ## Before reporting work as done
 
-- Build `windows-debug` (and `windows-profile` or `windows-release` for performance-related work), run `ctest --preset windows-debug` and `sh tools/check-architecture.sh`, and report the commands, their exit codes and any warnings or failing tests.
+- Build `windows-debug` (and `windows-profile` or `windows-release` for performance-related work), run `ctest --preset windows-debug` and `sh tools/check-architecture.sh`, once for the batch ("Checks by stage"), and report the commands, their exit codes and any warnings or failing tests, and the state of CI's run on the branch's head.
 - The nets a change must keep whole (`tests/README.md`, "The nets"): a new model command is run in the command script (`tests/CommandGoldenTests.cpp`), or listed in `getCommandsNotRun()` with why; a new saved name is added to the representative golden project (`tests/GoldenProjectTests.cpp`), or to `getNamesNotInTheProject()` with why; a test of what playback promises everywhere runs at every condition (`atEveryCondition()`, `tests/PlaybackConditions.h`); a golden song that can't play live as it renders says why (`liveDiffers`); a JUCE assertion fails the test it fires in (`tests/TestMain.cpp`): fix what raises it, or list it in `allowedAssertions` with why and in `docs/juce-workarounds.md`; an edit that could make the audio thread allocate gets a scenario in the real-time audit that makes it while the song plays (`Edit` in `tests/RealtimeAuditTests.cpp`), and a real-time test waits for blocks played, never for time (`waitForBlocks()`, `tests/RealTimePlayback.h`); a tool or a gesture of an editor is tested with the mouse on an `EditorScreens.h` screen, with what happens when the song changes under it; a device that can't keep a rule of the conformance suite (`tests/DeviceConformanceTests.cpp`) gets a line in its `exceptions` table with its reason and a known bug, never a looser rule; and a change to a project is checked with `UndoCheck` (`tests/UndoCheck.h`) where its Undo could go wrong.
 - For performance-related work, run the benchmarks from `windows-profile` (`phazite_tests.exe --test-suite=benchmark --no-skip`, in `tests/Benchmarks.cpp`; ctest skips them) before and after, and update the numbers in `docs/performance.md`.
 - Commit lowered architecture budgets with the change that lowered them.
