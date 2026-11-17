@@ -4018,6 +4018,12 @@ TEST_CASE ("A close and a save that wait on a slow plug-in each go on once, for 
     juce::StringArray errors;
     session.onError = [&errors] (const juce::String& title, const juce::String&) { errors.add (title); };
     session.onNotice = [] (const juce::String&, const juce::String&) {};
+
+    // No question in a window of JUCE's as it closes below: the slow plug-in's settings, coming in late on a slow build,
+    // can leave the project with an unsaved change, and a session given no answer asks in a real window (in which JUCE read
+    // a display that a machine without one hasn't: UBSan, CI's linux-asan, 2026-11-17).
+    session.askToSave = [] (const juce::File&, const juce::String&, std::function<void (phazite::ProjectSession::UnsavedChanges)> answer)
+    { answer (phazite::ProjectSession::UnsavedChanges::discard); };
     session.setAutoSave (false);
     phazite::test::RenderHost host;
     phazite::CommandRegistry registry;

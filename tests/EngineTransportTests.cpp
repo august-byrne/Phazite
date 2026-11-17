@@ -1016,6 +1016,10 @@ TEST_CASE ("A jump while the reading thread waits has the place it lands in read
     REQUIRE (phazite::test::dispatchMessagesUntil ([&reads, landing] { return reads.findReadTime (landing).has_value(); }));
     MESSAGE ("the reading thread read where a jump lands " << *reads.findReadTime (landing) - asked << " ms after it was asked for");
 
+    // And has handed it on: the reader returned, the thread still has the chunk to give the file, and a slow build played
+    // three blocks of silence before it had (ThreadSanitizer's, CI, 2026-11-17).
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&file] { return file->isRead (40 * (std::int64_t) rate); }));
+
     // Then the clip is silent for the jump's fade alone: from where the jump is taken, its fade in (3 ms) at most, never a
     // block of silence while its file is read.
     while (player.getLocatesTaken().load() != player.getLocatesAsked())

@@ -1133,5 +1133,8 @@ TEST_CASE ("The clock a test held runs on from where it stood as it is let go, n
     const auto heldAt = Clock::getMilliseconds();
     REQUIRE (Clock::advance (60000.0));
     Clock::release();
-    CHECK (Clock::getMilliseconds() >= heldAt + 60000.0);
+
+    // To a hundredth of a millisecond: the clock counts whole ticks, so a minute moved on can come out a part of a tick
+    // short in milliseconds (it did once, on CI's Clang build, 2026-11-17, the two numbers alike to six digits).
+    CHECK (Clock::getMilliseconds() >= heldAt + 60000.0 - 0.01);
 }
