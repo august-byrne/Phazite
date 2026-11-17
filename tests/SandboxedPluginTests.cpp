@@ -644,7 +644,7 @@ TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of it
 
 TEST_CASE ("What a plug-in in a helper tells of itself that changes nothing is no unsaved change: a VST3's restart, values again")
 {
-    // The owner, 2026-11-08: an idle project asked to save its changes as Phazite closed, with none in Source Control.
+    // The owner, 2026-11-08: an idle project asked to save its changes as Phazite closed, with none in the Versions view.
     SandboxedPlugins sandboxed;
     TestSong song;
     const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
@@ -3356,8 +3356,8 @@ TEST_CASE ("A command that reads the plug-ins' states runs once one changed in i
     CHECK (getStoredLevel (getSong (song), phazite::getEffects (song.context, copy)[0].id) == doctest::Approx (0.5f));
     phazite::undo (getSong (song));
 
-    // Turned again, and committed at once (Source Control's commands, as the app's session adds them, saving as it saves):
-    // the commit holds it, and Source Control shows nothing left to commit.
+    // Turned again, and a version saved at once (the versions' commands, as the app's session adds them, saving as it saves):
+    // the version holds it, and the Versions view shows nothing left to save.
     phazite::test::RenderHost renders;
     phazite::addVersionCommands (song.commands, song.context, song.save, renders);
     const auto commit = [&]
@@ -4367,10 +4367,10 @@ TEST_CASE ("A command's wait offers to go on without the plug-ins or to drop the
     }
 }
 
-TEST_CASE ("A preset loaded or a chain duplicated or a change staged straight after a change in a plug-in's window holds it")
+TEST_CASE ("A preset loaded or a chain duplicated or a version saved straight after a change in a plug-in's window holds it")
 {
     // The review of known bug 166: these went around the gate: a preset's load stored what the plug-in gave last, so its
-    // Undo lost the change; a chain's copy and a staged change held the state before.
+    // Undo lost the change; a chain's copy held the state before.
     SandboxedPlugins sandboxed;
     TestSong song;
     const auto track = song.firstTrack;
@@ -4399,7 +4399,7 @@ TEST_CASE ("A preset loaded or a chain duplicated or a change staged straight af
     phazite::undo (opened);
     CHECK (getStoredLevel (opened, slow) == doctest::Approx (0.75f));
 
-    // A change staged at once, as the Stage button does (its command): the staged song holds the turned state.
+    // A version saved at once, as Save Version does (its command): it waits for the state, and records the turned one.
     phazite::test::RenderHost renders;
     phazite::addVersionCommands (song.commands, song.context, song.save, renders);
     REQUIRE (phazite::test::waitForVersionHistory (song.context));
@@ -4408,12 +4408,12 @@ TEST_CASE ("A preset loaded or a chain duplicated or a change staged straight af
 
     {
         SlowGate gate;
-        phazite::selectChange (song.context, phazite::getChangesSinceLastVersion (song.context).front());
-        song.run ("version.stage");
+        song.run ("version.save");
         CHECK (song.commands.isWaitingForPluginStates());
     }
 
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getStagedChanges (song.context).empty(); }, longWait));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! phazite::isSavingVersion (song.context) && ! phazite::hasChangesSinceLastVersion (song.context); }, longWait));
     CHECK (getStoredLevel (opened, slow) == doctest::Approx (0.125f));
 
     // Grouped into a container, turned, and its chain duplicated at once: the copy holds the turned state.
@@ -4499,7 +4499,7 @@ TEST_CASE ("A branch merged from the branch picker straight after a change in a 
         CHECK (phazite::getMergeLines (song.context).empty());
     }
 
-    // The merge's lines, to tick, listed (Source Control's merge window), its clashes found against the turned state.
+    // The merge's lines listed (the Versions view's merge list), its clashes found against the turned state.
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getMergeLines (song.context).empty(); }, longWait));
     CHECK (getStoredLevel (getSong (song), slow) == doctest::Approx (0.75f));
 }

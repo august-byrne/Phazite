@@ -135,7 +135,7 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     CHECK (phazite::findChanges (then, song.getState()).empty());
     CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
-    CHECK (phazite::describeUndo (&song) == "Undo Restore from \"Verse\"");
+    CHECK (phazite::describeUndo (&song) == "Undo Restore \"Verse\"");
     CHECK (phazite::getVersions (s.context).size() == 2); // the history keeps every commit, the initial one too
 
     // Undo takes it all back, in one step.
@@ -289,11 +289,6 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
     checkIDs (song);
     CHECK (phazite::getClips (song, bass).empty());
     CHECK (phazite::getClips (song, keys) == std::vector { clip });
-
-    // Keys' line staged alone: what is staged holds the clip once too, on Keys.
-    REQUIRE (phazite::stageChange (s.context, *findLine (phazite::getListedChanges (s.context), "Keys")));
-    checkUniqueIDs (phazite::getVersionHistory (s.context)->getStagedSong());
-    phazite::unstageAllChanges (s.context);
 
     // Committed on Keys, then Bass restored from the commit before: the clip is on Bass, once.
     keepVersion (s.context, "Moved");
@@ -491,7 +486,7 @@ TEST_CASE ("The commands bring back the version selected, and put back the line 
 
     CHECK_FALSE (commands.invoke ("version.bringBack")); // nothing selected
     phazite::selectVersion (s.context, first);
-    CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Restore from \"First\"");
+    CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Restore \"First\"");
     CHECK_FALSE (phazite::canTakeFrom (s.context)); // it is the last version: its changes are listed already
     REQUIRE (phazite::test::finished (s.context, [&] { return commands.invoke ("version.bringBack"); }));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));

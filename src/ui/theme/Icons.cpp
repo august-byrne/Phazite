@@ -128,8 +128,6 @@ namespace
                 return "ellipsis.svg";
             case Icon::song:
                 return "file-music.svg";
-            case Icon::minus:
-                return "minus.svg";
             case Icon::menu:
                 return "menu.svg";
             case Icon::undo:

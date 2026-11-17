@@ -1463,7 +1463,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/ValueTextTests.cpp
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
-        tests/VersionsCheckoutTests.cpp
         tests/VersionsFolderCopyTests.cpp
         tests/VersionsGoingBackTests.cpp
         tests/VersionsHearingTests.cpp

@@ -492,30 +492,45 @@ TEST_CASE (
     }
 }
 
-TEST_CASE ("A computer's record of a commit checked out on its own names the branch it came from, and other computers leave it out")
+TEST_CASE ("A branch's name is kept as typed, spaces and all, in its record's file, which is named by its id")
+{
+    TemporaryFolder temporary;
+    phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+    auto branch = makeBranch ("Half time  feel / take 2", juce::Colours::red, "a");
+    REQUIRE (store.writeBranch (branch));
+
+    const auto read = store.readBranches();
+    REQUIRE (read.size() == 1);
+    CHECK (read[0].name == "Half time  feel / take 2");
+    CHECK (read[0].id == branch.id);
+    CHECK (read[0].others.isEmpty());
+    CHECK (getVersionsFolder (temporary).getChildFile ("branches").getChildFile (branch.id).isDirectory());
+}
+
+TEST_CASE ("A branch's name read from a record anyone may have written is made as a typed one is, and is never empty")
 {
     std::map<juce::String, phazite::VersionRecord> versions;
     phazite::VersionRecord version;
     version.id = "a";
     versions.emplace (version.id, version);
 
-    auto main = makeBranch ("main", juce::Colours::red, "a");
-    auto checkout = makeBranch ({}, juce::Colours::red, "a");
-    checkout.detachedFrom = main.id;
+    auto broken = makeBranch ("Verse\nidea\t2" + juce::String::repeatedString ("x", 200), juce::Colours::red, "a");
+    auto empty = makeBranch (juce::String::charToString (0x200b) + "  ", juce::Colours::blue, "a");
+    const auto joined = phazite::joinBranchRecords ({ broken, empty }, versions, thisComputer);
+    REQUIRE (joined.size() == 2);
 
-    CHECK (phazite::joinBranchRecords ({ main, checkout }, versions, thisComputer).size() == 2);
-    const auto elsewhere = phazite::joinBranchRecords ({ main, checkout }, versions, "another computer");
-    REQUIRE (elsewhere.size() == 1);
-    CHECK (elsewhere[0].id == main.id);
-
-    // Its file keeps it (Schema.h: branchDetachedFrom).
-    TemporaryFolder temporary;
-    phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
-    REQUIRE (store.writeBranch (checkout));
-    const auto read = store.readBranches();
-    REQUIRE (read.size() == 1);
-    CHECK (read[0].detachedFrom == main.id);
-    CHECK (read[0].others.isEmpty());
+    for (const auto& branch : joined)
+    {
+        if (branch.id == broken.id)
+        {
+            CHECK (branch.name.startsWith ("Verse idea 2xxx"));
+            CHECK (branch.name.length() == phazite::maxBranchName);
+        }
+        else
+        {
+            CHECK (branch.name == "branch");
+        }
+    }
 }
 
 TEST_CASE ("A branch's log on this computer keeps each move of its last version, and leaves out a line a crash cut off")

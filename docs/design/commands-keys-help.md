@@ -62,7 +62,7 @@ transport bar and the keys.
 
 | Menu | Holds |
 | --- | --- |
-| File | New, Open, Import DAWproject, Open Recent; Save, Save As, Auto Save, Commit; Export Song, Export as DAWproject; Clean Up Unused Audio; Quit |
+| File | New, Open, Import DAWproject, Open Recent; Save, Save As, Auto Save, Save Version; Export Song, Export as DAWproject; Clean Up Unused Audio; Quit |
 | Edit | Undo and Redo; Cut, Copy, Paste; Delete, Duplicate, Duplicate as Alias, Rename; Select All, Deselect All; Quantize, Consolidate; **Notes** (the piano roll's edits of the selected notes); **Tracks** (colour, mute, solo, folders, order); Insert Time, Remove Time |
 | Add | A track, a folder, a return track; a section; **Song Outline**; Chord Progressions; a tempo change |
 | View | Showing and hiding the left panel, the song, the editor and the inspector; the browser, the project and the versions; **Panels** (maximize, detach, the layouts, focus mode); full screen; the piano roll and the mixer; **Zoom**; **Playback** (the start and end, centring on and following the playhead, scrolling continuously, the loop); **Grid**; **Tracks** (heights, collapsing, pinning); **Interface Size** |
@@ -190,7 +190,7 @@ used last.
   nothing to the dialog's fields.
 - Enter and Escape in the inspector's names let the keys go too, after the name changes.
 - Showing a view never puts the cursor in a field: the browser's icon gives the browser the keys, not its search
-  (Ctrl+F or a click does that), and the Source Control icon gives the view the keys, not the commit's message.
+  (Ctrl+F or a click does that), and the Versions icon gives the view the keys, not the version's name field.
 
 ## The computer keyboard plays notes
 
@@ -242,7 +242,7 @@ Ctrl+X, Ctrl+C and Ctrl+V in every keymap, in the Edit menu, and in the clips', 
 - Every command that changes the project is one named undo step ("Split", "Apply Outline: Pop"), and so is every
   edit the window asks the model for. A drag is one step, opened when it starts and kept when it ends.
 - The window never starts an undo step itself ([architecture.md](../architecture.md)).
-- **Undo History,** at the foot of the Source Control view ([versions.md](versions.md)), lists the song's undo
+- **Undo History,** at the foot of the Versions view ([versions.md](versions.md)), lists the song's undo
   steps; a click goes back or forth to one.
 - In FL Studio's keymap Ctrl+Z is **Undo or Redo**, which undoes the last change or redoes it, and Ctrl+Alt+Z undoes
   step by step.
@@ -319,7 +319,7 @@ Help > Lessons, and the welcome window's last page, start one of five short less
 - `src/model/commands/CommandRegistry.h`: the commands, their search, and `addMacro()`;
   `src/model/commands/internal/Undo.h`: undo steps, gestures and `undo()` / `redo()`;
   `src/model/commands/SongGesture.h`: a drag's one step, as the window's tools hold it;
-  `src/model/commands/UndoHistory.h`: the history as the Source Control view lists it.
+  `src/model/commands/UndoHistory.h`: the history as the Versions view lists it.
 - `src/ui/input/CommandBridge.h`, `KeyDispatcher.h`, `CommandUI.h`: the commands as menus and keys reach them, the
   keys' priorities, and menu items that show shortcuts.
 - `src/ui/input/Keymap.h`, `KeymapStore.h`; `resources/keymaps/phazite.json`, `fl_studio.json`, `ableton_live.json`.

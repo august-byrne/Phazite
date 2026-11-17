@@ -18,7 +18,7 @@ namespace phazite
 struct UnusedAudioLook
 {
     juce::File projectFile;
-    juce::StringArray songPaths;                   // what the song and what is staged for the next commit play now
+    juce::StringArray songPaths;                   // what the song plays now
     VersionHistory::AudioPathsFinder versionPaths; // what its versions play (VersionHistory.h), none for none
     int projectNumber = 0;
 
@@ -49,16 +49,10 @@ namespace
         return files;
     }
 
-    // What the song plays and what is staged for the next commit (a line staged keeps its track as it was then: Commit
-    // records it, its files too).
+    // What the song plays.
     juce::StringArray findSongPaths (const ProjectContext& context)
     {
-        auto paths = findAudioFilePaths (findSong (context)->getState());
-
-        if (const auto* history = getVersionHistory (context); history != nullptr && history->getStagedSong().isValid())
-            paths.addArray (findAudioFilePaths (history->getStagedSong()));
-
-        return paths;
+        return findAudioFilePaths (findSong (context)->getState());
     }
 
     // What the saved files play, each read again only once it changed since the last look; what is kept of one gone since
@@ -151,7 +145,7 @@ juce::String getWhyNotCleanUpAudio (const ProjectContext& context)
         return "Phazite is still reading the project's versions.";
 
     if (history != nullptr && history->isWriting())
-        return "Not while a commit or a snapshot of Local History is being written: it may hold files the Versions folder "
+        return "Not while a version or a snapshot of Local History is being written: it may hold files the Versions folder "
                "doesn't name yet.";
 
     return {};
@@ -189,7 +183,7 @@ int deleteUnusedAudio (ProjectContext& context, const UnusedAudio& found, const 
     if (history != nullptr && history->findVersionsAudioKey() != found.versionsKey)
         return refuse ("The versions changed since Clean Up looked: it looks again.");
 
-    // What must be fresh, looked at again now: the song, what is staged, and the saved files.
+    // What must be fresh, looked at again now: the song and the saved files.
     UnusedAudioLook again;
     again.projectFile = findSong (context)->getFile();
     auto paths = findSongPaths (context);

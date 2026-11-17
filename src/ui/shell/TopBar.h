@@ -96,7 +96,7 @@ private:
     int shownKeyboardState = -1;          // what the keyboard button shows, to update it only on changes
     juce::uint32 shownKeyboardLayout = 0; // and the layout its tooltip names the keys of (KeyboardLayout::getFingerprint())
 
-    // A/B (version.compare): a press hears the last commit's bounce in place of the song, at the same point and as loud, and
+    // A/B (version.compare): a press hears the last version's bounce in place of the song, at the same point and as loud, and
     // another the song again; lit while it is heard, or bounced to be. And beside it what is heard ("Hearing: Verse 2"), or
     // bounced to be, while that isn't the song: nothing hidden.
     juce::TextButton compareButton { "A/B" };

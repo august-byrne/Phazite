@@ -170,7 +170,7 @@ TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosav
     CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
 }
 
-TEST_CASE ("Clean Up keeps the audio that Local History, and the commits Recover Lost Commits brings back, still play")
+TEST_CASE ("Clean Up keeps the audio that Local History, and the versions Recover Lost Versions brings back, still play")
 {
     // Known bug 61: only the commits on branches and the songs left on branches counted, so that restoring a snapshot, or a
     // commit recovered, found its sounds deleted.
@@ -308,27 +308,6 @@ TEST_CASE ("Clean Up offers nothing while a commit's pack can't be opened, and d
     CHECK (getNames (found).isEmpty());
     CHECK (deleteUnused (s.context, { committed }) == 0);
     CHECK (committed.existsAsFile());
-}
-
-TEST_CASE ("Clean Up keeps the audio of a line staged for the next commit, which its commit records")
-{
-    // The review of known bug 61: a clip staged, then taken out of the song and the file deleted; the commit of what was
-    // staged named a file that wasn't there.
-    TestSong s;
-    const auto track = s.addTrack ("Audio");
-    keepVersion (s.context, "Before");
-    const auto clip = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Staged.wav"), 0.5), 0.0);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 1; }));
-    REQUIRE (phazite::stageChange (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
-    s.select (clip);
-    s.run ("edit.delete");
-    REQUIRE (s.getProject().save().wasOk());
-    s.getProject().getFolder().getChildFile ("Backups").deleteRecursively();
-
-    const auto staged = s.getProject().getAudioFolder().getChildFile ("Staged.wav");
-    CHECK (getNames (lookForUnused (s.context)).isEmpty());
-    CHECK (deleteUnused (s.context, { staged }) == 0);
-    CHECK (staged.existsAsFile());
 }
 
 TEST_CASE ("Clean Up reads nothing of the versions on the message thread, however many snapshots Local History keeps")

@@ -96,15 +96,9 @@ project.saveAs | ctrl + shift + S | plugin-states
 project.save | ctrl + S
 project.autoSave
 version.save | ctrl + alt + S | plugin-states
-version.undoCommit
-version.stage | plugin-states
-version.unstage
-version.stageAll | plugin-states
-version.unstageAll
+version.undoLast
 version.discardAll | plugin-states
 version.putBack | plugin-states
-version.checkout | plugin-states
-version.backToBranch | plugin-states
 version.bringBack | plugin-states
 version.takeFrom
 version.restoreChange | plugin-states

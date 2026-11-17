@@ -44,7 +44,7 @@ What every area builds on.
 | `internal/Undo.h` | Undo and redo with the undo convention: `phazite::UndoStep`, `phazite::Gesture` (a change over several events, as a drag, with `rollBack()`), `undoTargetOf()`, `withSong()`/`ifSong()`, `phazite::undo()` and `redo()`; and its Trial: what Swap tries, one step that gives way to any other change. |
 | `internal/UndoCommands.h` | Undo, redo and FL Studio's undo-or-redo, for the selection's song. |
 | `SongGesture.h` | A drag's one step for the open project, as the UI's tools hold it. |
-| `UndoHistory.h` | The undo history as Source Control lists it, with a step gone back or forth to. |
+| `UndoHistory.h` | The undo history as the Versions view lists it, with a step gone back or forth to. |
 
 ## devices/
 
@@ -211,7 +211,7 @@ The project's versions ([docs/design/versions.md](../../docs/design/versions.md)
 | `internal/SongDiff.h` | What differs between two songs, by track, in Phazite's own words. |
 | `internal/ApplySong.h` | The song made like a version, or a line of it, with the fewest edits. |
 | `internal/SongMerge.h` | The three-way merge of two lines by IDs, with its clashes. |
-| `internal/VersionHistory.h` | The open song's history, which the project context makes for each song: its branches and the merge being made, with Verify History and Recover Lost Commits, Undo Last Commit, Delete Branch, the commits' messages edited beside them, and Local History. |
+| `internal/VersionHistory.h` | The open song's history, which the project context makes for each song: its branches and the merge being made, with Verify History and Recover Lost Versions, Undo Last Version, Delete Branch, the versions' names edited beside them, and Local History. |
 | `VersionsModel.h` | What the UI reaches, by plain values and IDs. |
 
 ## playback/

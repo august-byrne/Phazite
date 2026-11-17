@@ -51,20 +51,10 @@ struct Sides
         theirs = phazite::makeSong (base->getState().createCopy());
     }
 
-    // The other side's changes, every line of them, merged into this side's.
+    // The other side's changes, every line of them (a merge takes them all), merged into this side's.
     phazite::MergeResult merge()
     {
-        phazite::MergeLines lines;
-
-        for (const auto& change : phazite::findChanges (base->getState(), theirs->getState()))
-        {
-            if (change.where == phazite::SongChange::Where::song)
-                lines.songOwn = true;
-            else
-                lines.tracks.insert (change.trackID);
-        }
-
-        return phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), lines, [this] { return ours->makeID(); });
+        return phazite::mergeSongs (base->getState(), ours->getState(), theirs->getState(), [this] { return ours->makeID(); });
     }
 };
 
@@ -405,14 +395,8 @@ TEST_CASE ("A line merged again after a merge gave its additions new IDs merges 
     phazite::translateIDs (theirs, first.renumbered);
     CHECK (findTrack (theirs, "Pad 2")[schema::trackID] == padID);
 
-    phazite::MergeLines lines;
-
-    for (const auto& change : phazite::findChanges (base, theirs))
-        if (change.where != phazite::SongChange::Where::song)
-            lines.tracks.insert (change.trackID);
-
     auto ours = phazite::makeSong (first.song.createCopy());
-    const auto second = phazite::mergeSongs (base, ours->getState(), theirs, lines, [&ours] { return ours->makeID(); });
+    const auto second = phazite::mergeSongs (base, ours->getState(), theirs, [&ours] { return ours->makeID(); });
 
     CHECK (second.clashes.empty());
     CHECK (findTrack (second.song, "Lead")[schema::trackID] == ourTrack[schema::trackID]);
@@ -708,18 +692,16 @@ TEST_CASE ("A clip moved onto another track on one side and changed on the other
         CHECK (merged.notes.isEmpty());
     }
 
-    // Moved there, and only the line of the track it left taken: it stays where it is here, rather than on neither track.
+    // Moved there and nothing else changed: the merge takes both tracks' lines, never one alone, so it is on Drums, once
+    // (the audit's case for a merge of some lines: the clip on neither track, or on both).
     {
         Sides sides;
         phazite::moveClip (*sides.theirs, sides.clip, at (4.0), sides.tracks[1]);
-        phazite::MergeLines lines;
-        lines.tracks.insert (sides.tracks[0].getRaw());
-
-        const auto merged = phazite::mergeSongs (sides.base->getState(), sides.ours->getState(), sides.theirs->getState(), lines,
-                                                 [&sides] { return sides.ours->makeID(); });
+        const auto merged = sides.merge();
         checkIDs (merged.song);
         CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
-        CHECK (clipOf (merged.song, "Bass").isValid());
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        CHECK_FALSE (clipOf (merged.song, "Bass").isValid());
     }
 
     // Moved on both sides, to different tracks: where this side put it, with a note.

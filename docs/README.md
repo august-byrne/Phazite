@@ -12,7 +12,7 @@ map of the layers is [architecture.md](architecture.md).
   latest release's `phazite-update.json`. It keeps its own pictures of the window and its parts, which the tests'
   `site-pictures` suite paints into it. The pages are Markdown with Starlight's front matter
   (title, description, sidebar order) and relative links, which the site turns into its own pages or GitHub's. Each
-  page's `description` says what it covers, from getting started to the keys, the views, recording, source control,
+  page's `description` says what it covers, from getting started to the keys, the views, recording, versions,
   troubleshooting, the FAQ and privacy.
 - [building.md](building.md): the build in full, on Windows and Linux, with the installer and troubleshooting.
 - [images/](images/): the README's picture of the window (`phazite.png`, painted by the tests' `readme-picture` suite)

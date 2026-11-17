@@ -1059,7 +1059,7 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   known bug 123), and a key typed in the browser's search looks through none of the library there
   (`Library::getItemsSearchedOnMessageThread()`, in `tests/BrowserTests.cpp`; known bug 128), nor does a filter's menu
   as it counts what it offers (in `tests/BrowserFilterTests.cpp`).
-- a branch switch, a checkout, going back to the branch, the start of a merge and Merge read, split and write no song on
+- a branch switch, a whole version's restore, the start of a merge and Merge read, split and write no song on
   the message thread (`VersionStore::countSongsRead()`, `countSongsWritten()`, `countSongsSplit()`; known bug 126).
 - a stopped song's devices work no block once their sound has ended, each of Phazite's own (an instrument alone, an
   effect after a synth, and a reverb an LFO modulates): none in a second as the song opens, nothing played, and none in

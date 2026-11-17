@@ -155,7 +155,7 @@ namespace
     // beside the song's own, unseen (as a merge refuses such a commit).
     juce::String idsTwiceRefusal()
     {
-        return "Nothing was restored: that commit holds an ID twice, or IDs too large to count on from, which no Phazite writes "
+        return "Nothing was restored: that version holds an ID twice, or IDs too large to count on from, which no Phazite writes "
                "(another tool wrote it), so what it holds can't be told from what the song has.";
     }
 
@@ -186,7 +186,7 @@ namespace
         // kept in Local History first. The plug-ins' own settings as they are now, to tell which differ from the commit's:
         // only those are set again.
         keepSongBefore (*history, "restore");
-        const UndoStep step (*song, "Restore from \"" + getDisplayName (*version) + "\"");
+        const UndoStep step (*song, "Restore \"" + getDisplayName (*version) + "\"");
         song->storeDeviceStates();
         const auto curves = findCurves (*song);
         makeSongLike (*song, read.song);
@@ -263,16 +263,7 @@ std::optional<BranchInfo> getCurrentBranch (const ProjectContext& context)
     if (const auto* history = findHistory (context))
     {
         if (const auto* branch = history->findCurrentBranch())
-        {
-            // A commit checked out on its own: no branch, named as the commit is.
-            auto info = toInfo (*branch);
-            info.detached = branch->detachedFrom.isNotEmpty();
-
-            if (const auto* version = info.detached ? history->findVersion (branch->head) : nullptr)
-                info.name = getDisplayName (*version);
-
-            return info;
-        }
+            return toInfo (*branch);
     }
 
     return std::nullopt;
@@ -289,10 +280,9 @@ std::optional<VersionInfo> getLastVersion (const ProjectContext& context)
 
 namespace
 {
-    VersionChange toLine (const SongChange& change, bool staged = false)
+    VersionChange toLine (const SongChange& change)
     {
         VersionChange line;
-        line.staged = staged;
         line.kind = change.kind == SongChange::Kind::added     ? VersionChange::Kind::added
                     : change.kind == SongChange::Kind::removed ? VersionChange::Kind::removed
                                                                : VersionChange::Kind::changed;
@@ -319,12 +309,12 @@ namespace
         return change;
     }
 
-    std::vector<VersionChange> toLines (const std::vector<SongChange>& changes, bool staged = false)
+    std::vector<VersionChange> toLines (const std::vector<SongChange>& changes)
     {
         std::vector<VersionChange> lines;
 
         for (const auto& change : changes)
-            lines.push_back (toLine (change, staged));
+            lines.push_back (toLine (change));
 
         return lines;
     }
@@ -342,51 +332,10 @@ bool hasChangesSinceLastVersion (const ProjectContext& context)
     return history != nullptr && history->hasChanges();
 }
 
-std::vector<VersionChange> getStagedChanges (const ProjectContext& context)
-{
-    auto* history = findHistory (context);
-    return history != nullptr ? toLines (history->getStagedChanges(), true) : std::vector<VersionChange>();
-}
-
 int countChanges (const ProjectContext& context)
 {
-    // Each thing once, staged, changed since, or both.
     auto* history = findHistory (context);
-
-    if (history == nullptr)
-        return 0;
-
-    std::set<std::pair<int, std::uint64_t>> things;
-
-    for (const auto* list : { &history->getChanges(), &history->getStagedChanges() })
-        for (const auto& change : *list)
-            things.insert ({ (int) change.where, change.trackID });
-
-    return (int) things.size();
-}
-
-bool stageChange (ProjectContext& context, const VersionChange& line)
-{
-    auto* history = findHistory (context);
-    return history != nullptr && history->stage (fromLine (line));
-}
-
-bool unstageChange (ProjectContext& context, const VersionChange& line)
-{
-    auto* history = findHistory (context);
-    return history != nullptr && history->unstage (fromLine (line));
-}
-
-void stageAllChanges (ProjectContext& context)
-{
-    if (auto* history = findHistory (context))
-        history->stageAll();
-}
-
-void unstageAllChanges (ProjectContext& context)
-{
-    if (auto* history = findHistory (context))
-        history->unstageAll();
+    return history != nullptr ? (int) history->getChanges().size() : 0;
 }
 
 bool discardAllChanges (ProjectContext& context)
@@ -394,15 +343,14 @@ bool discardAllChanges (ProjectContext& context)
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    if (song == nullptr || history == nullptr || ! history->getStagedSong().isValid() || history->getChanges().empty())
+    if (song == nullptr || history == nullptr || ! history->getLastVersionSong().isValid() || history->getChanges().empty())
         return false;
 
-    // A change of its own, one undo step, as git restore makes the working tree the index again; Local History keeps what
-    // goes.
+    // A change of its own, one undo step: the song made the last version's again; Local History keeps what goes.
     keepSongBefore (*history, "discard");
     const UndoStep step (*song, "Discard All Changes");
     song->storeDeviceStates();
-    makeSongLike (*song, history->getStagedSong());
+    makeSongLike (*song, history->getLastVersionSong());
     removeBrokenReferences (*song);
     return true;
 }
@@ -429,32 +377,41 @@ juce::String getThisComputer()
 
 juce::String toBranchName (const juce::String& typed)
 {
-    // Spaces as dashes, and only what a ref can hold (git check-ref-format).
+    // As typed, spaces and all: a branch is stored by its id, its name only a value in its record, so a name needs nothing
+    // more than what any text field's line holds. Each run of white space (a tab, a line break pasted) one space; no control
+    // characters, nor the format characters that change how text around them shows without showing themselves (zero-width
+    // ones, bidirectional marks and overrides, the byte order mark); and at most maxBranchName characters.
+    const auto isFormat = [] (juce::juce_wchar c)
+    {
+        return c == 0xad || c == 0x61c || c == 0x180e || (c >= 0x200b && c <= 0x200f) || (c >= 0x202a && c <= 0x202e)
+               || (c >= 0x2060 && c <= 0x206f) || c == 0xfeff;
+    };
+
     juce::String name;
+    auto space = false;
 
     for (const auto c : typed.trim())
     {
+        if (name.length() >= maxBranchName)
+            break;
+
         if (juce::CharacterFunctions::isWhitespace (c))
-            name << '-';
-        else if (c >= 32 && c != 127 && juce::String ("~^:?*[\\").indexOfChar (c) < 0)
-            name << juce::String::charToString (c);
+        {
+            space = true;
+            continue;
+        }
+
+        if (c < 32 || (c >= 127 && c < 160) || isFormat (c))
+            continue;
+
+        if (space && name.isNotEmpty())
+            name << ' ';
+
+        space = false;
+        name << juce::String::charToString (c);
     }
 
-    while (name.contains ("--"))
-        name = name.replace ("--", "-");
-
-    while (name.contains (".."))
-        name = name.replace ("..", ".");
-
-    while (name.contains ("//"))
-        name = name.replace ("//", "/");
-
-    name = name.replace ("@{", "@").trimCharactersAtStart ("-./").trimCharactersAtEnd ("./");
-
-    while (name.endsWithIgnoreCase (".lock"))
-        name = name.dropLastCharacters (5).trimCharactersAtEnd ("./");
-
-    return name;
+    return name.substring (0, maxBranchName).trimEnd();
 }
 
 void setVersionDraft (ProjectContext& context, const juce::String& name, const juce::String& note)
@@ -485,7 +442,7 @@ bool saveVersion (ProjectContext& context, std::function<void (juce::Result)> do
     if (history == nullptr)
     {
         if (done != nullptr)
-            done (juce::Result::fail ("This song isn't a project's, so it keeps no commits."));
+            done (juce::Result::fail ("This song isn't a project's, so it keeps no versions."));
 
         return false;
     }
@@ -529,8 +486,7 @@ bool canSaveVersion (const ProjectContext& context)
 bool hasSomethingToCommit (const ProjectContext& context)
 {
     auto* history = findHistory (context);
-    return history != nullptr && ! history->isReading() && ! history->isDetached()
-           && (history->getMerging().has_value() || history->hasChanges());
+    return history != nullptr && ! history->isReading() && (history->getMerging().has_value() || history->hasChanges());
 }
 
 juce::String describeNextCommit (const ProjectContext& context)
@@ -588,7 +544,7 @@ bool undoLastCommit (ProjectContext& context)
 
             if (! read.song.isValid())
                 return VersionHistory::Taken::refused (
-                    "The commit before can't be read from the Versions folder: a piece of it is damaged or missing. Verify History says what is damaged.");
+                    "The version before can't be read from the Versions folder: a piece of it is damaged or missing. Verify History says what is damaged.");
 
             const auto* lastNow = reading != nullptr ? reading->findLastVersion() : nullptr;
 
@@ -667,7 +623,7 @@ bool compareWithVersion (ProjectContext& context, const juce::String& versionID)
 
                               if (! read.song.isValid())
                                   return VersionHistory::Taken::refused (
-                                      "That commit can't be read from the Versions folder: a piece of it is "
+                                      "That version can't be read from the Versions folder: a piece of it is "
                                       "damaged or missing. Verify History says what is damaged.");
 
                               return true;
@@ -697,7 +653,7 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
     const auto then = history->getComparedSong();
     const auto* compared = history->findVersion (history->getComparedVersion());
 
-    // A change of its own, one undo step: Discard Changes, from the staged song (git restore); Restore from another commit.
+    // A change of its own, one undo step: Discard Changes, from the last version; Restore from another version.
     const UndoStep step (*song, compared != nullptr ? "Restore " + line.name + " from \"" + getDisplayName (*compared) + "\""
                                                     : "Discard Changes in " + line.name);
     song->storeDeviceStates();
@@ -819,7 +775,7 @@ namespace
                     findTrackState (*song, id).isValid() ? "\"" + getTrackName (*song, id) + "\"" : juce::String ("a track gone since");
                 history->restoreMissing.clear();
                 history->restoreRefused = "Couldn't restore " + line.name + " from \"" + getDisplayName (*version)
-                                          + "\": the commit's piece of " + name + ", which may hold it, can't be read.";
+                                          + "\": the version's piece of " + name + ", which may hold it, can't be read.";
                 history->tellNow();
                 return false;
             }
@@ -878,7 +834,7 @@ std::optional<VersionChange> getSelectedVersionChange (const ProjectContext& con
 {
     const auto* history = findHistory (context);
     return history != nullptr && history->selectedVersionChange.has_value()
-               ? std::optional<VersionChange> (toLine (*history->selectedVersionChange, true))
+               ? std::optional<VersionChange> (toLine (*history->selectedVersionChange))
                : std::nullopt;
 }
 
@@ -914,23 +870,21 @@ void selectChange (ProjectContext& context, std::optional<VersionChange> line)
     if (auto* history = findHistory (context))
     {
         history->selectedChange = line.has_value() ? std::optional<SongChange> (fromLine (*line)) : std::nullopt;
-        history->selectedChangeIsStaged = line.has_value() && line->staged;
     }
 }
 
 std::optional<VersionChange> getSelectedChange (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->selectedChange.has_value()
-               ? std::optional<VersionChange> (toLine (*history->selectedChange, history->selectedChangeIsStaged))
-               : std::nullopt;
+    return history != nullptr && history->selectedChange.has_value() ? std::optional<VersionChange> (toLine (*history->selectedChange))
+                                                                     : std::nullopt;
 }
 
 juce::String describeBringBack (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (history->selectedVersion) : nullptr;
-    return version != nullptr ? "Restore from \"" + getDisplayName (*version) + "\"" : juce::String();
+    return version != nullptr ? "Restore \"" + getDisplayName (*version) + "\"" : juce::String();
 }
 
 juce::String describePutBack (const ProjectContext& context)
@@ -955,43 +909,8 @@ bool canTakeFrom (const ProjectContext& context)
 
 bool canPutBack (const ProjectContext& context)
 {
-    // A line of the working tree's: a staged one is unstaged first, as in git.
     const auto* history = findHistory (context);
-    return history != nullptr && history->selectedChange.has_value() && ! history->selectedChangeIsStaged;
-}
-
-bool canStageSelected (const ProjectContext& context)
-{
-    const auto line = getSelectedChange (context);
-    return line.has_value() && ! line->staged && getComparedVersion (context).isEmpty();
-}
-
-bool canUnstageSelected (const ProjectContext& context)
-{
-    const auto line = getSelectedChange (context);
-    return line.has_value() && line->staged;
-}
-
-void stageSelectedChange (ProjectContext& context)
-{
-    if (const auto line = getSelectedChange (context); line.has_value() && stageChange (context, *line))
-        selectChange (context, std::nullopt);
-}
-
-void unstageSelectedChange (ProjectContext& context)
-{
-    if (const auto line = getSelectedChange (context); line.has_value() && unstageChange (context, *line))
-        selectChange (context, std::nullopt);
-}
-
-bool canStageAll (const ProjectContext& context)
-{
-    return ! getChangesSinceLastVersion (context).empty() && getComparedVersion (context).isEmpty();
-}
-
-bool canUnstageAll (const ProjectContext& context)
-{
-    return ! getStagedChanges (context).empty();
+    return history != nullptr && history->selectedChange.has_value();
 }
 
 void takeFromSelectedVersion (ProjectContext& context)
@@ -1142,68 +1061,6 @@ bool switchBranch (ProjectContext& context, const juce::String& branchID, const 
                            std::move (done));
 }
 
-bool canCheckout (const ProjectContext& context, const juce::String& versionID)
-{
-    // Whenever the song can switch, but while a merge is shown: it lists what the song would take.
-    const auto* history = findHistory (context);
-    return history != nullptr && history->findVersion (versionID) != nullptr && canSwitchBranch (context) && ! history->preview.has_value();
-}
-
-bool checkoutVersion (ProjectContext& context, const juce::String& versionID, const SaveProjectThen& saveProjectThen)
-{
-    auto* history = findHistory (context);
-
-    if (history == nullptr || ! canCheckout (context, versionID))
-        return false;
-
-    return startSwitch (context, *history, history->prepareCheckout (versionID),
-                        "Reading \"" + getDisplayName (*history->findVersion (versionID)) + "\"", saveProjectThen);
-}
-
-bool isDetached (const ProjectContext& context)
-{
-    const auto* history = findHistory (context);
-    return history != nullptr && history->isDetached();
-}
-
-bool canGoBackToBranch (const ProjectContext& context)
-{
-    return isDetached (context) && canSwitchBranch (context);
-}
-
-bool backToBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
-{
-    auto* history = findHistory (context);
-
-    if (history == nullptr || ! canGoBackToBranch (context))
-        return false;
-
-    auto plan = history->prepareBackFromDetached();
-    const auto title = plan.has_value() ? describeBranchRead (*history, plan->branchID) : juce::String();
-    return startSwitch (context, *history, std::move (plan), title, saveProjectThen);
-}
-
-juce::String describeBackToBranch (const ProjectContext& context)
-{
-    // The branch the commit was checked out from.
-    if (const auto* history = findHistory (context))
-        for (const auto& branch : history->getBranches())
-            if (branch.id == history->getDetachedFrom())
-                return "Back to " + branch.name;
-
-    return "Back to Branch";
-}
-
-void checkoutSelectedVersion (ProjectContext& context, const SaveProjectThen& saveProjectThen)
-{
-    checkoutVersion (context, getSelectedVersion (context), saveProjectThen);
-}
-
-bool canCheckoutSelected (const ProjectContext& context)
-{
-    return canCheckout (context, getSelectedVersion (context));
-}
-
 bool renameBranch (ProjectContext& context, const juce::String& branchID, const juce::String& name)
 {
     auto* history = findHistory (context);
@@ -1213,7 +1070,7 @@ bool renameBranch (ProjectContext& context, const juce::String& branchID, const 
 bool canRenameBranch (const ProjectContext& context)
 {
     const auto current = getCurrentBranch (context);
-    return current.has_value() && ! current->detached && ! isSavingVersion (context); // a commit writes its record meanwhile
+    return current.has_value() && ! isSavingVersion (context); // a version writes its record meanwhile
 }
 
 bool canDeleteBranch (const ProjectContext& context, const juce::String& branchID)
@@ -1227,8 +1084,7 @@ bool canDeleteBranch (const ProjectContext& context, const juce::String& branchI
     const auto branches = history->getBranches();
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
 
-    // Nor the one a commit checked out came from, which Back to goes to.
-    if (found == branches.end() || (current.has_value() && current->id == branchID) || branchID == history->getDetachedFrom())
+    if (found == branches.end() || (current.has_value() && current->id == branchID))
         return false;
 
     // Not while a merge of its line shows, nor while a merge waiting (here, or on another branch) took in a commit that only
@@ -1259,24 +1115,24 @@ juce::String describeBranchDeletion (const ProjectContext& context, const juce::
     const auto only = history->countVersionsOnlyOn (branchID);
 
     if (only > 0)
-        parts.add (juce::String (only) + (only == 1 ? " commit" : " commits") + " that no other branch has");
+        parts.add (juce::String (only) + (only == 1 ? " version" : " versions") + " that no other branch has");
 
     // Whether it has any is found out on the history's thread the first time it is asked for (canDeleteBranch() asks, as the
     // picker lists it): until it is known, said as maybe.
     using LeftSong = VersionHistory::LeftSong;
 
     if (const auto left = history->hasChangesLeftOn (branchID); ! left.has_value())
-        parts.add ("the changes left on it uncommitted, if it has any");
+        parts.add ("the changes left on it, if it has any");
     else if (*left == LeftSong::changed)
-        parts.add ("the changes left on it uncommitted");
+        parts.add ("the changes left on it");
     else if (*left == LeftSong::unreadable)
-        parts.add ("what was left on it uncommitted, which can't be read from the Versions folder to tell what it holds");
+        parts.add ("what was left on it, which can't be read from the Versions folder to tell what it holds");
 
     if (parts.isEmpty())
         return {};
 
     return "This also deletes " + parts.joinIntoString (", and ") + "."
-           + (only > 0 ? juce::String (" Recover Lost Commits brings the commits back.") : juce::String());
+           + (only > 0 ? juce::String (" Recover Lost Versions brings the versions back.") : juce::String());
 }
 
 bool deleteBranch (ProjectContext& context, const juce::String& branchID)
@@ -1324,11 +1180,7 @@ juce::String newBranchNamed (ProjectContext& context, const juce::String& name)
 
 void newBranchFromSelection (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
-    // On the commit checked out, a branch here, which keeps what changed.
-    const auto selected = getSelectedVersion (context);
-    const auto current = getCurrentBranch (context);
-    const auto here = current.has_value() && current->detached && selected == current->head;
-    newBranch (context, here ? juce::String() : selected, saveProjectThen);
+    newBranch (context, getSelectedVersion (context), saveProjectThen);
 }
 
 void switchToSelectedBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
@@ -1340,20 +1192,6 @@ void switchToSelectedBranch (ProjectContext& context, const SaveProjectThen& sav
 //==============================================================================
 namespace
 {
-    MergeLines toMergeLines (const std::vector<VersionChange>& lines)
-    {
-        MergeLines merged;
-
-        for (const auto& line : lines)
-        {
-            if (line.isSong)
-                merged.songOwn = true;
-            else
-                merged.tracks.insert (line.track.getRaw());
-        }
-
-        return merged;
-    }
 
     bool isOnLine (const MergeClash& clash, const SongChange& line)
     {
@@ -1380,8 +1218,8 @@ bool canMerge (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
 
-    // Not while a merge waits for its commit, as git refuses one: commit it or abort it first.
-    if (history == nullptr || history->isReading() || history->isSaving() || history->isDetached() || history->getMerging().has_value())
+    // Not while a merge waits for its version, as git refuses one: save its version or cancel it first.
+    if (history == nullptr || history->isReading() || history->isSaving() || history->getMerging().has_value())
         return false;
 
     const auto* last = history->findLastVersion();
@@ -1443,21 +1281,11 @@ namespace
         preview.lines = findChanges (preview.base, preview.theirs);
 
         auto next = juce::jmax (worked.next, findNextID (ours), findNextID (preview.theirs));
-        MergeLines everything;
-
-        for (const auto& line : preview.lines)
-        {
-            if (line.where == SongChange::Where::song)
-                everything.songOwn = true;
-            else
-                everything.tracks.insert (line.trackID);
-        }
-
-        preview.clashes = mergeSongs (preview.base, ours, preview.theirs, everything, [&next] { return next++; }).clashes;
+        preview.clashes = mergeSongs (preview.base, ours, preview.theirs, preview.lines, [&next] { return next++; }).clashes;
         nameKnobs (preview.clashes, ours, preview.theirs, ourParameters, preview.theirParameters);
     }
 
-    // The song as it was copied for the merge's list, kept in the store as Merge will need it for Abort Merge (VersionHistory.h:
+    // The song as it was copied for the merge's list, kept in the store as Merge will need it for Cancel Merge (VersionHistory.h:
     // keepMerge()), here on the history's thread (known bug 126: Merge split and wrote the whole song on the message thread):
     // its piece, which Merge takes while the song is still as it was copied; none if it couldn't be written.
     void keepSongBeforeMerge (VersionStore& store, MergeWorked& worked, const MergeStart& start)
@@ -1506,19 +1334,19 @@ namespace
             auto* song = findSong (context);
             const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
             const auto* version = history != nullptr ? history->findVersion (start.version) : nullptr;
-            const auto name = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : juce::String ("that commit");
+            const auto name = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : juce::String ("that version");
 
             if (song == nullptr || history == nullptr)
                 return false;
 
             if (! worked->baseRead.isValid() || ! worked->theirsRead.isValid())
                 return VersionHistory::Taken::refused ("Nothing was merged: " + name
-                                                       + " or the commit both lines have can't be read from the Versions folder. "
+                                                       + " or the version both lines have can't be read from the Versions folder. "
                                                          "Verify History says what is damaged.");
 
             if (worked->idsGivenAnew)
                 return VersionHistory::Taken::refused ("Nothing was merged: " + name
-                                                       + " or the commit both lines have holds an ID twice, or IDs too large to count "
+                                                       + " or the version both lines have holds an ID twice, or IDs too large to count "
                                                          "on from, which no Phazite writes (another tool wrote it), so what the two "
                                                          "lines share can't be told apart.");
 
@@ -1549,12 +1377,11 @@ namespace
             if (worked->next > findNextID (song->getState()) && ! worked->preview.renumbered.empty())
             {
                 song->getState().setProperty (schema::nextID, (juce::int64) worked->next, nullptr);
-                // Its count of IDs, which isn't counted as a change (Abort Merge leaves it as it is), no reason to keep the song
+                // Its count of IDs, which isn't counted as a change (Cancel Merge leaves it as it is), no reason to keep the song
                 // before it again as Merge is clicked.
                 worked->preview.beforeChanges = history->countSongChanges();
             }
 
-            history->ticked.assign (worked->preview.lines.size(), true);
             history->preview = std::move (worked->preview);
             history->tellNow();
             return true;
@@ -1616,8 +1443,7 @@ std::vector<MergeLine> getMergeLines (const ProjectContext& context)
         {
             const auto clashes = std::any_of (history->preview->clashes.begin(), history->preview->clashes.end(),
                                               [&line] (const MergeClash& clash) { return isOnLine (clash, line); });
-            const auto index = lines.size();
-            lines.push_back ({ toLine (line), clashes, index < history->ticked.size() && history->ticked[index] });
+            lines.push_back ({ toLine (line), clashes });
         }
     }
 
@@ -1675,7 +1501,7 @@ bool resetToReadable (ProjectContext& context)
                           {
                               if (! read.song.isValid())
                                   return VersionHistory::Taken::refused (
-                                      "That commit can't be read from the Versions folder any more: nothing was reset.");
+                                      "That version can't be read from the Versions folder any more: nothing was reset.");
 
                               auto* reading = findHistory (context);
                               return reading != nullptr && reading->resetToReadable (std::move (read.song), std::move (read.parameters));
@@ -1710,7 +1536,7 @@ void cancelMerge (ProjectContext& context)
     {
         const auto before = merging->before.isValid() ? merging->before : history->getLastVersionSong();
         keepSongBefore (*history, "abort");
-        const UndoStep step (*song, "Abort Merge");
+        const UndoStep step (*song, "Cancel Merge");
         song->storeDeviceStates();
 
         if (before.isValid())
@@ -1725,7 +1551,7 @@ void cancelMerge (ProjectContext& context)
 
     // An element that waits for nothing (one that can't be read, of a history the project's Versions folder isn't, or held
     // by the branch already): taken out alone, one undo step, the rest of the song as it is.
-    const UndoStep step (*song, "Abort Merge");
+    const UndoStep step (*song, "Cancel Merge");
     setMergingElement (*song, {});
     history->tellNow();
 }
@@ -1748,8 +1574,8 @@ bool canCancelMerge (const ProjectContext& context)
 
 namespace
 {
-    // Merge, once the song before it is kept in the store (merge.beforePiece): the lines taken, as one undo step.
-    bool takeMergeIn (ProjectContext& context, VersionHistory::Merge merge, const std::vector<VersionChange>& lines)
+    // Merge, once the song before it is kept in the store (merge.beforePiece): every line taken, as one undo step.
+    bool takeMergeIn (ProjectContext& context, VersionHistory::Merge merge)
     {
         auto* history = findHistory (context);
         auto* song = findSong (context);
@@ -1759,8 +1585,7 @@ namespace
             return false;
 
         merge.head = last->id;
-        merge.taken = toMergeLines (lines);
-        auto result = mergeSongs (merge.base, merge.before, merge.theirs, merge.taken, [song] { return song->makeID(); });
+        auto result = mergeSongs (merge.base, merge.before, merge.theirs, merge.lines, [song] { return song->makeID(); });
 
         merge.clashes = std::move (result.clashes);
         merge.renumbered.insert (merge.renumbered.end(), result.renumbered.begin(),
@@ -1772,8 +1597,8 @@ namespace
         if (! element.isValid())
         {
             history->mergeFailure = "Nothing was merged: Phazite couldn't write the song as it is into the project's Versions folder, "
-                                    "which Abort Merge would need. Make room on the drive, or check that the folder can be written to, "
-                                    "then Merge again.";
+                                    "which Cancel Merge would need. Make room on the drive, or check that the folder can be written "
+                                    "to, then Merge again.";
             history->tellNow();
             return false;
         }
@@ -1782,9 +1607,9 @@ namespace
         history->mergeFailure.clear();
         keepSongBefore (*history, "merge");
 
-        // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
-        // of its lines makes, its IDs counted on past them, with the merge waiting for its commit in it (Schema.h: MERGING), so
-        // that Undo takes the merge back whole, and every file the song is saved into holds it as the song does.
+        // A change of its own, one undo step named for what it merges ("Merge idea-2"): the song made what the merge of every
+        // line makes, its IDs counted on past them, with the merge waiting for its version in it (Schema.h: MERGING), so that
+        // Undo takes the merge back whole, and every file the song is saved into holds it as the song does.
         const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
         result.song.removeChild (result.song.getChildWithName (schema::MERGING), nullptr); // one finished before, as the song had it
         makeSongLike (*song, result.song);
@@ -1796,7 +1621,7 @@ namespace
     }
 } // namespace
 
-bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lines)
+bool finishMerge (ProjectContext& context)
 {
     auto* history = findHistory (context);
     auto* song = findSong (context);
@@ -1815,7 +1640,7 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
         return false;
     }
 
-    // The song as it was, for Abort Merge: kept in the store first (where the song's element of the merge names it), and in
+    // The song as it was, for Cancel Merge: kept in the store first (where the song's element of the merge names it), and in
     // Local History too. Nothing is taken if the store can't keep it: the merge's list stays, and the view says why. Kept
     // already as the list was worked out, on the history's thread, while the song is still as it was then (known bug 126);
     // changed since, kept there now, the window held meanwhile, then taken.
@@ -1823,26 +1648,26 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     song->storeDeviceStates();
 
     if (merge.beforePiece.isNotEmpty() && history->countSongChanges() == merge.beforeChanges)
-        return takeMergeIn (context, std::move (merge), lines);
+        return takeMergeIn (context, std::move (merge));
 
     merge.before = song->getState().createCopy();
     merge.beforePiece.clear();
     return startCommandRead (
-        context, *history, "Keeping the song as it is, for Abort Merge",
-        [&context, merge, lines, store = history->getStore()]() mutable -> VersionHistory::TakeIn
+        context, *history, "Keeping the song as it is, for Cancel Merge",
+        [&context, merge, store = history->getStore()]() mutable -> VersionHistory::TakeIn
         {
             const auto pieces = splitSong (merge.before);
             const auto kept = store->writeSong (pieces);
             store->getPieces().closeFiles();
             merge.beforePiece = kept ? pieces.song : juce::String();
 
-            return [&context, merge, lines]() -> VersionHistory::Taken
+            return [&context, merge]() -> VersionHistory::Taken
             {
                 if (merge.beforePiece.isEmpty())
                 {
                     const auto why =
                         juce::String ("Nothing was merged: Phazite couldn't write the song as it is into the project's Versions "
-                                      "folder, which Abort Merge would need. Make room on the drive, or check that the folder can be "
+                                      "folder, which Cancel Merge would need. Make room on the drive, or check that the folder can be "
                                       "written to, then Merge again.");
 
                     if (auto* found = findHistory (context))
@@ -1851,7 +1676,7 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
                     return VersionHistory::Taken::refused (why);
                 }
 
-                return takeMergeIn (context, merge, lines);
+                return takeMergeIn (context, merge);
             };
         });
 }
@@ -1914,7 +1739,7 @@ bool chooseClash (ProjectContext& context, int index, int value)
     const auto& clash = merging.clashes[(size_t) index];
     auto* undo = &song->getUndoManager();
 
-    // A change of its own, one undo step, as a merge editor names its choices: "Accept Incoming Change: Bass volume".
+    // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
 
     if (clash.property.isValid())
@@ -1968,7 +1793,7 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
 juce::String getClashChoiceName (int value)
 {
-    return value == 0 ? "Accept Base" : value == 1 ? "Accept Current Change" : "Accept Incoming Change";
+    return value == 0 ? "Take What Was Before" : value == 1 ? "Keep This Branch's" : "Take the Other Branch's";
 }
 
 void mergeSelectedVersion (ProjectContext& context)
@@ -2005,8 +1830,7 @@ bool canMergeBranch (const ProjectContext& context, const juce::String& branchID
     const auto current = getCurrentBranch (context);
 
     return history != nullptr && ! history->isReading() && ! history->isSaving() && current.has_value() && current->id != branchID
-           && ! current->detached && ! history->preview.has_value() && ! history->getMerging().has_value()
-           && countCommitsToMerge (context, branchID) > 0;
+           && ! history->preview.has_value() && ! history->getMerging().has_value() && countCommitsToMerge (context, branchID) > 0;
 }
 
 bool canMergeAnyBranch (const ProjectContext& context)
@@ -2022,29 +1846,9 @@ bool mergeBranch (ProjectContext& context, const juce::String& branchID)
     return history != nullptr && canMergeBranch (context, branchID) && startMerge (context, findBranchHead (*history, branchID));
 }
 
-void tickMergeLine (ProjectContext& context, int line, bool ticked)
-{
-    if (auto* history = findHistory (context); history != nullptr && juce::isPositiveAndBelow (line, (int) history->ticked.size()))
-    {
-        history->ticked[(size_t) line] = ticked;
-        history->tellNow();
-    }
-}
-
 bool canFinishMerge (const ProjectContext& context)
 {
     return ! getMergeLines (context).empty() && ! isSavingProjectFolder (context);
-}
-
-void finishTickedMerge (ProjectContext& context)
-{
-    std::vector<VersionChange> ticked;
-
-    for (const auto& line : getMergeLines (context))
-        if (line.ticked)
-            ticked.push_back (line.change);
-
-    finishMerge (context, ticked);
 }
 
 //==============================================================================
@@ -2178,7 +1982,7 @@ namespace
             const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
             if (open == nullptr || version == nullptr)
-                return juce::Result::fail ("That commit isn't there any more.");
+                return juce::Result::fail ("That version isn't there any more.");
 
             title = "Bouncing \"" + getDisplayName (*version) + "\"";
 
@@ -2200,7 +2004,7 @@ namespace
             const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
             if (open == nullptr || version == nullptr)
-                return juce::Result::fail ("That commit isn't there any more.");
+                return juce::Result::fail ("That version isn't there any more.");
 
             song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
 
@@ -2387,15 +2191,14 @@ namespace
     // What a snapshot's reason is called in the view.
     juce::String describeReason (const juce::String& reason)
     {
-        return reason == "open"       ? "As opened"
-               : reason == "auto"     ? "Auto-saved"
-               : reason == "restore"  ? "Before Restore"
-               : reason == "discard"  ? "Before Discard All Changes"
-               : reason == "merge"    ? "Before Merge"
-               : reason == "history"  ? "Before Restoring Local History"
-               : reason == "abort"    ? "Before Abort Merge"
-               : reason == "checkout" ? "Before Leaving a Checkout"
-                                      : reason;
+        return reason == "open"      ? "As opened"
+               : reason == "auto"    ? "Auto-saved"
+               : reason == "restore" ? "Before Restore"
+               : reason == "discard" ? "Before Discard All Changes"
+               : reason == "merge"   ? "Before Merge"
+               : reason == "history" ? "Before Restoring Local History"
+               : reason == "abort"   ? "Before Cancel Merge"
+                                     : reason;
     }
 
     // The song as it is, kept in Local History before what makes it another, while it differs from its last commit.
@@ -2558,7 +2361,7 @@ juce::String describeHistoryCheck (const ProjectContext& context)
     juce::StringArray parts;
 
     if (check->damagedPieces.isEmpty() && check->damaged.empty())
-        parts.add ("Verified " + count ((size_t) check->numVersions, "commit", "commits") + " and "
+        parts.add ("Verified " + count ((size_t) check->numVersions, "version", "versions") + " and "
                    + count ((size_t) check->numPieces, "piece", "pieces") + ": all whole.");
 
     if (! check->damagedPieces.isEmpty())
@@ -2572,12 +2375,13 @@ juce::String describeHistoryCheck (const ProjectContext& context)
             names.add (describeVersion (*history, id) + " (" + describeMissing (*song, missing.front())
                        + (missing.size() > 1 ? " and " + juce::String ((juce::int64) missing.size() - 1) + " more" : juce::String()) + ")");
 
-        parts.add (count (check->damaged.size(), "commit can't", "commits can't") + " be read whole: " + names.joinIntoString (", ")
-                   + ". Restore from This Commit takes what can be.");
+        parts.add (count (check->damaged.size(), "version can't", "versions can't") + " be read whole: " + names.joinIntoString (", ")
+                   + ". Restore This Version takes what can be.");
     }
 
     if (! check->lost.empty())
-        parts.add (count (check->lost.size(), "commit", "commits") + " no branch holds: Recover Lost Commits makes a branch of each line.");
+        parts.add (count (check->lost.size(), "version", "versions")
+                   + " no branch holds: Recover Lost Versions makes a branch of each line.");
 
     return parts.joinIntoString (" ");
 }
@@ -2617,14 +2421,14 @@ juce::String getRestoreProblem (const ProjectContext& context)
     const auto& missing = history->restoreMissing;
 
     if (missing.size() == 1 && missing.front().path.isEmpty())
-        return "That commit can't be read: Verify History says what is damaged.";
+        return "That version can't be read: Verify History says what is damaged.";
 
     juce::StringArray what;
 
     for (const auto& piece : missing)
         what.addIfNotAlreadyThere (describeMissing (*song, piece));
 
-    return "Restored but for what the commit's damaged pieces held, which stayed as it was: " + what.joinIntoString (", ") + ".";
+    return "Restored but for what the version's damaged pieces held, which stayed as it was: " + what.joinIntoString (", ") + ".";
 }
 
 juce::StringArray getDivergentVersions (const ProjectContext& context)
@@ -2655,7 +2459,7 @@ void bounceVersion (ProjectContext& context, const juce::String& versionID, Trac
 {
     auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
-    const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the commit")) + "\"";
+    const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the version")) + "\"";
 
     if (! canBounce (context, versionID))
     {
@@ -2780,11 +2584,14 @@ juce::String describeHearing (const ProjectContext& context)
 
 juce::String getCompareVersion (const ProjectContext& context)
 {
-    // The commit heard last, else the one the song comes from.
+    // The version waiting for its bounce to be heard, else the version heard last, else the one the song comes from.
     const auto* history = findHistory (context);
 
     if (history == nullptr)
         return {};
+
+    if (history->findVersion (history->hearWhenBounced) != nullptr)
+        return history->hearWhenBounced;
 
     if (history->findVersion (history->bounceCompared) != nullptr)
         return history->bounceCompared;
@@ -2869,7 +2676,7 @@ juce::String describeCompare (const ProjectContext& context)
     const auto* version = history != nullptr ? history->findVersion (compared) : nullptr;
 
     if (version == nullptr)
-        return "A/B: there is no commit yet to hear the song against";
+        return "A/B: there is no version yet to hear the song against";
 
     const auto name = "\"" + getDisplayName (*version) + "\"";
 
@@ -2893,14 +2700,43 @@ juce::String describeCompare (const ProjectContext& context)
 
 void hearSelectedVersion (ProjectContext& context)
 {
-    hearVersion (context, getSelectedVersion (context));
+    auto* history = findHistory (context);
+    const auto selected = getSelectedVersion (context);
+
+    if (history == nullptr || ! canHearSelected (context))
+        return;
+
+    if (selected.isEmpty() || history->hasBounce (selected))
+    {
+        hearVersion (context, selected);
+        return;
+    }
+
+    // A version without a bounce: bounced first in the background, the song playing on, then heard, as A/B does; or why it
+    // can't be, said.
+    history->compareProblem.clear();
+
+    if (history->bouncingVersion == selected || startBackgroundBounce (context, selected))
+        history->hearWhenBounced = selected;
+    else
+        history->compareProblem = history->bounceProblem;
+
+    history->tellNow();
 }
 
 bool canHearSelected (const ProjectContext& context)
 {
-    const auto* history = findHistory (context);
+    auto* history = findHistory (context);
     const auto selected = getSelectedVersion (context);
-    return history != nullptr && (selected.isEmpty() ? history->hearingBounce : history->hasBounce (selected));
+
+    if (history == nullptr)
+        return false;
+
+    if (selected.isEmpty())
+        return history->hearingBounce;
+
+    return history->hasBounce (selected) || history->bouncingVersion == selected
+           || (canBounce (context, selected) && ! isSongNow (*history, selected));
 }
 
 namespace
@@ -2999,7 +2835,7 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 
     // The version it came from, by which importing it again finds it (step D2).
     const auto comment = "Exported by " + juce::String (appName) + " " + getVersionString()
-                         + (version != nullptr ? " from the commit \"" + getDisplayName (*version) + "\" (" + version->id + ")."
+                         + (version != nullptr ? " from the version \"" + getDisplayName (*version) + "\" (" + version->id + ")."
                                                : juce::String (" from the song as it was."));
     const auto heading = "Exporting " + title + " as DAWproject";
     const auto finished = [&host, heading, file] (const juce::Result& result)
@@ -3048,64 +2884,34 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 
 void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, TrackRenderHost& renders)
 {
-    // In git's words (docs/design/versions.md: Words), as VS Code's Source Control names them.
+    // In plain words (docs/design/versions.md: Decisions); git's words stay as search words, so that "commit" and "checkout" still
+    // find them.
     const auto add = [&registry] (Command command)
     {
-        command.category = "Source Control";
+        command.category = "Versions";
         registry.add (std::move (command));
     };
 
     add ({ .id = "version.save",
-           .name = "Commit",
-           .description = "Saves the project and commits the staged changes to the current branch, or every change while none is "
-                          "staged, with the message typed, to go back to, hear and compare later.",
-           .synonyms = { "save version", "snapshot", "checkpoint", "history", "version" },
+           .name = "Save Version",
+           .description = "Saves the project and a version of the song as it is on the current branch, named as typed, to go back "
+                          "to, hear and compare later.",
+           .synonyms = { "commit", "snapshot", "checkpoint", "history", "version", "git commit" },
            .perform = [&context, saveProjectThen, &renders] { saveProjectAndVersion (context, saveProjectThen, renders); },
            .isEnabled = [&context] { return canSaveVersion (context); },
            .needsPluginStates = true });
 
-    add ({ .id = "version.undoCommit",
-           .name = "Undo Last Commit",
-           .description = "Takes the last commit off the current branch, as git reset --soft does: what it recorded is staged "
-                          "again, the song stays as it is, and its message comes back to the message field.",
-           .synonyms = { "uncommit", "reset", "amend", "undo commit", "git reset" },
+    add ({ .id = "version.undoLast",
+           .name = "Undo Last Version",
+           .description = "Takes the last version off the current branch and leaves the song as it is, so that what it recorded "
+                          "shows in the changes again; its name comes back to the field.",
+           .synonyms = { "undo commit", "uncommit", "reset", "amend", "git reset" },
            .perform = [&context] { undoLastCommit (context); },
            .isEnabled = [&context] { return canUndoLastCommit (context); } });
 
-    // Staging, as git add and git restore --staged: on the line selected in the changes, or on every line.
-    add ({ .id = "version.stage",
-           .name = "Stage Changes",
-           .description = "Stages the selected line of the changes, as it is now, for the next commit.",
-           .synonyms = { "add", "git add", "index" },
-           .perform = [&context] { stageSelectedChange (context); },
-           .isEnabled = [&context] { return canStageSelected (context); },
-           .needsPluginStates = true });
-
-    add ({ .id = "version.unstage",
-           .name = "Unstage Changes",
-           .description = "Takes the selected line of the staged changes out of the next commit; the song keeps it as it is.",
-           .synonyms = { "reset", "restore staged", "index" },
-           .perform = [&context] { unstageSelectedChange (context); },
-           .isEnabled = [&context] { return canUnstageSelected (context); } });
-
-    add ({ .id = "version.stageAll",
-           .name = "Stage All Changes",
-           .description = "Stages every change, as the song is now, for the next commit.",
-           .synonyms = { "add all", "git add", "index" },
-           .perform = [&context] { stageAllChanges (context); },
-           .isEnabled = [&context] { return canStageAll (context); },
-           .needsPluginStates = true });
-
-    add ({ .id = "version.unstageAll",
-           .name = "Unstage All Changes",
-           .description = "Takes every staged change out of the next commit; the song keeps them as they are.",
-           .synonyms = { "reset", "restore staged", "index" },
-           .perform = [&context] { unstageAllChanges (context); },
-           .isEnabled = [&context] { return canUnstageAll (context); } });
-
     add ({ .id = "version.discardAll",
            .name = "Discard All Changes",
-           .description = "Makes the song what is staged again, or the last commit while nothing is, as one undo step.",
+           .description = "Makes the song what the last version has again, as one undo step.",
            .synonyms = { "restore", "revert", "reset", "throw away", "git restore" },
            .perform = [&context] { discardAllChanges (context); },
            .isEnabled = [&context] { return ! getChangesSinceLastVersion (context).empty(); },
@@ -3113,58 +2919,38 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
 
     add ({ .id = "version.putBack",
            .name = "Discard Changes",
-           .description = "Makes the selected line of the changes what is staged again, or the last commit while nothing is (while "
-                          "the changes are compared with another commit, what that commit had), as one undo step.",
+           .description = "Makes the selected line of the changes what the last version has again (while the changes are compared "
+                          "with another version, what that version has), as one undo step.",
            .synonyms = { "revert", "restore", "undo change", "git restore" },
            .perform = [&context] { putBackSelectedChange (context); },
            .isEnabled = [&context] { return canPutBack (context); },
            .currentName = [&context] { return describePutBack (context); },
            .needsPluginStates = true });
 
-    // On the commit selected in the graph; each a change of its own, which names its undo step after what it restores.
-    add ({ .id = "version.checkout",
-           .name = "Checkout (Detached)",
-           .description = "Makes the song the selected commit's, to see and hear it whole as it was then, on no branch: the branch "
-                          "keeps its song as it is, to come back to. Nothing is committed meanwhile; Create Branch keeps what "
-                          "changes there.",
-           .synonyms = { "checkout", "detach", "detached head", "go to commit", "view commit", "look at", "visit", "git switch" },
-           .perform = [&context, saveProjectThen] { checkoutSelectedVersion (context, saveProjectThen); },
-           .isEnabled = [&context] { return canCheckoutSelected (context); },
-           .needsPluginStates = true });
-
-    add ({ .id = "version.backToBranch",
-           .name = "Back to Branch",
-           .description = "Leaves the commit checked out for the branch it came from: the song becomes that branch's again, as it "
-                          "was left there. What changed meanwhile goes into Local History first.",
-           .synonyms = { "back", "return", "leave detached", "reattach", "go back to branch", "head" },
-           .perform = [&context, saveProjectThen] { backToBranch (context, saveProjectThen); },
-           .isEnabled = [&context] { return canGoBackToBranch (context); },
-           .currentName = [&context] { return describeBackToBranch (context); },
-           .needsPluginStates = true });
-
+    // On the version selected in the history; each a change of its own, which names its undo step after what it restores.
     add ({ .id = "version.bringBack",
-           .name = "Restore from This Commit",
-           .description = "Makes the song what it was in the selected commit, as one undo step, as git restore --source does. "
-                          "The history keeps every commit, so the changes show what it took back.",
-           .synonyms = { "revert", "go back", "roll back", "bring back", "reset" },
+           .name = "Restore This Version",
+           .description = "Makes the whole song what it was in the selected version, as one undo step. The history keeps every "
+                          "version, so the changes show what it took back.",
+           .synonyms = { "revert", "go back", "roll back", "bring back", "reset", "checkout", "git restore" },
            .perform = [&context] { bringBackSelectedVersion (context); },
            .isEnabled = [&context] { return canBringBack (context); },
            .currentName = [&context] { return describeBringBack (context); },
            .needsPluginStates = true });
 
     add ({ .id = "version.takeFrom",
-           .name = "Compare with Working Tree",
-           .description = "Lists what differs between the selected commit and the song now, by track, each to restore from the "
-                          "commit on its own.",
-           .synonyms = { "compare", "diff", "cherry-pick", "differences", "take from" },
+           .name = "Compare with the Song",
+           .description = "Lists what differs between the selected version and the song now, by track, each to restore from the "
+                          "version on its own.",
+           .synonyms = { "compare", "diff", "differences", "take from", "working tree" },
            .perform = [&context] { takeFromSelectedVersion (context); },
            .isEnabled = [&context] { return canTakeFrom (context); } });
 
     add ({ .id = "version.restoreChange",
-           .name = "Restore from This Commit",
-           .description = "Makes the line selected under a commit in the graph (a track, the master or the song's own) what it "
-                          "was in that commit, as one undo step, as git restore --source does for one file.",
-           .synonyms = { "restore track", "revert track", "bring back", "take", "git restore" },
+           .name = "Restore from This Version",
+           .description = "Makes the line selected under a version in the history (a track, the master or the song's own) what it "
+                          "was in that version, as one undo step.",
+           .synonyms = { "restore track", "revert track", "bring back", "take", "cherry-pick", "git restore" },
            .perform = [&context] { restoreSelectedChange (context); },
            .isEnabled = [&context] { return canRestoreSelectedChange (context); },
            .currentName = [&context] { return describeRestoreChange (context); },
@@ -3172,15 +2958,15 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
 
     add ({ .id = "version.showChanges",
            .name = "Close the Comparison",
-           .description = "Lists the changes since the last commit again, rather than what differs from another commit.",
+           .description = "Lists the changes since the last version again, rather than what differs from another version.",
            .synonyms = { "done", "changes", "back" },
            .perform = [&context] { compareWithVersion (context, {}); },
            .isEnabled = [&context] { return getComparedVersion (context).isNotEmpty(); } });
 
-    // Branches and merges: a checkout saves the project after it.
+    // Branches and merges: a switch saves the project after it.
     add ({ .id = "version.newBranch",
            .name = "Create Branch",
-           .description = "Creates a branch, named at once (idea-2 and on), from the selected commit, which the song then becomes, "
+           .description = "Creates a branch, named at once (idea-2 and on), from the selected version, which the song then becomes, "
                           "or from the current one, the song going on there with its changes. The branch left keeps its own.",
            .synonyms = { "branch", "fork", "idea", "alternative", "new branch" },
            .perform = [&context, saveProjectThen] { newBranchFromSelection (context, saveProjectThen); },
@@ -3188,18 +2974,18 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .needsPluginStates = true });
 
     add ({ .id = "version.switchBranch",
-           .name = "Checkout Branch",
-           .description = "Checks out the branch picked: the song becomes that branch's, as it was left there, and the branch it "
-                          "leaves keeps it as it is now, its changes too. It goes on playing.",
-           .synonyms = { "switch", "branch", "go to", "git checkout", "git switch" },
+           .name = "Switch to the Selected Branch",
+           .description = "Makes the song the branch's selected in the branch picker (Switch Branch...), as it was left there; the "
+                          "branch it leaves keeps the song as it is now, its changes too. It goes on playing.",
+           .synonyms = { "switch", "branch", "go to", "checkout", "git checkout", "git switch" },
            .perform = [&context, saveProjectThen] { switchToSelectedBranch (context, saveProjectThen); },
            .isEnabled = [&context] { return canSwitchBranch (context); },
            .needsPluginStates = true });
 
     add ({ .id = "version.merge",
            .name = "Merge into Current Branch...",
-           .description = "Lists what the selected commit changed since the newest commit both lines have, by track, to take into "
-                          "the song as one undo step.",
+           .description = "Lists what the selected version changed since the newest version both branches have, by track, to take "
+                          "into the song as one undo step.",
            .synonyms = { "merge", "combine", "join", "pull", "git merge" },
            .perform = [&context] { mergeSelectedVersion (context); },
            .isEnabled = [&context] { return canMerge (context); },
@@ -3208,17 +2994,17 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
 
     add ({ .id = "version.finishMerge",
            .name = "Merge",
-           .description = "Takes the lines ticked in the merge's list into the song, as one undo step; commit to finish the merge.",
+           .description = "Takes every line of the merge's list into the song, as one undo step; save a version to finish the merge.",
            .synonyms = { "merge", "apply", "take" },
-           .perform = [&context] { finishTickedMerge (context); },
+           .perform = [&context] { finishMerge (context); },
            .isEnabled = [&context] { return canFinishMerge (context); },
            .needsPluginStates = true });
 
     add ({ .id = "version.cancelMerge",
-           .name = "Abort Merge",
-           .description = "Aborts the merge, as git merge --abort: closes its list, taking nothing, or, once it was taken and "
-                          "waits for its commit, makes the song what it was before it, as one undo step.",
-           .synonyms = { "cancel", "close", "back", "abort", "undo merge" },
+           .name = "Cancel Merge",
+           .description = "Closes the merge's list, taking nothing, or, once the merge was taken and waits for its version, makes "
+                          "the song what it was before it, as one undo step.",
+           .synonyms = { "abort", "abort merge", "close", "back", "undo merge", "git merge --abort" },
            .perform = [&context] { cancelMerge (context); },
            .isEnabled = [&context] { return canCancelMerge (context); },
            .needsPluginStates = true });
@@ -3226,16 +3012,17 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
     // Bounces, and hearing them: not undo steps, as they change the history and what is heard, not the song.
     add ({ .id = "version.hear",
            .name = "Hear It",
-           .description = "Plays the selected commit's bounce in place of the song, at the same beat and as loud, to compare them; "
-                          "on the uncommitted changes, the song itself again. An edit to the song switches back to it.",
-           .synonyms = { "listen", "compare", "a/b", "reference", "play commit" },
+           .description = "Plays the selected version's bounce in place of the song, at the same beat and as loud, to compare them, "
+                          "bouncing it first in the background if it has none; on the changes' row, the song itself again. An edit "
+                          "to the song switches back to it.",
+           .synonyms = { "listen", "compare", "a/b", "reference", "play version", "play commit" },
            .perform = [&context] { hearSelectedVersion (context); },
            .isEnabled = [&context] { return canHearSelected (context); } });
 
     add ({ .id = "version.compare",
            .name = "A/B Compare",
-           .description = "Hears the last commit (or the commit heard last) in place of the song, at the same point and as loud, "
-                          "and the song again at the next press: what isn't committed yet against what is. A commit without a "
+           .description = "Hears the last version (or the version heard last) in place of the song, at the same point and as loud, "
+                          "and the song again at the next press: what changed since against what was. A version without a "
                           "bounce is bounced first, in the background.",
            .synonyms = { "a/b", "ab", "compare", "before and after", "reference", "listen", "stash", "toggle" },
            .perform = [&context] { toggleCompare (context); },
@@ -3245,14 +3032,14 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
 
     add ({ .id = "version.bounce",
            .name = "Bounce",
-           .description = "Renders the selected commit, as Export Song renders the song, to hear it later against the song.",
+           .description = "Renders the selected version, as Export Song renders the song, to hear it later against the song.",
            .synonyms = { "render", "bounce", "mixdown", "audio" },
            .perform = [&context, &renders] { bounceSelectedVersion (context, renders); },
            .isEnabled = [&context] { return canBounceSelected (context); } });
 
     add ({ .id = "version.deleteBounce",
            .name = "Delete Bounce",
-           .description = "Deletes the selected commit's bounce, which nearly all of the room the history takes is. The commit "
+           .description = "Deletes the selected version's bounce, which nearly all of the room the history takes is. The version "
                           "stays.",
            .synonyms = { "remove", "free space", "clean up", "delete audio" },
            .perform = [&context] { deleteSelectedBounce (context); },
@@ -3260,7 +3047,7 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
 
     add ({ .id = "version.exportDawProject",
            .name = "Export as DAWproject...",
-           .description = "Writes the selected commit, or the song as it is, as a DAWproject file, which Bitwig Studio, Studio One "
+           .description = "Writes the selected version, or the song as it is, as a DAWproject file, which Bitwig Studio, Studio One "
                           "and Cubase open, into the project's Renders folder. What they can't play is bounced beside its notes.",
            .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "share", "collaborate", "interchange" },
            .perform = [&context, &renders] { exportDawProject (context, renders); },
@@ -3282,24 +3069,24 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
     // Keeping the history whole.
     add ({ .id = "version.verify",
            .name = "Verify History",
-           .description = "Reads every piece of the project's history and checks it against its name, walks every commit's song, "
-                          "and finds the commits no branch holds, as git fsck does. The Versions view says what it found.",
+           .description = "Reads every piece of the project's history and checks it against its name, reads every version's song, "
+                          "and finds the versions no branch holds. The Versions view says what it found.",
            .synonyms = { "fsck", "check", "integrity", "damaged", "corrupt", "repair" },
            .perform = [&context] { verifyHistory (context); },
            .isEnabled = [&context] { return canVerifyHistory (context); } });
 
     add ({ .id = "version.recover",
-           .name = "Recover Lost Commits",
-           .description = "Makes a branch of each line of the commits Verify History found that no branch holds, named after "
-                          "the branch they were made on.",
-           .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits" },
+           .name = "Recover Lost Versions",
+           .description = "Makes a branch of each line of the versions Verify History found that no branch holds, named after "
+                          "the branch they were saved on.",
+           .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits", "lost commits" },
            .perform = [&context] { recoverLostVersions (context); },
            .isEnabled = [&context] { return countLostVersions (context) > 0; } });
 
     add ({ .id = "version.resetToReadable",
-           .name = "Reset Branch to Last Readable Commit",
-           .description = "Takes the current branch, whose last commit can't be read from the Versions folder, back to the newest "
-                          "commit of its log that reads, keeping the song as it is.",
+           .name = "Reset Branch to Last Readable Version",
+           .description = "Takes the current branch, whose last version can't be read from the Versions folder, back to the newest "
+                          "version of its log that reads, keeping the song as it is.",
            .synonyms = { "damaged", "broken", "missing commit", "repair", "reset", "reflog" },
            .perform = [&context] { resetToReadable (context); },
            .isEnabled = [&context] { return canResetToReadable (context); } });

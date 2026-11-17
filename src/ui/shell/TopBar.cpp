@@ -229,7 +229,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     hearing.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     hearing.setJustificationType (juce::Justification::centredLeft);
     hearing.setTooltip (
-        "A commit's bounce is heard in place of the song. A/B, hearing the uncommitted changes, or any edit, plays the song again");
+        "A version's bounce is heard in place of the song. A/B, hearing the changes since the last version, or any edit, plays the song again");
     addChildComponent (hearing);
 
     lookAndFeelChanged();

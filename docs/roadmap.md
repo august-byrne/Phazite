@@ -41,7 +41,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 2. Finish a track | Built, and every step checked by hand by the owner: automation, modulators and macros, containers and presets, the audio clip editor, the chord lane, freeze and stems, more devices, the wavetable synth, time-stretching. |
 | Phase 3. Polish | Built: every plug-in in a helper process, audio recording, the performance and accessibility passes, three keymaps, help and lessons. Recording through an audio interface and a session with a screen reader are not checked. Chord suggestions, the sound generator and the usability rounds moved after 1.0. |
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 5, 7 and 8. |
-| Source control | Built: commits, what changed by track, branches, merge, hearing a commit against the song, Local History, DAWproject export and import. Stage 4 cuts it down to what producers use. |
+| Versions | Built: versions saved, what changed by track, branches, merge, hearing a version against the song, Local History, DAWproject export and import. Stage 4 cut it down to what producers use (S4.2) and gave it plain words; S4.3 to S4.5 are open. |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
 | The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16; in `main` since 2026-11-17): every entry but four that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stages 3 to 8 otherwise not started. |
 
@@ -92,10 +92,9 @@ what they found is fixed or in known-bugs.md.
 
 | Step | Size | What | Done when |
 |---|---|---|---|
-| S4.2 | L | Staging, the commit checked out on its own and a merge's ticked lines removed; the view called Versions, in plain words ([the note](design/versions-cut.md)) | The `version.stage*`, `version.checkout` and `version.backToBranch` commands are gone, and the goldens say so |
-| S4.3 | M | A history that cannot lose work | No command leaves a commit unreachable without asking |
+| S4.3 | M | A history that cannot lose work: a version that leaves every branch is kept 30 days and can be recovered ([the note](design/versions-cut.md)) | No command leaves a version out of reach without asking |
 | S4.4 | M | Housekeeping: unused pieces swept, Clean Up aware of Local History, Verify History checking audio | Verify reports a missing audio file |
-| S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
+| S4.5 | M | The song tied to its version; differences worked out off the message thread | The Versions view never stalls the window on a large song |
 | S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
 
 ### Stage 5. Wide: what a beat maker meets in the first week

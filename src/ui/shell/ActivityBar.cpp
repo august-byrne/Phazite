@@ -18,7 +18,7 @@ juce::String getLeftViewName (LeftView view)
         case LeftView::project:
             return "Project";
         case LeftView::versions:
-            return "Source Control";
+            return "Versions";
         case LeftView::browser:
         default:
             return "Browser";
@@ -102,7 +102,7 @@ public:
             setToggleState (marked, juce::dontSendNotification);
     }
 
-    // The count on its badge (0: none), which screen readers say after its name ("Source Control, 3 changes").
+    // The count on its badge (0: none), which screen readers say after its name ("Versions, 3 changes").
     void setBadge (int count)
     {
         if (std::exchange (badge, count) == count)
@@ -126,8 +126,8 @@ public:
     void refreshTooltip()
     {
         const auto about = view == LeftView::versions
-                               ? juce::String ("Source Control: commit the song as it is now, see what changed since, and go "
-                                               "back. Click again to hide the left panel")
+                               ? juce::String ("Versions: save a version of the song as it is now, see what changed since, and "
+                                               "go back. Click again to hide the left panel")
                            : view == LeftView::project
                                ? juce::String ("Project: what the song holds, its notes, the audio files it plays and its "
                                                "plug-ins, with any that are missing or crashed. Click again to hide the left panel")
@@ -320,7 +320,7 @@ void ActivityBar::showAccountMenu()
 
 void ActivityBar::updateBadge()
 {
-    versionsItem->setBadge (countChanges (context)); // staged or not, each thing once
+    versionsItem->setBadge (countChanges (context)); // each line once
 }
 
 void ActivityBar::paint (juce::Graphics& g)

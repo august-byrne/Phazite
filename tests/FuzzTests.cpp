@@ -204,9 +204,9 @@ TEST_CASE ("Fuzz: a version's pieces join into a song that holds together, or no
 }
 
 TEST_CASE (
-    "Fuzz: a song another computer wrote into the versions goes into the song holding together, as it is checked out, merged, restored or brought back from Local History")
+    "Fuzz: a song another computer wrote into the versions goes into the song holding together, as its branch is switched to, merged, restored or brought back from Local History")
 {
-    // The representative project's song, damaged each round as anyone could write it, kept as another computer's commit on a
+    // The representative project's song, damaged each round as anyone could write it, kept as another computer's version on a
     // branch of its own and as a snapshot of this computer's Local History, with each piece's name what it holds (so that
     // the store reads it); the project opened again, the song made it in each way the versions make it, and checked.
     TestSong s;
@@ -220,82 +220,83 @@ TEST_CASE (
     const auto versions = s.getProject().getFolder().getChildFile ("Versions");
     auto round = 0;
 
-    fuzz::runRounds ("versions from elsewhere", 20,
-                     [&] (fuzz::Mutator& mutator, juce::MemoryBlock& fed) -> std::string
-                     {
-                         fed = mutator.mutate (seed, fuzz::Shape::xml);
-                         const auto hostile = phazite::readElement (fed);
+    fuzz::runRounds (
+        "versions from elsewhere", 20,
+        [&] (fuzz::Mutator& mutator, juce::MemoryBlock& fed) -> std::string
+        {
+            fed = mutator.mutate (seed, fuzz::Shape::xml);
+            const auto hostile = phazite::readElement (fed);
 
-                         if (! hostile.hasType (schema::PHAZITE))
-                             return {};
+            if (! hostile.hasType (schema::PHAZITE))
+                return {};
 
-                         REQUIRE (waitForVersionHistory (s.context));
-                         const auto head = phazite::getLastVersion (s.context)->id;
-                         const auto main = phazite::getCurrentBranch (s.context)->id;
-                         const auto time = juce::Time::currentTimeMillis() + ++round;
-                         juce::String id;
+            REQUIRE (waitForVersionHistory (s.context));
+            const auto head = phazite::getLastVersion (s.context)->id;
+            const auto main = phazite::getCurrentBranch (s.context)->id;
+            const auto time = juce::Time::currentTimeMillis() + ++round;
+            juce::String id;
 
-                         {
-                             phazite::VersionStore other (versions, "fuzz-computer");
-                             phazite::VersionRecord record;
-                             record.parents = { head };
-                             record.branch = "fuzz-" + juce::String (round);
-                             record.saved = time;
-                             const auto pieces = phazite::splitSong (hostile);
-                             id = other.writeVersion (record, pieces);
-                             REQUIRE (id.isNotEmpty());
-                             phazite::BranchRecord branch;
-                             branch.id = record.branch;
-                             branch.name = record.branch;
-                             branch.head = id;
-                             branch.computer = "fuzz-computer";
-                             branch.changed = time;
-                             REQUIRE (other.writeBranch (branch));
-                             other.getPieces().closeFiles();
+            {
+                phazite::VersionStore other (versions, "fuzz-computer");
+                phazite::VersionRecord record;
+                record.parents = { head };
+                record.branch = "fuzz-" + juce::String (round);
+                record.saved = time;
+                const auto pieces = phazite::splitSong (hostile);
+                id = other.writeVersion (record, pieces);
+                REQUIRE (id.isNotEmpty());
+                phazite::BranchRecord branch;
+                branch.id = record.branch;
+                branch.name = record.branch;
+                branch.head = id;
+                branch.computer = "fuzz-computer";
+                branch.changed = time;
+                REQUIRE (other.writeBranch (branch));
+                other.getPieces().closeFiles();
 
-                             phazite::VersionStore mine (versions, phazite::getThisComputer());
-                             auto snapshots = mine.readSnapshots();
-                             snapshots.push_back ({ time, main, pieces.song, "auto" });
-                             REQUIRE (mine.writeSnapshots (snapshots));
-                         }
+                phazite::VersionStore mine (versions, phazite::getThisComputer());
+                auto snapshots = mine.readSnapshots();
+                snapshots.push_back ({ time, main, pieces.song, "auto" });
+                REQUIRE (mine.writeSnapshots (snapshots));
+            }
 
-                         s.reopen (false);
-                         REQUIRE (waitForVersionHistory (s.context));
-                         std::vector<std::string> problems;
-                         const auto check = [&] (const char* how)
-                         {
-                             for (const auto& problem : findSongProblems (*phazite::findSong (s.context)))
-                                 problems.push_back (std::string (how) + ": " + problem);
-                         };
+            s.reopen (false);
+            REQUIRE (waitForVersionHistory (s.context));
+            std::vector<std::string> problems;
+            const auto check = [&] (const char* how)
+            {
+                for (const auto& problem : findSongProblems (*phazite::findSong (s.context)))
+                    problems.push_back (std::string (how) + ": " + problem);
+            };
 
-                         if (finished (s.context, [&] { return phazite::checkoutVersion (s.context, id, s.save); }))
-                         {
-                             check ("checked out");
-                             REQUIRE (finished (s.context, [&] { return phazite::backToBranch (s.context, s.save); }));
-                         }
+            if (finished (s.context, [&] { return phazite::switchBranch (s.context, "fuzz-" + juce::String (round), s.save); }))
+            {
+                check ("switched to");
+                REQUIRE (finished (s.context, [&] { return phazite::switchBranch (s.context, main, s.save); }));
+            }
 
-                         if (finished (s.context, [&] { return phazite::startMerge (s.context, id); }))
-                         {
-                             phazite::finishTickedMerge (s.context);
-                             check ("merged");
-                             phazite::cancelMerge (s.context);
-                             check ("merge aborted");
-                         }
+            if (finished (s.context, [&] { return phazite::startMerge (s.context, id); }))
+            {
+                phazite::finishMerge (s.context);
+                check ("merged");
+                phazite::cancelMerge (s.context);
+                check ("merge cancelled");
+            }
 
-                         if (finished (s.context, [&] { return phazite::bringBackVersion (s.context, id); }))
-                         {
-                             check ("restored");
-                             phazite::undo (*phazite::findSong (s.context));
-                         }
+            if (finished (s.context, [&] { return phazite::bringBackVersion (s.context, id); }))
+            {
+                check ("restored");
+                phazite::undo (*phazite::findSong (s.context));
+            }
 
-                         if (finished (s.context, [&] { return phazite::restoreSnapshot (s.context, time); }))
-                         {
-                             check ("Local History restored");
-                             phazite::undo (*phazite::findSong (s.context));
-                         }
+            if (finished (s.context, [&] { return phazite::restoreSnapshot (s.context, time); }))
+            {
+                check ("Local History restored");
+                phazite::undo (*phazite::findSong (s.context));
+            }
 
-                         return fuzz::joinProblems (problems);
-                     });
+            return fuzz::joinProblems (problems);
+        });
 }
 
 TEST_CASE ("Fuzz: a pack of a version's pieces is read whole or not at all")
@@ -438,7 +439,7 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
                      });
 }
 
-TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, and the song holds together through Abort Merge")
+TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, and the song holds together through Cancel Merge")
 {
     // A real merge waiting, its element (Schema.h: MERGING) as Phazite writes it, and one whose song before it names a
     // track's piece; each damaged, put into the song's file, and the project opened again, as one from anyone would be.
@@ -465,7 +466,7 @@ TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, an
     s.setVolume (bass, -6.0f);
     commit();
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
-    phazite::finishTickedMerge (s.context);
+    phazite::finishMerge (s.context);
     REQUIRE (phazite::isMerging (s.context));
 
     const auto state = phazite::findSong (s.context)->getState().createCopy();
@@ -518,7 +519,7 @@ TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, an
                    phazite::cancelMerge (s.context);
 
                    if (phazite::getTrackIDs (opened).empty())
-                       return "Abort Merge emptied the song";
+                       return "Cancel Merge emptied the song";
 
                    return fuzz::joinProblems (findSongProblems (opened));
                });

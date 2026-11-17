@@ -1372,8 +1372,8 @@ TEST_CASE ("Performance gate: a track's controllers' index holds a place for eac
 }
 
 TEST_CASE (
-    "Performance gate: a branch switch, a checkout, the start of a merge and an open that offers the last commit read no song on the "
-    "message thread, nor split or write one")
+    "Performance gate: a branch switch, a whole version's restore, the start of a merge and an open that offers the last version read "
+    "no song on the message thread, nor split or write one")
 {
     // Known bug 126: a switch read two songs on the message thread (the branch's and its last commit's), and the start of a
     // merge two (the commit both lines have, and the other's), keeping the window for a second and more in a large song.
@@ -1408,14 +1408,14 @@ TEST_CASE (
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, idea, s.save); }));
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, main, s.save); }));
     CHECK (phazite::getChannelVolume (song, built.tracks[3]) == doctest::Approx (-2.0f)); // the change left there, back
-    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::checkoutVersion (s.context, theirs, s.save); }));
-    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::backToBranch (s.context, s.save); }));
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, theirs); }));
+    phazite::undo (song);
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, theirs); }));
     CHECK_FALSE (phazite::getMergeLines (s.context).empty());
 
-    // And Merge, which keeps the song before it in the store for Abort Merge: kept as its list was worked out, on the
+    // And Merge, which keeps the song before it in the store for Cancel Merge: kept as its list was worked out, on the
     // history's thread (the second review of known bug 126).
-    phazite::finishTickedMerge (s.context);
+    phazite::finishMerge (s.context);
     CHECK (phazite::isMerging (s.context));
 
     const auto after = phazite::VersionStore::countSongsRead();

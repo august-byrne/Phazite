@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Source control's quick inputs (docs/design/versions.md: Branches), as VS Code's branch quick picks, in a call-out like the command
-// palette's; Esc or a click elsewhere closes one:
-// - Checkout to...: first Create new branch, named as typed (else "idea-2" and on), then the project's branches, the one the
-//   song is on ticked, each with what it holds (its last commit and when it was made; for the one the song is on, its
-//   changes since). Typing narrows the branches; Enter or a click checks out the one picked (version.switchBranch) or makes
+// The versions' quick inputs (docs/design/versions.md: Branches), as VS Code's branch quick picks, in a call-out like the
+// command palette's; Esc or a click elsewhere closes one:
+// - Switch Branch...: first Create new branch, named as typed (else "idea-2" and on), then the project's branches, the one the
+//   song is on ticked, each with what it holds (its last version and when it was saved; for the one the song is on, its
+//   changes since). Typing narrows the branches; Enter or a click switches to the one picked (version.switchBranch) or makes
 //   the new one (version.newBranch).
 // - Rename Branch...: the name of the branch the song is on, to type over.
-// - Merge Branch...: the other branches, each with how many of its commits the current branch doesn't have; the one picked
-//   is merged in (its lines listed to tick in the Source Control view).
-// - Delete Branch...: the other branches; the one picked is deleted, after a question when it would take commits no other
+// - Merge Branch...: the other branches, each with how many of its versions the current branch doesn't have; the one picked
+//   is merged in (what it brings listed first in the Versions view).
+// - Delete Branch...: the other branches; the one picked is deleted, after a question when it would take versions no other
 //   branch has, or changes left on it, with it.
-// - Edit Commit Message...: the selected commit's message, its first line the name and the lines after it the note, to type
-//   over; Ctrl+Enter, or a click on its row, keeps it.
+// - Rename Version...: the selected version's name and note, its first line the name and the lines after it the note, to
+//   type over; Ctrl+Enter, or a click on its row, keeps them.
 #pragma once
 
 #include "model/project/ProjectContext.h"
@@ -62,7 +62,7 @@ public:
 
 private:
     // What a row does: makes a branch from Now with the name typed, switches to a branch, names the current one anew, merges
-    // a branch in, deletes one, or keeps a commit's message.
+    // a branch in, deletes one, or renames a version.
     struct Row
     {
         enum class Kind
@@ -86,7 +86,7 @@ private:
     CommandBridge& commands;
     ProjectContext& context;
     const Mode mode;
-    const juce::String version;                          // the commit whose message is edited
+    const juce::String version;                          // the version renamed
     juce::Component::SafePointer<juce::Component> owner; // the window it opened over, which a question opens over too
     SearchField searchField;
     std::unique_ptr<MessageField> messageField;

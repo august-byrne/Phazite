@@ -1071,9 +1071,27 @@ namespace
     }
 } // namespace
 
-MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs, const MergeLines& lines,
+MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
                         const std::function<std::uint64_t()>& makeID)
 {
+    return mergeSongs (base, ours, theirs, findChanges (base, theirs), makeID);
+}
+
+MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
+                        const std::vector<SongChange>& lines, const std::function<std::uint64_t()>& makeID)
+{
+    // Every line the other side changed: its tracks (the other side's IDs, and the master's) and the song's own.
+    std::set<std::uint64_t> lineTracks;
+    auto songOwn = false;
+
+    for (const auto& line : lines)
+    {
+        if (line.where == SongChange::Where::song)
+            songOwn = true;
+        else
+            lineTracks.insert (line.trackID);
+    }
+
     MergeResult result;
     result.song = ours.createCopy();
     // New IDs past every ID either side holds: the other side may have counted further than this one.
@@ -1109,7 +1127,7 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
     // added in it, which go into it; then those it took away, and the master.
     std::set<std::uint64_t> wanted;
 
-    for (const auto requested : lines.tracks)
+    for (const auto requested : lineTracks)
     {
         const auto found = renumbered.ids.find (requested);
         wanted.insert (found != renumbered.ids.end() ? found->second : requested);
@@ -1168,7 +1186,7 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
         mergeCurves (base, result.song, other, devices, merger);
     }
 
-    if (lines.songOwn)
+    if (songOwn)
     {
         Merger merger { result, "Song", 0, baseItems, theirItems, ourItems };
         merger.mergeProperties (base, result.song, other);

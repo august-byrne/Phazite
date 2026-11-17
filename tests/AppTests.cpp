@@ -600,7 +600,7 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     REQUIRE (phazite::test::dispatchMessagesUntil ([&session] { return ! session.isUntitled(); }));
     CHECK (errors.isEmpty());
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
-    CHECK (names() == juce::StringArray ("Initial commit"));
+    CHECK (names() == juce::StringArray ("First version"));
 
     // A copy saved as a version is being written: the copy has it, and goes on in its own folder.
     phazite::setVersionDraft (context, "Sketch", {});
@@ -610,14 +610,14 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     CHECK (errors.isEmpty());
     REQUIRE (session.getProject()->getFile() == projects.getChildFile ("Beat copy").getChildFile ("Beat copy.phazite"));
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
-    CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
+    CHECK (names() == juce::StringArray ("Sketch", "First version"));
 
     // The first has both, as written there, when it opens again.
     const auto first = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     session.openProject (first);
     REQUIRE (session.getProject()->getFile() == first);
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
-    CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
+    CHECK (names() == juce::StringArray ("Sketch", "First version"));
     CHECK (errors.isEmpty());
 }
 
@@ -1146,7 +1146,7 @@ TEST_CASE ("A project file that won't open offers its branch's last commit, read
         REQUIRE (phazite::test::dispatchMessagesUntil ([&offers] { return ! offers.empty(); }));
         CHECK_FALSE (session->getContext().isHoldingForWork()); // let go of before the question
         CHECK (offers[0].backup.isEmpty());
-        CHECK (offers[0].commit == "the last commit, \"Kept\"");
+        CHECK (offers[0].commit == "the last version, \"Kept\"");
         CHECK (phazite::VersionStore::countSongsRead().onMessageThread == before.onMessageThread);
         CHECK (phazite::VersionStore::countSongsRead().all > before.all);
 

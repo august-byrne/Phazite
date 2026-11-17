@@ -36,7 +36,7 @@ arranged, and the look they share.
 | What a tempo change stretches | Built | |
 | Tempo changes along the song (the tempo lane) | Built | |
 | Tap tempo, tempo detection from audio | Planned | After version 1 |
-| Activity bar with the Browser, Project and Source Control views | Built | |
+| Activity bar with the Browser, Project and Versions views | Built | |
 | Upper and lower panel with views that move between them | Built | |
 | Each editor's tools in its tab row | Built | |
 | Inspector | Built | |
@@ -81,7 +81,7 @@ A row under the title bar, for what belongs to the song as a whole:
 - The playhead's place in bars, beats and sixteenths ("17.3.2", each counted from 1) and its time ("1:23.4"). Each is a
   field that moves the playhead when dragged, scrolled or typed in ("17.3", "1:05"). While the song plays they follow
   the playhead at the display's frames. A narrow window hides the time first, then the place.
-- A/B, which plays the last commit's bounce in place of the song and the song again, with what is heard beside it
+- A/B, which plays the last version's bounce in place of the song and the song again, with what is heard beside it
   ([../versions.md](versions.md)).
 - The master level and volume, and the computer keyboard's switch.
 
@@ -148,7 +148,7 @@ hides the panel.
     plays, their count with **Clean Up...**, which runs Clean Up Unused Audio.
   - *Plug-ins:* each plug-in the song holds, on its track or the master; the header says how many crashed, are not
     installed or are off. A crashed one has Reload. A click selects the plug-in and shows it in the Devices view.
-- **Source Control:** the project's versions as commits and branches ([../versions.md](versions.md)).
+- **Versions:** the project's versions and branches ([versions.md](versions.md)).
 
 ## Centre: the song above, the selection below
 

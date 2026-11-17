@@ -1909,10 +1909,10 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
     };
 
     if (open == nullptr || version == nullptr || in == nullptr || in->project == nullptr)
-        return refuse ("It wasn't exported from a commit of this project.");
+        return refuse ("It wasn't exported from a version of this project.");
 
     if (! canSwitchBranch (context))
-        return refuse ("Not while the song records, renders, or commits.");
+        return refuse ("Not while the song records, renders, or a version is being saved.");
 
     // In steps, the window held from the first to the last (known bug 126): the version's song read on the history's thread;
     // made a song of its own here, with what came back taken in (its audio copied into the project); split and kept on the
@@ -1943,7 +1943,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
         const auto song = state.isValid() && songNow != nullptr ? makeSong (state, songNow->getFile(), songNow->getCacheFolder()) : nullptr;
 
         if (reading == nullptr || song == nullptr)
-            return VersionHistory::Taken::refused ("Phazite couldn't read the commit it came from. " + nothing);
+            return VersionHistory::Taken::refused ("Phazite couldn't read the version it came from. " + nothing);
 
         song->getState().setProperty (schema::nextID,
                                       (juce::int64) std::max (findNextID (song->getState()), findNextID (songNow->getState())), nullptr);
@@ -2046,7 +2046,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
                         }
                         else
                         {
-                            making->readingProblem = "The branch the import made couldn't be taken away again, as a commit was being "
+                            making->readingProblem = "The branch the import made couldn't be taken away again, as a version was being "
                                                      "written: it stays, with the audio it plays. Delete it from the branch picker.";
                             making->tellNow();
                         }

@@ -96,34 +96,20 @@ public:
     const VersionRecord* findVersion (const juce::String& id) const;
     const VersionRecord* findLastVersion() const;
 
-    // The changes in the working tree, as git's: from the staged song (getStagedSong()) to the song, none before the first
-    // commit, nor while the history is being read. And whether anything changed since the current branch's last commit,
-    // staged or not.
+    // The changes since the current branch's last version: from its song to the song as it is, none before the first version,
+    // nor while the history is being read. And whether there are any.
     const std::vector<SongChange>& getChanges();
     bool hasChanges();
 
-    // Staging, as git's index: the staged song is what the next commit records, the current branch's last commit with the
-    // lines staged since taken from the song as they were when they were staged. Its changes from the last commit; a line
-    // staged (its track, the master or the song's own, with its plug-ins' settings and knobs as they are now) or unstaged
-    // (as the last commit has it again); every line at once. False for a line neither has. Kept while the project is open,
-    // for its branch: a switch, or the project opening again, starts with nothing staged.
-    const std::vector<SongChange>& getStagedChanges();
-    const juce::ValueTree& getStagedSong() const noexcept { return staged; }
-    bool stage (const SongChange&);
-    bool unstage (const SongChange&);
-    void stageAll();
-    void unstageAll();
-
-    // Commits: the staged song, or, with nothing staged or a merge being made, the song as it is now (git's smart commit),
-    // its name and note as given (each may be empty), and calls back on the message thread once it is written, or not: the
-    // song is copied here, then split and written on the history's thread. One at a time, and not while the history is
-    // being read: false then, with done told why. The first, made as soon as the history has read that it has none, is
-    // "Initial commit", on main.
+    // Saves a version: the song as it is now, its name and note as given (each may be empty), and calls back on the message
+    // thread once it is written, or not: the song is copied here, then split and written on the history's thread. One at a
+    // time, and not while the history is being read: false then, with done told why. The first, made as soon as the history
+    // has read that it has none, is "First version", on main.
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
     bool isSaving() const noexcept { return saving || copyingFolder; } // a commit, or a first save's copy (copyFolder())
 
-    // What the next commit would be named while it has no message of its own: what is staged, or every change while none
-    // is ("Update Bass and Drums"), or the merge it finishes ("Merge branch 'idea-2'"); none while there is nothing to commit.
+    // What the next version would be named while it has no name of its own: what changed ("Update Bass and Drums"), or the
+    // merge it finishes ("Merge idea-2").
     juce::String summariseNextCommit();
 
     // A version's song, read from its pieces, with its plug-ins' parameters' values if asked: invalid if one can't be read,
@@ -163,7 +149,7 @@ public:
     const std::optional<Check>& getLastCheck() const noexcept { return lastCheck; }
 
     // The lost commits the last check found, each line of them made a branch of its own at its newest commit (named after
-    // the branch they were made on, "main-recovered", or "recovered" for one this history doesn't know): how many branches.
+    // the branch they were made on, "main (recovered)", or "recovered" for one this history doesn't know): how many branches.
     int recoverLostVersions();
     const juce::ValueTree& getLastVersionSong() const noexcept { return baseline; }
 
@@ -182,7 +168,6 @@ public:
     // last version). What differs from that one, as the changes are listed (from it to the song now), and its song.
     juce::String selectedVersion;
     std::optional<SongChange> selectedChange;
-    bool selectedChangeIsStaged = false;
     std::optional<SongChange> selectedVersionChange; // a line of what the selected version changed, under it in the graph
     // Another version's song, read on the history's thread, with its plug-ins' values (none for the last version: the
     // changes' own); invalid for one that couldn't be read, which compares nothing.
@@ -190,9 +175,9 @@ public:
     const juce::String& getComparedVersion() const noexcept { return comparedVersion; }
     const std::vector<SongChange>& getListedChanges();
 
-    // What a line of the changes is taken back from: the staged song (Discard Changes, as git restores from its index), or
-    // the version the changes are listed against.
-    const juce::ValueTree& getComparedSong() const noexcept { return comparedVersion.isEmpty() ? staged : comparedSong; }
+    // What a line of the changes is taken back from: the last version's song (Discard Changes), or the version the changes
+    // are listed against.
+    const juce::ValueTree& getComparedSong() const noexcept { return comparedVersion.isEmpty() ? baseline : comparedSong; }
 
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
@@ -241,8 +226,7 @@ public:
     //==============================================================================
     // Branches (docs/design/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
     // "idea-2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
-    // can't be made. And a branch named anew, as git names one (model/versions/VersionsModel.h: toBranchName()), never as
-    // another is.
+    // can't be made. And a branch named anew, as typed (model/versions/VersionsModel.h: toBranchName()), never as another is.
     juce::String makeBranch (const juce::String& fromVersion, bool makeCurrent);
 
     // A branch from a version, whose song is another (a DAWproject's that came back: model/project/internal/DawProject.h),
@@ -256,17 +240,6 @@ public:
     // for its version stays with its branch.
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
-
-    // Checkout (Detached), as VS Code's graph names git switch --detach (docs/design/versions.md: Checking out a commit): the song
-    // made a commit's in place, as a switch makes it a branch's, the song as it was kept on the branch it leaves, to come back
-    // to. The song is on no branch then, but this computer's record of the checkout (BranchRecord::detachedFrom), the current
-    // one, so that the project opens again where it was left; other computers leave it out. Nothing is committed or merged
-    // while detached: a branch made from the song (makeBranch() from none) takes what changed there. Going back to a branch,
-    // the one it came from (prepareBackFromDetached()) or another (prepareSwitch()), keeps what changed in Local History
-    // first, and the record of the checkout goes. Checking out another commit while detached goes on to it alike
-    // (prepareCheckout()).
-    bool isDetached() const;
-    juce::String getDetachedFrom() const; // the branch's id, none while on a branch
 
     // Delete Branch (git branch -D): a branch but the current one, and the song left on it, gone; its commits that no other
     // branch holds go from the graph and stay in the store, where Verify History finds them and Recover Lost Commits brings
@@ -284,11 +257,11 @@ public:
 
     std::optional<LeftSong> hasChangesLeftOn (const juce::String& branchID); // none while it is being found out
 
-    // Undo Last Commit (git reset --soft HEAD~, as VS Code's): the current branch moved back to the commit before its last,
-    // what that commit recorded staged again, the song as it is, and its message the draft again while none is typed. Not
-    // for the first commit or a merge's, nor while a commit is being made or a merge is under way. The commit stays in the
-    // store, so Recover Lost Commits brings it back while no branch holds it. Given the song of the commit before, read on
-    // the history's thread (startReading(): VersionsModel.cpp), with its plug-ins' values.
+    // Undo Last Version (as git reset --soft HEAD~): the current branch moved back to the version before its last, the song
+    // as it is, so that what that version recorded shows in the changes again, and its name and note the draft again while
+    // none is typed. Not for the first version or a merge's, nor while a version is being saved or a merge is under way. The
+    // version stays in the store, so Recover Lost Versions brings it back while no branch holds it. Given the song of the
+    // version before, read on the history's thread (startReading(): VersionsModel.cpp), with its plug-ins' values.
     bool canUndoLastCommit() const;
     bool undoLastCommit (juce::ValueTree before, PluginParameterValues beforeParameters);
 
@@ -326,8 +299,8 @@ public:
     // The IDs earlier merges into this line gave anew to what the other line added (findRenumbering(), below).
     std::vector<RenumberedID> findRenumbering (const juce::String& ours, const juce::String& theirs, const juce::String& parted) const;
 
-    // A commit as git names one in a merge's message: "branch 'idea-2'" for another branch's last commit, else
-    // "commit '1a2b3c4'" (its id's first seven characters).
+    // A version as a merge's own name names it ("Merge idea-2"): another branch's last version by the branch's name, else by
+    // its own in quotes ("\"Verse 2\""), or its id's first seven characters for one the history doesn't hold.
     juce::String describeCommit (const juce::String& versionID) const;
 
     // A merge, from its window (preview) until the version that finishes it is saved (merging): the version merged, the
@@ -339,8 +312,8 @@ public:
         juce::ValueTree base, theirs;
         PluginParameterValues theirParameters; // the other's plug-ins' knobs, which name a plug-in's clash
         std::vector<RenumberedID> translation; // what base and theirs were translated through (SongMerge.h: findTranslation())
-        std::vector<RenumberedID> renumbered;  // what it gave anew, which its commit keeps
-        std::vector<SongChange> lines;
+        std::vector<RenumberedID> renumbered;  // what it gave anew, which its version keeps
+        std::vector<SongChange> lines;         // what the other line changed, which the merge takes whole
         std::vector<MergeClash> clashes;
         std::vector<int> chosen;
         juce::StringArray notes;
@@ -348,16 +321,14 @@ public:
         juce::String beforePiece;
         juce::int64 beforeChanges = -1; // the song's count of changes (countSongChanges()) as before was copied, for its piece
         juce::String head;              // the current branch's last version as the merge was taken
-        MergeLines taken;               // the lines the merge took
 
         // Whether its three songs were read whole, so that its clashes are known (none while they are being read on the
         // history's thread, or where one can't be).
         bool readWhole = false, reading = false;
     };
 
-    // The merge window's merge, while it shows; and the lines of it Merge takes.
+    // The merge's list's merge, while it shows, which Merge takes whole.
     std::optional<Merge> preview;
-    std::vector<bool> ticked;
 
     // The merge taken into the song that waits for its commit: the one the song's MERGING element says (Schema.h), until
     // a commit of this branch's line finishes it (one that merged its commit, on top of where it was taken, and recorded the
@@ -397,9 +368,9 @@ public:
     void tellNow();
 
     //==============================================================================
-    // A command that reads whole songs before it changes anything (Checkout Branch, Checkout (Detached), Back to Branch,
-    // Merge's list, Restore from This Commit, Restore from Local History, Compare with Working Tree, Undo Last Commit, Reset
-    // Branch to Last Readable Commit: known bug 126), in two halves: what it reads, on the history's thread (read, given
+    // A command that reads whole songs before it changes anything (a switch to another branch, Merge's list, Restore This Version,
+    // Restore from This Version, Restore from Local History, Compare with the Song, Undo Last Version, Reset Branch to Last
+    // Readable Version: known bug 126), in two halves: what it reads, on the history's thread (read, given
     // what it needs copied first, never the song, whose tree is the message thread's), which returns what takes it in, on
     // the message thread once it is read (TakeIn: whether it did what the command does). One at a time, and not while the
     // history is being read; false, with nothing started, then. Cancelled meanwhile (cancelReading(): the progress window's
@@ -455,17 +426,13 @@ public:
     // in what it read, to do again with the song as it is what it worked out from the copy.
     juce::int64 countSongChanges() const noexcept { return songChanges + song.getChangesOutsideHistory(); }
 
-    // A switch to another branch, or to a commit checked out (Checkout Branch, Checkout (Detached), Back to Branch), in its halves
-    // (startReading()): what it takes on the message thread first (the song left copied, its plug-ins' settings stored), what
-    // it reads (the song left split and kept, the other's song and its last commit's read), and how it ends, the song made
-    // the other's. Invalid, with nothing done, if it can't be.
+    // A switch to another branch, in its halves (startReading()): what it takes on the message thread first
+    // (the song left copied, its plug-ins' settings stored), what it reads (the song left split and kept, the other's song and
+    // its last version's read), and how it ends, the song made the other's. Invalid, with nothing done, if it can't be.
     struct Switch
     {
-        juce::String branchID;              // the branch entered: an existing one, or the checkout's record (record)
-        std::optional<BranchRecord> record; // a checkout's from a branch, written as the switch ends
-        bool movesCheckout = false;         // checked out already: on to another commit, in place
-        juce::String commitID;              // the commit checked out, for the log
-        juce::ValueTree left;               // the song as it is, kept on the branch it leaves; none leaving a checkout
+        juce::String branchID; // the branch entered
+        juce::ValueTree left;  // the song as it is, kept on the branch it leaves
         PluginParameterValues leftParameters;
         juce::int64 changesAtCopy = 0;
         juce::String otherPiece;  // the other's song: as it was left there, or its last commit's
@@ -483,8 +450,6 @@ public:
     };
 
     std::optional<Switch> prepareSwitch (const juce::String& branchID, bool withinRead = false); // within: a command's read's next step
-    std::optional<Switch> prepareCheckout (const juce::String& versionID);
-    std::optional<Switch> prepareBackFromDetached();
     static SwitchRead readSwitch (VersionStore&, const Switch&);
     Taken finishSwitch (const Switch&, SwitchRead);
 
@@ -529,26 +494,20 @@ private:
     std::set<juce::String> bounces; // the versions that have one
     juce::int64 bouncesSize = 0;
 
-    // The current branch's last version's song, which the staged changes are from, and its plug-ins' parameters' values;
-    // and the staged song, which the changes are from: its tracks by their IDs, its plug-ins' values, and its changes.
+    // The current branch's last version's song, which the changes are from: its tracks by their IDs, and its plug-ins'
+    // parameters' values.
     juce::ValueTree baseline;
+    std::map<std::uint64_t, juce::ValueTree> baselineTracks;
     PluginParameterValues baselineParameters;
-    juce::ValueTree staged;
-    std::map<std::uint64_t, juce::ValueTree> stagedTracks;
-    PluginParameterValues stagedParameters;
-    std::vector<SongChange> stagedChanges;
-    bool stagedReady = false;
 
     // The song's counts of the changes its plug-ins said they made (Song::getChangesOutsideHistory()), by device, as they
-    // were at the last commit and as each line was staged: a plug-in whose stored state differs counts as changed since one
-    // of them only if its count moved, or a knob of it did (SongDiff.h: PluginValues::reported).
+    // were at the last version: a plug-in whose stored state differs counts as changed since only if its count moved, or a
+    // knob of it did (SongDiff.h: PluginValues::reported).
     using ReportCounts = std::map<std::uint64_t, int>;
-    ReportCounts reportedAtBaseline, reportedAtStaged;
+    ReportCounts reportedAtBaseline;
     static std::set<std::uint64_t> findReported (const ReportCounts& then, const ReportCounts& now);
 
-    void takeLine (const SongChange&, const juce::ValueTree& from, const PluginParameterValues& fromParameters,
-                   const ReportCounts& fromReported);
-    void stagedChanged();
+    void baselineChanged();
 
     // The changes, worked out a thing at a time: each track's (and the master's) by its ID, those with changes; the song's
     // own; the devices whose automation changed; and what changed in the song since.
@@ -679,9 +638,8 @@ private:
     // How many times the song changed (countSongChanges()).
     juce::int64 songChanges = 0;
 
-    // The song as it is now, its plug-ins' settings stored, to be kept on the branch it leaves (none leaving a checkout).
-    void keepLeft (Switch&, const BranchRecord& current);
-    juce::String checkoutRecord; // the id of this computer's last record of a checkout, made again for the next
+    // The song as it is now, its plug-ins' settings stored, to be kept on the branch it leaves.
+    void keepLeft (Switch&);
     void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts);
 
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
@@ -747,9 +705,9 @@ bool startCommandRead (ProjectContext&, VersionHistory&, const juce::String& tit
                        std::function<void (bool did)> done = {}, std::shared_ptr<std::atomic<float>> progress = {});
 VersionHistory::TakeIn takeInSwitch (ProjectContext&, VersionHistory::Switch, std::shared_ptr<VersionHistory::SwitchRead>, int rounds);
 
-// A commit's song read from a store, without a merge's element (Schema.h: MERGING), which no commit's song holds, whoever
-// wrote it: what the song is made like (a checkout, a switch, Bring Back) never brings one. As VersionStore::readSong()
-// reads it. Any thread.
+// A version's song read from a store, without a merge's element (Schema.h: MERGING), which no version's song holds, whoever
+// wrote it: what the song is made like (a switch, Restore This Version) never brings one. As VersionStore::readSong() reads
+// it. Any thread.
 juce::ValueTree readCommitSong (const VersionStore&, const juce::String& songPiece, PluginParameterValues* parameters = nullptr,
                                 std::vector<MissingPiece>* missing = nullptr, bool* idsGivenAnew = nullptr);
 
@@ -775,7 +733,6 @@ juce::String getDisplayName (const VersionRecord&);
 struct MergeState
 {
     juce::String version, head, before;
-    MergeLines taken;
     std::vector<int> chosen;
     std::vector<RenumberedID> renumbered, translation;
 };

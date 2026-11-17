@@ -931,7 +931,7 @@ void ProjectSession::closeAndFinishThen (std::function<void()> callback)
     };
 
     const auto wait = std::make_shared<StatesWait>();
-    wait->title = "Finishing the commits of " + getProjectsBeingFinished().joinIntoString (", ");
+    wait->title = "Finishing the versions of " + getProjectsBeingFinished().joinIntoString (", ");
     renders->runRender (std::make_unique<TrackRender> (std::make_unique<WaitForVersions> (wait)));
 
     auto timer = std::make_unique<Finishing>();
@@ -1222,7 +1222,7 @@ void ProjectSession::offerCopies (const juce::File& file, const juce::String& er
 
     const auto backupText =
         backup.isValid() ? "the backup of " + backupFile.getLastModificationTime().formatted ("%d %b %Y %H:%M") : juce::String();
-    const auto commitText = commit.isValid() ? "the last commit, \"" + commitName + "\"" : juce::String();
+    const auto commitText = commit.isValid() ? "the last version, \"" + commitName + "\"" : juce::String();
 
     const auto choose = [this, file, backupSong = backup, commitSong = commit] (int choice)
     {
@@ -1275,7 +1275,7 @@ void ProjectSession::askWhichCopyToOpen (const juce::String& error, const juce::
         options = options.withButton ("Open the Backup", 1);
 
     if (commit.isNotEmpty())
-        options = options.withButton ("Open the Last Commit", 2);
+        options = options.withButton ("Open the Last Version", 2);
 
     // Escape, or closing the window, answers 0, as Cancel does.
     juce::AlertWindow::showAsync (options.withButton ("Cancel", 0), [callback] (int result) { callback (result); });
@@ -1558,7 +1558,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
                     .name = "Auto Save",
                     .category = "Project",
                     .description = "Saves the project a moment after each change, as VS Code's Auto Save does, so that its changes "
-                                   "show in source control as they are made; a new project once its first save puts it somewhere.",
+                                   "show in the Versions view as they are made; a new project once its first save puts it somewhere.",
                     .synonyms = { "autosave", "save automatically", "keep saved" },
                     .perform = [this] { toggleAutoSave(); },
                     .isTicked = [this] { return isAutoSaving(); } });
@@ -1580,7 +1580,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
                     .name = "Clean Up Unused Audio...",
                     .category = "Project",
                     .description = "Lists the audio files in the project's folder that neither the song, nor its saved file or "
-                                   "backups, nor a commit, nor a branch plays, to move those you tick to the recycle bin.",
+                                   "backups, nor a version, nor a branch plays, to move those you tick to the recycle bin.",
                     .synonyms = { "unused", "delete", "free space", "takes", "recordings", "tidy", "purge" },
                     .perform = [this] { cleanUpAudio(); },
                     .isEnabled = [this] { return canCleanUpAudio (context) && ! isUntitled(); } });
@@ -1589,7 +1589,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
                     .name = "Import DAWproject...",
                     .category = "Project",
                     .description = "Opens a DAWproject file, from Bitwig Studio, Studio One, Cubase or another DAW, as a new project. One "
-                                   "exported from a commit of this project comes back as a branch from that commit, with what changed.",
+                                   "exported from a version of this project comes back as a branch from that version, with what changed.",
                     .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "open", "import", "collaborate" },
                     .perform = [this] { importDawProject(); } });
 }
@@ -1645,7 +1645,7 @@ void ProjectSession::importDawProject (const juce::File& file)
 
                         if (imported)
                             showNotice ("Imported " + file.getFileName(),
-                                        "It came back as a new branch from the commit it was exported from."
+                                        "It came back as a new branch from the version it was exported from."
                                             + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
                         else if (said.joinIntoString ({}).isNotEmpty())
                             showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));

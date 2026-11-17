@@ -125,7 +125,7 @@ window opens, or as its values' texts are written and read, as most DAWs' window
   was in the same helper, or loading in it, is tried once more in a fresh helper first.
 - **Renders:** an export, a freeze or a bounce started while plug-ins still load fails at its start, naming them ("*name*
   is still loading. Render again once the project's plug-ins have loaded."), one the song got a moment before included. A
-  render of a song no session plays (an older commit's bounce, a DAWproject of an old version) opens its own plug-ins in
+  render of a song no session plays (an older version's bounce, a DAWproject of an old version) opens its own plug-ins in
   the background the same way, and begins once they are in.
 - **Saving:** a save asks every plug-in for its state at once, and writes once all have answered, or once a plug-in has
   taken 10 seconds; one that hasn't answered keeps the state it last gave, and a notice names it. The save is never lost
@@ -135,13 +135,13 @@ window opens, or as its values' texts are written and read, as most DAWs' window
   state may have changed since they last gave it: a value or a program set, by Phazite, in the plug-in's window or by
   MIDI, its settings said to have changed (a VST3's `setDirty()`), or its window open since (a plug-in needn't say what
   its window changes, a sample loaded say); and they ask again one that didn't answer the last time.
-- **Commands that read the plug-ins' states** (commit, stage, checkout, a branch switched to, discard, restore, merge
-  and abort merge, a snapshot restored, Save As, DAWproject export; Delete and Duplicate of tracks that hold a plug-in
+- **Commands that read the plug-ins' states** (Save Version, a branch switched to, discard, restore, merge
+  and cancel merge, a snapshot restored, Save As, DAWproject export; Delete and Duplicate of tracks that hold a plug-in
   or a drum sampler's pad tracks, and grouping devices among which one is, but not of notes, clips or a time range) run
   once the plug-ins that said they changed have given their states, as a save does. So do the other ways in to the same
   (`ProjectContext::withPluginStates()`, the one gate the registry's commands go through too): a preset loaded into a
   device or saved, from the browser's menus, a plug-in's window or a track dropped into the browser; a chain duplicated
-  in a container; Stage's "+" in Source Control; a branch merged from the branch picker; a DAWproject imported as a
+  in a container; a line's Discard Changes in the Versions view; a branch merged from the branch picker; a DAWproject imported as a
   branch. A wait of more than a second shows the progress window, "Waiting for the settings of *name*", with **Go On
   Without Them** (the command runs with what each plug-in gave last) and **Cancel** (the command is dropped, changing
   nothing; Escape is Cancel). Meanwhile no other command that changes the song runs, and the window takes no input (a
@@ -154,7 +154,7 @@ window opens, or as its values' texts are written and read, as most DAWs' window
   no plug-in: each writes the state a plug-in gave last, and asks those that said they changed, whose answers are
   written in as they come (into the device an undo brings back, if it was taken away, unless the instance playing it
   now changed since it opened); the versions count a plug-in's reports only as far as the state they hold has them, so a
-  late answer shows as a change to commit. So that what a plug-in gave last is its own, one that says it changed is
+  late answer shows as a change since the last version. So that what a plug-in gave last is its own, one that says it changed is
   asked for its state once it has been quiet for a quarter of a second, or a second after its first change at the
   latest as changes go on, and no sooner after the last ask than ten times as long as that answer took (a 20 MB state
   measured 48 ms an answer, 7 ms of it the message thread's copy).
@@ -195,7 +195,7 @@ waits for the block (the engine skips its blocks meanwhile), and a plug-in that 
 ended. A crashed plug-in keeps the rate the engine last asked of it, which its reload opens it at.
 
 While the open song renders, the render has the song's plug-ins, and playback stops. A song rendered beside the open
-one (an older commit's bounce) gets plug-in instances of its own.
+one (an older version's bounce) gets plug-in instances of its own.
 
 ## Parameters and state
 

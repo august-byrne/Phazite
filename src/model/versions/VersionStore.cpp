@@ -20,7 +20,7 @@ namespace
     bool isBranchProperty (const juce::Identifier& name)
     {
         for (const auto* known : { &versions::branchID, &versions::branchName, &versions::branchColour, &versions::branchHead,
-                                   &versions::branchChanged, &versions::branchDeleted, &versions::branchDetachedFrom })
+                                   &versions::branchChanged, &versions::branchDeleted })
             if (name == *known)
                 return true;
 
@@ -234,7 +234,7 @@ std::vector<BranchRecord> VersionStore::readBranches() const
             branch.head = xml->getStringAttribute (versions::branchHead);
             branch.changed = xml->getStringAttribute (versions::branchChanged).getLargeIntValue();
             branch.deleted = xml->getBoolAttribute (versions::branchDeleted);
-            branch.detachedFrom = xml->getStringAttribute (versions::branchDetachedFrom);
+
             branch.computer = file.getFileNameWithoutExtension();
 
             for (const auto& attribute : xml->getAttributeIterator())
@@ -268,9 +268,6 @@ bool VersionStore::writeBranch (const BranchRecord& branch)
 
     if (branch.deleted)
         element.setProperty (versions::branchDeleted, true, nullptr);
-
-    if (branch.detachedFrom.isNotEmpty())
-        element.setProperty (versions::branchDetachedFrom, branch.detachedFrom, nullptr);
 
     for (const auto& [name, value] : branch.others)
         if (! isBranchProperty (name))

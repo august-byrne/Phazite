@@ -725,7 +725,7 @@ TEST_CASE ("Every merge waiting goes from a song given its IDs anew as it opens"
             Edited::findTrack (song, "Audio")->setAttribute ("id", juce::String ((juce::int64) phazite::schema::renumberMark));
 
             for (int i = 0; i < 2; ++i)
-                song.createNewChildElement ("MERGING")->setAttribute ("lines", "song");
+                song.createNewChildElement ("MERGING")->setAttribute ("chosen", "1");
         });
     REQUIRE (project != nullptr);
     CHECK_FALSE (project->getSong().getState().getChildWithName (schema::MERGING).isValid());

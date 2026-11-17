@@ -226,11 +226,11 @@ with **Ctrl+K** or give them one in Keyboard Shortcuts.
 | Save Project | **Ctrl+S** | **Ctrl+S** | **Ctrl+S** |
 | Export Song | **Ctrl+Shift+R** | **Ctrl+R** | **Ctrl+Shift+R** |
 
-### Source Control
+### Versions
 
 | Command | Phazite | FL Studio | Ableton Live |
 |---|---|---|---|
-| Commit | **Ctrl+Alt+S** | **Ctrl+N** | **Ctrl+Alt+S** |
+| Save Version | **Ctrl+Alt+S** | **Ctrl+N** | **Ctrl+Alt+S** |
 | A/B Compare | **N** | **N** | **N** |
 
 ### View

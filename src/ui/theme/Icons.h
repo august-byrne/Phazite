@@ -63,11 +63,10 @@ enum class Icon
     account,
     settings,
     reload, // a crashed plug-in loaded again (ui/project/ProjectView.h): an arrow going round
-    // The Source Control view (ui/versions/VersionsView.h)
-    check,       // Commit, and the branch the song is on
+    // The Versions view (ui/versions/VersionsView.h)
+    check,       // Save Version, and the branch the song is on
     moreActions, // a view's menu of what else it does: three dots
     song,        // a change to the song's own: its tempo, sections, chords
-    minus,       // a line unstaged
     // The title bar (ui/shell/TitleBar.h)
     menu, // the menus, folded
     undo,
@@ -118,7 +117,7 @@ public:
     // inside other controls, such as the chevron that collapses a track.
     void setQuiet (bool);
 
-    // An accented button is a view's main one, in the accent color, as Commit is.
+    // An accented button is a view's main one, in the accent color, as Save Version is.
     void setAccented (bool);
 
     // A button that asks for attention while it is off (Follow, paused by a scroll) is washed in the warning colour, as the

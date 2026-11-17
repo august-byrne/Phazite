@@ -33,7 +33,7 @@ text or larger targets. Accessibility is part of every control, not a mode.
 - **Search Commands** (`view.commandPalette`, Ctrl+K) finds and runs any command by name.
 - **A view its key shows gets the keys.** F5, F6, Shift+F6, F7 and F9 move the keyboard focus into the view they
   show: the playlist, the instrument, the effects, the piano roll or the mixer. A screen reader then says the view's
-  name, and Tab goes on into its controls. The left panel's views (Browser, Project, Source Control) take the focus
+  name, and Tab goes on into its controls. The left panel's views (Browser, Project, Versions) take the focus
   the same way.
 - The mixer and the Devices view take the focus themselves, as the playlist does, so that the arrow keys still run
   commands until Tab reaches a control.

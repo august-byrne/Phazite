@@ -1,131 +1,144 @@
 # Versions
 
-*Design section 18; in full here.*
+*Design section 18; in full here. Cut down to what producers use by [versions-cut.md](versions-cut.md) (the owner,
+2026-11-17).*
 
-A project keeps a history of its song, as git keeps one of code: commits on branches, in the project's own folder,
-with no account and no network. The **Source Control** view in the left panel shows it, in git's words as VS Code's
-Source Control says them. A commit can carry a bounce, so that an earlier version can be heard against the song.
+A project keeps the versions of its song: saved at points the user chooses, on branches, in the project's own folder,
+with no account and no network. The **Versions** view in the left panel shows them, in plain words: a version, the
+history, a branch, a merge. A version can carry a bounce, so that it can be heard against the song.
 
 ## Status
 
 | Feature | State | Note |
 | --- | --- | --- |
-| Commit, with a message or named by what changed | Built | |
-| The changes since the last commit, by track | Built | |
-| The graph of every branch's commits | Built | |
-| Restore the song, or one track, from a commit | Built | |
+| Save Version, named as typed or by what changed | Built | |
+| The changes since the last version, by track | Built | |
+| The history of every branch's versions | Built | |
+| Restore the song, or one track, from a version | Built | |
 | Discard Changes, for a line or for all | Built | |
-| Branches: create, check out, rename, delete | Built | |
+| Branches: create, switch, rename, delete | Built | |
 | A branch's colour chosen by hand | Planned | No roadmap step |
-| Merging another branch or commit, with conflicts | Built | To be simplified: see [To be removed](#to-be-removed) |
-| Bounces of commits, Hear It and A/B | Built | |
+| Merging another branch or version, whole, with conflicts | Built | |
+| Bounces of versions, Hear It and A/B | Built | |
 | Local History | Built | |
 | Undo History | Built | |
-| Undo Last Commit, Edit Commit Message... | Built | |
-| Verify History, Recover Lost Commits | Built | |
-| Staging | Built | To be removed |
-| Checkout (Detached) | Built | To be removed |
+| Undo Last Version, Rename Version... | Built | |
+| Verify History, Recover Lost Versions | Built | |
+| A version off every branch kept 30 days, a swept store, the song tied to its version | Planned | S4.3 to S4.5 ([versions-cut.md](versions-cut.md)) |
 | The playlist marking what changed | Planned | No roadmap step |
+| Staging, a version checked out on its own, a merge of some lines | Removed | S4.2 ([versions-cut.md](versions-cut.md)) |
 | Tags, stash, rebase, squash, cherry-pick, blame, bisect | Declined | Not needed by one person working alone |
 | Backup to another folder, a cloud copy, share links | Planned | No roadmap step |
 
 ## From the start
 
-- **Initial commit.** A project keeps commits from its start: as soon as its history is read and has no branch, the
-  song as it is is committed as "Initial commit", on the branch **main**. A new project's history moves with it at its
+- **First version.** A project keeps versions from its start: as soon as its history is read and has no branch, the
+  song as it is is saved as "First version", on the branch **main**. A new project's history moves with it at its
   first save.
 - **Auto Save** keeps the project file up to date ([projects-saving-export.md](projects-saving-export.md)), so every
   change shows in the changes as it is made.
 - The status bar names the branch beside the save state, with a star while the song has changes since its last
-  commit ("main*"). A click opens the branch picker.
-- The Source Control icon in the activity bar carries a badge that counts the changed lines.
+  version ("main*"). A click opens the branch picker.
+- The Versions icon in the activity bar carries a badge that counts the changed lines.
 
-## The Source Control view
+## The Versions view
 
-From the top: the view's title with its menu (Commit, Changes, Branch, the DAWproject commands, Clean Up Unused
-Audio, Verify History, Recover Lost Commits); the branch button; the message field; the **Commit** button with its
-menu; then the sections **Staged Changes**, **Changes**, **Graph**, **Local History** and **Undo History**, each
-folding under its heading.
+From the top: the view's title with its menu (Version, Changes, Branch, the DAWproject commands, Clean Up Unused
+Audio, Verify History, Recover Lost Versions, Reset Branch to Last Readable Version); the branch button; the name field; the **Save Version** button with its
+menu; then the sections **Changes**, **History**, **Local History** and **Undo History**, each folding under its
+heading. The layout is VS Code's Source Control view's; the words are a producer's.
 
-### Committing
+### Saving a version
 
-- **Commit** (`version.save`, Ctrl+Alt+S) saves the project and commits the staged changes, or every change while
-  none is staged.
-- It runs only with something to commit: changes, staged or not, or a merge waiting for its commit. Until then it
-  is greyed.
-- **One message:** its first line is the commit's name, the lines after it a note. Enter starts a new line and
-  Ctrl+Enter commits. Both are optional. Left empty, the commit is named by what changed ("Update Bass and Drums"),
-  and the empty field shows that name before it is made.
-- **Bounce Each Commit** (`version.bounceEach`, in Commit's menu, whose button then reads "Commit and Bounce")
-  renders the song into each commit as Export Song renders it. The settings keep it.
-- **Undo Last Commit** (`version.undoCommit`): the branch goes back to the commit before its last, what that commit
-  recorded is staged again, the song stays as it is, and the message goes back into the field. Not for the first
-  commit, nor a merge's. The commit stays in the store, where Recover Lost Commits finds it.
-- **Edit Commit Message...** (`version.editMessage`) names any commit anew. A commit never changes, so the message
-  is kept beside it; its id, its place in the graph and its bounce stay.
-- Committing is not an undo step: it changes the history, not the song.
+- **Save Version** (`version.save`, Ctrl+Alt+S) saves the project and a version of the song as it is: every change,
+  the whole song.
+- It runs only with something to save: changes, or a merge waiting for its version. Until then it is greyed.
+- **One field:** its first line is the version's name, the lines after it a note. Enter starts a new line and
+  Ctrl+Enter saves. Both are optional. Left empty, the version is named by what changed ("Update Bass and Drums"), and
+  the empty field shows that name before it is saved ("Update Bass and Drums (Ctrl+Enter to save it on 'main')", or
+  "Name this version (...)" with nothing to save).
+- **Bounce Each Version** (`version.bounceEach`, in Save Version's menu, whose button then reads "Save Version and
+  Bounce") renders the song into each version as Export Song renders it. The settings keep it.
+- **Undo Last Version** (`version.undoLast`): the branch goes back to the version before its last and the song stays as
+  it is, so what that version recorded shows in the changes again; its name and note go back into the field. Not for the
+  first version, nor a merge's. The version stays in the store, where Recover Lost Versions finds it.
+- **Rename Version...** (`version.editMessage`) names any version anew, and its note. A version never changes, so the
+  name is kept beside it; its id, its place in the history and its bounce stay.
+- Saving a version is not an undo step: it changes the history, not the song.
 
 ### Changes
 
-**Changes** lists what the song holds now that the last commit doesn't, a line for each track that changed, the
+**Changes** lists what the song holds now that the last version doesn't, a line for each track that changed, the
 master, and the song's own (its tempo, sections, chord lane and track order).
 
-- Each line says what changed in Phazite's own words ("volume, 12 notes"), with a letter as git marks a file: U
-  untracked (a track added), M modified, D deleted, A added (staged), C a merge's conflict.
+- Each line says what changed in Phazite's own words ("volume, 12 notes"), with a letter: **A** added, **M**
+  modified, **D** deleted; **C** marks a merge's conflict. The colours are VS Code's.
 - View state and how the song plays never show. They are left out by the same lists as for unsaved changes.
 - A plug-in's settings count as changed only when the plug-in reported a change or one of its knobs moved. A
   plug-in's change is named by the parameters whose values differ.
 - A click on a line selects that thing in the song.
-- **Discard Changes** (`version.putBack`) makes a line what the last commit has again; **Discard All Changes**
+- **Discard Changes** (`version.putBack`) makes a line what the last version has again; **Discard All Changes**
   (`version.discardAll`) every line. Each is one undo step. A clip moved between tracks since ends where the last
-  commit has it, once, whichever of the two tracks' lines is discarded.
+  version has it, once, whichever of the two tracks' lines is discarded.
 
-### The graph
+### History
 
-- Every commit of every branch, newest first, each on its branch's line in the branch's colour, under a row for the
-  **Uncommitted Changes**.
-- **A click on a commit opens it:** under it, a row for each line it changed since the commit before it. One commit
+- Every version of every branch, newest first, each on its branch's line in the branch's colour, under a row for the
+  **Changes Since the Last Version**.
+- **A click on a version opens it:** under it, a row for each line it changed since the version before it. One version
   is open at a time.
-- **Restore from This Commit** on one of those rows (`version.restoreChange`) makes that line what it was in the
-  commit, as one undo step ("Restore Bass from "Verse 2""). This is how a track is brought back from an earlier
-  version.
-- **Restore from This Commit** on the commit itself (`version.bringBack`) makes the whole song what it was then, as
-  one undo step. The history keeps every commit, so the changes then show what was taken back.
-- **Compare with Working Tree** (`version.takeFrom`) lists what differs between a commit and the song, each line to
-  restore on its own; **Close the Comparison** lists the changes since the last commit again.
-- A commit's menu also has Hear It, Create Branch, Merge into Current Branch..., Edit Commit Message..., Bounce,
-  Delete Bounce and Export as DAWproject....
+- **A double-click hears it** (Hear It, below): it changes nothing. A version without a bounce is bounced in the
+  background first and heard as soon as it is, as A/B does.
+- **Restore from This Version** on one of those rows (`version.restoreChange`) makes that line what it was in the
+  version, as one undo step ("Restore Bass from "Verse 2""). A version lists only the lines it changed since the version
+  before it, so a track it didn't change isn't there: Compare with the Song lists every line that differs.
+- **Restore This Version** on the version itself (`version.bringBack`) makes the whole song what it was then, as one
+  undo step ("Restore "Verse 2""). The history keeps every version, so the changes then show what was taken back.
+- **Compare with the Song** (`version.takeFrom`) lists what differs between a version and the song, each line to
+  restore on its own (Restore from "Verse 2", one undo step); **Close the Comparison** (Done) lists the changes since the
+  last version again. This is how a track is brought back from any version, or from another branch: its last version
+  compared with the song, then the track's line restored.
+- A whole version's restore keeps the song as it is in Local History first; a line's restore, as a line's discard, is an
+  undo step alone.
+- A version's menu also has Hear It, Create Branch, Merge into Current Branch..., Rename Version..., Undo Last Version
+  (on the last), Bounce, Delete Bounce and Export as DAWproject....
 
 ## Branches
 
 - **Create Branch** (`version.newBranch`) asks nothing: the branch is named "idea-2" (the next number free), takes
-  the next colour, and the song goes on there at once. Made from the current commit, it takes the uncommitted
-  changes with it. Made from an older commit, the song becomes that commit's.
-- **Checkout to...** (`version.pickBranch`, the branch button and the status bar's branch) opens the branch picker:
-  the branches, the current one ticked, each with its last commit; typing narrows them or names a new one.
-- **Checking out a branch** makes the song the other branch's in place, with the fewest edits. What both branches
-  have stays as it is: its plug-ins stay loaded and the song plays on. The branch left keeps its song as it was,
-  uncommitted changes and view state included. The project is saved after, so that its file is the branch's song.
-  It is not an undo step, and the undo history starts again. Not while the song records or renders.
-- **Rename Branch...** (`version.renameBranch`) names the current branch anew. Names are as git takes them: spaces
-  become dashes, and no two branches share a name.
-- **Delete Branch...** (`version.deleteBranch`) lists the other branches. When the branch has commits no other
-  branch has, or changes left on it uncommitted, it asks first, saying so. Its commits stay in the store. Not while a
-  merge waiting (here, or in the song left on another branch) took in a commit only its line holds.
+  the next colour, and the song goes on there at once. Made from the song as it is, it takes the changes with it. Made
+  from an older version, the song becomes that version's, as a switch makes it.
+- **Switch Branch...** (`version.pickBranch`, the branch button and the status bar's branch) opens the branch picker:
+  the branches, the current one ticked, each with its last version; typing narrows them or names a new one.
+- **Switching to a branch** (`version.switchBranch`) makes the song the other branch's in place, with the fewest edits.
+  What both branches have stays as it is: its plug-ins stay loaded and the song plays on. The branch left keeps its song
+  as it was, changes and view state included. The project is saved after, so that its file is the branch's song. It is
+  not an undo step, and the undo history starts again. Not while the song records or renders.
+- **A branch is named as typed**, spaces and all (`toBranchName()`): trimmed, each run of white space one space, no
+  control characters. A branch is stored by its id, so its name needs nothing more to be safe. No two branches share a
+  name, whatever its case.
+- **Rename Branch...** (`version.renameBranch`) names the current branch anew.
+- **Delete Branch...** (`version.deleteBranch`) lists the other branches. When the branch has versions no other
+  branch has, or changes left on it, it asks first, saying so ("This also deletes 1 version that no other branch has,
+  and the changes left on it. Recover Lost Versions brings the versions back."). Its versions stay in the store. Not
+  while a merge waiting (here, or in the song left on another branch) took in a version only its line holds.
 
 ## Merging
 
-**Merge Branch...** (`version.mergeBranch`) lists the other branches, each with how many commits it would bring;
-**Merge into Current Branch...** on a commit merges that commit.
+**Merge Branch...** (`version.mergeBranch`) lists the other branches, each with how many versions it would bring;
+**Merge into Current Branch...** (`version.merge`) on a version merges that version.
 
-- The Source Control view then lists what the other line changed since the newest commit both lines have, by track,
-  each line ticked. **Merge** takes the ticked lines as one undo step, so the result is heard at once.
+- The Versions view then lists what the other line changed since the newest version both lines have, by track: what
+  will come in, each line marked where it conflicts. **Merge** (`version.finishMerge`) takes every line as one undo
+  step ("Merge idea-2"), so the result is heard at once; **Cancel** takes nothing. A merge never takes some lines and
+  leaves others: it is recorded whole, so what was left out could never be merged later. One track from another branch
+  is a restore, not a merge: Compare with the Song on that branch's last version, then the track's line restored (above).
 - **A three-way merge by IDs.** An element added on one side is added. One removed on one side and unchanged on the
   other goes; removed on one side and changed on the other, it stays, and a note says so. A property changed on one
   side takes that side's value.
 - **Conflicts.** A property both sides changed to different values is a conflict. It takes this branch's value to
-  start with, so a merge never stops on a question, and it keeps all three values until the merge is committed:
-  **Accept Current Change**, **Accept Incoming Change**, **Accept Base**. Each switch is one undo step, heard at
+  start with, so a merge never stops on a question, and it keeps all three values until the merge's version is saved:
+  **Keep This Branch's**, **Take the Other Branch's**, **Take What Was Before**. Each switch is one undo step, heard at
   once; what the value chosen names that this branch took away (a track deleted here) goes with it, as after any
   edit. Automation curves, the chord lane and a plug-in's state merge whole.
 - **Moves.** An item moved between tracks, or into a folder or a container, is treated as a move, not as a removal
@@ -139,63 +152,66 @@ master, and the song's own (its tempo, sections, chord lane and track order).
   it, which stay where it was; each track follows its own line.
 - **IDs never collide.** Two branches both count their IDs on from where they parted, so a merge gives new IDs to
   what the other branch added wherever this branch has something else with them, and a later merge of that branch
-  knows them again by its commit's record, even where the other branch, on another computer, gave one of those IDs to
-  something it made since. No ID is in the song twice after a merge, a restore or a discard, and every one of them
+  knows them again by its version's record, even where the other branch, on another computer, gave one of those IDs
+  to something it made since. No ID is in the song twice after a merge, a restore or a discard, and every one of them
   leaves the song's count of IDs past every ID it holds.
-- **The commit that finishes it** has both lines as its parents, and is named as git names one ("Merge branch
-  'idea-2'") unless a message is typed.
-- **Abort Merge** (`version.cancelMerge`) closes the list, taking nothing; once the merge is taken and waits for its
-  commit, it makes the song what it was before, as one undo step, the song as it is kept in Local History first (the
-  branch's last commit, where the song before it can't be read, as git's abort resets to `HEAD`). A merge's record
-  in the song that waits for nothing (one that can't be read, one of another history, as in a project file opened
-  without its Versions folder, or one the branch holds already) it takes out alone, the rest of the song as it is.
+- **The version that finishes it** has both lines as its parents, and is named for what it merged ("Merge idea-2",
+  or "Merge "Verse 2"" for a version that isn't a branch's last) unless a name is typed.
+- **Cancel Merge** (`version.cancelMerge`) closes the list, taking nothing; once the merge is taken and waits for its
+  version, it makes the song what it was before, as one undo step, the song as it is kept in Local History first (the
+  branch's last version, where the song before it can't be read). A merge's record in the song that waits for nothing
+  (one that can't be read, one of another history, as in a project file opened without its Versions folder, or one
+  the branch holds already) it takes out alone, the rest of the song as it is.
 - **A merge the Versions folder can't keep** (the song before it can't be written, a full or locked drive) takes
   nothing: its list stays, and the view says why.
-- **One merge at a time.** While a merge waits for its commit, no other starts, as git refuses one: Merge Branch...
-  and Merge into Current Branch... are greyed until it is committed or aborted.
-- **A merge waiting is part of the song,** as git keeps `MERGE_HEAD` beside the files it merged: it goes with the song
+- **One merge at a time.** While a merge waits for its version, no other starts: Merge Branch... and Merge into
+  Current Branch... are greyed until its version is saved or it is cancelled.
+- **A merge waiting is part of the song** (as git keeps `MERGE_HEAD` beside the files it merged): it goes with the song
   into its file, its autosave and the song left on a branch, so that whichever of them opens holds the merge state its
   song is in. A song closed without saving after a merge holds none; the autosave restored after a crash holds the one
   it was saved with. It goes in and out with the merge's undo step: Undo of the merge leaves none waiting, so the next
-  commit follows this line alone, and Redo brings it back; Undo of Abort Merge makes it wait again, its conflicts as
-  they were chosen. It counts as an unsaved change, but is no line of the changes, nor part of a commit.
-- **The branch moved on underneath it.** Where the branch's last commit is no longer the one the merge was taken at
-  (another computer committed on it, or a commit was made after the merge's Undo and before its Redo), the merge still
-  waits, so that its commit follows the newest commit and the merged one and records the IDs it gave, rather than the
-  merged work coming into the branch as new items that a later merge would bring again; the view says so. Its own
-  commit finishes it, known by the graph (a commit of the line that merged the same commit, on top of where it was
-  taken, recording the IDs it gave), so that nothing is written into the song after a commit. Where the branch holds the
-  merged commit through another computer's merge of it that gave what it added other IDs, it waits still, its commit
-  recording this song's IDs beside that merge's, so that later merges of that line find this song's items; where the
-  branch holds it otherwise, it waits no more, and the view says so.
+  version follows this line alone, and Redo brings it back; Undo of Cancel Merge makes it wait again, its conflicts as
+  they were chosen. It counts as an unsaved change, but is no line of the changes, nor part of a version.
+- **The branch moved on underneath it.** Where the branch's last version is no longer the one the merge was taken at
+  (another computer saved one on it, or one was saved after the merge's Undo and before its Redo), the merge still
+  waits, so that its version follows the newest version and the merged one and records the IDs it gave, rather than
+  the merged work coming into the branch as new items that a later merge would bring again; the view says so. Its own
+  version finishes it, known by the history (a version of the line that merged the same version, on top of where it was
+  taken, recording the IDs it gave), so that nothing is written into the song after a version is saved. Where the branch
+  holds the merged version through another computer's merge of it that gave what it added other IDs, it waits still,
+  its version recording this song's IDs beside that merge's, so that later merges of that line find this song's items;
+  where the branch holds it otherwise, it waits no more, and the view says so.
 - **Read in the background.** A merge's conflicts are found again from its three songs on the history's thread (as
-  the project opens, or a branch is switched to whose song holds one); meanwhile it waits, "being read", and Abort
+  the project opens, or a branch is switched to whose song holds one); meanwhile it waits, "being read", and Cancel
   Merge waits for it.
 - View state and how the song plays are always this branch's.
 
-## Hearing a commit
+## Hearing a version
 
-- **A bounce** is the song as it was in a commit, rendered as Export Song renders it, as FLAC at 16 bits. **Bounce**
-  (`version.bounce`) makes one for a commit that has none: the current commit's from the open song, playback
+- **A bounce** is the song as it was in a version, rendered as Export Song renders it, as FLAC at 16 bits. **Bounce**
+  (`version.bounce`) makes one for a version that has none: the current version's from the open song, playback
   stopped; an older one's in the background, with plug-in instances of its own, while the song plays on. **Delete
   Bounce** frees its file. Bounces are nearly all of the room a history takes.
-- **Hear It** (`version.hear`) plays a commit's bounce in place of the song, from the engine's next block, at the
-  same beat. The transport bar says "Hearing: *name*". An edit to the song switches back to the song.
+- **Hear It** (`version.hear`, the play mark, a double-click in the history) plays a version's bounce in place of the
+  song, from the engine's next block, at the same beat. A version without a bounce is bounced in the background first,
+  the song playing on, and heard as soon as it is, as A/B does (meanwhile A/B names it, "Bouncing to hear it"); not the
+  version the song is now, which has nothing to be heard against. The transport bar says "Hearing: *name*". An edit to
+  the song switches back to the song.
 - **Loudness matched:** both are measured as they play, and at each switch the louder one is turned down to the
   other's loudness so far, so that a version can't win by being louder.
 - **A/B** (`version.compare`, N, and the transport bar's A/B) switches between the song and B, over plug-in windows
-  too. B is the commit heard last, or else the last commit, so that work not committed yet is heard against what
-  was. A commit without a bounce is bounced in the background first. A/B is greyed while B is the song itself.
+  too. B is the version heard last, or else the last version, so that the changes since are heard against what was. A
+  version without a bounce is bounced in the background first. A/B is greyed while B is the song itself.
 
 ## Local History
 
-Local History keeps the song as it was at times while it differed from its last commit, without asking.
+Local History keeps the song as it was at times while it differed from its last version, without asking.
 
-- **When:** as the project opens with changes since its last commit ("As opened"); every 10 minutes while the song
+- **When:** as the project opens with changes since its last version ("As opened"); every 10 minutes while the song
   changes ("Auto-saved"), never while it records; and before what makes the song another: a restore, Discard All
-  Changes, a merge taken, Abort Merge, a snapshot restored.
+  Changes, a merge taken, Cancel Merge, a snapshot restored.
 - **What it costs:** a snapshot is taken only when the song differs from the one before it, and is stored as
-  commits are, so it costs what changed.
+  versions are, so it costs what changed.
 - **How long:** every snapshot of the last two hours, then the newest of each hour for a day, then the newest of
   each day for 30 days.
 - **Restore from Local History** (`version.restoreSnapshot`) makes the song what it was then, as one undo step, the
@@ -207,27 +223,26 @@ Local History keeps the song as it was at times while it differed from its last 
 
 ## Keeping the history whole
 
-- **Verify History** (`version.verify`) reads every piece and checks it against its name, walks every commit's
-  song, and finds the commits no branch holds.
-- **Recover Lost Commits** (`version.recover`) makes a branch of each line of those commits, named after the branch
-  they were made on ("main-recovered").
-- A commit with a damaged piece is restored in part, and the view says what it couldn't take, which stays as it is
-  now. **Restore from This Commit** on the commit (the whole song) takes every element it can read, and a track the
-  song hasn't now comes back without what of it can't be read (a clip). On one of its lines, it takes that line where
-  the commit holds it whole, leaves what of it can't be read as it is, and takes nothing where the line's place in the
-  commit can't be read: it isn't in the commit where it reads, and a track whose piece is damaged could have held it (a
-  folder it is in now, the nearest named; a folder now; or a track gone since, whose kind is unknown), saying
-  which piece. In the window, only the first is reached: the graph lists no lines under a commit it can't read whole,
-  nor does Compare with Working Tree list any, so a damaged commit's lines show nowhere to restore one by one. Verify
-  History names such commits. A commit whose own piece can't be read restores nothing.
-- **A branch whose last commit can't be read** (a piece of its record damaged or missing) says so in the view, and
-  offers the newest commit of the branch's log on this computer that reads; **Reset Branch to Last Readable Commit**
-  (`version.resetToReadable`, git reset --soft) takes the branch back to it, the song as it is. Nothing is committed on
-  top of the commit that can't be read meanwhile; where the log holds none that reads, a commit starts the branch's line
-  again.
+- **Verify History** (`version.verify`) reads every piece and checks it against its name, reads every version's song,
+  and finds the versions no branch holds.
+- **Recover Lost Versions** (`version.recover`) makes a branch of each line of those versions, named after the branch
+  they were saved on ("main (recovered)").
+- A version with a damaged piece is restored in part, and the view says what it couldn't take, which stays as it is
+  now. **Restore This Version** (the whole song) takes every element it can read, and a track the song hasn't now comes
+  back without what of it can't be read (a clip). On one of its lines, it takes that line where the version holds it
+  whole, leaves what of it can't be read as it is, and takes nothing where the line's place in the version can't be
+  read: it isn't in the version where it reads, and a track whose piece is damaged could have held it (a folder it is
+  in now, the nearest named; a folder now; or a track gone since, whose kind is unknown), saying which piece. In the
+  window, only the first is reached: the history lists no lines under a version it can't read whole, nor does Compare
+  with the Song list any, so a damaged version's lines show nowhere to restore one by one. Verify History names such
+  versions. A version whose own piece can't be read restores nothing.
+- **A branch whose last version can't be read** (a piece of its record damaged or missing) says so in the view, and
+  offers the newest version of the branch's log on this computer that reads; **Reset Branch to Last Readable Version**
+  (`version.resetToReadable`) takes the branch back to it, the song as it is. No version is saved on top of the one
+  that can't be read meanwhile; where the log holds none that reads, a version saved starts the branch's line again.
 - **A damaged piece is read from another pack** that holds it, and a copy found damaged (by a read, or Verify History)
-  is forgotten, so that the next commit holding the piece writes it again.
-- A project file that can't be read offers its branch's last commit
+  is forgotten, so that the next version holding the piece writes it again.
+- A project file that can't be read offers its branch's last version
   ([projects-saving-export.md](projects-saving-export.md)).
 
 ## The store
@@ -236,40 +251,44 @@ The history is the `Versions` folder beside the project file. Its format is writ
 [../versions-format.md](../versions-format.md).
 
 - **Pieces.** A song is split at its tracks, clips, devices, containers and automation curves. Each piece is named
-  by the SHA-256 of what it holds, so a commit stores only the pieces no commit before it has. A clip's notes and a
+  by the SHA-256 of what it holds, so a version stores only the pieces no version before it has. A clip's notes and a
   curve's points are split into runs, so one note changed in a long clip stores one run. A plug-in's state is a
   piece of its own, in its bytes.
 - **The same song always makes the same pieces:** each value is written in one way, as in the project file.
 - **Packs.** Pieces are kept in packs, written once and never changed, but where every piece of one was found damaged:
-  the next commit that holds them writes it again whole under its own name, in its place (where another program holds the
-  damaged file, the commit fails and says so). More than 50 packs are joined into one as the history opens.
+  the next version that holds them writes it again whole under its own name, in its place (where another program holds
+  the damaged file, the save fails and says so). More than 50 packs are joined into one as the history opens.
 - **Audio files** are named by their paths, sizes and hashes, not copied. Clean Up Unused Audio keeps every file a
-  commit plays (on a branch, or one Recover Lost Commits brings back), and every song left on a branch or kept in Local
-  History, on any computer, and the song before a merge any of them holds. The Project view finds how many are unused
-  in the background, reading each piece once.
+  version plays (on a branch, or one Recover Lost Versions brings back), and every song left on a branch or kept in
+  Local History, on any computer, and the song before a merge any of them holds. The Project view finds how many are
+  unused in the background, reading each piece once.
 - **Written safely:** every file is written whole or not at all. Reading checks each piece's hash, so a damaged one
-  affects only the commits that hold it.
+  affects only the versions that hold it.
 - **Each computer writes only files of its own:** its record of each branch, its log of each branch's moves, its
-  edited messages, the songs it left on branches and its Local History. A computer is known by an ID made at
-  random, never by a name.
+  renamed versions, the songs it left on branches and its Local History. A computer is known by an ID made at random,
+  never by a name. So a project folder kept in a synced folder and opened on two computers, one at a time, never has a
+  file with two writers. From each computer's records follow a branch whose line went its own way on two computers,
+  which the view shows to merge again ("main went another way on another computer too"), a deleted branch staying
+  deleted everywhere, and the newest computer's word winning for a renamed version or branch. Nothing more is built on
+  them until working together is designed (the owner, 2026-11-17).
 - **Off the message thread:** the song is copied on the message thread; splitting, hashing, compressing and writing
-  run on the history's own thread, as does reading it when the project opens. A commit or a snapshot given as the project
-  closes is written after it, on the history's thread, which the close doesn't wait for; the project opened again (or
-  another history of the same folder) reads the folder only after it, and quitting waits for it behind a window that
-  says what is being finished. What the history reads is let go.
-- **Commands that read whole songs read them there too** (known bug 126): Checkout Branch, Checkout (Detached), Back
-  to Branch, Create Branch from a commit, Import DAWproject back as a branch, Merge's list, Restore from This Commit (the
-  song's or a line's), Compare with Working Tree, Restore from Local History, Undo Last Commit and Reset Branch to Last
-  Readable Commit read on the history's thread, and change the song on the message thread once what they read is in
-  (one named undo step where the command is one). A switch also splits and keeps the song it leaves there, from a copy
-  taken as it starts; the merge's list is worked out there against a copy of the song, which is kept in the store there
-  too, for Abort Merge (Merge takes that piece, unless the song changed since: then it is kept on the history's thread as
-  Merge is clicked, the window held). The import of a DAWproject as a branch unpacks its audio there, with progress. If the song changed while it was
-  read (a plug-in's own change, the automation written as it plays), that part goes round again on the history's thread
-  from a new copy, twice at most; what changed after that (the hold keeps every edit of the user's out) is worked in on
-  the message thread as the command ends. Bouncing an old commit, exporting one as DAWproject and Delete Branch's
-  question (whether the song left there had changes) read on the history's thread too, without holding the window;
-  hearing a commit's bounce reads its song's own piece alone, for its tempo map.
+  run on the history's own thread, as does reading it when the project opens. A version or a snapshot given as the
+  project closes is written after it, on the history's thread, which the close doesn't wait for; the project opened
+  again (or another history of the same folder) reads the folder only after it, and quitting waits for it behind a
+  window that says what is being finished. What the history reads is let go.
+- **Commands that read whole songs read them there too** (known bug 126): a switch to another branch, Create Branch from a
+  version, Import DAWproject back as a branch, Merge's list, Restore This Version and Restore from This Version, Compare
+  with the Song, Restore from Local History, Undo Last Version and Reset Branch to Last Readable Version read on the
+  history's thread, and change the song on the message thread once what they read is in (one named undo step where the
+  command is one). A switch also splits and keeps the song it leaves there, from a copy taken as it starts; the merge's
+  list is worked out there against a copy of the song, which is kept in the store there too, for Cancel Merge (Merge
+  takes that piece, unless the song changed since: then it is kept on the history's thread as Merge is clicked, the
+  window held). The import of a DAWproject as a branch unpacks its audio there, with progress. If the song changed while
+  it was read (a plug-in's own change, the automation written as it plays), that part goes round again on the history's
+  thread from a new copy, twice at most; what changed after that (the hold keeps every edit of the user's out) is worked
+  in on the message thread as the command ends. Bouncing an old version, exporting one as DAWproject and Delete
+  Branch's question (whether the song left there had changes) read on the history's thread too, without holding the
+  window; hearing a version's bounce reads its song's own piece alone, for its tempo map.
 - **The window held meanwhile** (`ProjectContext::holdForWork()`): from the command's start the window takes no input but
   the keys that work while a mouse button is down (play and stop, the tools, the editors' zoom): the window's one hold
   (`src/app/InputHold.h`), the same as a command waiting for the plug-ins' states and an audio file's work take, and the
@@ -278,60 +297,37 @@ The history is the `Versions` folder beside the project file. Its format is writ
   the window's queue of progress windows, after an audio file's work's if that shows first. Its Cancel, or Escape
   (before its window shows too), and a quit or the computer's session ending, cancel it
   (a quit says so where the view says its problems: "Stopped, as Phazite was closing"), and what each leaves is:
-  - a switch, a checkout, Back to Branch: the song and the branch as they were; the song left may already be kept in the
-    store as a piece that nothing names, which takes only its room;
-  - Create Branch from a commit, Import DAWproject as a branch: nothing; a branch made for it is taken away again (the
+  - a switch: the song and the branch as they were; the song left may already be kept in the store as a piece that
+    nothing names, which takes only its room;
+  - Create Branch from a version, Import DAWproject as a branch: nothing; a branch made for it is taken away again (the
     import's audio unpacked by then is deleted again);
-  - Merge's list, the restores, Compare, Undo Last Commit, Reset Branch: nothing changed.
+  - Merge's list, the restores, Compare, Undo Last Version, Reset Branch: nothing changed.
   A command that can't finish says why in the Versions view (`getReadingProblem()`): a song that can't be read, the
   song recording or a render begun meanwhile, the branch moved on, a folder that can't be written to, the project
   saved into a new folder meanwhile. None of them starts while a first save copies the `Versions` folder, and one that
   read before the copy is refused as it is taken in, so that nothing is written into the folder the project leaves; a
   branch a cancelled command made is taken away once the copy is over. Delete Branch's question says when what was left
   on the branch can't be read.
-- **Songs from elsewhere:** a song read from the pieces (a commit's, a song left on a branch, a snapshot) is made
+- **Songs from elsewhere:** a song read from the pieces (a version's, a song left on a branch, a snapshot) is made
   consistent as a project file is as it opens (`makeConsistent()`), whoever wrote it: what no Phazite writes (a number
   that is none or out of its range, an ID twice, a send to nothing, a sound file outside the project's folder) never
   reaches the song. Of a song Phazite wrote the checks change nothing but what a project opened leaves out too: the
   curves of a device deleted, which the song keeps while an Undo could bring the device back. That loses nothing: a
-  switch starts the undo history again; Restore from This Commit and from Local History are undo steps, whose Undo puts
-  the curves back with the rest; a line's Restore leaves them as they are; a merge counts them as this side's. A song
-  read in part (a commit with damaged pieces) keeps what names what it couldn't read (a send to a lost return, a lost
-  device's curves and modulations), which the song it is taken into judges (`removeBrokenReferences()`, and a curve it
-  brought in of a device the song hasn't taken away again, in the same step), so that the song is what its file would open
-  as. A merge, Restore from This Commit and a line's Restore refuse a song that held an ID twice, which its line's IDs no
-  longer match once the checks give it new ones (an item would come in as new).
+  switch starts the undo history again; Restore This Version and Restore from Local History are undo steps, whose Undo
+  puts the curves back with the rest; a line's restore leaves them as they are; a merge counts them as this side's. A
+  song read in part (a version with damaged pieces) keeps what names what it couldn't read (a send to a lost return, a
+  lost device's curves and modulations), which the song it is taken into judges (`removeBrokenReferences()`, and a
+  curve it brought in of a device the song hasn't taken away again, in the same step), so that the song is what its
+  file would open as. A merge, Restore This Version and a line's restore refuse a song that held an ID twice, which its
+  line's IDs no longer match once the checks give it new ones (an item would come in as new).
 - Save Project As copies the history with the project. Without a `Versions` folder, a project opens with no history
-  and makes its initial commit.
+  and saves its first version.
 
 ## DAWproject
 
-A commit, or the song as it is, is written as a DAWproject for other DAWs, and one that was exported from a commit
-comes back as a branch from that commit, showing only what the other DAW changed
+A version, or the song as it is, is written as a DAWproject for other DAWs, and one that was exported from a version
+comes back as a branch from that version, showing only what the other DAW changed
 ([projects-saving-export.md](projects-saving-export.md#dawproject)).
-
-## To be removed
-
-The feature is to be made simpler for producers. Commit, the graph, restoring the song or one track from a commit,
-branches, A/B and Local History stay. Merging stays as a whole merge, for later collaboration. These parts are in
-the code now and are to be removed; this page is to be cut down when they are.
-
-- **Staging.** The **Staged Changes** section, **Stage Changes** and **Unstage Changes** on a line (`version.stage`,
-  `version.unstage`), **Stage All Changes** and **Unstage All Changes** (`version.stageAll`, `version.unstageAll`),
-  and the letter A. Today the staged song is what the next commit records: the last commit with the lines staged
-  since, as they were when staged. Discard Changes restores a line from the staged song; Undo Last Commit stages
-  what the commit recorded. Staging is kept while the project is open, for its branch.
-- **A commit checked out on its own.** **Checkout (Detached)** (`version.checkout`, also a double-click on a
-  commit) makes the song a commit's in place, on no branch: the branch button and the status bar read
-  "*name* (detached)", and a bar offers **Back to main** (`version.backToBranch`) and **Create Branch Here**.
-  Nothing is committed or merged meanwhile. What changed there goes into Local History ("Before Leaving a
-  Checkout") on the way back. The project opens again where it was left.
-- **A merge's ticked lines.** Today each line of a merge can be unticked, so that only some tracks are taken. A
-  merge is to take every line.
-- **Per-computer branch records** are parked: each computer's own record of each branch
-  (`branches/<branch>/<computer>.xml`), with what follows from it: a branch's lines that went their own way on
-  another computer shown to merge again, a deleted branch kept out on every computer, and the newest computer's
-  word winning for an edited message.
 
 ## Decisions
 
@@ -339,30 +335,39 @@ the code now and are to be removed; this page is to be cut down when they are.
   servers has closed with it; a cloud would only hold a copy.
 - Git's ideas without git's files: git merges lines of text, which a song isn't, and two branches that each add
   something give the same new ID to different things.
-- A commit is a point the user chooses, not every save; Local History covers the time between commits.
-- A commit stores what changed, in pieces; audio files are named, not copied; bounces are optional and deleted one
+- A version is a point the user chooses, not every save; Local History covers the time between versions.
+- A version stores what changed, in pieces; audio files are named, not copied; bounces are optional and deleted one
   by one.
+- A version records the whole song: no staging, as no producer saves the drums alone while the bass is half done
+  (they save both, or put the bass on a branch).
+- The song is always on a branch: an old version is looked at by hearing it, restoring it (an undo step) or starting a
+  branch there, never by checking it out on its own.
+- A merge takes every line: one track from another branch is a restore of its line, after Compare with the Song.
 - Differences and merges go by the song's IDs, and are said in Phazite's own words, by track.
 - A merge never stops on a question: a conflict takes this branch's value and stays open to switch.
 - Restoring, discarding and merging are each one undo step, so what plays follows and Undo takes them back.
-- Checking out a branch changes the song in place rather than loading it anew, so plug-ins stay loaded.
-- A new branch asks nothing.
-- The words are git's, as VS Code's Source Control says them; hear, bounce and A/B are Phazite's own.
-- No stash: each branch keeps its own unfinished work, and A/B hears it against the last commit.
-- While Phazite keeps no backward compatibility, an update can make older commits unreadable; their bounces still
+- Switching to a branch changes the song in place rather than loading it anew, so plug-ins stay loaded.
+- A new branch asks nothing, and is named as typed.
+- The words are plain ones (version, history, switch, restore), keeping branch and merge (the owner, 2026-11-17); git's
+  words stay as search words for the commands. The layout stays VS Code's Source Control view's.
+- No stash: each branch keeps its own unfinished work, and A/B hears it against the last version.
+- While Phazite keeps no backward compatibility, an update can make older versions unreadable; their bounces still
   play.
 
 ## Not built
 
-- The playlist marking the clips and tracks that changed since the last commit: Planned.
+- What S4.3 to S4.5 build next ([versions-cut.md](versions-cut.md)): a version that leaves every branch kept 30 days
+  and listed by Recover Lost Versions, the store swept of what nothing names, Verify History's check of the audio, and
+  the song tied to the version it grew from: Planned.
+- The playlist marking the clips and tracks that changed since the last version: Planned.
 - A branch's colour chosen by hand: Planned.
-- One undo for every source control operation (a checkout, a deleted branch): Planned.
-- Reverting one old commit while keeping later ones: Planned; restoring a line from a commit covers most of it.
-- Showing only named commits in a long graph, and exports tied to commits: Planned.
+- One undo for every versions operation (a switch, a deleted branch): Planned.
+- Reverting one old version while keeping later ones: Planned; restoring a line from a version covers most of it.
+- Showing only named versions in a long history, and exports tied to versions: Planned.
 - Backup to a folder of the user's choosing, a cloud copy, share links with comments, and working together on
   branches: Planned.
 - Tags, stash, rebase, squash, cherry-pick, blame and bisect: Declined.
-- A benchmark of committing and of the changes list on a 100-track song: Planned.
+- A benchmark of saving a version and of the changes list on a 100-track song: Planned (S4.5).
 
 ## In the code
 
@@ -373,11 +378,10 @@ the code now and are to be removed; this page is to be cut down when they are.
 - `src/model/versions/internal/SongDiff.h`: what differs between two songs.
 - `src/model/versions/internal/ApplySong.h`: the song made like another with the fewest edits (`makeSongLike()`,
   `makeTrackLike()`, `makeSongTheSame()`).
-- `src/model/versions/internal/SongMerge.h`: the three-way merge (`mergeSongs()`).
+- `src/model/versions/internal/SongMerge.h`: the three-way merge of every line (`mergeSongs()`).
 - `src/model/commands/UndoHistory.h`: the undo history as the view lists it.
 - `src/engine/nodes/Comparison.h`: a bounce played after the master.
 - `src/ui/versions/VersionsView.h`, `BranchPicker.h`; `src/ui/shell/ActivityBar.h`, `StatusBar.h`, `TopBar.h` (A/B).
-- Tests: `tests/VersionsTests.cpp`, `VersionsBranchTests.cpp`, `VersionsMergeTests.cpp`,
-  `VersionsCheckoutTests.cpp`, `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
-  `VersionsHearingTests.cpp`, `VersionStoreTests.cpp`,
-  `tests/golden/format/`.
+- Tests: `tests/VersionsTests.cpp`, `VersionsBranchTests.cpp`, `VersionsMergeTests.cpp`, `VersionsMergeWaitingTests.cpp`,
+  `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
+  `VersionsHearingTests.cpp` (and A/B), `VersionsKeptWholeTests.cpp`, `VersionStoreTests.cpp`, `tests/golden/format/`.

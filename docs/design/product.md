@@ -15,7 +15,7 @@ built on JUCE. This page says what it aims to be, who it is for and the principl
 | Song outlines and chord progressions | Built | [getting-started.md](getting-started.md), [chords.md](chords.md) |
 | VST®3 hosting on Windows | Built | Each plug-in file in a helper process: [plugin-hosting.md](plugin-hosting.md) |
 | Audio and MIDI recording, Capture | Partly built | Take lanes and comping are after version 1: [recording.md](recording.md) |
-| Versions of a project (commits, branches, merges) | Built | [../versions.md](versions.md) |
+| Versions of a project (saved versions, branches, merges) | Built | [../versions.md](versions.md) |
 | DAWproject export and import | Partly built | A DAWproject's plug-ins and sends are not imported; after version 1 |
 | Windows | Built | Phazite is developed on Windows 11 |
 | Linux | Partly built | Builds and passes its tests; the app itself has not been tried |

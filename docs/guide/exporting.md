@@ -65,8 +65,8 @@ stretch, pitch or reverse, and frozen tracks. Such a track's sound goes onto an 
 the track itself is kept, muted, with its notes and clips, so the other DAW has both. The file's comment says what was
 left out.
 
-**File > Import DAWproject...** opens a DAWproject file as a new project. A file exported from a commit of the open
-project comes back as a branch from that commit ([Source control](source-control.md)). A notice then says what it
+**File > Import DAWproject...** opens a DAWproject file as a new project. A file exported from a version of the open
+project comes back as a branch from that version ([Versions](versions.md)). A notice then says what it
 couldn't bring in, track by track: plug-ins and devices by name, sends, automation and groups.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.

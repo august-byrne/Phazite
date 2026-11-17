@@ -161,7 +161,7 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     TestSong s;
     const auto bass = s.addTrack ("Bass");
     REQUIRE (waitForVersionHistory (s.context));
-    REQUIRE (getVersionNames (s.context) == juce::StringArray ("Initial commit"));
+    REQUIRE (getVersionNames (s.context) == juce::StringArray ("First version"));
 
     s.setVolume (bass, -6.0f);
     REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
@@ -185,7 +185,7 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     }
 
     REQUIRE (waitForVersionHistory (s.context));
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Written as it closed", "Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Written as it closed", "First version"));
     CHECK (phazite::getSnapshots (s.context).size() == 1);
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     waitForVersionsFinished();
@@ -235,7 +235,7 @@ void checkNothingWaitsForHistoriesGoneAsTheyRead (int histories)
 
     phazite::setSong (s.context, &song);
     REQUIRE (waitForVersionHistory (s.context));
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("First version"));
 }
 } // namespace
 
@@ -444,7 +444,7 @@ TEST_CASE ("The example song opened from a file that is its last commit has no c
 TEST_CASE (
     "A branch whose last commit can't be read says so and offers the newest commit of its log that reads, committing nothing by itself")
 {
-    // Known bug 59: the history read no commit, made a new "Initial commit" on top of the one it couldn't read, and the
+    // Known bug 59: the history read no commit, made a new "First version" on top of the one it couldn't read, and the
     // older commits left the graph.
     TestSong s;
     const auto bass = s.addTrack ("Bass");
@@ -462,7 +462,7 @@ TEST_CASE (
     closeAndOpenAgain (s, [&packs] { REQUIRE (packs[0].deleteFile()); });
 
     // Nothing committed: the branch still at the commit it can't read, which it says, offering the one before.
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "First version"));
     REQUIRE (phazite::getCurrentBranch (s.context).has_value());
     CHECK (phazite::getCurrentBranch (s.context)->head == damaged);
     const auto problem = phazite::getHeadProblem (s.context);
@@ -470,7 +470,7 @@ TEST_CASE (
     CHECK (problem.contains ("\"Readable\""));
     CHECK (phazite::canResetToReadable (s.context));
     CHECK_FALSE (phazite::canSaveVersion (s.context)); // Commit greyed, its field saying why (the review of known bug 59)
-    CHECK (problem.contains ("Recover Lost Commits"));
+    CHECK (problem.contains ("Recover Lost Versions"));
 
     // No commit on top of it meanwhile.
     std::optional<juce::Result> refused;
@@ -488,12 +488,12 @@ TEST_CASE (
     CHECK (phazite::hasChangesSinceLastVersion (s.context)); // the volume, which the commit that went had
 
     keepVersion (s.context, "Again");
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Again", "Readable", "Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Again", "Readable", "First version"));
     CHECK (phazite::getLastVersion (s.context)->parents == juce::StringArray (readable));
 
     // And so it opens again.
     closeAndOpenAgain (s);
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Again", "Readable", "Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Again", "Readable", "First version"));
     CHECK (phazite::getHeadProblem (s.context).isEmpty());
 }
 
@@ -541,7 +541,7 @@ TEST_CASE ("A branch whose last commit can't be read offers the newest that read
     CHECK_FALSE (phazite::canSaveVersion (s.context));
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::resetToReadable (s.context); }));
     CHECK (phazite::getCurrentBranch (s.context)->head == readable);
-    CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "Initial commit"));
+    CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "First version"));
 }
 
 TEST_CASE ("A branch none of whose commits reads says so, and a commit made by hand starts its line again")
@@ -809,11 +809,11 @@ TEST_CASE ("A song read from the versions' pieces holds together as a project fi
     const auto theirs = writeOthersCommit (s, hostile, "elsewhere");
     auto& song = *phazite::findSong (s.context);
 
-    SUBCASE ("Checked out")
+    SUBCASE ("A branch from it, switched to")
     {
-        REQUIRE (finished (s.context, [&] { return phazite::checkoutVersion (s.context, theirs, s.save); }));
+        REQUIRE (finished (s.context, [&] { return phazite::newBranch (s.context, theirs, s.save); }));
         checkSong (song);
-        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context)); // the commit as it is read, the same each time
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context)); // the version as it is read, the same each time
     }
 
     SUBCASE ("Restored")
@@ -846,7 +846,7 @@ TEST_CASE ("A song read from the versions' pieces holds together as a project fi
         list.removeChild (list.getNumChildren() - 1, nullptr); // the twin, added last
         const auto other = writeOthersCommit (s, single, "elsewhere-2");
         REQUIRE (finished (s.context, [&] { return phazite::startMerge (s.context, other); }));
-        phazite::finishTickedMerge (s.context);
+        phazite::finishMerge (s.context);
         REQUIRE (phazite::isMerging (s.context));
         checkSong (*phazite::findSong (s.context));
     }
@@ -911,7 +911,7 @@ TEST_CASE (
 
 TEST_CASE ("The loader's checks change nothing in a song Phazite wrote, read back from its pieces")
 {
-    // A commit read back is what was committed, so that the changes and the badge see none after a checkout: the
+    // A version read back is what was saved, so that the changes and the badge see none after a switch: the
     // representative project's song, every name Phazite saves in it, split and joined again.
     TestSong s;
     const auto golden = getGoldenFolder().getChildFile ("projects/representative.xml");

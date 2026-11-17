@@ -11,7 +11,7 @@
 namespace phazite::ui
 {
 //==============================================================================
-// A commit's message, edited: Enter starts a new line and Ctrl+Enter keeps it, as in the Source Control view's field.
+// A version's name and note, edited: Enter starts a new line and Ctrl+Enter keeps them, as in the Versions view's field.
 class BranchPicker::MessageField : public juce::TextEditor
 {
 public:
@@ -55,10 +55,10 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
             case Mode::remove:
                 return { "Delete a branch", "Select a branch to delete" };
             case Mode::message:
-                return { "Edit the commit's message", "The commit's message" };
+                return { "Rename the version", "The version's name" };
             case Mode::pick:
             default:
-                return { "Branches", "Select a branch to checkout, or type a new branch's name" };
+                return { "Branches", "Select a branch to switch to, or type a new branch's name" };
         }
     }();
 
@@ -77,7 +77,8 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
         searchField.selectAll();
     }
 
-    // Editing a message: the field holds it, its first line the name and the rest the note, as the commit's field does.
+    // Renaming a version: the field holds its name and note, its first line the name and the rest the note, as the view's
+    // field does.
     if (mode == Mode::message)
     {
         messageField = std::make_unique<MessageField>();
@@ -176,8 +177,8 @@ void BranchPicker::resized()
 
 void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
 {
-    // The other branches whose names have what was typed, each with its last commit and when it was made; merging, how many of
-    // its commits the current branch doesn't have, and not one that has none; deleting, not one a merge under way needs.
+    // The other branches whose names have what was typed, each with its last version and when it was saved; merging, how many
+    // of its versions the current branch doesn't have, and not one that has none; deleting, not one a merge under way needs.
     const auto current = getCurrentBranch (context);
     const auto versions = getVersions (context);
     const auto now = juce::Time::getCurrentTime();
@@ -189,7 +190,7 @@ void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
 
         const auto head = std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
         const auto last =
-            head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now) : juce::String ("no commits yet");
+            head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now) : juce::String ("no versions yet");
         Row row { kind, branch, branch.name, last, false, true };
 
         if (kind == Row::Kind::merge)
@@ -197,7 +198,7 @@ void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
             const auto toMerge = countCommitsToMerge (context, branch.id);
             row.enabled = canMergeBranch (context, branch.id);
             row.about = toMerge == 0 ? juce::String ("nothing to merge")
-                                     : juce::String (toMerge) + (toMerge == 1 ? " commit" : " commits") + " to merge; last " + last;
+                                     : juce::String (toMerge) + (toMerge == 1 ? " version" : " versions") + " to merge; last " + last;
         }
         else
         {
@@ -212,7 +213,7 @@ void BranchPicker::updateRows()
 {
     rows.clear();
     const auto typed = getSearchField().getText().trim();
-    const auto name = toBranchName (typed); // as git keeps it
+    const auto name = toBranchName (typed); // as a branch keeps it
     const auto current = getCurrentBranch (context);
     const auto branches = getBranches (context);
     const auto isTaken = [&branches, &name] (const juce::String& except)
@@ -230,10 +231,10 @@ void BranchPicker::updateRows()
 
     if (mode == Mode::message)
     {
-        // The one row: the message kept, as typed (an empty first line leaves the commit named by what it changed).
+        // The one row: the name kept, as typed (an empty first line leaves the version named by what it changed).
         const auto versions = getVersions (context);
         const auto exists = std::any_of (versions.begin(), versions.end(), [this] (const VersionInfo& info) { return info.id == version; });
-        Row row { Row::Kind::message, {}, "Save the commit's message", {}, false, exists };
+        Row row { Row::Kind::message, {}, "Rename the version", {}, false, exists };
         row.about = formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
                         .replace ("Return", "Enter");
         rows.push_back (std::move (row));
@@ -267,8 +268,8 @@ void BranchPicker::updateRows()
         return;
     }
 
-    // Create new branch, as VS Code's first item, named as typed, unless a branch has that name: Enter on its name checks it
-    // out instead.
+    // Create new branch, as VS Code's first item, named as typed, unless a branch has that name: Enter on its name switches
+    // to it instead.
     if (! isTaken ({}))
     {
         const auto last = getLastVersion (context);
@@ -276,7 +277,7 @@ void BranchPicker::updateRows()
             Row::Kind::newBranch, {}, {}, {}, false, last.has_value() && ! isSavingVersion (context) && ! isReadingVersions (context)
         };
         row.name = name.isEmpty() ? juce::String ("Create new branch...") : "Create new branch '" + name + "'";
-        row.about = last.has_value() ? juce::String ("from the current commit, with the changes") : juce::String ("no commit yet");
+        row.about = last.has_value() ? juce::String ("from the song as it is, with its changes") : juce::String ("no version yet");
         rows.push_back (std::move (row));
     }
 
@@ -307,7 +308,7 @@ void BranchPicker::updateRows()
             const auto head =
                 std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
             row.about = head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now)
-                                               : juce::String ("no commits yet");
+                                               : juce::String ("no versions yet");
         }
 
         if (firstMatch < 0)
@@ -350,7 +351,7 @@ void BranchPicker::choose (int index)
     const auto row = rows[(size_t) index];
     const auto typed = getSearchField().getText().trim();
     const auto message = getSearchField().getText();
-    const auto commit = version;
+    const auto renamed = version;
     const auto ask = askToDelete;
     const auto window = owner;
     auto& bridge = commands;
@@ -358,7 +359,7 @@ void BranchPicker::choose (int index)
     close();
 
     juce::MessageManager::callAsync (
-        [&bridge, &projectContext, row, typed, message, commit, ask, window]
+        [&bridge, &projectContext, row, typed, message, renamed, ask, window]
         {
             switch (row.kind)
             {
@@ -408,7 +409,7 @@ void BranchPicker::choose (int index)
 
                 case Row::Kind::message:
                     // Its first line the name, the lines after it the note.
-                    editVersionMessage (projectContext, commit, message.upToFirstOccurrenceOf ("\n", false, false).trim(),
+                    editVersionMessage (projectContext, renamed, message.upToFirstOccurrenceOf ("\n", false, false).trim(),
                                         message.fromFirstOccurrenceOf ("\n", false, false).trim());
                     break;
             }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Two lines of a song merged (docs/design/versions.md: Merging by IDs): what the other side changed since the newest version both
+// Two lines of a song merged (docs/design/versions.md: Merging): everything the other side changed since the newest version both
 // have, taken into this side's, a line at a time (a track, the master, the song's own), each element by its key
 // (model/base/internal/Schema.h: getElementKey()), each property on its own. A property changed on one side takes that
 // side's value; changed on both to different values, it is a clash, which keeps this side's value and all three. An element
@@ -83,16 +83,12 @@ bool areOneToOne (const std::vector<RenumberedID>&);
 // The other side's plug-ins' knobs (SongPieces.h), by their devices' IDs as translateIDs() numbers them: all at once.
 PluginParameterValues translateKnobs (PluginParameterValues, const std::vector<RenumberedID>&);
 
-// What a merge takes, of the lines the other side changed since the two parted (findChanges (base, theirs)): tracks by their
-// IDs (the other side's), the master by its ID, and the song's own.
-struct MergeLines
-{
-    std::set<std::uint64_t> tracks;
-    bool songOwn = false;
-};
-
-// Merges the other side's lines into a copy of this side's song. New IDs come from makeID (the song's: Song::makeID()).
-MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs, const MergeLines&,
+// Merges every line the other side changed since the two parted into a copy of this side's song: never some of them, as a
+// merge is recorded whole. The lines are findChanges (base, theirs), as the merge's list holds them already (so that Merge
+// doesn't compare two whole songs again), or worked out here. New IDs come from makeID (the song's: Song::makeID()).
+MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
+                        const std::vector<SongChange>& lines, const std::function<std::uint64_t()>& makeID);
+MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
                         const std::function<std::uint64_t()>& makeID);
 
 // The element a clash's path names in a song, invalid if it has none.

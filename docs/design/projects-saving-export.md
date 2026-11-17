@@ -4,7 +4,7 @@
 
 A project is a folder that holds the song and everything it uses. This page says how a project is kept and saved, how
 Phazite recovers one after a crash, and how a song leaves Phazite: as an export, as stems, as a bounce, or as a
-DAWproject for another DAW. A project's history of commits is in [versions.md](versions.md).
+DAWproject for another DAW. A project's history of versions is in [versions.md](versions.md).
 
 ## Status
 
@@ -17,7 +17,7 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 | Backups of the project file | Built | Kept by age, as Local History is |
 | Auto Save | Built | On by default, for a project that has been saved once |
 | Autosave for a crash, and restoring it | Built | |
-| A project file that can't be read: its backup or its last commit offered | Built | |
+| A project file that can't be read: its backup or its last version offered | Built | |
 | View state saved without counting as a change | Built | |
 | The format written down for other tools | Built | [project-format.md](../project-format.md) |
 | Files from others taken as untrusted | Partly built | A song is made consistent as it opens; a preset's sounds are not yet limited to the library's folders |
@@ -80,7 +80,7 @@ Projects, presets and DAWprojects come from other people, so every file Phazite 
 says, it can't crash Phazite or make it do anything but open a song.
 
 - **A project is made consistent as it opens** (`makeConsistent()`), whoever wrote it, and the same for its autosave,
-  a backup and a commit's song. An element Phazite knows, where it doesn't belong, is left out, and one of a type it doesn't know stays untouched; every
+  a backup and a version's song. An element Phazite knows, where it doesn't belong, is left out, and one of a type it doesn't know stays untouched; every
   number is brought within its range, and one that is no number at all takes its default; IDs held twice or missing
   are given anew; what names something the song hasn't (a lane, a curve, a modulation, a sidechain, a pad's track) is
   dropped or cleared; and a sound file named on a network path, or by a path that climbs out of the project's folder, is looked for in its
@@ -128,8 +128,8 @@ it, packed or stored, so that a large recording in a DAWproject takes as much me
   a crash left goes to the system's trash, in the background, at the next first save into that folder. A folder of that
   name without the marker, or with a project file in it, is never touched.
 - The `Versions` folder is copied last, by the history's own thread after what it was writing: meanwhile nothing is
-  written into it (a commit, a merge taken or a branch's change waits, and the Source Control view says the project
-  is being saved), and a bounce of a commit under way starts again once the copy is over, in the project's new folder.
+  written into it (a version saved, a merge taken or a branch's change waits, and the Versions view says the project
+  is being saved), and a bounce of a version under way starts again once the copy is over, in the project's new folder.
   A project that closes during the copy starts nothing more in the folder it leaves.
 - An untitled project is not in Open Recent, and Export Song offers `Documents/Phazite/Exports` for it.
 - A lock keeps a second Phazite running at the same time away from the folders the first one uses.
@@ -214,11 +214,11 @@ An untitled project, and any project while Auto Save is off, is autosaved into a
   **Discard them**. Recordings made after the last autosave come back on tracks of their own. Untitled folders with
   nothing to restore are deleted.
 - A project file that can't be read offers the newest backup that reads (**Open the Backup**) or the song of its
-  branch's last commit (**Open the Last Commit**), opened in its place. Both are read in the background before the
+  branch's last version (**Open the Last Version**), opened in its place. Both are read in the background before the
   question shows, the window held as for any work (a progress window after a second; its Cancel, or Escape, offers
   the backup if it was read by then; a quit stops it). Without either, it leaves Open Recent with an error that says
   so.
-- **A restored project is unsaved until it is saved.** A project opened from an autosave, a backup or a commit does
+- **A restored project is unsaved until it is saved.** A project opened from an autosave, a backup or a version does
   not match its project file, so it shows as changed whatever else happens, and closing it saves it (with Auto Save)
   or asks (without it, or for an untitled project).
 
@@ -324,7 +324,7 @@ Consolidate, which joins clips into one, is in [playlist.md](playlist.md).
 ## Clean Up Unused Audio
 
 **Clean Up Unused Audio...** (File menu, `project.cleanUpAudio`) lists the files in the project's `Audio` and
-`Generated` folders that neither the song, nor its file as saved, its autosave or a backup, nor any commit or branch
+`Generated` folders that neither the song, nor its file as saved, its autosave or a backup, nor any version or branch
 of its history plays, and deletes the ticked ones.
 
 ## DAWproject
@@ -334,8 +334,8 @@ DAWproject is an open exchange format that other DAWs open. Phazite writes versi
 
 ### Export
 
-**Export as DAWproject...** (File menu and the Source Control view, `version.exportDawProject`) writes the song as it
-is, or the commit selected in the graph, into the project's `Renders` folder ("*project* - *commit*.dawproject").
+**Export as DAWproject...** (File menu and the Versions view, `version.exportDawProject`) writes the song as it
+is, or the version selected in the history, into the project's `Renders` folder ("*project* - *version*.dawproject").
 
 - **What goes in:** the tracks, folders (a bus as a submix), returns with the sends to them, and the master; each
   channel's volume, pan, mute, solo and output; MIDI clips' notes; audio clips' files with their fades; the tempo
@@ -353,9 +353,9 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 
 **Import DAWproject...** (File menu, `project.importDawProject`) opens a DAWproject file as a new project.
 
-- A file that was exported from a commit of the open project comes back as a branch from that commit, showing only
+- A file that was exported from a version of the open project comes back as a branch from that version, showing only
   what the other DAW changed. It takes notes, faders, mutes and tracks added or taken away. Its devices, automation
-  and audio clips stay the commit's. What DAWproject can't hold stays as the commit had it, instead of counting as
+  and audio clips stay the version's. What DAWproject can't hold stays as the version had it, instead of counting as
   removed.
 - A new project made from a file gets no plug-ins or sends from it. It takes notes, faders, mutes, audio clips (an
   audio file once, however many clips play it; Bitwig Studio's clips stretched by their warps follow the tempo at the
@@ -367,7 +367,7 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 
 - A project is a folder, not a single file, so that recordings and renders have a place and the song stays small.
 - A new project is untitled until its first save asks where it goes, so that starting a song asks nothing.
-- Auto Save is on by default, and a project keeps commits from its start, so that work is neither lost nor needs
+- Auto Save is on by default, and a project keeps versions from its start, so that work is neither lost nor needs
   remembering. Backups are made at most every 10 minutes under Auto Save, and kept by age on Local History's schedule,
   so that they reach back a month and there is one rule to learn; a count of ten turned over in under two hours.
 - Files are written whole or not at all, with a flush to the disk, because a failed write must never leave a cut

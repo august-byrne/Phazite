@@ -451,7 +451,7 @@ void ProjectView::read()
 
 void ProjectView::showUnused()
 {
-    // The last look's count, the button there while a commit or a snapshot is written (it can't look then), greyed with
+    // The last look's count, the button there while a version or a snapshot is written (it can't look then), greyed with
     // why; or why it can't tell which files are unused.
     const auto& found = unusedFinder.getFound();
     const auto problem = found.has_value() && ! found->unreadable.isEmpty() ? found->unreadable[0] : juce::String();

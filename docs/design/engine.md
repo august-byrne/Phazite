@@ -188,7 +188,7 @@ r8brain-free-src and Phazite's devices only.
 - **The metronome's click** is synthesized, and comes out as late as the song's sound does (its delay
   compensation), the count-in's too. The master's loudness is measured by EBU R128 ([mixer.md](mixer.md)).
 - **One output channel** (a mono device, or one channel chosen) plays both sides of the mix, each at half.
-- **A commit's bounce** is heard in place of the song by a part of the plan that plays it after the master, in time
+- **A version's bounce** is heard in place of the song by a part of the plan that plays it after the master, in time
   with the playhead ([versions.md](versions.md)).
 
 ### Offline

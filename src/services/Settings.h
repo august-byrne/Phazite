@@ -107,7 +107,7 @@ public:
     static constexpr NumberSetting pianoRollVelocityHeight { "phazitePianoRollVelocityHeight", 72.0, SaveTiming::soon };
     static constexpr BoolSetting pianoRollVelocityFolded { "phazitePianoRollVelocityFolded", false, SaveTiming::soon };
 
-    // Bounce Each Commit, in Commit's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
+    // Bounce Each Version, in Save Version's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
     // saved project saves itself a moment after each change, app/ProjectSession.h).
     static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };

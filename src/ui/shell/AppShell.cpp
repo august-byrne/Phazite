@@ -647,7 +647,7 @@ void AppShell::revealLeftView (LeftView view)
 
 void AppShell::showBranchPicker (BranchPicker::Mode mode)
 {
-    // A merge's lines show in the Source Control view.
+    // A merge's lines show in the Versions view.
     if (mode == BranchPicker::Mode::merge)
         revealLeftView (LeftView::versions);
 
@@ -1290,25 +1290,26 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "notes", "files", "audio files", "missing", "plug-ins used", "pool", "contents", "sidebar" },
          [this] { showLeftView (LeftView::project); });
 
-    add ("view.versions", "Source Control",
-         "Shows the project's source control in the left panel: its changes, staged or not, the commit and the graph of its "
+    add ("view.versions", "Versions",
+         "Shows the project's versions in the left panel: the changes since the last version, saving one, and the history of its "
          "branches; or hides the panel if it shows them.",
-         { "versions", "history", "branches", "git", "commits", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
+         { "source control", "history", "branches", "git", "commits", "snapshots", "sidebar" },
+         [this] { showLeftView (LeftView::versions); });
 
-    // Source control's quick inputs, as the Versions view's branch button, its menus and the status bar's branch open them,
-    // and Bounce Each Commit, as Commit's menu shows it.
+    // The versions' quick inputs, as the Versions view's branch button, its menus and the status bar's branch open them, and
+    // Bounce Each Version, as Save Version's menu shows it.
     registry.add (
         { .id = "version.pickBranch",
-          .name = "Checkout to...",
-          .category = "Source Control",
-          .description = "Lists the project's branches to check out, or creates a new one from the current commit, named as you type.",
-          .synonyms = { "branch", "checkout", "git", "switch", "idea", "new branch" },
+          .name = "Switch Branch...",
+          .category = "Versions",
+          .description = "Lists the project's branches to switch to, or creates a new one from the song as it is, named as you type.",
+          .synonyms = { "branch", "checkout", "git checkout", "switch", "idea", "new branch" },
           .perform = [this] { showBranchPicker (BranchPicker::Mode::pick); },
           .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
 
     registry.add ({ .id = "version.renameBranch",
                     .name = "Rename Branch...",
-                    .category = "Source Control",
+                    .category = "Versions",
                     .description = "Names the branch the song is on anew.",
                     .synonyms = { "branch", "name", "rename", "title" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::rename); },
@@ -1316,36 +1317,36 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     registry.add ({ .id = "version.mergeBranch",
                     .name = "Merge Branch...",
-                    .category = "Source Control",
+                    .category = "Versions",
                     .description = "Lists the other branches, to merge one into the branch the song is on: what it changed shows in "
-                                   "Source Control, each line ticked, to take into the song as one undo step.",
+                                   "the Versions view first, to take into the song whole, as one undo step.",
                     .synonyms = { "merge", "combine", "join", "pull", "git merge", "branch" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::merge); },
                     .isEnabled = [this] { return canMergeAnyBranch (projectContext); } });
 
     registry.add ({ .id = "version.deleteBranch",
                     .name = "Delete Branch...",
-                    .category = "Source Control",
-                    .description = "Lists the other branches, to delete one, asking first when commits no other branch has, or "
+                    .category = "Versions",
+                    .description = "Lists the other branches, to delete one, asking first when versions no other branch has, or "
                                    "changes left on it, would go with it.",
                     .synonyms = { "remove", "branch", "git branch -d", "clean up", "discard branch" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::remove); },
                     .isEnabled = [this] { return canDeleteAnyBranch (projectContext); } });
 
     registry.add ({ .id = "version.editMessage",
-                    .name = "Edit Commit Message...",
-                    .category = "Source Control",
-                    .description = "Names the commit selected in the graph anew, and its note: its first line the name, the lines "
-                                   "after it the note. The commit itself stays as it is.",
-                    .synonyms = { "rename commit", "reword", "amend", "name", "note", "label", "tag" },
+                    .name = "Rename Version...",
+                    .category = "Versions",
+                    .description = "Names the version selected in the history anew, and its note: its first line the name, the "
+                                   "lines after it the note. The version itself stays as it is.",
+                    .synonyms = { "edit commit message", "rename commit", "reword", "amend", "name", "note", "label", "tag" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::message); },
                     .isEnabled = [this] { return canEditSelectedMessage (projectContext); } });
 
     registry.add ({ .id = "version.bounceEach",
-                    .name = "Bounce Each Commit",
-                    .category = "Source Control",
-                    .description = "Renders the song into each commit as Commit makes it, as Export Song renders it, to hear that "
-                                   "commit later against the song.",
+                    .name = "Bounce Each Version",
+                    .category = "Versions",
+                    .description = "Renders the song into each version as Save Version saves it, as Export Song renders it, to hear "
+                                   "that version later against the song.",
                     .synonyms = { "bounce", "render", "audio", "with a bounce", "mixdown" },
                     .perform = [this] { toggleBounceEachVersion(); },
                     .isTicked = [this] { return settings.get (Settings::versionBounce); } });
@@ -1372,7 +1373,7 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     for (const auto& command :
          { PanelCommands { Panel::left,
-                           "Shows or hides the left panel, with the browser, the project or source control; the icons beside it stay.",
+                           "Shows or hides the left panel, with the browser, the project or the versions; the icons beside it stay.",
                            { "browser", "versions", "sidebar", "files", "samples", "plugins", "sounds" } },
            PanelCommands { Panel::song,
                            "Shows or hides the upper panel, by default the playlist and the mixer; the lower panel takes its place.",

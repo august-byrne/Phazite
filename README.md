@@ -33,7 +33,7 @@ What is built, on Windows:
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, the song normalized to a loudness if you like.
 - **Share:** the song as a DAWproject, the open format that Bitwig Studio, Studio One and Cubase read, with your VST3 plug-ins and their settings, and Phazite's own devices bounced beside their notes. File > Import DAWproject opens one as a new project, so far without its plug-ins and sends.
-- **Keep versions:** Source Control, in git's words: commit the song with a message, see what changed since, track by track, go back to any commit, branch to try an idea and merge it back, and hear an earlier commit in place of the song, at the same beat and loudness; work not yet committed is kept in its Local History, and its Undo History goes back or forth to any change since the project opened.
+- **Keep versions:** save a version of the song with a name, see what changed since, track by track, go back to any version, branch to try an idea and merge it back, and hear an earlier version in place of the song, at the same beat and loudness; work not yet in a version is kept in its Local History, and its Undo History goes back or forth to any change since the project opened.
 - **Organize:** the Project view, with the song's notes, its audio files (a missing one to locate, unused ones to clean up) and its plug-ins (a crashed one to reload); Auto Save keeps it all saved.
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
@@ -87,7 +87,7 @@ The setup takes a few minutes to an hour, and the build a few minutes. [Building
 - **Ctrl+K** finds any command by name, and the bar along the bottom says what the control under the pointer does.
 - **Scan for Plug-ins**, in the menu of the gear at the bottom left, finds your VST3 plug-ins. If you hear nothing, choose your output in **Audio Settings**, in the same menu.
 - **Ctrl+S** saves: the first time, Phazite asks for a name and suggests `Documents\Phazite\Projects`, and from then on Auto Save keeps the project saved. **File > Export Song** renders it to a file.
-- **Source Control**, the branch icon down the left, commits the song with a message (**Ctrl+Alt+S**, or Ctrl+N with FL Studio's shortcuts), shows what changed since, track by track, and takes you back to any commit.
+- **Versions**, the branch icon down the left, saves a version of the song with a name (**Ctrl+Alt+S**, or Ctrl+N with FL Studio's shortcuts), shows what changed since, track by track, and takes you back to any version.
 
 ## Get involved
 

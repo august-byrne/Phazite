@@ -222,7 +222,7 @@ Each input has a buffer of 8 seconds between the audio thread and the thread tha
   "Record" step of its own once the drag has ended, so that the drag's Escape doesn't take the take back.
 - **Closing the project or quitting while recording**, Save As, and an untitled project's first save stop recording
   first, as Stop does, keeping the take (and placing one still waiting for a drag), which the save then holds.
-  Switching to a commit or a branch can't run while recording.
+  Switching to another branch can't run while recording.
 - **A take's audio and notes** are placed in beats by the tempo the take was recorded at, both of them, whatever the
   song's tempo is by the time they are placed (a tempo dragged as the take stopped).
 

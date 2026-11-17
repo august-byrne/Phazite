@@ -188,8 +188,8 @@ The project's versions ([docs/design/versions.md](../../docs/design/versions.md)
 
 | File | What it holds |
 |---|---|
-| `VersionsView.*` | The Source Control view in the left panel. The branch, with its menu, or a commit checked out on its own, with Back to main; a version saved with its name and note; the changes since the last one, by track (or a merge's lines, ticked, then its clashes, each switched between its three values); the history of every branch's versions, each on its branch's line, a commit opened by a click to show what it changed, each line restorable from it. Then Local History, the song as it was while it differed from its last commit; then Undo History, the song's undo steps, a click going back or forth to one. |
-| `BranchPicker.*` | Source control's quick inputs: Checkout to..., Rename Branch..., Merge Branch..., Delete Branch... and Edit Commit Message.... |
+| `VersionsView.*` | The Versions view in the left panel. The branch, with its menu; a version saved with its name and note; the changes since the last one, by track (or a merge's lines, what it will take whole, then its conflicts, each switched between its three values); the history of every branch's versions, each on its branch's line, a version opened by a click to show what it changed, each line restorable from it, and heard by a double-click. Then Local History, the song as it was while it differed from its last version; then Undo History, the song's undo steps, a click going back or forth to one. |
+| `BranchPicker.*` | The versions' quick inputs: Switch Branch..., Rename Branch..., Merge Branch..., Delete Branch... and Rename Version.... |
 
 ## shell/
 
@@ -200,7 +200,7 @@ The window's content and everything around the views.
 | `AppShell.*` | The window's content. |
 | `ActivityBar.*` | The activity bar down the window's left edge, whose icons show the left panel's views: the browser, the project and the versions. |
 | `TitleBar.*` | The title bar: Phazite's logo, the menus, Undo and Redo beside the command search, the panels' switches and, on Windows, where it is the window's own, the window's buttons and what its frame does where. |
-| `TopBar.*` | The transport bar, with the playhead's place and time as fields that move it, and A/B, which hears the last commit in place of the song and back. |
+| `TopBar.*` | The transport bar, with the playhead's place and time as fields that move it, and A/B, which hears the last version in place of the song and back. |
 | `TempoStretchPanel.*` | What a tempo change stretches, under the transport bar's tempo field while the tempo changes. |
 | `StatusBar.*` | The status bar: the save state, the audio output, the CPU, and between them the hint bar. |
 | `HintBar.*` | The hint bar, which shows a drag's readout while one moves something, for a few seconds what a command made that its name doesn't say (copies that didn't fit), and otherwise the guide's next step. |

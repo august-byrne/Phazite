@@ -92,7 +92,7 @@ The engine's design is in [engine.md](engine.md). The parts that matter for spee
 - The project file, the autosave and the history's files are written in the background from a copy of the song, so
   the window and what plays don't wait for a save.
 - Exports, freezes, bounces and consolidations render on a thread of their own, with a progress window and Cancel.
-- The changes since the last commit, the hits in an audio file and the library's loop data are worked out in the
+- The changes since the last version, the hits in an audio file and the library's loop data are worked out in the
   background.
 - No thread is ever ended by force. A thread is woken or cancelled, then joined.
 

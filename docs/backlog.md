@@ -141,18 +141,17 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| The cut itself: staging, a commit checked out on its own and ticked merge lines removed; plain words where git's words stand ([the note](design/versions-cut.md)) | `src/model/versions/VersionsModel.cpp` | L | 4 | ui-shell-browser 10, model-versions 12, source control audit |
 | The store swept of what nothing names any more | `src/model/versions/PieceStore.cpp` | (M) | 4 | model-versions 7 |
 | Verify History checks the audio, the snapshots and the songs left on branches too | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 10 |
-| The open song tied to the commit it grew from | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 9 |
-| One undo for every source control operation: a log of operations (a branch switch, a deletion) to take back | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
+| The open song tied to the version it grew from | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 9 |
+| One undo for every versions operation: a log of operations (a branch switch, a deletion) to take back | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
 | The undo history kept across a branch switch | `src/model/versions/VersionsModel.cpp` | — | — | source control audit |
-| One old commit reverted while the later ones are kept | `src/model/versions/SongMerge.cpp` | — | — | source control audit |
-| Undo Last Commit on a merge's commit | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
+| One old version reverted while the later ones are kept | `src/model/versions/SongMerge.cpp` | — | — | source control audit |
+| Undo Last Version on a merge's version | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
 | Backup of the history to another folder, then the cloud | `src/model/versions/VersionStore.cpp` | — | — | source control audit |
-| Only the named commits shown, once histories grow long | `src/ui/versions/VersionsView.cpp` | — | — | source control audit |
-| A commit's changes marked on the song in the playlist | `src/ui/versions/VersionsView.cpp` | — | — | source control audit |
-| Exports tied to the commits they were made from | `src/model/project/Export.h` | — | — | source control audit |
+| Only the named versions shown, once histories grow long | `src/ui/versions/VersionsView.cpp` | — | — | source control audit |
+| A version's changes marked on the song in the playlist | `src/ui/versions/VersionsView.cpp` | — | — | source control audit |
+| Exports tied to the versions they were made from | `src/model/project/Export.h` | — | — | source control audit |
 
 ## UI and UX
 
@@ -195,7 +194,7 @@ and nothing is listed in both.
 | The wheel over a knob or a fader: one undo step for a burst, and no change by a wheel that only scrolls past | `src/ui/components/Controls.cpp` | (S) | 5 | ui-core-mixer-app 2 |
 | Typed values take a decimal comma, and a bare number's unit shows | `src/ui/components/ValueText.cpp` | (S) | 5 | ui-core-mixer-app 9 |
 | Several strips at once: linked faders, strips selected together and reordered; strip widths, a taller fader, RMS meters and a clip light that holds | `src/ui/mixer/ChannelStrip.cpp` | L | 5 | ui-core-mixer-app 1 |
-| Right-click menus, and the rows' actions in the browser and Source Control, reached from the keyboard | `src/ui/components/Controls.cpp` | M | 5 | ui-core-mixer-app 7, ui-shell-browser 12 |
+| Right-click menus, and the rows' actions in the browser and the Versions view, reached from the keyboard | `src/ui/components/Controls.cpp` | M | 5 | ui-core-mixer-app 7, ui-shell-browser 12 |
 | Fine drag switched by its key during a drag, and knob drags that go on past the screen's edge | `src/ui/components/Controls.cpp` | — | — | ui-core-mixer-app 12 |
 | Small ones: a theme colour that goes stale, a menu action that holds its component by a bare pointer, the system's settings for less motion and transparency followed | `src/ui/mixer/DeviceSlots.cpp` | — | — | ui-core-mixer-app 13 |
 | Numbers written one way everywhere, and checked by a test: a true minus sign, a thin space before the unit, an en dash in a range, and a fixed count of decimals for each unit | `src/ui/components/ValueText.cpp` | S | 5 | comparison with another DAW, 2026-11-17 |
@@ -246,7 +245,7 @@ Stage 2 put the docs in order: pages that say what is, with the history in `arch
 
 | Item | Where | Size | Stage | Status | Source |
 |---|---|---|---|---|---|
-| The guide: a page for each device, once stage 6 has finished it, and the source control page written again once stage 4 cuts the feature down; the views have their pages | `docs/guide/` | L | 4, 6 | Open | product-gaps 15 |
+| The guide: a page for each device, once stage 6 has finished it; the views have their pages | `docs/guide/` | L | 6 | Open | product-gaps 15 |
 | The guide's pictures listed in one file (a name, the screen, the part to cut out, both themes) and painted from it by the site-pictures test, with a check that every picture a page names exists; each device's page on one template, opened from the device's menu | `tests/SitePictures.cpp` | M | 8 | Open | comparison with another DAW, 2026-11-17 |
 | A map from each feature to its guide page, with the version the page was checked against, and a check that fails when a feature has no page: today nothing but the rule keeps a page from going stale | `docs/guide/` | M | 8 | Open | comparison with another DAW, 2026-11-17 |
 | The website's download button for the visitor's system, with the version, the file's name and its size, beside the SHA-256 the page already shows; the version and its date at the top of the home page (the `phazite-site` repository, once 4.5 makes releases) | `docs/README.md` | S | 5 | Open | comparison with another DAW, 2026-11-17 |

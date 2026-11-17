@@ -92,7 +92,7 @@ TEST_CASE ("Merge waits while a first save copies the versions: refused, saying 
     const auto theirs = keepVersion (context, "Quieter");
     REQUIRE (phazite::test::finished (context, [&] { return phazite::switchBranch (context, findBranch (context, "main"), s.save); }));
     REQUIRE (waitForVersionHistory (context));
-    s.addTrack ("Lead"); // not committed: the song before the merge, which Abort Merge needs, is written into the store
+    s.addTrack ("Lead"); // not committed: the song before the merge, which Cancel Merge needs, is written into the store
 
     REQUIRE (phazite::test::finished (context, [&] { return phazite::startMerge (context, theirs); }));
     REQUIRE_FALSE (phazite::getMergeLines (context).empty());
@@ -108,7 +108,7 @@ TEST_CASE ("Merge waits while a first save copies the versions: refused, saying 
     CHECK (phazite::isSavingProjectFolder (context));
     CHECK_FALSE (phazite::canFinishMerge (context));
     CHECK_FALSE (s.commands.invoke ("version.finishMerge"));
-    phazite::finishTickedMerge (context);
+    phazite::finishMerge (context);
     CHECK_FALSE (phazite::isMerging (context));
     CHECK_FALSE (phazite::getMergeLines (context).empty());
     CHECK (phazite::getMergeProblem (context).contains ("saving the project"));
@@ -121,7 +121,7 @@ TEST_CASE ("Merge waits while a first save copies the versions: refused, saying 
     CHECK_FALSE (phazite::isInHeldFolder (phazite::getVersionsFolder (*phazite::findSong (context)).getChildFile ("current")));
     REQUIRE (waitForVersionHistory (context));
     CHECK (phazite::canFinishMerge (context));
-    phazite::finishTickedMerge (context);
+    phazite::finishMerge (context);
     CHECK (phazite::isMerging (context));
 }
 

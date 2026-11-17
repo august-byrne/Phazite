@@ -13,6 +13,10 @@ The full text of every step, as it was written when it was built, is in the
 - **S4.1 The design note of the cut to versions:** [design/versions-cut.md](design/versions-cut.md) says what the
   versions keep, what goes, the plain words the view takes and how a history cannot lose work; the owner approved
   it with both of its recommendations (plain words; each computer's own records stay).
+- **S4.2 Versions cut down to what producers use:** staging, a version checked out on its own and a merge's ticked
+  lines are gone (a version records the whole song, a double-click hears a version, bouncing it first if it has no
+  bounce, and a merge takes every line), and the view is called Versions and speaks in plain words: Save Version,
+  History, Switch Branch, Restore This Version. A branch is named as typed.
 - **S4.6 Backups kept by age:** a save backs the project file up only when it differs from the newest backup, and
   Backups/ keeps what Local History keeps (every one of the last two hours, the newest of each hour for a day, the
   newest of each day for 30 days), each backup dated by when its version was saved, and the newest older than that

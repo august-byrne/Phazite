@@ -426,9 +426,8 @@ namespace History
     inline constexpr int changeRowHeight = ListRow::height, versionRowHeight = 30, noteHeight = 52;
     inline constexpr int laneWidth = 12; // a branch's line's column
     inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
-    inline constexpr int buttonWidth = 72;                     // Done, Merge and Cancel, at their widest
-    inline constexpr float tickSize = 12.0f, tickInset = 3.0f; // a merge's line's box, filled while the line is taken
-    inline constexpr int playWidth = 20;                       // a version's play mark's column, while any has a bounce
+    inline constexpr int buttonWidth = 72; // Done, Merge and Cancel, at their widest
+    inline constexpr int playWidth = 20;   // a version's play mark's column, while any has a bounce
     inline constexpr float playSize = 8.0f;
 
     // As VS Code's Source Control view lays out its parts (SideBar): the message, at most so many lines tall as it grows;

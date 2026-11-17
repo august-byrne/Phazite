@@ -160,7 +160,7 @@ inline constexpr int versionHistoryTimeout = 60000;
 bool waitForVersionHistory (ProjectContext&);
 
 // Runs a command of the versions that may read whole songs on the history's thread before it changes the song (a branch
-// switch, a checkout, a merge's list, a restore: model/versions/internal/VersionHistory.h, startReading()), and waits until
+// switch, a merge's list, a restore: model/versions/internal/VersionHistory.h, startReading()), and waits until
 // what it read is taken in, and the history has done what came of it (a save after a switch): whether the command did what
 // it does (false if it couldn't start). One that read nothing is done as it returns.
 bool finished (ProjectContext&, const std::function<bool()>& command);

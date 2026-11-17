@@ -356,15 +356,13 @@ void StatusBar::showBranch()
 
     if (branch.has_value())
     {
-        // A commit checked out on its own: on no branch, named as the commit is, as VS Code names a detached head by its
-        // commit.
         const auto changed = hasChangesSinceLastVersion (context);
-        branchItem->show ((branch->detached ? branch->name + " (detached)" : branch->name) + (changed ? "*" : ""), Item::Emphasis::quiet);
-        branchItem->setTooltip (withShortcut (
-            commands,
-            (branch->detached ? juce::String ("The commit checked out, on no branch") : juce::String ("The branch the song is on"))
-                + (changed ? ", with changes since its last commit (*)" : "") + ": click to check out another, or to create one",
-            "version.pickBranch"));
+        branchItem->show (branch->name + (changed ? "*" : ""), Item::Emphasis::quiet);
+        branchItem->setTooltip (withShortcut (commands,
+                                              juce::String ("The branch the song is on")
+                                                  + (changed ? ", with changes since its last version (*)" : "")
+                                                  + ": click to switch to another, or to create one",
+                                              "version.pickBranch"));
     }
 
     if (wasVisible != branchItem->isVisible() || oldWidth != branchItem->getPreferredWidth())

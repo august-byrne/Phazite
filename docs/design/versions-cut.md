@@ -60,7 +60,8 @@ named for collaboration. It becomes simpler in one way, below.
 
 - **Gone:** the ticks. A merge takes every line the other branch changed.
 - **After it:** Merge Branch... still shows the list first, as what will come in, with Merge and Cancel. One track
-  from another branch is brought over as it already can be: open the branch's version, and restore that line.
+  from another branch is brought over as it already can be: Compare with the Song on the branch's last version,
+  and restore that track's line.
 - **Why:** a merge with lines unticked is recorded as a whole merge, so what was left out could never be merged
   later. Taking one track is a restore, not a merge, and the restore already exists.
 

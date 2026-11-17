@@ -637,20 +637,10 @@ bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
     return done;
 }
 
-bool makeTrackLike (juce::ValueTree song, TrackID id, const juce::ValueTree& other)
-{
-    return makeTrackLikeIn (std::move (song), id, other, nullptr);
-}
-
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
     makeSongOwnLikeIn (song.getState(), other, &song.getUndoManager());
     countIDsPast (song, other);
-}
-
-void makeSongOwnLike (juce::ValueTree song, const juce::ValueTree& other)
-{
-    makeSongOwnLikeIn (std::move (song), other, nullptr);
 }
 
 int removeBrokenReferences (Song& song)
