@@ -61,10 +61,14 @@ namespace
         return paths;
     }
 
-    // What the saved files play, each read again only once it changed since the last look.
+    // What the saved files play, each read again only once it changed since the last look; what is kept of one gone since
+    // (a backup thinned away) forgotten.
     void addSavedPaths (UnusedAudioLook& look, juce::StringArray& paths)
     {
-        for (const auto& file : findSavedSongFiles (look.projectFile))
+        const auto files = findSavedSongFiles (look.projectFile);
+        std::erase_if (look.saved, [&files] (const auto& entry) { return ! files.contains (entry.first); });
+
+        for (const auto& file : files)
         {
             if (! file.existsAsFile())
                 continue;

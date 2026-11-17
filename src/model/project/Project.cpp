@@ -7,6 +7,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Json.h"
+#include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -262,6 +263,80 @@ namespace
     // thread, which no sleep may hold up: there, it tries once.
     std::mutex retryHookLock;
     std::shared_ptr<const std::function<void (int)>> retryHook; // Project::setCopyRetryHook()'s
+
+    juce::int64 backupTime = 0; // Project::setBackupTime()'s; 0 for the computer's clock
+
+    juce::int64 getBackupTime()
+    {
+        return backupTime != 0 ? backupTime : juce::Time::currentTimeMillis();
+    }
+
+    // One of a project's backups (Project::backUpProjectFile()): when its version was saved, its modification time; and its
+    // number among those of one second, 1 for the first.
+    struct Backup
+    {
+        juce::File file;
+        juce::int64 time = 0;
+        int number = 1;
+    };
+
+    juce::String getBackupStem (const juce::File& projectFile, juce::Time saved)
+    {
+        return projectFile.getFileNameWithoutExtension() + " " + saved.formatted ("%Y-%m-%d %H-%M-%S");
+    }
+
+    // The number of a file named as the project's backups are ("<project> YYYY-MM-DD HH-MM-SS", then "_<n>" from 2), or 0
+    // for one that isn't (another name's autosave, a temporary file a crash left, a file the user put there).
+    int readBackupNumber (const juce::File& projectFile, const juce::File& candidate)
+    {
+        const auto prefix = projectFile.getFileNameWithoutExtension() + " ";
+        const auto name = candidate.getFileNameWithoutExtension();
+
+        if (! candidate.hasFileExtension (Project::fileExtension) || ! name.startsWith (prefix))
+            return 0;
+
+        const auto rest = name.substring (prefix.length());
+        const juce::String stamp ("0000-00-00 00-00-00"); // a digit for each 0
+
+        if (rest.length() < stamp.length())
+            return 0;
+
+        for (int i = 0; i < stamp.length(); ++i)
+            if (stamp[i] == '0' ? ! juce::CharacterFunctions::isDigit (rest[i]) : rest[i] != stamp[i])
+                return 0;
+
+        const auto suffix = rest.substring (stamp.length());
+
+        if (suffix.isEmpty())
+            return 1;
+
+        const auto digits = suffix.substring (1);
+
+        if (! suffix.startsWithChar ('_') || digits.isEmpty() || digits.length() > 9 || ! digits.containsOnly ("0123456789")
+            || digits.startsWithChar ('0'))
+            return 0;
+
+        return digits.getIntValue() >= 2 ? digits.getIntValue() : 0;
+    }
+
+    bool isOlder (const Backup& a, const Backup& b)
+    {
+        return a.time != b.time ? a.time < b.time : a.number < b.number;
+    }
+
+    // The project's backups, oldest first: by when their versions were saved, and of one second by their numbers.
+    std::vector<Backup> findBackups (const juce::File& projectFile)
+    {
+        std::vector<Backup> found;
+
+        for (const auto& candidate : projectFile.getSiblingFile ("Backups").findChildFiles (juce::File::findFiles, false,
+                                                                                            juce::String ("*") + Project::fileExtension))
+            if (const auto number = readBackupNumber (projectFile, candidate); number > 0)
+                found.push_back ({ candidate, candidate.getLastModificationTime().toMilliseconds(), number });
+
+        std::sort (found.begin(), found.end(), isOlder);
+        return found;
+    }
 
     bool tryAgainBriefly (const std::function<bool()>& attempt, const std::function<bool()>& shouldStop)
     {
@@ -1805,18 +1880,19 @@ std::unique_ptr<Project> Project::openWithSong (const juce::File& projectFile, c
 
 std::pair<juce::File, juce::ValueTree> Project::readNewestBackup (const juce::File& projectFile)
 {
-    auto backups = projectFile.getSiblingFile ("Backups").findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension);
+    // Its backups, oldest first, and its autosave among them by its time (before a backup of the same time).
+    auto copies = findBackups (projectFile);
 
-    std::sort (backups.begin(), backups.end(),
-               [] (const juce::File& a, const juce::File& b)
-               {
-                   const auto ta = a.getLastModificationTime(), tb = b.getLastModificationTime();
-                   return ta != tb ? ta > tb : a.getFileName() > b.getFileName();
-               });
+    if (const auto autosave = getAutosaveFile (projectFile); autosave.existsAsFile())
+    {
+        const auto time = autosave.getLastModificationTime().toMilliseconds();
+        copies.insert (std::find_if (copies.begin(), copies.end(), [time] (const Backup& b) { return b.time >= time; }),
+                       Backup { autosave, time, 0 });
+    }
 
-    for (const auto& backup : backups)
-        if (auto song = readSong (backup); song.isValid())
-            return { backup, song };
+    for (auto copy = copies.rbegin(); copy != copies.rend(); ++copy)
+        if (auto song = readSong (copy->file); song.isValid())
+            return { copy->file, song };
 
     return {};
 }
@@ -1944,7 +2020,7 @@ juce::Result Project::save()
     autosaveWriter->wait(); // an autosave being written, which this makes old
     backgroundSave = {};    // and a save in the background, which this overtakes
     backUpProjectFile();
-    backedUpAt = juce::Time::currentTimeMillis();
+    backedUpAt = getBackupTime();
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
@@ -2034,7 +2110,7 @@ void Project::saveInBackground()
         return;
 
     // The previous file into the backups every few minutes, not at every save.
-    if (const auto now = juce::Time::currentTimeMillis(); now - backedUpAt >= (juce::int64) backupMinutes * 60 * 1000)
+    if (const auto now = getBackupTime(); now - backedUpAt >= (juce::int64) backupMinutes * 60 * 1000)
     {
         backUpProjectFile();
         backedUpAt = now;
@@ -2287,6 +2363,13 @@ void Project::setCopyRetryHook (std::function<void (int tries)> hook)
     const std::scoped_lock held (retryHookLock);
     retryHook = hook != nullptr ? std::make_shared<const std::function<void (int)>> (std::move (hook)) : nullptr;
 }
+
+void Project::setBackupTime (juce::int64 now)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    backupTime = now;
+}
+
 juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& folder)
 {
     JUCE_ASSERT_MESSAGE_THREAD
@@ -2353,37 +2436,62 @@ void Project::backUpProjectFile()
     const auto backups = getBackupsFolder();
     backups.createDirectory();
 
-    // One that can't be made is told, once until one is made again; the save goes on without it.
-    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
+    // The project's backups, oldest first (Project.h names them); nothing else there is one.
+    auto versions = findBackups (file);
 
-    // A file that can't be read is no copy either, said before JUCE tries: on Linux its copy reads from a stream it hasn't
-    // checked, and asserts. JUCE workaround 36 (docs/juce-workarounds.md).
-    if (! file.hasReadAccess()
-        || ! file.copyFileTo (backups.getNonexistentChildFile (file.getFileNameWithoutExtension() + " " + stamp, fileExtension, false)))
+    // A file the newest backup holds already is no new backup (ten saves without a change make one), and its versions
+    // are thinned as they are. One that can't be made is told, once until one is made again; the save goes on without it.
+    if (versions.empty() || ! file.hasIdenticalContentTo (versions.back().file))
     {
-        if (! std::exchange (backupFailed, true) && onBackupFailed != nullptr)
-            onBackupFailed ("Phazite couldn't copy the project's last saved version into " + backups.getFullPathName()
-                            + ". It saved the project without a backup; check that that folder can be written to.");
+        // Named, and dated, by when this version was saved, as a copy doesn't keep that everywhere (on Linux JUCE's copy is
+        // a new file). A file that can't be read is no copy either, said before JUCE tries: on Linux its copy reads from a
+        // stream it hasn't checked, and asserts. JUCE workaround 36 (docs/juce-workarounds.md).
+        const auto saved = file.getLastModificationTime();
+        const auto stem = getBackupStem (file, saved);
+        auto copy = backups.getChildFile (stem + fileExtension);
+        int number = 1;
 
-        return;
+        while (copy.exists())
+            copy = backups.getChildFile (stem + "_" + juce::String (++number) + fileExtension);
+
+        if (! file.hasReadAccess() || ! file.copyFileTo (copy))
+        {
+            if (! std::exchange (backupFailed, true) && onBackupFailed != nullptr)
+                onBackupFailed ("Phazite couldn't copy the project's last saved version into " + backups.getFullPathName()
+                                + ". It saved the project without a backup; check that that folder can be written to.");
+
+            return;
+        }
+
+        copy.setLastModificationTime (saved);
+        versions.push_back ({ copy, saved.toMilliseconds(), number });
+        std::sort (versions.begin(), versions.end(), isOlder); // newest, unless the computer's clock went back
     }
 
     backupFailed = false;
 
-    // Keep the newest numBackupsToKeep. A copy keeps the original's modification time, which is
-    // when that version was saved.
-    auto versions = backups.findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension);
-    versions.removeIf ([autosaveFile = getAutosaveFile (file)] (const juce::File& f) { return f == autosaveFile; });
+    // Kept by age, as Local History is, and the newest of those older than that too (Project.h). Oldest first, so that of
+    // two of one time keepByAge() keeps the later one.
+    std::vector<juce::int64> times;
 
-    std::sort (versions.begin(), versions.end(),
-               [] (const juce::File& a, const juce::File& b)
-               {
-                   const auto ta = a.getLastModificationTime(), tb = b.getLastModificationTime();
-                   return ta != tb ? ta > tb : a.getFileName() > b.getFileName();
-               });
+    for (const auto& version : versions)
+        times.push_back (version.time);
 
-    for (int i = numBackupsToKeep; i < versions.size(); ++i)
-        versions.getReference (i).deleteFile();
+    const auto now = getBackupTime();
+    auto keep = keepByAge (times, now);
+
+    for (size_t i = versions.size(); i-- > 0;)
+    {
+        if (now - versions[i].time > keptByAge::dailyFor)
+        {
+            keep[i] = true; // newest first: the newest of them
+            break;
+        }
+    }
+
+    for (size_t i = 0; i < versions.size(); ++i)
+        if (! keep[i])
+            versions[i].file.deleteFile();
 }
 
 void Project::clearToCompare()

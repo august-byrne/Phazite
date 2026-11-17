@@ -2,6 +2,7 @@
 #include "internal/VersionHistory.h"
 #include "internal/ApplySong.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
@@ -3510,23 +3511,19 @@ juce::ValueTree VersionHistory::readSnapshot (juce::int64 time) const
 
 std::vector<Snapshot> thinSnapshots (const std::vector<Snapshot>& oldestFirst, juce::int64 now)
 {
-    // Newest first, the newest of each hour's or day's bucket kept, as Time Machine thins its backups.
-    constexpr juce::int64 hour = 60 * 60 * 1000, day = 24 * hour;
+    // As a project's backups are kept (model/base/KeptByAge.h).
+    std::vector<juce::int64> times;
+
+    for (const auto& snapshot : oldestFirst)
+        times.push_back (snapshot.time);
+
+    const auto keep = keepByAge (times, now);
     std::vector<Snapshot> kept;
-    std::set<juce::int64> buckets; // an hour's by its number, a day's by its number below zero
 
-    for (auto snapshot = oldestFirst.rbegin(); snapshot != oldestFirst.rend(); ++snapshot)
-    {
-        const auto age = now - snapshot->time;
+    for (size_t i = 0; i < oldestFirst.size(); ++i)
+        if (keep[i])
+            kept.push_back (oldestFirst[i]);
 
-        if (age > 30 * day)
-            continue;
-
-        if (age <= 2 * hour || buckets.insert (age <= day ? snapshot->time / hour : -1 - snapshot->time / day).second)
-            kept.push_back (*snapshot);
-    }
-
-    std::reverse (kept.begin(), kept.end());
     return kept;
 }
 

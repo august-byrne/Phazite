@@ -1089,11 +1089,11 @@ DamagedProject makeDamagedProject (const juce::File& parentFolder, bool keepBack
     const auto backups = copy.getChildFile ("Backups");
     REQUIRE (backups.deleteRecursively());
 
-    if (keepBackups) // the file as it was saved, a backup
+    if (keepBackups) // the file as it was saved, a backup, named as Phazite names them
     {
         REQUIRE (backups.createDirectory());
         REQUIRE (made.file.copyFileTo (
-            backups.getChildFile (made.file.getFileNameWithoutExtension() + " backup" + made.file.getFileExtension())));
+            backups.getChildFile (made.file.getFileNameWithoutExtension() + " 2026-11-01 10-00-00" + made.file.getFileExtension())));
     }
 
     REQUIRE (made.file.replaceWithText ("<PHAZITE damaged"));

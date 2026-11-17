@@ -14,7 +14,7 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 | A new project untitled until its first save | Built | |
 | Save, Save Project As | Built | |
 | Files written whole or not at all | Built | |
-| Backups of the project file | Built | The newest ten |
+| Backups of the project file | Built | Kept by age, as Local History is |
 | Auto Save | Built | On by default, for a project that has been saved once |
 | Autosave for a crash, and restoring it | Built | |
 | A project file that can't be read: its backup or its last commit offered | Built | |
@@ -41,7 +41,7 @@ DAWproject for another DAW. A project's history of commits is in [versions.md](v
 | `Audio/` | Recordings, and imported audio copied in on import |
 | `Generated/` | Sounds made by Phazite's generators |
 | `Renders/` | Exports: the song, its stems and DAWproject files |
-| `Backups/` | Earlier saves of the project file, the newest ten, and the autosave |
+| `Backups/` | Earlier saves of the project file, kept by age ([Backups](#backups)), and the autosave |
 | `Cache/` | What Phazite can make again: frozen tracks' sound and stretched audio clips' renders |
 | `Versions/` | The project's history ([versions.md](versions.md)) |
 
@@ -139,12 +139,33 @@ it, packed or stored, so that a large recording in a DAWproject takes as much me
 ### Save
 
 - **Save Project** (`project.save`, Ctrl+S) writes the project file. A copy of the previous file goes into
-  `Backups/` first, and the newest ten are kept. A backup that can't be made is reported, once until one is made
-  again, and the save goes on without it.
+  `Backups/` first ([Backups](#backups)). A backup that can't be made is reported, once until one is made again, and
+  the save goes on without it.
 - **Save Project As** (`project.saveAs`, Ctrl+Shift+S) saves the project, unsaved changes included, as a new folder
   with copies of its `Audio`, `Generated`, `Renders` and `Cache` folders and its `Versions`, and goes on in the copy.
   The project it came from keeps its last saved version.
 - Before a save, the song takes in what its plug-ins hold of their own (`Song::storeDeviceStates()`).
+
+### Backups
+
+`Backups/` keeps the project file as it was saved at earlier times, for a save made over good work and for a file
+that can't be read.
+
+- **What goes in:** the project file as it was, before a save replaces it, unless the newest backup holds the same:
+  saves that change nothing make no backup. Auto Save backs up at most every 10 minutes.
+- **By when it was saved:** each backup is named and dated by when its version was saved ("*project*
+  2026-11-17 14-02-00", with "_2" and on for more of one second). Only files so named are the project's backups:
+  anything else in `Backups/` is left alone, and never offered in the project's place.
+- **How long:** as Local History ([versions.md](versions.md#local-history)): every backup of the last two hours, then
+  the newest of each hour for a day, then the newest of each day for 30 days. So a day's work leaves backups from an
+  hour, a day and a week before.
+- **And the one before that:** the newest backup older than 30 days is kept too. A backup's age is its version's, so
+  a project opened after a month away backs up a file already older than that, and keeps it: the project it opened
+  as stays one to go back to. The file each session opened is otherwise the last save before it, the newest of its
+  hour and its day, which the schedule keeps.
+- The autosave is not a backup, and stays until a save or closing deletes it.
+- Phazite offers the newest backup that reads when the project file can't be read ([After a crash](#after-a-crash)),
+  and Clean Up Unused Audio keeps what any backup plays.
 
 ### Written whole or not at all
 
@@ -165,7 +186,8 @@ history's files (`writeWholeFile()` in `src/model/base/WholeFile.h`).
 - While the song plays, it saves at most every 10 seconds.
 - It never saves while the song records, halfway through a drag, or while something is being tried in place (Swap).
   It saves at once as a recording ends.
-- The previous file goes into `Backups/` at most every 10 minutes, so the backups keep the project as it was then.
+- The previous file goes into `Backups/` at most every 10 minutes (the first time at once), so the backups keep the
+  project as it was then, not every second of it.
 - Closing the project saves it without asking. If that save fails (a drive gone, a folder that can't be written),
   closing asks instead: **Save As...** (a copy where the user chooses), **Don't Save**, or **Cancel**.
 - An untitled project is not auto-saved into a file the user never chose. It is autosaved for a crash instead.
@@ -346,7 +368,8 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 - A project is a folder, not a single file, so that recordings and renders have a place and the song stays small.
 - A new project is untitled until its first save asks where it goes, so that starting a song asks nothing.
 - Auto Save is on by default, and a project keeps commits from its start, so that work is neither lost nor needs
-  remembering. Backups are thinned to one every 10 minutes under Auto Save, so that they still reach back in time.
+  remembering. Backups are made at most every 10 minutes under Auto Save, and kept by age on Local History's schedule,
+  so that they reach back a month and there is one rule to learn; a count of ten turned over in under two hours.
 - Files are written whole or not at all, with a flush to the disk, because a failed write must never leave a cut
   file where a whole one was, nor pass for one that worked.
 - View state and how the song plays are saved but are not changes, so that scrolling or looping never asks to save.
@@ -378,7 +401,8 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
 
 - `src/model/project/internal/Project.h`: the project folder, `Project::create()`, `open()`, `save()`, the autosave,
   Auto Save (`AutosaveTimer`), backups, `openWithSong()`, `readNewestBackup()`, and `makeConsistent()`.
-- `src/model/base/WholeFile.h`: `writeWholeFile()`.
+- `src/model/base/WholeFile.h`: `writeWholeFile()`; `src/model/base/KeptByAge.h`: what the backups and Local History
+  keep as they grow old.
 - `src/model/project/internal/UnsavedProjects.h`: untitled projects' folders and what a crash left in them.
 - `src/model/project/ProjectContext.h`: the open project as commands and views find it.
 - `src/app/ProjectSession.h`: opening, saving, closing and their questions; `src/app/RunMarker.h`: whether the last

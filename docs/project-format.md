@@ -21,7 +21,7 @@ starts ([design.md, section 18](design.md#18-projects-saving-and-export)).
   Audio/           recordings and imported audio, copied in as they come: written once, never changed
   Generated/       sounds Phazite made
   Renders/         exports
-  Backups/         earlier saves of the project file (the newest ten), and the autosave
+  Backups/         earlier saves of the project file, kept by age, and the autosave
   Cache/           what Phazite can make again: frozen tracks, stretched clips' renders; safe to delete
   Versions/        the project's history (versions-format.md)
 ```

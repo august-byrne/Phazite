@@ -32,6 +32,7 @@ What every area builds on.
 | `Toggles.h` | Switches that act on several things: `toggleAll()`, `areAllOn()`. |
 | `BackgroundJobs.h` | Jobs run in the background on threads of their own, never ended by force. |
 | `Json.h` | JSON read from text (`parseJson()`), wherever Phazite reads it, without the numbers JUCE's parser can't count; and a number in any text with an exponent JUCE's reader of numbers would overflow, told and made one it reads (`hasExponentTooLongToRead()`, `makeExponentReadable()`, `readDouble()`, `readFloat()`). |
+| `KeptByAge.h` | What a history kept without asking keeps as it grows old (`keepByAge()`): every one of the last two hours, the newest of each hour for a day, the newest of each day for 30 days; one rule for Local History and a project's backups. |
 | `Numbers.h` | Whole numbers made of numbers that may be no finite number (from a plug-in, a file, a device, a division), without a cast that is undefined: `toWhole()`, `roundToWhole()`, `roundToNearestInt()`, `keepFinite()`. |
 | `WholeFile.h` | A file written whole or not at all, which the project file, the autosave, the versions' files and presets are written with, and the tests' hook that makes such a write fail or slow (`WholeFileHook`); and the file of a full path that such a file holds (`makeFileOfFullPath()`). |
 
@@ -85,7 +86,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 
 | File | What it holds |
 |---|---|
-| `internal/Project.h` | A project: its folder, saving and autosave, `Project::create()` and `Project::open()`; `makeSong()`, which makes a `Song` of a project file, and `phazite::createSong()`, a song outside a project. |
+| `internal/Project.h` | A project: its folder, saving and autosave, its backups kept by age, `Project::create()` and `Project::open()`; `makeSong()`, which makes a `Song` of a project file, and `phazite::createSong()`, a song outside a project. |
 | `internal/UnsavedProjects.h` | Projects not saved yet, each kept in a folder of its own until its first save. |
 | `NewProject.h`, `internal/NewProject.h` | What a new project starts with: nothing but its tempo, key and outline. |
 | `ExampleSongs.h`, `internal/ExampleSongs.h` | The example songs that Help opens as new projects. |

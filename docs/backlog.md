@@ -93,7 +93,6 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Backups kept by age, not by a count of ten that Auto Save turns over in under two hours | `src/model/project/Project.cpp` | S | 4 | model-project-services 6 |
 | A project and its versions keep no full path that can hold the user's name: an audio file whose copy into the project failed, a plug-in's file in a per-user folder | `src/model/base/internal/Schema.h` | — | — | format audit |
 | The formats named and versioned when compatibility starts: a file that names the store's format, its version and its hash, room for a pack's entries to grow, a format name and version on the project file | `src/model/versions/PieceStore.cpp` | (L) | 8 | format audit, product-gaps 12 |
 | Save As copies the project's folders in the background with progress, as the first save does | `src/model/project/Project.cpp` | S | — | plan |

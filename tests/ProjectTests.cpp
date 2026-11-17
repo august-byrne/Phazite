@@ -23,6 +23,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -38,6 +39,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <optional>
@@ -289,19 +291,176 @@ TEST_CASE ("The song numbers its items itself, each new one past every ID it hol
     CHECK (reopened->getSong().makeID() >= saved);
 }
 
-TEST_CASE ("Saving keeps the newest backups")
+TEST_CASE ("Saves that change nothing make no backup: the newest backup holds the file already")
 {
+    // The audit's model-project-services 6: every save copied the project file into Backups/, changed or not, so that ten
+    // presses of Ctrl+S left ten copies of one file.
     TemporaryFolder temp;
-    auto project = createProject (temp.folder, "Backups");
+    auto project = createProject (temp.folder, "Same");
     CHECK (getBackups (*project).isEmpty()); // the first save had nothing to back up
 
-    for (int i = 0; i < phazite::Project::numBackupsToKeep + 3; ++i)
-    {
-        project->getSong().getState().setProperty ("version", i, nullptr);
+    for (int i = 0; i < 10; ++i)
         REQUIRE (project->save().wasOk());
+
+    CHECK (getBackups (*project).size() == 1); // the file as it was made
+
+    // A change saved, and saved again ten times: the file as it was before it, and as it is, one backup each.
+    project->getSong().getState().setProperty (phazite::schema::notes, "Changed", &project->getSong().getUndoManager());
+
+    for (int i = 0; i < 10; ++i)
+        REQUIRE (project->save().wasOk());
+
+    const auto backups = getBackups (*project);
+    REQUIRE (backups.size() == 2);
+    CHECK ((backups[0].hasIdenticalContentTo (project->getFile()) || backups[1].hasIdenticalContentTo (project->getFile())));
+}
+
+TEST_CASE ("Of times that are the same, keepByAge() keeps the one later in the list: in a list oldest first, the newer")
+{
+    using namespace phazite::keptByAge;
+    constexpr juce::int64 now = 1000 * day;
+
+    // Two of one time three hours before (the newest of an hour kept), and two of one time ten days before (of a day).
+    const std::vector<juce::int64> oldestFirst { now - 10 * day, now - 10 * day, now - 3 * hour, now - 3 * hour };
+    CHECK (phazite::keepByAge (oldestFirst, now) == std::vector<bool> { false, true, false, true });
+}
+
+TEST_CASE ("Backups of one second are kept by their numbers, and what else is in Backups/ is neither thinned nor offered")
+{
+    // The review of S4.6: a newest-first list handed keepByAge() the older of two backups of one second (Linux dates files
+    // in whole seconds), its names ordered as text ("_10" before "_2"); and every .phazite file in Backups/ was thinned by
+    // age as a backup, and offered for a damaged project file.
+    constexpr juce::int64 minute = 60 * 1000, hour = 60 * minute, day = 24 * hour;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Kept");
+    auto& song = project->getSong();
+    const auto backups = project->getBackupsFolder();
+    const auto now = juce::Time (2026, 0, 20, 12, 0, 0, 0, false).toMilliseconds();
+
+    struct BackupTime
+    {
+        ~BackupTime() { phazite::Project::setBackupTime (0); }
+    } const backupTime;
+
+    const auto put = [&backups] (const juce::String& name, juce::int64 time)
+    {
+        const auto file = backups.getChildFile (name);
+        REQUIRE (file.replaceWithText (name));
+        REQUIRE (file.setLastModificationTime (juce::Time (time)));
+        return file;
+    };
+
+    // Ten backups of one second, five hours before: of an hour, the newest is kept, the tenth.
+    put ("Kept 2026-01-20 07-00-00.phazite", now - 5 * hour);
+
+    for (int n = 2; n <= 10; ++n)
+        put ("Kept 2026-01-20 07-00-00_" + juce::String (n) + ".phazite", now - 5 * hour);
+
+    // And what isn't one of the project's backups, two months old: another project's file, another name's autosave, a
+    // temporary file a crash left, a copy the user made.
+    const juce::StringArray others { "Other.phazite", "Old name (autosave).phazite", "Kept (autosave)_temp1a2b3c.phazite",
+                                     "Kept 2026-01-20 07-00-00 copy.phazite" };
+
+    for (const auto& name : others)
+        put (name, now - 60 * day);
+
+    phazite::Project::setBackupTime (now);
+    REQUIRE (project->getFile().setLastModificationTime (juce::Time (now - minute)));
+    song.getState().setProperty (phazite::schema::notes, "Changed", &song.getUndoManager());
+    REQUIRE (project->save().wasOk());
+
+    CHECK (backups.getChildFile ("Kept 2026-01-20 07-00-00_10.phazite").existsAsFile());
+    CHECK_FALSE (backups.getChildFile ("Kept 2026-01-20 07-00-00_9.phazite").existsAsFile());
+    CHECK_FALSE (backups.getChildFile ("Kept 2026-01-20 07-00-00_2.phazite").existsAsFile());
+    CHECK_FALSE (backups.getChildFile ("Kept 2026-01-20 07-00-00.phazite").existsAsFile());
+
+    for (const auto& name : others)
+        CHECK (backups.getChildFile (name).existsAsFile());
+
+    // The file it backed up, a minute before, is the newest of the project's: offered for a damaged file, though a song
+    // that isn't one of its backups is newer there.
+    const auto other = backups.getChildFile ("Other.phazite");
+    REQUIRE (project->getFile().copyFileTo (other));
+    REQUIRE (other.setLastModificationTime (juce::Time (now + hour)));
+    const auto offered = phazite::Project::readNewestBackup (project->getFile());
+    CHECK (offered.second.isValid());
+    CHECK (offered.first.getParentDirectory() == backups);
+    CHECK (offered.first.getLastModificationTime().toMilliseconds() == now - minute);
+}
+
+TEST_CASE ("Backups are kept by age: a day's work leaves backups from an hour, a day and a week before, none older than kept")
+{
+    // The audit's model-project-services 6: ten backups were kept, which Auto Save, backing up every 10 minutes, turned over
+    // in under two hours. They are kept as Local History is, each by when its version was saved: every one of the last two
+    // hours, the newest of each hour for a day, the newest of each day for 30 days, and the newest of those older than that.
+    constexpr juce::int64 minute = 60 * 1000, hour = 60 * minute, day = 24 * hour;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Weeks");
+    auto& song = project->getSong();
+
+    struct BackupTime
+    {
+        ~BackupTime() { phazite::Project::setBackupTime (0); }
+    } const backupTime;
+
+    // A save at a time: the clock the backups go by there, and the file's time the time it was saved.
+    const auto saveAt = [&project, &song] (juce::int64 time, const juce::String& change)
+    {
+        phazite::Project::setBackupTime (time);
+        song.getState().setProperty (phazite::schema::notes, change, &song.getUndoManager());
+        REQUIRE (project->save().wasOk());
+        REQUIRE (project->getFile().setLastModificationTime (juce::Time (time)));
+    };
+
+    const auto backupAges = [&project] (juce::int64 now)
+    {
+        std::vector<juce::int64> ages;
+
+        for (const auto& backup : getBackups (*project))
+            ages.push_back (now - backup.getLastModificationTime().toMilliseconds());
+
+        return ages;
+    };
+
+    const auto count = [] (const std::vector<juce::int64>& ages, juce::int64 from, juce::int64 to)
+    { return std::count_if (ages.begin(), ages.end(), [from, to] (juce::int64 age) { return age > from && age <= to; }); };
+
+    // Six weeks of work, each day from 9:00 to 17:00 (UTC): the last two days a change saved every half hour, the days
+    // before at the start and the end of the day.
+    const auto start = juce::Time (2026, 0, 5, 0, 0, 0, 0, false).toMilliseconds();
+    REQUIRE (project->getFile().setLastModificationTime (juce::Time (start - day)));
+    juce::int64 now = 0;
+
+    for (juce::int64 d = 0; d < 42; ++d)
+    {
+        for (auto t = 9 * hour; t <= 17 * hour; t += d < 40 ? 8 * hour : 30 * minute)
+        {
+            now = start + d * day + t;
+            saveAt (now, juce::String (now));
+        }
     }
 
-    CHECK (getBackups (*project).size() == phazite::Project::numBackupsToKeep);
+    const auto ages = backupAges (now);
+    CHECK (count (ages, 45 * minute, 75 * minute) >= 1);                 // an hour before
+    CHECK (count (ages, 23 * hour, 25 * hour) >= 1);                     // a day before
+    CHECK (count (ages, 7 * day - 12 * hour, 7 * day + 12 * hour) == 1); // a week before: that day's last
+    CHECK (count (ages, -1, 2 * hour) == 4);                             // every one of the last two hours
+    CHECK (count (ages, 2 * hour, day) == 7);                            // the newest of each hour for a day
+    CHECK (count (ages, day, 30 * day) == 30);                           // the newest of each day for 30 days
+    CHECK (count (ages, 30 * day, 100 * day) == 1);                      // and the newest of those older
+    CHECK (count (ages, 31 * day - 1, 31 * day) == 1);                   // that day's last
+
+    // Opened again after two months away and worked on for three hours: the file it opened with is still a backup.
+    const auto lastSaved = now;
+    now += 60 * day;
+    saveAt (now, "Back");
+
+    for (int i = 1; i <= 6; ++i)
+        saveAt (now += 30 * minute, "Back " + juce::String (i));
+
+    const auto later = backupAges (now);
+    CHECK (count (later, 30 * day, 1000 * day) == 1);
+    CHECK (std::count (later.begin(), later.end(), now - lastSaved) == 1);
 }
 
 TEST_CASE ("An autosave survives a crash and can be restored")

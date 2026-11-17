@@ -13,6 +13,11 @@ The full text of every step, as it was written when it was built, is in the
 - **S4.1 The design note of the cut to versions:** [design/versions-cut.md](design/versions-cut.md) says what the
   versions keep, what goes, the plain words the view takes and how a history cannot lose work; the owner approved
   it with both of its recommendations (plain words; each computer's own records stay).
+- **S4.6 Backups kept by age:** a save backs the project file up only when it differs from the newest backup, and
+  Backups/ keeps what Local History keeps (every one of the last two hours, the newest of each hour for a day, the
+  newest of each day for 30 days), each backup dated by when its version was saved, and the newest older than that
+  too, so a day's work leaves backups from an hour, a day and a week before. Only files named as the project's
+  backups are thinned or offered; anything else in the folder stays.
 
 ## After the known bugs' first push (2026-11-17)
 

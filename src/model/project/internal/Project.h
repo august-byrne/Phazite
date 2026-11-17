@@ -116,7 +116,7 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
 //   Audio/           recordings and imported audio
 //   Generated/       sounds made by Phazite's generators
 //   Renders/         exports: the song, and its stems
-//   Backups/         earlier versions of the project file (newest numBackupsToKeep), and the autosave
+//   Backups/         earlier versions of the project file, kept by age (backUpProjectFile()), and the autosave
 //   Cache/           frozen tracks' files (model/mixer/internal/Freeze.h) and renders of stretched audio clips (the song's
 //                    cache folder). Closing the project deletes what nothing in it uses any more. Only the clips' renders
 //                    can always be made again: a frozen track's file may be all that is left of a plug-in this computer
@@ -129,7 +129,6 @@ class Project : private juce::ValueTree::Listener
 {
 public:
     static constexpr const char* fileExtension = ".phazite";
-    static constexpr int numBackupsToKeep = 10;
 
     // Creates the folder <parentFolder>/<name> with a new project in it, and saves it. addContent, if given, adds what the
     // project starts with (the starter song, an outline's sections): it goes into that first save, so the project starts
@@ -149,7 +148,8 @@ public:
     // into its file: unsaved until then. Nothing, with error set, for a state that isn't a song.
     static std::unique_ptr<Project> openWithSong (const juce::File& projectFile, const juce::ValueTree& song, juce::String& error);
 
-    // The newest file of the project's in Backups/ (its autosave too) that reads as a song, and the song; none for none.
+    // The newest of the project's backups and its autosave that reads as a song, and the song; none for none. Other files
+    // in Backups/ (another name's autosave, a file put there) are not the project's (backUpProjectFile()).
     static std::pair<juce::File, juce::ValueTree> readNewestBackup (const juce::File& projectFile);
 
     // True if the project has an autosave from a session that ended without saving or closing the
@@ -182,7 +182,7 @@ public:
     // are none from then on. Message thread only.
     bool checkUnsavedChanges();
 
-    // Saves to the project file. A copy of the previous version goes into Backups/ first, and the
+    // Saves to the project file. A copy of the previous version goes into Backups/ first (backUpProjectFile()), and the
     // new file only replaces the old one once it has been written completely. What is being tried in place (Swap) is kept
     // first, as its own undo step (model/commands/internal/Undo.h: Trial).
     juce::Result save();
@@ -206,11 +206,11 @@ public:
 
     // Auto Save (AutosaveTimer::setAutoSave()): as save(), into the project file, with the state copied here and its XML
     // made and written on a background thread as autosaveInBackground() writes, so that the window and what plays don't wait
-    // for it; the previous file into Backups/ at most every backupMinutes, so that the backups keep the project as it was
-    // then. Nothing while a write is under way, or with nothing to save. Then, once isAutosaving() is false,
-    // finishBackgroundSave() takes in what was written: the project is saved, unless it changed since it was copied; false if
-    // the write failed, which leaves its changes to save again. And how many changes the project has had, to tell when they
-    // stop.
+    // for it; the previous file into Backups/ at most every backupMinutes (the first one at once), so that the backups keep
+    // the project as it was then and not each second of it. Nothing while a write is under way, or with nothing to save.
+    // Then, once isAutosaving() is false, finishBackgroundSave() takes in what was written: the project is saved, unless it
+    // changed since it was copied; false if the write failed, which leaves its changes to save again. And how many changes
+    // the project has had, to tell when they stop.
     void saveInBackground();
     bool hasBackgroundSave() const noexcept { return backgroundSave.isValid(); }
     bool finishBackgroundSave();
@@ -271,6 +271,11 @@ public:
     // that couldn't be opened, read or written (another program holds it), with how many tries it made, so that a test can
     // let go of a file it holds after a few. None: nullptr. Any thread.
     static void setCopyRetryHook (std::function<void (int tries)>);
+
+    // For tests: the time backups are made and thinned by, in milliseconds since 1970, which a test moves through days and
+    // weeks without waiting (with each saved version's time, its file's modification time, set as it goes); 0: the
+    // computer's clock. Message thread.
+    static void setBackupTime (juce::int64 now);
 
 private:
     Project (Song::Ptr, const juce::File&);
@@ -339,6 +344,14 @@ private:
     class FolderCopy;
     juce::Result finishMoveTo (const juce::File& copy, const juce::File& folder);
 
+    // The project file into Backups/, unless the newest backup holds the same, named and dated by when that version was
+    // saved (its file's modification time): "<project> YYYY-MM-DD HH-MM-SS.phazite", and "_2", "_3"... after the time for
+    // more of one second, which come after it. Only files so named are the project's backups, and only they are compared
+    // and thinned: anything else there stays. Then the backups thinned by age, as Local History is (model/base/KeptByAge.h:
+    // every one of the last two hours, the newest of each hour for a day, the newest of each day for 30 days), and the
+    // newest of those older than that kept as well: a version's time is when it was saved, so the file a project opened
+    // with after a month away is already older than that as it is backed up, and stays the one the project can go back to.
+    // The autosave is no backup and stays.
     void backUpProjectFile();
     bool backupFailed = false; // told until a backup is made again
     void rememberSavedState();

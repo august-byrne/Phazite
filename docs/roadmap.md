@@ -96,7 +96,6 @@ what they found is fixed or in known-bugs.md.
 | S4.3 | M | A history that cannot lose work | No command leaves a commit unreachable without asking |
 | S4.4 | M | Housekeeping: unused pieces swept, Clean Up aware of Local History, Verify History checking audio | Verify reports a missing audio file |
 | S4.5 | M | The song tied to its commit; differences worked out off the message thread | The Source Control view never stalls the window on a large song |
-| S4.6 | S | Backups kept by age, not by count | A day's work leaves backups from an hour, a day and a week before |
 | S4.7 | L | Automation along the control's travel, so a line on a lane is a straight turn of the knob | A ramp of a frequency or a level sounds even, and existing lanes are converted or regenerated |
 
 ### Stage 5. Wide: what a beat maker meets in the first week
