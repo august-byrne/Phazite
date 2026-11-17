@@ -26,8 +26,6 @@ namespace
     constexpr double longestGlideFrame = 0.05;
     constexpr double glideEnd = 0.5;
 
-    bool displayFramesTaken = true; // TimelineEditor::setDisplayFramesTaken(), read and set on the message thread
-
     constexpr int autoScrollMargin = 16;             // pixels inside an edge where a drag starts to scroll
     constexpr double autoScrollSpeedPerPixel = 15.0; // pixels per second for each pixel nearer the edge, or past it
     constexpr double maxAutoScrollSpeed = 3000.0;    // pixels per second
@@ -966,8 +964,8 @@ void TimelineEditor::showProject()
     // At each frame of the display from now on (showFrame()), so that the playhead moves from the first frame after Play;
     // a frame does nothing while the song is stopped, and the window's own painting wakes the message thread at each one
     // anyway. A few times a second, the timer notices what changed elsewhere.
-    playheadFrames = open && displayFramesTaken ? juce::VBlankAttachment (this, [this] (double seconds) { showDisplayFrame (seconds); })
-                                                : juce::VBlankAttachment();
+    playheadFrames =
+        open ? juce::VBlankAttachment (this, [this] (double seconds) { showDisplayFrame (seconds); }) : juce::VBlankAttachment();
 
     if (open)
         startTimerHz (5);
@@ -1015,11 +1013,6 @@ void TimelineEditor::placeView (BeatPosition start, bool readContent)
 }
 
 //==============================================================================
-void TimelineEditor::setDisplayFramesTaken (bool taken)
-{
-    displayFramesTaken = taken;
-}
-
 void TimelineEditor::setScrollingAtFrames (bool atFrames)
 {
     framesComing = framesSaid = atFrames;

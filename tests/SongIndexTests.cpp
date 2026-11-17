@@ -285,7 +285,7 @@ struct Asker final : juce::ValueTree::Listener
 TEST_CASE ("What listens to the song, on any of its elements, finds a change in the index as it is told of it")
 {
     // A song made from a tree, not by makeSong(), so that a listener can be on its track list before the index is.
-    auto id = [next = std::int64_t { 100 }]() mutable { return ++next; };
+    auto id = [next = juce::int64 { 100 }]() mutable { return ++next; };
     juce::ValueTree state (phazite::schema::PHAZITE), list (phazite::schema::TRACKS), track (phazite::schema::TRACK),
         clip (phazite::schema::CLIP);
     track.setProperty (phazite::schema::trackID, id(), nullptr);
@@ -572,7 +572,7 @@ namespace
 // A song of one track with a clip of notes, made from a tree on whatever thread calls this, as background work makes one
 // of its own from a copy (the versions' store makes a song it reads consistent so): without makeSong(), which is the
 // message thread's.
-phazite::Song::Ptr makeSongOfOwn (int numNotes, std::int64_t firstID)
+phazite::Song::Ptr makeSongOfOwn (int numNotes, juce::int64 firstID)
 {
     juce::ValueTree state (phazite::schema::PHAZITE), list (phazite::schema::TRACKS), track (phazite::schema::TRACK),
         clip (phazite::schema::CLIP);

@@ -22,10 +22,13 @@ CLAUDE.md ("Checks by stage", "Agents").
 - **A plug-in that joins the song is taken in when the changes are asked for,** not only at the history's next tick:
   the badge's count just after a project's plug-ins loaded is right, and no tick later compares every track again
   (known bug 187, which a performance gate showed in two runs of three).
-- **Tests that failed on CI and not here:** the editors take no frames from the display in the tests, where a window
-  on no screen got some on GitHub's Windows runners and scrolls by hand then waited for one in the middle of a test;
-  the golden project is saved as the app saves, once its plug-ins have given their states (known bug 188); a take is
-  written as far as its first click before its drive fills; and three lines that GCC refuses and MSVC and Clang don't.
+- **Tests that failed on CI and not here:** the rows' scrolling frames are compared from a row's second frame on with
+  the platform's renderer, which without a graphics card draws a header's switch cut by the window's foot a little
+  otherwise than whole (what comes into view is still compared with a playlist made afresh); the golden project is
+  saved as the app saves, once its plug-ins have given their states (known bug 188); a take is written as far as its
+  first click before its drive fills; and the lines that GCC refuses and MSVC and Clang don't (an enumerator
+  shadowing a member, an int added to a size_t through `?:`, `linux` as a name, a constant used in a lambda inside a
+  lambda, a `long` given to a `juce::var`).
 - **189 An import cancelled once its branch is made:** two tests of it failed in some runs of a release build, the
   import done before the cancel; they hold the history's read of the switch where it starts (a seam that lets a count
   of reads start first).

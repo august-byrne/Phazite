@@ -219,10 +219,10 @@ TEST_CASE ("The loader takes a number's text as Phazite's own only where Phazite
             case 6:
             {
                 // A decimal as Phazite writes many: up to six digits, the point anywhere in or before them.
-                const auto digits = juce::String (1 + random.nextInt (999999));
-                const auto point = random.nextInt (digits.length());
-                const auto text = point == 0 ? "0." + juce::String::repeatedString ("0", random.nextInt (3)) + digits
-                                             : digits.substring (0, point) + "." + digits.substring (point);
+                const auto number = juce::String (1 + random.nextInt (999999));
+                const auto point = random.nextInt (number.length());
+                const auto text = point == 0 ? "0." + juce::String::repeatedString ("0", random.nextInt (3)) + number
+                                             : number.substring (0, point) + "." + number.substring (point);
                 return random.nextBool() ? "-" + text : text;
             }
             case 0:
