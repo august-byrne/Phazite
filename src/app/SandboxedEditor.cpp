@@ -539,6 +539,8 @@ JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wvariadic-macros")
  #include <X11/Xlib.h>
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
+#include <dlfcn.h>
+
 namespace phazite::x11
 {
 namespace
@@ -551,21 +553,21 @@ namespace
     {
         Display11()
         {
-            if (auto* openDisplay = reinterpret_cast<decltype (&::XOpenDisplay)> (library.getFunction ("XOpenDisplay")))
+            if (auto* openDisplay = reinterpret_cast<decltype (&::XOpenDisplay)> (getFunction ("XOpenDisplay")))
                 display = openDisplay (nullptr);
 
-            createWindow = reinterpret_cast<decltype (&::XCreateSimpleWindow)> (library.getFunction ("XCreateSimpleWindow"));
-            destroyWindow = reinterpret_cast<decltype (&::XDestroyWindow)> (library.getFunction ("XDestroyWindow"));
-            mapWindow = reinterpret_cast<decltype (&::XMapWindow)> (library.getFunction ("XMapWindow"));
-            unmapWindow = reinterpret_cast<decltype (&::XUnmapWindow)> (library.getFunction ("XUnmapWindow"));
-            moveResize = reinterpret_cast<decltype (&::XMoveResizeWindow)> (library.getFunction ("XMoveResizeWindow"));
-            reparent = reinterpret_cast<decltype (&::XReparentWindow)> (library.getFunction ("XReparentWindow"));
-            queryTree = reinterpret_cast<decltype (&::XQueryTree)> (library.getFunction ("XQueryTree"));
-            freeData = reinterpret_cast<decltype (&::XFree)> (library.getFunction ("XFree"));
-            flush = reinterpret_cast<decltype (&::XFlush)> (library.getFunction ("XFlush"));
-            syncDisplay = reinterpret_cast<decltype (&::XSync)> (library.getFunction ("XSync"));
-            rootWindow = reinterpret_cast<decltype (&::XDefaultRootWindow)> (library.getFunction ("XDefaultRootWindow"));
-            setErrorHandler = reinterpret_cast<decltype (&::XSetErrorHandler)> (library.getFunction ("XSetErrorHandler"));
+            createWindow = reinterpret_cast<decltype (&::XCreateSimpleWindow)> (getFunction ("XCreateSimpleWindow"));
+            destroyWindow = reinterpret_cast<decltype (&::XDestroyWindow)> (getFunction ("XDestroyWindow"));
+            mapWindow = reinterpret_cast<decltype (&::XMapWindow)> (getFunction ("XMapWindow"));
+            unmapWindow = reinterpret_cast<decltype (&::XUnmapWindow)> (getFunction ("XUnmapWindow"));
+            moveResize = reinterpret_cast<decltype (&::XMoveResizeWindow)> (getFunction ("XMoveResizeWindow"));
+            reparent = reinterpret_cast<decltype (&::XReparentWindow)> (getFunction ("XReparentWindow"));
+            queryTree = reinterpret_cast<decltype (&::XQueryTree)> (getFunction ("XQueryTree"));
+            freeData = reinterpret_cast<decltype (&::XFree)> (getFunction ("XFree"));
+            flush = reinterpret_cast<decltype (&::XFlush)> (getFunction ("XFlush"));
+            syncDisplay = reinterpret_cast<decltype (&::XSync)> (getFunction ("XSync"));
+            rootWindow = reinterpret_cast<decltype (&::XDefaultRootWindow)> (getFunction ("XDefaultRootWindow"));
+            setErrorHandler = reinterpret_cast<decltype (&::XSetErrorHandler)> (getFunction ("XSetErrorHandler"));
 
             if (createWindow == nullptr || destroyWindow == nullptr || mapWindow == nullptr || unmapWindow == nullptr
                 || moveResize == nullptr || reparent == nullptr || queryTree == nullptr || freeData == nullptr || flush == nullptr
@@ -573,7 +575,13 @@ namespace
                 display = nullptr; // no sockets (a display opened is left open, as below)
         }
 
-        juce::DynamicLibrary library { "libX11.so.6" };
+        // The library, opened as juce::DynamicLibrary opens one and never closed, as the display below isn't: a
+        // juce::DynamicLibrary still alive as the program ends is a leak to JUCE's leak detector (Debug builds), which the
+        // tests' assertion net failed the plug-ins' tests for (CI's linux-debug, 2026-11-17).
+        void* const library = dlopen ("libX11.so.6", RTLD_LOCAL | RTLD_NOW);
+
+        void* getFunction (const char* name) const { return library != nullptr ? dlsym (library, name) : nullptr; }
+
         ::Display* display = nullptr;
         decltype (&::XCreateSimpleWindow) createWindow = nullptr;
         decltype (&::XDestroyWindow) destroyWindow = nullptr;

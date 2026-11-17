@@ -567,6 +567,9 @@ TEST_CASE ("A track's header moves the selected tracks from anywhere on it, a do
     PlaylistScreen screen;
     auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
     REQUIRE (headers.size() == 3);
+
+    // From the top: the playlist keeps its headers by their tracks, in no order (another on Linux than on Windows).
+    std::sort (headers.begin(), headers.end(), [] (const auto* a, const auto* b) { return a->getY() < b->getY(); });
     auto& header = *headers[0];
     REQUIRE (header.getTrack() == screen.tracks[0]);
     CHECK (phazite::test::findComponentWithTitle (header, "Collapse track") == nullptr); // no chevron, and no handle
@@ -3496,7 +3499,11 @@ TEST_CASE ("While the display's frames come, the overview's drag moves the view 
     CHECK (afterOne > target);
     CHECK (playlist.getView().start == target);
     wheel.wheel (centre, -0.1f, juce::ModifierKeys::shiftModifier);
-    CHECK ((playlist.getScrollTarget() - afterOne).inBeats() == doctest::Approx ((afterOne - target).inBeats()));
+
+    // As far again, to a step of the view: each lands on a whole one, and a notch isn't a whole count of them everywhere
+    // (Linux's is another than Windows').
+    const auto stepInBeats = playlist.getViewStep() / playlist.getView().pixelsPerBeat;
+    CHECK (std::abs ((playlist.getScrollTarget() - afterOne).inBeats() - (afterOne - target).inBeats()) <= stepInBeats + 1.0e-9);
 
     // The view put somewhere meanwhile (a zoom, a command) drops what was on its way.
     playlist.setViewStart (before);

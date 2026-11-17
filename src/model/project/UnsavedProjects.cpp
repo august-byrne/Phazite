@@ -16,10 +16,22 @@ namespace phazite
 {
 namespace
 {
-    // The lock that Phazites check for a folder, held, or nullptr if another Phazite holds it. It is named after the
-    // folder's path, hashed: a lock's name can't hold every character a path can.
+    // The folders this Phazite's UnsavedFolders hold, by their paths, on the message thread. The system's lock tells
+    // Phazites apart, not two holders in one: on Linux and macOS a process is given a lock it holds again (Windows refuses
+    // it), and this Phazite then took its own folder in use for one left by a crash, and deleted it (CI's Linux, 2026-11-17).
+    std::set<juce::String>& getPathsHeldHere()
+    {
+        static std::set<juce::String> paths;
+        return paths;
+    }
+
+    // The lock that Phazites check for a folder, held, or nullptr if another Phazite holds it, or this one does. It is named
+    // after the folder's path, hashed: a lock's name can't hold every character a path can.
     std::unique_ptr<juce::InterProcessLock> hold (const juce::File& folder)
     {
+        if (getPathsHeldHere().count (folder.getFullPathName()) > 0)
+            return {};
+
         auto lock = std::make_unique<juce::InterProcessLock> ("Phazite unsaved "
                                                               + juce::String::toHexString (folder.getFullPathName().hashCode64()));
 
@@ -194,6 +206,7 @@ UnsavedFolder::UnsavedFolder (const juce::File& f, std::unique_ptr<juce::InterPr
     : folder (f),
       lock (std::move (l))
 {
+    getPathsHeldHere().insert (folder.getFullPathName());
 }
 
 UnsavedFolder::~UnsavedFolder()
@@ -204,6 +217,8 @@ UnsavedFolder::~UnsavedFolder()
 
     if (folder.isDirectory())
         folder.getChildFile (discardedMarker).create();
+
+    getPathsHeldHere().erase (folder.getFullPathName());
 }
 
 int UnsavedFolder::recoverUnusedAudio (Song& song)

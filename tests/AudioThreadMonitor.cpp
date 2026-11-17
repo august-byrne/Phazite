@@ -266,11 +266,14 @@ namespace
         std::map<void*, juce::String> names;
     };
 
-    // Whether an event was JUCE's, making an assertion's message (juce_Logger.cpp: logAssertion()).
+    // Whether an event was JUCE's, making an assertion's message (juce_Logger.cpp: logAssertion()) or, on Linux, asking
+    // whether a debugger is there to stop in (jassert's juce_isRunningUnderDebugger(), which reads /proc/self/status into
+    // strings each time: 129 allocations an assertion, CI's linux-debug, 2026-11-17).
     bool isOfAssertion (const RecordedEvent& event, SymbolNames& names)
     {
         for (int f = 0; f < event.numFrames; ++f)
-            if (names.get (event.frames[f]).contains ("juce::logAssertion"))
+            if (const auto name = names.get (event.frames[f]);
+                name.contains ("juce::logAssertion") || name.contains ("juce_isRunningUnderDebugger"))
                 return true;
 
         return false;
