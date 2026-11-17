@@ -301,7 +301,7 @@ SongIndex::TrackPlace SongIndex::getTrackPlace (const juce::ValueTree& trackStat
         for (size_t i = 0, number = 0; i < order.size(); ++i)
         {
             visit();
-            number += isFolder (order[i]) ? 0 : 1;
+            number += isFolder (order[i]) ? size_t { 0 } : size_t { 1 };
 
             if (order[i] == trackState)
             {
@@ -319,7 +319,7 @@ SongIndex::TrackPlace SongIndex::getTrackPlace (const juce::ValueTree& trackStat
 
         for (size_t i = 0, number = 0; i < walked.size() && expected.index < 0; ++i)
         {
-            number += isFolder (walked[i]) ? 0 : 1;
+            number += isFolder (walked[i]) ? size_t { 0 } : size_t { 1 };
 
             if (walked[i] == trackState)
                 expected = { (int) i, isFolder (walked[i]) ? 0 : (int) number };

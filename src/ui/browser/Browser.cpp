@@ -1031,7 +1031,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
     // go. Nothing made, moved or taken away where nothing differs.
     enum class Kind
     {
-        soundPack,
+        pack,
         place,
         item,
         message
@@ -1048,7 +1048,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
     wanted.reserve (contents.places.size() + contents.items.size() + (size_t) contents.messages.size() + 1);
 
     if (contents.offersSoundPack)
-        wanted.push_back ({ "soundPack", Kind::soundPack, 0 });
+        wanted.push_back ({ "soundPack", Kind::pack, 0 });
 
     for (size_t i = 0; i < contents.places.size(); ++i)
         wanted.push_back ({ "place:" + contents.places[i].getKey(), Kind::place, i });
@@ -1095,7 +1095,7 @@ void Browser::updateRows (juce::TreeViewItem& parent, const BrowserContents& con
 
         switch (each.kind)
         {
-            case Kind::soundPack:
+            case Kind::pack:
                 made = new SoundPackNode (*this);
                 break;
             case Kind::place:
