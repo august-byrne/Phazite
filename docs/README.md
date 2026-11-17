@@ -34,6 +34,8 @@ map of the layers is [architecture.md](architecture.md).
 - [design/](design/): one page per area of Phazite: how it works now, what is built, planned and declined.
 - [design/devices/](design/devices/): one page per device of Phazite's own.
 - [design/decisions.md](design/decisions.md): the decisions that still matter, each with its reason.
+- [design/versions-cut.md](design/versions-cut.md): the design note of what the versions are cut down to (roadmap
+  step S4.1), which waits for the owner's approval.
 - [project-format.md](project-format.md): the project file's format, for other tools, with its test vectors in
   `tests/golden/format/`.
 - [versions-format.md](versions-format.md): the versions' format, for other tools, with its test vectors in
