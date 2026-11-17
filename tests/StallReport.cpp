@@ -258,8 +258,7 @@ struct StallReport::Watch
 #endif
 
 #if JUCE_LINUX
-        std::fprintf (stderr, "  The tests' thread is at:
-");
+        std::fprintf (stderr, "  The tests' thread is at:\n");
         std::fflush (stderr);
         pthread_kill (linuxTestsThread, SIGUSR2);
         std::this_thread::sleep_for (std::chrono::milliseconds (500)); // its handler writes meanwhile
