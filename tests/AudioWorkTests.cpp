@@ -760,18 +760,23 @@ TEST_CASE ("A job goes on the message thread, which owns it, even when its read'
     };
 
     auto where = std::make_shared<std::atomic<int>> (0);
-    std::atomic<bool> letGo { false };
+    std::atomic<bool> letGo { false }, left { false };
     work.setAfterEachRead (
-        [&where, &letGo]
+        [&where, &letGo, &left]
         {
             while (where->load() == 0 && ! letGo)
                 juce::Thread::sleep (1);
+
+            left = true;
         });
 
     work.add (std::make_unique<Tracked> (where));
     REQUIRE (phazite::test::runTimersUntil ([&work] { return ! work.isBusy(); }));
     letGo = true;
     REQUIRE (phazite::test::runTimersUntil ([&where] { return where->load() != 0; }));
+
+    // The work's thread out of the wait above before what it reads goes with this test (ThreadSanitizer, CI, 2026-11-17).
+    REQUIRE (phazite::test::runTimersUntil ([&left] { return left.load(); }));
     work.setAfterEachRead (nullptr);
     CHECK (where->load() == 1);
 }

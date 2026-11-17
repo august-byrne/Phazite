@@ -223,11 +223,12 @@ void Delay::addDelayed (const float* const* inputs, float* const* outputs, int n
         }
     };
 
-    touched = 0;
-
     if (! played.load (std::memory_order_relaxed))
         played.store (true, std::memory_order_release);
 
+    // Without a ring it writes nothing of its own but that: the engine's one for what needs no delay (Engine::noDelay)
+    // joins for every strip, on every worker at once, and a count set here was two threads' write (ThreadSanitizer, CI,
+    // 2026-11-17). Its count stays the 0 it starts with.
     if (line == nullptr)
     {
         for (int channel = 0; channel < 2; ++channel)
@@ -236,6 +237,7 @@ void Delay::addDelayed (const float* const* inputs, float* const* outputs, int n
         return;
     }
 
+    touched = 0;
     auto& ring = *line;
     ring.start();
 
