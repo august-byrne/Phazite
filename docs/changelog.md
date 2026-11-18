@@ -10,6 +10,12 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
 
+- **S6.3 The Compressor:** Compress hears a sidechain, looks ahead up to 10 ms, makes its gain up by itself and holds
+  its detector, so that a gate drawn on its curve opens in a tenth of a millisecond and doesn't chatter (two more gate
+  shapes, three gate presets); a third mode, Transient, turns each hit's attack and what follows it up or down
+  whatever the level (Punch, Sustain, Speed; two presets); the curve's points, the Multiband's too, are read, typed
+  and moved by number; a change of mode turns what is on its way by the mode it was meant for; and a drag of a knob
+  that a device's latency follows remakes the device once, as the drag ends.
 - **S6.6 The Saturator takes the Exciter in:** the Saturator gains a Colour (the curve's working point, for even
   harmonics from any shape), a Crush shape (fewer bits the harder it is driven), a Quality of 2x, 4x or 8x the rate,
   and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the

@@ -578,3 +578,70 @@ TEST_CASE ("The multiband's Sidechain part picks the key's track, which Monitor 
     CHECK (alone.getSidechainButton() == nullptr);
     shown = nullptr;
 }
+
+TEST_CASE ("The multiband's curve by numbers too: the readout, Type Values and the arrow keys, each one undo step, in the dock")
+{
+    // The curve is the compressor's component (src/ui/devices/DynamicsCurve.h), so the bands' curves are as exact.
+    Song song;
+    phazite::ui::MultibandEditor editor (song.getDevice());
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    CHECK_FALSE (editor.getLayout().usesPages());
+    editor.selectBand (Multiband::mid);
+    auto& curve = editor.getCurve();
+    REQUIRE (curve.isShowing());
+
+    // Its first band limits at 0 dB: the corner, and its line on, a limit.
+    CHECK (curve.describePoint (1) == juce::String ("In 0.0 dB, Out 0.0 dB"));
+    CHECK (curve.describeRatio (1) == juce::String ("Limit"));
+
+    REQUIRE (curve.setPointLevels (1, "-6, -9"));
+    const auto decibelsOf = [&song] (curves::PointField field)
+    { return juce::Decibels::gainToDecibels (curves::fromAxis (song.pointValue (Multiband::mid, 1, field))); };
+    CHECK (decibelsOf (curves::pointX) == doctest::Approx (-6.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf (curves::pointY) == doctest::Approx (-9.0f).epsilon (1.0e-4));
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
+    editor.refresh();
+
+    // Two presses of Shift and Up on it, then Left to the first point: one step, up 2 dB.
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    REQUIRE (curve.getChosenPoint() == 1);
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::shiftModifier, 0));
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::shiftModifier, 0));
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+    CHECK (decibelsOf (curves::pointY) == doctest::Approx (-7.0f).epsilon (1.0e-3));
+    phazite::undo (*song.song);
+    editor.refresh();
+    CHECK (decibelsOf (curves::pointY) == doctest::Approx (-9.0f).epsilon (1.0e-3));
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point")); // the typed move, still there
+}
+
+TEST_CASE ("A run of arrow presses on a band's curve ends as another band shows: it moves the band it began on alone")
+{
+    Song song;
+    phazite::ui::MultibandEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    editor.selectBand (Multiband::low);
+    auto& curve = editor.getCurve();
+    const auto lowBefore = song.pointValue (Multiband::low, 1, curves::pointY);
+    const auto midBefore = song.pointValue (Multiband::mid, 1, curves::pointY);
+
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    REQUIRE (curve.getChosenPoint() == 1);
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::downKey, juce::ModifierKeys::shiftModifier, 0));
+    REQUIRE (phazite::Gesture::isInProgress (*song.song));
+
+    // Another band shown within the run's half second: the run ends, the low band's point moved, the mid band's untouched.
+    editor.selectBand (Multiband::mid);
+    CHECK_FALSE (phazite::Gesture::isInProgress (*song.song));
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::downKey, juce::ModifierKeys::shiftModifier, 0));
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < lowBefore);
+    CHECK (song.pointValue (Multiband::mid, 1, curves::pointY) < midBefore);
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::leftKey)); // ends the mid band's run
+    phazite::undo (*song.song);
+    editor.refresh();
+    CHECK (song.pointValue (Multiband::mid, 1, curves::pointY) == doctest::Approx (midBefore));
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < lowBefore); // the low band's own step, still there
+}

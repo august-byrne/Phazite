@@ -157,6 +157,7 @@ private:
     PlaybackHost& host;
     juce::ValueTree songState;
     bool lentToRender = false;
+    bool latencyWaits = false; // a new plan for a device's latency waits for the gesture that drags it (valueTreePropertyChanged())
     PluginInstances plugins;
     std::unique_ptr<AudioRecorder> recorder;
     SongPlayer player;

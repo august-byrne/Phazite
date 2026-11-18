@@ -35,11 +35,13 @@ LevelHistoryView::LevelHistoryView (const juce::String& title, float lowestLevel
 
 void LevelHistoryView::describe()
 {
-    const auto shown = keyName.isNotEmpty()
-                           ? "how loud the sound came in (pale) and went out (over it, each duck a dip under what came in), and " + keyName
-                                 + ", what it listens to, as a line in its colour"
-                           : juce::String ("how loud the sound came in (pale) and went out, and how far it was turned down (red, "
-                                           "from the top)");
+    const auto shown =
+        keyName.isNotEmpty() ? "how loud the sound came in (pale) and went out (over it, each duck a dip under what came in), and "
+                                   + keyName + ", what it listens to, as a line in its colour"
+        : gainRange > 0.0f
+            ? juce::String ("how loud the sound came in (pale) and went out, and how far it was turned up or down (a line above or "
+                            "below the middle)")
+            : juce::String ("how loud the sound came in (pale) and went out, and how far it was turned down (red, from the top)");
     setDescription ("The last two bars: " + shown + ", with a faint line at each beat and a stronger one at each bar."
                     + (line != nullptr ? " Drag the " + lineName.toLowerCase() + "'s line up or down to move it." : juce::String()));
 }
@@ -67,7 +69,7 @@ void LevelHistoryView::push (double milliseconds, const SongTime& song, float in
         lines.pop_front();
 
     // Only what moves the picture repaints: a history of silence doesn't, scrolled on (docs/archive/performance-audit.md, section 8).
-    std::vector<float> numbers { line != nullptr ? line->getValue() : 0.0f, isLineLit() ? 1.0f : 0.0f, (float) span };
+    std::vector<float> numbers { line != nullptr ? line->getValue() : 0.0f, isLineLit() ? 1.0f : 0.0f, (float) span, gainRange };
 
     if (! isFlat())
         numbers.push_back ((float) (pushes % 1000000));
@@ -117,7 +119,8 @@ bool LevelHistoryView::isFlat() const
                            [this] (const Reading& reading)
                            {
                                return reading.input <= lowest + unseenLevel && reading.output <= lowest + unseenLevel
-                                      && reading.reduction < unseenReduction && (showsReduction() || reading.key <= lowest + unseenLevel);
+                                      && std::abs (reading.reduction) < unseenReduction
+                                      && (showsReduction() || reading.key <= lowest + unseenLevel);
                            });
 }
 
@@ -166,6 +169,16 @@ void LevelHistoryView::setReductionScale (float decibels, float shareOfHeight)
 {
     reductionRange = std::max (1.0f, decibels);
     reductionShare = juce::jlimit (0.1f, 1.0f, shareOfHeight);
+    repaint();
+}
+
+void LevelHistoryView::setGainAroundMiddle (float decibels)
+{
+    if (juce::exactlyEqual (decibels, gainRange))
+        return;
+
+    gainRange = std::max (0.0f, decibels);
+    describe();
     repaint();
 }
 
@@ -265,9 +278,21 @@ void LevelHistoryView::paint (juce::Graphics& g)
             g.setColour (tint);
             g.strokePath (out, juce::PathStrokeType (1.0f));
 
+            // Turning up as well as down, its gain as a line about the middle, up where it turned up and down where it turned
+            // down.
+            if (showsGainAroundMiddle())
+            {
+                const auto middle = inner.getCentreY();
+                const auto gainY = [&inner, middle, this] (float reduction)
+                { return middle + juce::jlimit (-1.0f, 1.0f, reduction / gainRange) * inner.getHeight() * 0.5f; };
+                g.setColour (p.text.withAlpha (GraphTint::zeroLine));
+                g.drawHorizontalLine (juce::roundToInt (middle), inner.getX(), inner.getRight());
+                g.setColour (p.danger);
+                g.strokePath (makeTrace (&Reading::reduction, gainY), juce::PathStrokeType (1.5f));
+            }
             // Listening to another track, that track as a line in its colour, named, which the threshold's line crosses where
             // the sound dips: how far it turned down is the dips themselves.
-            if (! showsReduction())
+            else if (! showsReduction())
             {
                 g.setColour (keyColour);
                 g.strokePath (makeTrace (&Reading::key, yFor), juce::PathStrokeType (1.5f));

@@ -57,6 +57,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Containers' chains: three bands, their crossover modulated, layers muted, and two synths split by keys (2026-11-09) | 0 | 0 |
 | Phazite's compressor, ducked by another track at 70 % mix, with its meters read | 0 | 0 |
 | Phazite's compressor ducking under a kick track, held and let go along a curve, Listen on (2026-11-11) | 0 | 0 |
+| Phazite's compressor keyed by another track, its mode, look-ahead and hold moved by lanes (2026-11-18, step S6.3) | 0 | 0 |
 | Phazite's multiband, its low band and master keyed by another track through the sidechain, its key cut, Listen on (2026-11-10) | 0 | 0 |
 | Phazite's vocoder at 40 bands, its carrier another track through the sidechain | 0 | 0 |
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 0 | 0 |

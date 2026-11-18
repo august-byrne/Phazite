@@ -38,32 +38,42 @@ namespace
 
     // What each mode does, as its tab's tooltip says.
     const std::vector<juce::String> modeTips {
-        "Compress: turns its own sound down (or up) as its curve says, in its character's colour",
+        "Compress: turns the sound down (or up) as its curve says, in its character's colour, by its own level or by the track "
+        "its sidechain listens to",
         "Duck: turns the sound down while another track plays, the one its sidechain listens to (a kick, for sidechain "
         "pumping), by its threshold, depth, attack, hold and release",
+        "Transient: turns each hit's attack and what follows it up or down, whatever the level of the sound",
     };
+
+    // How far the history shows Transient's gain up and down from its middle, in decibels: as far as it turns.
+    constexpr float transientRange = 24.0f;
 } // namespace
 
 //==============================================================================
-// The curve over its tools, with the meter beside it of how far the sound goes down (from its middle down, in the warning
-// colour) or up (from its middle up), and that as a number by the tools.
+// The curve over its tools and Auto Makeup's switch, with the meter beside it of how far the sound goes down (from its middle
+// down, in the warning colour) or up (from its middle up), and that as a number by the tools.
 class CompressorEditor::CurvePart : public juce::Component
 {
 public:
     explicit CurvePart (CompressorEditor& e)
         : editor (e),
           curve (e.device, e.values),
-          tools (curve)
+          tools (curve),
+          autoMakeup (e.device, getInfo (Compressor::autoMakeup).id, "Auto",
+                      "Auto Makeup: turns the sound up after the curve by half what the curve takes off a 0 dB level, so that "
+                      "a curve compresses without getting quieter; Out adds to it")
     {
         curve.setCurve (Compressor::points);
         curve.onEdit = [this] { editor.refresh(); };
         addAndMakeVisible (curve);
         addAndMakeVisible (tools);
+        addAndMakeVisible (autoMakeup);
     }
 
     void resized() override
     {
-        // The curve square, the meter right beside it, and the tools under both, the number at their right, with room for it.
+        // The curve square, the meter right beside it, and the tools and the switch under both, the number at their right,
+        // with room for it.
         auto area = getLocalBounds();
         auto toolbar = area.removeFromBottom (controlHeight);
         area.removeFromBottom (Space::xs);
@@ -71,10 +81,17 @@ public:
         curve.setBounds (area.removeFromLeft (side).withHeight (side));
         area.removeFromLeft (Space::s);
         meter = area.removeFromLeft (GraphTint::meterWidth).withHeight (side).toFloat();
-        toolbar.setWidth (std::max (side + Space::s + GraphTint::meterWidth, tools.getPreferredWidth() + readoutWidth));
+        const auto switchWidth = autoMakeup.getPreferredWidth();
+        toolbar.setWidth (
+            std::max (side + Space::s + GraphTint::meterWidth, tools.getPreferredWidth() + Space::xs + switchWidth + readoutWidth));
         tools.setBounds (toolbar.removeFromLeft (tools.getPreferredWidth()));
+        toolbar.removeFromLeft (Space::xs);
+        autoMakeup.setBounds (toolbar.removeFromLeft (switchWidth));
         readout = toolbar.toFloat();
     }
+
+    // The least width its toolbar takes.
+    int getNarrowestWidth() { return tools.getPreferredWidth() + Space::xs + autoMakeup.getPreferredWidth() + readoutWidth; }
 
     void paint (juce::Graphics& g) override
     {
@@ -103,6 +120,7 @@ public:
     CompressorEditor& editor;
     DynamicsCurve curve;
     DynamicsCurveTools tools;
+    ParameterSwitch autoMakeup;
 
 private:
     juce::Rectangle<float> meter, readout;
@@ -110,11 +128,11 @@ private:
 };
 
 //==============================================================================
-// What the compressor listens to while it ducks, under its part's title, Sidechain: the track picked (given the project), as
-// the multiband's Sidechain part shows its own, and under it the sidechain's cuts, and Listen beside them: while it is on and
-// the editor shows Duck's page, the compressor plays its sidechain, through its cuts, instead of the sound
-// (Compressor::listenToKey(), which the refresh asks for again and again), to hear what makes it duck. Hidden, or with the
-// editor gone, the sound comes back within half a second.
+// What the compressor listens to while it compresses or ducks, under its part's title, Sidechain: the track picked (given the
+// project), as the multiband's Sidechain part shows its own, and under it the sidechain's cuts, and Listen beside them: while
+// it is on and shows, the compressor plays what its detector hears, through its cuts, instead of the sound
+// (Compressor::listenToKey(), which the refresh asks for again and again), to hear what makes it duck or compress. Hidden,
+// or with the editor gone, the sound comes back within half a second.
 class CompressorEditor::KeyPart : public juce::Component
 {
 public:
@@ -123,7 +141,8 @@ public:
           picker (std::move (shownPicker))
     {
         listen.setTitle ("Listen");
-        listen.setTooltip ("Plays what the compressor listens to, through its cuts, instead of the sound, to hear what makes it duck");
+        listen.setTooltip ("Plays what the compressor listens to, through its cuts, instead of the sound, to hear what makes it "
+                           "compress or duck");
         listen.setClickingTogglesState (true);
         addAndMakeVisible (controls);
         addAndMakeVisible (listen);
@@ -201,18 +220,38 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
     history = &shownHistory;
     const DeviceLayout::Part historyPart { "History", &shownHistory, historyWidth, 260, 96, true, GraphTint::minimumWidth };
 
-    // Compress: the characters over the curve, beside the history over the knobs.
+    // Compress: the characters over the curve, beside the history over the knobs and the key it hears.
     auto& shownCurve = keep (std::make_unique<CurvePart> (*this));
     curvePart = &shownCurve;
+    addControl (getInfo (Compressor::autoMakeup).id, shownCurve.autoMakeup);
     auto& shownCharacters = keep (
         std::make_unique<ChoiceButtons> (device, getInfo (Compressor::character).id, ChoiceButtons::Direction::across, characterTips));
     characters = &shownCharacters;
     addControl (getInfo (Compressor::character).id, shownCharacters);
 
-    auto compressKnobs = makeControlsPart ("Compress", { "attack", "release", "inputGain", "drive", "makeup", "keyLowCut" }, 0,
-                                           ParameterControls::Size::compact, { "Attack", "Release", "In", "Drive", "Out", "Low Cut" });
-    compressKnobs.minimumWidth = 6 * narrowestKnob;
+    const std::vector<std::string_view> compressIDs { "attack", "release", "levelHold", "lookahead", "inputGain", "drive", "makeup" };
+    auto compressKnobs = makeControlsPart ("Compress", compressIDs, 0, ParameterControls::Size::compact,
+                                           { "Attack", "Release", "Hold", "Look-Ahead", "In", "Drive", "Out" });
+    compressKnobs.minimumWidth = (int) compressIDs.size() * narrowestKnob;
+
+    // A gate drawn on the curve closes as the gain goes down and opens as it comes back: at the Attack and the Release, the
+    // reverse of a gate's own words. Their tooltips here say both.
+    if (auto* knobs = dynamic_cast<ParameterControls*> (compressKnobs.content))
+    {
+        for (const auto& [parameterID, meaning] :
+             { std::pair ("attack", "Attack: how fast the gain goes down: a compressor gripping, a gate closing"),
+               std::pair ("release", "Release: how fast the gain comes back: a compressor letting go, a gate opening") })
+        {
+            if (auto* client = dynamic_cast<juce::SettableTooltipClient*> (knobs->findControl (parameterID)))
+            {
+                const auto rest = client->getTooltip().fromFirstOccurrenceOf (": ", false, false);
+                client->setTooltip (juce::String (meaning) + ". " + rest.substring (0, 1).toUpperCase() + rest.substring (1));
+            }
+        }
+    }
+
     const auto characterWidth = std::max (curveWidth, shownCharacters.getPreferredWidth());
+    const auto narrowest = std::max (narrowestCurve, shownCurve.getNarrowestWidth());
 
     // Duck: the key over its cuts and Listen, beside the history over the knobs.
     auto& cuts =
@@ -225,17 +264,24 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
                                        ParameterControls::Size::compact, { "Threshold", "Depth", "Attack", "Hold", "Release", "Curve" });
     duckKnobs.minimumWidth = 6 * narrowestKnob;
 
+    // Transient: the history, beside its punch and sustain, large, over its speed, makeup and low cut.
+    const auto punchAndSustain = makeControlsPart ("Transient", { "punch", "sustain" }, 0, ParameterControls::Size::large);
+    auto transientKnobs = makeControlsPart ("Ear and Out", { "speed", "makeup", "keyLowCut" }, 0, ParameterControls::Size::compact,
+                                            { "Speed", "Out", "Low Cut" });
+
     const DeviceLayout::Part charactersPart { .title = "Character",
                                               .content = &shownCharacters,
                                               .width = characterWidth,
                                               .height = controlHeight,
                                               .minimumHeight = controlHeight,
-                                              .minimumWidth = narrowestCurve };
-    const DeviceLayout::Part curveGraph { "Curve", &shownCurve, characterWidth, 300, 150, true, narrowestCurve };
+                                              .minimumWidth = narrowest };
+    const DeviceLayout::Part curveGraph { "Curve", &shownCurve, characterWidth, 300, 150, true, narrowest };
     const auto keyHeight = shownKey.getPreferredHeight();
     const DeviceLayout::Part sidechainPart { "Sidechain", &shownKey, shownKey.getPreferredWidth(), keyHeight, keyHeight };
     setModes (getInfo (Compressor::mode).id,
-              { { { charactersPart, curveGraph }, { historyPart, compressKnobs } }, { { sidechainPart }, { historyPart, duckKnobs } } },
+              { { { charactersPart, curveGraph }, { historyPart, compressKnobs, sidechainPart } },
+                { { sidechainPart }, { historyPart, duckKnobs } },
+                { { historyPart }, { punchAndSustain, transientKnobs } } },
               modeTips);
     refresh();
 }
@@ -278,22 +324,36 @@ juce::Button& CompressorEditor::getCharacterButton (int character)
     return characters->getButton (character);
 }
 
+bool CompressorEditor::isShapingTransients() const noexcept
+{
+    return getShownMode() == (int) Compressor::Mode::transient;
+}
+
 void CompressorEditor::modeShown (int)
 {
-    // Compressing, what comes in and what goes out, how far it turns down from the top over half the height;
-    // ducking, the sound it ducks as it comes in and goes out, with the key (without one, how far it turns down, on the
-    // levels' own scale) and the threshold's line.
+    // Compressing, what comes in and what goes out, how far it turns down from the top over half the height, or with a key,
+    // the key; ducking, the sound it ducks as it comes in and goes out, with the key (without one, how far it turns down, on
+    // the levels' own scale) and the threshold's line; shaping transients, how far it turns up and down about the middle.
     const auto ducking = isDucking();
     const auto lineName = getInfo (Compressor::threshold).name;
     history->setLine (ducking ? &threshold : nullptr, juce::String (lineName.data(), lineName.size()));
     history->setReductionScale (ducking ? -historyLowest : meterRange, ducking ? 1.0f : 0.5f);
+    history->setGainAroundMiddle (isShapingTransients() ? transientRange : 0.0f);
     showKey();
+
+    // Where Compress's page is too short for its history, its knobs and its key one over another (the default dock), its
+    // knobs show first, under their tab beside the history's and the key's.
+    if (getShownMode() == (int) Compressor::Mode::compress && ! knobsChosen)
+    {
+        knobsChosen = true;
+        getLayout().showPart (1, 1);
+    }
 }
 
 void CompressorEditor::showKey()
 {
     const auto key = device.getSidechainSource();
-    history->setKey (isDucking() ? key.name : juce::String(), key.colour);
+    history->setKey (isShapingTransients() ? juce::String() : key.name, key.colour);
 
     if (keyPicker != nullptr)
         keyPicker->show (key);
@@ -316,8 +376,8 @@ void CompressorEditor::refresh()
         reduction = compressor->getReductionMeter().take();
         boost = compressor->getBoostMeter().take();
 
-        // Listen: the key, for as long as the editor shows Duck's page and asks.
-        if (isDucking() && keyPart->listen.getToggleState())
+        // Listen: what the detector hears, for as long as the editor shows Listen, on Compress's page or Duck's, and asks.
+        if (! isShapingTransients() && keyPart->listen.getToggleState() && keyPart->listen.isShowing())
             compressor->listenToKey();
     }
 
@@ -332,12 +392,15 @@ void CompressorEditor::refresh()
     shownReduction = std::max (reduction, shownReduction - meterFall);
     shownBoost = std::max (boost, shownBoost - meterFall);
 
-    // The sound's peak as it came in and as it went out, as each mode's page shows them; ducking, also the key as the
-    // detector heard it, against the threshold. Compressing, the detector's level is the curve's dot and the meter's alone:
-    // after the input gain and the key's low cut, and for some characters an average, it isn't what came in.
+    // The sound's peak as it came in and as it went out, as each mode's page shows them; with a key, also the key as the
+    // detector heard it (ducking, against the threshold). Compressing without one, the detector's level is the curve's dot
+    // and the meter's alone: after the input gain and the key's low cut, and for some characters an average, it isn't what
+    // came in. Shaping transients, how far it turned up (below 0) or down, whichever went further.
     const auto now = juce::Time::getMillisecondCounterHiRes();
 
-    if (isDucking())
+    if (isShapingTransients())
+        history->push (now, device.getSongTime(), input, output, boost > reduction ? -boost : reduction);
+    else if (isDucking() || history->getKeyName().isNotEmpty())
         history->push (now, device.getSongTime(), input, output, reduction, level);
     else
         history->push (now, device.getSongTime(), input, output, reduction);

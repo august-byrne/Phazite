@@ -138,9 +138,10 @@ namespace
         return state[schema::deviceType].toString() == juce::String (devices::Compressor::typeID);
     }
 
-    // Phazite's compressor ducks under the key chosen for it (its Duck mode, as its Duck tab sets it), joining the caller's step
-    // (setSidechainSource()): compressing, it would hear its own sound. Still as it was made (but for its mode, set by its Duck
-    // tab first), it is set up to pump under a kick (docs/design.md, section 8): from -14 dB, 14 dB down, in 1 ms, held 120 ms
+    // Phazite's compressor, still as it was made (but for its mode, set by its Duck tab first), ducks under the key chosen for
+    // it (its Duck mode), joining the caller's step (setSidechainSource()); one set its own way keeps its mode, and compressing,
+    // it compresses as its key says (a keyed compressor). As made, it is set up to pump under a kick (docs/design.md,
+    // section 8): from -14 dB, 14 dB down, in 1 ms, held 120 ms
     // from the hit and as long as the key stays over -14 dB, and back in a straight line over 80 ms. When the key plays a drum
     // sampler it hears only its kick's body from 60 to 150 Hz: below 60 Hz a kick's long boom would hold it down through the
     // beat, and the snare, clap and hats on the same track sound above 150 Hz. Under every factory kit's kick at velocity 100 at
@@ -162,12 +163,10 @@ namespace
         if (isCompressor (state))
         {
             const auto& info = Compressor::info;
-            const auto asMade = isAsMade (state, info, info.parameters[(size_t) Compressor::mode].id);
-            setValue (info, "mode", (float) Compressor::Mode::duck);
-
-            if (! asMade)
+            if (! isAsMade (state, info, info.parameters[(size_t) Compressor::mode].id))
                 return;
 
+            setValue (info, "mode", (float) Compressor::Mode::duck);
             setValue (info, "threshold", -14.0f);
             setValue (info, "depth", 14.0f);
             setValue (info, "attack", 1.0f);
@@ -291,7 +290,8 @@ bool hearsSidechain (const Song& song, DeviceID id)
 
     const auto state = findDeviceState (song, id);
     const auto& mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode];
-    return ! isCompressor (state) || devices::Compressor::getMode (readValueSetByHand (state, mode)) == devices::Compressor::Mode::duck;
+    return ! isCompressor (state)
+           || devices::Compressor::getMode (readValueSetByHand (state, mode)) != devices::Compressor::Mode::transient;
 }
 
 bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property)

@@ -119,9 +119,27 @@ void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juc
         return;
 
     // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug
-    // 174); anything else, in a new plan.
+    // 174); anything else, in a new plan. One that changes a device's latency (a compressor's Look-Ahead) makes the device
+    // anew in the new plan, which starts it again from silence: while a gesture drags it (a knob's), the plan waits for the
+    // gesture's end, so that a drag remakes it once, and not at each of its steps (meanwhile it plays the value within the
+    // latency it has).
     if (! player.takeValue (tree, property))
-        triggerAsyncUpdate();
+    {
+        if (tree.hasType (schema::VALUES) && Gesture::isInProgress (*song))
+        {
+            if (! std::exchange (latencyWaits, true))
+                Gesture::whenEnded (*song, this,
+                                    [this]
+                                    {
+                                        latencyWaits = false;
+                                        triggerAsyncUpdate();
+                                    });
+        }
+        else
+        {
+            triggerAsyncUpdate();
+        }
+    }
     else if (song->getUndoManager().isPerformingUndoRedo())
         writer.followValuesSetByHand();
 }

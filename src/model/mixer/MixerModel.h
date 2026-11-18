@@ -121,7 +121,8 @@ struct DeviceSlot
     bool loading = false;
 
     // It can listen to another track (a sidechain): the one it hears, if any, with its name and colour (none for Phazite's
-    // compressor while it compresses, its key kept for when it ducks: internal/Sidechain.h, hearsSidechain()).
+    // compressor while it shapes transients, its key kept for when it compresses or ducks: internal/Sidechain.h,
+    // hearsSidechain()).
     bool hasSidechain = false;
     SidechainChoice sidechain {};
 };
@@ -238,8 +239,8 @@ void setOutput (ProjectContext&, TrackID, TrackID bus);
 //==============================================================================
 // A device's sidechain (docs/design.md, section 8), Phazite's own or a plug-in's: whether it has one, every track but its
 // own with why it can't listen to one whose sound comes from its own, the one it listens to (none: the sound passing
-// through it), and choosing one, as one undo step (Phazite's compressor ducks under it then, set up to duck if it was still
-// as it was made, and its vocoder plays the track as its carrier: internal/Sidechain.h).
+// through it), and choosing one, as one undo step (Phazite's compressor still as it was made ducks under it then, set
+// up to duck, one set its own way is keyed by it, and its vocoder plays the track as its carrier: internal/Sidechain.h).
 bool hasSidechain (const ProjectContext&, DeviceID);
 std::vector<SidechainChoice> getSidechainChoices (const ProjectContext&, DeviceID);
 TrackID getSidechainSource (const ProjectContext&, DeviceID);
@@ -260,7 +261,7 @@ float getCpuLoad (const ProjectContext&, TrackID);
 //==============================================================================
 // What links the channels (docs/design.md, section 8), which the mixer outlines from the selection: where each channel's
 // sound goes (its bus, or the master), its sends to returns, and the sidechains that hear it (not a compressor's key while
-// it compresses).
+// it shapes transients).
 struct Connection
 {
     enum class Kind

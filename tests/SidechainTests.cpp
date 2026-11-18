@@ -8,19 +8,23 @@
 #include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "UndoCheck.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -373,20 +377,35 @@ TEST_CASE ("Phazite's compressor ducks under the key chosen for it, set up to du
     phazite::undo (model);
     phazite::undo (model);
 
-    // A compressor already set its own way keeps its settings, and ducks.
+    // A compressor already set its own way keeps its settings and its mode: compressing, it compresses as the key says (a
+    // keyed compressor). One undo step either way, exact.
     {
         const phazite::UndoStep step (model, "Change Attack");
         phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "attack" }, 2.0f);
     }
 
-    phazite::setSidechainSource (model, compressor, song.kick);
-    CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
+    {
+        phazite::test::UndoCheck undo (model);
+        undo.check ("Sidechain from Kick", [&] { phazite::setSidechainSource (model, compressor, song.kick); });
+    }
+
+    CHECK (phazite::getSidechainSource (model, compressor) == song.kick);
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (compressMode));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (2.0f));
     CHECK (valueOf (compressor, "release") == doctest::Approx (120.0f));
+    CHECK (phazite::hearsSidechain (model, compressor)); // keyed
 
-    // Listening to none again, it ducks under its own sound, as it was set.
+    // Listening to none again, it hears its own sound, as it was set.
     phazite::setSidechainSource (model, compressor, {});
-    CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (compressMode));
+
+    // As made, the step that sets it to duck is exact too.
+    {
+        const auto asMade = song.addCompressor (song.keys);
+        phazite::test::UndoCheck undo (model);
+        undo.check ("Sidechain from Kick", [&] { phazite::setSidechainSource (model, asMade, song.kick); });
+        CHECK (valueOf (asMade, "mode") == doctest::Approx (duckMode));
+    }
 
     // A source that plays a drum sampler: only its kick's body, from 60 to 150 Hz, so that the kick ducks the keys, its long boom
     // doesn't hold them down, and the snare, clap and hats don't.
@@ -398,7 +417,7 @@ TEST_CASE ("Phazite's compressor ducks under the key chosen for it, set up to du
     CHECK (valueOf (onKeys, "keyHighCut") == doctest::Approx (150.0f));
 }
 
-TEST_CASE ("Phazite's compressor hears its key only while it ducks: compressing, the mixer shows no key, which it keeps")
+TEST_CASE ("Phazite's compressor hears its key while it compresses or ducks: shaping transients, the mixer shows no key, which it keeps")
 {
     using phazite::devices::Compressor;
     phazite::test::TestSong song;
@@ -438,8 +457,16 @@ TEST_CASE ("Phazite's compressor hears its key only while it ducks: compressing,
     CHECK (slot().sidechain.track == kick);
     CHECK (linked());
 
-    // Compressing: neither, its key kept; a change the mixer hears of, as one of its devices'.
+    // Compressing, keyed by the kick: both still.
     song.setParameter (compressor, "mode", (float) Compressor::Mode::compress);
+    phazite::test::dispatchPendingMessages();
+    CHECK (slot().sidechain.track == kick);
+    CHECK (linked());
+
+    // Shaping transients, which hear its own sound: neither, its key kept; a change the mixer hears of, as one of its
+    // devices'.
+    changes.devices = false;
+    song.setParameter (compressor, "mode", (float) Compressor::Mode::transient);
     phazite::test::dispatchPendingMessages();
     CHECK (changes.devices);
     CHECK_FALSE (slot().sidechain.track.isValid());
@@ -633,6 +660,98 @@ TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while i
 
     setMode (phazite::devices::Compressor::Mode::compress);
     REQUIRE (phazite::test::dispatchMessagesUntil (isDrivesAlone));
+}
+
+TEST_CASE ("Phazite's compressor's latency follows its Look-Ahead set by hand, and Low Latency leaves it out past a millisecond")
+{
+    // Compressing, its sound comes as late as its drive and its look-ahead, which makes it anew as the value set by hand
+    // changes; while Low Latency is on, one that comes more than a millisecond late is left out, as a ducking one is
+    // (model/playback/internal/PlaybackHost.h), and one under it plays on.
+    phazite::test::TestSong song;
+    auto& context = song.context;
+    auto& model = *phazite::findSong (context);
+    phazite::addEffect (context, song.firstTrack, song.findDeviceType (phazite::devices::Compressor::typeID));
+    const auto compressor = phazite::getEffects (context, song.firstTrack)[0].id;
+    const auto latency = [&context, &song] { return phazite::getEffects (context, song.firstTrack)[0].latencySeconds; };
+    const auto setLookahead = [&model, compressor] (float milliseconds)
+    {
+        const phazite::UndoStep step (model, "Change Look-Ahead");
+        phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "lookahead" }, milliseconds);
+    };
+
+    phazite::test::dispatchPendingMessages();
+    const auto driven = latency();
+    REQUIRE (driven > 0.0);
+    REQUIRE (driven < 0.0005);
+
+    setLookahead (5.0f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.004; }));
+    CHECK (latency() == doctest::Approx (driven + 0.005).epsilon (0.01));
+
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    const juce::ScopeGuard lowLatencyOff { [&host] { host.setLowLatency (false); } };
+    host.setLowLatency (true);
+    CHECK (juce::exactlyEqual (latency(), 0.0));
+
+    setLookahead (0.5f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.0 && latency() < 0.001; }));
+    CHECK (latency() == doctest::Approx (driven + 0.0005).epsilon (0.05));
+}
+
+TEST_CASE ("A drag of a compressor's Look-Ahead makes it anew once, as the drag ends, not at each of its steps")
+{
+    // Its latency follows the Look-Ahead set by hand, and a new latency is a device made anew in a new plan, which starts it
+    // again from silence, its reduction lost: a sweep of the knob was hundreds of them. While a gesture drags it, the plan
+    // waits for the gesture's end; meanwhile it plays the value within the latency it has.
+    phazite::test::TestSong song;
+    auto& context = song.context;
+    phazite::addEffect (context, song.firstTrack, song.findDeviceType (phazite::devices::Compressor::typeID));
+    const auto compressor = phazite::getEffects (context, song.firstTrack)[0].id;
+    const auto latency = [&context, &song] { return phazite::getEffects (context, song.firstTrack)[0].latencySeconds; };
+    phazite::test::dispatchPendingMessages();
+    const auto driven = latency();
+    REQUIRE (driven > 0.0);
+    REQUIRE (driven < 0.0005);
+
+    // Set by hand to 1 ms first, a step of its own: made anew for it.
+    auto handle = phazite::getParameter (context, { compressor, "lookahead" });
+    handle.beginGesture();
+    handle.setValue (1.0f);
+    handle.endGesture();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return latency() > driven + 0.0009; }));
+    const auto atOne = latency();
+
+    // Then dragged on to 6 ms, twenty steps: the same device, made for 1 ms, plays on until the drag ends.
+    handle.beginGesture();
+
+    for (int step = 1; step <= 20; ++step)
+    {
+        handle.setValue (1.0f + 0.25f * (float) step);
+        phazite::test::dispatchPendingMessages();
+        CHECK (latency() == doctest::Approx (atOne));
+    }
+
+    handle.endGesture();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.005; }));
+    CHECK (latency() == doctest::Approx (driven + 0.006).epsilon (0.01));
+}
+
+TEST_CASE ("A compressor whose Mix was turned isn't as it was made: choosing a key keeps its mode")
+{
+    using phazite::devices::Compressor;
+    Song song;
+    auto& model = *song.song;
+    const auto compressor = song.addCompressor (song.bass);
+
+    {
+        const phazite::UndoStep step (model, "Change Mix");
+        phazite::setMix (model, compressor, 0.5f);
+    }
+
+    phazite::setSidechainSource (model, compressor, song.kick);
+    CHECK (phazite::getValueSetByHand (model, phazite::ParameterRef { compressor, "mode" })
+           == doctest::Approx ((float) Compressor::Mode::compress));
+    CHECK (phazite::getMix (model, compressor) == doctest::Approx (0.5f));
 }
 
 TEST_CASE ("A sidechain's key reaches its device while the device's track is soloed, a bus's too, whose tracks send nothing meanwhile")

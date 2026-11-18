@@ -201,6 +201,12 @@ const std::vector<Shape>& getShapes()
         { "Gate under -30 dB",
           { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-31.0f), 0.0f),
             makePoint (axisForDecibels (-30.0f), axisForDecibels (-30.0f)), makePoint (1.0f, 1.0f) } },
+        { "Gate under -40 dB",
+          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-41.0f), 0.0f),
+            makePoint (axisForDecibels (-40.0f), axisForDecibels (-40.0f)), makePoint (1.0f, 1.0f) } },
+        { "Gate under -50 dB",
+          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-51.0f), 0.0f),
+            makePoint (axisForDecibels (-50.0f), axisForDecibels (-50.0f)), makePoint (1.0f, 1.0f) } },
         { "Expand under -24 dB",
           { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-40.0f), axisForDecibels (-56.0f)),
             makePoint (axisForDecibels (-24.0f), axisForDecibels (-24.0f)), makePoint (1.0f, 1.0f) } },
@@ -224,10 +230,10 @@ const Shape* findShape (std::string_view name)
     return nullptr;
 }
 
-void Gains::update (std::span<const float> curve) noexcept
+bool Gains::update (std::span<const float> curve) noexcept
 {
     if (hasTable && std::equal (shownCurve.begin(), shownCurve.end(), curve.begin()))
-        return;
+        return false;
 
     std::copy (curve.begin(), curve.begin() + parameterCount, shownCurve.begin());
     hasTable = true;
@@ -244,6 +250,7 @@ void Gains::update (std::span<const float> curve) noexcept
     }
 
     lastGain = fromAxis (getAt (curve, 1.0f));
+    return true;
 }
 
 float Gains::getDecibels (float level) const noexcept

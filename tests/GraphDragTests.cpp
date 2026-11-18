@@ -1052,7 +1052,8 @@ TEST_CASE ("A graph's handle held still while the song plays grabs its parameter
     song.run ("transport.playStop");
 }
 
-TEST_CASE ("A click on a device's graph leaves the keyboard's focus where it was: no graph is a Tab stop, and the keys do what they did")
+TEST_CASE (
+    "A click on a device's graph leaves the keys where they were: only the dynamics curve is a Tab stop, and the keys do what they did")
 {
     phazite::test::AppScreen screen;
     screen.session.openAtStartup();
@@ -1065,7 +1066,8 @@ TEST_CASE ("A click on a device's graph leaves the keyboard's focus where it was
                                           "Saturation",     "Vocoder bands", "Stereo image",    "Osc 1 Wavetable", "Sound",  "Excited band",
                                           "Phaser notches", "Flanger comb",  "Chorus copies",   "Breakpoints" };
 
-    // Every device's graphs, in the dock: none wants the keyboard's focus.
+    // Every device's graphs, in the dock: none wants the keyboard's focus, but the dynamics curve, whose points the keys
+    // choose and move (step S6.3), which Tab reaches and a click on it doesn't take the keys to.
     for (const auto device : devices)
     {
         auto& view = screen.showInDevicesView (device);
@@ -1082,7 +1084,9 @@ TEST_CASE ("A click on a device's graph leaves the keyboard's focus where it was
                 || dynamic_cast<phazite::ui::FilterView*> (each) != nullptr || (! isControl && graphTitles.contains (each->getTitle()));
             CAPTURE (each->getTitle());
 
-            if (isGraph)
+            if (dynamic_cast<phazite::ui::DynamicsCurve*> (each) != nullptr)
+                CHECK_FALSE (each->getMouseClickGrabsKeyboardFocus());
+            else if (isGraph)
                 CHECK_FALSE (each->getWantsKeyboardFocus());
         }
     }

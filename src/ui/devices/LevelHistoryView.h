@@ -66,6 +66,12 @@ public:
     // reduction range over half of it). Over all of it, as far as its lowest level, it reads on the levels' scale.
     void setReductionScale (float decibels, float shareOfHeight);
 
+    // Or, for a device that turns the sound up as well as down (the compressor's Transient), its gain as a line through the
+    // middle of its height, up as far as it turned the sound up and down as far as it turned it down, to this many decibels
+    // at its top and bottom: the readings' reductions then below 0 where it turned up. None (0) draws reductions from the top.
+    void setGainAroundMiddle (float decibels);
+    bool showsGainAroundMiddle() const noexcept { return gainRange > 0.0f; }
+
     // The track the device listens to through its sidechain (its key), named and in its colour; an empty name for none. With
     // one, it shows the sound it ducks, what came in, pale, and what went out over it in the device's colour, each duck a dip
     // under what came in, and the key as a line in its colour beside the threshold's, as Kickstart and ShaperBox draw the
@@ -98,6 +104,7 @@ private:
 
     const float lowest;
     float reductionRange, reductionShare = 0.5f;
+    float gainRange = 0.0f;       // setGainAroundMiddle()'s
     std::deque<Reading> readings; // oldest first: those in view, and the one before them that their traces start from
     std::deque<Line> lines;
     SongTime lastSong;

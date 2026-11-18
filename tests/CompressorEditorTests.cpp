@@ -116,10 +116,11 @@ bool shows (const phazite::ui::CompressorEditor& editor, const char* id)
     return control != nullptr && control->isShowing();
 }
 
-// What each page shows of the compressor's parameters: compressing, its curve's knobs and its low cut (the high cut is Duck's
-// alone, which compressing ignores); ducking, its own and both cuts.
-const std::vector<const char*> compressKnobs { "attack", "release", "inputGain", "drive", "makeup", "keyLowCut" };
+// What each page shows of the compressor's parameters: compressing, its curve's knobs and the cuts of what it hears;
+// ducking, its own and both cuts; shaping transients, its punch, sustain, speed, makeup and low cut.
+const std::vector<const char*> compressKnobs { "attack", "release", "levelHold", "lookahead", "inputGain", "drive", "makeup" };
 const std::vector<const char*> duckKnobs { "threshold", "depth", "attack", "hold", "release", "releaseCurve", "keyLowCut", "keyHighCut" };
+const std::vector<const char*> transientKnobs { "punch", "sustain", "speed", "makeup", "keyLowCut" };
 
 // Clicks a mode's tab.
 void clickMode (phazite::ui::CompressorEditor& editor, Compressor::Mode mode)
@@ -155,7 +156,8 @@ TEST_CASE ("The compressor's editor compresses at first: its characters, its cur
         CHECK (dynamic_cast<const phazite::ui::Knob*> (editor.findControl (id)) != nullptr);
     }
 
-    CHECK_FALSE (shows (editor, "keyHighCut"));
+    CHECK (shows (editor, "keyHighCut")); // the cuts of what it hears, its own sound or a key
+    CHECK (shows (editor, "autoMakeup"));
 
     for (const auto* id : { "threshold", "depth", "hold", "releaseCurve" })
     {
@@ -166,7 +168,7 @@ TEST_CASE ("The compressor's editor compresses at first: its characters, its cur
     CHECK (editor.findControl ("mix") == nullptr);
     CHECK (editor.findControl ("points") == nullptr);
     CHECK (editor.getKeyPicker() == nullptr); // without the project
-    CHECK_FALSE (editor.getListenButton().isShowing());
+    CHECK (editor.getListenButton().isShowing());
     phazite::test::checkChildrenApart (editor);
 
     // Its history beside the curve: what comes in and goes out, and how far it turned down, with no line to drag.
@@ -202,7 +204,7 @@ TEST_CASE ("The compressor's tabs are its modes: a click on one sets it, one und
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     CHECK (song.valueOf ("mode") == doctest::Approx ((float) Compressor::Mode::compress));
     REQUIRE (editor.getKeyPicker() != nullptr);
-    CHECK_FALSE (editor.getKeyPicker()->isShowing());
+    CHECK (editor.getKeyPicker()->isShowing()); // keyed by the track it picks
 
     // Duck: the mode, one undo step, and its page: the key over its cuts and Listen, its knobs, and the history with the
     // threshold's line; no curve, no characters.
@@ -232,11 +234,11 @@ TEST_CASE ("The compressor's tabs are its modes: a click on one sets it, one und
     CHECK (editor.getHistory().hasLine());
     phazite::test::checkChildrenApart (editor);
 
-    // Compress again: the curve, and no key; then undone, at the tabs' next refresh, Duck's page again.
+    // Compress again: the curve, and the key it can hear; then undone, at the tabs' next refresh, Duck's page again.
     clickMode (editor, Compressor::Mode::compress);
     CHECK (song.valueOf ("mode") == doctest::Approx ((float) Compressor::Mode::compress));
     CHECK (editor.getCurve().isShowing());
-    CHECK_FALSE (editor.getKeyPicker()->isShowing());
+    CHECK (editor.getKeyPicker()->isShowing());
     CHECK_FALSE (editor.getHistory().hasLine());
     phazite::undo (*song.song);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
@@ -245,7 +247,7 @@ TEST_CASE ("The compressor's tabs are its modes: a click on one sets it, one und
     CHECK (editor.getKeyPicker()->isShowing());
 }
 
-TEST_CASE ("Ducking, the compressor's editor has its key's cuts, and Listen plays the key while Duck's page shows")
+TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key while Compress's or Duck's page shows")
 {
     Song song;
     phazite::ui::CompressorEditor editor ((song.getDevice()));
@@ -266,9 +268,14 @@ TEST_CASE ("Ducking, the compressor's editor has its key's cuts, and Listen play
     editor.refresh();
     CHECK (compressor->isPlayingKey());
 
-    // On Compress's page, where it hears its own sound, it no longer asks: once the last ask has run out, the key stops.
+    // On Compress's page, which shows the same Listen, it asks on; on Transient's, which hears its own sound and has no
+    // Listen, it no longer asks: once the last ask has run out, the key stops.
     clock.advance (501.0);
     clickMode (editor, Compressor::Mode::compress);
+    editor.refresh();
+    CHECK (compressor->isPlayingKey());
+    clock.advance (501.0);
+    clickMode (editor, Compressor::Mode::transient);
     editor.refresh();
     CHECK_FALSE (compressor->isPlayingKey());
 }
@@ -480,16 +487,18 @@ TEST_CASE ("Ducking, the compressor's key is picked over its cuts and Listen: a 
     CHECK_FALSE (editor.getHistory().showsReduction()); // what the kick does is the bass's dips
     CHECK (editor.getHistory().getDescription().contains ("Kick, what it listens to"));
 
-    // Compressing, the history shows its own sound, the kick kept for when it ducks again.
+    // Compressing, keyed by the kick, the history shows it too; shaping transients, its own sound, the kick kept for when it
+    // compresses or ducks again.
     clickMode (editor, Compressor::Mode::compress);
+    CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));
+    clickMode (editor, Compressor::Mode::transient);
     CHECK (editor.getHistory().getKeyName().isEmpty());
-    CHECK (editor.getHistory().showsReduction());
     CHECK (phazite::getSidechainSource (song.context, song.compressor) == song.getTrack (0));
     clickMode (editor, Compressor::Mode::duck);
     CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));
 
-    // Undone (both modes' clicks, then the key): none again, at the editor's next look.
-    for (int step = 0; step < 3; ++step)
+    // Undone (the modes' clicks, then the key): none again, at the editor's next look.
+    for (int step = 0; step < 4; ++step)
         phazite::undo (*song.song);
 
     editor.refresh();
@@ -569,16 +578,18 @@ TEST_CASE ("In the default dock each of the compressor's modes shows whole on on
     REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
     phazite::test::TestWindow window (editor, dockWidth, dockHeight);
 
-    // Compress: the characters, the curve with its meter and tools, and beside them the history over the knobs.
+    // Compress: the characters, the curve with its meter, its tools and Auto Makeup; and beside them its knobs, under a tab
+    // beside the history's and the key's, which the dock is too short to show over one another.
     CHECK_FALSE (editor.getLayout().usesPages());
     CHECK (editor.getModeTab (0).isShowing());
     CHECK (editor.getModeTab (1).isShowing());
+    CHECK (editor.getModeTab (2).isShowing());
     CHECK (editor.getCharacterButton (0).isShowing());
     CHECK (editor.getCurve().isShowing());
     CHECK (editor.getCurve().getWidth() >= 120);
-    CHECK (editor.getHistory().isShowing());
-    CHECK (editor.getHistory().getWidth() >= phazite::ui::GraphTint::minimumWidth);
-    CHECK (editor.getHistory().getHeight() >= 96);
+    CHECK (shows (editor, "autoMakeup"));
+    REQUIRE (editor.getLayout().usesTabs (1));
+    CHECK (editor.getLayout().getShownPart (1) == 1);
 
     for (const auto* id : compressKnobs)
     {
@@ -587,6 +598,18 @@ TEST_CASE ("In the default dock each of the compressor's modes shows whole on on
         CHECK (editor.findControl (id)->getWidth() >= phazite::ui::compactKnobSize);
     }
 
+    phazite::test::checkChildrenApart (editor);
+
+    // Its history and its key, each under its tab.
+    editor.getLayout().showPart (1, 0);
+    CHECK (editor.getHistory().isShowing());
+    CHECK (editor.getHistory().getWidth() >= phazite::ui::GraphTint::minimumWidth);
+    CHECK (editor.getHistory().getHeight() >= 96);
+    editor.getLayout().showPart (1, 2);
+    CHECK (editor.getKeyPicker()->isShowing());
+    CHECK (editor.getListenButton().isShowing());
+    CHECK (shows (editor, "keyLowCut"));
+    CHECK (shows (editor, "keyHighCut"));
     phazite::test::checkChildrenApart (editor);
 
     // Duck: the key over its cuts and Listen, and beside them the history over the knobs, each a whole cell wide.
@@ -605,4 +628,252 @@ TEST_CASE ("In the default dock each of the compressor's modes shows whole on on
     }
 
     phazite::test::checkChildrenApart (editor);
+
+    // Transient: the history beside its punch and sustain, large, over its speed, makeup and low cut.
+    clickMode (editor, Compressor::Mode::transient);
+    CHECK_FALSE (editor.getLayout().usesPages());
+    CHECK (editor.isShapingTransients());
+    CHECK (editor.getHistory().isShowing());
+    CHECK (editor.getHistory().getWidth() >= 300);
+    CHECK (editor.getHistory().getHeight() >= 96);
+    CHECK_FALSE (editor.getCurve().isShowing());
+    CHECK_FALSE (editor.getListenButton().isShowing());
+
+    for (const auto* id : transientKnobs)
+    {
+        CAPTURE (id);
+        CHECK (shows (editor, id));
+        CHECK (editor.findControl (id)->getWidth() >= phazite::ui::compactKnobSize);
+    }
+
+    CHECK (editor.findControl ("punch")->getWidth() >= phazite::ui::knobSize); // large
+    CHECK (editor.findControl ("sustain")->getWidth() >= phazite::ui::knobSize);
+    phazite::test::checkChildrenApart (editor);
+}
+
+TEST_CASE ("Shaping transients, the compressor's history shows its gain up and down about its middle, and no key")
+{
+    Song song;
+    phazite::setSidechainSource (song.context, song.compressor, song.getTrack (0));
+    song.song->getUndoManager().clearUndoHistory();
+    phazite::ui::CompressorEditor editor (song.getDevice(), &song.context, song.compressor);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& history = editor.getHistory();
+
+    // Compressing, keyed by the kick: the kick as a line in its colour, named, and how far it turned down from the top no
+    // more.
+    phazite::test::dispatchPendingMessages();
+    editor.refresh();
+    REQUIRE (Compressor::getMode (song.valueOf ("mode")) == Compressor::Mode::duck); // set up to duck as it was made
+    clickMode (editor, Compressor::Mode::compress);
+    editor.refresh();
+    CHECK (history.getKeyName() == juce::String ("Kick"));
+    CHECK_FALSE (history.showsReduction());
+    CHECK_FALSE (history.showsGainAroundMiddle());
+
+    // Transient: no key, its gain about the middle; a click on its tab one undo step.
+    clickMode (editor, Compressor::Mode::transient);
+    CHECK (song.valueOf ("mode") == doctest::Approx ((float) Compressor::Mode::transient));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Mode"));
+    editor.refresh();
+    CHECK (history.getKeyName().isEmpty());
+    CHECK (history.showsGainAroundMiddle());
+
+    // Turning a hit up: the newest reading is below 0, how far it turned up.
+    auto* compressor = song.getDevice().getProcessor<Compressor>();
+    REQUIRE (compressor != nullptr);
+    compressor->prepare (48000.0, 4800);
+    auto values = getDefaults();
+    values[Compressor::mode] = (float) Compressor::Mode::transient;
+    values[Compressor::punch] = 1.0f;
+    juce::AudioBuffer<float> buffer (2, 4800);
+    buffer.clear();
+
+    for (int i = 2400; i < 4800; ++i)
+        for (int channel = 0; channel < 2; ++channel)
+            buffer.setSample (channel, i, 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 200.0 * i / 48000.0));
+
+    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    phazite::devices::ProcessContext block;
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = 4800;
+    block.parameters = values;
+    compressor->process (block);
+    editor.refresh();
+    CHECK (history.getNewestReduction() < -10.0f);
+    CHECK (editor.getShownBoost() > 10.0f);
+}
+
+TEST_CASE ("The compressor's curve by numbers: its corner reads a point and its line's ratio, typed levels and the arrows move it")
+{
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& curve = editor.getCurve();
+    const auto decibelsOf = [&song] (const char* id) { return juce::Decibels::gainToDecibels (curves::fromAxis (song.valueOf (id))); };
+
+    // The default curve's corner at -18 dB, as numbers, and the line that leaves it, 4:1 to 0 dB; from silence, no ratio.
+    CHECK (curve.describePoint (1) == juce::String ("In -18.0 dB, Out -18.0 dB"));
+    CHECK (curve.describeRatio (1) == juce::String ("4.0:1"));
+    CHECK (curve.describeRatio (0).isEmpty());
+    CHECK (curve.describeRatio (curve.getCount() - 1).isEmpty()); // the last point: no line leaves it
+
+    // Under the pointer, the corner reads it.
+    CHECK (curve.getReadout().isEmpty());
+    phazite::test::Mouse mouse (curve);
+    mouse.moveTo (curve.getPointPosition (1).roundToInt());
+    CHECK (curve.getReadout() == juce::String ("In -18.0 dB, Out -18.0 dB\n4.0:1"));
+
+    // Ratios: a line that expands, a limit, a gate; and one that lifts quiet levels, 2:1 as it rises.
+    REQUIRE (curve.applyShape ("Lift under -30 dB")); // from -60 dB in, -45 out, to -30 dB both
+    editor.refresh();
+    CHECK (curve.describeRatio (1) == juce::String ("2.0:1"));
+    REQUIRE (curve.applyShape ("Expand under -24 dB")); // from -40 dB in, -56 out, to -24 dB both
+    editor.refresh();
+    CHECK (curve.describeRatio (1) == juce::String ("1:2.0"));
+    REQUIRE (curve.applyShape ("Limit at 0 dB"));
+    editor.refresh();
+    CHECK (curve.describeRatio (1) == juce::String ("Limit"));
+    REQUIRE (curve.applyShape ("Gate under -40 dB"));
+    editor.refresh();
+    CHECK (curve.describeRatio (1) == juce::String ("Gate"));
+    REQUIRE (curve.applyShape ("Compress 4:1 over -18 dB"));
+    editor.refresh();
+
+    // Type Values...: "in, out" in decibels, exactly, one undo step named as a drag's; the curve's end its level out alone.
+    REQUIRE (curve.setPointLevels (1, "-24, -20 dB"));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-24.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-20.0f).epsilon (1.0e-4));
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
+    phazite::undo (*song.song);
+    editor.refresh();
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-18.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-18.0f).epsilon (1.0e-4));
+    const auto last = curve.getCount() - 1;
+    REQUIRE (curve.setPointLevels (last, "-3"));
+    CHECK (song.valueOf ("point4X") == doctest::Approx (1.0f));
+    CHECK (decibelsOf ("point4Y") == doctest::Approx (-3.0f).epsilon (1.0e-4));
+    CHECK_FALSE (curve.setPointLevels (1, "loud"));
+    CHECK_FALSE (curve.setPointLevels (1, "-12")); // a point between needs both
+    phazite::undo (*song.song);
+    editor.refresh();
+
+    // From its menu, the field over the point, with its levels: Enter moves it.
+    curve.typeValues (1);
+    auto* field = curve.getValuesField();
+    REQUIRE (field != nullptr);
+    CHECK (field->getText() == juce::String ("-18.0, -18.0"));
+    field->setText ("-30, -28");
+    field->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-30.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-28.0f).epsilon (1.0e-4));
+    phazite::undo (*song.song);
+    editor.refresh();
+
+    // The keyboard: Tab reaches it; Right chooses the next point, and with Ctrl the arrows move it a tenth of a decibel, with
+    // Shift a decibel; a run of presses is one undo step, which the next choice ends.
+    CHECK (curve.getWantsKeyboardFocus());
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::leftKey)));
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::leftKey)));
+    CHECK (curve.getChosenPoint() == 0);
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    CHECK (curve.getChosenPoint() == 1);
+    const auto before = song.describeUndo();
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::rightKey, juce::ModifierKeys::commandModifier, 0));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-17.9f).epsilon (1.0e-3));
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::shiftModifier, 0));
+    curve.keyPressed (juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::shiftModifier, 0));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-16.0f).epsilon (1.0e-3));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-17.9f).epsilon (1.0e-3));
+    CHECK (curve.keyPressed (juce::KeyPress (juce::KeyPress::leftKey))); // chooses the first point: the run ends
+    CHECK (curve.getChosenPoint() == 0);
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
+    CHECK (song.describeUndo() != before);
+    phazite::undo (*song.song);
+    editor.refresh();
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-18.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-18.0f).epsilon (1.0e-4));
+    CHECK (song.describeUndo() == before);
+}
+
+TEST_CASE ("The compressor's curve by keys, as a user presses them: Tab reaches it, and a key not its own ends a run of presses")
+{
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& curve = editor.getCurve();
+
+    // Tab from the characters' first button, through the window's focus traversal, reaches the curve.
+    editor.getCharacterButton (0).grabKeyboardFocus();
+    REQUIRE (editor.getCharacterButton (0).hasKeyboardFocus (false));
+
+    for (int i = 0; i < 40 && ! curve.hasKeyboardFocus (false); ++i)
+        window.pressKey (juce::KeyPress (juce::KeyPress::tabKey));
+
+    REQUIRE (curve.hasKeyboardFocus (false));
+
+    // Right chooses the corner, Ctrl and Up moves it; a key that isn't the curve's ends the run, a step of its own, there and
+    // then (the next key's action, Delete say, landed in it).
+    window.pressKey (juce::KeyPress (juce::KeyPress::rightKey));
+    REQUIRE (curve.getChosenPoint() == 1);
+    window.pressKey (juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::commandModifier, 0));
+    CHECK (phazite::Gesture::isInProgress (*song.song));
+    window.pressKey (juce::KeyPress ('a'));
+    CHECK_FALSE (phazite::Gesture::isInProgress (*song.song));
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
+    CHECK (juce::Decibels::gainToDecibels (curves::fromAxis (song.valueOf ("point2Y"))) == doctest::Approx (-17.9f).epsilon (1.0e-3));
+}
+
+TEST_CASE ("Type Values reads a decimal comma where it can't be mistaken, and says why it refuses what it can't read")
+{
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& curve = editor.getCurve();
+    const auto decibelsOf = [&song] (const char* id) { return juce::Decibels::gainToDecibels (curves::fromAxis (song.valueOf (id))); };
+    const auto last = curve.getCount() - 1;
+
+    // An end's "-3,5" is -3.5 dB; a point between's "-18,5, -12" is -18.5 in and -12 out; "-20;-14" and "-20 -14" alike.
+    REQUIRE (curve.setPointLevels (last, "-3,5"));
+    CHECK (decibelsOf ("point4Y") == doctest::Approx (-3.5f).epsilon (1.0e-4));
+    REQUIRE (curve.setPointLevels (1, "-18,5, -12"));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-18.5f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-12.0f).epsilon (1.0e-4));
+    REQUIRE (curve.setPointLevels (1, "-20;-14"));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-14.0f).epsilon (1.0e-4));
+    REQUIRE (curve.setPointLevels (1, "-21 -15 dB"));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-21.0f).epsilon (1.0e-4));
+    CHECK (curve.getRefusal().isEmpty());
+
+    // What it can't read: refused, the point where it was, and why, in the curve's corner.
+    CHECK_FALSE (curve.setPointLevels (1, "-12"));
+    CHECK (curve.getRefusal().contains ("in and out"));
+    CHECK (curve.getReadout() == curve.getRefusal());
+    CHECK_FALSE (curve.setPointLevels (1, "loud, -12"));
+    CHECK (curve.getRefusal().contains ("\"loud\" isn't a level"));
+    CHECK_FALSE (curve.setPointLevels (last, "-3, -4"));
+    CHECK (curve.getRefusal().contains ("level out alone"));
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-21.0f).epsilon (1.0e-4));
+    REQUIRE (curve.setPointLevels (1, "-18, -18"));
+    CHECK (curve.getRefusal().isEmpty());
+}
+
+TEST_CASE ("On Compress's page the Attack and the Release say what they do to a gate, which closes at one and opens at the other")
+{
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    const auto tooltipOf = [&editor] (const char* id)
+    {
+        auto* client = dynamic_cast<juce::SettableTooltipClient*> (editor.findControl (id));
+        REQUIRE (client != nullptr);
+        return client->getTooltip();
+    };
+
+    CHECK (tooltipOf ("attack").contains ("a gate closing"));
+    CHECK (tooltipOf ("release").contains ("a gate opening"));
+    const auto menu = editor.getCurve().isShowing() ? phazite::ui::DynamicsCurveTools (editor.getCurve()).getMenu() : juce::PopupMenu();
+    CHECK (phazite::test::findMenuItem (menu, { "Shapes", "Gates: the Attack closes them, the Release opens them" }) != nullptr);
 }

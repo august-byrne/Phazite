@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's compressor (src/devices/dynamics/Compressor.h): compressing, its drawn curve as it plays, down and up, its attack
-// and release times, input and makeup gains, stereo link, cuts, meters and characters, deaf to a sidechain; and ducking, under
-// its key or its own sound, its threshold and depth, its attack in a straight line, its hold from the hit and while the key
-// stays loud, its release and its curve, a new hit during the release, its key's cuts and Listen, and its meters.
+// and release times, input and makeup gains, stereo link, cuts, meters and characters, keyed by a sidechain, its look-ahead,
+// automatic makeup and hold; ducking, under its key or its own sound, its threshold and depth, its attack in a straight line,
+// its hold from the hit and while the key stays loud, its release and its curve, a new hit during the release, its key's cuts
+// and Listen, and its meters; and shaping transients, each hit's attack and what follows it, whatever the level.
 #include "DspProbe.h"
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/dynamics/Compressor.h"
+#include "model/devices/internal/Parameters.h"
 
 #include <algorithm>
 #include <cmath>
@@ -235,21 +237,32 @@ TEST_CASE ("The compressor's description holds together: its mode first, its cur
     CHECK (mode.unit == devices::Unit::choice);
     CHECK (devices::getChoiceName (mode, 0) == "Compress");
     CHECK (devices::getChoiceName (mode, 1) == "Duck");
+    CHECK (devices::getChoiceName (mode, 2) == "Transient");
     CHECK (Compressor::getMode (mode.defaultValue) == Compressor::Mode::compress);
+    CHECK (Compressor::getMode (1.0f) == Compressor::Mode::duck);
+    CHECK (Compressor::getMode (2.0f) == Compressor::Mode::transient);
     const auto values = getDefaults();
     CHECK (values[Compressor::threshold] == doctest::Approx (-24.0f));
     CHECK (values[Compressor::depth] == doctest::Approx (12.0f));
     CHECK (values[Compressor::hold] == doctest::Approx (0.0f));
     CHECK (values[Compressor::releaseCurve] == doctest::Approx (0.0f));
 
-    for (const auto& [id, low, high] : { std::tuple ("threshold", -60.0f, 0.0f), std::tuple ("depth", 0.0f, 60.0f),
-                                         std::tuple ("hold", 0.0f, 1000.0f), std::tuple ("releaseCurve", -1.0f, 1.0f) })
+    // Compress's Look-Ahead, Hold and Auto Makeup, and Transient's Punch, Sustain and Speed: none of them doing anything at
+    // first.
+    for (const auto& [id, low, high, start] : { std::tuple ("threshold", -60.0f, 0.0f, -24.0f), std::tuple ("depth", 0.0f, 60.0f, 12.0f),
+                                                std::tuple ("hold", 0.0f, 1000.0f, 0.0f), std::tuple ("releaseCurve", -1.0f, 1.0f, 0.0f),
+                                                std::tuple ("lookahead", 0.0f, 10.0f, 0.0f), std::tuple ("levelHold", 0.0f, 500.0f, 0.0f),
+                                                std::tuple ("autoMakeup", 0.0f, 1.0f, 0.0f), std::tuple ("punch", -1.0f, 1.0f, 0.0f),
+                                                std::tuple ("sustain", -1.0f, 1.0f, 0.0f), std::tuple ("speed", 1.0f, 50.0f, 10.0f) })
     {
         CAPTURE (id);
         const auto& parameter = Compressor::info.parameters[(size_t) devices::findParameter (Compressor::info, id)];
         CHECK (parameter.minimum == doctest::Approx (low));
         CHECK (parameter.maximum == doctest::Approx (high));
+        CHECK (parameter.defaultValue == doctest::Approx (start));
     }
+
+    CHECK (Compressor::info.parameters[(size_t) Compressor::autoMakeup].unit == devices::Unit::toggle);
 
     // At first, as a compressor with a threshold at -18 dB and a ratio of 4:1 would be set.
     const auto expected = curves::makeCompression (-18.0f, 4.0f);
@@ -358,7 +371,7 @@ TEST_CASE ("The compressor's makeup gain moves smoothly")
     CHECK (gainAt (played[0], 9599, -46.0f) == doctest::Approx (12.0f).epsilon (0.001));
 }
 
-TEST_CASE ("The compressor's input gain drives the sound into it and into its detector; compressing, it doesn't hear a sidechain")
+TEST_CASE ("The compressor's input gain drives the sound into it and into its detector, but not a key it hears")
 {
     // 10 dB under where its curve starts: untouched at 0 dB in; 16 dB more goes 6 dB over, which it turns down.
     auto values = getTestValues();
@@ -373,16 +386,16 @@ TEST_CASE ("The compressor's input gain drives the sound into it and into its de
     CHECK (getCurveGain (values, -20.0f) < -1.0f);
     CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f + getCurveGain (values, -20.0f)).epsilon (0.003));
 
-    // A loud sidechain changes nothing while it compresses: it hears its own sound, quiet, and plays it as it would without
-    // one, sample for sample, its key kept for when it ducks.
-    values[Compressor::inputGain] = 6.0f;
-    Compressor keyed, alone;
+    // Keyed, it hears the key as it comes, whatever the input gain: a sound 10 dB over where its curve starts, with 16 dB of
+    // input gain, under a silent key, is turned up by the input gain alone; under a loud key, down by what the curve gives the
+    // key's level.
+    Compressor keyed;
     keyed.prepare (testRate, testBlockSize);
-    alone.prepare (testRate, testBlockSize);
-    const auto quiet = [] (int t, int) { return steady (t, -46.0f); };
-    played = play (keyed, values, 12000, quiet, [] (int t, int) { return steady (t, -6.0f); });
-    CHECK (gainAt (played[0], 11999, -46.0f) == doctest::Approx (6.0f).epsilon (0.001));
-    CHECK (played == play (alone, values, 12000, quiet));
+    const auto sound = [] (int t, int) { return steady (t, -36.0f); };
+    played = play (keyed, values, 24000, sound, [] (int, int) { return 0.0f; });
+    CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f).epsilon (0.001));
+    played = play (keyed, values, 24000, sound, [] (int t, int) { return steady (t, -6.0f); });
+    CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f + getCurveGain (values, -6.0f)).epsilon (0.003));
 }
 
 TEST_CASE ("The compressor turns both channels alike, compressing and ducking; ducking, it hears its key when one feeds it")
@@ -458,10 +471,23 @@ TEST_CASE ("The compressor's key low cut keeps bass from pushing it, and its met
     CHECK (mostReduction (20.0f) > 10.0f);
     CHECK (mostReduction (300.0f) < 0.1f);
 
-    // Compressing, the high cut is Duck's and changes nothing: a bass heard through a 100 Hz high cut is turned down as far.
+    // Compressing, the high cut shapes what it hears too: a bass heard through a 100 Hz high cut is turned down as far, and
+    // hats at 8 kHz through it barely.
     values[Compressor::keyHighCut] = 100.0f;
     CHECK (mostReduction (20.0f) > 10.0f);
+    const auto hats = [] (int t, int) { return (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * 8000.0 * t / testRate)); };
+    const auto hatsReduction = [&]
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        play (compressor, values, 24000, hats);
+        compressor.getReductionMeter().take();
+        play (compressor, values, 24000, hats);
+        return compressor.getReductionMeter().take();
+    };
+    CHECK (hatsReduction() < 0.5f);
     values[Compressor::keyHighCut] = 20000.0f;
+    CHECK (hatsReduction() > 10.0f);
 
     // The meters: how loud the detector heard it and how far it went down, until taken. (Their first readings hold the
     // low cut's overshoot as the sound starts.)
@@ -1646,5 +1672,791 @@ TEST_CASE ("Finding 4: FET's and Tube's colour plays the same however its blocks
             CHECK (ofOne == of512);
             CHECK (of64 == of512);
         }
+    }
+}
+
+//==============================================================================
+// Compress keyed, its look-ahead, its automatic makeup and its hold (roadmap step S6.3).
+namespace
+{
+// Plays a compressor in blocks of a size, the values valuesAt gives for each block's first sample, input (time, channel) its
+// sound and sidechain (time, channel), if given, its key's; returns both channels lined up with what went in, as play() does.
+std::array<std::vector<float>, 2> playLinedUp (Compressor& compressor, int numSamples, int blockSize,
+                                               const std::function<float (int, int)>& input,
+                                               const std::function<const std::vector<float>&(int)>& valuesAt,
+                                               const std::function<float (int, int)>& sidechain = {})
+{
+    juce::AudioBuffer<float> buffer (2, blockSize), side (2, blockSize);
+    std::array<std::vector<float>, 2> played;
+    const auto latency = compressor.getLatencySamples();
+    const auto total = numSamples + latency;
+
+    for (int done = 0; done < total; done += blockSize)
+    {
+        const auto length = std::min (blockSize, total - done);
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            for (int i = 0; i < length; ++i)
+            {
+                buffer.setSample (channel, i, input (done + i, channel));
+                side.setSample (channel, i, sidechain != nullptr ? sidechain (done + i, channel) : 0.0f);
+            }
+        }
+
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        const float* sides[] = { side.getReadPointer (0), side.getReadPointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = length;
+        block.parameters = valuesAt (done);
+
+        if (sidechain != nullptr)
+        {
+            block.sidechain = sides;
+            block.numSidechainChannels = 2;
+        }
+
+        compressor.process (block);
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < length; ++i)
+                played[(size_t) channel].push_back (buffer.getSample (channel, i));
+    }
+
+    for (auto& channel : played)
+    {
+        channel.erase (channel.begin(), channel.begin() + latency);
+        channel.resize ((size_t) numSamples);
+    }
+
+    return played;
+}
+
+// The same values for every block.
+std::function<const std::vector<float>&(int)> always (const std::vector<float>& values)
+{
+    return [&values] (int) -> const std::vector<float>& { return values; };
+}
+
+// A compressor made for its values set by hand (its mode and look-ahead), as its engine makes it.
+std::unique_ptr<Compressor> makeFor (const std::vector<float>& values)
+{
+    auto compressor = std::make_unique<Compressor>();
+    compressor->takeValuesBeforePrepare (values);
+    compressor->prepare (testRate, testBlockSize);
+    return compressor;
+}
+
+// A tone that steady() can't be, for an ear that hears its peaks: 440 Hz.
+float sine (int time, float decibels)
+{
+    return toGain (decibels) * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * time / testRate);
+}
+
+// How many times a gain, sample by sample, crosses a level, either way.
+int countCrossings (const std::vector<float>& gains, float decibels)
+{
+    auto crossings = 0;
+
+    for (size_t i = 1; i < gains.size(); ++i)
+        if ((gains[i - 1] < decibels) != (gains[i] < decibels))
+            ++crossings;
+
+    return crossings;
+}
+
+// The gain at each time on a channel that carries a steady sound at a level too quiet for the ear: what the compressor
+// turns both channels by, read where the other one's wave crosses 0.
+std::vector<float> getGains (const std::vector<float>& channel, float carrierDecibels)
+{
+    std::vector<float> gains;
+
+    for (const auto sample : channel)
+        gains.push_back (20.0f * std::log10 (std::max (1.0e-12f, std::abs (sample))) - carrierDecibels);
+
+    return gains;
+}
+
+// The mean of a stretch of gains, in decibels.
+float meanOf (const std::vector<float>& gains, int from, int to)
+{
+    auto sum = 0.0;
+
+    for (auto i = from; i < to; ++i)
+        sum += gains[(size_t) i];
+
+    return (float) (sum / (to - from));
+}
+} // namespace
+
+TEST_CASE ("Keyed, Compress turns a pad down by what its curve gives the kick's level, and not between kicks once released")
+{
+    // A steady pad under where the curve starts; a kick, loud for 100 ms every half second, as the key.
+    auto values = getTestValues();
+    const auto pad = [] (int t, int) { return steady (t, -36.0f); };
+    const auto kick = [] (int t, int) { return t % 24000 < 4800 ? steady (t, -6.0f) : 0.0f; };
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto played = play (compressor, values, 48000, pad, kick);
+
+    for (const auto hit : { 0, 24000 })
+    {
+        CAPTURE (hit);
+        CHECK (gainAt (played[0], hit + 4799, -36.0f) == doctest::Approx (getCurveGain (values, -6.0f)).epsilon (0.003));
+        CHECK (gainAt (played[1], hit + 4799, -36.0f) == doctest::Approx (getCurveGain (values, -6.0f)).epsilon (0.003));
+        CHECK (std::abs (gainAt (played[0], hit + 4800 + 14400, -36.0f)) < 0.1f); // 300 ms on: let go, its release 50 ms
+    }
+
+    // With no key feeding it, it hears itself as before: the quiet pad untouched.
+    Compressor alone;
+    alone.prepare (testRate, testBlockSize);
+    CHECK (std::abs (gainAt (play (alone, values, 24000, pad)[0], 23999, -36.0f)) < 0.001f);
+
+    // Both cuts shape what it hears: hats at 8 kHz as the key, under a high cut at 150 Hz, and a 30 Hz rumble under a low
+    // cut at 300 Hz, barely move it.
+    const auto mostWith = [&values, &pad] (float lowCut, float highCut, double hertz)
+    {
+        auto cut = values;
+        cut[Compressor::keyLowCut] = lowCut;
+        cut[Compressor::keyHighCut] = highCut;
+        Compressor keyed;
+        keyed.prepare (testRate, testBlockSize);
+        const auto key = [hertz] (int t, int)
+        { return (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * hertz * t / testRate)); };
+        play (keyed, cut, 24000, pad, key);
+        keyed.getReductionMeter().take();
+        play (keyed, cut, 24000, pad, [&key] (int t, int c) { return key (t + 24000, c); });
+        return keyed.getReductionMeter().take();
+    };
+
+    CHECK (mostWith (20.0f, 20000.0f, 8000.0) > 10.0f);
+    CHECK (mostWith (20.0f, 150.0f, 8000.0) < 0.5f);
+    CHECK (mostWith (20.0f, 20000.0f, 30.0) > 10.0f);
+    CHECK (mostWith (300.0f, 20000.0f, 30.0) < 0.5f);
+}
+
+TEST_CASE ("Keyed, Compress plays its key while its editor listens, through its cuts")
+{
+    auto values = getTestValues();
+    values[Compressor::keyLowCut] = 300.0f;
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto key = [] (int t, int)
+    {
+        const auto at = juce::MathConstants<double>::twoPi * t / testRate;
+        return (float) (0.25 * std::sin (1000.0 * at) + 0.5 * std::sin (30.0 * at));
+    };
+
+    phazite::test::HeldClock clock;
+    compressor.listenToKey();
+    const auto heard = play (compressor, values, 4800, [] (int t, int) { return steady (t, -30.0f); }, key);
+    CHECK (compressor.overridesMix());
+    auto loudest = 0.0f;
+
+    for (int i = 2400; i < 4800; ++i)
+        loudest = std::max (loudest, std::abs (heard[0][(size_t) i]));
+
+    CHECK (loudest == doctest::Approx (0.25f).epsilon (0.1)); // the 1 kHz sine, and not the rumble
+}
+
+TEST_CASE ("Compress looks ahead by its Look-Ahead: a burst's first peak is down already, and its latency is what an impulse takes")
+{
+    // From silence to 20 dB over where its curve starts, which settles 15 dB down, in an attack of a millisecond: without a
+    // look-ahead its first millisecond goes through nearly whole; 5 ms ahead, the gain is down as it plays.
+    constexpr int onset = 4800;
+    const auto burst = [] (int t, int) { return t < onset ? 0.0f : steady (t, -6.0f); };
+    const auto overshootWith = [&burst] (float milliseconds)
+    {
+        auto values = getTestValues();
+        values[Compressor::lookahead] = milliseconds;
+        const auto compressor = makeFor (values);
+        const auto played = play (*compressor, values, onset + 9600, burst);
+        auto loudest = -200.0f;
+
+        for (int t = onset; t < onset + 48; ++t)
+            loudest = std::max (loudest, gainAt (played[0], t, -6.0f));
+
+        return loudest - gainAt (played[0], onset + 9599, -6.0f);
+    };
+
+    CHECK (overshootWith (0.0f) > 6.0f);
+    CHECK (overshootWith (5.0f) < 1.0f);
+
+    // Its latency: the drive's and the look-ahead's, what an impulse takes through it; asked for other values set by hand, it
+    // says what it would be made with.
+    auto values = getDefaults();
+    setCurve (values, curves::findShape ("No Compression")->points);
+    values[Compressor::lookahead] = 5.0f;
+    const auto compressor = makeFor (values);
+    const auto latency = compressor->getLatencySamples();
+    CHECK (latency == Compressor::getDriveLatency() + 240);
+    CHECK (compressor->getLatencySamplesFor (values) == latency);
+    auto other = values;
+    other[Compressor::lookahead] = 2.0f;
+    CHECK (compressor->getLatencySamplesFor (other) == Compressor::getDriveLatency() + 96);
+    auto shaping = other;
+    shaping[Compressor::mode] = (float) Compressor::Mode::transient;
+    CHECK (compressor->getLatencySamplesFor (shaping) == Compressor::getDriveLatency());
+
+    // Automation of the look-ahead while it plays, block by block: the latency stays, and an impulse comes as late.
+    const auto impulse = [] (int time) { return time == 1000 ? 0.5f : 0.0f; };
+    const auto out = playInBlocks (*compressor, 4096, 64, impulse, [&values, &other] (int done) -> const std::vector<float>&
+                                   { return (done / 64) % 2 == 0 ? values : other; });
+    CHECK (compressor->getLatencySamples() == latency);
+    CHECK (std::distance (out.begin(), std::max_element (out.begin(), out.end())) == 1000 + latency);
+    CHECK (out[(size_t) (1000 + latency)] == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("Compress's Auto Makeup adds half what its curve takes off 0 dB, follows the curve as it is edited, and never pumps")
+{
+    // The default curve takes 13.5 dB off 0 dB: 6.75 dB up. A curve that adds level at 0 dB takes as much less.
+    curves::Gains gains;
+    gains.update (Compressor::getCurve (getDefaults()));
+    CHECK (std::abs (Compressor::getAutoMakeupDecibels (gains) - 6.75f) < 0.1f);
+    auto lifting = getDefaults();
+    setCurve (lifting,
+              { curves::makePoint (0.0f, 0.0f), curves::makePoint (curves::axisForDecibels (-40.0f), curves::axisForDecibels (-40.0f)),
+                curves::makePoint (0.5f, curves::axisForDecibels (6.0f)), curves::makePoint (1.0f, 1.0f) });
+    gains.update (Compressor::getCurve (lifting));
+    CHECK (std::abs (Compressor::getAutoMakeupDecibels (gains) + 3.0f) < 0.1f);
+
+    // A quiet steady sound, which the curve leaves be, comes out 6.75 dB louder from its first sample, a loud part between
+    // changing nothing of it after its release: no pumping.
+    auto values = getDefaults();
+    values[Compressor::autoMakeup] = 1.0f;
+    values[Compressor::release] = 50.0f;
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto quietThenLoud = [] (int t, int) { return steady (t, t >= 12000 && t < 24000 ? -6.0f : -46.0f); };
+    const auto played = play (compressor, values, 48000, quietThenLoud);
+    CHECK (std::abs (gainAt (played[0], 0, -46.0f) - 6.75f) < 0.1f);
+    CHECK (std::abs (gainAt (played[0], 11999, -46.0f) - 6.75f) < 0.1f);
+    CHECK (std::abs (gainAt (played[0], 47999, -46.0f) - 6.75f) < 0.1f);
+
+    // The curve edited while it plays (to 2:1 over -12 dB, which takes 6 dB off 0 dB): the makeup glides to 3 dB, never a
+    // step.
+    auto edited = values;
+    setCurve (edited, curves::makeCompression (-12.0f, 2.0f));
+    Compressor gliding;
+    gliding.prepare (testRate, testBlockSize);
+    const auto out = playLinedUp (
+        gliding, 24000, testBlockSize, [] (int t, int) { return steady (t, -46.0f); },
+        [&values, &edited] (int done) -> const std::vector<float>& { return done < 4800 ? values : edited; });
+    auto largestStep = 0.0f;
+
+    for (int t = 1; t < 24000; ++t)
+        largestStep = std::max (largestStep, std::abs (gainAt (out[0], t, -46.0f) - gainAt (out[0], t - 1, -46.0f)));
+
+    CHECK (largestStep < 0.05f);
+    CHECK (std::abs (gainAt (out[0], 23999, -46.0f) - 3.0f) < 0.1f);
+}
+
+TEST_CASE ("Compress's Hold keeps its reduction down after a burst, and lets a gate drawn on its curve open and close once on a tom")
+{
+    // A burst 20 dB over where the curve starts, then a quiet sound: held 100 ms, the reduction stays within half a decibel
+    // for 100 ms after the burst ends, and then lets go; without, it lets go at once.
+    constexpr int end = 9600;
+    const auto burst = [] (int t, int) { return steady (t, t < end ? -6.0f : -46.0f); };
+    const auto playWith = [&burst] (float hold)
+    {
+        auto values = getTestValues();
+        values[Compressor::levelHold] = hold;
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        return play (compressor, values, end + 24000, burst)[0];
+    };
+
+    const auto held = playWith (100.0f);
+
+    for (const auto after : { 0, 2400, 4799 })
+        CHECK (std::abs (gainAt (held, end + after, -46.0f) + 15.0f) < 0.5f);
+
+    CHECK (gainAt (held, end + 4800 + 7200, -46.0f) > -1.0f); // 150 ms after the hold: let go, its release 50 ms
+    CHECK (gainAt (playWith (0.0f), end + 480, -46.0f) > -14.0f);
+
+    // A tom decaying from -6 dB, through a gate that closes under -40 dB in a tenth of a millisecond and opens in one: without
+    // a hold it closes at each crossing of the tom's wave through 0, and chatters; held 60 ms, it opens once and closes once,
+    // 60 ms after the tom fell under -40 dB. The right channel carries a sound too quiet to open it, which shows the gain.
+    constexpr float carrier = -100.0f;
+    constexpr int hit = 4800;
+    const auto tom = [] (int t, int channel)
+    {
+        if (channel == 1)
+            return steady (t, carrier);
+
+        const auto since = (double) (t - hit) / testRate;
+        return t < hit ? 0.0f : (float) (0.5 * std::exp (-since / 0.15) * std::sin (juce::MathConstants<double>::twoPi * 100.0 * since));
+    };
+
+    REQUIRE (curves::findShape ("Gate under -40 dB") != nullptr);
+    const auto gateWith = [&tom] (float hold)
+    {
+        auto values = getDefaults();
+        setCurve (values, curves::findShape ("Gate under -40 dB")->points);
+        values[Compressor::attack] = 0.1f;
+        values[Compressor::release] = 1.0f;
+        values[Compressor::levelHold] = hold;
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        auto gains = getGains (play (compressor, values, 48000, tom)[1], carrier);
+        gains.erase (gains.begin(), gains.begin() + 480); // from 10 ms on, once it has shut on the quiet sound before the tom
+        return gains;
+    };
+
+    const auto chattering = gateWith (0.0f), opened = gateWith (60.0f);
+    CHECK (countCrossings (chattering, -10.0f) > 10);
+    CHECK (countCrossings (opened, -10.0f) == 2);
+    CHECK (opened[(size_t) hit] > -1.0f);        // 10 ms into the tom
+    CHECK (opened[(size_t) hit - 481] < -10.0f); // shut: as far as its curve takes silence, 120 dB under full scale
+}
+
+TEST_CASE ("The gate shapes: under -40 dB and under -50 dB, after under -30 dB in the curve's menu")
+{
+    const auto& shapes = curves::getShapes();
+    const auto at = [&shapes] (std::string_view name)
+    {
+        return std::distance (shapes.begin(),
+                              std::find_if (shapes.begin(), shapes.end(), [name] (const curves::Shape& s) { return s.name == name; }));
+    };
+
+    REQUIRE (at ("Gate under -30 dB") < (std::ptrdiff_t) shapes.size());
+    CHECK (at ("Gate under -40 dB") == at ("Gate under -30 dB") + 1);
+    CHECK (at ("Gate under -50 dB") == at ("Gate under -30 dB") + 2);
+
+    for (const auto& [name, under] : { std::pair ("Gate under -40 dB", -40.0f), std::pair ("Gate under -50 dB", -50.0f) })
+    {
+        CAPTURE (name);
+        auto values = getDefaults();
+        setCurve (values, curves::findShape (name)->points);
+        CHECK (std::abs (getCurveGain (values, under + 1.0f)) < 0.1f);
+        CHECK (getCurveGain (values, under - 2.0f) < -60.0f);
+    }
+}
+
+//==============================================================================
+// Transient, the third mode (roadmap step S6.3).
+namespace
+{
+// Shaping transients at a punch, a sustain and a speed.
+std::vector<float> getTransientValues (float punch, float sustain, float speed = 10.0f)
+{
+    auto values = getDefaults();
+    values[Compressor::mode] = (float) Compressor::Mode::transient;
+    values[Compressor::punch] = punch;
+    values[Compressor::sustain] = sustain;
+    values[Compressor::speed] = speed;
+    return values;
+}
+
+// A drum hit on the left at a time, a 200 Hz tone from a level that dies away by 145 dB a second (to a thousandth in 60 ms
+// times 6.9), and on the right a steady sound too quiet for the ear (transientCarrier), which shows the gain.
+constexpr float transientCarrier = -100.0f;
+constexpr int drumHit = 4800;
+
+float drum (int t, int channel, float decibels)
+{
+    if (channel == 1)
+        return steady (t, transientCarrier);
+
+    const auto since = (double) (t - drumHit) / testRate;
+    return t < drumHit
+               ? 0.0f
+               : toGain (decibels) * (float) (std::exp (-since / 0.06) * std::sin (juce::MathConstants<double>::twoPi * 200.0 * since));
+}
+
+// The gain each sample of a drum hit is turned by.
+std::vector<float> shapeDrum (const std::vector<float>& values, float decibels)
+{
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    return getGains (play (compressor, values, drumHit + 24000, [decibels] (int t, int c) { return drum (t, c, decibels); })[1],
+                     transientCarrier);
+}
+} // namespace
+
+TEST_CASE ("Transient leaves a steady sine as it came at any level, whatever its punch and sustain")
+{
+    // After its first 100 ms (a sine starting is a hit), a tenth of a decibel at most, at -30 dB and at -6 dB.
+    for (const auto decibels : { -30.0f, -6.0f })
+    {
+        for (const auto& [punch, sustain] :
+             { std::pair (1.0f, 1.0f), std::pair (-1.0f, -1.0f), std::pair (1.0f, -1.0f), std::pair (-1.0f, 1.0f) })
+        {
+            CAPTURE (decibels);
+            CAPTURE (punch);
+            CAPTURE (sustain);
+            Compressor compressor;
+            compressor.prepare (testRate, testBlockSize);
+            const auto played =
+                play (compressor, getTransientValues (punch, sustain), 24000, [decibels] (int t, int) { return sine (t, decibels); });
+            const auto out = getToneLevel (played[0], 4800, 24000, 440.0, testRate);
+            CHECK (std::abs (20.0 * std::log10 (out) - decibels) < 0.1);
+        }
+    }
+}
+
+TEST_CASE ("Transient turns a drum hit's attack up or down by its punch, and its tail by its sustain, the same at any level")
+{
+    for (const auto decibels : { -30.0f, -6.0f })
+    {
+        CAPTURE (decibels);
+
+        // Its first 5 ms (once the gain has glided there, from 2 ms): 14 to 16 dB up at +100 %, as far down at -100 %.
+        const auto up = shapeDrum (getTransientValues (1.0f, 0.0f), decibels);
+        const auto down = shapeDrum (getTransientValues (-1.0f, 0.0f), decibels);
+        const auto from = drumHit + 96, to = drumHit + 240;
+        INFO ("punch +100 %: " << meanOf (up, from, to) << " dB; -100 %: " << meanOf (down, from, to) << " dB");
+        CHECK (meanOf (up, from, to) > 14.0f);
+        CHECK (meanOf (up, from, to) < 16.0f);
+        CHECK (meanOf (down, from, to) < -14.0f);
+        CHECK (meanOf (down, from, to) > -16.0f);
+
+        // Its tail, from 100 to 300 ms: 12 dB or more up at +100 %, as far down at -100 %; the attack's punch over by then.
+        const auto longer = shapeDrum (getTransientValues (0.0f, 1.0f), decibels);
+        const auto shorter = shapeDrum (getTransientValues (0.0f, -1.0f), decibels);
+        const auto tailFrom = drumHit + 4800, tailTo = drumHit + 14400;
+        INFO ("sustain +100 %: " << meanOf (longer, tailFrom, tailTo) << " dB; -100 %: " << meanOf (shorter, tailFrom, tailTo) << " dB");
+        CHECK (meanOf (longer, tailFrom, tailTo) >= 12.0f);
+        CHECK (meanOf (shorter, tailFrom, tailTo) <= -12.0f);
+        CHECK (std::abs (meanOf (longer, drumHit + 96, drumHit + 240)) < 1.0f); // no sustain in the attack
+        CHECK (std::abs (meanOf (up, tailFrom + 4800, tailTo)) < 1.0f);         // nor punch in the tail
+    }
+}
+
+TEST_CASE ("Transient's Speed sets how much of a hit counts as its attack")
+{
+    // The punch 20 to 30 ms into the hit: little at a speed of 2 ms, most of it at 50 ms.
+    const auto at = [] (float speed)
+    {
+        const auto gains = shapeDrum (getTransientValues (1.0f, 0.0f, speed), -12.0f);
+        return meanOf (gains, drumHit + 960, drumHit + 1440);
+    };
+
+    INFO ("2 ms: " << at (2.0f) << " dB; 10 ms: " << at (10.0f) << " dB; 50 ms: " << at (50.0f) << " dB");
+    CHECK (at (2.0f) < at (10.0f));
+    CHECK (at (10.0f) < at (50.0f));
+    CHECK (at (2.0f) < 3.0f);
+    CHECK (at (50.0f) > 12.0f);
+}
+
+TEST_CASE ("Transient's punch, sustain and mode move without a click")
+{
+    // Drum hits every 250 ms; its punch and sustain turned from one end to the other, then the mode switched between Compress
+    // (turning the hits down) and Transient, a block at a time at random places: the gain never steps more than its
+    // glide of a millisecond takes it, at most a decibel from one sample to the next across its whole range of 48 dB.
+    const auto hits = [] (int t, int channel) { return drum (drumHit + t % 12000, channel, -6.0f); };
+    auto compressing = getTestValues();
+    auto pushing = getTransientValues (1.0f, 1.0f), pulling = getTransientValues (-1.0f, -1.0f);
+
+    for (auto* values : { &compressing, &pushing, &pulling })
+        (*values)[Compressor::release] = 50.0f;
+
+    const auto valuesAt = [&] (int done) -> const std::vector<float>&
+    {
+        const auto block = done / testBlockSize;
+        return block % 7 == 3 ? compressing : block % 3 == 0 ? pushing : pulling;
+    };
+
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto gains = getGains (playLinedUp (compressor, 96000, testBlockSize, hits, valuesAt)[1], transientCarrier);
+    auto largest = 0.0f;
+    auto where = 0;
+
+    for (int t = 1; t < (int) gains.size(); ++t)
+    {
+        if (const auto step = std::abs (gains[(size_t) t] - gains[(size_t) t - 1]); step > largest)
+        {
+            largest = step;
+            where = t;
+        }
+    }
+
+    INFO ("the largest step: " << largest << " dB at " << where);
+    CHECK (largest < 1.0f);
+}
+
+TEST_CASE ("Transient hears its own sound, never a key, and its meters show how far it turned up and down")
+{
+    // A loud key changes nothing: what it plays with one is what it plays without, sample for sample.
+    const auto values = getTransientValues (1.0f, -1.0f);
+    const auto sound = [] (int t, int c) { return drum (t, c, -12.0f); };
+    Compressor keyed, alone;
+    keyed.prepare (testRate, testBlockSize);
+    alone.prepare (testRate, testBlockSize);
+    const auto withKey = playLinedUp (keyed, 24000, testBlockSize, sound, always (values), [] (int t, int) { return steady (t, -6.0f); });
+    CHECK (withKey == playLinedUp (alone, 24000, testBlockSize, sound, always (values)));
+    CHECK (alone.getBoostMeter().take() > 12.0f);
+    CHECK (alone.getReductionMeter().take() > 6.0f);
+    CHECK (alone.getLatencySamples() == Compressor::getDriveLatency());
+}
+
+TEST_CASE ("The compressor plays the same in blocks of 32 as of 512 samples in each of its modes, its look-ahead and hold on")
+{
+    const auto hits = [] (int t, int channel) { return drum (drumHit + t % 12000, channel, -6.0f) + 0.1f * sine (t, -20.0f); };
+    auto compressing = getTestValues();
+    compressing[Compressor::lookahead] = 3.0f;
+    compressing[Compressor::levelHold] = 40.0f;
+    compressing[Compressor::autoMakeup] = 1.0f;
+    auto ducking = getDuckValues();
+    ducking[Compressor::hold] = 30.0f;
+    auto shaping = getTransientValues (0.7f, -0.6f, 20.0f);
+
+    for (const auto* values : { &compressing, &ducking, &shaping })
+    {
+        CAPTURE ((int) Compressor::getMode ((*values)[Compressor::mode]));
+        const auto inBlocksOf = [values, &hits] (int blockSize)
+        {
+            const auto compressor = makeFor (*values);
+            return playLinedUp (*compressor, 48000, blockSize, hits, always (*values), hits);
+        };
+
+        CHECK (inBlocksOf (32) == inBlocksOf (512));
+    }
+}
+
+//==============================================================================
+// The review's round on step S6.3: changes of mode with sound on its way, the gates' presets, the look-ahead's automation,
+// the copy for the mix, and Transient's ear.
+namespace
+{
+// The gain of what comes out against what came in over the millisecond up to each sample, in decibels, for a steady sine
+// in at an amplitude (its RMS in a whole number of its cycles).
+std::vector<float> getMillisecondGains (const std::vector<float>& out, float amplitude)
+{
+    constexpr int window = 48;
+    std::vector<float> gains (out.size(), 0.0f);
+    auto squares = 0.0;
+
+    for (size_t i = 0; i < out.size(); ++i)
+    {
+        squares += (double) out[i] * out[i];
+
+        if (i >= (size_t) window)
+            squares -= (double) out[i - window] * out[i - window];
+
+        const auto rms = std::sqrt (std::max (0.0, squares) / window);
+        gains[i] = (float) (20.0 * std::log10 (std::max (1.0e-9, rms) / (amplitude / std::sqrt (2.0))));
+    }
+
+    return gains;
+}
+
+// A Compressor's settings in each of its modes: Compress taking 15 dB off a sine at -6 dB, Duck under its own sound 9 dB
+// down, Transient turning a steady sine neither way; and the mode and look-ahead it was made for.
+std::vector<float> getModeValues (Compressor::Mode mode, float lookaheadMilliseconds)
+{
+    auto values = getTestValues();
+    values[Compressor::mode] = (float) mode;
+    values[Compressor::lookahead] = lookaheadMilliseconds;
+    values[Compressor::threshold] = -30.0f;
+    values[Compressor::depth] = 9.0f;
+    values[Compressor::hold] = 0.0f;
+    values[Compressor::releaseCurve] = 0.0f;
+    return values;
+}
+} // namespace
+
+TEST_CASE ("A change of mode by automation, either way between any two, with sound on its way, keeps between the two modes' levels")
+{
+    // A sine at -6 dB, 300 ms in one mode and 300 ms in another, a lane moving the mode between blocks. Made for Duck (10 ms on
+    // its way), or for Compress with a 5 ms look-ahead: what is on its way as the mode changes is turned by the mode it was
+    // meant for, and the new mode's gain goes on from the old one's. Each millisecond's level through the change stays
+    // between the two modes' settled levels, give or take a decibel: Duck once let 10 ms through as loud as the curve was
+    // taking off.
+    using Mode = Compressor::Mode;
+    constexpr float amplitude = 0.5011872f; // -6 dB
+    constexpr int change = 56 * testBlockSize, numSamples = 2 * change;
+    const auto tone = [] (int time)
+    { return amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * time / testRate); };
+
+    for (const auto& [made, lookahead] : { std::pair (Mode::duck, 0.0f), std::pair (Mode::compress, 5.0f) })
+    {
+        for (const auto from : { Mode::compress, Mode::duck, Mode::transient })
+        {
+            for (const auto to : { Mode::compress, Mode::duck, Mode::transient })
+            {
+                if (from == to)
+                    continue;
+
+                const auto before = getModeValues (from, lookahead), after = getModeValues (to, lookahead);
+                const auto compressor = makeFor (getModeValues (made, lookahead));
+                REQUIRE (compressor->getLatencySamples() > Compressor::getDriveLatency()); // sound on its way
+                const auto out =
+                    playInBlocks (*compressor, numSamples, testBlockSize, tone,
+                                  [&before, &after] (int done) -> const std::vector<float>& { return done < change ? before : after; });
+                const auto gains = getMillisecondGains (out, amplitude);
+                const auto settledBefore = gains[(size_t) change - 1], settledAfter = gains.back();
+                const auto low = std::min (settledBefore, settledAfter) - 1.0f, high = std::max (settledBefore, settledAfter) + 1.0f;
+                auto worst = 0.0f;
+                auto where = 0;
+
+                for (int t = change - 2400; t < numSamples; ++t)
+                {
+                    const auto outside = std::max (low - gains[(size_t) t], gains[(size_t) t] - high);
+
+                    if (outside > worst)
+                    {
+                        worst = outside;
+                        where = t;
+                    }
+                }
+
+                INFO ("made for " << (int) made << ", from " << (int) from << " to " << (int) to << ": " << settledBefore << " dB, then "
+                                  << settledAfter << " dB; " << worst << " dB outside at " << where - change
+                                  << " samples after the change");
+                CHECK (std::abs (settledBefore - settledAfter) > 5.0f);
+                CHECK (juce::exactlyEqual (worst, 0.0f));
+            }
+        }
+    }
+}
+
+TEST_CASE ("Drum Gate lets a drum hit's start through whole, and holds bleed 30 dB down or more before it")
+{
+    // The preset as it ships: a hit at -6 dB over bleed at -45 dBFS (another drum's, a steady tone here). A gate opens at its
+    // Release, from as far down as the curve takes the bleed: opening in 5 ms, the hit lost its first milliseconds.
+    const auto file = phazite::test::getFactoryPresetsFolder().getChildFile ("Compressor/Gate/Drum Gate.phazitepreset");
+    REQUIRE (file.existsAsFile());
+    const auto preset = juce::JSON::parse (file);
+    const auto* saved = preset["device"]["parameters"].getDynamicObject();
+    REQUIRE (saved != nullptr);
+    auto values = getDefaults();
+
+    for (size_t i = 0; i < values.size(); ++i)
+        if (const auto& id = Compressor::info.parameters[i].id; saved->hasProperty (juce::Identifier (juce::String (id.data(), id.size()))))
+            values[i] = phazite::readSavedValue (Compressor::info.parameters[i], saved->getProperty (juce::String (id.data(), id.size())));
+
+    REQUIRE (values[Compressor::release] < 1.0f);
+    const auto bleed = [] (int t)
+    { return toGain (-45.0f) * (float) std::sin (juce::MathConstants<double>::twoPi * 1300.0 * t / testRate); };
+    const auto in = [&bleed] (int t, int) { return drum (t, 0, -6.0f) + bleed (t); };
+    const auto compressor = makeFor (values);
+    const auto played = playLinedUp (*compressor, drumHit + 4800, testBlockSize, in, always (values));
+    const auto levelOf = [] (const std::function<float (int)>& sound, int from, int to)
+    {
+        auto squares = 0.0;
+
+        for (auto t = from; t < to; ++t)
+            squares += (double) sound (t) * sound (t);
+
+        return 10.0 * std::log10 (std::max (1.0e-30, squares / (to - from)));
+    };
+
+    const auto out = [&played] (int t) { return played[0][(size_t) t]; };
+    const auto came = [&in] (int t) { return in (t, 0); };
+    const auto hitIn = levelOf (came, drumHit, drumHit + 96), hitOut = levelOf (out, drumHit, drumHit + 96);
+    const auto bleedIn = levelOf (came, drumHit - 2400, drumHit - 480), bleedOut = levelOf (out, drumHit - 2400, drumHit - 480);
+    INFO ("the hit's first 2 ms: " << hitOut - hitIn << " dB; the bleed before it: " << bleedOut - bleedIn << " dB");
+    CHECK (std::abs (hitOut - hitIn) < 1.0);
+    CHECK (bleedOut - bleedIn < -30.0);
+}
+
+TEST_CASE ("Automation of the Look-Ahead through a fast attack leaves no step bigger than the attack's own")
+{
+    // Bursts 20 dB over where the curve starts every 100 ms, a 1 ms attack; the look-ahead jumping between 2 and 8 ms every
+    // few blocks. The place the gain is read from glides an eighth of a sample a sample, so that the gain moves at most an
+    // eighth faster than it would (and a little more, read between two samples): it was read from another time at each
+    // block, a step of several decibels.
+    constexpr float carrier = -100.0f;
+    const auto bursts = [] (int t, int channel)
+    { return channel == 1 ? steady (t, carrier) : ((t % 4800) < 2400 ? steady (t, -6.0f) : 0.0f); };
+    auto made = getTestValues();
+    made[Compressor::lookahead] = 8.0f;
+    auto shorter = made, steadyAhead = made;
+    shorter[Compressor::lookahead] = 2.0f;
+    steadyAhead[Compressor::lookahead] = 5.0f;
+
+    const auto largestStep = [&] (const std::function<const std::vector<float>&(int)>& valuesAt)
+    {
+        const auto compressor = makeFor (made);
+        const auto gains = getGains (playLinedUp (*compressor, 48000, 64, bursts, valuesAt)[1], carrier);
+        auto largest = 0.0f;
+
+        for (size_t t = 4800; t < gains.size(); ++t)
+            largest = std::max (largest, std::abs (gains[t] - gains[t - 1]));
+
+        return largest;
+    };
+
+    const auto attacks = largestStep (always (steadyAhead));
+    const auto automated =
+        largestStep ([&made, &shorter] (int done) -> const std::vector<float>& { return (done / (64 * 5)) % 2 == 0 ? made : shorter; });
+    INFO ("the attack's largest step " << attacks << " dB, with the look-ahead automated " << automated << " dB");
+    CHECK (attacks > 0.1f);
+    CHECK (automated <= attacks * 1.2f); // an eighth faster at most, and what reading between two samples adds
+}
+
+TEST_CASE ("With a Look-Ahead, the copy for the mix comes as late as the sound: a curve that changes nothing nulls at 50 % mix")
+{
+    namespace probe = phazite::test::probe;
+    probe::Device device (Compressor::info);
+    setCurve (device.values, curves::findShape ("No Compression")->points);
+    device.values[Compressor::lookahead] = 5.0f;
+    device.values[Compressor::mix] = 0.5f;
+    device.prepare (testRate, 480);
+    const auto latency = device.getLatencySamples();
+    REQUIRE (latency == Compressor::getDriveLatency() + 240);
+    const auto in = probe::makeNoise (480 * 20, 23, 0.25f);
+    const auto out = device.played (in, 480);
+    auto largest = 0.0;
+
+    for (int i = latency; i < out.getNumSamples(); ++i)
+        largest = std::max (largest, (double) std::abs (out.getSample (0, i) - in.getSample (0, i - latency)));
+
+    CHECK (largest < 1.0e-5);
+}
+
+TEST_CASE ("Changing to Transient in the middle of a sound starts its ear at the level it has: no burst of gain, no click")
+{
+    // Its followers run in Transient alone now; switched to it, they start at the level its ear hears, so that a steady sine
+    // doesn't read as a hit (which turned it up or down by its punch for tens of milliseconds) and a drum loop doesn't click.
+    constexpr int change = 40 * testBlockSize;
+    auto compressing = getDefaults();
+    setCurve (compressing, curves::findShape ("No Compression")->points);
+    const auto shaping = getTransientValues (1.0f, 1.0f);
+
+    {
+        constexpr float amplitude = 0.25f;
+        const auto tone = [] (int t) { return amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * t / testRate); };
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        const auto out = playInBlocks (compressor, change + 9600, testBlockSize, tone,
+                                       [&] (int done) -> const std::vector<float>& { return done < change ? compressing : shaping; });
+        const auto gains = getMillisecondGains (out, amplitude);
+        auto furthest = 0.0f;
+        auto where = 0;
+
+        for (int t = change - 480; t < (int) gains.size(); ++t)
+        {
+            if (std::abs (gains[(size_t) t]) > furthest)
+            {
+                furthest = std::abs (gains[(size_t) t]);
+                where = t - change;
+            }
+        }
+
+        INFO ("the sine moved by " << furthest << " dB, " << where << " samples after the change: " << gains[(size_t) (change + where)]);
+        CHECK (furthest < 0.5f);
+    }
+
+    {
+        constexpr float carrier = -100.0f;
+        const auto loop = [] (int t, int channel) { return drum (drumHit + (t + 3000) % 12000, channel, -6.0f); };
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        const auto gains =
+            getGains (playLinedUp (compressor, change + 24000, testBlockSize, loop,
+                                   [&] (int done) -> const std::vector<float>& { return done < change ? compressing : shaping; })[1],
+                      carrier);
+        auto largest = 0.0f;
+
+        for (int t = change - 480; t < change + 960; ++t)
+            largest = std::max (largest, std::abs (gains[(size_t) t] - gains[(size_t) t - 1]));
+
+        INFO ("the largest step about the change: " << largest << " dB");
+        CHECK (largest < 1.0f);
     }
 }

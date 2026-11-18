@@ -34572,11 +34572,12 @@
         "name": "Mode",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 1.0,
+        "maximum": 2.0,
         "default": "Compress",
         "choices": [
           "Compress",
-          "Duck"
+          "Duck",
+          "Transient"
         ]
       },
       {
@@ -34600,6 +34601,14 @@
         "unit": "decibels",
         "minimum": -24.0,
         "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "lookahead",
+        "name": "Look-Ahead",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10.0,
         "default": 0.0
       },
       {
@@ -34638,10 +34647,19 @@
         "midpoint": 100.0
       },
       {
+        "id": "levelHold",
+        "name": "Level Hold",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 500.0,
+        "default": 0.0,
+        "midpoint": 60.0
+      },
+      {
         "id": "release",
         "name": "Release",
         "unit": "milliseconds",
-        "minimum": 5.0,
+        "minimum": 0.1,
         "maximum": 2000.0,
         "default": 120.0,
         "midpoint": 100.0
@@ -34663,12 +34681,45 @@
         "default": 0.0
       },
       {
+        "id": "autoMakeup",
+        "name": "Auto Makeup",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "drive",
         "name": "Drive",
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.0
+      },
+      {
+        "id": "punch",
+        "name": "Punch",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "sustain",
+        "name": "Sustain",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "speed",
+        "name": "Speed",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 50.0,
+        "default": 10.0,
+        "midpoint": 10.0
       },
       {
         "id": "keyLowCut",

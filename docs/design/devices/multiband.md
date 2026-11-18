@@ -127,8 +127,10 @@ hears, with its menu; its mode; its switches (Solo and Sidechain; for the master
 knobs Pre, Stereo, Sat and Ceiling, Attack, Release, Sustain and Release 2, the Curve and Rel Curve boxes, Peak or
 RMS, and for the master its Post. The curve is edited as the [Compressor](compressor.md)'s is (the same component):
 points drag, with Shift to keep them level and Ctrl to keep them where they are across; handles bend lines; a
-right-click adds a point, picks a line's type or deletes; Alt and a click deletes. Its menu has the shapes to start
-from, copy and paste (also to and from a Compressor), flip, smooth and reset, with Freeze and Snap.
+right-click adds a point, types a point's levels, picks a line's type or deletes; Alt and a click deletes. Its corner
+reads the point under the pointer as numbers with its line's ratio, and the keyboard chooses and moves points (Left and
+Right, and with Ctrl or Shift the arrows), each run of presses one undo step. Its menu has the shapes to start from,
+copy and paste (also to and from a Compressor), flip, smooth and reset, with Freeze and Snap.
 
 Two things share the Band part's space where the dock is narrow, and show beside it where there is room:
 
@@ -149,7 +151,7 @@ for the session, not to the project. Each edit of a parameter is one undo step.
 - A new Multiband's limit at 0 dB is a compressor's curve with an attack, not a brick wall: fast peaks pass over it.
   The [Limiter](limiter.md) keeps a ceiling.
 - The curve is small in the dock and its axes crowd quiet levels together, so points far below 0 dB are hard to
-  place; points cannot be typed or moved with the keyboard, and no threshold or ratio is shown.
+  drag to; their levels are typed or moved by the keyboard instead. No threshold or ratio is set as a number.
 - The bands' graph draws the bands as blocks, not the crossovers' slopes, and shows no gain reduction on the spectrum.
 - Monitor takes one reading at each refresh of the display.
 - A drag of a band's level in the graph starts from the level as modulation plays it, and sets that as the value by

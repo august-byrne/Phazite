@@ -186,10 +186,11 @@ through it.
 **Duck Under,** in a track's right-click menu, does "kick ducks bass" in one step ("Duck Bass Under Kick"): it adds
 Phazite's compressor after the track's effects, in its Duck mode, listening to the other track.
 
-Choosing a source for Phazite's compressor puts it in its Duck mode in the same undo step. A compressor still as it
-was made is also set up to pump under a kick: from -14 dB, 14 dB down, in 1 ms, held 120 ms, and back over 80 ms.
-When the source plays a drum sampler, the compressor hears only the kick's body, from 60 to 150 Hz, so that the snare,
-clap and hats on the same track do not move it. While the compressor compresses rather than ducks, it hears its own
+Choosing a source for Phazite's compressor still as it was made (but for its mode) puts it in its Duck mode in the same
+undo step, set up to pump under a kick: from -14 dB, 14 dB down, in 1 ms, held 120 ms, and back over 80 ms. When the
+source plays a drum sampler, the compressor hears only the kick's body, from 60 to 150 Hz, so that the snare, clap and
+hats on the same track do not move it. A compressor set its own way keeps its mode: compressing, it is then a keyed
+compressor, its curve worked by the source's level. While it shapes transients (its Transient mode), it hears its own
 sound, and the mixer does not link the two channels.
 
 ## The master

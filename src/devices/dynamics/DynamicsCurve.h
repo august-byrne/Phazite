@@ -94,8 +94,8 @@ public:
     static constexpr int tableSize = 528;
     static constexpr float lowestDecibels = -120.0f;
 
-    void update (std::span<const float> curve) noexcept;
-    void reset() noexcept { hasTable = false; } // made again at the next update
+    bool update (std::span<const float> curve) noexcept; // whether it made its table again
+    void reset() noexcept { hasTable = false; }          // made again at the next update
 
     // For a level heard (an amplitude); past the axes' end, out as loud as the curve's end.
     float getDecibels (float level) const noexcept;

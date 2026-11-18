@@ -33,9 +33,9 @@ TrackID getSidechainSource (const Song&, DeviceID);
 SidechainChoice describeSidechainSource (const Song&, DeviceID);
 
 // Whether a device hears the track its sidechain listens to now, as the mixer shows it (a stripe of the track's colour, a
-// link to its channel): one that has a source does, but Phazite's compressor only while it ducks (its Duck mode); while it
-// compresses, it hears its own sound, its key kept for when it ducks again. And whether a change of a device's value set by
-// hand (a property of its VALUES) turns that on or off, as the compressor's mode does.
+// link to its channel): one that has a source does, but Phazite's compressor only while it compresses or ducks; shaping
+// transients (its Transient mode), it hears its own sound, its key kept for when it compresses or ducks again. And whether
+// a change of a device's value set by hand (a property of its VALUES) turns that on or off, as the compressor's mode does.
 bool hearsSidechain (const Song&, DeviceID);
 bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property);
 
@@ -47,8 +47,9 @@ std::vector<SidechainChoice> describeTracksToListenTo (const Song&, TrackID list
 std::vector<SidechainChoice> describeSidechainChoices (const Song&, DeviceID);
 
 // Makes a device's sidechain listen to a track, one of getSidechainSources(), or with none to the sound passing through
-// it, as one undo step. Phazite's compressor ducks under the track chosen, in the same step (its Duck mode), and, still as
-// it was made but for its mode, is set up to pump under a kick then: from -14 dB, 14 dB down, in 1 ms, held 120 ms from the
+// it, as one undo step. Phazite's compressor still as it was made but for its mode ducks under the track chosen, in the
+// same step (its Duck mode), set up to pump under a kick (one set its own way keeps its mode, and compressing is keyed by
+// the track): from -14 dB, 14 dB down, in 1 ms, held 120 ms from the
 // hit and while the key stays over -14 dB, and back in a straight line over 80 ms; hearing only 60 to 150 Hz when the source
 // plays a drum sampler, its kick's body, so that a long kick's boom doesn't hold it down through the beat and the snare,
 // clap and hats don't move it. Phazite's multiband, still as it was made, ducks its lows under it. Phazite's vocoder plays

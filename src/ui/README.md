@@ -76,7 +76,7 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |
 | `SweepPicture.*` | The picture Motion's three modes share, with their LFO. |
 | `DeviceTint.*` | Each device's colour. |
-| `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it. |
+| `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it: by dragging, and by numbers (its corner's readout of a point and its line's ratio, Type Values..., the arrow keys). |
 | `ModulatorEditor.*` | Modulators' editors. |
 
 The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
@@ -92,7 +92,7 @@ The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSam
 | `SaturatorEditor.*` | The curve as it plays (lopsided with Colour, in steps with Crush), lit as far as the sound reaches, beside the wave in and out; six shape buttons drawn with their curves; and the Band, switched at its title, over the spectrum in and out with the band lit between its edges, which drag, and Listen. |
 | `VinylEditor.*` | A record turning off its centre as far as the vinyl's wow swings it, with a speck where each crackle came, its pitch over the last seconds, and its band's ends to drag. |
 | `MultibandEditor.*` | The multiband's parts on one page in the dock: the bands across the spectrum, their crossovers and levels dragged there, always with their knobs, and the band shown by its tab, its curve (`DynamicsCurve.*`) and controls, with Monitor and its Sidechain part beside it, or in its place by a switch and a tab where the dock is narrow. |
-| `CompressorEditor.*` | Two tabs along its top that are its modes, each on one page in the dock: Compress, its characters and curve beside its history over its knobs; and Duck, its sidechain over its cuts and Listen beside its history, its graph (its threshold a line to drag) over its knobs. |
+| `CompressorEditor.*` | Three tabs along its top that are its modes, each on one page in the dock: Compress, its characters and curve (with Auto Makeup's switch) beside its history, its knobs and its sidechain, under tabs where the dock is short; Duck, its sidechain over its cuts and Listen beside its history, its graph (its threshold a line to drag) over its knobs; and Transient, its history (its gain a line about the middle) beside its punch and sustain over its speed, makeup and low cut. |
 
 ## timeline/
 

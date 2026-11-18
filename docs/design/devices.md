@@ -55,7 +55,8 @@ parameters ([automation-and-modulation.md](automation-and-modulation.md)). Each 
 real-time audit ([realtime-audit.md](../realtime-audit.md)): steady playback through it must not allocate.
 
 While Low Latency is on, a device that is on and delays its sound by more than 1 ms is left out of what plays, and the
-sound passes as it comes: the Limiter, the Multiband, the Vinyl and a Compressor set to Duck.
+sound passes as it comes: the Limiter, the Multiband, the Vinyl, a Compressor set to Duck, and one set to
+Compress with a Look-Ahead that, with its drive's 6 samples, makes it more than 1 ms late.
 
 ## Phazite's own devices
 
@@ -70,7 +71,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Drum Sampler](devices/drum-sampler.md) | Instrument | A pad on every note, 128 in all, each with up to four layers, an envelope, a filter and a choke group |
 | [EQ](devices/eq.md) | Effect | Eight bands over a spectrum of what comes in and what goes out |
 | [Filter](devices/filter.md) | Effect | A resonant filter of nine types, with drive |
-| [Compressor](devices/compressor.md) | Effect | Two modes: Compress, by a drawn curve, and Duck, under a sidechain |
+| [Compressor](devices/compressor.md) | Effect | Three modes: Compress, by a drawn curve, keyed or not; Duck, under a sidechain; and Transient, each hit's attack and tail |
 | [Multiband](devices/multiband.md) | Effect | Three bands of dynamics and saturation, then a master band |
 | [Limiter](devices/limiter.md) | Effect | A look-ahead limiter that keeps true peaks under a ceiling |
 | [Saturator](devices/saturator.md) | Effect | Drive into one of six curves, Crush among them, with a colour, a tone tilt and a band, which makes it an exciter too |
@@ -158,8 +159,8 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 - in a narrower space its graphs narrow first; narrower still, the columns wrap into rows where the height allows, or
   else show in pages, as many columns on each as fit, under a bar of the pages' names;
 - a tab or a page chosen stays chosen;
-- a device with modes (the Compressor's Compress and Duck, Motion's Chorus, Flanger and Phaser) has its modes as tabs
-  along its top, each a page of parts, and keeps its size from mode to mode.
+- a device with modes (the Compressor's Compress, Duck and Transient, Motion's Chorus, Flanger and Phaser) has its
+  modes as tabs along its top, each a page of parts, and keeps its size from mode to mode.
 
 ### What the editors share
 
@@ -213,7 +214,7 @@ phase, and a change ramped so that a fast move does not click.
 A device with a sidechain can listen to another track in place of the sound passing through it. Of Phazite's own
 devices, three have one:
 
-- the [Compressor](devices/compressor.md) ducks under the track chosen, in its Duck mode;
+- the [Compressor](devices/compressor.md) compresses by the track chosen (a keyed compressor) or ducks under it;
 - the [Multiband](devices/multiband.md) has its bands' compressors hear it, band by band;
 - the [Vocoder](devices/vocoder.md) plays it as its carrier.
 

@@ -1172,6 +1172,43 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's compressor keyed by another track, its mode, look-ahead and hold moved by lanes")
+    {
+        // Compressing keyed by a muted track (set its own way before its key is chosen, so that it stays in Compress), made
+        // with a 5 ms look-ahead; lanes switch it through Compress, Duck and Transient and back, and sweep its look-ahead
+        // within its latency and its hold, a cycle a beat.
+        using phazite::devices::Compressor;
+        TestSong song;
+        const auto track = song.firstTrack;
+        const auto source = song.addTrack ("Source");
+        addTone (song, track);
+        addTone (song, source);
+        phazite::setTrackMuted (getSong (song), source, true);
+
+        const auto compressor = song.addEffect (track, Compressor::typeID);
+        song.setParameter (compressor, "lookahead", 5.0f);
+        song.setParameter (compressor, "punch", 0.8f);
+        song.setParameter (compressor, "sustain", -0.5f);
+        phazite::setSidechainSource (getSong (song), compressor, source);
+        REQUIRE (phazite::hearsSidechain (getSong (song), compressor));
+
+        const auto range = phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0));
+        const auto at = [] (double beats) { return phazite::BeatPosition::fromBeats (beats); };
+        phazite::replacePoints (getSong (song), { compressor, "mode" }, range,
+                                { { at (0.0), 0.0f }, { at (4.0), 2.0f }, { at (8.0), 0.0f }, { at (16.0), 2.0f }, { at (32.0), 0.0f } });
+        phazite::replacePoints (
+            getSong (song), { compressor, "lookahead" }, range,
+            phazite::makeAutomationShape (phazite::AutomationShape::sine, range, phazite::BeatDuration::fromBeats (1.0), 0.0f, 10.0f));
+        phazite::replacePoints (
+            getSong (song), { compressor, "levelHold" }, range,
+            phazite::makeAutomationShape (phazite::AutomationShape::sine, range, phazite::BeatDuration::fromBeats (1.0), 0.0f, 200.0f));
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's compressor keyed by another track, its mode, look-ahead and hold moved by lanes", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's multiband, its low band and master keyed by another track through the sidechain, Listen on")
     {
         using phazite::devices::Multiband;
