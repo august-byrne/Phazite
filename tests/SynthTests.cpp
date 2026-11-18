@@ -1144,7 +1144,7 @@ TEST_CASE ("The synth plays 16 voices, glides in mono mode, and plays the same e
 TEST_CASE ("A key played again on the synth as it rings out takes a voice of its own: its tail rings on, the new note starts "
            "afresh")
 {
-    // A new wavetable synth's saw through its filter, which its second envelope opens for each note: C3 let go, then played
+    // A new synth's saw through its filter, which its second envelope opens for each note: C3 let go, then played
     // again a third of the way through its 200 ms release. It plays each note as it does alone, added, on both sides: the
     // first's tail as it would have rung out, the second from the start of its wave and of its envelopes, as a note on a
     // voice of its own. Its voice taken back, the second would have gone on with the first's wave and envelopes.
@@ -2571,12 +2571,42 @@ TEST_CASE ("A note whose cutoff Envelope 2 opens with no attack plays its filter
     {
         values[Synth::cutoff] = cutoffHertz;
         values[Synth::mod1Amount] = amount;
-        return play (*makeSynth(), values, 1024, { noteOn (96, 60) });
+        return play (*makeSynth(), values, 1024, { noteOn (100, 60) }); // between two control steps, as a song's notes are
     };
 
     const auto opened = playThrough (200.0f, 24.0f / 96.0f), still = playThrough (800.0f, 0.0f);
-    REQUIRE (peakOf (still.left, 96, 128) > 0.01f);
-    CHECK (largestDifference (opened, still) < 1.0e-5f);
+    REQUIRE (peakOf (still.left, 100, 132) > 0.01f);
+    CHECK (largestDifference (opened, still) < 1.0e-6f);
+}
+
+TEST_CASE ("A driven synth leaves nothing off centre, even of a synced or a narrow wave")
+{
+    // The filter's drive bends a wave that is centred but lopsided unevenly, which leaves an offset: the synth plays its
+    // blocker while the drive is on, which takes it away.
+    const auto offsetOf = [] (Synth::Warp warp, float amount, float driveDecibels)
+    {
+        auto values = getPlainValues (2.0f / 3.0f); // a saw
+        values[Synth::osc1Warp] = (float) warp;
+        values[Synth::osc1WarpAmount] = amount;
+        values[Synth::filterOn] = 1.0f;
+        values[Synth::cutoff] = 12000.0f;
+        values[Synth::drive] = driveDecibels;
+        const auto played = play (*makeSynth(), values, 96000, { noteOn (0, 57) }).left;
+        auto sum = 0.0;
+
+        for (size_t i = 48000; i < played.size(); ++i)
+            sum += played[i];
+
+        return std::abs (sum / 48000.0);
+    };
+
+    for (const auto& [warp, amount] : { std::pair { Synth::Warp::none, 0.0f }, std::pair { Synth::Warp::sync, 0.4f },
+                                        std::pair { Synth::Warp::pulseWidth, 0.6f }, std::pair { Synth::Warp::bendUp, 0.7f } })
+    {
+        const auto driven = offsetOf (warp, amount, 18.0f);
+        CAPTURE ((int) warp);
+        CHECK (driven < 1.0e-5); // it measures 3e-7
+    }
 }
 
 TEST_CASE ("The synth's filter drive saturates what goes into the filter, adding harmonics to a sine, and only while the filter is on")

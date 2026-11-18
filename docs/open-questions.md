@@ -36,7 +36,7 @@ choice is in the code as described; what is not built says so.
 | 28 | Devices | In the Devices view the effects are stacked down a column, each a row of its switch, name and mix, and the one clicked fills the rest of the dock; the instrument's name, Presets and window button are in the column too; a synth's parts switch on and off at their titles. | Built. | |
 | 29 | Devices | Where an editor does not fit the dock's width, its graph narrows first, then its parts go onto pages named after them, with one level of tabs at most. | Built (`src/ui/devices/DeviceLayout.h`). | |
 | 30 | Devices | The Reverb has two modes: Room, its feedback delay network, and Plate, Jon Dattorro's plate. | Built. | |
-| 31 | Devices | The wavetable synth's unison has a Stack and a Drift, in place of a third oscillator. | Built. | |
+| 31 | Devices | The synth's unison has a Stack and a Drift, in place of a third oscillator. | Built. | |
 | 32 | Devices | Every note of a polyphonic instrument takes a voice of its own, so a key played again lets its tail ring on under the new note. | Built. | |
 | 33 | Devices | What else was added for the dark synthwave presets: drum synthesis for natural drums, sounds made from their spectra, start phases and a filter envelope in the FM synth. | Built. | |
 | 34 | Devices | The EQ's analyzer works in two resolutions: below 150 Hz it reads longer frames of the sound at a lower rate, so that a bass note shows as a narrow peak. | Built (`src/devices/core/Spectrum.h`). | |

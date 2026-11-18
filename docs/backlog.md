@@ -47,7 +47,7 @@ and nothing is listed in both.
 | Oversampling by choice, 4x and 8x, for the Saturator and the Filter | `src/devices/saturation/Saturator.cpp` | (L) | 6 | devices-effects 15 |
 | Stretch modes: a formant switch, re-pitch, and a mode that slices drums at their hits | `src/devices/stretch/Stretch.cpp` | (L) | 5 | devices-effects 6, recording audit |
 | Multiband: its attack, release and curve worked out once a block for each band, not for every sample | `src/devices/dynamics/Multiband.cpp` | — | 6 | devices-effects 13, performance audit |
-| FM synth: four voices at once in SIMD registers, or operators skipped once their envelopes have ended; the wavetable synth's unison voices in SIMD | `src/devices/fm/FmSynth.cpp` | — | — | performance audit |
+| FM synth: four voices at once in SIMD registers, or operators skipped once their envelopes have ended; the Synth's unison voices in SIMD | `src/devices/fm/FmSynth.cpp` | — | — | performance audit |
 | A sampler's sound made ready (its hits found, its octaves made) in the background, not on the message thread | `src/model/devices/SamplerSound.cpp` | — | — | performance audit |
 | MP3 files: a test of where a click lands, then the encoder's delay and padding trimmed by the LAME tag | `src/model/engine/AudioFiles.cpp` | — | — | DSP audit |
 | A set of sounds to listen to for each device, and a verdict for each device once it is done | `src/devices/` | S each | 6 | plan |

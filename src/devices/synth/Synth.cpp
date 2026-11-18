@@ -1661,7 +1661,8 @@ void Synth::process (const ProcessContext& block)
 
     // Without what ring modulation and FM leave off centre at whole ratios (the product of two waves at one pitch has a part
     // at 0 Hz, as FM's sidebands do): on its sum, one blocker a side (dsp/DcBlocker.h), only while an oscillator that is on
-    // has one of those warps. Otherwise its waves are centred as they are made (the other warps by Wavetable::getArea() and
+    // has one of those warps, or the filter's drive is on (its curve leaves a lopsided wave off centre, as a saw and a
+    // pulse together are). Otherwise its waves are centred as they are made (the other warps by Wavetable::getArea() and
     // getBentMean()), and its sum is left as it is, bit for bit, as the blocker would change its waveform: a slow tail after
     // each note. Once playback has stopped and no note sounds in the block, what the blockers still ring with fades out, so
     // that nothing sounds on after Stop.
@@ -1672,6 +1673,7 @@ void Synth::process (const ProcessContext& block)
         const auto warp = choiceOf<Warp> (values[(size_t) getParameter (osc, oscWarp)]);
         wanted = wanted || (values[(size_t) getParameter (osc, oscOn)] > 0.5f && (warp == Warp::fm || warp == Warp::ringMod));
     }
+    wanted = wanted || (values[filterOn] > 0.5f && values[drive] > 0.0f);
     const auto quiet = stoppedPlaying && ! soundedBefore && ! sounding();
 
     for (size_t side = 0; side < (right != nullptr ? 2u : 1u); ++side)

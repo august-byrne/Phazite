@@ -132,7 +132,7 @@ struct Tracks
 };
 
 // Containers, what their chains hold and what the devices in them play: on Pad, an instrument container of two layers, a
-// wavetable synth for the low keys and the soft notes and a sampler for the others, with a macro; on Tone, effects split
+// synth for the low keys and the soft notes and a sampler for the others, with a macro; on Tone, effects split
 // into bands, into the middle and the sides, and into left and right; and Tone's other devices: one that ducks under the
 // drums, one switched off, one whose window was moved, and a plug-in.
 void addContainersAndDevices (phazite::Song& song, phazite::ProjectContext& context, const Tracks& tracks, const juce::File& scratch)
