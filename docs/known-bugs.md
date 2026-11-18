@@ -156,6 +156,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **206. `MainWindowTests`, the case that compares every menu item with its command, failed once in CI's linux-clang
+  job** (2026-11-18, the run of `50234b25`; the other eight jobs passed it): File > Clean Up Unused Audio... was
+  disabled in the menu and its command enabled when the test asked a moment later (`tests/MainWindowTests.cpp`, the
+  check of `item.isEnabled`). So that command's `isEnabled` depends on something that changes without the message
+  thread's doing between the two reads (`src/app/ProjectSession.cpp`, where it is registered): a save or a background
+  job ending. With 205, the second case in stage 4's code that fails only now and then and only under Clang, whose
+  job is the slowest. To fix: find what its `isEnabled` reads, and have the test wait for the project to be at rest
+  before it builds the menu.
 - **204. `ConsolidateTests`, "With a time range selected across tracks, Consolidate joins what lies in it on each...",
   failed once in CI's windows-profile job** (2026-11-18, the run of `4ff18a92`; the run before it passed
   there, as did every other preset): the joined clip on the first track was where it should be, from beat 2 to 6, and
