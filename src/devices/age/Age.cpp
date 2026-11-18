@@ -90,7 +90,7 @@ namespace
     constexpr double flutterMostRms = 4.5;                               // the flutter moves the delay at most this many RMS either way
     constexpr double residueLowCut = 20.0;                               // what the record's curve adds, without anything under this
     constexpr double tapeLowCut =
-        5.0; // what the tape's adds: its curve takes the whole sound, so only the DC goes (a bass keeps its saturation)
+        2.0; // what the tape's adds: its curve takes the whole sound, so only the DC goes (a bass keeps its saturation)
     constexpr double wowGlideSeconds = 0.05, glideSeconds = 0.02, bandGlideSeconds = 0.005, flutterGlideSeconds = 0.3;
     constexpr double fadeSeconds = 0.02, flutterFadeSeconds = 0.25; // a part's switch and a change of medium; the flutter's
     constexpr double mostSwoop = 0.004;                             // how far a change of the wow may bend the pitch as it glides: 7 cents

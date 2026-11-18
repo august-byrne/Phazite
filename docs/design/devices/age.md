@@ -112,7 +112,7 @@ aliases are louder. The Head Bump is a bell at 60 Hz with a Q of 1.4, as many de
 at 0 dB it isn't played.
 
 In both, only what the curve bends is added to the sound, which itself passes untouched, so at 0 % there is no curve
-at all and a quiet sound keeps its level at any Distortion; what is added goes through a high-pass (the record's at 20 Hz, its curve taking the highs alone; the tape's at 5 Hz, so that a bass keeps its saturation), so that a
+at all and a quiet sound keeps its level at any Distortion; what is added goes through a high-pass (the record's at 20 Hz, its curve taking the highs alone; the tape's at 2 Hz, so that a bass keeps its saturation), so that a
 lopsided wave, which even the tape's symmetric curve bends unevenly, leaves no DC. The curves play at twice the rate by
 their antiderivatives, so that they don't alias.
 

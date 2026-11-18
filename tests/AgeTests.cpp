@@ -1980,7 +1980,7 @@ TEST_CASE ("The tape's drive leaves no DC, even of a lopsided wave")
 {
     // A symmetric curve bends a lopsided wave unevenly: a pulse a quarter of the time at +0.75 and the rest at -0.25, its mean
     // nothing, came out with about -22 dBFS of DC at 100 %, which Tape Saturation, its band off, let out. What the tape's curve
-    // adds now goes through a 5 Hz high-pass, as the record's goes through its 20 Hz one.
+    // adds now goes through a 2 Hz high-pass, as the record's goes through its 20 Hz one.
     constexpr double rate = 48000.0;
     const auto pulse = [] (int t) { return t % 480 < 120 ? 0.75f : -0.25f; }; // 100 Hz
     const auto played = play (onTape (clean ({ { "distortion", 1.0f }, { "band", 0.0f } })), rate, (int) (1.5 * rate), pulse);
@@ -1998,7 +1998,7 @@ TEST_CASE ("The tape's drive saturates a bass as its curve does: the lows come o
 {
     // What the tape's curve adds is the whole sound's, its lows too: a high-pass on it at 20 Hz, as the record's has, let a
     // 40 Hz bass at full scale out 3 dB over what the curve gives (the added part no longer cancelled the fundamental). At
-    // 5 Hz it does: at 100 % the lows come out no louder than 9 dB under full scale, give or take what the pole still turns.
+    // 2 Hz it does: at 100 % a bass at full scale comes out about 8.5 dB under it, as a 100 Hz tone does.
     constexpr double rate = 48000.0;
     const auto values = onTape (clean ({ { "distortion", 1.0f }, { "band", 0.0f } }));
 
