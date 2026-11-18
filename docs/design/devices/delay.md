@@ -51,7 +51,8 @@ With Ping-Pong on, the two sides of the sound go into the left line as one, the 
 and the right's feeds the left, so each echo crosses to the other side; with Link off it bounces between the two times.
 
 **A change of time.** With Repitch, a time glides to a new one over about 50 ms, as a tape's would, which bends the
-echoes' pitch on the way instead of clicking. With Fade, a change of time never bends the pitch by more than 10 cents:
+echoes' pitch on the way instead of clicking, and ends at the time set exactly once less than a hundredth of a sample is
+left (the time read is kept in a double, whose steps are fine enough for that at any time and rate). With Fade, a change of time never bends the pitch by more than 10 cents:
 the time read follows the time set by a glide no faster than 10 cents (0.58 % of real time), and once it is more than
 1 ms behind, the line is read at the time set at once while the read as it is fades out over 50 ms and the new one fades
 in (two reads of the line for that long), at equal power (a sine and a cosine), so that sound unrelated between the two
@@ -130,8 +131,6 @@ Link is on), the Feedback, large, with Ping-Pong and Freeze; the Character, with
 - Fade crosses at equal power, which keeps the level of sound unrelated between the two reads (the usual case: a note value
   switched); where the two reads match (a steady tone changed by whole cycles, or a low sound whose time moves just over
   1 ms), the sum is up to 3 dB louder at the fade's middle.
-- Repitch's glide comes to rest a little short of the time set at long times, where its last steps are too small for the
-  float it is kept in: about 3 samples at 375 ms and 48 kHz, some 10 (0.2 ms) at 2 s.
 - A press over the echoes sets the time and the feedback together from where the pointer is, and a right-click presses
   as a left-click does.
 

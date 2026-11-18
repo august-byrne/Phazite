@@ -85,6 +85,8 @@ void DeviceRunner::prepare (double rate, int maximumBlockSize)
     letGoOfNotes();
     hasPreviousValues = false;
     startedEarly = false;
+    sleptValues.assign (processor->wakesWhenValuesChange() ? currentValues.size() : 0, 0.0f);
+    valuesNow.assign (sleptValues.size(), 0.0f);
 
     if (mixIndex >= 0)
     {
@@ -271,7 +273,17 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
     // Asleep, it sleeps on while nothing comes in; but one that plays with the song wakes as the song plays. In the engine,
     // Play resets every runner (Engine::flushStrip()), which is what wakes it there; this is the backstop for a runner played
     // without that reset (a test's, or another engine's).
-    if (asleep && begun.quietIn && ! in.isRendering && ! (in.isPlaying && processor->playsWithTheSong()))
+    auto sleeps = asleep && begun.quietIn && ! in.isRendering && ! (in.isPlaying && processor->playsWithTheSong());
+
+    // One that a change of its values alone can make sound wakes for a change since it fell asleep, and stays awake from
+    // there as it would for sound come in (nothing moved since the last block, settled, is no change).
+    if (sleeps && ! begun.settled && ! sleptValues.empty() && valuesMovedInSleep (in, numSamples))
+    {
+        sleeps = false;
+        silentSamples = 0;
+    }
+
+    if (sleeps)
     {
         for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
             buffer.clear (channel, start, numSamples);
@@ -346,6 +358,10 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
                  && ! (in.isPlaying && processor->playsWithTheSong())
                  && ((! heard && ! in.isPlaying) || (double) silentSamples >= processor->getTailSeconds() * sampleRate) && numHeld == 0
                  && ! pedalDown;
+
+        // Falling asleep, the values it was given last, which a device that wakes when they change is woken for.
+        if (asleep && ! sleptValues.empty())
+            std::copy (currentValues.begin(), currentValues.end(), sleptValues.begin());
     }
     else
     {
@@ -566,6 +582,66 @@ void DeviceRunner::keepValues() noexcept
 {
     std::copy (targetValues.begin(), targetValues.end(), previousValues.begin());
     hasPreviousValues = true;
+}
+
+bool DeviceRunner::valuesMovedInSleep (const Block& in, int numSamples) noexcept
+{
+    // The values it would be given in the block, a stretch at a time as setStretchValues() works them out: each at its value
+    // as the block starts (begin() has them), an automated one at its curve's value on each stretch's control point while the
+    // song plays, and a modulated one moved by its sources there. On every control point, not only the block's start: a lane
+    // that switches inside the block (where an automation that lines up with a late sound switches) wakes it for that block,
+    // where a render plays the switch.
+    const auto* plan = in.modulation;
+    const auto modulated = plan != nullptr && ! plan->routes.empty();
+    const auto automationMoves = in.beatsPerSample > 0.0 && ! in.automation.empty();
+    const auto sinceControlPoint = (int) (((in.sample % smoothingStep) + smoothingStep) % smoothingStep);
+    const auto toControlPoint = smoothingStep - sinceControlPoint;
+
+    for (int done = 0, stretch = 0;; ++stretch)
+    {
+        const auto length = std::min (numSamples - done, done == 0 ? toControlPoint : smoothingStep);
+        std::copy (targetValues.begin(), targetValues.end(), valuesNow.begin());
+
+        if (automationMoves)
+            for (const auto& automated : in.automation)
+                valuesNow[(size_t) automated.parameter] = devices::constrain (
+                    info.parameters[(size_t) automated.parameter],
+                    automated.curve->getValueAt (in.automationBeat + (done == 0 ? -sinceControlPoint : done) * in.beatsPerSample));
+
+        if (modulated)
+        {
+            const auto along = numSamples > 0 ? (float) (done + length) / (float) numSamples : 0.0f;
+
+            for (const auto parameter : plan->modulated)
+                offsets[(size_t) parameter] = 0.0f;
+
+            for (const auto& route : plan->routes)
+            {
+                const auto& source = plan->sources[(size_t) route.source];
+
+                if (source.isOn)
+                    offsets[(size_t) route.parameter] +=
+                        route.amount
+                        * (! source.points.empty() ? source.points[std::min ((size_t) stretch, source.points.size() - 1)]
+                                                   : source.previous + (source.now - source.previous) * along);
+            }
+
+            for (const auto parameter : plan->modulated)
+                valuesNow[(size_t) parameter] = devices::modulate (info.parameters[(size_t) parameter], travels[(size_t) parameter],
+                                                                   valuesNow[(size_t) parameter], offsets[(size_t) parameter]);
+        }
+
+        if (! std::equal (valuesNow.begin(), valuesNow.end(), sleptValues.begin(),
+                          [] (float a, float b) { return juce::exactlyEqual (a, b); })
+            && processor->wakesFor (valuesNow))
+            return true;
+
+        done += length;
+
+        // Nothing moves within the block, or it is played through.
+        if ((! automationMoves && ! modulated) || length <= 0 || done >= numSamples)
+            return false;
+    }
 }
 
 void DeviceRunner::startModulation (Modulation& plan) noexcept

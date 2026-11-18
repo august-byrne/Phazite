@@ -139,6 +139,14 @@ public:
     // which may play with nothing coming in (an arpeggiator's own pattern, a drone).
     virtual bool sleepsOnSilence() const noexcept { return true; }
 
+    // Whether a change of its values alone can make it sound, from silence (a Clean filter that a lane switches to Driven at
+    // a Resonance that sings): its runner, asleep on silence, then compares each block's values with those it gave it last
+    // and wakes it for a change, if it would sound for the new ones: wakesFor(), which says yes to any unless a device knows
+    // better (the Filter: only for values that make it Driven, so that an LFO on a sleeping Clean filter's cutoff doesn't
+    // keep it awake on a silent track). Real-time safe.
+    virtual bool wakesWhenValuesChange() const noexcept { return false; }
+    virtual bool wakesFor (std::span<const float> /* values */) const noexcept { return true; }
+
     // Whether, while the song plays, it plays with nothing coming in, and only then (Age's noise, which starts
     // with the song): its runner lets it sleep on silence only while the song is stopped, and wakes it as the song plays.
     virtual bool playsWithTheSong() const noexcept { return false; }

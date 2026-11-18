@@ -219,7 +219,15 @@ surroundings:
   waited for. While the song plays, every device
   waits for its tail, so that one whose sound starts within it plays as a render does (a render never sleeps, and a
   reverb's sway runs on through silence). A muted track's devices sleep the same way. Age, whose noise
-  plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays.
+  plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays. Asleep, a device
+  wakes for sound, a note's start or what waits in it to play (a pad its editor played); and a device that a change of
+  its values alone can make sound (the Filter, which a lane can switch to Driven at a Resonance that sings) asks to be
+  woken when they change (`Processor::wakesWhenValuesChange()`): its runner compares the values it would give it in each
+  block, on each of the block's control points, automation and modulation applied, with those it gave it last before it
+  fell asleep, and, where they differ and the device says it would sound for the new ones (`Processor::wakesFor()`: the Filter, only
+  for values that make it Driven, so that an LFO on a Clean filter's cutoff doesn't keep it at work on a silent track),
+  wakes it for the block, after which it stays awake as long as for sound come in. Other devices are never compared,
+  and sleep through a change of their values.
   `tests/PerformanceGateTests.cpp` counts the blocks each of Phazite's devices works once stopped, which are none once
   its sound has ended.
 

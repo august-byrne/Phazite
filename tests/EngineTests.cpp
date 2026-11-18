@@ -570,6 +570,57 @@ TEST_CASE ("Runners sleep once what comes in and what they play have been silent
     CHECK (buffer.getSample (0, 48) == doctest::Approx (1.0f));
 }
 
+TEST_CASE ("A runner wakes a sleeping device that asks for it when its values change, not for the same values; others sleep on")
+{
+    // A device that a change of its values alone can make sound (devices::Processor::wakesWhenValuesChange(): the Filter
+    // switched to Driven) was left asleep, deaf to its lanes (known bug 203 until 2026-11-18).
+    for (const auto asks : { true, false })
+    {
+        CAPTURE (asks);
+        auto device = std::make_unique<TestGain>();
+        auto& gain = *device;
+        gain.wakesOnValues = asks;
+        engine::DeviceRunner effect (TestGain::info, std::move (device));
+        effect.prepare (rate, deviceBlock);
+
+        std::vector<float> gainValues { 0.0f, 0.0f };
+        engine::DeviceRunner::Block block;
+        block.values = gainValues; // each block reads them as they are then
+        juce::AudioBuffer<float> buffer (2, deviceBlock);
+
+        const auto playSilence = [&] (int blocks)
+        {
+            for (int b = 0; b < blocks; ++b)
+            {
+                buffer.clear();
+                effect.process (buffer, 0, deviceBlock, block);
+            }
+        };
+
+        // The song stopped, nothing heard: asleep after a quarter of a second (24 blocks). Its values again, each block told
+        // they may have changed, don't wake it.
+        playSilence (100);
+        CHECK (gain.processed == 24);
+        CHECK (block.valuesChanged);
+
+        // Its Mode switched: one that asks wakes at once, plays the new values, and stays awake for the quarter of a second
+        // again before it sleeps; one that doesn't sleeps on, as before.
+        gainValues[1] = 1.0f;
+        playSilence (1);
+        CHECK (gain.processed == (asks ? 25 : 24));
+
+        if (asks)
+            CHECK (gain.lastValues[1] == doctest::Approx (1.0f));
+
+        playSilence (99);
+        CHECK (gain.processed == (asks ? 48 : 24));
+
+        // Asleep on the new values, those again don't wake it.
+        playSilence (50);
+        CHECK (gain.processed == (asks ? 48 : 24));
+    }
+}
+
 TEST_CASE ("A runner doesn't take what isn't a number for silence: its effect stays awake for it, however long it lasts")
 {
     // An effect asleep doesn't look at what comes in. One that slept while what came in was no number would let it by,

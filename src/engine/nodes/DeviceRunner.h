@@ -231,7 +231,13 @@ private:
     // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency,
     // and as long as the tail it reports then: devices::Processor::getTailSeconds()), with nothing to play, it skips its
     // work until sound, a note or an event comes in, or something waits in the device to play
-    // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render, nor an instrument while it holds
+    // (devices::Processor::isWaitingToPlay(): a pad its editor played); or, for a device that a change of its values alone
+    // can make sound (devices::Processor::wakesWhenValuesChange(): the Filter), until the values it would be given in a
+    // block, on any of its control points, automation and modulation applied, differ from those it was given last before it
+    // fell asleep and the device would sound for them (sleptValues, devices::Processor::wakesFor(); known bug 203 until
+    // 2026-11-18): woken so, for the whole block, it stays awake as long as the
+    // rules here say, as if sound had come in. A device that doesn't ask is never compared. Never in a render, nor an
+    // instrument while it holds
     // a note or its sustain pedal is down: a held note can be silent for a while and sound again (a slow LFO on its filter,
     // a sample with a gap), and asleep it would stay silent (known bug 37 until 2026-11-14). While the song is stopped, its
     // tail is waited for only once something that can sound has come in since it was prepared or reset (heard: a note's
@@ -252,6 +258,8 @@ private:
     static constexpr int maximumSilentSamples = 1 << 30; // counted no further: longer than any tail
     int silentSamples = 0, sleepAfterSamples = 0;
     bool asleep = false, heard = false;
+    std::vector<float> sleptValues, valuesNow; // sized in prepare(), for a device that wakes when its values change
+    bool valuesMovedInSleep (const Block&, int numSamples) noexcept;
     std::atomic<std::uint64_t> blocksWorked { 0 }; // written by the audio thread alone
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free);
     // How many times it holds each note (the song's and a key played live can hold the same one), how many in all, and

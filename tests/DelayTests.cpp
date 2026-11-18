@@ -1095,10 +1095,10 @@ TEST_CASE ("Frozen, a change of time stretches the delay's loop between samples 
     CHECK (getLargestStep (moving.left, 72000, moving.left.size()) < 1.5f * steadyStep);
     CHECK (getLargestStep (moving.right, 72000, moving.right.size()) < 1.5f * steadyStep);
 
-    // Noise frozen, the tempo moved the same way, then 30 s more frozen: the loop on whole samples again (about 17851 of them
-    // at 121 BPM: Repitch's glide comes to rest a sample or two from the time set, where its steps grow too small for its
-    // float), what is heard read between them as the time says. What comes out repeats a loop's length later sample for
-    // sample, and 30 s on, every third of an octave is within 0.1 dB.
+    // Noise frozen, the tempo moved the same way, then 30 s more frozen: the loop on whole samples again (17851 of them at
+    // 121 BPM, the whole sample nearest the time set, where Repitch's glide comes to rest), what is heard read between them
+    // as the time says. What comes out repeats a loop's length later sample for sample, and 30 s on, every third of an
+    // octave is within 0.1 dB.
     const auto noise = makeNoise (24000, 17, 0.5f);
     constexpr int length = 32768;
     const auto first = 288000;
@@ -1129,6 +1129,7 @@ TEST_CASE ("Frozen, a change of time stretches the delay's loop between samples 
     }
 
     CAPTURE (period);
+    CHECK (period == 17851);
     CHECK (closest < 1.0e-5);
     const auto last = first + 80 * period;
     CHECK (getLargestBandDifference (getBandLevels (out.left, (size_t) first, length, rate, 15),
@@ -1203,6 +1204,89 @@ TEST_CASE ("The delay's transitions: Repitch glides to a new time, bending the e
     // Each time reached: an echo of the sine as late as the last time says.
     const auto late = getLateness (out.left, 200.0, 480, 48000 + 9600, 433.7 * 48.0);
     CHECK (late.back() == doctest::Approx (433.7 * 48.0).epsilon (0.002));
+}
+
+TEST_CASE ("The delay's Repitch glide comes to the time set: an echo after it is as late as a steady delay's, a frozen loop as long")
+{
+    // From 100 ms to 375 ms or to 2 s, half a second in, at 44.1 and 96 kHz. Its glide stopped where its steps grew too small
+    // for the float that held the time read, about 3 samples short at 375 ms and 10 at 2 s (known bug 202 until 2026-11-18).
+    for (const auto sampleRate : { 44100.0, 96000.0 })
+    {
+        for (const auto milliseconds : { 375.0f, 2000.0f })
+        {
+            CAPTURE (sampleRate);
+            CAPTURE (milliseconds);
+            const auto timeSamples = milliseconds * 0.001 * sampleRate;
+            const auto changeAt = (int) (0.5 * sampleRate);
+            const auto changed = [=] (bool frozen, int freezeAt) -> Values
+            {
+                return [=] (int t)
+                { return plain (t < changeAt ? 100.0f : milliseconds, { { "freeze", frozen && t >= freezeAt ? 1.0f : 0.0f } }); };
+            };
+
+            // An impulse three seconds in, the glide long over: its echo is where a delay at that time all along puts it,
+            // within a hundredth of a sample (its place by a parabola through its peak).
+            const auto at = (int) (3.0 * sampleRate);
+            const auto numSamples = at + (int) timeSamples + 1000;
+            const auto click = both ([at] (int t) { return t == at ? 1.0f : 0.0f; });
+            const auto echoAt = [&] (const Values& values)
+            {
+                Delay delay;
+                delay.prepare (sampleRate, 480);
+                const auto out = play (delay, numSamples, 480, click, values);
+                auto peak = (size_t) at + 1;
+
+                for (auto i = peak; i + 1 < out.left.size(); ++i)
+                    if (std::abs (out.left[i]) > std::abs (out.left[peak]))
+                        peak = i;
+
+                const double a = std::abs (out.left[peak - 1]), b = std::abs (out.left[peak]), c = std::abs (out.left[peak + 1]);
+                return (double) peak + 0.5 * (a - c) / (a - 2.0 * b + c) - at;
+            };
+
+            const auto glided = echoAt (changed (false, 0));
+            const auto steady = echoAt ([milliseconds] (int) { return plain (milliseconds); });
+            CAPTURE (glided);
+            CAPTURE (steady);
+            CHECK (std::abs (steady - timeSamples) < 2.0); // the cuts, open, move the peak by a sample or so
+            CHECK (std::abs (glided - steady) < 0.01);
+
+            // Noise in from a second and a half, frozen once a time's worth has gone in: what goes round is the time set
+            // long, to the whole sample nearest it (where it rests: readLoop()), and what comes out repeats as often.
+            const auto noiseFrom = (int) (1.5 * sampleRate), freezeAt = noiseFrom + (int) timeSamples + (int) (0.1 * sampleRate);
+            const auto noise = makeNoise (freezeAt - noiseFrom, 21, 0.5f);
+            const auto first = freezeAt + (int) timeSamples + (int) (0.2 * sampleRate);
+            const auto loopLength = (int) std::lround (timeSamples);
+            constexpr int reach = 30, compared = 4096;
+            Delay delay;
+            delay.prepare (sampleRate, 480);
+            const auto out =
+                play (delay, first + loopLength + reach + compared, 480,
+                      both ([&noise, noiseFrom] (int t)
+                            { return t >= noiseFrom && t - noiseFrom < (int) noise.size() ? noise[(size_t) (t - noiseFrom)] : 0.0f; }),
+                      changed (true, freezeAt));
+            auto period = 0;
+            auto closest = 1.0e9;
+
+            for (int lag = loopLength - reach; lag <= loopLength + reach; ++lag)
+            {
+                auto difference = 0.0;
+
+                for (int i = 0; i < compared; ++i)
+                    difference =
+                        std::max (difference, (double) std::abs (out.left[(size_t) (first + i)] - out.left[(size_t) (first + lag + i)]));
+
+                if (difference < closest)
+                {
+                    closest = difference;
+                    period = lag;
+                }
+            }
+
+            CHECK (period == loopLength);
+            CHECK (closest < 1.0e-5);
+        }
+    }
 }
 
 TEST_CASE ("The delay's Fade crosses at equal power: noise keeps its level through a change of time")

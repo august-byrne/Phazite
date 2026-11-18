@@ -1443,6 +1443,48 @@ TEST_CASE ("After a sleep, the filter Clean plays as one that never slept; Drive
         CHECK (toDecibels ((float) probe::getPeak (live, 48000 * 5, 48000)) > -15.0f);
     }
 
+    // Clean, its Resonance at 100 %, silence all along, its Character's lane switching it to Driven two seconds in (inside a
+    // block: the lane lines up with the sound, which comes as late as the filter's latency): live, it has long been asleep
+    // there, and wakes for the block its values change in (devices::Processor::wakesWhenValuesChange(); known bug 203 until
+    // 2026-11-18: it slept on in silence). Live plays what the render plays, and both sing.
+    {
+        const auto silence = probe::makeSilence (48000 * 6);
+        const auto playSwitched = [&] (bool rendering, std::uint64_t& worked)
+        {
+            probe::Device device (FilterEffect::info);
+            device.set ("character", 0.0f);
+            device.set ("cutoff", 440.0f);
+            device.set ("resonance", 1.0f);
+            device.isRendering = rendering;
+            device.prepare (48000.0, 480);
+            device.automate (FilterEffect::character, 0.0f, 1.0f, 48000 * 4); // Driven from halfway, two seconds in
+            auto played = device.played (silence, 480);
+            worked = device.getRunner().getBlocksWorked();
+            return played;
+        };
+
+        std::uint64_t liveBlocks = 0, renderBlocks = 0;
+        const auto live = playSwitched (false, liveBlocks), render = playSwitched (true, renderBlocks);
+        CHECK (liveBlocks < renderBlocks); // it slept before the switch
+        CHECK (probe::getLargestDifference (live, render) < 1.0e-5);
+        CHECK (toDecibels ((float) probe::getPeak (render, 48000 * 5, 48000)) > -15.0f);
+    }
+
+    // Clean and silent, a lane sweeping its Cutoff all along: nothing a Clean filter is given makes it sound, so it sleeps
+    // through the lane (devices::Processor::wakesFor()), where waking for any change would keep every modulated filter on a
+    // silent track at work.
+    {
+        probe::Device device (FilterEffect::info);
+        device.set ("character", 0.0f);
+        device.set ("resonance", 1.0f);
+        device.isRendering = false;
+        device.prepare (48000.0, 480);
+        device.automate (FilterEffect::cutoff, 200.0f, 4000.0f, 48000 * 6);
+        const auto played = device.played (probe::makeSilence (48000 * 6), 480);
+        CHECK (probe::getPeak (played, 0, 48000 * 6) == 0.0);
+        CHECK (device.getRunner().getBlocksWorked() < 100); // of 600: asleep after the first quarter second
+    }
+
     // Self-Oscillating Sine (its preset) at 50 Hz, the song stopped, from silence: its ring grows from the kick for seconds
     // under the runner's floor for silence, and a filter that slept would sleep before it was heard. It reaches its level.
     {

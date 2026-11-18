@@ -61,8 +61,10 @@ struct TestGain final : devices::Processor
 
     int getLatencySamples() const override { return 64; }
     double getTailSeconds() const override { return 1.5; }
+    bool wakesWhenValuesChange() const noexcept override { return wakesOnValues; }
 
     bool prepared = false;
+    bool wakesOnValues = false; // whether its runner wakes it for a change of its values (set before it is prepared)
     std::vector<float> lastValues;
     int lastNumChannels = 0;
     int processed = 0;               // stretches

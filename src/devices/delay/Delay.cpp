@@ -160,7 +160,7 @@ int Delay::getFadesUnderWay() const noexcept
 void Delay::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
-    timeSmoothing = (float) (1.0 - std::exp (-1.0 / (glideSeconds * sampleRate)));
+    timeSmoothing = 1.0 - std::exp (-1.0 / (glideSeconds * sampleRate));
     fadeLength = std::max (1, (int) std::lround (fadeSeconds * sampleRate));
     fadeAfter = (float) (fadeAfterSeconds * sampleRate);
     shareStep = (float) (1.0 / std::max (1.0, switchSeconds * sampleRate));
@@ -245,7 +245,7 @@ void Delay::advanceModulation() noexcept
 // and once the time read is more than 1 ms behind the time set, read at the time set at once while the read as it is fades
 // out. A change while a fade is under way waits for it to end, then glides or fades on from what is heard. So a nudge glides
 // in without a bend anyone hears, a jump fades, and a time that moves faster than 10 cents (a steep ramp of the tempo) fades
-// again and again.
+// again and again. Repitch's glide ends at the time set exactly, once what is left of it is under a hundredth of a sample.
 bool Delay::moveTime (Side& side, float target, bool fades) noexcept
 {
     if (side.fadeLeft > 0)
@@ -254,21 +254,23 @@ bool Delay::moveTime (Side& side, float target, bool fades) noexcept
         return false;
     }
 
-    const auto lag = target - side.delaySamples;
+    const auto lag = (double) target - side.delaySamples;
 
     if (! fades)
     {
-        side.delaySamples += lag * timeSmoothing;
+        constexpr double glideEnd = 0.01; // samples
+
+        side.delaySamples = std::abs (lag) < glideEnd ? (double) target : side.delaySamples + lag * timeSmoothing;
         return false;
     }
 
-    if (std::abs (lag) <= fadeAfter)
+    if (std::abs (lag) <= (double) fadeAfter)
     {
-        side.delaySamples += std::clamp (lag, -fadeGlideStep, fadeGlideStep);
+        side.delaySamples += std::clamp (lag, (double) -fadeGlideStep, (double) fadeGlideStep);
         return false;
     }
 
-    side.fadingFrom = side.delaySamples;
+    side.fadingFrom = (float) side.delaySamples;
     side.fadeLeft = fadeLength;
     side.delaySamples = target;
     ++fadesStarted;
@@ -285,7 +287,8 @@ float Delay::getSwing (float delay) const noexcept
 float Delay::readEcho (const Side& side, float wave) const noexcept
 {
     const auto modulated = depthNow > 0.0f;
-    const auto now = side.line.read (side.delaySamples + (modulated ? getSwing (side.delaySamples) * wave : 0.0f) - 1.0f);
+    const auto delay = (float) side.delaySamples;
+    const auto now = side.line.read (delay + (modulated ? getSwing (delay) * wave : 0.0f) - 1.0f);
 
     if (side.fadeLeft <= 0)
         return now;
@@ -313,9 +316,11 @@ float Delay::readLoop (const Side& side) const noexcept
 // faster than the time moves and 10 cents more, so that it never steps.
 void Delay::moveLoop (Side& side, float moved, bool fadeStarted) noexcept
 {
+    const auto delay = (float) side.delaySamples;
+
     if (! side.looping)
     {
-        side.loopNow = side.delaySamples;
+        side.loopNow = delay;
         side.loopFrom = side.fadingFrom;
         side.looping = true;
         return;
@@ -324,17 +329,17 @@ void Delay::moveLoop (Side& side, float moved, bool fadeStarted) noexcept
     if (fadeStarted)
     {
         side.loopFrom = side.loopNow;
-        side.loopNow = side.delaySamples;
+        side.loopNow = delay;
         return;
     }
 
     if (side.fadeLeft > 0)
         return;
 
-    // Resting: the time moved less this sample than half of what 10 cents move it (Repitch's glide ends so, its last steps
-    // too small to tell from its float's, two samples or so from the time set at a long time, where it stays).
+    // Resting: the time moved less this sample than half of what 10 cents move it (Repitch's glide's last steps, until it
+    // ends at the time set).
     const auto rests = std::abs (moved) < 0.5f * fadeGlideStep;
-    const auto goal = rests ? std::round (side.delaySamples) : side.delaySamples;
+    const auto goal = rests ? std::round (delay) : delay;
     const auto reach = fadeGlideStep + std::abs (moved);
     side.loopNow += std::clamp (goal - side.loopNow, -reach, reach);
 }
@@ -448,7 +453,7 @@ void Delay::process (const ProcessContext& block)
 
             if (frozenShare > 0.0f)
             {
-                moveLoop (side, side.delaySamples - before, fadeStarted);
+                moveLoop (side, (float) (side.delaySamples - before), fadeStarted);
                 held[s] = readLoop (side);
             }
             else

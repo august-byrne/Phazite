@@ -137,22 +137,18 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Compressor's Look-Ahead; found in S6.3's reviews, 2026-11-18): each notch of the wheel or step of a key makes a new
   plan, the device starts from silence, and its reduction and the sound on its way are dropped, a click or a gap each
   time. A drag of the knob doesn't: the playback session waits for a gesture's end before it makes the plan
-  (`PlaybackSession::valueTreePropertyChanged`). Why: a burst of the wheel is a `Trial` and a key's step an undo step
-  of its own, neither a `Gesture`, so nothing is in progress to wait for. To fix: let the session wait while a `Trial`
-  is open too (a `Trial::whenEnded`, as `Gesture::whenEnded`), or run the knob's key steps and wheel bursts through
-  one gesture that ends when they rest, as the dynamics curve's arrow keys do.
-- **202. The Delay's Repitch glide stops a few samples short of the time set at long times** (found in S6.6's reviews,
-  2026-11-18; older than that step): the glide's step becomes smaller than the precision of the float that holds the
-  time read, so it stops about 3 samples short at 375 ms and about 10 (0.2 ms) at 2 s; the echo plays that much off
-  the time set, and a frozen loop settles at that length. To fix: hold the time read in a double, or set it to the
-  time set once what is left is under a hundredth of a sample. Either moves what a project that changes a delay's
-  time plays by a few samples; the defaults, which don't glide, stay exact.
-- **203. A Filter asleep on Clean whose Character a lane switches to Driven at a singing Resonance stays silent live**
-  (found in S6.6's reviews, 2026-11-18): a render, which never sleeps, sings there from the lane's switch; live, the
-  filter goes on sleeping, so the song plays without it until sound comes in. Why: a sleeping device doesn't hear its
-  lanes; the runner wakes it only for sound or notes (`src/engine/nodes/DeviceRunner.cpp`, `begin()`). A Driven filter
-  never sleeps (`FilterEffect::sleepsOnSilence()`), but a Clean one that is asleep can't know it has become Driven. To
-  fix: the runner wakes a sleeping device when one of its values changes.
+  (`PlaybackSession::valueTreePropertyChanged`). Why (S6.2, 2026-11-18, which left it): a knob's wheel is JUCE's own
+  (`ui::ValueSlider` doesn't take it), and `juce::Slider::mouseWheelMove` wraps each notch in a drag notification of its
+  own (`ScopedDragNotification`, `juce_Slider.cpp`), which `ui::ParameterAttachment` turns into
+  `ParameterHandle::beginGesture()` and `endGesture()`: each notch is a `Gesture` that ends at once, so the session's
+  wait runs at once, and each notch is an undo step of its own (five notches on the Compressor's Look-Ahead, a message
+  loop's turn after each: five steps "Change Look-Ahead" and a plan after each). No `Trial` is involved (those are Swap's
+  and the piano roll's velocity wheel), so letting the session wait while a `Trial` is open changes nothing here, and
+  would hold back the latency of a preset that Swap tries. A key's step is a step of its own the same way. To fix: the
+  knob holds a burst of the wheel open as one gesture until it rests, as `graph::WheelGesture` and the velocity lane do
+  (500 ms on a `juce::Timer`; a press, a key or the pointer leaving ends it at once), so that a burst is one plan and one
+  undo step; a key's step stays one of each per press. Tests need a way to end a burst without waiting for the timer (a
+  call that does what it does).
 
 ## Tests
 

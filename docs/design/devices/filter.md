@@ -140,7 +140,9 @@ a render waits for it and its runner doesn't let it sleep sooner; where it sings
 of a filter that sings to the song's end goes on for the export's own longest tail, 10 s, and is cut there. A Driven
 filter never sleeps on silence, while its last block played Driven: it can start to sing by itself as its Resonance rises,
 which a filter asleep wouldn't hear, so it plays its loop on a silent track too, which is the price of a filter that can
-sing on its own. A Clean filter sleeps on silence as other devices do. Switched off, it isn't played at all. Clean's other
+sing on its own. A Clean filter sleeps on silence as other devices do, through any lane or modulator on it, but wakes when its values
+make it Driven (a lane that switches its Character at a Resonance that sings), as a render, which never sleeps, plays it. Switched off, it isn't
+played at all. Clean's other
 types fall silent within a few milliseconds.
 
 ## Its editor
@@ -164,9 +166,6 @@ Mix is not in the editor: it is with the device in the Devices view ([devices.md
 - No ladder, diode or Sallen-Key model as such: Driven is the state-variable filter with its resonance saturating.
 - Driven only for Low Pass, High Pass, Band Pass and Notch; the combs, the vowel, the phaser and the sample and hold play
   Clean. A notch that sings is silent at its cutoff, as a notch is, and a band-pass sings quietly.
-- A filter asleep on Clean (on a silent track) whose Character a lane switches to Driven at a singing Resonance stays
-  silent live until sound comes in, where a render sings: a sleeping device doesn't hear its lanes
-  ([known-bugs.md](../../known-bugs.md), bug 203).
 - A full-scale sound driven hard comes out a little past 0 dBFS (+0.15 dBFS for a sine at 24 dB, +0.36 as it starts):
   the ceiling holds full scale at the Quality's rate, and the half-band filters back to the sound's rate overshoot it.
 - Clean's Q stops at 16 at 12 dB and at about 21 at 24 dB: Clean doesn't self-oscillate.

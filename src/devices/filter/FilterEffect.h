@@ -90,6 +90,11 @@ public:
     // can start to sing as its Resonance rises, which a sleeping one wouldn't hear. Any thread.
     bool sleepsOnSilence() const noexcept override;
 
+    // A Clean filter asleep that its values make Driven at a Resonance that sings would sing from silence: woken for them,
+    // and for no others (a Clean filter makes no sound of its own, whatever moves).
+    bool wakesWhenValuesChange() const noexcept override { return true; }
+    bool wakesFor (std::span<const float> values) const noexcept override { return isDriven (values); }
+
 private:
     static constexpr int numQualities = 3;
     static constexpr int numWays = 2 * numQualities; // Clean at each Quality, then Driven at each

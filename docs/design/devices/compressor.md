@@ -283,6 +283,9 @@ Mix is the knob on the device's row in the Devices view.
   live can leave a little of (its next release a little slower than a render's).
 - While the Look-Ahead's knob is dragged, the compressor looks ahead no further than the latency it had as the drag
   began; the new latency comes as the drag ends.
+- The wheel on the Look-Ahead's knob makes the device anew at each notch, each a step of its own, where a drag makes it
+  anew once ([known-bugs.md](../../known-bugs.md), bug 201). A key's step makes it anew once for each press, as it is a
+  step of its own.
 - Transient has no look-ahead, and hears only its own sound.
 - The channels are always linked: no unlinked, mid/side or per-channel detection.
 - There is no threshold, ratio or knee as numbers to set: a point's levels are typed and its line's ratio is read,

@@ -109,12 +109,15 @@ private:
     // A side's line and where it is read: at its time, which Repitch glides to a new one (Fade too, but no faster than
     // 10 cents); and while Fade fades, also at the time it fades from, which fades out as the new one fades in. While frozen,
     // where what goes round is read, apart from what is heard: at the time while it moves, on a whole sample while it
-    // rests, and from where it was while it fades.
+    // rests, and from where it was while it fades. The time read is a double: a float's step at 2 s is a 128th of a sample
+    // at 44.1 kHz, a 64th at 96 and a 32nd at 192 (2 to the power 18 samples and more), so the glide's last steps, a
+    // hundredth of a sample and less, were lost in it, and it stopped short of the time set (known bug 202 until
+    // 2026-11-18).
     struct Side
     {
         dsp::DelayLine line;
         dsp::Filter lowFilter, highFilter;
-        float delaySamples = 1.0f;
+        double delaySamples = 1.0;
         float fadingFrom = 1.0f;
         int fadeLeft = 0; // samples of the fade left; 0 while it doesn't fade
         float loopNow = 1.0f, loopFrom = 1.0f;
@@ -122,7 +125,7 @@ private:
     };
 
     double sampleRate = 44100.0;
-    float timeSmoothing = 0.001f; // of the way to a new time, per sample (Repitch)
+    double timeSmoothing = 0.001; // of the way to a new time, per sample (Repitch)
     int fadeLength = 2205;        // a Fade's samples
     float fadeAfter = 48.0f;      // with Fade, the time read this far behind the time set (1 ms), in samples, fades to it
     float shareStep = 0.001f;     // of a switch's crossfade, per sample (the character's and the freeze's)
