@@ -226,37 +226,64 @@ void PieceStore::countAgain() const
     totalSize = size;
 }
 
+namespace
+{
+    // A pack file's trailer and index, as its file holds them now, checked against its marks, its length and its name: none
+    // for one that can't be opened (another program holds it), isn't whole or isn't one (a write cut off before its end,
+    // which never got its name), or is damaged (its index and writer don't hash to its name).
+    struct PackFile
+    {
+        juce::int64 length = 0, indexStart = 0;
+        juce::uint32 count = 0;
+        char wroteIt[writerSize] = {};
+        juce::MemoryBlock entries;
+    };
+
+    std::optional<PackFile> readPackFile (const juce::File& file)
+    {
+        juce::FileInputStream in (file);
+
+        if (! in.openedOk() || in.getTotalLength() < markSize + endSize)
+            return std::nullopt;
+
+        PackFile pack;
+        pack.length = in.getTotalLength();
+        char start[markSize] = {}, end[markSize] = {};
+        in.read (start, markSize);
+        in.setPosition (pack.length - endSize);
+        pack.count = (juce::uint32) in.readInt();
+        pack.indexStart = in.readInt64();
+        in.read (pack.wroteIt, writerSize);
+        in.read (end, markSize);
+
+        if (! hasMark (start) || ! hasMark (end) || pack.indexStart < markSize
+            || pack.indexStart + (juce::int64) pack.count * entrySize != pack.length - endSize)
+            return std::nullopt;
+
+        const auto indexSize = (size_t) pack.count * (size_t) entrySize;
+        in.setPosition (pack.indexStart);
+
+        if (in.readIntoMemoryBlock (pack.entries, (juce::pointer_sized_int) indexSize) != indexSize)
+            return std::nullopt;
+
+        if (makePackName (pack.entries.getData(), pack.entries.getSize(), pack.wroteIt) != file.getFileNameWithoutExtension())
+            return std::nullopt;
+
+        return pack;
+    }
+} // namespace
+
 void PieceStore::readIndex (const juce::File& file)
 {
-    // A pack that isn't whole, or isn't one, is left out: a write cut off before its end, which never got its name.
-    juce::FileInputStream in (file);
+    // A pack that can't be read whole as one is left out (one another program holds is read the next time); a pack is
+    // named by the SHA-256 of its index and its writer, and one whose name doesn't match is damaged (or is a temporary
+    // file a write left): none of its entries can be trusted.
+    const auto read = readPackFile (file);
 
-    if (! in.openedOk() || in.getTotalLength() < markSize + endSize)
-        return; // another program holds it, with no sharing: read the next time
-
-    const auto length = in.getTotalLength();
-    char start[markSize] = {}, end[markSize] = {}, wroteIt[writerSize] = {};
-    in.read (start, markSize);
-    in.setPosition (length - endSize);
-    const auto count = (juce::uint32) in.readInt();
-    const auto indexStart = in.readInt64();
-    in.read (wroteIt, writerSize);
-    in.read (end, markSize);
-
-    if (! hasMark (start) || ! hasMark (end) || indexStart < markSize || indexStart + (juce::int64) count * entrySize != length - endSize)
+    if (! read.has_value())
         return;
 
-    juce::MemoryBlock entries;
-    const auto indexSize = (size_t) count * (size_t) entrySize;
-    in.setPosition (indexStart);
-
-    if (in.readIntoMemoryBlock (entries, (juce::pointer_sized_int) indexSize) != indexSize)
-        return;
-
-    // A pack is named by the SHA-256 of its index and its writer: one whose name doesn't match is damaged (or is a
-    // temporary file a write left), and none of its entries can be trusted.
-    if (makePackName (entries.getData(), entries.getSize(), wroteIt) != file.getFileNameWithoutExtension())
-        return;
+    const auto& [length, indexStart, count, wroteIt, entries] = *read;
 
     // One read before again (written anew in place of its damaged copy, which had the same index) keeps its number. Its
     // writer is this computer only where the trailer says so: a pack whose writer can't be told is nobody's, never joined.
@@ -699,6 +726,19 @@ void PieceStore::readNewPacks()
             readIndex (file);
 
     countAgain();
+}
+
+juce::Array<juce::File> PieceStore::findDamagedPacks() const
+{
+    // Every pack file read again from the disk, as it is now (those this store read too): a byte changed anywhere in its
+    // index or its trailer makes it no pack (a changed piece is found as the piece is read).
+    juce::Array<juce::File> damaged;
+
+    for (const auto& file : folder.findChildFiles (juce::File::findFiles, false, "*.pack"))
+        if (! readPackFile (file).has_value())
+            damaged.add (file);
+
+    return damaged;
 }
 
 juce::Array<juce::File> PieceStore::findUnreadPacks() const

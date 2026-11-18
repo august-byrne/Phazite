@@ -170,8 +170,9 @@ public:
         std::map<juce::String, std::vector<AudioProblem>> audio;     // by version: its audio files that aren't as it recorded
         std::vector<DamagedSong> damagedSongs;                       // songs kept without a version that can't be read whole
         std::map<juce::String, juce::StringArray> unreadableParents; // by version: the versions it follows that can't be read
-        std::vector<VersionRecord> lost;                             // versions no branch's line holds, newest first
-        bool stopped = false;                                        // cancelled before it was done: none of it is sure
+        juce::StringArray unreadPacks;   // the pack files that don't read whole as packs (PieceStore::findDamagedPacks())
+        std::vector<VersionRecord> lost; // versions no branch's line holds, newest first
+        bool stopped = false;            // cancelled before it was done: none of it is sure
     };
 
     bool checkHistory (std::function<void()> done = {});

@@ -822,23 +822,69 @@ TEST_CASE ("Verify History finds the versions no branch holds and what is damage
     CHECK (std::any_of (branches.begin(), branches.end(), [&lostID] (const phazite::BranchInfo& branch)
                         { return branch.name == "main (recovered)" && branch.head == lostID; }));
 
-    // A byte of a pack damaged: the piece is found, and the commits that need it named.
+    // A byte of a pack damaged, found by what the pack holds (not by its file's time, which some systems keep in whole
+    // seconds): the pack that lists the new version's record, which no other pack holds.
     phazite::setChannelVolume (song, bass, -6.0f);
     keepVersion (s.context, "Second");
-    juce::File newest;
+    const auto second = phazite::getVersionHistory (s.context)->findLastVersion()->id;
+    juce::File holding;
+    juce::MemoryBlock bytes;
+    size_t pieceStart = 0, pieceSize = 0, indexStart = 0;
 
     for (const auto& pack :
          phazite::getVersionsFolder (song).getChildFile ("pieces").findChildFiles (juce::File::findFiles, false, "*.pack"))
-        if (newest == juce::File() || pack.getLastModificationTime() > newest.getLastModificationTime())
-            newest = pack;
+    {
+        juce::MemoryBlock read;
+        REQUIRE (pack.loadFileAsData (read));
+        REQUIRE (read.getSize() > 32);
+        const auto* end = static_cast<const char*> (read.getData()) + read.getSize() - 32;
+        const auto count = (size_t) juce::ByteOrder::littleEndianInt (end);
+        const auto start = (size_t) juce::ByteOrder::littleEndianInt64 (end + 4);
 
-    juce::MemoryBlock bytes;
-    REQUIRE (newest.loadFileAsData (bytes));
-    static_cast<char*> (bytes.getData())[10] ^= 0x5a;
-    REQUIRE (newest.replaceWithData (bytes.getData(), bytes.getSize()));
+        for (size_t i = 0; i < count; ++i)
+        {
+            const auto* entry = static_cast<const char*> (read.getData()) + start + i * 56;
 
-    verify();
-    CHECK (phazite::describeHistoryCheck (s.context).contains ("damaged"));
+            if (juce::String::toHexString (entry, 32, 0) == second)
+            {
+                holding = pack;
+                bytes = read;
+                pieceStart = (size_t) juce::ByteOrder::littleEndianInt64 (entry + 32);
+                pieceSize = juce::ByteOrder::littleEndianInt (entry + 40);
+                indexStart = start;
+            }
+        }
+    }
+
+    REQUIRE (holding.existsAsFile());
+    REQUIRE (pieceSize > 2);
+
+    SUBCASE ("A byte of a piece: the piece is found damaged")
+    {
+        static_cast<char*> (bytes.getData())[pieceStart + pieceSize / 2] ^= 0x5a;
+        REQUIRE (holding.replaceWithData (bytes.getData(), bytes.getSize()));
+        verify();
+        CHECK (phazite::describeHistoryCheck (s.context).contains ("1 piece is damaged"));
+        CHECK_FALSE (phazite::describeHistoryCheck (s.context).contains ("all whole"));
+    }
+
+    SUBCASE ("A byte of the pack's index: the pack can't be read")
+    {
+        static_cast<char*> (bytes.getData())[indexStart + 40] ^= 0x5a;
+        REQUIRE (holding.replaceWithData (bytes.getData(), bytes.getSize()));
+        verify();
+        CHECK (phazite::describeHistoryCheck (s.context).contains ("1 pack of the Versions folder can't be read"));
+        CHECK_FALSE (phazite::describeHistoryCheck (s.context).contains ("all whole"));
+    }
+
+    SUBCASE ("A byte of the pack's trailer: the pack can't be read")
+    {
+        static_cast<char*> (bytes.getData())[bytes.getSize() - 10] ^= 0x5a;
+        REQUIRE (holding.replaceWithData (bytes.getData(), bytes.getSize()));
+        verify();
+        CHECK (phazite::describeHistoryCheck (s.context).contains ("1 pack of the Versions folder can't be read"));
+        CHECK_FALSE (phazite::describeHistoryCheck (s.context).contains ("all whole"));
+    }
 }
 
 TEST_CASE ("A branch another computer took its own way keeps this computer's line, with the other's as divergent")

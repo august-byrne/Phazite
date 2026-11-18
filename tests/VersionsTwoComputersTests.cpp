@@ -365,23 +365,33 @@ TEST_CASE ("Snapshots taken while a clock set back holds the stamps up each have
         CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-13.0f + (float) i));
     }
 }
+
 TEST_CASE ("Verify History says an audio file that can't be read, and never calls the history whole when it was stopped")
 {
     SweepLetsGo letGo;
     TestSong s;
     const auto track = s.addTrack ("Drums");
-    s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Kick.wav"), 0.25), 0.0);
+    const auto clip = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Kick.wav"), 0.25), 0.0);
     keepVersion (s.context, "Drums");
 
     SUBCASE ("A file another program holds")
     {
+        // A file the song plays is open in Phazite itself, which on Windows keeps another program from holding it (no one
+        // else may then, so it isn't held at all): the version alone plays it here, the project opened again without it.
+        s.select (clip);
+        s.run ("edit.delete");
+        s.reopen();
+        REQUIRE (waitForVersionHistory (s.context));
         const HeldFile held (s.getProject().getAudioFolder().getChildFile ("Kick.wav"));
 
-        if (held.works())
+        if (! held.works())
         {
-            verify (s.context);
-            CHECK (phazite::describeHistoryCheck (s.context).contains ("Audio/Kick.wav can't be read"));
+            MESSAGE ("The file can't be held from this user: nothing to fail.");
+            return;
         }
+
+        verify (s.context);
+        CHECK (phazite::describeHistoryCheck (s.context).contains ("Audio/Kick.wav can't be read"));
     }
 
     SUBCASE ("Stopped by a save")

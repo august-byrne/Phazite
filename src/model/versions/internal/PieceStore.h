@@ -145,6 +145,10 @@ public:
     // of a layout this build doesn't read), whose pieces might be anything: those it hasn't read, as of now.
     juce::Array<juce::File> findUnreadPacks() const;
 
+    // The pack files that don't read whole as packs now, read again from the disk (Verify History's): one another program
+    // holds, one cut off, or one with a byte changed in its index or its trailer, whether this store read it before or not.
+    juce::Array<juce::File> findDamagedPacks() const;
+
     // Lets go of the packs it has open for reading, which it opens again as needed.
     void closeFiles() const;
 
