@@ -69,7 +69,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [FM](devices/fm.md) | Instrument | Four operators in eight algorithms, for electric pianos, bells, basses and brass |
 | [Sampler](devices/sampler.md) | Instrument | One sound across the keys: held and looped, played through as a one-shot, or cut into slices |
 | [Drum Sampler](devices/drum-sampler.md) | Instrument | A pad on every note, 128 in all, each with up to four layers, an envelope, a filter and a choke group |
-| [EQ](devices/eq.md) | Effect | Eight bands over a spectrum of what comes in and what goes out |
+| [EQ](devices/eq.md) | Effect | Eight bands over a spectrum of what comes in and what goes out, each on the whole sound, its middle, its sides, its left or its right, and each bell or shelf dynamic if wanted (a de-esser) |
 | [Filter](devices/filter.md) | Effect | A resonant filter of nine types, with drive |
 | [Compressor](devices/compressor.md) | Effect | Three modes: Compress, by a drawn curve, keyed or not; Duck, under a sidechain; and Transient, each hit's attack and tail |
 | [Multiband](devices/multiband.md) | Effect | Three bands of dynamics and saturation, then a master band |

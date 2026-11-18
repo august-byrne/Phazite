@@ -2,32 +2,41 @@
 #include "EqEditor.h"
 #include "DeviceTint.h"
 #include "ParameterControls.h"
+#include "devices/dsp/Math.h"
 #include "devices/eq/Equalizer.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <optional>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace phazite::ui
 {
 namespace
 {
     using Eq = devices::Equalizer;
+    using Placement = Eq::Placement;
 
     constexpr double lowestFrequency = 20.0, highestFrequency = 20000.0;
     constexpr double gainRange = 24.0;      // the graph shows the bands' whole range, -24 to +24 dB
     constexpr double analyzerFloor = -90.0; // the analyzer's bottom, in dB; its top is 0 dB
     constexpr double defaultSampleRate = 48000.0;
-    constexpr int bandsGroup = 1;   // the band buttons' radio group
-    constexpr int graphWidth = 400; // as wide at any height
-    constexpr int bandRows = 2;     // of band buttons
+    constexpr int bandsGroup = 1;              // the band buttons' radio group
+    constexpr int graphWidth = 400;            // as wide at any height
+    constexpr int bandRows = 2;                // of band buttons
+    constexpr float shownGainStep = 0.01f;     // a dynamic band's gain as the curves show it: steps of this many decibels
+    constexpr float dashes[] = { 4.0f, 3.0f }; // the side's and the right's curves, dashed
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
     const auto knobCell = compactKnobSize + Space::l;
 
-    // Beside the graph: the band buttons in two rows, the band's switch and shape, its slope, then its knobs and the output's.
+    // Beside the graph: the band buttons in two rows, the band's switch and shape, its slope and placement, then its knobs and
+    // the output's.
     int getControlsWidth()
     {
         return EqEditor::numKnobs * knobCell;
@@ -73,6 +82,65 @@ namespace
     {
         return 20.0 * std::log10 (std::max (magnitude, 1.0e-6));
     }
+
+    // A band's values, as a list of all of them holds them.
+    struct BandValues
+    {
+        bool on;
+        int type;
+        Placement placement;
+        float gain, dynamic;
+
+        BandValues (const std::vector<float>& values, int band)
+            : on (values[(size_t) indexOf (band, Eq::on)] > 0.5f),
+              type (juce::roundToInt (values[(size_t) indexOf (band, Eq::type)])),
+              placement ((Placement) juce::jlimit (0, 4, juce::roundToInt (values[(size_t) indexOf (band, Eq::placement)]))),
+              gain (values[(size_t) indexOf (band, Eq::gain)]),
+              dynamic (values[(size_t) indexOf (band, Eq::dynamic)])
+        {
+        }
+
+        // A bell or a shelf whose gain moves with the sound.
+        bool isDynamic() const { return on && hasGain (type) && std::abs (dynamic) > 0.0f; }
+    };
+
+    const char* getLetter (Placement placement)
+    {
+        switch (placement)
+        {
+            case Placement::stereo:
+                return "";
+            case Placement::mid:
+                return "M";
+            case Placement::side:
+                return "S";
+            case Placement::left:
+                return "L";
+            case Placement::right:
+                return "R";
+        }
+
+        return "";
+    }
+
+    const char* getWayName (Placement placement)
+    {
+        switch (placement)
+        {
+            case Placement::stereo:
+                return "Stereo";
+            case Placement::mid:
+                return "Mid";
+            case Placement::side:
+                return "Side";
+            case Placement::left:
+                return "Left";
+            case Placement::right:
+                return "Right";
+        }
+
+        return "";
+    }
 } // namespace
 
 //==============================================================================
@@ -83,8 +151,9 @@ public:
         : editor (e)
     {
         setTitle ("EQ curve");
-        setDescription ("Drag a band's dot to move its frequency and gain; the wheel over it changes its Q, a double-click turns it "
-                        "on or off, and a right-click picks its shape");
+        setDescription ("Drag a band's dot to move its frequency and gain, and a dynamic band's handle to change its Dynamic; the "
+                        "wheel over a dot changes its Q, a double-click turns it on or off, and a right-click picks its shape and "
+                        "placement");
 
         for (int band = 0; band < Eq::numBands; ++band)
             qs[(size_t) band] = editor.device.getParameter (getInfo (indexOf (band, Eq::q)).id);
@@ -114,6 +183,21 @@ public:
         return { xFor (shown[(size_t) indexOf (band, Eq::frequency)]), yForGain (juce::jlimit (-gainRange, gainRange, gain)) };
     }
 
+    // A dynamic band's handle, where its gain goes at its whole Dynamic (kept in the graph); and the mark on its line where
+    // its gain is now.
+    std::optional<juce::Point<float>> getHandle (int band) const
+    {
+        const BandValues shown (editor.values, band);
+
+        if (! shown.isDynamic())
+            return std::nullopt;
+
+        const auto dot = getDot (band);
+        return juce::Point<float> (dot.x, yForGain (juce::jlimit (-gainRange, gainRange, (double) (shown.gain + shown.dynamic))));
+    }
+
+    float getMarkY (int band) const { return yForGain (juce::jlimit (-gainRange, gainRange, (double) editor.getShownGain (band))); }
+
     // The nearest dot within reach, or -1.
     int findBandAt (juce::Point<float> position) const
     {
@@ -126,6 +210,27 @@ public:
             {
                 nearest = distance;
                 found = band;
+            }
+        }
+
+        return found;
+    }
+
+    // The nearest dynamic band's handle within reach, or -1.
+    int findHandleAt (juce::Point<float> position) const
+    {
+        auto found = -1;
+        auto nearest = GraphTint::grabDistance;
+
+        for (int band = 0; band < Eq::numBands; ++band)
+        {
+            if (const auto handle = getHandle (band); handle.has_value())
+            {
+                if (const auto distance = handle->getDistanceFrom (position); distance <= nearest)
+                {
+                    nearest = distance;
+                    found = band;
+                }
             }
         }
 
@@ -149,31 +254,33 @@ public:
         editor.output.paint (g, frequencies, levels, tint.withAlpha (GraphTint::spectrumFill * 1.5f),
                              tint.withAlpha (GraphTint::spectrumLine));
 
-        // The selected band's own curve, filled to 0 dB, and the curve of every band together, worked out again only when
-        // they change (known bug 130): not at each of the analyzer's 30 repaints a second.
+        // The selected band's own curve, filled to 0 dB, and the curve of every band together (or the curves of the ways through
+        // it), worked out again only when they change (known bug 130): not at each of the analyzer's 30 repaints a second.
         updateCurves();
         g.setColour (getBandColour (editor.selectedBand).withAlpha (GraphTint::partCurve));
         g.fillPath (bandCurve);
-        g.setColour (palette.text);
-        g.strokePath (wholeCurve, juce::PathStrokeType (GraphTint::curveWidth));
+        paintCurves (g, palette, tint);
 
+        paintDynamics (g, palette);
         paintDots (g, palette);
     }
 
     // How many times its curves were worked out, for the tests.
     int getCurvesWorkedOut() const noexcept { return curvesWorkedOut; }
 
-    // Over a dot, the pointer shows it can be grabbed, and the dot lights up.
-    void mouseMove (const juce::MouseEvent& e) override { hover (findBandAt (e.position)); }
-    void mouseExit (const juce::MouseEvent&) override { hover (-1); }
+    // Over a dot, the pointer shows it can be grabbed, and the dot lights up; over a dynamic band's handle, that it moves up
+    // and down, and the handle lights up.
+    void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { hover ({}); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const auto band = findBandAt (e.position);
+        const auto target = findTarget (e.position);
 
-        if (band < 0)
+        if (target.band < 0)
             return;
 
+        const auto band = target.band;
         editor.selectBand (band);
 
         if (e.mods.isPopupMenu())
@@ -182,21 +289,44 @@ public:
             return;
         }
 
+        // A dynamic band's handle: its Dynamic, from where it is set by hand, as one undo step.
+        if (target.handle)
+        {
+            dragDynamic = editor.device.getParameter (getInfo (indexOf (band, Eq::dynamic)).id,
+                                                      "Change Band " + juce::String (band + 1) + " Dynamic");
+            draggingDynamic = true;
+            dragBand = band;
+            drag.take ({ &dragDynamic });
+            return;
+        }
+
         // Its frequency and, for a shelf or a bell, its gain, from where they are set by hand: one undo step.
         dragFrequency = editor.device.getParameter (getInfo (indexOf (band, Eq::frequency)).id, "Move Band " + juce::String (band + 1));
         dragGain = editor.device.getParameter (getInfo (indexOf (band, Eq::gain)).id);
         draggingGain = hasGain (juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)]));
+        draggingDynamic = false;
         drag.take (draggingGain ? std::vector<ParameterHandle*> { &dragFrequency, &dragGain }
                                 : std::vector<ParameterHandle*> { &dragFrequency });
     }
 
-    // The dot moves as far as the pointer: a dot taken at its edge doesn't jump to the pointer.
+    // The dot moves as far as the pointer: a dot taken at its edge doesn't jump to the pointer. A handle moves up and down.
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (! drag.isTaken())
             return;
 
         const auto moved = e.getOffsetFromDragStart().toFloat();
+
+        if (draggingDynamic)
+        {
+            const auto gain = (double) editor.values[(size_t) indexOf (dragBand, Eq::gain)];
+            drag.moveAlong (
+                0, moved.y, [this, gain] (float dynamic) { return yForGain (gain + dynamic); },
+                [this, gain] (float y) { return (float) juce::jlimit (-gainRange, gainRange, gainFor (y) - gain); });
+            editor.refresh();
+            return;
+        }
+
         drag.moveAlong (
             0, moved.x, [this] (float hertz) { return xFor (hertz); },
             [this] (float x) { return (float) juce::jlimit (lowestFrequency, highestFrequency, frequencyFor (x)); });
@@ -209,12 +339,17 @@ public:
         editor.refresh();
     }
 
-    void mouseUp (const juce::MouseEvent&) override { drag.end(); }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        drag.end();
+        draggingDynamic = false;
+    }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (const auto band = findBandAt (e.position); band >= 0)
+        if (const auto target = findTarget (e.position); target.band >= 0 && ! target.handle)
         {
+            const auto band = target.band;
             auto on = editor.device.getParameter (getInfo (indexOf (band, Eq::on)).id);
             on.setValue (on.getValue() > 0.5f ? 0.0f : 1.0f);
             editor.refresh();
@@ -225,7 +360,8 @@ public:
     // view's, to scroll it.
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
-        const auto band = drag.isTaken() ? -1 : findBandAt (e.position);
+        const auto target = drag.isTaken() ? Target {} : findTarget (e.position);
+        const auto band = target.handle ? -1 : target.band;
 
         if (band < 0)
         {
@@ -239,25 +375,83 @@ public:
         editor.refresh();
     }
 
-    int getHoveredBand() const noexcept { return hovered; }
+    // The ways whose curves it draws (EqEditor::getCurvesShown()).
+    std::vector<Placement> getWays() const
+    {
+        auto middle = false, sides = false;
+
+        for (int band = 0; band < Eq::numBands; ++band)
+        {
+            const BandValues shown (editor.values, band);
+
+            if (! shown.on)
+                continue;
+
+            middle = middle || shown.placement == Placement::mid || shown.placement == Placement::side;
+            sides = sides || shown.placement == Placement::left || shown.placement == Placement::right;
+        }
+
+        std::vector<Placement> ways;
+
+        if (middle)
+            ways.insert (ways.end(), { Placement::mid, Placement::side });
+
+        if (sides)
+            ways.insert (ways.end(), { Placement::left, Placement::right });
+
+        if (ways.empty())
+            ways.push_back (Placement::stereo);
+
+        return ways;
+    }
 
 private:
+    // What a press under the pointer takes: a band's dot, or a dynamic band's handle.
+    struct Target
+    {
+        int band = -1;
+        bool handle = false;
+
+        bool operator== (const Target&) const = default;
+    };
+
     EqEditor& editor;
-    ParameterHandle dragFrequency, dragGain;
+    ParameterHandle dragFrequency, dragGain, dragDynamic;
     std::array<ParameterHandle, Eq::numBands> qs; // each band's, which the wheel turns
     graph::HandleDrag drag { *this };             // after the handles it moves
     graph::WheelGesture qWheel { drag };          // and turns
-    bool draggingGain = false;
-    int hovered = -1; // the band whose dot the pointer is over
-    juce::Path bandCurve, wholeCurve;
-    std::vector<float> curvesFor; // what they were worked out for
+    bool draggingGain = false, draggingDynamic = false;
+    int dragBand = -1;
+    Target hovered; // what the pointer is over
+    juce::Path bandCurve;
+    std::vector<std::pair<Placement, juce::Path>> curves; // each way's, as the bands play now
+    std::vector<float> curvesFor;                         // what they were worked out for
     int curvesWorkedOut = 0;
+
+    // The nearer to the press of the dot and the handle within reach of it: a small Dynamic's handle sits within a dot's reach.
+    Target findTarget (juce::Point<float> position) const
+    {
+        const auto dot = findBandAt (position), handle = findHandleAt (position);
+
+        if (dot >= 0 && handle >= 0)
+            return getDot (dot).getDistanceFrom (position) <= getHandle (handle)->getDistanceFrom (position) ? Target { dot, false }
+                                                                                                             : Target { handle, true };
+
+        if (dot >= 0)
+            return { dot, false };
+
+        if (handle >= 0)
+            return { handle, true };
+
+        return {};
+    }
 
     void updateCurves()
     {
         const auto sampleRate = editor.getSampleRate();
         const auto width = (float) getWidth();
-        auto now = editor.values;
+        const auto& shown = editor.playing;
+        auto now = shown;
         now.insert (now.end(), { (float) editor.selectedBand, (float) sampleRate, width, (float) getHeight() });
 
         if (now == curvesFor)
@@ -265,35 +459,118 @@ private:
 
         curvesFor = std::move (now);
         ++curvesWorkedOut;
+        const auto ways = getWays();
         const auto zero = yForGain (0.0);
+        const auto outputGain = (double) devices::dsp::decibelsToGain (shown[(size_t) Eq::outputParameter]);
         bandCurve.clear();
-        wholeCurve.clear();
         bandCurve.startNewSubPath (0.0f, zero);
+        curves.clear();
+
+        for (const auto way : ways)
+            curves.emplace_back (way, juce::Path());
+
+        // Each band's sections designed once, then evaluated at each point.
+        std::array<Placement, Eq::numBands> placements {};
+        std::array<Eq::BandShape, Eq::numBands> shapes {};
+
+        for (int band = 0; band < Eq::numBands; ++band)
+        {
+            placements[(size_t) band] = BandValues (shown, band).placement;
+            shapes[(size_t) band] = Eq::getBandShape (shown, band, sampleRate);
+        }
 
         for (auto x = 0.0f; x <= width; x += 1.5f)
         {
             const auto frequency = frequencyFor (x);
-            const auto own = toDecibels (Eq::getBandMagnitude (editor.values, editor.selectedBand, frequency, sampleRate));
-            const auto total = toDecibels (Eq::getMagnitude (editor.values, frequency, sampleRate));
-            bandCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, own)));
+            std::array<double, 5> through {}; // each way's gain, by its placement's number
+            through.fill (outputGain);
 
-            if (x <= 0.0f)
-                wholeCurve.startNewSubPath (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
-            else
-                wholeCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, total)));
+            // Each band's magnitude on its own placement, into each way it acts on.
+            for (int band = 0; band < Eq::numBands; ++band)
+            {
+                const auto placement = placements[(size_t) band];
+                const auto magnitude = shapes[(size_t) band].getMagnitude (frequency, sampleRate);
+
+                if (band == editor.selectedBand)
+                    bandCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (magnitude))));
+
+                for (const auto way : ways)
+                    if (Eq::actsOn (placement, way))
+                        through[(size_t) way] *= magnitude;
+            }
+
+            for (auto& [way, curve] : curves)
+            {
+                const auto y = yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (through[(size_t) way])));
+
+                if (x <= 0.0f)
+                    curve.startNewSubPath (x, y);
+                else
+                    curve.lineTo (x, y);
+            }
         }
 
         bandCurve.lineTo (width, zero);
         bandCurve.closeSubPath();
     }
 
-    void hover (int band)
-    {
-        setMouseCursor (band >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+    // The colour of a way's curve: one curve in the text colour; the middle's and the left's in the device's colour, the side's
+    // and the right's in the analyzer's second trace's, dashed.
+    static bool isSecond (Placement way) { return way == Placement::side || way == Placement::right; }
 
-        if (band != hovered)
+    void paintCurves (juce::Graphics& g, const Palette& palette, juce::Colour tint)
+    {
+        const juce::PathStrokeType stroke (GraphTint::curveWidth);
+
+        for (const auto& [way, curve] : curves)
         {
-            hovered = band;
+            if (way == Placement::stereo)
+            {
+                g.setColour (palette.text);
+                g.strokePath (curve, stroke);
+                continue;
+            }
+
+            g.setColour (isSecond (way) ? palette.textMuted : tint);
+
+            if (isSecond (way))
+            {
+                juce::Path dashed;
+                stroke.createDashedStroke (dashed, curve, dashes, (int) std::size (dashes));
+                g.fillPath (dashed);
+            }
+            else
+            {
+                g.strokePath (curve, stroke);
+            }
+        }
+
+        // Which is which, along the top at the right, each name in its curve's colour.
+        if (curves.size() < 2)
+            return;
+
+        g.setFont (juce::FontOptions (TextSize::small));
+        auto key = getLocalBounds().reduced (Space::s, Space::xs).removeFromTop (labelHeight);
+
+        for (auto it = curves.rbegin(); it != curves.rend(); ++it)
+        {
+            const juce::String name (getWayName (it->first));
+            const auto nameWidth = (int) std::ceil (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), name)) + 1;
+            g.setColour (isSecond (it->first) ? palette.textMuted : tint);
+            g.drawText (name, key.removeFromRight (nameWidth), juce::Justification::centredRight);
+            key.removeFromRight (Space::s);
+        }
+    }
+
+    void hover (Target target)
+    {
+        setMouseCursor (target.band < 0 ? juce::MouseCursor::NormalCursor
+                        : target.handle ? juce::MouseCursor::UpDownResizeCursor
+                                        : juce::MouseCursor::DraggingHandCursor);
+
+        if (target != hovered)
+        {
+            hovered = target;
             repaint();
         }
     }
@@ -329,7 +606,37 @@ private:
         g.drawHorizontalLine (juce::roundToInt (yForGain (0.0)), 0.0f, width);
     }
 
-    // Each band's dot, filled while it is on, with its number, and the selected one outlined in the accent colour.
+    // Each dynamic band's line from its dot to where its gain goes at its whole Dynamic, in its colour, with a hollow handle at
+    // its end (ringed in the text colour under the pointer) and a mark across it where its gain is now.
+    void paintDynamics (juce::Graphics& g, const Palette& palette)
+    {
+        for (int band = 0; band < Eq::numBands; ++band)
+        {
+            const auto handle = getHandle (band);
+
+            if (! handle.has_value())
+                continue;
+
+            const auto dot = getDot (band);
+            const auto colour = getBandColour (band);
+            const auto lit = hovered == Target { band, true } || (draggingDynamic && dragBand == band);
+            g.setColour (colour.withAlpha (GraphTint::marker));
+            g.drawLine ({ dot, *handle }, GraphTint::handleOutline);
+
+            const auto ring = juce::Rectangle<float> (2.0f * GraphTint::handleRadius, 2.0f * GraphTint::handleRadius).withCentre (*handle);
+            g.setColour (palette.background);
+            g.fillEllipse (ring);
+            g.setColour (lit ? palette.text : colour);
+            g.drawEllipse (lit ? ring.expanded (GraphTint::litGap) : ring, lit ? GraphTint::litWidth : GraphTint::handleOutline);
+
+            const auto markY = getMarkY (band);
+            g.setColour (palette.text);
+            g.drawLine (dot.x - GraphTint::handleRadius, markY, dot.x + GraphTint::handleRadius, markY, GraphTint::litWidth);
+        }
+    }
+
+    // Each band's dot, filled while it is on, with its number (and its placement's letter), and the selected one outlined in
+    // the accent colour.
     void paintDots (juce::Graphics& g, const Palette& palette)
     {
         g.setFont (juce::FontOptions (TextSize::small));
@@ -346,11 +653,11 @@ private:
                 g.fillEllipse (dot);
             }
 
-            const auto selected = band == editor.selectedBand, lit = band == hovered;
+            const auto selected = band == editor.selectedBand, lit = hovered == Target { band, false };
             g.setColour (selected ? palette.accent : (on || lit ? palette.text : palette.textMuted));
             g.drawEllipse (lit ? dot.expanded (1.0f) : dot, selected || lit ? 2.0f : 1.0f);
             g.setColour (on ? getInkFor (colour) : palette.textMuted);
-            g.drawText (juce::String (band + 1), dot, juce::Justification::centred);
+            g.drawFittedText (editor.getDotText (band), dot.toNearestInt(), juce::Justification::centred, 1, 0.6f);
         }
     }
 
@@ -358,10 +665,12 @@ private:
     {
         const auto type = juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)]);
         const auto slope = juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::slope)]);
+        const auto placement = juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::placement)]);
         const auto on = editor.values[(size_t) indexOf (band, Eq::on)] > 0.5f;
         const auto& types = getInfo (indexOf (band, Eq::type)).choices;
         const auto& slopes = getInfo (indexOf (band, Eq::slope)).choices;
-        constexpr int slopeItems = 100, onItem = 200;
+        const auto& placements = getInfo (indexOf (band, Eq::placement)).choices;
+        constexpr int slopeItems = 100, placementItems = 300, onItem = 200, dynamicItem = 400;
 
         juce::PopupMenu menu;
         menu.addSectionHeader ("Band " + juce::String (band + 1));
@@ -375,6 +684,18 @@ private:
 
             for (size_t i = 0; i < slopes.size(); ++i)
                 menu.addItem (slopeItems + (int) i, toString (slopes[i]), true, (int) i == slope);
+        }
+
+        menu.addSeparator();
+
+        for (size_t i = 0; i < placements.size(); ++i)
+            menu.addItem (placementItems + (int) i, toString (placements[i]), true, (int) i == placement);
+
+        // A bell or a shelf that isn't dynamic: Make Dynamic, which gives it a handle to drag.
+        if (hasGain (type) && ! BandValues (editor.values, band).isDynamic())
+        {
+            menu.addSeparator();
+            menu.addItem (dynamicItem, "Make Dynamic");
         }
 
         menu.addSeparator();
@@ -395,6 +716,10 @@ private:
 
                                 if (result == onItem)
                                     set (Eq::on, on ? 0.0f : 1.0f);
+                                else if (result == dynamicItem)
+                                    owner.makeDynamic (band);
+                                else if (result >= placementItems)
+                                    set (Eq::placement, (float) (result - placementItems));
                                 else if (result >= slopeItems)
                                     set (Eq::slope, (float) (result - slopeItems));
                                 else
@@ -417,6 +742,7 @@ EqEditor::EqEditor (const DeviceHandle& handle)
         values.push_back (parameter.defaultValue);
     }
 
+    playing = values;
     graph = std::make_unique<Graph> (*this);
     addAndMakeVisible (*graph);
 
@@ -435,16 +761,17 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     onButton.setTitle ("Band On");
     typeBox.setTitle ("Band Shape");
     slopeBox.setTitle ("Slope");
+    placementBox.setTitle ("Placement");
 
-    for (auto* control :
-         std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob, &outputKnob })
+    for (auto* control : std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &placementBox, &frequencyKnob, &gainKnob,
+                                                                   &qKnob, &dynamicKnob, &thresholdKnob, &outputKnob })
         addAndMakeVisible (control);
 
     // Each knob's name, then what it is set to, where a click types a value.
-    for (const auto* name : { "Frequency", "Gain", "Q", "Output" })
+    for (const auto* name : { "Frequency", "Gain", "Q", "Dynamic", "Threshold", "Output" })
         addLabel (name);
 
-    Knob* const shown[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+    Knob* const shown[] = { &frequencyKnob, &gainKnob, &qKnob, &dynamicKnob, &thresholdKnob, &outputKnob };
 
     for (auto* knob : shown)
     {
@@ -497,6 +824,34 @@ juce::Point<float> EqEditor::getDotPosition (int band) const
     return graph->getDot (band);
 }
 
+std::optional<juce::Point<float>> EqEditor::getDynamicHandlePosition (int band) const
+{
+    return graph->getHandle (band);
+}
+
+void EqEditor::makeDynamic (int band)
+{
+    constexpr float madeDynamic = -6.0f;
+    auto dynamic = device.getParameter (getInfo (indexOf (band, Eq::dynamic)).id, "Make Band " + juce::String (band + 1) + " Dynamic");
+    dynamic.setValue (madeDynamic);
+    refresh();
+}
+
+juce::String EqEditor::getDotText (int band) const
+{
+    return juce::String (band + 1) + getLetter (BandValues (values, band).placement);
+}
+
+std::vector<devices::Equalizer::Placement> EqEditor::getCurvesShown() const
+{
+    return graph->getWays();
+}
+
+float EqEditor::getShownGain (int band) const
+{
+    return playing[(size_t) indexOf (band, Eq::gain)];
+}
+
 int EqEditor::getCurvesWorkedOut() const noexcept
 {
     return graph->getCurvesWorkedOut();
@@ -530,21 +885,30 @@ void EqEditor::selectBand (int band)
     for (auto [control, field] : { std::pair<juce::SettableTooltipClient*, Eq::Field> { &onButton, Eq::on },
                                    { &typeBox, Eq::type },
                                    { &slopeBox, Eq::slope },
+                                   { &placementBox, Eq::placement },
                                    { &frequencyKnob, Eq::frequency },
                                    { &gainKnob, Eq::gain },
-                                   { &qKnob, Eq::q } })
+                                   { &qKnob, Eq::q },
+                                   { &dynamicKnob, Eq::dynamic },
+                                   { &thresholdKnob, Eq::threshold } })
         control->setTooltip (describeParameter (getInfo (indexOf (selectedBand, field)), handleOf (field)));
 
     onAttachment.setParameter (handleOf (Eq::on));
     typeAttachment.setParameter (handleOf (Eq::type));
     slopeAttachment.setParameter (handleOf (Eq::slope));
+    placementAttachment.setParameter (handleOf (Eq::placement));
 
-    showAsParameter (frequencyKnob, getInfo (indexOf (selectedBand, Eq::frequency)));
-    showAsParameter (gainKnob, getInfo (indexOf (selectedBand, Eq::gain)));
-    showAsParameter (qKnob, getInfo (indexOf (selectedBand, Eq::q)));
-    frequencyAttachment.setParameter (handleOf (Eq::frequency));
-    gainAttachment.setParameter (handleOf (Eq::gain));
-    qAttachment.setParameter (handleOf (Eq::q));
+    for (auto [knob, attachment, field] :
+         { std::tuple<Knob*, ParameterAttachment*, Eq::Field> { &frequencyKnob, &frequencyAttachment, Eq::frequency },
+           { &gainKnob, &gainAttachment, Eq::gain },
+           { &qKnob, &qAttachment, Eq::q },
+           { &dynamicKnob, &dynamicAttachment, Eq::dynamic },
+           { &thresholdKnob, &thresholdAttachment, Eq::threshold } })
+    {
+        showAsParameter (*knob, getInfo (indexOf (selectedBand, field)));
+        attachment->setParameter (handleOf (field));
+    }
+
     refresh();
 }
 
@@ -554,31 +918,52 @@ void EqEditor::refresh()
         if (parameters[i].isValid())
             values[i] = parameters[i].getValue();
 
+    // The curves show each dynamic band's gain as it plays now (in steps too small to see, so that a gain at rest draws
+    // nothing new).
+    playing = values;
+    auto* eq = device.getProcessor<Eq>();
+
+    for (int band = 0; band < Eq::numBands; ++band)
+        if (eq != nullptr && BandValues (values, band).isDynamic())
+            playing[(size_t) indexOf (band, Eq::gain)] += std::round (eq->getGainMoved (band) / shownGainStep) * shownGainStep;
+
     onAttachment.update();
     typeAttachment.update();
+    placementAttachment.update();
     frequencyAttachment.update();
     qAttachment.update();
     outputAttachment.update();
 
-    // A cut's slope matters, and a shelf's or bell's gain; the other's control is off, switched off once rather than on by its
-    // attachment and off again at each tick, which repainted it each time.
-    const auto type = juce::roundToInt (values[(size_t) indexOf (selectedBand, Eq::type)]);
+    // A cut's slope matters, and a shelf's or bell's gain, Dynamic and Threshold (the Threshold faint while the Dynamic is 0); the
+    // other's control is off, switched off once rather than on by its attachment and off again at each tick, which repainted it
+    // each time.
+    const BandValues selected (values, selectedBand);
 
-    if (isCut (type))
+    if (isCut (selected.type))
         slopeAttachment.update();
     else
         slopeBox.setEnabled (false);
 
-    if (hasGain (type))
+    if (hasGain (selected.type))
+    {
         gainAttachment.update();
+        dynamicAttachment.update();
+        thresholdAttachment.update();
+        thresholdKnob.setAlpha (std::abs (selected.dynamic) > 0.0f ? 1.0f : GraphTint::partOff);
+    }
     else
+    {
         gainKnob.setEnabled (false);
+        dynamicKnob.setEnabled (false);
+        thresholdKnob.setEnabled (false);
+        thresholdKnob.setAlpha (1.0f);
+    }
 
     for (int band = 0; band < Eq::numBands; ++band)
         bandButtons[band]->setAlpha (values[(size_t) indexOf (band, Eq::on)] > 0.5f ? 1.0f : GraphTint::partOff);
 
     // What each knob is set to, under its name (none for a knob that doesn't apply).
-    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &dynamicKnob, &thresholdKnob, &outputKnob };
 
     for (int i = 0; i < numKnobs; ++i)
         labels[i + numKnobs]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
@@ -586,7 +971,7 @@ void EqEditor::refresh()
 
     auto spectraMoved = false;
 
-    if (auto* eq = device.getProcessor<Eq>())
+    if (eq != nullptr)
     {
         output.setSampleRate (getSampleRate());
         output.pull (eq->getOutputTap());
@@ -605,8 +990,9 @@ void EqEditor::refresh()
         spectraMoved = input.update() || spectraMoved;
     }
 
-    // The curve and its dots over the spectra, repainted when any of them moves.
-    auto numbers = values;
+    // The curves, their dots and the dynamic bands' marks over the spectra, repainted when any of them moves.
+    auto numbers = playing;
+    numbers.insert (numbers.end(), values.begin(), values.end());
     numbers.insert (numbers.end(), { (float) selectedBand, (float) getSampleRate() });
 
     if (drawnGraph.changed (std::move (numbers)) || spectraMoved)
@@ -646,16 +1032,20 @@ void EqEditor::resized()
 
     area.removeFromTop (Space::s);
 
-    // The band's switch and shape, then its slope.
+    // The band's switch and shape, then its slope and its placement side by side.
     auto shapes = area.removeFromTop (controlHeight);
     onButton.setBounds (shapes.removeFromLeft (knobCell));
     typeBox.setBounds (shapes);
     area.removeFromTop (Space::xs);
-    slopeBox.setBounds (area.removeFromTop (controlHeight).withTrimmedLeft (knobCell));
+    auto choices = area.removeFromTop (controlHeight).withTrimmedLeft (knobCell);
+    const auto choiceWidth = (choices.getWidth() - Space::xs) / 2;
+    slopeBox.setBounds (choices.removeFromLeft (choiceWidth));
+    choices.removeFromLeft (Space::xs);
+    placementBox.setBounds (choices);
     area.removeFromTop (Space::s);
 
     // Its knobs, then the output's, each with its name and value.
-    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+    Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &dynamicKnob, &thresholdKnob, &outputKnob };
 
     for (int i = 0; i < numKnobs; ++i)
     {

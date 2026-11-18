@@ -379,6 +379,13 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
             TestWindow window (editor, editor.getWidth(), editor.getHeight());
             const auto dot = editor.getDotPosition (3).roundToInt();
             dragThenEscape (song, window, editor.getGraph(), dot, dot + juce::Point<int> (40, -30));
+
+            // A dynamic band's handle, which drags its Dynamic.
+            song.setParameter (eq, "band4Dynamic", -6.0f);
+            editor.refresh();
+            const auto handle = editor.getDynamicHandlePosition (3);
+            REQUIRE (handle.has_value());
+            dragThenEscape (song, window, editor.getGraph(), handle->roundToInt(), handle->roundToInt() + juce::Point<int> (0, -30));
         }
 
         const auto multiband = song.addEffect (song.firstTrack, phazite::devices::Multiband::typeID);

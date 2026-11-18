@@ -977,6 +977,41 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's EQ with dynamic bands on the middle, the side and the left, a band's placement and "
+               "another's Dynamic automated")
+    {
+        using phazite::devices::Equalizer;
+        TestSong song;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+        const auto eq = song.addEffect (track, Equalizer::typeID);
+
+        // Bands 3, 4 and 5 dynamic, each on a placement of its own, their Thresholds low enough that the tone moves them.
+        for (const auto& [band, placement] : { std::pair { 2, Equalizer::Placement::mid }, std::pair { 3, Equalizer::Placement::side },
+                                               std::pair { 4, Equalizer::Placement::left } })
+        {
+            song.setParameter (eq, getBandParameter (band, Equalizer::placement), (float) placement);
+            song.setParameter (eq, getBandParameter (band, Equalizer::dynamic), -6.0f);
+            song.setParameter (eq, getBandParameter (band, Equalizer::threshold), -60.0f);
+        }
+
+        // Band 6, raised, going through every placement, a beat on each, crossfading as it goes; band 3's Dynamic swept.
+        song.setParameter (eq, getBandParameter (5, Equalizer::gain), 6.0f);
+        song.addAutomation ({ eq, getBandParameter (5, Equalizer::placement) }, { { phazite::BeatPosition(), 0.0f, 0.0f },
+                                                                                  { phazite::BeatPosition::fromBeats (1.0), 1.0f, 0.0f },
+                                                                                  { phazite::BeatPosition::fromBeats (2.0), 2.0f, 0.0f },
+                                                                                  { phazite::BeatPosition::fromBeats (3.0), 3.0f, 0.0f },
+                                                                                  { phazite::BeatPosition::fromBeats (4.0), 4.0f, 0.0f } });
+        song.addAutomation ({ eq, getBandParameter (2, Equalizer::dynamic) },
+                            { { phazite::BeatPosition(), -12.0f, 0.0f }, { phazite::BeatPosition::fromBeats (3.0), 12.0f, 0.0f } });
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's EQ with dynamic bands on the middle, the side and the left, a band's placement and another's Dynamic automated",
+                m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: every kind of modulator, and a macro, moving Phazite's EQ")
     {
         using phazite::devices::Equalizer;

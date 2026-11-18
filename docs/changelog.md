@@ -18,6 +18,12 @@ The full text of every step, as it was written when it was built, is in the
   that a device's latency follows remakes the device once, as the drag ends; however often the mode changes, each
   sample is turned by the mode it came in under and the gain never steps; and the compressor's tail keeps it awake
   until its gain has come back, so that a long release sounds live as it renders.
+- **S6.4 The EQ, part A:** each band plays on the whole sound, its middle, its side, its left or its right, and each
+  bell or shelf can be dynamic, its gain moving with the level of the sound in its band (a de-esser): it holds the
+  loudest of the last 25 ms, rises in 3 ms and falls in 60. The editor gains Placement, Dynamic and Threshold, a
+  handle for the Dynamic with a mark where the gain is now, and the middle's and the side's curves (or the left's
+  and the right's) drawn as they play; six presets under Dynamic and Mid-Side. A dynamic band keeps the EQ awake
+  until its level has fallen, so that live plays as a render. Left of S6.4: linear phase.
 - **S6.6 The Delay:** a time for each side (Link), a Clean loop beside the Tape one and a Feedback to 110 % whose
   echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
   holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power without bending the pitch by more than 10 cents

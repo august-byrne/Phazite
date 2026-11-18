@@ -34026,6 +34026,37 @@
         ]
       },
       {
+        "id": "band1Placement",
+        "name": "Band 1 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band1Dynamic",
+        "name": "Band 1 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band1Threshold",
+        "name": "Band 1 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
+      },
+      {
         "id": "band2On",
         "name": "Band 2 On",
         "unit": "toggle",
@@ -34088,6 +34119,37 @@
           "36 dB/oct",
           "48 dB/oct"
         ]
+      },
+      {
+        "id": "band2Placement",
+        "name": "Band 2 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band2Dynamic",
+        "name": "Band 2 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band2Threshold",
+        "name": "Band 2 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
       },
       {
         "id": "band3On",
@@ -34154,6 +34216,37 @@
         ]
       },
       {
+        "id": "band3Placement",
+        "name": "Band 3 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band3Dynamic",
+        "name": "Band 3 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band3Threshold",
+        "name": "Band 3 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
+      },
+      {
         "id": "band4On",
         "name": "Band 4 On",
         "unit": "toggle",
@@ -34216,6 +34309,37 @@
           "36 dB/oct",
           "48 dB/oct"
         ]
+      },
+      {
+        "id": "band4Placement",
+        "name": "Band 4 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band4Dynamic",
+        "name": "Band 4 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band4Threshold",
+        "name": "Band 4 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
       },
       {
         "id": "band5On",
@@ -34282,6 +34406,37 @@
         ]
       },
       {
+        "id": "band5Placement",
+        "name": "Band 5 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band5Dynamic",
+        "name": "Band 5 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band5Threshold",
+        "name": "Band 5 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
+      },
+      {
         "id": "band6On",
         "name": "Band 6 On",
         "unit": "toggle",
@@ -34344,6 +34499,37 @@
           "36 dB/oct",
           "48 dB/oct"
         ]
+      },
+      {
+        "id": "band6Placement",
+        "name": "Band 6 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band6Dynamic",
+        "name": "Band 6 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band6Threshold",
+        "name": "Band 6 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
       },
       {
         "id": "band7On",
@@ -34410,6 +34596,37 @@
         ]
       },
       {
+        "id": "band7Placement",
+        "name": "Band 7 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band7Dynamic",
+        "name": "Band 7 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band7Threshold",
+        "name": "Band 7 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
+      },
+      {
         "id": "band8On",
         "name": "Band 8 On",
         "unit": "toggle",
@@ -34472,6 +34689,37 @@
           "36 dB/oct",
           "48 dB/oct"
         ]
+      },
+      {
+        "id": "band8Placement",
+        "name": "Band 8 Placement",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Stereo",
+        "choices": [
+          "Stereo",
+          "Mid",
+          "Side",
+          "Left",
+          "Right"
+        ]
+      },
+      {
+        "id": "band8Dynamic",
+        "name": "Band 8 Dynamic",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band8Threshold",
+        "name": "Band 8 Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
       },
       {
         "id": "output",

@@ -17,6 +17,7 @@
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -56,6 +57,33 @@ juce::String knobText (juce::Component& root, const juce::String& title, double 
             return knob->getTextFromValue (value);
 
     return {};
+}
+
+template <typename Control>
+Control* findControl (juce::Component& root, const juce::String& title)
+{
+    for (auto* control : phazite::test::findAll<Control> (root))
+        if (control->getTitle() == title)
+            return control;
+
+    return nullptr;
+}
+
+int countDifferentPixels (const juce::Image& a, const juce::Image& b)
+{
+    auto differ = 0;
+
+    for (int y = 0; y < std::min (a.getHeight(), b.getHeight()); ++y)
+        for (int x = 0; x < std::min (a.getWidth(), b.getWidth()); ++x)
+            if (a.getPixelAt (x, y) != b.getPixelAt (x, y))
+                ++differ;
+
+    return differ;
+}
+
+void setValue (phazite::test::TestSong& song, phazite::DeviceID eq, const char* id, float value)
+{
+    phazite::setValueSetByHand (*phazite::findSong (song.context), phazite::ParameterRef { eq, id }, value);
 }
 } // namespace
 
@@ -325,4 +353,203 @@ TEST_CASE ("The pointer over an EQ band's dot shows it can be grabbed, and the d
                 ++lit;
 
     CHECK (lit > 8);
+}
+
+TEST_CASE ("The EQ's editor has the selected band's Placement, Dynamic and Threshold, the Threshold faint while the Dynamic is 0")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    auto* placement = findControl<juce::ComboBox> (editor, "Placement");
+    auto* dynamic = findControl<phazite::ui::Knob> (editor, "Dynamic");
+    auto* threshold = findControl<phazite::ui::Knob> (editor, "Threshold");
+    REQUIRE (placement != nullptr);
+    REQUIRE (dynamic != nullptr);
+    REQUIRE (threshold != nullptr);
+    CHECK (placement->getNumItems() == 5);
+    CHECK (placement->getText() == juce::String ("Stereo"));
+    CHECK (dynamic->getValue() == doctest::Approx (0.0));
+    CHECK (threshold->getValue() == doctest::Approx (-24.0));
+    CHECK (threshold->isEnabled());
+    CHECK (threshold->getAlpha() < 1.0f);
+    phazite::test::checkChildrenApart (editor);
+
+    // Picking a placement sets the band's, as one undo step.
+    s.getUndoManager().clearUndoHistory();
+    placement->setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (valueOf (s, eq, "band3Placement") == doctest::Approx (1.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Band 3 Placement"));
+
+    // A Dynamic: the Threshold as strong as the rest.
+    setValue (song, eq, "band3Dynamic", -6.0f);
+    editor.refresh();
+    CHECK (dynamic->getValue() == doctest::Approx (-6.0));
+    CHECK (juce::exactlyEqual (threshold->getAlpha(), 1.0f));
+
+    // A cut ignores both.
+    editor.selectBand (0);
+    CHECK_FALSE (dynamic->isEnabled());
+    CHECK_FALSE (threshold->isEnabled());
+    CHECK (placement->isEnabled());
+}
+
+TEST_CASE ("An EQ band off Stereo shows its placement's letter in its dot, and the graph draws the curves of the ways through the EQ")
+{
+    using Placement = Eq::Placement;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    // Every band on Stereo: one curve, and the numbers alone.
+    CHECK (editor.getCurvesShown() == std::vector { Placement::stereo });
+    CHECK (editor.getDotText (2) == juce::String ("3"));
+    const auto paint = [&editor]
+    {
+        auto& graph = editor.getGraph();
+        return graph.createComponentSnapshot (graph.getLocalBounds());
+    };
+
+    const auto oneCurve = paint();
+    const auto workedOut = editor.getCurvesWorkedOut();
+
+    // A band on Mid: the middle's curve and the side's, and an M in its dot.
+    setValue (song, eq, "band3Gain", 6.0f);
+    setValue (song, eq, "band3Placement", (float) Placement::mid);
+    editor.refresh();
+    CHECK (editor.getCurvesShown() == std::vector { Placement::mid, Placement::side });
+    CHECK (editor.getDotText (2) == juce::String ("3M"));
+    const auto twoCurves = paint();
+    CHECK (editor.getCurvesWorkedOut() > workedOut);
+    CHECK (countDifferentPixels (oneCurve, twoCurves) > 100);
+
+    // And one on Left: the left's and the right's too; one on Side, Right: S, R.
+    setValue (song, eq, "band5Placement", (float) Placement::left);
+    setValue (song, eq, "band6Placement", (float) Placement::side);
+    setValue (song, eq, "band7Placement", (float) Placement::right);
+    editor.refresh();
+    CHECK (editor.getCurvesShown() == std::vector { Placement::mid, Placement::side, Placement::left, Placement::right });
+    CHECK (editor.getDotText (4) == juce::String ("5L"));
+    CHECK (editor.getDotText (5) == juce::String ("6S"));
+    CHECK (editor.getDotText (6) == juce::String ("7R"));
+
+    // A band that is off counts for none.
+    for (const auto* on : { "band3On", "band6On" })
+        setValue (song, eq, on, 0.0f);
+
+    editor.refresh();
+    CHECK (editor.getCurvesShown() == std::vector { Placement::left, Placement::right });
+}
+
+TEST_CASE ("A dynamic EQ band's handle drags its Dynamic as one undo step, and its mark and the curve follow its gain as it plays")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    const auto device = phazite::makeDeviceHandle (s, eq);
+    phazite::ui::EqEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    // No handle until the band is dynamic; then one where its gain goes at its whole Dynamic, under its dot.
+    CHECK_FALSE (editor.getDynamicHandlePosition (3).has_value());
+    setValue (song, eq, "band4Gain", 3.0f);
+    setValue (song, eq, "band4Dynamic", -9.0f);
+    editor.refresh();
+    const auto handle = editor.getDynamicHandlePosition (3);
+    REQUIRE (handle.has_value());
+    const auto height = (double) editor.getGraph().getHeight();
+    CHECK (handle->x == doctest::Approx (editor.getDotPosition (3).x));
+    CHECK (handle->y == doctest::Approx ((0.5 - (3.0 - 9.0) / 48.0) * height));
+
+    // Dragged up 30 pixels: the Dynamic up by as many decibels, the band's frequency and gain as they were, one undo step.
+    s.getUndoManager().clearUndoHistory();
+    phazite::test::Mouse mouse (editor.getGraph());
+    mouse.moveTo (handle->roundToInt());
+    CHECK (editor.getGraph().getMouseCursor() == juce::MouseCursor (juce::MouseCursor::UpDownResizeCursor));
+    mouse.press (handle->roundToInt());
+    mouse.dragTo (handle->roundToInt() + juce::Point<int> (0, -30));
+    mouse.release();
+    mouse.pause();
+    CHECK (valueOf (s, eq, "band4Dynamic") == doctest::Approx (-9.0 + 30.0 * 48.0 / height).epsilon (0.01));
+    CHECK (valueOf (s, eq, "band4Gain") == doctest::Approx (3.0f));
+    CHECK (valueOf (s, eq, "band4Frequency") == doctest::Approx (800.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Band 4 Dynamic"));
+    phazite::undo (s);
+    CHECK (valueOf (s, eq, "band4Dynamic") == doctest::Approx (-9.0f));
+    editor.refresh();
+
+    // A loud sound in the band: the gain it plays goes down, and the curve with it.
+    auto* processor = device.getProcessor<Eq>();
+    REQUIRE (processor != nullptr);
+    processor->prepare (48000.0, 480);
+    std::vector<float> values;
+
+    for (const auto& parameter : Eq::info.parameters)
+        values.push_back (valueOf (s, eq, parameter.id.data())); // the IDs are literals
+
+    const auto before = editor.getCurvesWorkedOut();
+    CHECK (editor.getShownGain (3) == doctest::Approx (3.0f));
+    juce::AudioBuffer<float> buffer (2, 480);
+
+    for (int block = 0; block < 50; ++block)
+    {
+        for (int i = 0; i < 480; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                buffer.setSample (channel, i,
+                                  0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 800.0 * (block * 480 + i) / 48000.0));
+
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.parameters = values;
+        processor->process (context);
+    }
+
+    editor.refresh();
+    editor.getGraph().createComponentSnapshot (editor.getGraph().getLocalBounds()); // paints, working the curves out
+    CHECK (editor.getShownGain (3) == doctest::Approx (-6.0f).epsilon (0.02));
+    CHECK (editor.getCurvesWorkedOut() > before);
+}
+
+TEST_CASE ("A small Dynamic's handle, within a dot's reach, is taken where it is pressed; and Make Dynamic gives a band one")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    // Make Dynamic, as the dot's right-click menu offers it: -6 dB, one undo step.
+    s.getUndoManager().clearUndoHistory();
+    editor.makeDynamic (3);
+    CHECK (valueOf (s, eq, "band4Dynamic") == doctest::Approx (-6.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Make Band 4 Dynamic"));
+
+    // A Dynamic of -2 dB: its handle about 12 pixels under the dot, within the dot's reach. Pressed on the handle, the drag
+    // moves the Dynamic; pressed on the dot, the band.
+    setValue (song, eq, "band4Dynamic", -2.0f);
+    editor.refresh();
+    const auto dot = editor.getDotPosition (3);
+    const auto handle = editor.getDynamicHandlePosition (3);
+    REQUIRE (handle.has_value());
+    CHECK (handle->getDistanceFrom (dot) < phazite::ui::GraphTint::dotRadius * 1.5f);
+
+    phazite::test::Mouse mouse (editor.getGraph());
+    mouse.press (handle->roundToInt());
+    mouse.dragTo (handle->roundToInt() + juce::Point<int> (0, 20));
+    mouse.release();
+    mouse.pause();
+    CHECK (valueOf (s, eq, "band4Dynamic") < -3.0f);
+    CHECK (valueOf (s, eq, "band4Frequency") == doctest::Approx (800.0f));
+    CHECK (valueOf (s, eq, "band4Gain") == doctest::Approx (0.0f));
+
+    mouse.press (dot.roundToInt());
+    mouse.dragTo (dot.roundToInt() + juce::Point<int> (0, -20));
+    mouse.release();
+    CHECK (valueOf (s, eq, "band4Gain") > 2.0f);
 }
