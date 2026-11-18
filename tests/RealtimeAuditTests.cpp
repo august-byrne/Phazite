@@ -2048,6 +2048,39 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's reverb on a return as a large hall, its mode moved by a lane through the room, the plate "
+               "and the hall")
+    {
+        TestSong song;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+
+        const auto reverbReturn = song.addReturn (track, phazite::devices::Reverb::typeID);
+        const auto effects = phazite::getEffects (getSong (song), reverbReturn);
+        REQUIRE (effects.size() == 1);
+        song.setParameter (effects.front(), "mode", (float) phazite::devices::Reverb::hall);
+        song.setParameter (effects.front(), "decay", 8.0f);
+        song.setParameter (effects.front(), "size", 1.0f);
+        song.setParameter (effects.front(), "diffusion", 1.0f);
+
+        // A beat each in the room, the plate and the hall, and round again, so that its modes fade into each other all the time.
+        const phazite::ParameterRef mode { effects.front(), "mode" };
+        const auto range = phazite::getControlTravel (getSong (song), mode);
+        REQUIRE (range.has_value());
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            const auto position = phazite::toControlPosition (*range, (float) (beat % 3));
+            phazite::addPoint (getSong (song), mode, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+            phazite::addPoint (getSong (song), mode, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+        }
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's reverb on a return as a large hall, its mode moved by a lane through the room, the plate and the hall", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     // These read audio files, so they only report; but a frozen track plays a file Phazite made, and its steady playback
     // must not allocate either.
 

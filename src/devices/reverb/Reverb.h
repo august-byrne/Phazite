@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's reverb (roadmap step 1.6): a space around the sound, of one of two kinds, as its Mode says.
+// Phazite's reverb (roadmap step 1.6): a space around the sound, of one of three kinds, as its Mode says.
 //
-// A Room, small or a hall as its Size says: after a pre-delay and a few allpass filters that smear the attack, eight delay
+// A Room, small or medium as its Size says: after a pre-delay and a few allpass filters that smear the attack, eight delay
 // lines feed each other through a mixing matrix that keeps the sound's energy (a "feedback delay network"); each line
 // loses the treble faster than the bass, past the damping frequency, as much on a pass as its length asks (so that the
 // tail keeps its colour as it fades), and fades by 60 dB over the decay time. The lines' lengths move a little, each at
@@ -17,7 +17,14 @@
 // sample rate; its Decay is measured, not worked out (the table in Reverb.cpp), since its allpass filters hold the sound
 // longer than its loop alone would say. Its sway is fixed, as the paper's is: enough to break up the tank's ringing.
 //
-// In both, the Diffusion is how far the allpass filters smear the sound (at its middle, as the paper has them), the Damping
+// A Hall, for long tails (roadmap step S6.5): the room's network made longer and denser, so that a decay of many seconds
+// doesn't ring. Six allpass filters smear what comes in, sixteen lines from 66 to 264 ms at the largest Size (2.3 s in all,
+// against the room's 0.53) feed each other through a Hadamard matrix, which shares each line's sound out to every line alike,
+// and an allpass filter in each line's loop smears every pass after the first. Each line's loss and sway are the room's; its
+// damping takes as much a second as every other line's below the damping frequency, where the room's matches at the Nyquist
+// frequency. Its sways run on with the song's samples over a sleep, so that what it plays after one is what a render plays.
+//
+// In all three, the Diffusion is how far the allpass filters smear the sound (at its middle, as the paper has them), the Damping
 // is the frequency past which the treble fades sooner (a low-pass on each pass: the plate's, which its sound passes far less
 // often, two octaves lower, so that where the treble starts to fade it fades as fast in either mode), a low cut keeps
 // rumble out of the tail, a high cut takes its treble, by 12 dB an octave or by a gentle 6 (the plate's own "bandwidth", a
@@ -41,7 +48,8 @@ class Reverb final : public Processor
 {
 public:
     static constexpr const char* typeID = "phaziteReverb";
-    static constexpr int numLines = 8;
+    static constexpr int numLines = 8;      // the room's
+    static constexpr int numHallLines = 16; // the hall's
 
     enum Parameter
     {
@@ -62,17 +70,21 @@ public:
     enum Mode
     {
         room,
-        plate
+        plate,
+        hall
     };
 
     static const DeviceInfo info;
+
+    // The mode the parameters' values in the device's order ask for.
+    static Mode getMode (std::span<const float> parameters);
 
     // How long the tail takes to fade by 60 dB at a frequency, in seconds, for the parameters' values in the device's
     // order: the decay for the bass, less for the treble past the damping frequency. For its editor's graph.
     static double getDecayAt (std::span<const float> parameters, double frequency, double sampleRate);
 
     // The same, adding to lineUpdates the work it took: in its lines' energies worked out, one line's from every line's once
-    // being one. A room's takes 900 to 1,500 at any values (a plate's none): its editor works it
+    // being one. A room's takes 900 to 1,500 at any values, a hall's under 1,000 (a plate's none): its editor works it
     // out for each of its map's pitches when a value changes.
     static double getDecayAt (std::span<const float> parameters, double frequency, double sampleRate, std::int64_t& lineUpdates);
 
@@ -96,6 +108,7 @@ public:
 
 private:
     static constexpr int numDiffusers = 4;
+    static constexpr int numHallDiffusers = 6;
     static constexpr int numTankParts = 4; // in each half: the swaying allpass filter, a delay, an allpass filter, a delay
     static constexpr int numTaps = 7;      // of the tank, for each side
 
@@ -136,6 +149,23 @@ private:
     std::array<dsp::DelayLine, numLines> lines;
     std::array<float, numLines> damped {}, phases {}, phaseSteps {};
 
+    // The hall. Its sways' phases count turns in whole numbers, a turn being 2^32, so that they run on exactly as far over a
+    // sleep as over the samples it slept through.
+    std::array<std::array<Allpass, numHallDiffusers>, 2> hallDiffusers;
+    std::array<dsp::DelayLine, numHallLines> hallLines, hallLoops; // each line, and the allpass filter in its loop
+    std::array<int, numHallLines> hallLoopLengths {};
+    std::array<float, numHallLines> hallDamped {};
+    std::array<float, numHallLines> hallLosses {}, hallDampings {}, hallLoopGains {}; // as they glide, each line's
+    bool hallStarted = false;                                                         // whether those are set, to glide from
+
+    // Each sway moves along a straight line from one point of its sine to the next, swayGrid samples on: the points, and how
+    // far along it is. The phases are the next point's.
+    std::array<std::uint32_t, numHallLines> hallPhases {}, hallPhaseSteps {};
+    std::array<float, numHallLines> hallSwayFrom {}, hallSwayTo {};
+    int hallGridAt = 0;
+    bool hallFollowsSong = false;        // whether the last block played as the song played, so that a gap is a sleep
+    std::int64_t hallNextSongSample = 0; // where the song would be after it
+
     // The plate.
     std::array<dsp::DelayLine, numDiffusers> plateDiffusers;
     std::array<std::array<dsp::DelayLine, numTankParts>, 2> tank;
@@ -173,11 +203,13 @@ private:
     void putOut (float& left, float& right, const Output&, float gain) noexcept;
 
     void processRoom (const ProcessContext&, int numChannels);
+    void processHall (const ProcessContext&, int numChannels);
     void processPlate (const ProcessContext&, int numChannels);
     template <bool glides>
     void playPlate (const ProcessContext&, int numChannels, const PlateValues& from, const PlateValues& to,
                     const std::array<float, numPlateLengths>& lengthSteps);
     void resetRoom();
+    void resetHall();
     void resetPlate();
 };
 } // namespace phazite::devices

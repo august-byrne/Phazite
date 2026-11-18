@@ -77,7 +77,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Saturator](devices/saturator.md) | Effect | Drive into one of six curves, Crush among them, with a colour, a tone tilt and a band, which makes it an exciter too |
 | [Age](devices/age.md) | Effect | What a medium does to a sound, a record or a tape, each of its parts switched on or off |
 | [Delay](devices/delay.md) | Effect | Echoes on a note value or a time for each side, with ping-pong, cuts and a Tape or Clean character in the loop, feedback to 110 %, modulation, ducking, a freeze, and a change of time that glides or fades |
-| [Reverb](devices/reverb.md) | Effect | A room or a plate |
+| [Reverb](devices/reverb.md) | Effect | A room, a plate or a hall, the hall for long tails that don't ring |
 | [Motion](devices/motion.md) | Effect | Three modes swept by an LFO: Chorus, copies of the sound, one to eight voices; Flanger, a swept comb; Phaser, swept notches |
 | [Vocoder](devices/vocoder.md) | Effect | Makes a carrier speak with the voice on its track |
 | [Stereo](devices/stereo.md) | Effect | A channel's two sides: width, bass in mono, balance, mono, swap, polarity, a DC filter and gain |

@@ -41,9 +41,15 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     auto* mode = dynamic_cast<juce::ComboBox*> (editor.findControl ("mode"));
     REQUIRE (mode != nullptr);
     CHECK (mode->getTitle() == juce::String ("Mode"));
-    CHECK (mode->getNumItems() == 2);
+    CHECK (mode->getNumItems() == 3);
     CHECK (mode->getText() == juce::String ("Room"));
     CHECK (editor.getModeText() == juce::String ("Room"));
+
+    // A hall picked: the map names it, and draws its tail.
+    mode->setSelectedItemIndex (Reverb::hall, juce::sendNotificationSync);
+    editor.refresh();
+    CHECK (valueOf ("mode") == (float) Reverb::hall);
+    CHECK (editor.getModeText() == juce::String ("Hall"));
     mode->setSelectedItemIndex (Reverb::plate, juce::sendNotificationSync);
     editor.refresh();
     CHECK (valueOf ("mode") == (float) Reverb::plate);

@@ -37837,11 +37837,12 @@
         "name": "Mode",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 1.0,
+        "maximum": 2.0,
         "default": "Room",
         "choices": [
           "Room",
-          "Plate"
+          "Plate",
+          "Hall"
         ]
       },
       {

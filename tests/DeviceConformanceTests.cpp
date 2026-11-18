@@ -214,8 +214,8 @@ const OnPurpose onPurpose[] = {
 };
 
 // Devices measured once in each of their modes, each under a name of its own, with its mode's choice as if it were the
-// default: Motion, whose modes are three effects that were devices of their own; Age in each medium; and the Delay with its
-// modulation off and on, whose phase follows the song's place.
+// default: Motion, whose modes are three effects that were devices of their own; Age in each medium; the Delay with its
+// modulation off and on, whose phase follows the song's place; and the Reverb as a room and as a hall, whose sways follow it.
 struct Variant
 {
     std::string_view typeID, name, parameterID;
@@ -226,7 +226,8 @@ constexpr Variant variants[] = {
     { "phaziteAge", "Age (Record)", "medium", 0.0f },          { "phaziteAge", "Age (Tape)", "medium", 1.0f },
     { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f },      { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
     { "phaziteMotion", "Motion (Phaser)", "mode", 2.0f },      { "phaziteDelay", "Delay", "modDepth", 0.0f },
-    { "phaziteDelay", "Delay (Modulated)", "modDepth", 0.5f },
+    { "phaziteDelay", "Delay (Modulated)", "modDepth", 0.5f }, { "phaziteReverb", "Reverb", "mode", 0.0f },
+    { "phaziteReverb", "Reverb (Hall)", "mode", 2.0f },
 };
 
 const Exception* findException (const devices::DeviceInfo& info, Rule rule)

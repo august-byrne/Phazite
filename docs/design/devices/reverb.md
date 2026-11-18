@@ -2,8 +2,9 @@
 
 *Design section 9.*
 
-A space around the sound, of one of two kinds: a Room, which is small or a hall as its Size says, or a Plate, the
-studios' sheet of steel. It puts out the tail alone; its Mix blends the tail with the sound.
+A space around the sound, of one of three kinds: a Room, for small and medium spaces, as its Size says; a Plate, the
+studios' sheet of steel; or a Hall, a longer and denser network for long tails, which stay smooth at the longest Decay
+where the Room's ring. It puts out the tail alone; its Mix blends the tail with the sound.
 
 ## Parameters
 
@@ -13,15 +14,15 @@ The editor groups them as Space, Shape and Tone.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Decay | 0.2 to 20 s | 2 s | How long the tail takes to fade by 60 dB: the Room's bass, or the Plate's sound below 1.5 kHz. |
-| Size | 0 to 100 % | 50 % | How large the space is: the Room's lines from a quarter of their longest to all of it, the Plate from 0.4 to 1.6 times its paper's lengths. A change glides. |
+| Decay | 0.2 to 20 s | 2 s | How long the tail takes to fade by 60 dB: the Room's and the Hall's bass, or the Plate's sound below 1.5 kHz. |
+| Size | 0 to 100 % | 50 % | How large the space is: the Room's lines from a quarter of their longest to all of it, the Hall's from 35 % of theirs, the Plate from 0.4 to 1.6 times its paper's lengths. A change glides. |
 
 ### Shape
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Mode | Room, Plate | Room | Which of the two algorithms plays. A change fades the one playing out over 30 ms, then the other in, which starts empty. |
-| Diffusion | 0 to 100 % | 50 % | How far the all-pass filters smear the sound: none at 0 %, the paper's gains at 50 %, the densest at 100 %. |
+| Mode | Room, Plate, Hall | Room | Which of the three algorithms plays. A change fades the one playing out over 30 ms, then the other in, which starts empty. |
+| Diffusion | 0 to 100 % | 50 % | How far the all-pass filters smear the sound: none at 0 %, the paper's gains at 50 %, the densest at 100 %. In the Hall, those in its lines' loops too. |
 | Pre-Delay | 0 to 250 ms | 10 ms | The gap before the tail starts. A change glides. |
 
 ### Tone
@@ -61,7 +62,43 @@ Decay too short for the plate's Size or Diffusion holds them back, and the edito
 low-passes sit two octaves under the Damping, so that the knob means about the same in both modes, and its level is
 matched to the Room's.
 
-Both modes end the same way: the Width through mid and side, the Low Cut, and the High Cut at its slope (12 dB an
+**Hall** is the Room's network made longer and denser, for long tails (roadmap step S6.5). Each side goes through the
+Pre-Delay and six all-pass filters (the Room's four and two shorter ones, 2.37 and 6.13 ms, the right side's 7 % longer),
+into sixteen lines with signs that alternate. The lines' lengths at the largest Size are primes in samples at 48 kHz,
+spread evenly on a logarithmic scale from 66 to 264 ms, and add up to 2.31 s, against the Room's 0.53: about 2.3 modes a
+hertz, where a tail of 10 s needs 1.5 not to ring (Schroeder: about 0.15 a hertz for each second of decay). At the
+smallest Size they are 35 % of that. A Hadamard matrix of order 16 (the fast Walsh-Hadamard transform, scaled by a quarter)
+shares each line's sound out to every line alike. Each line loses on every pass what makes it fade by 60 dB over the
+Decay, as the Room's do, and its treble through the Damping's one-pole; but where the Room matches its lines' dampings at
+the Nyquist frequency, the Hall's take as much a second as each other below the Damping (a one-pole's loss there is nearly
+proportional to 2 (1 - c) / c², which each line's takes in proportion to its length), since its lines, four times as long
+as each other at the most, came sixty times apart a second at 300 Hz under a Damping of 1 kHz, and the short lines rang on.
+In each line's loop, after what the sides hear of it, an all-pass filter a fifth of the line's length at the largest Size
+(a third at half of it; it keeps its length as the Size moves, so that a Size turned doesn't click) smears every pass after
+the first, at a gain of 0.5 at the Diffusion's middle (none at 0 %, never over 0.6, which it reaches at a Diffusion of 70 %, and less for a Decay too short for it,
+as the Plate's all-pass filters). It holds the sound longer than its length on average as the tail fades, which each
+line's loss gives back: for energy fading as e^(-st), an all-pass of gain g and length M keeps as much as a delay of
+g² + (1 - g²)² e^(sM) / (1 - g² e^(sM)) would. Each line's length sways by 0.25 ms at a rate of its own from 0.3 to 0.9 Hz, along straight lines between
+points of its sine 32 samples apart, read by the Room's 4-point Lagrange interpolation; the sways start from the same places
+every time, and run on with the song's samples over a sleep, so that what it plays after one is what a render plays. The
+losses, dampings and gains glide over a block when a value changes. The two sides hear the lines through two orthogonal
+patterns of signs, and its level is matched to the Room's.
+
+What the Hall is for, measured beside the Room at the same settings (`tests/ReverbTests.cpp`; the decays and the ringing
+at 24 kHz, Damping open, Low Cut at 20 Hz):
+
+| Measure | Hall | Room | Target |
+| --- | --- | --- | --- |
+| Decay in the octaves at 250 Hz to 1 kHz, 1 to 20 s, Size 0, 50 and 100 % | 0.98 to 1.02 of it | 0.95 to 1.02 | within 5 % |
+| Decay in the octave at 2 kHz, the same | 0.94 to 1.01 (0.94 at 20 s, Size 0) | 0.80 to 0.99 | within 5 % (not met at 20 s, Size 0: Limits) |
+| Ringing at 10 and 20 s, Size 50 and 100 % (the largest peak of the spectrum of the tail from 1 to 5 s over its third-octave envelope) | 11.2 to 12.5 dB | 15.9 to 17.5 dB | within 4 dB of what decaying noise itself measures (10.1 to 10.5 dB; the Room is 6 to 7 dB over it) |
+| Echo density 0.9 (Abel and Huang) after the Pre-Delay, Size 100 % / 50 % | 95 / 74 ms | 111 / 89 ms | 150 / 80 ms |
+| Correlation of the sides from 200 ms, Width 100 % | under 0.02 | under 0.03 | within 0.2 |
+| Level in 50 ms frames from 300 ms, from a straight line | 0.5 dB at 2 s, 1.5 dB at 10 s | 0.4 / 1.6 dB | within 2 dB |
+| Cost, against the Room's (Debug build) | 1.9 to 2.1 times | 1 | 2.2 times at most |
+| Level of the tail from pink noise at the defaults | -0.14 dB | 0 | within 0.5 dB |
+
+All three modes end the same way: the Width through mid and side, the Low Cut, and the High Cut at its slope (12 dB an
 octave, or a one-pole 6 dB, which is what the plate's own input bandwidth filter comes to). The reverb reports the
 Decay plus the Pre-Delay as its tail and has no latency.
 
@@ -75,9 +112,12 @@ energy flows between the lines as the room plays it, which comes within a tenth 
 in a third-octave band (at two dampings and both ends of Size, 300 Hz to 3 kHz). The flow is worked out without stepping
 through the tail: what is yet to come out is solved for, and where its curve passes each 5 dB from 5 to 25 dB down is
 found by halves, through one step's flow squared again and again, so one pitch costs about the same at any Decay and
-Size (under a twentieth of a millisecond in a Debug build). The map works its 43 pitches out once when a value changes,
-not for each paint. Hits coming in drift into the map and fade. The map's top names the mode, and for a plate what a short Decay
-holds back ("Plate  Diffusion 58%").
+Size (under a twentieth of a millisecond in a Debug build). For the hall, where every line feeds every line alike, the
+flow has a closed form: the energy going into the lines fades as e^(-st) for the s at which the mean over the lines of what
+each keeps on a pass (its loss and its damping at the pitch), times e^(s × its pass) and its all-pass's holding, is 1 (a
+renewal equation), found by halves in at most 768 line updates, 0.01 to 0.03 ms a pitch in a Debug build; it comes within a tenth of the hall's measured third-octave decays (at two dampings and both ends of Size, 300 Hz to
+3 kHz). The map works its 43 pitches out once when a value changes, not for each paint. Hits coming in drift into the map
+and fade. The map's top names the mode, and for a plate what a short Decay holds back ("Plate  Diffusion 58%").
 
 The map's edges drag, each as one undo step: the wedge's end (or a drag anywhere in the tail) for the Decay, the gap
 for the Pre-Delay, the slant's corner for the Damping, the floor for the Low Cut and the ceiling for the High Cut, each
@@ -87,10 +127,17 @@ map are Decay and Size as large knobs, then Mode, Diffusion and Pre-Delay, then 
 
 ## Limits
 
-- Two algorithms, against the dozen or more of Valhalla VintageVerb: no hall, chamber, spring, non-linear or
-  convolution reverb.
+- Three algorithms, against the dozen or more of Valhalla VintageVerb: no chamber, spring, non-linear or convolution
+  reverb.
 - The Room's eight lines add up to 531 ms at the largest Size (332 ms at the default): thin for the long end of its
-  Decay, where a reverb with more or longer lines stays dense. Its sway is fixed and has no control.
+  Decay, where it rings (its tail's spectrum peaks 16 to 17.5 dB over its envelope at 10 and 20 s, against noise's 10 to
+  10.5): the Hall is for those. No mode's sway has a control.
+- The Hall's treble in the octave at 2 kHz fades a little sooner than its Decay at the longest Decays, the more the
+  smaller it is (0.94 of 20 s at Size 0 and 0.95 at 50 %, measured at 24 kHz; 0.90 at Size 0 at 48 kHz): the Damping at its top is a one-pole at 20
+  kHz, which still takes a little of 2 kHz on each pass (0.025 dB at 48 kHz), and a small hall's tail of 20 s goes round
+  400 times. The Room's comes to 0.80 there. A Damping whose top is off would end it.
+- The Room's and the Plate's sways stop while the device sleeps on silence, so what they play after a sleep differs a
+  little from a render (as heard, the same); the Hall's run on.
 - No early reflections apart from the tail, no bass decay multiplier, no freeze, shimmer, gate or ducking, and the
   Pre-Delay doesn't follow the song's tempo.
 - The Plate takes both sides in as one, as the paper does, so a sound panned left reverberates the same as one panned
@@ -103,6 +150,7 @@ map are Decay and Size as large knobs, then Mode, Diffusion and Pre-Delay, then 
 - DSP: `src/devices/reverb/Reverb.h`, `src/devices/reverb/Reverb.cpp`; the delay line and its interpolation,
   `src/devices/dsp/DelayLine.h`; the cuts, `src/devices/dsp/Filters.h`.
 - Editor: `src/ui/devices/ReverbEditor.h`, `src/ui/devices/ReverbEditor.cpp`.
-- Tests: `tests/ReverbTests.cpp`, `tests/ReverbEditorTests.cpp`, `tests/DragPointerTests.cpp` (the map's edges),
-  `tests/RealtimeAuditTests.cpp`, `tests/FactoryPresetTests.cpp`.
+- Tests: `tests/ReverbTests.cpp` (the Room and the Plate beside a copy of their code before the Hall came, and the Hall's
+  measures beside the Room's), `tests/ReverbEditorTests.cpp`, `tests/DragPointerTests.cpp` (the map's edges),
+  `tests/RealtimeAuditTests.cpp`, `tests/DeviceConformanceTests.cpp` (as a Room and as a Hall), `tests/FactoryPresetTests.cpp`.
 - Presets: `resources/presets/Reverb/` ([presets.md](../../presets.md)).

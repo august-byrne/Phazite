@@ -24,6 +24,10 @@ The full text of every step, as it was written when it was built, is in the
   handle for the Dynamic with a mark where the gain is now, and the middle's and the side's curves (or the left's
   and the right's) drawn as they play; six presets under Dynamic and Mid-Side. A dynamic band keeps the EQ awake
   until its level has fallen, so that live plays as a render. Left of S6.4: linear phase.
+- **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
+  through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
+  doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the
+  Room and the Plate play as before; Concert Hall, Cathedral, Endless and Chamber among its presets.
 - **S6.6 The Delay:** a time for each side (Link), a Clean loop beside the Tape one and a Feedback to 110 % whose
   echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
   holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power without bending the pitch by more than 10 cents

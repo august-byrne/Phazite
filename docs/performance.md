@@ -89,6 +89,7 @@ instruments hold their notes. The figure is the share of one core's time.
 | Age, a record (then the Vinyl): stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
 | Delay | 0.14 | 2026-11-16 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
+| Reverb: hall | not measured yet | |
 | Stereo, spreading | 0.27 | 2026-11-16 |
 | Motion, phaser, six notches (then the Phaser) | 0.49 | 2026-11-16 |
 | Motion, flanger (then the Flanger) | 0.20 | 2026-11-16 |

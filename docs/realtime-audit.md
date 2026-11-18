@@ -64,6 +64,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Phazite's limiter on the master, pushed 12 dB, with its meters read | 0 | 0 |
 | Phazite's reverb on a return, with an 8-second decay | 0 | 0 |
 | Phazite's reverb as a plate on a return, large and fully diffused, with an 8-second decay (2026-11-10) | 0 | 0 |
+| Phazite's reverb on a return as a large hall, its mode moved by a lane through the room, the plate and the hall (2026-11-18) | 0 | 0 |
 | MIDI into Phazite's synth, notes overlapping, with noise and its LFO | 0 | 0 |
 | Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart | 0 | 0 |
 | Phazite's synth with osc 2 synced and swept, a square sub, drift, drive, its LFO on the pulse width, a pitch envelope, unison and legato glides (2026-11-08) | 0 | 0 |

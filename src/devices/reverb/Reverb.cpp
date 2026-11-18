@@ -9,17 +9,19 @@
 #include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <tuple>
+#include <utility>
 
 namespace phazite::devices
 {
 namespace
 {
-    constexpr std::string_view modes[] = { "Room", "Plate" };
+    constexpr std::string_view modes[] = { "Room", "Plate", "Hall" };
     constexpr std::string_view slopes[] = { "6 dB", "12 dB" }; // an octave
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
-        { .id = "mode", .name = "Mode", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::choice, .choices = modes },
+        { .id = "mode", .name = "Mode", .maximum = 2.0f, .defaultValue = 0.0f, .unit = Unit::choice, .choices = modes },
         { .id = "size", .name = "Size", .defaultValue = 0.5f, .unit = Unit::percent },
         { .id = "decay",
           .name = "Decay",
@@ -109,9 +111,10 @@ namespace
     // depth, which lengthens it by none to twice that; and its damping one-pole's delay at low frequencies, (1 - c) / c for its
     // coefficient c (6.5 samples at 1 kHz at 44.1 kHz). Each pass's loss is worked out for it, so that the lows fade over the
     // decay time: counted for the length alone, the smallest room's lows rang a percent or two longer than set.
-    double getPassSamples (double lineSamples, double dampingCoefficient, double sampleRate)
+    double getPassSamples (double lineSamples, double dampingCoefficient, double sampleRate,
+                           double swayDepthMilliseconds = modulationMilliseconds)
     {
-        return lineSamples + modulationMilliseconds * 0.001 * sampleRate + (1.0 - dampingCoefficient) / dampingCoefficient;
+        return lineSamples + swayDepthMilliseconds * 0.001 * sampleRate + (1.0 - dampingCoefficient) / dampingCoefficient;
     }
 
     // The low-pass on each pass, y += c (x - y): its coefficient for a frequency, and how much it keeps of a frequency.
@@ -133,6 +136,128 @@ namespace
     {
         const auto kept = std::pow (c / (2.0 - c), shareOfMean);
         return 2.0 * kept / (1.0 + kept);
+    }
+
+    //==============================================================================
+    // The hall's sixteen lines: their lengths at the largest size, in samples at 48 kHz, each a prime, so that no two share a
+    // period, spread evenly on a logarithmic scale from 66 to 264 ms. They add up to 2.31 s: about 2.3 modes a hertz, where a
+    // tail of ten seconds needs 1.5 not to ring (Schroeder: about 0.15 a hertz for each second of decay), and the room's add
+    // up to 0.53 s. At size 0, 35 % of these.
+    // clang-format off
+    constexpr double hallLineSamples[Reverb::numHallLines] = {
+        3169.0, 3469.0, 3803.0, 4177.0, 4583.0, 5023.0, 5519.0, 6053.0,
+        6637.0, 7283.0, 7993.0, 8753.0, 9601.0, 10531.0, 11551.0, 12671.0,
+    };
+    // clang-format on
+    constexpr double hallLengthRate = 48000.0; // the rate the lengths are in
+    constexpr double hallSmallest = 0.35;      // of the largest lengths, at size 0
+
+    // How far each line's length sways, and how fast: slowly, each at a rate of its own, not in the order of their lengths;
+    // from 0.3 to 0.9 Hz, so that each goes round at least once in a few seconds, which breaks up the modes of a long tail.
+    constexpr double hallSwayMilliseconds = 0.25;
+    constexpr double hallSwayHertz[Reverb::numHallLines] = { 0.37, 0.89, 0.41, 0.73, 0.83, 0.47, 0.61, 0.79,
+                                                             0.53, 0.67, 0.31, 0.71, 0.59, 0.86, 0.43, 0.77 };
+    constexpr std::uint32_t hallSwaySeed = 0x4a11c0deu;
+    constexpr double turn = 4294967296.0; // a sway's turn, in its phase's steps
+
+    // The allpass filters before the hall's lines, the right side's a little longer, as the room's: the room's four, and two
+    // shorter ones, so that each line's first round comes out dense sooner. Their gains at the Diffusion's middle, as the
+    // room's are set by it.
+    constexpr double hallDiffuserMilliseconds[] = { 4.77, 3.59, 12.73, 9.30, 2.37, 6.13 };
+    constexpr float hallInputGains[] = { 0.75f, 0.75f, 0.625f, 0.625f, 0.625f, 0.625f };
+
+    // What goes into the lines: each side into every other line, with signs that alternate. What comes out: two orthogonal
+    // patterns, so that the sides are uncorrelated.
+    constexpr float hallInSigns[Reverb::numHallLines] = { 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1 };
+    constexpr float hallLeftSigns[Reverb::numHallLines] = { 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1 };
+    constexpr float hallRightSigns[Reverb::numHallLines] = { 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1 };
+    constexpr float hallLineScale = 0.25f; // 1 / sqrt (numHallLines)
+
+    // So that its tail is as loud as the room's at the same settings: its lines are longer, and each pass gives out less of
+    // what they hold a second.
+    constexpr float hallOutputGain = 1.33f;
+
+    double getHallLineSamples (int line, float size, double sampleRate)
+    {
+        return hallLineSamples[line] * sampleRate / hallLengthRate * (hallSmallest + (1.0 - hallSmallest) * size);
+    }
+
+    // The allpass filter in each line's loop, after what the sides hear of the line, which smears every pass after the first,
+    // so that the tail thickens as it goes round and its modes lie closer: its length in samples at 48 kHz, a prime a fifth of its line's at the largest size (a third at half
+    // of it). It keeps its length as the Size moves, so that a Size turned glides without a click. Its gain is 0.5 at the
+    // Diffusion's middle, none at 0 % (a plain delay) and 0.75 at 100 %, as the allpass filters' that smear what comes in.
+    // clang-format off
+    constexpr double hallLoopSamples[Reverb::numHallLines] = {
+        631.0, 691.0, 761.0, 839.0, 919.0, 1009.0, 1103.0, 1213.0,
+        1327.0, 1459.0, 1601.0, 1753.0, 1913.0, 2111.0, 2311.0, 2531.0,
+    };
+    // clang-format on
+    constexpr float hallLoopGain = 0.5f;
+
+    int getHallLoopSamples (int line, double sampleRate)
+    {
+        return std::max (1, (int) std::lround (hallLoopSamples[line] * sampleRate / hallLengthRate));
+    }
+
+    // An allpass filter of a gain and a length (in seconds) holds what passes through it: a share g^2 comes straight out, and
+    // the rest after one length or more, (1 - g^2)^2 g^(2 (k - 1)) of it after k. For energy that fades as exp (-s t), it gives
+    // out as much as a plain delay of mean[exp (s D)] would keep, D being how long each share is held: g^2 + (1 - g^2)^2
+    // exp (s M) / (1 - g^2 exp (s M)). Its mean is its length, as a plain delay's, but a share held longer weighs more, the more
+    // the faster the energy fades, so a line's loss is worked out with it (its loss times it for a pass is exp (-s pass)).
+    double getAllpassHolding (double gain, double seconds, double s)
+    {
+        const auto g2 = gain * gain, delayed = std::exp (s * seconds);
+        return g2 + (1.0 - g2) * (1.0 - g2) * delayed / std::max (1.0e-9, 1.0 - g2 * delayed);
+    }
+
+    // The gain of a line's allpass filter: as the Diffusion says, but no more than keeps g^2 exp (s M) under 0.36, so that
+    // the holding above stays near what its line's length says (a short decay smears less, as the plate's does).
+    double getHallLoopGain (float diffusion, double allpassSeconds, double decaySeconds)
+    {
+        return std::min ((double) getAllpassGain (hallLoopGain, diffusion), 0.6 * std::pow (10.0, -3.0 * allpassSeconds / decaySeconds));
+    }
+
+    // A hall's line's damping coefficient, for the damping knob's c and the line's length as a share of the lines' mean: as
+    // much treble lost a second as every other line below the damping frequency. A one-pole low-pass of coefficient c takes
+    // 10 log10 (1 + b (1 - cos w)) dB of a frequency w, b = 2 (1 - c) / c^2, nearly b (1 - cos w) times 4.34 below its corner:
+    // a line's b is the knob's times its share. The room's match at the Nyquist frequency (getLineDamping()) gave its sixteen
+    // lines, four times as long as each other at the most, losses at 300 Hz under a damping of 1 kHz sixty times apart a
+    // second: the short lines held the tail, which rang a quarter longer there than its lines' energies said.
+    double getHallLineDamping (double c, double shareOfMean)
+    {
+        const auto b = 2.0 * (1.0 - c) / (c * c) * shareOfMean;
+        return b > 1.0e-12 ? (std::sqrt (1.0 + 2.0 * b) - 1.0) / b : 1.0;
+    }
+
+    // The sways move along straight lines between points this many samples apart, each point on the line's sine: a sine
+    // worked out every 32 samples rather than every sample (the pitch it bends holds for two thirds of a millisecond).
+    constexpr int swayGrid = 32;
+
+    // A sway at a phase (a turn being 2^32), in samples: from none to twice its depth.
+    float getSway (std::uint32_t phase, float depth) noexcept
+    {
+        return depth * (1.0f + dsp::sineOfPhase ((float) phase * (float) (1.0 / turn)));
+    }
+
+    // The Hadamard matrix of order 16, scaled by a quarter so that it keeps the energy, as the fast Walsh-Hadamard transform:
+    // 64 additions where the product would take 256 multiplications.
+    void mixHadamard (std::array<float, Reverb::numHallLines>& x) noexcept
+    {
+        for (size_t half = 1; half < x.size(); half *= 2)
+        {
+            for (size_t start = 0; start < x.size(); start += 2 * half)
+            {
+                for (auto i = start; i < start + half; ++i)
+                {
+                    const auto a = x[i], b = x[i + half];
+                    x[i] = a + b;
+                    x[i + half] = a - b;
+                }
+            }
+        }
+
+        for (auto& each : x)
+            each *= 0.25f;
     }
 
     //==============================================================================
@@ -278,6 +403,11 @@ namespace
 
 const DeviceInfo Reverb::info { .typeID = typeID, .name = "Reverb", .kind = DeviceKind::effect, .parameters = parameters };
 
+Reverb::Mode Reverb::getMode (std::span<const float> values)
+{
+    return static_cast<Mode> (std::clamp ((int) std::lround (values[mode]), (int) room, (int) hall));
+}
+
 Reverb::PlateSetting Reverb::getPlateSetting (std::span<const float> values)
 {
     const auto seconds = (double) values[decay];
@@ -311,7 +441,8 @@ double Reverb::getDecayAt (std::span<const float> values, double frequency, doub
 
 double Reverb::getDecayAt (std::span<const float> values, double frequency, double sampleRate, std::int64_t& lineUpdates)
 {
-    const auto isPlate = values[mode] > 0.5f;
+    const auto kind = getMode (values);
+    const auto isPlate = kind == plate;
     const auto c = getDampingCoefficient (values[damping] * (isPlate ? plateDampingShare : 1.0), sampleRate);
     const auto magnitude = getDampingMagnitude (c, frequency, sampleRate);
 
@@ -324,14 +455,90 @@ double Reverb::getDecayAt (std::span<const float> values, double frequency, doub
         return setting.scale * loopTime * getDecayRatio (loopTime, setting.diffusion);
     }
 
-    // The room as it plays, as energies: each line passes on what it holds at its pass's rate (its pass at this frequency,
-    // its damping's delay there included), keeping what its loss (worked out for its pass at low frequencies) and its own
-    // damping at this frequency leave, and the Householder matrix shares that out, (1 - 2/N)^2 of it back into the same
-    // line and (2/N)^2 into each other; what comes out is what the lines pass on. Its decay is the slope of the energy decay
-    // curve of what comes out from 5 to 25 dB down, as a room's is measured (ISO 3382): the lines that damp less keep much of
-    // their energy to themselves, so the room rings longer than the average of its lines would. With the damping knob's
-    // coefficient taken for every line, as if each had it, the curve was 19 % long at 300 Hz at 1 kHz's damping in the
-    // smallest room (and 19 % short at 1 kHz): a line's own is scaled by its length, and the long lines damp much more.
+    // Each line's pass at this frequency: how much of its energy it keeps, its loss's (worked out for its pass at low
+    // frequencies) and its own damping's at this frequency, and how long it takes, its damping's delay there included.
+    const auto passAt = [&values, frequency, sampleRate] (double lineSamples, double lineDamping, double swayDepthMilliseconds)
+    {
+        const auto omega = juce::MathConstants<double>::twoPi * std::min (frequency, 0.5 * sampleRate) / sampleRate;
+        const auto lowPass = getPassSamples (lineSamples, lineDamping, sampleRate, swayDepthMilliseconds);
+        const auto loss = std::pow (10.0, -3.0 * lowPass / ((double) values[decay] * sampleRate));
+        const auto magnitudeHere = getDampingMagnitude (lineDamping, frequency, sampleRate);
+
+        // The one-pole's group delay at this frequency: (1 - c) / c at 0 Hz, for a = 1 - c.
+        const auto a = 1.0 - lineDamping;
+        const auto delay = (a * std::cos (omega) - a * a) / (1.0 - 2.0 * a * std::cos (omega) + a * a);
+        return std::pair { loss * loss * magnitudeHere * magnitudeHere,
+                           (lowPass - (1.0 - lineDamping) / lineDamping + delay) / sampleRate };
+    };
+
+    if (kind == hall)
+    {
+        // The hall as it plays, as energies: what a line takes in comes out a pass later and as its allpass filter holds it
+        // (getAllpassHolding()), as much as its loss and its damping at this frequency keep, and the Hadamard matrix shares
+        // that out to every line alike, a sixteenth to each. So the energy going into the lines, x (t) = mean over the lines of
+        // what each keeps of x a pass and its allpass's holding before, fades as exp (-s t) for the s at which the mean of kept
+        // holding (s) exp (s pass) is 1: found by halves, from no fading up to the fastest line's own rate (or, sooner, where an
+        // allpass would hold its sound for ever). Where the lines fade as fast a second, as in the lows, it is their rate, and
+        // the decay is as set.
+        constexpr int n = numHallLines;
+        const auto seconds = (double) values[decay];
+        const auto fading = 6.0 * std::log (10.0) / seconds; // the energy's rate, as set
+        std::array<double, n> lengths {}, kept {}, passSeconds {}, allpassSeconds {}, gains {};
+        auto meanSamples = 0.0, high = 0.0;
+
+        for (int line = 0; line < n; ++line)
+        {
+            lengths[(size_t) line] = getHallLineSamples (line, values[size], sampleRate);
+            meanSamples += lengths[(size_t) line] / n;
+        }
+
+        const auto held = [&] (size_t line, double s) { return getAllpassHolding (gains[line], allpassSeconds[line], s); };
+        auto endless = 1.0e9;
+
+        for (size_t line = 0; line < (size_t) n; ++line)
+        {
+            allpassSeconds[line] = getHallLoopSamples ((int) line, sampleRate) / sampleRate;
+            gains[line] = getHallLoopGain (values[diffusion], allpassSeconds[line], seconds);
+            std::tie (kept[line], passSeconds[line]) =
+                passAt (lengths[line], getHallLineDamping (c, lengths[line] / meanSamples), hallSwayMilliseconds);
+            kept[line] /= held (line, fading);
+            high = std::max (high, -std::log (std::max (kept[line], 1.0e-300)) / passSeconds[line]);
+
+            if (gains[line] > 0.0)
+                endless = std::min (endless, -2.0 * std::log (gains[line]) / allpassSeconds[line]);
+        }
+
+        const auto meanKept = [&] (double s)
+        {
+            auto sum = 0.0;
+
+            for (size_t line = 0; line < (size_t) n; ++line)
+                sum += kept[line] * held (line, s) * std::exp (s * passSeconds[line]);
+
+            lineUpdates += n;
+            return sum / n;
+        };
+
+        auto low = 0.0;
+        high = std::min (high, endless * (1.0 - 1.0e-9));
+
+        for (int step = 0; step < 48 && high - low > 1.0e-6 * high; ++step)
+        {
+            const auto middle = 0.5 * (low + high);
+            (meanKept (middle) < 1.0 ? low : high) = middle;
+        }
+
+        const auto s = 0.5 * (low + high);
+        return s > 0.0 ? 6.0 * std::log (10.0) / s : seconds;
+    }
+
+    // The room as it plays, as energies: each line passes on what it holds at its pass's rate, keeping what its loss and its
+    // damping leave, and the Householder matrix shares that out, (1 - 2/N)^2 of it back into the same line and (2/N)^2 into
+    // each other; what comes out is what the lines pass on. Its decay is the slope of the energy decay curve of what comes out
+    // from 5 to 25 dB down, as a room's is measured (ISO 3382): the lines that damp less keep much of their energy to
+    // themselves, so the room rings longer than the average of its lines would. With the damping knob's coefficient taken for
+    // every line, as if each had it, the curve was 19 % long at 300 Hz at 1 kHz's damping in the smallest room (and 19 %
+    // short at 1 kHz): a line's own is scaled by its length, and the long lines damp much more.
     std::array<double, numLines> lengths {}, passSeconds {}, kept {};
     auto meanSamples = 0.0;
 
@@ -341,21 +548,12 @@ double Reverb::getDecayAt (std::span<const float> values, double frequency, doub
         meanSamples += lengths[(size_t) line] / numLines;
     }
 
-    const auto omega = juce::MathConstants<double>::twoPi * std::min (frequency, 0.5 * sampleRate) / sampleRate;
     auto shortestPass = 1.0e9;
 
     for (size_t line = 0; line < (size_t) numLines; ++line)
     {
-        const auto lineDamping = getLineDamping (c, lengths[line] / meanSamples);
-        const auto lowPass = getPassSamples (lengths[line], lineDamping, sampleRate);
-        const auto loss = std::pow (10.0, -3.0 * lowPass / ((double) values[decay] * sampleRate));
-        const auto magnitudeHere = getDampingMagnitude (lineDamping, frequency, sampleRate);
-        kept[line] = loss * loss * magnitudeHere * magnitudeHere;
-
-        // The one-pole's group delay at this frequency: (1 - c) / c at 0 Hz, for a = 1 - c.
-        const auto a = 1.0 - lineDamping;
-        const auto delay = (a * std::cos (omega) - a * a) / (1.0 - 2.0 * a * std::cos (omega) + a * a);
-        passSeconds[line] = (lowPass - (1.0 - lineDamping) / lineDamping + delay) / sampleRate;
+        std::tie (kept[line], passSeconds[line]) =
+            passAt (lengths[line], getLineDamping (c, lengths[line] / meanSamples), modulationMilliseconds);
         shortestPass = std::min (shortestPass, passSeconds[line]);
     }
 
@@ -519,6 +717,29 @@ void Reverb::prepare (double newSampleRate, int)
         }
     }
 
+    // The hall's, as the room's.
+    const auto hallSway = hallSwayMilliseconds * 0.001 * sampleRate;
+
+    for (int line = 0; line < numHallLines; ++line)
+    {
+        hallLines[(size_t) line].prepare ((int) std::ceil (getHallLineSamples (line, 1.0f, sampleRate) + 2.0 * hallSway) + 2);
+        hallLoopLengths[(size_t) line] = getHallLoopSamples (line, sampleRate);
+        hallLoops[(size_t) line].prepare (hallLoopLengths[(size_t) line]);
+        hallPhaseSteps[(size_t) line] = (std::uint32_t) std::llround (hallSwayHertz[line] / sampleRate * turn);
+    }
+
+    for (size_t side = 0; side < 2; ++side)
+    {
+        for (size_t stage = 0; stage < (size_t) numHallDiffusers; ++stage)
+        {
+            auto& allpass = hallDiffusers[side][stage];
+            allpass.length =
+                std::max (1, (int) std::lround (hallDiffuserMilliseconds[stage] * 0.001 * sampleRate * (side == 0 ? 1.0 : rightSpread)));
+            allpass.gain = hallInputGains[stage];
+            allpass.line.prepare (allpass.length);
+        }
+    }
+
     // The plate's lines, each long enough for the largest plate, and the swaying ones for their sway.
     plateSway = (float) (swayMilliseconds * 0.001 * sampleRate);
     platePhaseStep = (float) (swayHertz / sampleRate);
@@ -549,6 +770,7 @@ void Reverb::reset()
     gentleCuts.fill (0.0f);
     gentleShare = -1.0f;
     resetRoom();
+    resetHall();
     resetPlate();
     playing = -1;
     modeLevel = 1.0f;
@@ -571,6 +793,37 @@ void Reverb::resetRoom()
     for (auto& phase : phases)
         phase = random.nextUnipolar();
 
+    shownSize = -1.0f;
+}
+
+void Reverb::resetHall()
+{
+    for (auto& line : hallLines)
+        line.reset();
+
+    for (auto& line : hallLoops)
+        line.reset();
+
+    for (auto& side : hallDiffusers)
+        for (auto& allpass : side)
+            allpass.line.reset();
+
+    hallDamped.fill (0.0f);
+    hallStarted = false;
+
+    // The same starting points every time, so that a render comes out the same: the first sample takes the first line of
+    // each sway from its starting point.
+    dsp::Random random (hallSwaySeed);
+    const auto depth = (float) (hallSwayMilliseconds * 0.001 * sampleRate);
+
+    for (size_t line = 0; line < (size_t) numHallLines; ++line)
+    {
+        hallPhases[line] = random.nextInt();
+        hallSwayTo[line] = getSway (hallPhases[line], depth);
+    }
+
+    hallGridAt = 0;
+    hallFollowsSong = false;
     shownSize = -1.0f;
 }
 
@@ -654,7 +907,7 @@ void Reverb::process (const ProcessContext& block)
         gentleShare = values[highCutSlope] < 0.5f ? 1.0f : 0.0f; // the slope it starts with, at once
 
     // The mode that plays: the one asked for, once the one before it has faded out; it starts empty.
-    const auto wanted = values[mode] > 0.5f ? (int) plate : (int) room;
+    const auto wanted = (int) getMode (values);
 
     if (playing < 0)
     {
@@ -666,6 +919,8 @@ void Reverb::process (const ProcessContext& block)
 
         if (playing == plate)
             resetPlate();
+        else if (playing == hall)
+            resetHall();
         else
             resetRoom();
     }
@@ -681,6 +936,8 @@ void Reverb::process (const ProcessContext& block)
 
     if (playing == plate)
         processPlate (block, numChannels);
+    else if (playing == hall)
+        processHall (block, numChannels);
     else
         processRoom (block, numChannels);
 
@@ -808,6 +1065,209 @@ void Reverb::processRoom (const ProcessContext& block, int numChannels)
         }
 
         putOut (left, right, output, outputGain);
+        block.channels[0][i] = left;
+
+        if (numChannels > 1)
+            block.channels[1][i] = right;
+    }
+}
+
+// The hall: the room's way, with its sixteen lines, its six allpass filters in, and the Hadamard matrix between the lines.
+void Reverb::processHall (const ProcessContext& block, int numChannels)
+{
+    const auto& values = block.parameters;
+    const auto decaySeconds = values[decay];
+    const auto targetPredelay = (float) (values[predelay] * 0.001 * sampleRate);
+    const auto dampingCoefficient = (float) getDampingCoefficient (values[damping], sampleRate);
+    const auto output = makeOutput (values);
+    const auto swayDepth = (float) (hallSwayMilliseconds * 0.001 * sampleRate);
+    constexpr auto gridShare = 1.0f / (float) swayGrid;
+
+    if (shownSize < 0.0f)
+    {
+        shownSize = values[size];
+        shownPredelay = targetPredelay;
+        shownDiffusion = values[diffusion];
+    }
+
+    // The sways run on with the song: a block later than the last one ended, as the song plays (its runner let it sleep on
+    // silence), moves them on as far as the samples it missed, so that live playback and a render, which never sleeps, sway
+    // alike after a sleep: their phases are whole numbers, and the points they move between where the render's are. Its lines
+    // are silent by then: it sleeps only after its tail. Stopped, or the song gone round a loop (a block earlier than the last
+    // one ended), they run on as they are.
+    if (block.isPlaying)
+    {
+        if (hallFollowsSong && block.songSample > hallNextSongSample)
+        {
+            const auto missed = block.songSample - hallNextSongSample;
+            const auto points = (hallGridAt + missed + swayGrid - 1) / swayGrid - (hallGridAt + swayGrid - 1) / swayGrid;
+
+            if (points > 0)
+            {
+                for (size_t line = 0; line < (size_t) numHallLines; ++line)
+                {
+                    const auto gridStep = (std::uint32_t) swayGrid * hallPhaseSteps[line];
+                    hallPhases[line] += (std::uint32_t) ((std::uint64_t) points * gridStep);
+                    hallSwayFrom[line] = getSway (hallPhases[line] - gridStep, swayDepth);
+                    hallSwayTo[line] = getSway (hallPhases[line], swayDepth);
+                }
+            }
+
+            hallGridAt = (int) ((hallGridAt + missed) % swayGrid);
+        }
+
+        hallFollowsSong = true;
+        hallNextSongSample = block.songSample + block.numSamples;
+    }
+    else
+    {
+        hallFollowsSong = false;
+    }
+
+    // Each line's loss and damping, as the room's (processRoom()), but each line's damping takes as much a second as every
+    // other's below the damping frequency (getHallLineDamping()), and its loss gives back what its allpass filter holds of
+    // the sound (getAllpassHolding()).
+    std::array<float, numHallLines> lengths {}, losses {}, dampings {}, loopGains {};
+    auto meanLength = 0.0f;
+
+    for (int line = 0; line < numHallLines; ++line)
+    {
+        lengths[(size_t) line] = (float) getHallLineSamples (line, shownSize, sampleRate);
+        meanLength += lengths[(size_t) line] / (float) numHallLines;
+    }
+
+    const auto fading = 6.0 * std::log (10.0) / (double) decaySeconds;
+
+    for (int line = 0; line < numHallLines; ++line)
+    {
+        const auto allpassSeconds = hallLoopLengths[(size_t) line] / sampleRate;
+        loopGains[(size_t) line] = (float) getHallLoopGain (values[diffusion], allpassSeconds, decaySeconds);
+        dampings[(size_t) line] = (float) getHallLineDamping ((double) dampingCoefficient, (double) (lengths[(size_t) line] / meanLength));
+        const auto pass = getPassSamples (lengths[(size_t) line], dampings[(size_t) line], sampleRate, hallSwayMilliseconds);
+        losses[(size_t) line] = (float) (std::pow (10.0, -3.0 * pass / (decaySeconds * sampleRate))
+                                         / std::sqrt (getAllpassHolding (loopGains[(size_t) line], allpassSeconds, fading)));
+    }
+
+    // The losses, the dampings and the allpass filters' gains glide over the block from where the last one left them, so that
+    // a decay, a size or a diffusion changed doesn't step the sound.
+    if (! hallStarted)
+    {
+        hallLosses = losses;
+        hallDampings = dampings;
+        hallLoopGains = loopGains;
+        hallStarted = true;
+    }
+
+    std::array<float, numHallLines> lossSteps {}, dampingSteps {}, loopGainSteps {};
+    auto glides = false;
+
+    for (size_t line = 0; line < (size_t) numHallLines; ++line)
+    {
+        lossSteps[line] = (losses[line] - hallLosses[line]) / (float) block.numSamples;
+        dampingSteps[line] = (dampings[line] - hallDampings[line]) / (float) block.numSamples;
+        loopGainSteps[line] = (loopGains[line] - hallLoopGains[line]) / (float) block.numSamples;
+        glides = glides || ! juce::exactlyEqual (losses[line], hallLosses[line])
+                 || ! juce::exactlyEqual (dampings[line], hallDampings[line])
+                 || ! juce::exactlyEqual (loopGains[line], hallLoopGains[line]);
+    }
+
+    const auto sizeStep = (values[size] - shownSize) * std::min (1.0f, smoothing * (float) block.numSamples);
+    const auto lengthScale = [] (float shown) { return (float) (hallSmallest + (1.0 - hallSmallest) * shown); };
+    const auto startScale = lengthScale (shownSize), endScale = lengthScale (shownSize + sizeStep);
+    shownSize += sizeStep;
+
+    const auto diffusionFrom = shownDiffusion, diffusionTo = values[diffusion];
+    const auto diffusionMoves = ! juce::exactlyEqual (diffusionFrom, diffusionTo);
+    shownDiffusion = diffusionTo;
+    const auto setDiffusion = [this] (float amount)
+    {
+        for (auto& side : hallDiffusers)
+            for (size_t stage = 0; stage < (size_t) numHallDiffusers; ++stage)
+                side[stage].gain = getAllpassGain (hallInputGains[stage], amount);
+    };
+    setDiffusion (diffusionFrom);
+
+    for (int i = 0; i < block.numSamples; ++i)
+    {
+        const auto along = (float) (i + 1) / (float) block.numSamples;
+
+        if (diffusionMoves)
+            setDiffusion (diffusionFrom + (diffusionTo - diffusionFrom) * along);
+
+        // In: delayed, then smeared, each side on its own.
+        shownPredelay += (targetPredelay - shownPredelay) * smoothing;
+        const auto feed = feedFrom + (feedTo - feedFrom) * along;
+        std::array<float, 2> in {};
+
+        for (size_t side = 0; side < 2; ++side)
+        {
+            const auto sample = block.channels[std::min ((int) side, numChannels - 1)][i];
+            auto& line = predelays[side];
+            line.push (sample);
+            auto diffused = line.read (shownPredelay) * feed;
+
+            for (auto& allpass : hallDiffusers[side])
+                diffused = allpass.process (diffused);
+
+            in[side] = diffused * hallLineScale;
+        }
+
+        // The sways: on to the next point of each sine every swayGrid samples.
+        if (hallGridAt == 0)
+        {
+            for (size_t line = 0; line < (size_t) numHallLines; ++line)
+            {
+                hallSwayFrom[line] = hallSwayTo[line];
+                hallPhases[line] += (std::uint32_t) swayGrid * hallPhaseSteps[line];
+                hallSwayTo[line] = getSway (hallPhases[line], swayDepth);
+            }
+        }
+
+        const auto swayAlong = (float) hallGridAt * gridShare;
+        hallGridAt = (hallGridAt + 1) % swayGrid;
+
+        if (glides)
+        {
+            const auto last = i + 1 == block.numSamples;
+
+            for (size_t line = 0; line < (size_t) numHallLines; ++line)
+            {
+                hallLosses[line] = last ? losses[line] : hallLosses[line] + lossSteps[line];
+                hallDampings[line] = last ? dampings[line] : hallDampings[line] + dampingSteps[line];
+                hallLoopGains[line] = last ? loopGains[line] : hallLoopGains[line] + loopGainSteps[line];
+            }
+        }
+
+        // The network: each line's output, swayed, damped and faded, which each side hears through its pattern of signs;
+        // then through the allpass filter in its loop, and shared out to every line by the Hadamard matrix. The sides hear
+        // each line before its allpass filter, so that a hit comes out of each line as soon as it has gone through it once.
+        const auto scale = startScale + (endScale - startScale) * along;
+        std::array<float, numHallLines> out {};
+        auto left = 0.0f, right = 0.0f;
+
+        for (size_t line = 0; line < (size_t) numHallLines; ++line)
+        {
+            const auto sway = hallSwayFrom[line] + (hallSwayTo[line] - hallSwayFrom[line]) * swayAlong;
+            const auto delay = lengths[line] / startScale * scale + sway;
+            auto& smooth = hallDamped[line];
+            smooth += (hallLines[line].read (delay - 1.0f) - smooth) * hallDampings[line];
+            const auto heard = smooth * hallLosses[line];
+            left += hallLeftSigns[line] * heard;
+            right += hallRightSigns[line] * heard;
+
+            auto& loop = hallLoops[line];
+            const auto gain = hallLoopGains[line];
+            const auto held = loop.read (hallLoopLengths[line] - 1);
+            out[line] = held - gain * heard;
+            loop.push (heard + gain * out[line]);
+        }
+
+        mixHadamard (out);
+
+        for (size_t line = 0; line < (size_t) numHallLines; ++line)
+            hallLines[line].push (out[line] + hallInSigns[line] * in[line % 2]);
+
+        putOut (left, right, output, hallOutputGain);
         block.channels[0][i] = left;
 
         if (numChannels > 1)

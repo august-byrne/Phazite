@@ -382,6 +382,8 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },
         { "Reverb, plate", maker<dev::Reverb>(), &dev::Reverb::info, 0,
           [] (std::vector<float>& v) { v[dev::Reverb::mode] = (float) dev::Reverb::plate; } },
+        { "Reverb, hall", maker<dev::Reverb>(), &dev::Reverb::info, 0,
+          [] (std::vector<float>& v) { v[dev::Reverb::mode] = (float) dev::Reverb::hall; } },
         { "Stereo, spreading", maker<dev::Stereo>(), &dev::Stereo::info, 0, [] (std::vector<float>& v) { v[dev::Stereo::spread] = 1.0f; } },
         { "Motion, phaser, six notches", maker<dev::Motion>(), &dev::Motion::info, 0,
           [] (std::vector<float>& v)

@@ -284,8 +284,9 @@ public:
     juce::String getModeText() const
     {
         const auto& modes = Reverb::info.parameters[Reverb::mode].choices;
-        const auto isPlate = values[Reverb::mode] > 0.5f;
-        const auto name = modes[(size_t) (isPlate ? Reverb::plate : Reverb::room)];
+        const auto kind = Reverb::getMode (values);
+        const auto isPlate = kind == Reverb::plate;
+        const auto name = modes[(size_t) kind];
         juce::String text (name.data(), name.size());
 
         if (isPlate)

@@ -1,0 +1,21 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Reverb",
+    "instrument": false,
+    "type": "phaziteReverb",
+    "parameters": {
+      "mode": "Hall",
+      "size": 1.0,
+      "decay": 20.0,
+      "predelay": 30.0,
+      "diffusion": 0.8,
+      "damping": 4000.0,
+      "lowCut": 120.0,
+      "highCut": 9000.0,
+      "highCutSlope": "6 dB",
+      "width": 1.0,
+      "mix": 0.4
+    }
+  }
+}
