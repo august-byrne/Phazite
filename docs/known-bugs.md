@@ -147,6 +147,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   the time set, and a frozen loop settles at that length. To fix: hold the time read in a double, or set it to the
   time set once what is left is under a hundredth of a sample. Either moves what a project that changes a delay's
   time plays by a few samples; the defaults, which don't glide, stay exact.
+- **203. A Filter asleep on Clean whose Character a lane switches to Driven at a singing Resonance stays silent live**
+  (found in S6.6's reviews, 2026-11-18): a render, which never sleeps, sings there from the lane's switch; live, the
+  filter goes on sleeping, so the song plays without it until sound comes in. Why: a sleeping device doesn't hear its
+  lanes; the runner wakes it only for sound or notes (`src/engine/nodes/DeviceRunner.cpp`, `begin()`). A Driven filter
+  never sleeps (`FilterEffect::sleepsOnSilence()`), but a Clean one that is asleep can't know it has become Driven. To
+  fix: the runner wakes a sleeping device when one of its values changes.
 
 ## Tests
 

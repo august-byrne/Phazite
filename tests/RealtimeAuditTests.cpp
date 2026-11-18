@@ -1564,6 +1564,48 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's filter on the synth's chords, driven, its cutoff swept and its Character and Quality "
+               "automated")
+    {
+        using phazite::devices::FilterEffect;
+        TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        addChords (song, track);
+        const auto filter = song.addEffect (track, FilterEffect::typeID);
+
+        // A low-pass near singing, driven, at half its mix; its cutoff swept by a lane, a cycle a beat; its Character switched
+        // every two beats and its Quality moved from 8x to 4x and 2x and back, a beat each, so that its ways fade into each
+        // other all the time.
+        for (const auto& [id, value] :
+             { std::pair<const char*, float> { "resonance", 0.97f }, { "drive", 18.0f }, { "quality", 2.0f }, { "mix", 0.5f } })
+            song.setParameter (filter, id, value);
+
+        sweepParameter (song, { filter, "cutoff" }, 200.0f, 4000.0f);
+
+        for (const auto& [id, value] : { std::pair<const char*, int> { "character", 2 }, { "quality", 1 } })
+        {
+            const phazite::ParameterRef parameter { filter, id };
+            const auto range = phazite::getControlTravel (getSong (song), parameter);
+            REQUIRE (range.has_value());
+
+            for (int beat = 0; beat < 8; ++beat)
+            {
+                const auto choice = value == 2 ? (float) ((beat / 2) % 2) : (float) (2 - beat % 3);
+                const auto position = phazite::toControlPosition (*range, choice);
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+            }
+        }
+
+        const auto m = playAndMeasure (song, [&song, filter] { getPlayed (song, filter).getScope().setListening (true); });
+        report ("Phazite's filter on the synth's chords, driven near singing, its cutoff swept and its Character and Quality "
+                "automated by lanes, its editor's display listening",
+                m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's Age on the synth's chords, everything on, its medium and each part's switch automated, "
                "its band swept, with its editor listening")
     {

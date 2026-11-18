@@ -54,6 +54,36 @@ struct TapeCurve
     }
 };
 
+// A ceiling at 1 that leaves a sound under half of it alone: straight up to 0.5 (-6 dBFS), then rounding off to 1 as
+// 0.5 + 0.5 tanh (2 (|x| - 0.5)), its slope 1 at the knee as below it, so that it bends without a corner (the Filter's
+// Driven output, after its loop). The integral above the knee is 1/8 + (|x| - 0.5) / 2 + ln cosh (2 (|x| - 0.5)) / 4, the
+// logarithm worked out as u + ln (1 + e^-2u) - ln 2 so that it can't overflow.
+struct KneeCurve
+{
+    static float value (float x) noexcept
+    {
+        const auto a = std::abs (x);
+
+        if (a <= 0.5f)
+            return x;
+
+        const auto bent = 0.5f + 0.5f * std::tanh (2.0f * (a - 0.5f));
+        return x < 0.0f ? -bent : bent;
+    }
+
+    static double integral (double x) noexcept
+    {
+        const auto a = std::abs (x);
+
+        if (a <= 0.5)
+            return 0.5 * x * x;
+
+        const auto u = 2.0 * (a - 0.5);
+        const auto logCosh = u + std::log1p (std::exp (-2.0 * u)) - 0.6931471805599453; // ln 2
+        return 0.125 + 0.5 * (a - 0.5) + 0.25 * logCosh;
+    }
+};
+
 // Clipping at 1.
 struct HardCurve
 {

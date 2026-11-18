@@ -1,0 +1,18 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Filter",
+    "instrument": false,
+    "type": "phaziteFilter",
+    "parameters": {
+      "filterType": "Band Pass",
+      "cutoff": 1200.0,
+      "resonance": 0.95,
+      "filterSlope": "12 dB",
+      "character": "Driven",
+      "drive": 12.0,
+      "quality": "2x",
+      "mix": 1.0
+    }
+  }
+}

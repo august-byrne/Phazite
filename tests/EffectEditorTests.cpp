@@ -30,6 +30,7 @@
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/devices/FilterEditor.h"
+#include "ui/devices/ParameterControls.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/devices/StereoEditor.h"
@@ -150,6 +151,40 @@ TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves acros
         CHECK (song.valueOf ("cutoff") == doctest::Approx (frequencyAt (away.x)).epsilon (0.002));
         CHECK (song.valueOf ("resonance") == doctest::Approx (resonanceAt (away.y)).epsilon (0.002));
     }
+}
+
+TEST_CASE ("The Filter's Character is two buttons, Clean and Driven, a click picking one as one undo step; its Quality a list")
+{
+    Song song (FilterEffect::typeID);
+    phazite::ui::FilterEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto* characters = dynamic_cast<phazite::ui::ChoiceButtons*> (editor.findControl ("character"));
+    REQUIRE (characters != nullptr);
+    REQUIRE (characters->getNumButtons() == 2);
+    CHECK (characters->getButton (0).getToggleState());
+    CHECK (characters->getButton (1).getTitle() == juce::String ("Character: Driven"));
+    CHECK (dynamic_cast<juce::ComboBox*> (editor.findControl ("quality")) != nullptr);
+
+    phazite::test::Mouse mouse (characters->getButton (1));
+    mouse.click (characters->getButton (1).getLocalBounds().getCentre());
+    CHECK (song.valueOf ("character") == doctest::Approx (1.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Character"));
+    CHECK (characters->getButton (1).getToggleState());
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("character") == doctest::Approx (0.0f));
+
+    // Its graph draws Driven's response to a quiet sound: at the top of the Resonance, a peak far off its top.
+    std::vector<float> values;
+
+    for (const auto& parameter : FilterEffect::info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    values[FilterEffect::cutoff] = 1000.0f;
+    values[FilterEffect::resonance] = 1.0f;
+    values[FilterEffect::character] = 1.0f;
+    CHECK (FilterEffect::getMagnitude (values, 1000.0, 48000.0) > 100.0);
+    values[FilterEffect::character] = 0.0f;
+    CHECK (FilterEffect::getMagnitude (values, 1000.0, 48000.0) < 30.0);
 }
 
 TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their curves, and shows how far the sound reaches")

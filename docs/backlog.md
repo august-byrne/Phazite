@@ -35,7 +35,7 @@ and nothing is listed in both.
 |---|---|---|---|---|
 | Modulation and expression in the Synth, the FM synth and the Sampler: more than one free-running LFO with one target, tempo sync, aftertouch, MPE | `src/devices/synth/Synth.cpp` | (XL) | 6 | devices-instruments 4 |
 | Hard sync and the wavetable's warps band-limited; oversampling for the oscillators that need it | `src/devices/synth/Synth.cpp` | (XL) | 6 | devices-instruments 6 |
-| A filter with character: more than the one linear model, self-oscillation, and a Drive that drives instead of lowering the level | `src/devices/dsp/MultimodeFilter.cpp` | (L) | 6 | devices-instruments 7 |
+| The Filter's Driven character for the instruments' filters (the Synth's, the FM synth's, the Sampler's), which share its code and still play Clean; a ladder or a diode model as a third character | `src/devices/dsp/MultimodeFilter.cpp` | (L) | 6 | devices-instruments 7 |
 | Pitch, cutoff, table position and levels glide between control steps instead of stepping every 16 samples | `src/devices/synth/Synth.cpp` | — | 6 | devices-instruments 8 |
 | A wavetable made from a sound file in the background, not on the message thread: since tables keep 16 samples a cycle (S6.7), a file of 256 frames takes 2.7 times as long to make as it did (it was 84 ms in a release build) and 54 MB | `src/model/devices/Wavetables.cpp` | M | 6 | S6.7's part A |
 | Factory presets made again, so that they use what the engines can do | `resources/presets/` | L | 6 | devices-instruments 5, product-gaps 6 |
@@ -44,7 +44,6 @@ and nothing is listed in both.
 | Reverb, after its Hall (S6.5): the Damping's top setting as off (the Hall's 2 kHz octave decays 6 to 10 % short at 20 s and the smallest Size); the Room's and the Plate's sways moved on over a sleep, by a closed form on a gap, so that live plays as a render after one; the Room's losses and dampings gliding when the Decay moves; the Hall's lines cleared at Play only when the Hall plays (0.6 MB a reverb at 48 kHz now); a test of the Diffusion modulated fast under a 20 s tail; the ringing measure averaged over several takes | `src/devices/reverb/Reverb.cpp` | M | 6 | devices-effects 5; S6.5's review |
 | EQ: a linear-phase mode (S6.4's second part), more than eight bands, a sidechain and attack and release controls for its dynamic bands | `src/devices/eq/Equalizer.cpp` | L | 6 | devices-effects 7; mid/side and dynamic bands were built in S6.4 |
 | Delay: reverse, diffusion, a width, a bucket-brigade character, the Tape loop's curve anti-aliased | `src/devices/delay/Delay.cpp` | M | — | devices-effects 8; the rest of that row was built in S6.6 |
-| Oversampling by choice, 4x and 8x, for the Saturator and the Filter | `src/devices/saturation/Saturator.cpp` | (L) | 6 | devices-effects 15 |
 | Stretch modes: a formant switch, re-pitch, and a mode that slices drums at their hits | `src/devices/stretch/Stretch.cpp` | (L) | 5 | devices-effects 6, recording audit |
 | Multiband: its attack, release and curve worked out once a block for each band, not for every sample | `src/devices/dynamics/Multiband.cpp` | — | 6 | devices-effects 13, performance audit |
 | FM synth: four voices at once in SIMD registers, or operators skipped once their envelopes have ended; the Synth's unison voices in SIMD | `src/devices/fm/FmSynth.cpp` | — | — | performance audit |

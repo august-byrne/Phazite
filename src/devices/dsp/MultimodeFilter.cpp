@@ -206,6 +206,117 @@ double getMagnitude (const MultimodeCoefficients& c, double frequency, double sa
 }
 
 //==============================================================================
+namespace
+{
+    // Whether the loop is a 24 dB low-pass's or high-pass's second section, whose Q starts at a fourth-order Butterworth's.
+    bool isButterworthPair (FilterMode mode, bool steep) noexcept
+    {
+        return steep && (mode == FilterMode::lowPass || mode == FilterMode::highPass);
+    }
+
+    // Clean's damping for the loop's section at a Resonance.
+    double getCleanDamping (FilterMode mode, bool steep, double resonance) noexcept
+    {
+        return isButterworthPair (mode, steep) ? 1.0 / (getButterworthQ (4, 1) * std::pow (2.0, 4.0 * resonance))
+                                               : 1.0 / getResonanceQ ((float) resonance);
+    }
+
+    // How much of a sine's amplitude softClip passes as its fundamental, at singingLevel: 1 - 2/9 s^2 + 5/81 s^4 from the
+    // curve's series (x - 8/27 x^3 + 8/81 x^5), good to a hundred-thousandth there. The loop sings where the damping's
+    // fundamental is nothing: kLarge = bend times that, so kSmall = kLarge (1 - 1 / that).
+    constexpr double singingShare = 1.0 - 2.0 / 9.0 * (double) singingLevel * singingLevel
+                                    + 5.0 / 81.0 * (double) singingLevel * singingLevel * singingLevel * singingLevel;
+    constexpr double drivenFromResonance = 0.9; // where the Driven damping leaves Clean's
+} // namespace
+
+float getDrivenLargeDamping (FilterMode mode, bool steep) noexcept
+{
+    return (float) getCleanDamping (mode, steep, 0.0);
+}
+
+float getDrivenDamping (FilterMode mode, bool steep, float resonance) noexcept
+{
+    const auto amount = std::clamp ((double) resonance, 0.0, 1.0);
+
+    if (amount <= drivenFromResonance)
+        return (float) getCleanDamping (mode, steep, amount);
+
+    const auto from = getCleanDamping (mode, steep, drivenFromResonance);
+    const auto singing = (double) getDrivenLargeDamping (mode, steep) * (1.0 - 1.0 / singingShare);
+    return (float) (from + (amount - drivenFromResonance) / (1.0 - drivenFromResonance) * (singing - from));
+}
+
+DrivenCoefficients makeDriven (const FilterSettings& settings, double sampleRate)
+{
+    DrivenCoefficients c;
+    const auto frequency = std::clamp (settings.frequency, 1.0, 0.49 * sampleRate); // tan() grows without bound at Nyquist
+    const auto shape = settings.mode == FilterMode::highPass   ? FilterShape::highPass
+                       : settings.mode == FilterMode::bandPass ? FilterShape::bandPass
+                       : settings.mode == FilterMode::notch    ? FilterShape::notch
+                                                               : FilterShape::lowPass;
+
+    // 24 dB: a linear section in front, as Clean's first: a fourth-order Butterworth's for a low-pass or high-pass, one
+    // alike for a band-pass or notch.
+    if (settings.steep)
+    {
+        c.hasFront = true;
+        c.front = makeFilter (shape, frequency, sampleRate,
+                              isButterworthPair (settings.mode, true) ? getButterworthQ (4, 0) : getResonanceQ (settings.resonance));
+    }
+
+    const auto g = std::tan (juce::MathConstants<double>::pi * frequency / sampleRate);
+    c.g = (float) g;
+    c.a = (float) (1.0 + g * g);
+    c.kLarge = getDrivenLargeDamping (settings.mode, settings.steep);
+    c.kSmall = getDrivenDamping (settings.mode, settings.steep, settings.resonance);
+    c.bend = c.kLarge - c.kSmall;
+    c.bandGain = (float) getCleanDamping (settings.mode, settings.steep, std::clamp ((double) settings.resonance, 0.0, 1.0));
+
+    switch (settings.mode)
+    {
+        case FilterMode::highPass:
+            c.mx = 1.0f;
+            c.mlp = -1.0f;
+            c.md = -1.0f;
+            break;
+
+        case FilterMode::bandPass:
+            c.mv = c.bandGain - c.kSmall;
+            c.mlp = 0.0f;
+            c.md = 1.0f;
+            break;
+
+        case FilterMode::notch:
+            c.mx = 1.0f;
+            c.mlp = 0.0f;
+            c.md = -1.0f;
+            break;
+
+        case FilterMode::lowPass:
+        case FilterMode::combPlus:
+        case FilterMode::combMinus:
+        case FilterMode::vowel:
+        case FilterMode::phaser:
+        case FilterMode::sampleAndHold:
+            break;
+    }
+
+    return c;
+}
+
+double getMagnitude (const DrivenCoefficients& c, double frequency, double sampleRate)
+{
+    // The loop for a quiet sound: a state-variable section with the damping kSmall (a little above 0 where it sings, so that
+    // its peak goes off any scale rather than to nothing).
+    frequency = std::clamp (frequency, 0.0, 0.4999 * sampleRate);
+    const std::complex<double> s (0.0, std::tan (juce::MathConstants<double>::pi * frequency / sampleRate) / (double) c.g);
+    const auto k = std::max ((double) c.kSmall, 1.0e-4);
+    const auto denominator = s * s + k * s + 1.0;
+    const auto loop = (double) c.mx + ((double) c.mv * s + (double) c.mlp + (double) c.md * k * s) / denominator;
+    return std::abs (loop) * (c.hasFront ? getMagnitude (c.front, frequency, sampleRate) : 1.0);
+}
+
+//==============================================================================
 void MultimodeFilter::prepare (int longestCombDelay)
 {
     comb.prepare (longestCombDelay);

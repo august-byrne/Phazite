@@ -113,7 +113,7 @@ and silent (2026-11-16), so its stopped cost there is none.
 |---|---|---|
 | Limiter | 101 | 2026-11-16 |
 | Saturator, at every Quality | 7 | 2026-11-18 |
-| Filter | 6 | 2026-11-16 |
+| Filter, at every Quality | 7 | 2026-11-18 |
 | Compressor | 6 | 2026-11-16 |
 | Multiband | 492 | 2026-11-16 |
 | Age (then the Vinyl) | 531 | 2026-11-16 |

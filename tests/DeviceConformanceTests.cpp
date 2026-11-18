@@ -129,7 +129,7 @@ constexpr Exception exceptions[] = {
       "Its noise (a record's surface, a tape's hiss) plays while the song does, sound or none coming in, until two seconds after "
       "the sound has stopped." },
     { "phaziteFilter", Rule::latency, 2.0,
-      "Its latency is its oversampling's 6 samples; its filter, a low pass at first, delays the lows it passes by its own phase "
+      "Its latency is its oversampling's 7 samples, 8x's, which every Quality takes; its filter, a low pass at first, delays the lows it passes by its own phase "
       "besides, 1.6 samples at 96 kHz. Its copy for the mix, which the filter doesn't touch, is held to the latency by the mix rule." },
     { "phaziteMultiband", Rule::latency, 12.0,
       "Its crossovers turn the phase of what they split (the bands add up to an all-pass), which delays the lows 3 samples at "

@@ -6,6 +6,9 @@
 #include "devices/filter/FilterEffect.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace phazite::ui
 {
 namespace
@@ -107,11 +110,11 @@ public:
 
         const auto type =
             juce::String (getInfo (FilterEffect::filterType).choices[(size_t) juce::roundToInt (values[FilterEffect::filterType])].data());
-        graph::paintReadouts (g, p, area,
-                              type + "  " + graph::formatFrequency (values[FilterEffect::cutoff]) + "  Res "
-                                  + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%",
-                              values[FilterEffect::drive] > 0.05f ? "Drive " + graph::formatDecibels (values[FilterEffect::drive])
-                                                                  : juce::String());
+        graph::paintReadouts (
+            g, p, area,
+            type + (FilterEffect::isDriven (values) ? "  Driven  " : "  ") + graph::formatFrequency (values[FilterEffect::cutoff])
+                + "  Res " + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%",
+            values[FilterEffect::drive] > 0.05f ? "Drive " + graph::formatDecibels (values[FilterEffect::drive]) : juce::String());
     }
 
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
@@ -176,6 +179,34 @@ private:
 };
 
 //==============================================================================
+// The Character part: Clean and Driven as two buttons along its top, over the type, the slope and the drive.
+class FilterEditor::CharacterPart : public juce::Component
+{
+public:
+    CharacterPart (ChoiceButtons& b, ParameterControls& c)
+        : buttons (b),
+          controls (c)
+    {
+        addAndMakeVisible (buttons);
+        addAndMakeVisible (controls);
+    }
+
+    int getPreferredWidth() const { return std::max (buttons.getPreferredWidth(), controls.getPreferredWidth()); }
+    int getPreferredHeight() const { return buttons.getPreferredHeight() + Space::xs + controls.getPreferredHeight(); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        buttons.setBounds (area.removeFromTop (buttons.getPreferredHeight()));
+        area.removeFromTop (Space::xs);
+        controls.setBounds (area);
+    }
+
+private:
+    ChoiceButtons& buttons;
+    ParameterControls& controls;
+};
+
 FilterEditor::FilterEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle)
 {
@@ -183,8 +214,20 @@ FilterEditor::FilterEditor (const DeviceHandle& handle)
     graph = &shown;
 
     const auto sweep = makeControlsPart ("Sweep", { "cutoff", "resonance" }, 2, ParameterControls::Size::large);
-    const auto character = makeControlsPart ("Character", { "filterType", "filterSlope", "drive" }, 3);
-    setParts ({ { { "Response", &shown, 320, 196, 100, true, GraphTint::minimumWidth } }, { sweep, character } });
+
+    auto& characters = keep (std::make_unique<ChoiceButtons> (
+        device, getInfo (FilterEffect::character).id, ChoiceButtons::Direction::across,
+        std::vector<juce::String> {
+            "Clean: the filter is linear, and the drive saturates what goes into it, giving back the gain it adds",
+            "Driven: the drive pushes the sound into the filter's loop, where its resonance saturates: louder and thicker as it is "
+            "driven, and singing on its own at the top of the Resonance (low-pass, high-pass, band-pass and notch)" }));
+    addControl (getInfo (FilterEffect::character).id, characters);
+    auto& knobs = makeControls ({ "filterType", "filterSlope", "drive" }, 3);
+    auto& shownCharacter = keep (std::make_unique<CharacterPart> (characters, knobs));
+    const DeviceLayout::Part character { "Character", &shownCharacter, shownCharacter.getPreferredWidth(),
+                                         shownCharacter.getPreferredHeight(), shownCharacter.getPreferredHeight() };
+    const auto quality = makeControlsPart ("Quality", { "quality" }, 1);
+    setParts ({ { { "Response", &shown, 320, 196, 100, true, GraphTint::minimumWidth } }, { sweep, character, quality } });
 }
 
 FilterEditor::~FilterEditor() = default;

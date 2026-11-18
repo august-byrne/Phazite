@@ -1,0 +1,18 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Filter",
+    "instrument": false,
+    "type": "phaziteFilter",
+    "parameters": {
+      "filterType": "Low Pass",
+      "cutoff": 440.0,
+      "resonance": 1.0,
+      "filterSlope": "12 dB",
+      "character": "Driven",
+      "drive": 0.0,
+      "quality": "2x",
+      "mix": 1.0
+    }
+  }
+}

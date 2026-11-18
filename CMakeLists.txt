@@ -1295,6 +1295,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ExampleSongTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
+        tests/FilterTests.cpp
         tests/FmEditorTests.cpp
         tests/FmSynthTests.cpp
         tests/FrameLogTests.cpp

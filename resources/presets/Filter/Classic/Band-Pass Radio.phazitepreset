@@ -9,7 +9,9 @@
       "cutoff": 1400.0,
       "resonance": 0.1,
       "filterSlope": "12 dB",
+      "character": "Clean",
       "drive": 6.0,
+      "quality": "2x",
       "mix": 1.0
     }
   }

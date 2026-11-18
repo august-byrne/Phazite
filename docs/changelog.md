@@ -32,7 +32,13 @@ The full text of every step, as it was written when it was built, is in the
   echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
   holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power without bending the pitch by more than 10 cents
   (Fade); at its defaults
-  it plays as before, sample for sample, and seven presets join its six. Left of S6.6: the Filter.
+  it plays as before, sample for sample, and seven presets join its six.
+- **S6.6 The Filter:** a Character, Clean (as it played) or Driven, whose drive sits in the filter's loop: the
+  resonance saturates, the top of the Resonance sings in tune at the Cutoff, and a driven sound comes out louder and
+  thicker, through a ceiling that leaves a sound under -6 dBFS alone; a Quality of 2x, 4x or 8x for the drive and the
+  Driven filter, at one latency; a Driven filter never sleeps, so a lane that raises its Resonance makes it sing
+  live as in a render; four presets under Driven. The instruments' filters share its code and still play Clean.
+  This ends S6.6.
 - **S6.6 The Saturator takes the Exciter in:** the Saturator gains a Colour (the curve's working point, for even
   harmonics from any shape), a Crush shape (fewer bits the harder it is driven), a Quality of 2x, 4x or 8x the rate,
   and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the

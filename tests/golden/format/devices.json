@@ -34279,12 +34279,37 @@
         ]
       },
       {
+        "id": "character",
+        "name": "Character",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Clean",
+        "choices": [
+          "Clean",
+          "Driven"
+        ]
+      },
+      {
         "id": "drive",
         "name": "Drive",
         "unit": "decibels",
         "minimum": 0.0,
         "maximum": 24.0,
         "default": 0.0
+      },
+      {
+        "id": "quality",
+        "name": "Quality",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": "2x",
+        "choices": [
+          "2x",
+          "4x",
+          "8x"
+        ]
       },
       {
         "id": "mix",
