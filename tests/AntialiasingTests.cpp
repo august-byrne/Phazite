@@ -196,28 +196,57 @@ TEST_CASE ("The pulse wave is as far above the middle as below it, at any width:
     }
 }
 
-TEST_CASE ("The saturator, driven hard, keeps its aliases down, and what it leaves straight comes out level to 20 kHz")
+TEST_CASE ("The saturator, driven hard, keeps its aliases down, the more the higher its Quality, and what it leaves straight comes "
+           "out level to 20 kHz")
 {
-    for (const auto rate : { 44100.0, 48000.0 })
-    {
-        // A loud tone into the hard clip, 24 dB over it, and into the fold.
-        for (const auto shape : { devices::Saturator::Shape::hard, devices::Saturator::Shape::fold, devices::Saturator::Shape::tube })
-        {
-            auto values = getDefaults (devices::Saturator::info);
-            set (values, devices::Saturator::info, "drive", 24.0f);
-            set (values, devices::Saturator::info, "shape", (float) shape);
-            const auto frequency = onBin (2500.0, rate);
-            devices::Saturator saturator;
-            const auto played = play (saturator, values, rate, fftSize + 4800,
-                                      [&] (int t) { return 0.5f * (float) std::sin (twoPi * frequency * t / rate); });
+    // How far under the tone its loudest alias stays at each Quality, at the worst of a 5 and a 12 kHz tone driven 24 dB into
+    // Hard, Fold and Tube, at 44.1 and 48 kHz (docs/design/devices/saturator.md gives these figures). Each Quality holds to
+    // its figure, less 3 dB, and does better than the one below it.
+    constexpr double figures[] = { 15.4, 36.9, 61.7 }; // measured 2026-11-18
+    double previous = 0.0;
 
-            CAPTURE (rate);
-            CAPTURE ((int) shape);
-            CHECK (getAliasesUnder (played.data() + 4800, frequency, rate) > 50.0);
+    for (int quality = 0; quality < 3; ++quality)
+    {
+        auto worst = 1000.0;
+
+        for (const auto rate : { 44100.0, 48000.0 })
+        {
+            for (const auto hertz : { 5000.0, 12000.0 })
+            {
+                for (const auto shape :
+                     { devices::Saturator::Shape::hard, devices::Saturator::Shape::fold, devices::Saturator::Shape::tube })
+                {
+                    auto values = getDefaults (devices::Saturator::info);
+                    set (values, devices::Saturator::info, "drive", 24.0f);
+                    set (values, devices::Saturator::info, "shape", (float) shape);
+                    set (values, devices::Saturator::info, "quality", (float) quality);
+                    const auto frequency = onBin (hertz, rate);
+                    devices::Saturator saturator;
+                    saturator.takeValuesBeforePrepare (values);
+                    const auto played = play (saturator, values, rate, fftSize + 4800,
+                                              [&] (int t) { return 0.5f * (float) std::sin (twoPi * frequency * t / rate); });
+                    const auto under = getAliasesUnder (played.data() + 4800, frequency, rate);
+                    MESSAGE ("Quality " << quality << ", " << rate << " Hz, " << hertz << " Hz, shape " << (int) shape << ": " << under
+                                        << " dB");
+                    worst = std::min (worst, under);
+                }
+            }
         }
 
-        // A quiet tone, which the curve leaves straight: as loud out as in, at 15 and 20 kHz too (the averaging alone dulled
-        // 20 kHz by 2.4 dB at twice 44.1 kHz).
+        MESSAGE ("Quality " << quality << ": aliases at least " << worst << " dB under the tone");
+        CAPTURE (quality);
+        CHECK (worst > figures[quality] - 3.0);
+
+        if (quality > 0)
+            CHECK (worst > previous);
+
+        previous = worst;
+    }
+
+    // A quiet tone, which the curve leaves straight: as loud out as in, at 15 and 20 kHz too (the averaging alone dulled 20
+    // kHz by 2.4 dB at twice 44.1 kHz).
+    for (const auto rate : { 44100.0, 48000.0 })
+    {
         for (const auto hertz : { 1000.0, 15000.0, 20000.0 })
         {
             auto values = getDefaults (devices::Saturator::info);

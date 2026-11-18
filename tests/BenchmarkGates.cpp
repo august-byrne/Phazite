@@ -213,7 +213,6 @@ const std::map<std::string, double> deviceBounds {
     { "phaziteMultiband",      5.0  }, // 2.458
     { "phaziteLimiter",        1.0  }, // 0.484
     { "phaziteSaturator",      2.4  }, // 1.155
-    { "phaziteExciter",        7.3  }, // 3.620
     { "phaziteVinyl",          4.1  }, // 2.040
     { "phaziteDelay",          0.43 }, // 0.213
     { "phaziteReverb",         2.6  }, // 1.282

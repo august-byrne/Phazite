@@ -10,6 +10,11 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
 
+- **S6.6 The Saturator takes the Exciter in:** the Saturator gains a Colour (the curve's working point, for even
+  harmonics from any shape), a Crush shape (fewer bits the harder it is driven), a Quality of 2x, 4x or 8x the rate,
+  and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the
+  band is kept out. The Exciter goes, its eight presets converted to the Band and measured against it. Left of
+  S6.6: the Filter and the Delay.
 - **S6.10 Motion:** the Chorus, the Flanger and the Phaser become the three modes of one device, Motion, under three
   tabs: one Mix that means the effect alone in every mode (half and half at 50 %), a 10 ms fade between modes, their
   24 presets converted to play as they did, so that Swap tries a chorus, a flanger and a phaser on a sound in place,

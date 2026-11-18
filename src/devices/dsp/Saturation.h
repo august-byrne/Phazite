@@ -73,6 +73,20 @@ struct FoldCurve
     static double integral (double x) noexcept { return 0.6366197723675814 * (1.0 - std::cos (1.5707963267948966 * x)); }
 };
 
+// round (x): steps a whole number apart, for a sound crushed to fewer bits (the saturator's Crush, which scales the sound to
+// its steps before and back after). Within a step the curve is flat at n = round (x), so its integral is a straight line
+// there, n x - n^2 / 2, which meets the next step's at the half step between them, (n + 1/2) n / 2 from either side.
+struct CrushCurve
+{
+    static float value (float x) noexcept { return std::round (x); }
+
+    static double integral (double x) noexcept
+    {
+        const auto n = std::round (x);
+        return n * x - 0.5 * n * n;
+    }
+};
+
 // softClip (x + x^2 / 5): lopsided, so even harmonics too (the DC it leaves is filtered out after). Its integral has no
 // short closed form, so it comes from a table worked out once (the first time a curve of it is made, off the audio thread).
 struct TubeCurve

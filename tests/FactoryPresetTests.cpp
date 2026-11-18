@@ -24,7 +24,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -114,8 +113,6 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Delay>();
     if (type == devices::Saturator::typeID)
         return std::make_unique<devices::Saturator>();
-    if (type == devices::Exciter::typeID)
-        return std::make_unique<devices::Exciter>();
     if (type == devices::Vinyl::typeID)
         return std::make_unique<devices::Vinyl>();
     if (type == devices::FilterEffect::typeID)

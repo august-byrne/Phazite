@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
-// level, the filter's response and the synth's unison. Stereo's have a file of their own (StereoTests.cpp),
-// as the phaser's and the flanger's do (MotionEffectTests.cpp), and the multiband's (MultibandTests.cpp).
+// The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the filter's response and the
+// synth's unison. Stereo's have a file of their own (StereoTests.cpp), as the phaser's and the flanger's do
+// (MotionEffectTests.cpp), the multiband's (MultibandTests.cpp) and the saturator's (SaturatorTests.cpp).
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
@@ -250,45 +250,6 @@ TEST_CASE ("The delay's echo comes exactly as late as its time says, however sho
             CHECK (largest < 1.0e-5f);
         }
     }
-}
-
-TEST_CASE ("The saturator: curves that round peaks off, harmonics when driven, and auto gain that keeps quiet sound level")
-{
-    using Shape = devices::Saturator::Shape;
-
-    for (const auto shape : { Shape::soft, Shape::tape, Shape::tube, Shape::hard })
-    {
-        CHECK (std::abs (devices::Saturator::shapeSample (shape, 0.0f)) < 1.0e-6f);
-        CHECK (devices::Saturator::shapeSample (shape, 0.5f) > devices::Saturator::shapeSample (shape, 0.25f));
-        CHECK (std::abs (devices::Saturator::shapeSample (shape, 10.0f)) <= 1.0f + 1.0e-4f);
-    }
-
-    CHECK (std::abs (devices::Saturator::shapeSample (Shape::fold, 2.0f)) < 1.0e-3f); // folded back down
-
-    // A quiet sine at the default drive, with auto gain: about as loud as it came in.
-    auto values = getDefaults (devices::Saturator::info);
-    devices::Saturator saturator;
-    saturator.prepare (testRate, testBlockSize);
-    const auto quiet = play (saturator, values, 24000, sine (440.0, 0.01f));
-    CHECK (toDecibels (getRms (quiet.left, 12000, 24000)) == doctest::Approx (toDecibels (0.01f / std::sqrt (2.0f))).epsilon (0.03));
-
-    // A loud sine driven hard: its peaks held down, and the third harmonic there.
-    set (values, devices::Saturator::info, "drive", 24.0f);
-    set (values, devices::Saturator::info, "autoGain", 0.0f);
-    saturator.reset();
-    const auto loud = play (saturator, values, 24000, sine (440.0, 0.5f));
-    CHECK (getPeak (loud.left, 12000, 24000) < 1.1f);
-    CHECK (getAmplitudeAt (loud.left, 12000, 24000, 1320.0) > 0.05f);
-    CHECK (saturator.getLatencySamples() >= 0);
-
-    // Its drive goes below 0 dB too, for a gentle bend on a loud sound: a loud sine 18 dB down into the soft curve, without
-    // auto gain, keeps almost all of its shape (its third harmonic 40 dB under it) and comes out 18 dB quieter.
-    set (values, devices::Saturator::info, "drive", -18.0f);
-    saturator.reset();
-    const auto gentle = play (saturator, values, 24000, sine (440.0, 0.5f));
-    CHECK (getAmplitudeAt (gentle.left, 12000, 24000, 1320.0) < 0.01f * getAmplitudeAt (gentle.left, 12000, 24000, 440.0));
-    CHECK (toDecibels (getRms (gentle.left, 12000, 24000))
-           == doctest::Approx (toDecibels (0.5f / std::sqrt (2.0f)) - 18.0f).epsilon (0.03));
 }
 
 TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass shapes that fall as steeply as their slope")

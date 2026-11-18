@@ -32,7 +32,6 @@
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/stretch/Stretch.h"
@@ -345,9 +344,15 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Multiband", maker<dev::Multiband>(), &dev::Multiband::info },
         { "Limiter", maker<dev::Limiter>(), &dev::Limiter::info },
         { "Saturator", maker<dev::Saturator>(), &dev::Saturator::info },
-        { "Exciter", maker<dev::Exciter>(), &dev::Exciter::info },
-        { "Exciter, its band from 1 kHz", maker<dev::Exciter>(), &dev::Exciter::info, 0,
-          [] (std::vector<float>& v) { v[dev::Exciter::frequency] = 1000.0f; } },
+        { "Saturator, its Band from 1 to 8 kHz, Tube with Colour", maker<dev::Saturator>(), &dev::Saturator::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Saturator::band] = 1.0f;
+              v[dev::Saturator::bandLow] = 1000.0f;
+              v[dev::Saturator::bandHigh] = 8000.0f;
+              v[dev::Saturator::shape] = (float) dev::Saturator::Shape::tube;
+              v[dev::Saturator::colour] = 0.5f;
+          } },
         { "Vinyl", maker<dev::Vinyl>(), &dev::Vinyl::info },
         { "Vinyl, playing, everything on", maker<dev::Vinyl>(), &dev::Vinyl::info, 0,
           [] (std::vector<float>& v)
@@ -440,7 +445,6 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
         { &dev::Multiband::info, maker<dev::Multiband>() },
         { &dev::Limiter::info, maker<dev::Limiter>() },
         { &dev::Saturator::info, maker<dev::Saturator>() },
-        { &dev::Exciter::info, maker<dev::Exciter>() },
         { &dev::Vinyl::info, maker<dev::Vinyl>() },
         { &dev::Delay::info, maker<dev::Delay>() },
         { &dev::Reverb::info, maker<dev::Reverb>() },

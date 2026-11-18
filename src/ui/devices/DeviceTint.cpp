@@ -8,7 +8,6 @@
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/vinyl/Vinyl.h"
@@ -29,10 +28,9 @@ DeviceFamily getDeviceFamily (std::string_view typeID)
         { devices::Compressor::typeID, DeviceFamily::dynamics }, { devices::Limiter::typeID, DeviceFamily::dynamics },
         { devices::Multiband::typeID, DeviceFamily::dynamics },  { devices::Equalizer::typeID, DeviceFamily::tone },
         { devices::FilterEffect::typeID, DeviceFamily::tone },   { devices::Saturator::typeID, DeviceFamily::drive },
-        { devices::Exciter::typeID, DeviceFamily::drive },       { devices::Delay::typeID, DeviceFamily::space },
-        { devices::Reverb::typeID, DeviceFamily::space },        { devices::Motion::typeID, DeviceFamily::motion },
-        { devices::Stereo::typeID, DeviceFamily::stereo },       { devices::Vocoder::typeID, DeviceFamily::voice },
-        { devices::Vinyl::typeID, DeviceFamily::drive },
+        { devices::Delay::typeID, DeviceFamily::space },         { devices::Reverb::typeID, DeviceFamily::space },
+        { devices::Motion::typeID, DeviceFamily::motion },       { devices::Stereo::typeID, DeviceFamily::stereo },
+        { devices::Vocoder::typeID, DeviceFamily::voice },       { devices::Vinyl::typeID, DeviceFamily::drive },
     };
 
     for (const auto& entry : entries)

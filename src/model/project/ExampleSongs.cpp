@@ -13,7 +13,6 @@
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -831,7 +830,7 @@ namespace
         const auto supersaw = song.addTrack ("Supersaw", "Bluish green");
         song.setInstrument (supersaw, devices::WavetableSynth::typeID, "Wavetable/Pluck/Octave Supersaw Pluck");
         song.addEffect (supersaw, devices::Limiter::typeID, "Limiter/Mixing/Dense Squeeze");
-        song.addEffect (supersaw, devices::Exciter::typeID, "Exciter/Creative/Saturated Highs");
+        song.addEffect (supersaw, devices::Saturator::typeID, "Saturator/Exciter/Saturated Highs");
         song.addEffect (supersaw, devices::Limiter::typeID, "Limiter/Mixing/Drum Bus Shaver");
         song.addEffect (supersaw, devices::Reverb::typeID, "Reverb/Plates/Dark Plate");
         song.addNotes (supersaw, notes, part ("Arp", up - 12), 4);

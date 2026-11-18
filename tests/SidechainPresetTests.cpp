@@ -20,7 +20,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"

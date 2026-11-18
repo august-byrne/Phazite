@@ -22,7 +22,6 @@
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -45,7 +44,6 @@
 #include "ui/devices/DrumSamplerEditor.h"
 #include "ui/devices/DynamicsCurve.h"
 #include "ui/devices/EqEditor.h"
-#include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
 #include "ui/devices/LevelHistoryView.h"
 #include "ui/devices/LimiterEditor.h"
@@ -54,6 +52,7 @@
 #include "ui/devices/MultibandEditor.h"
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SamplerEditor.h"
+#include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/StereoEditor.h"
 #include "ui/devices/SynthEditor.h"
 #include "ui/devices/SynthParts.h"
@@ -455,6 +454,19 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
             auto& graph = screen.find (title);
             const auto centre = graph.getLocalBounds().getCentre();
             dragThenEscape (song, *screen.window, graph, centre, centre + juce::Point<int> (40, -30));
+        }
+
+        // The saturator's band's edges.
+        const auto saturator = song.addEffect (song.firstTrack, phazite::devices::Saturator::typeID);
+        {
+            phazite::ui::SaturatorEditor editor (phazite::getDeviceHandle (song.context, saturator));
+            TestWindow window (editor, editor.getWidth(), editor.getHeight());
+            auto& view = editor.getBandView();
+            const auto y = view.getHeight() / 2;
+            const juce::Point<int> from (juce::roundToInt (editor.getEdgeX (false)), y),
+                to (juce::roundToInt (editor.getEdgeX (true)) - 1, y);
+            dragThenEscape (song, window, view, from, from - juce::Point<int> (30, 0));
+            dragThenEscape (song, window, view, to, to - juce::Point<int> (40, 0));
         }
 
         const auto compressor = song.addEffect (song.firstTrack, phazite::devices::Compressor::typeID);
@@ -1153,8 +1165,8 @@ TEST_CASE ("A click on a device's graph leaves the keyboard's focus where it was
     screen.registry.removeListener (&invoked);
 }
 
-TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each motion effect's and the exciter's dot take their "
-           "handles as every graph does")
+TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each motion effect's dot take their handles as every "
+           "graph does")
 {
     TestSong song;
 
@@ -1198,7 +1210,7 @@ TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each
         CHECK (valueOf (song, sampler, "loopEnd") - valueOf (song, sampler, "loopStart") == doctest::Approx (0.25f).epsilon (0.01));
     }
 
-    SUBCASE ("The dots of Motion's chorus, flanger and phaser, and the exciter's (GraphDot)")
+    SUBCASE ("The dots of Motion's chorus, flanger and phaser (GraphDot)")
     {
         using phazite::devices::Motion;
 
@@ -1218,9 +1230,6 @@ TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each
             { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::chorus },
             { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::flanger },
             { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::phaser },
-            { phazite::devices::Exciter::typeID,
-              [] (juce::Component& e) -> juce::Component& { return dynamic_cast<phazite::ui::ExciterEditor&> (e).getGraph(); },
-              [] (juce::Component& e) { return dynamic_cast<phazite::ui::ExciterEditor&> (e).getDotPosition(); } },
         };
 
         for (const auto& c : cases)

@@ -14,7 +14,6 @@
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -376,11 +375,13 @@ TEST_SUITE ("golden")
                      "Phazite's saturator driven 24 dB, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's exciter on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's saturator's band, driven and lifted, on a beat and stabs")
     {
-        checkEffect (phazite::devices::Exciter::typeID, "effect-exciter",
-                     { { "frequency", 2000.0f }, { "drive", 24.0f }, { "amount", 2.0f } },
-                     "Phazite's exciter, its band from 2 kHz driven 24 dB and added twice over, on a beat and chord stabs.");
+        checkEffect (
+            phazite::devices::Saturator::typeID, "effect-saturator-band",
+            { { "band", 1.0f }, { "bandLow", 2000.0f }, { "drive", 24.0f }, { "colour", 0.5f }, { "output", 9.5f }, { "quality", 1.0f } },
+            "Phazite's saturator with its band from 2 kHz driven 24 dB, lopsided, and lifted 9.5 dB, at 4x, on a beat and chord "
+            "stabs: what the exciter did.");
     }
 
     TEST_CASE ("Golden render: Phazite's vinyl on a beat and stabs")

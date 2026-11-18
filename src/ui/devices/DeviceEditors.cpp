@@ -4,7 +4,6 @@
 #include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
 #include "EqEditor.h"
-#include "ExciterEditor.h"
 #include "FilterEditor.h"
 #include "FmEditor.h"
 #include "LimiterEditor.h"
@@ -29,7 +28,6 @@
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -91,9 +89,6 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Saturator::typeID)
         return std::make_unique<SaturatorEditor> (device);
-
-    if (info->typeID == devices::Exciter::typeID)
-        return std::make_unique<ExciterEditor> (device);
 
     if (info->typeID == devices::Vinyl::typeID)
         return std::make_unique<VinylEditor> (device);

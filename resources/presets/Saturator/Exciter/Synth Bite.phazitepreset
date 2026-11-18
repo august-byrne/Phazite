@@ -1,0 +1,21 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Saturator",
+    "instrument": false,
+    "type": "phaziteSaturator",
+    "parameters": {
+      "drive": 13.24,
+      "shape": "Soft",
+      "colour": 0.35,
+      "tone": 0.0,
+      "output": 4.08,
+      "autoGain": 1,
+      "band": 1,
+      "bandLow": 3150.0,
+      "bandHigh": 16000.0,
+      "quality": "2x",
+      "mix": 1.0
+    }
+  }
+}

@@ -36954,15 +36954,24 @@
         "name": "Shape",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 4.0,
+        "maximum": 5.0,
         "default": "Soft",
         "choices": [
           "Soft",
           "Tape",
           "Tube",
           "Hard",
-          "Fold"
+          "Fold",
+          "Crush"
         ]
+      },
+      {
+        "id": "colour",
+        "name": "Colour",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
       },
       {
         "id": "tone",
@@ -36989,62 +36998,43 @@
         "default": 1.0
       },
       {
-        "id": "mix",
-        "name": "Mix",
-        "unit": "percent",
+        "id": "band",
+        "name": "Band",
+        "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 1.0
-      }
-    ]
-  },
-  {
-    "type": "phaziteExciter",
-    "name": "Exciter",
-    "kind": "effect",
-    "parameters": [
+        "default": 0.0
+      },
       {
-        "id": "frequency",
-        "name": "Frequency",
+        "id": "bandLow",
+        "name": "From",
         "unit": "hertz",
-        "minimum": 1000.0,
-        "maximum": 12000.0,
-        "default": 5000.0,
+        "minimum": 20.0,
+        "maximum": 10000.0,
+        "default": 3000.0,
         "scale": "logarithmic"
       },
       {
-        "id": "drive",
-        "name": "Drive",
-        "unit": "decibels",
-        "minimum": 0.0,
-        "maximum": 36.0,
-        "default": 18.0
-      },
-      {
-        "id": "colour",
-        "name": "Colour",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.5
-      },
-      {
-        "id": "amount",
-        "name": "Amount",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 4.0,
-        "default": 0.349999994039536,
-        "midpoint": 0.5
-      },
-      {
-        "id": "highCut",
-        "name": "High Cut",
+        "id": "bandHigh",
+        "name": "To",
         "unit": "hertz",
-        "minimum": 2000.0,
+        "minimum": 200.0,
         "maximum": 20000.0,
         "default": 20000.0,
         "scale": "logarithmic"
+      },
+      {
+        "id": "quality",
+        "name": "Quality",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": "2x",
+        "choices": [
+          "2x",
+          "4x",
+          "8x"
+        ]
       },
       {
         "id": "mix",

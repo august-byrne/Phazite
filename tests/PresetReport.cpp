@@ -3,7 +3,7 @@
 // checks them (docs/presets.md): each played as one note at its kind's pitch, at velocity 100 and again at 50 (for what
 // velocity does), measured for its level, loudness, attack, decay, release, brightness as it goes on, pitch and width; each
 // kit's pads one at a time; how far and how long each sidechain preset ducks a sound under each kit's kick; how much each
-// saturator preset colours a sine; how far each exciter preset lifts each octave of noise at three levels; what each vinyl
+// saturator preset colours a sine; how far each saturator preset with its band on lifts each octave of noise at three levels; what each vinyl
 // preset does to the pitch, the band and the sides, and its noise; and each EQ preset's response, band by band. It writes a
 // report and WAV files to listen to: the note, and a phrase of its kind of
 // sound (a bass line, a melody, chords, an arpeggio, a beat), and a pad pumping under each kick. ctest and CI skip it; run
@@ -21,7 +21,6 @@
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/SampleAnalysis.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
@@ -630,13 +629,13 @@ float measureDistortion (const Preset& preset, float peakDecibels)
 }
 
 //==============================================================================
-// The exciter's presets: how far each lifts the octaves around 2, 4, 8 and 16 kHz of pink noise at a level (its RMS, in
+// The saturator's presets with their band on (the exciter's among them): how far each lifts the octaves around 2, 4, 8 and 16 kHz of pink noise at a level (its RMS, in
 // dBFS), in decibels: what comes out against what went in, in each octave, over 65536 samples after half a second. The
-// louder the noise, the further its top reaches into the exciter's curve, which holds it down and makes harmonics of it
+// louder the noise, the further its band reaches into the saturator's curve, which holds it down and makes harmonics of it
 // instead: so a preset that lifts less as the level rises is one that saturates there.
-constexpr double exciterOctaves[] = { 2000.0, 4000.0, 8000.0, 16000.0 };
+constexpr double bandOctaves[] = { 2000.0, 4000.0, 8000.0, 16000.0 };
 
-std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset, float rmsDecibels)
+std::array<float, std::size (bandOctaves)> measureLift (const Preset& preset, float rmsDecibels)
 {
     constexpr int order = 16, size = 1 << order;
     const auto numSamples = at (0.5) + size;
@@ -662,8 +661,9 @@ std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset,
     dry.copyFrom (1, 0, dry, 0, 0, numSamples);
     audio.makeCopyOf (dry);
 
-    devices::Exciter exciter;
-    exciter.prepare (rate, blockSize);
+    devices::Saturator saturator;
+    saturator.takeValuesBeforePrepare (preset.values);
+    saturator.prepare (rate, blockSize);
 
     for (int done = 0; done < numSamples; done += blockSize)
     {
@@ -674,7 +674,7 @@ std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset,
         context.numSamples = std::min (blockSize, numSamples - done);
         context.parameters = preset.values;
         context.isPlaying = true;
-        exciter.process (context);
+        saturator.process (context);
     }
 
     // Each one's power in each octave.
@@ -688,12 +688,12 @@ std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset,
                 sound.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
 
         juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
-        std::array<double, std::size (exciterOctaves)> powers {};
+        std::array<double, std::size (bandOctaves)> powers {};
 
-        for (size_t octave = 0; octave < std::size (exciterOctaves); ++octave)
+        for (size_t octave = 0; octave < std::size (bandOctaves); ++octave)
         {
-            const auto from = (int) std::lround (exciterOctaves[octave] / std::sqrt (2.0) * size / rate);
-            const auto to = std::min (size / 2, (int) std::lround (exciterOctaves[octave] * std::sqrt (2.0) * size / rate));
+            const auto from = (int) std::lround (bandOctaves[octave] / std::sqrt (2.0) * size / rate);
+            const auto to = std::min (size / 2, (int) std::lround (bandOctaves[octave] * std::sqrt (2.0) * size / rate));
 
             for (int bin = from; bin < to; ++bin)
                 powers[octave] += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
@@ -703,7 +703,7 @@ std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset,
     };
 
     const auto in = octavePowers (dry), out = octavePowers (audio);
-    std::array<float, std::size (exciterOctaves)> lifts {};
+    std::array<float, std::size (bandOctaves)> lifts {};
 
     for (size_t octave = 0; octave < lifts.size(); ++octave)
         lifts[octave] = toDecibels (std::sqrt (out[octave] / in[octave]));
@@ -1228,22 +1228,23 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
                             + decibels (measureDistortion (*effect, -12.0f)) + " | " + decibels (measureDistortion (*effect, -6.0f))
                             + " |");
 
-    // The exciter's presets, each on pink noise at three levels.
-    juce::StringArray exciterLines;
-    exciterLines.add ({});
-    exciterLines.add ("## Exciter presets, what they add");
-    exciterLines.add ({});
-    exciterLines.add ("Each on pink noise at -30, -18 and -6 dBFS (RMS): how far it lifts the octaves around 2, 4, 8 and 16 kHz, in dB. "
-                      "Where the lift falls as the level rises, the band reaches the exciter's curve there, which holds it down and "
-                      "makes harmonics of it.");
-    exciterLines.add ({});
-    exciterLines.add ("| Preset | At -30: 2k / 4k / 8k / 16k | At -18 | At -6 |");
-    exciterLines.add ("|---|---|---|---|");
+    // The saturator's presets with their band on, each on pink noise at three levels.
+    juce::StringArray bandLines;
+    bandLines.add ({});
+    bandLines.add ("## Saturator presets with a band, what they add");
+    bandLines.add ({});
+    bandLines.add ("Each on pink noise at -30, -18 and -6 dBFS (RMS): how far it lifts the octaves around 2, 4, 8 and 16 kHz, in dB. "
+                   "Where the lift falls as the level rises, the band reaches the saturator's curve there, which holds it down and "
+                   "makes harmonics of it.");
+    bandLines.add ({});
+    bandLines.add ("| Preset | At -30: 2k / 4k / 8k / 16k | At -18 | At -6 |");
+    bandLines.add ("|---|---|---|---|");
 
     for (const auto& file : files)
     {
         if (auto effect = readPreset (file, devices::DeviceKind::effect);
-            effect.has_value() && toString (effect->info->typeID) == devices::Exciter::typeID
+            effect.has_value() && toString (effect->info->typeID) == devices::Saturator::typeID
+            && effect->values[devices::Saturator::band] > 0.5f
             && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
         {
             auto line = "| " + effect->kind + " / " + effect->name;
@@ -1258,7 +1259,7 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
                 line += " | " + lifts.joinIntoString (" / ");
             }
 
-            exciterLines.add (line + " |");
+            bandLines.add (line + " |");
         }
     }
 
@@ -1330,7 +1331,7 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
     lines.addArray (drumLines);
     lines.addArray (pumpLines);
     lines.addArray (driveLines);
-    lines.addArray (exciterLines);
+    lines.addArray (bandLines);
     lines.addArray (vinylLines);
     lines.addArray (eqLines);
     const auto report = folder.getChildFile ("report.md");

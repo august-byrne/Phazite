@@ -34,7 +34,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -1450,41 +1449,62 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's exciter on the synth's chords, its band swept, with its editor listening and Listen on")
+    TEST_CASE ("Real-time audit: Phazite's saturator on the synth's chords, its Band's edges swept and its Quality automated, with "
+               "its editor listening and Listen on")
     {
-        using phazite::devices::Exciter;
+        using phazite::devices::Saturator;
         TestSong song;
         const auto track = song.firstTrack;
         song.setInstrument (track, phazite::devices::Synth::typeID);
         addChords (song, track);
-        const auto exciter = song.addEffect (track, Exciter::typeID);
+        const auto saturator = song.addEffect (track, Saturator::typeID);
 
-        // Driven hard and added whole, High Cut on; where its band starts swept by a lane, a cycle a beat, so that the
-        // filter after its curve is worked out again all the time.
-        for (const auto& [id, value] : { std::pair<const char*, float> { "drive", 30.0f }, { "amount", 1.0f }, { "highCut", 12000.0f } })
-            song.setParameter (exciter, id, value);
+        // Its band of highs driven hard into a lopsided tube, lifted, at half its mix; where the band starts swept by a lane, a
+        // cycle a beat, so that its crossovers glide all the time; and its Quality moved by a lane from 8x to 4x and 2x and
+        // back, a beat each, so that its ways at each rate fade into each other all the time.
+        for (const auto& [id, value] : { std::pair<const char*, float> { "band", 1.0f },
+                                         { "bandHigh", 12000.0f },
+                                         { "drive", 30.0f },
+                                         { "shape", (float) Saturator::Shape::tube },
+                                         { "colour", 0.5f },
+                                         { "output", 6.0f },
+                                         { "quality", 2.0f },
+                                         { "mix", 0.5f } })
+            song.setParameter (saturator, id, value);
 
-        sweepParameter (song, { exciter, "frequency" }, 1000.0f, 8000.0f);
+        sweepParameter (song, { saturator, "bandLow" }, 1000.0f, 8000.0f);
+        const phazite::ParameterRef quality { saturator, "quality" };
+        const auto range = phazite::getControlTravel (getSong (song), quality);
+        REQUIRE (range.has_value());
 
-        // As its open editor has it: its scope and what it adds tapped, its meter read, and Listen held on.
-        const auto played = [&song, exciter]() -> auto& { return dynamic_cast<Exciter&> (getPlayed (song, exciter).getProcessor()); };
-        std::vector<float> tapped (32768);
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            const auto position = phazite::toControlPosition (*range, (float) (2 - beat % 3));
+            phazite::addPoint (getSong (song), quality, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+            phazite::addPoint (getSong (song), quality, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+        }
+
+        // As its open editor has it: its scope tapped, and Listen asked for once, so that it plays the band alone for the first
+        // half second and then fades back to the sound.
+        const auto played = [&song, saturator]() -> auto& { return dynamic_cast<Saturator&> (getPlayed (song, saturator).getProcessor()); };
+        std::vector<float> left (32768), right (32768);
 
         const auto m = playAndMeasure (
             song,
             [&]
             {
-                getPlayed (song, exciter).getScope().setListening (true);
-                played().getAddedTap().setListening (true);
-                played().getReach().take();
-                played().listenToAdded();
+                getPlayed (song, saturator).getScope().setListening (true);
+                played().listenToBand();
             },
             [&]
             {
-                CHECK (played().getAddedTap().pull (tapped.data(), (int) tapped.size()) > 0);
-                CHECK (played().getReach().take() > 1.0f); // well into its curve
+                auto* tap = getPlayed (song, saturator).getScope().getOutput();
+                REQUIRE (tap != nullptr);
+                CHECK (tap->pull (left.data(), right.data(), (int) left.size()) > 0);
             });
-        report ("Phazite's exciter on the synth's chords, its band swept by a lane, its editor's displays listening and Listen on", m);
+        report ("Phazite's saturator on the synth's chords, its Band's edges swept and its Quality automated by lanes, its editor's "
+                "scope listening and Listen on",
+                m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

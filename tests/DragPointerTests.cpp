@@ -10,7 +10,6 @@
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
@@ -24,7 +23,6 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DrumSamplerEditor.h"
-#include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
 #include "ui/devices/ModulatorEditor.h"
 #include "ui/devices/MotionEditor.h"
@@ -120,14 +118,6 @@ TEST_CASE ("Over the filter's dot the pointer grabs it and the dot lights up; el
 {
     phazite::test::TestSong song;
     phazite::ui::FilterEditor editor (addDevice (song, phazite::devices::FilterEffect::typeID));
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkDot (editor.getGraph(), editor.getDotPosition());
-}
-
-TEST_CASE ("Over the exciter's dot the pointer grabs it and the dot lights up; elsewhere it is the crosshair, where a press puts the dot")
-{
-    phazite::test::TestSong song;
-    phazite::ui::ExciterEditor editor (addDevice (song, phazite::devices::Exciter::typeID));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     checkDot (editor.getGraph(), editor.getDotPosition());
 }
@@ -312,6 +302,30 @@ TEST_CASE ("Over the saturator's curve the pointer points up and down and the cu
     auto& button = editor.getShapeButton (0);
     phazite::test::Mouse (button).moveTo (button.getLocalBounds().getCentre());
     CHECK (getChangedArea (before, snapshot (curve)).isEmpty());
+}
+
+TEST_CASE ("Over the saturator's band the pointer moves sideways and the edge nearer it lights up, the other as it was")
+{
+    phazite::test::TestSong song;
+    phazite::ui::SaturatorEditor editor (addDevice (song, phazite::devices::Saturator::typeID));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& view = editor.getBandView();
+    phazite::test::Mouse mouse (view);
+    const auto y = view.getHeight() / 2;
+    const auto from = juce::roundToInt (editor.getEdgeX (false)), to = juce::roundToInt (editor.getEdgeX (true));
+    const auto before = snapshot (view);
+
+    // Nearer From: it lights up, and To stays as it was.
+    mouse.moveTo ({ from + 3, y });
+    CHECK (view.getMouseCursor() == Cursor (Cursor::LeftRightResizeCursor));
+    const auto changed = getChangedArea (before, snapshot (view));
+    CHECK_FALSE (changed.isEmpty());
+    CHECK (changed.getRight() < to - 4);
+
+    // Off it, onto a shape's button: as it was.
+    auto& button = editor.getShapeButton (0);
+    phazite::test::Mouse (button).moveTo (button.getLocalBounds().getCentre());
+    CHECK (getChangedArea (before, snapshot (view)).isEmpty());
 }
 
 TEST_CASE ("Over a wavetable oscillator's table the pointer grabs it and the frame it plays lights up")

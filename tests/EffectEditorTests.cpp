@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, Stereo's and the vocoder's editors
+// The Filter's, the saturator's, the vinyl's, the delay's, Stereo's and the vocoder's editors
 // (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
 // them, each one undo step. Motion's editor is in MotionTests.cpp.
 #include "GoldenFiles.h"
@@ -8,7 +8,6 @@
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
@@ -29,7 +28,6 @@
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
-#include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SidechainMenus.h"
@@ -185,72 +183,84 @@ TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their c
     curveMouse.release();
     CHECK (song.valueOf ("drive") > 6.5f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Drive"));
+
+    // Six shapes, Crush last.
+    CHECK (editor.getShapeButton (5).getTitle() == juce::String ("Crush"));
+    phazite::test::Mouse crushMouse (editor.getShapeButton (5));
+    crushMouse.click (editor.getShapeButton (5).getLocalBounds().getCentre());
+    CHECK (song.valueOf ("shape") == doctest::Approx (5.0f));
 }
 
-TEST_CASE ("The exciter's editor drags its dot for the frequency and the amount, meters the band's reach, and listens to what is added")
+TEST_CASE ("The saturator's editor switches its Band at its title, drags the band's edges, and listens to the band while it shows")
 {
-    using phazite::devices::Exciter;
-    Song song (Exciter::typeID);
+    Song song (Saturator::typeID);
     const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::ExciterEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
-
-    phazite::ui::ExciterEditor editor (device);
+    phazite::ui::SaturatorEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, Exciter::info);
-    phazite::test::checkChildrenApart (editor);
-
-    // The dot is at the frequency, as high as the top's lift. Dragged left and up: a lower frequency and more of the band
-    // added, one step named after the frequency.
-    auto& graph = editor.getGraph();
-    CHECK (graph.getTitle() == juce::String ("Excited band"));
-    phazite::test::Mouse mouse (graph);
-    const auto dot = editor.getDotPosition().roundToInt();
-    CHECK (graph.getLocalBounds().contains (dot));
-    mouse.press (dot);
-    mouse.dragTo (dot - juce::Point<int> (20, 0));
-    mouse.dragTo (dot - juce::Point<int> (40, 30));
-    mouse.release();
-    CHECK (song.valueOf ("frequency") < 4000.0f);
-    CHECK (song.valueOf ("frequency") > 1000.0f);
-    CHECK (song.valueOf ("amount") > 0.6f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Frequency"));
-    CHECK (editor.getDotPosition().x == doctest::Approx ((float) dot.x - 40.0f).epsilon (0.02));
-    phazite::undo (*song.song);
-    CHECK (song.valueOf ("frequency") == doctest::Approx (5000.0f));
-    CHECK (song.valueOf ("amount") == doctest::Approx (0.35f));
-
-    // The wheel turns the drive.
-    mouse.pause();
-    mouse.wheel (graph.getLocalBounds().getCentre(), 0.5f);
-    CHECK (song.valueOf ("drive") > 18.5f);
-
-    // The meter: how far the driven band reached into the curve, against where it bends, up at once and falling back.
-    auto* exciter = device.getProcessor<Exciter>();
-    REQUIRE (exciter != nullptr);
     auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
-    ticker.tickNow();
-    CHECK (editor.getShownReach() < -20.0f);
-    exciter->getReach().raise (2.0f);
-    ticker.tickNow();
-    CHECK (editor.getShownReach() == doctest::Approx (6.02f).epsilon (0.01));
-    ticker.tickNow();
-    CHECK (editor.getShownReach() < 6.0f);
-    CHECK (editor.getShownReach() > 4.0f);
 
-    // Its displays listen to what goes in and out, and to what is added.
+    // The Band's switch, at its part's title: off at first, a click turns it on as one undo step.
+    auto* bandSwitch = dynamic_cast<juce::Button*> (editor.findControl ("band"));
+    REQUIRE (bandSwitch != nullptr);
+    CHECK_FALSE (bandSwitch->getToggleState());
+    phazite::test::Mouse switchMouse (*bandSwitch);
+    switchMouse.click (bandSwitch->getLocalBounds().getCentre());
+    CHECK (song.valueOf ("band") == doctest::Approx (1.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Band"));
+
+    // Its picture shows the band from 3 kHz to the top: its low edge dragged left lowers From alone, as one undo step, and
+    // its high edge, at the right, dragged left lowers To.
+    auto& view = editor.getBandView();
+    const auto y = view.getHeight() / 2;
+    phazite::test::Mouse mouse (view);
+    const juce::Point<int> from (juce::roundToInt (editor.getEdgeX (false)), y), to (juce::roundToInt (editor.getEdgeX (true)) - 1, y);
+    CHECK (view.getLocalBounds().contains (from));
+    CHECK (view.getLocalBounds().contains (to));
+    mouse.press (from);
+    mouse.dragTo (from - juce::Point<int> (15, 0));
+    mouse.dragTo (from - juce::Point<int> (30, 0));
+    mouse.release();
+    CHECK (song.valueOf ("bandLow") < 2500.0f);
+    CHECK (song.valueOf ("bandLow") > 500.0f);
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (20000.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change From"));
+    ticker.tickNow();
+    CHECK (editor.getEdgeX (false) == doctest::Approx ((float) from.x - 30.0f).epsilon (0.02));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("bandLow") == doctest::Approx (3000.0f));
+
+    mouse.pause();
+    mouse.press (to);
+    mouse.dragTo (to - juce::Point<int> (40, 0));
+    mouse.release();
+    CHECK (song.valueOf ("bandHigh") < 15000.0f);
+    CHECK (song.valueOf ("bandLow") == doctest::Approx (3000.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change To"));
+
+    // Its picture listens to what goes in and out.
     REQUIRE (device.getScope() != nullptr);
+    ticker.tickNow();
     CHECK (device.getScope()->isListening());
-    CHECK (exciter->getAddedTap().isListening());
 
-    // Listen: only while it is on does the exciter play what it adds alone.
+    // Listen: only while it is on, and the editor shows, does the saturator play the band alone; hidden, the editor asks no
+    // more, and the sound comes back half a second later.
+    auto* saturator = device.getProcessor<Saturator>();
+    REQUIRE (saturator != nullptr);
+    phazite::test::HeldClock clock;
     auto& listen = editor.getListenButton();
     CHECK (listen.getTitle() == juce::String ("Listen"));
-    CHECK_FALSE (exciter->isPlayingAdded());
+    ticker.tickNow();
+    CHECK_FALSE (saturator->isPlayingBand());
     phazite::test::Mouse listenMouse (listen);
     listenMouse.click (listen.getLocalBounds().getCentre());
     CHECK (listen.getToggleState());
     ticker.tickNow();
-    CHECK (exciter->isPlayingAdded());
+    CHECK (saturator->isPlayingBand());
+
+    editor.setVisible (false);
+    clock.advance (501.0);
+    ticker.tickNow();
+    CHECK_FALSE (saturator->isPlayingBand());
 }
 
 TEST_CASE ("The vinyl's editor turns its record as it plays, draws its pitch and its crackles, and drags for the wow and the band")

@@ -80,7 +80,7 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `ModulatorEditor.*` | Modulators' editors. |
 
 The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
-`ExciterEditor`, `FilterEditor`, `FmEditor`, `LimiterEditor`, `MotionEditor` (three modes, each a picture of its own), `MultibandEditor`,
+`FilterEditor`, `FmEditor`, `LimiterEditor`, `MotionEditor` (three modes, each a picture of its own), `MultibandEditor`,
 `ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoEditor`, `SynthEditor`, `VinylEditor`,
 `VocoderEditor`, `WavetableEditor`. Among them:
 
@@ -89,7 +89,7 @@ The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSam
 | `DrumSamplerEditor.*` | Sixteen of the drum sampler's 128 pads beside a map of them all, the selected pad's sound with its envelope's handles, and its controls, which follow the pad selected (with `ParameterControls::showParameters()`). |
 | `SamplerEditor.*` | The sampler's sound drawn with its markers, loop and slices; a sound dropped on it loads. |
 | `FmEditor.*` | The FM synth's algorithm drawn large with the harmonics its operators make, and the four operators side by side, a group of their controls at a time, with its filter's envelope beside its filter. |
-| `ExciterEditor.*` | What the exciter adds, over the spectrum, with its lift and a meter of how far its band reaches into its curve. |
+| `SaturatorEditor.*` | The curve as it plays (lopsided with Colour, in steps with Crush), lit as far as the sound reaches, beside the wave in and out; six shape buttons drawn with their curves; and the Band, switched at its title, over the spectrum in and out with the band lit between its edges, which drag, and Listen. |
 | `VinylEditor.*` | A record turning off its centre as far as the vinyl's wow swings it, with a speck where each crackle came, its pitch over the last seconds, and its band's ends to drag. |
 | `MultibandEditor.*` | The multiband's parts on one page in the dock: the bands across the spectrum, their crossovers and levels dragged there, always with their knobs, and the band shown by its tab, its curve (`DynamicsCurve.*`) and controls, with Monitor and its Sidechain part beside it, or in its place by a switch and a tab where the dock is narrow. |
 | `CompressorEditor.*` | Two tabs along its top that are its modes, each on one page in the dock: Compress, its characters and curve beside its history over its knobs; and Duck, its sidechain over its cuts and Listen beside its history, its graph (its threshold a line to drag) over its knobs. |

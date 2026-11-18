@@ -3,7 +3,7 @@
 *Design section 9.*
 
 A device is an instrument, which turns a track's notes into sound, or an effect, which changes the sound that comes
-into it. Phazite has eighteen devices of its own and hosts plug-ins as devices beside them. A container groups devices
+into it. Phazite has seventeen devices of its own and hosts plug-ins as devices beside them. A container groups devices
 into one device with parallel chains and eight macros, and a preset keeps a device, a container or a whole track in a
 file that any project can take in.
 
@@ -11,9 +11,9 @@ file that any project can take in.
 
 | Feature | State | Note |
 | --- | --- | --- |
-| Phazite's own devices: 5 instruments, 13 effects | Built | Each has a page of its own, below |
+| Phazite's own devices: 5 instruments, 12 effects | Built | Each has a page of its own, below |
 | Many recordings across the keys (pianos, strings), in the Sampler | Planned | Roadmap step 4.10; no Multisampler of its own |
-| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17; Motion (S6.10) and Stereo (S6.12) are built |
+| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17; Motion (S6.10), Stereo (S6.12) and the Exciter in the Saturator (S6.6) are built |
 | An instrument first, then any number of effects, on every track | Built | No limit |
 | Effects moved by dragging | Built | Within a channel or a container; not from one channel to another |
 | A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and Stereo have no Mix |
@@ -55,7 +55,7 @@ parameters ([automation-and-modulation.md](automation-and-modulation.md)). Each 
 real-time audit ([realtime-audit.md](../realtime-audit.md)): steady playback through it must not allocate.
 
 While Low Latency is on, a device that is on and delays its sound by more than 1 ms is left out of what plays, and the
-sound passes as it comes: the Limiter, the Multiband, the Exciter, the Vinyl and a Compressor set to Duck.
+sound passes as it comes: the Limiter, the Multiband, the Vinyl and a Compressor set to Duck.
 
 ## Phazite's own devices
 
@@ -73,8 +73,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Compressor](devices/compressor.md) | Effect | Two modes: Compress, by a drawn curve, and Duck, under a sidechain |
 | [Multiband](devices/multiband.md) | Effect | Three bands of dynamics and saturation, then a master band |
 | [Limiter](devices/limiter.md) | Effect | A look-ahead limiter that keeps true peaks under a ceiling |
-| [Saturator](devices/saturator.md) | Effect | Drive into one of five curves, with a tone tilt |
-| [Exciter](devices/exciter.md) | Effect | Adds harmonics of the highs above a frequency |
+| [Saturator](devices/saturator.md) | Effect | Drive into one of six curves, Crush among them, with a colour, a tone tilt and a band, which makes it an exciter too |
 | [Vinyl](devices/vinyl.md) | Effect | What a record and its player do to a sound |
 | [Delay](devices/delay.md) | Effect | Echoes on a note value or a time, with ping-pong and cuts in the loop |
 | [Reverb](devices/reverb.md) | Effect | A room or a plate |
@@ -166,7 +165,7 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 
 - **A picture of what the device does,** drawn as the sound plays, in the device's colour, which its knobs' arcs take
   too. The colour is by kind (`DeviceFamily` in `src/ui/theme/DesignTokens.h`): dynamics; tone (the EQ and the
-  Filter); drive (the Saturator, the Exciter and the Vinyl); space (the Delay and the Reverb); motion (Motion); Stereo's; the Vocoder's. Instruments take the accent.
+  Filter); drive (the Saturator and the Vinyl); space (the Delay and the Reverb); motion (Motion); Stereo's; the Vocoder's. Instruments take the accent.
 - **Pictures are controls.** A handle on a picture is a second grip on a parameter that also has a knob, so that
   everything also works from the keyboard and for screen readers. A drag is one undo step. Every picture takes a
   handle the same way (`graph::HandleDrag`, `src/ui/devices/DeviceGraph.h`), as Ableton Live's and FabFilter's do: a
@@ -175,7 +174,7 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   handle taken at its edge doesn't jump to the pointer; an axis the pointer hasn't moved along keeps its value exactly,
   and a move under a pixel writes nothing. Escape takes the drag back, leaving nothing to redo; it reaches the drag
   through the window's keys while the mouse is down, so that a picture is no stop for the keyboard's focus and a click
-  on one leaves the keys where they were. A picture with one dot (the Filter's, Motion's, the Exciter's)
+  on one leaves the keys where they were. A picture with one dot (the Filter's, Motion's)
   puts the dot under the pointer when pressed away from it. Envelopes drag by their points, and each stage bends by a
   handle in its middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a
   device's page says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and
@@ -432,9 +431,9 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
 - **Instruments of many recordings** (pianos, guitars, strings) from SFZ files: Planned, as a part of the
   [Sampler](devices/sampler.md), roadmap step 4.10.
 - **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
-  (S6.7); the Exciter's band and colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record
-  (S6.11). Planned; until each is built, this page and the devices' pages describe the devices as they are. Stereo
-  (S6.12) and Motion (S6.10) are built.
+  (S6.7); the Vinyl as Age, with tape beside the record (S6.11). Planned; until each is built, this page and the devices'
+  pages describe the devices as they are. Stereo (S6.12), Motion (S6.10) and the Exciter's band and colour in the Saturator
+  (S6.6) are built.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

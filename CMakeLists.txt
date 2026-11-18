@@ -204,8 +204,6 @@ target_sources(phazite_core PRIVATE
     src/devices/sampler/SampleAnalysis.h
     src/devices/sampler/Sampler.cpp
     src/devices/sampler/Sampler.h
-    src/devices/saturation/Exciter.cpp
-    src/devices/saturation/Exciter.h
     src/devices/saturation/Saturator.cpp
     src/devices/saturation/Saturator.h
     src/devices/stereo/Stereo.cpp
@@ -843,8 +841,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DynamicsCurve.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
-    src/ui/devices/ExciterEditor.cpp
-    src/ui/devices/ExciterEditor.h
     src/ui/devices/FilterEditor.cpp
     src/ui/devices/FilterEditor.h
     src/ui/devices/FmEditor.cpp
@@ -1295,7 +1291,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExampleSongTests.cpp
-        tests/ExciterTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
         tests/FmEditorTests.cpp
@@ -1403,6 +1398,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SandboxTests.cpp
         tests/SandboxedPluginTests.cpp
         tests/SandboxedPlugins.h
+        tests/SaturatorTests.cpp
         tests/SchemaTests.cpp
         tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp
