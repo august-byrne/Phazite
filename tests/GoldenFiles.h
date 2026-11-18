@@ -16,6 +16,8 @@
 //   N5  attributes are sorted by name
 //   N6  an empty element (no attributes, no children) goes only if its tag is in getDroppableEmptyTags(): any other
 //       empty element appearing or vanishing is a difference
+//   N7  the song's versionsBranch and versionsBase (where it stands in the project's versions, ids made anew in each run)
+//       become $BRANCH and $VERSION
 #pragma once
 
 #include "TestHelpers.h"

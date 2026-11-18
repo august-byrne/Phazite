@@ -728,6 +728,28 @@ namespace
             return words;
         }
 
+        // Ids written as text, a property's lowercase hexadecimal digits of a length, by its element's type; text of any other
+        // form names nothing, and goes, as if it had none.
+        struct HexID
+        {
+            const juce::Identifier* type;
+            const juce::Identifier* property;
+            int digits;
+        };
+
+        const std::vector<HexID>& getHexIDs()
+        {
+            using namespace schema;
+            static const std::vector<HexID> ids { { &PHAZITE, &versionsBranch, versionsBranchDigits },
+                                                  { &PHAZITE, &versionsBase, versionsBaseDigits } };
+            return ids;
+        }
+
+        bool isHexID (const juce::var& value, int digits)
+        {
+            return value.isString() && schema::isVersionsID (value.toString(), digits);
+        }
+
         // A value as a number: a number's own, or text that is a number and nothing else; none for anything else, and
         // infinity for text too large for one.
         std::optional<double> readNumber (const juce::var& value)
@@ -757,8 +779,9 @@ namespace
             const auto string = value.toString();
             const auto isVisible = [] (char c) { return c > ' ' && c < 127; };
 
-            if (const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
-                ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
+            // Its bytes as they are, up to their end: a text from a file anyone wrote needn't be UTF-8, and the count JUCE works
+            // out from its characters (getNumBytesAsUTF8()) is then not the count it holds.
+            if (const std::string_view text (string.toRawUTF8()); ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
                 return read (text);
 
             return read (string.trim().toStdString());
@@ -776,7 +799,7 @@ namespace
                 return false;
 
             const auto string = value.toString();
-            const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
+            const std::string_view text (string.toRawUTF8()); // its bytes as they are (readNumber())
             const auto isDigit = [] (char c) { return c >= '0' && c <= '9'; };
             size_t i = text.starts_with ('-') ? 1 : 0;
             const auto wholeStart = i;
@@ -1178,9 +1201,13 @@ namespace
             }
 
             //==============================================================================
-            // Every number Schema.h gives a range within it, and every word one of its words.
+            // Every number Schema.h gives a range within it, every word one of its words, and every id written as text one.
             void keepNumbers (juce::ValueTree element)
             {
+                for (const auto& id : getHexIDs())
+                    if (element.hasType (*id.type) && element.hasProperty (*id.property) && ! isHexID (element[*id.property], id.digits))
+                        element.removeProperty (*id.property, nullptr);
+
                 // The tables' rows by their elements' types, looked up once for each element.
                 static const auto byType = []
                 {
@@ -1966,7 +1993,8 @@ Project::Project (Song::Ptr s, const juce::File& f)
     : song (std::move (s)),
       songState (song->getState()),
       file (f),
-      autosaveWriter (std::make_unique<BackgroundWriter>())
+      autosaveWriter (std::make_unique<BackgroundWriter>()),
+      namesWriter (std::make_unique<BackgroundWriter>())
 {
     // The song's cache folder, where its frozen tracks' files are, is the project's Cache folder. Closing the project empties
     // it of what nothing uses; opening it doesn't, as clips find the renders they use only when they play.
@@ -1979,6 +2007,33 @@ Project::Project (Song::Ptr s, const juce::File& f)
 Project::~Project()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    // The versions' names, if they still wait to be written (versionsMoved()): at once, as the project closes.
+    stopTimer();
+    cancelPendingUpdate();
+    const auto namesFailedNow = takeNamesWritten(); // a write of them under way finished first, pending again if it failed
+    namesWriter = nullptr;
+    autosaveWriter->wait();
+    finishBackgroundSave(); // a save in the background under way, which took them along: pending again if it failed
+    compareWithSavedState();
+
+    if (namesPending && ! changedSinceSave && savedState.isValid())
+    {
+        const auto state = song->getState();
+
+        for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
+            if (const auto* now = state.getPropertyPointer (*name))
+                savedState.setProperty (*name, *now, nullptr);
+            else
+                savedState.removeProperty (*name, nullptr);
+
+        if (writeProjectFile (savedState, file).wasOk())
+            namesPending = false;
+    }
+
+    // A write of them that failed, and wasn't made good as it closed: told, once, as the timer tells one.
+    if (namesFailedNow && namesPending)
+        tellNamesFailed();
 
     autosaveWriter = nullptr; // before the autosave goes
     songState.removeListener (this);
@@ -2023,6 +2078,7 @@ juce::Result Project::save()
     Trial::keepOpenTrial (song->getUndoManager());
 
     autosaveWriter->wait(); // an autosave being written, which this makes old
+    takeNamesWritten();     // and the versions' names being written into the file, which this writes too
     backgroundSave = {};    // and a save in the background, which this overtakes
     backUpProjectFile();
     backedUpAt = getBackupTime();
@@ -2038,6 +2094,7 @@ juce::Result Project::save()
 
     changedSinceSave = false;
     changedSinceAutosave = false;
+    namesPending = namesFailed = false;                       // the versions' names went with the song
     changesOutsideHistory = song->getChangesOutsideHistory(); // stored in the song as it saved
     rememberSavedState();                                     // what the file holds now
     getAutosaveFile (file).deleteFile();
@@ -2111,7 +2168,9 @@ void Project::saveInBackground()
     JUCE_ASSERT_MESSAGE_THREAD
     compareWithSavedState();
 
-    if (! changedSinceSave || autosaveWriter->isBusy() || backgroundSave.isValid())
+    // Also for the versions' names alone, where a write of them failed (namesPending).
+    if ((! changedSinceSave && ! (namesPending && namesFailed)) || autosaveWriter->isBusy() || backgroundSave.isValid()
+        || namesWriter->isBusy())
         return;
 
     // The previous file into the backups every few minutes, not at every save.
@@ -2128,6 +2187,8 @@ void Project::saveInBackground()
         autosaveWriter->write (backgroundSave.createCopy(), file);
     }
 
+    namesPending = false; // in what it writes; pending again if the write fails (finishBackgroundSave())
+
     changesAtBackgroundSave = changeCount;
     outsideAtBackgroundSave = song->getChangesOutsideHistory();
 }
@@ -2142,7 +2203,10 @@ bool Project::finishBackgroundSave()
     const auto written = std::exchange (backgroundSave, {});
 
     if (autosaveWriter->takeFailure())
+    {
+        namesPending = namesPending || written.hasProperty (schema::versionsBase) || written.hasProperty (schema::versionsBranch);
         return false; // its changes are still to save
+    }
 
     // What the file holds now: saved, unless the song changed since it was copied. What is noted to compare stays, compared
     // with this copy at the next check: what a store wrote since without a notification (compareStoredStates()).
@@ -2183,6 +2247,8 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    if (takeNamesWritten()) // the versions' names being written into the file, which the copy is made from, written first
+        tellNamesFailed();
     const auto newFile = makeFolderWithFiles (parentFolder, name, error);
 
     if (newFile == juce::File())
@@ -2343,6 +2409,8 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
 {
     JUCE_ASSERT_MESSAGE_THREAD
     autosaveWriter->wait(); // its autosave goes with it
+    if (takeNamesWritten()) // and its file whole, the versions' names in it, before the copy reads it
+        tellNamesFailed();
 
     juce::String error;
     const auto folder = findNewProjectFolder (parentFolder, name, error);
@@ -2379,6 +2447,8 @@ juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& fo
 {
     JUCE_ASSERT_MESSAGE_THREAD
     autosaveWriter->wait();
+    if (takeNamesWritten()) // none into the file left behind once the project is in the copy
+        tellNamesFailed();
 
     if (const auto placed = putInPlace (copy, folder); placed.failed())
         return placed;
@@ -2643,6 +2713,12 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
 
     const auto state = song->getState();
 
+    if (tree == state && schema::isVersionsProperty (tree, property))
+    {
+        versionsMoved();
+        return;
+    }
+
     if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
         return;
 
@@ -2689,6 +2765,107 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     }
 
     add (comparingWhole ? ToCompare { wholeAround (tree), {} } : ToCompare { tree, property });
+}
+
+void Project::versionsMoved()
+{
+    // With unsaved changes, the file holds an older song, which the names it holds go with: these go with the song at its
+    // next save, and into the autosave at the next. Without, into the file in the background, once nothing else writes it.
+    namesPending = true;
+    compareWithSavedState();
+
+    if (changedSinceSave || ! savedState.isValid())
+        changedSinceAutosave = true;
+    else
+        triggerAsyncUpdate();
+}
+
+void Project::handleAsyncUpdate()
+{
+    writeVersionsNames();
+}
+
+void Project::writeVersionsNames()
+{
+    if (! namesPending)
+        return;
+
+    compareWithSavedState();
+
+    if (changedSinceSave || ! savedState.isValid())
+    {
+        changedSinceAutosave = true; // the next save writes them, and the next autosave holds them
+        return;
+    }
+
+    // Not over another write of the file (a save in the background, or the names before): looked at again in a moment.
+    if (autosaveWriter->isBusy() || backgroundSave.isValid() || namesWriter->isBusy())
+    {
+        startTimer (20);
+        return;
+    }
+
+    // The file as it was saved, the song's names in it as they are now: no backup, as the song in it is the one backed up.
+    const auto state = song->getState();
+
+    for (const auto* name : { &schema::versionsBranch, &schema::versionsBase })
+    {
+        if (const auto* now = state.getPropertyPointer (*name))
+            savedState.setProperty (*name, *now, nullptr);
+        else
+            savedState.removeProperty (*name, nullptr);
+    }
+
+    namesWriter->write (savedState.createCopy(), file);
+    namesPending = false;
+    namesWriting = true;
+    startTimer (20);
+}
+
+bool Project::takeNamesWritten()
+{
+    // Its failure taken here, so that the timer tells none after a save that wrote them (the review of S4.5); said by that
+    // save if it fails too, as pending, and by the others that take it (tellNamesFailed()). Whether it failed.
+    namesWriter->wait();
+
+    if (! std::exchange (namesWriting, false) || ! namesWriter->takeFailure())
+        return false;
+
+    namesPending = true;
+    changedSinceAutosave = true;
+    return true;
+}
+
+void Project::tellNamesFailed()
+{
+    if (! std::exchange (namesFailed, true) && onVersionsNamesFailed != nullptr)
+        onVersionsNamesFailed ("Phazite couldn't write which version the song grew from into " + file.getFullPathName()
+                               + ". The next save writes it; until then, the project file may open against an older version.");
+}
+
+void Project::timerCallback()
+{
+    // A names write over: one that failed leaves them pending, for the next save to write, and is told once.
+    if (namesWriting && ! namesWriter->isBusy())
+    {
+        if (takeNamesWritten())
+            tellNamesFailed();
+        else
+            namesFailed = false;
+    }
+
+    if (namesWriting)
+        return;
+
+    stopTimer();
+
+    if (namesPending && ! namesFailed)
+        writeVersionsNames(); // what waited for another write of the file
+}
+
+bool Project::hasVersionsNamesWritten() const
+{
+    return ! namesPending && ! namesWriting;
 }
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)

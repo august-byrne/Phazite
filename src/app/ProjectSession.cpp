@@ -217,6 +217,11 @@ ProjectSession::~ProjectSession()
 
     getSelection().removeChangeListener (this);
     engineContext.removeChangeListener (this);
+
+    // Nothing shown as the app goes: what the project would tell as it closes (a names write that failed) is in the log only.
+    if (project != nullptr)
+        project->onVersionsNamesFailed = [] (const juce::String& message) { juce::Logger::writeToLog (message); };
+
     setProject (nullptr); // closes the project on the message thread, before the engine context goes
 }
 
@@ -1318,6 +1323,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
     if (project != nullptr)
     {
         project->onBackupFailed = [this] (const juce::String& message) { showError ("No backup was made", message); };
+        project->onVersionsNamesFailed = [this] (const juce::String& message) { showError ("Phazite couldn't save the project", message); };
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         autosaveTimer->onRepeatedFailures = [this]
         {

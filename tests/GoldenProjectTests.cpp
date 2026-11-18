@@ -815,6 +815,7 @@ juce::StringArray getHolders (const juce::String& declared)
         { "container", { "CONTAINER" } },
         { "chain", { "CHAIN" } },
         { "merging", { "MERGING" } },
+        { "versions", { "PHAZITE" } },
         { "send", { "SEND" } },
         { "modulator", { "MODULATOR" } },
         { "macro", { "MACRO" } },
@@ -865,6 +866,7 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
         { "MERGING@chosen", "as MERGING" },
         { "MERGING@renumbered", "as MERGING" },
         { "MERGING@translated", "as MERGING" },
+        { "MERGING@crossed", "as MERGING" },
     };
     return names;
 }

@@ -5,6 +5,8 @@
 #include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <juce_events/juce_events.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -81,12 +83,15 @@ namespace
         std::map<juce::String, std::vector<juce::ValueTree>> unkeyed;
     };
 
-    std::atomic<juce::int64> elementsCompared { 0 };
+    std::atomic<juce::int64> elementsCompared { 0 }, elementsComparedOnMessageThread { 0 };
 
     Children getChildren (const juce::ValueTree& element)
     {
         Children children;
         elementsCompared.fetch_add (element.getNumChildren(), std::memory_order_relaxed);
+
+        if (juce::MessageManager::existsAndIsCurrentThread())
+            elementsComparedOnMessageThread.fetch_add (element.getNumChildren(), std::memory_order_relaxed);
 
         for (const auto& child : element)
         {
@@ -432,6 +437,11 @@ namespace
 juce::int64 countElementsCompared()
 {
     return elementsCompared.load();
+}
+
+juce::int64 countElementsComparedOnMessageThread()
+{
+    return elementsComparedOnMessageThread.load();
 }
 
 bool holdTheSame (const juce::ValueTree& a, const juce::ValueTree& b)

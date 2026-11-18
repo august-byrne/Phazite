@@ -2001,6 +2001,9 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
     if (open == nullptr || version == nullptr || in == nullptr || in->project == nullptr)
         return refuse ("It wasn't exported from a version of this project.");
 
+    if (const auto whyNot = whyNotSwitchBranch (context); whyNot.isNotEmpty())
+        return refuse (whyNot);
+
     if (! canSwitchBranch (context))
         return refuse ("Not while the song records, renders, or a version is being saved.");
 
@@ -2115,7 +2118,13 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
             }
 
             if (did)
-                saveProjectThen ([] (bool) {});
+                saveProjectThen (
+                    [&context] (bool saved)
+                    {
+                        // As every switch: the branch's record names the song made for it until the project file holds it.
+                        if (auto* now = getVersionHistory (context); now != nullptr && saved)
+                            now->switchSaved();
+                    });
             else if (historyNow != nullptr && import->branch.isNotEmpty())
                 historyNow->whenNotCopying (
                     [&context, import]

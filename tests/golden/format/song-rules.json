@@ -183,7 +183,9 @@
       "loopStart",
       "loopEnd",
       "playStart",
-      "metronome"
+      "metronome",
+      "versionsBranch",
+      "versionsBase"
     ]
   },
   "uncountedElements": [

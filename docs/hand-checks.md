@@ -252,6 +252,10 @@ the [changelog](changelog.md).
 | D16 | Delete a branch that has a version and changes left on it, then open the Versions view's menu > Recover Lost Versions...; pick its row and switch to the branch it makes | The row says the branch was deleted just now, with the changes left on it; the song on "<name> (recovered)" is as it was left | |
 | D17 | Delete an audio file that a version plays, then run Verify History; run it on a big project and choose Stop Verifying History, or save a version while it runs | Progress shows, then the version is named with the file that is missing; stopped, it says so and never says the history is whole | |
 | D18 | Open a project whose versions an earlier build saved | Its branches are listed and their versions can't be read (known bug 197); the song opens, Save Version works, and nothing in its `Versions` folder was deleted | |
+| D19 | In a big project, save a version, then edit: move clips, drag notes in a long clip, turn knobs; watch the Versions badge, the star in the status bar and the changes list | They follow a moment after each edit, and the window never stalls; a drag shows as one change when it ends | |
+| D20 | Copy the project file, save a version, close, put the copy back over the file and open it | The Versions view says the branch has 1 newer version; Save Version is greyed with its reason; Take the Newer Versions brings it in, and Ctrl+Z takes it back | |
+| D21 | With the project in a synced folder, save a version on each of two computers before the sync catches up, then open it on one | The view says the other computer's version went its own way and offers to merge it; after the merge and Save Version both computers' work is in, each item once | |
+| D22 | Save a version, change a volume, press Ctrl+Z, type a name and press Save Version at once | Nothing is saved; the view says "Nothing changed since the last version." and the typed name is still in the field | |
 
 ## What stage 6 built (from 2026-11-18)
 

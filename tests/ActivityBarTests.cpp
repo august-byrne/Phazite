@@ -301,7 +301,8 @@ TEST_CASE ("A commit selected in the graph is what Restore and Compare with Work
     screen.waitForVersions(); // the commit read on the history's thread first (known bug 126)
     CHECK (view.getChangesHeading() == "Compare with \"One\"");
     CHECK (view.getDoneButton().isShowing());
-    CHECK (view.getNumChanges() == 1); // the track added since
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&view] { return view.getNumChanges() == 1; })); // the track added since, worked out in the background
     screen.click (view.getDoneButton());
     CHECK (view.getChangesHeading() == "Changes");
     CHECK_FALSE (view.getDoneButton().isShowing());
@@ -375,7 +376,7 @@ TEST_CASE ("A merge's lines show in the Versions view, what it will bring, and M
     CHECK (view.getLines() == phazite::ui::VersionsView::Lines::changes);
     CHECK_FALSE (view.getMergeButton().isVisible());
     CHECK (phazite::isMerging (context));
-    CHECK (view.getNumChanges() == 1);
+    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
     screen.saveVersion();
     CHECK_FALSE (phazite::isMerging (context));
     CHECK (view.describeHistoryRow (1).startsWith ("Merge idea-2, now, on main"));
@@ -733,7 +734,10 @@ TEST_CASE ("Save Version waits for a change, and the field's placeholder names w
 
     screen.setFirstTrackVolume (0.4f);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getSaveButton().isEnabled(); }));
-    CHECK (view.getMessageField().getTextToShowWhenEmpty().startsWith ("Update "));
+
+    // Named once the changes are worked out, in the background.
+    CHECK (
+        phazite::test::dispatchMessagesUntil ([&view] { return view.getMessageField().getTextToShowWhenEmpty().startsWith ("Update "); }));
     CHECK (view.getMessageField().getTextToShowWhenEmpty().endsWith ("(Ctrl+Enter to save it on 'main')"));
 }
 
@@ -809,7 +813,13 @@ TEST_CASE ("The branch picker merges another branch in, and deletes one, asking 
     screen.click (view.getCancelButton());
     CHECK (view.getLines() == phazite::ui::VersionsView::Lines::changes);
 
-    // Delete Branch...: asked first, as its commit would go with it; kept while the answer is no.
+    // Delete Branch...: asked first, as its commit would go with it; kept while the answer is no. Whether the song left on it
+    // has changes is found out on the history's thread the first time it is asked (it says where it stands in the versions,
+    // so it is a piece of its own, not the version's), as the picker lists it: in by the time it is asked here.
+    for (const auto& branch : phazite::getBranches (context))
+        phazite::describeBranchDeletion (context, branch.id);
+
+    screen.waitForVersions();
     juce::String asked;
 
     {
@@ -899,7 +909,7 @@ TEST_CASE ("Local History lists the song as it was before Discard All Changes, f
     REQUIRE (screen.registry.invoke ("version.discardAll"));
     screen.waitForVersions();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumSnapshots() == 1; }));
-    CHECK (view.getNumChanges() == 0);
+    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
     CHECK (view.describeSnapshot (0).startsWith ("Before Discard All Changes, now, on main"));
 
     // Opened, its arrow under the pointer brings the change back, one undo step.
@@ -990,7 +1000,7 @@ TEST_CASE ("A double-click on a version hears it, as Hear It does, bouncing it f
     REQUIRE (phazite::test::dispatchMessagesUntil ([&context, &first] { return phazite::getHeardVersion (context) == first; }));
     CHECK_FALSE (phazite::isWaitingToCompare (context));
     CHECK (phazite::getCurrentBranch (context)->id == branchBefore);
-    CHECK (phazite::hasChangesSinceLastVersion (context));
+    CHECK (phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (context)));
     CHECK (view.describeHistoryRow (view.getHistoryRow (first)).contains ("heard"));
 
     // The song again (Hear It on the changes' row); then, with its bounce, a double-click hears it at once.

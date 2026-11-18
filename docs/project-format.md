@@ -65,6 +65,17 @@ its tags). An element it does know, where `Schema.h` doesn't put it, it leaves o
   and out of the song with the merge's undo step, is no part of a version's song, and is read as untrusted: one that
   doesn't hold together waits for nothing.
 
+**Where the song stands in its versions.** `versionsBranch` on `PHAZITE` is the id of the branch of the project's
+versions the song is on (32 lowercase hexadecimal digits), and `versionsBase` the id of the version it grew from (64
+lowercase hexadecimal digits), which its changes are worked out against; neither before the first version. They go with
+the song into its file, its autosave, its backups and the song left on a branch, so that whichever of them opens says
+where it stands; a version's own song holds neither. They are no change to the song (an uncounted property): Phazite moves
+them without an undo step as a version is saved, a branch made or switched to, Undo Last Version or Reset Branch to Last
+Readable Version run, and writes them into the project file at once while the song has no other unsaved change (else with
+the next save and autosave); only Take the Newer Versions moves them in an undo step. Text of another form is left out as
+the file opens. Where they name a branch or a version the Versions folder hasn't, or a version that can't be read, the song
+takes the branch the folder's `current` file names and its last version ([versions-format.md](versions-format.md)).
+
 **Time** is in beats from the song's start, as doubles, a beat being a quarter note whatever the time signature, as
 MIDI files and DAWproject count it, so that the song keeps its notes on their beats when its tempo changes. A tempo
 (`bpm` on `TEMPO`) counts quarter notes a minute, and a time signature (`TIMESIGNATURE`) only makes its bars
@@ -77,8 +88,8 @@ another names it by its ID. Copies get new IDs; the rules of which properties ho
 [`tests/golden/format/song-rules.json`](../tests/golden/format/song-rules.json).
 
 **View state and how the song plays** (track heights, the grid, where a device's window was; the loop, the metronome,
-where playback starts) are saved, but are no change to the song: the rules list them as `uncountedProperties` and
-`uncountedElements`.
+where playback starts), and where it stands in its versions, are saved, but are no change to the song: the rules list them
+as `uncountedProperties` and `uncountedElements`.
 
 ## 4. Devices
 
@@ -130,7 +141,8 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   hand to its parameter's range and every automation point to 0..1 (one that is none or no number is left out,
   and a curve that had points and is left without goes), and a value or a curve of a parameter its device hasn't is left out; a step
   sequencer's steps are held to -1..1 (one that is no finite number becomes 0) and a sampler's slices to 0..1 (one that
-  is none is left out), each in place, the others as they are written. First of all, before any number is read, a
+  is none is left out), each in place, the others as they are written; `versionsBranch` and `versionsBase` that aren't
+  ids of their form are left out. First of all, before any number is read, a
   number whose exponent has ten digits or more ("1e12345678901", which JUCE's reader of numbers can't count) is taken as
   JUCE's reader takes it, past every number for an exponent above 0 ("0e12345678901" too, which that reader reads as
   infinity) and 0 for one below, and so as no finite number; a name that reads as one stays as it is.

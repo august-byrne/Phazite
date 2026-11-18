@@ -54,6 +54,17 @@ The full text of every step, as it was written when it was built, is in the
   each piece copied from a copy that reads, so their count stays small; every time the store writes is later than
   the one before, whatever the clock does. The store lets go of nothing yet (known bug 196), and a history written
   by an earlier build is not read (known bug 197).
+- **S4.5 The song tied to its version:** the project file says which branch the song is on and which version it grew
+  from, and the changes are worked out against that version, on the history's thread, for the tracks that changed
+  alone (an edit costs the window a fraction of a millisecond on a 100-track song, and a drag is compared once, as it
+  ends). Newer versions on the branch, from another computer or after a project file was put back from a backup, are
+  offered by Take the Newer Versions or Merge the Newer Versions rather than shown as removals and taken out by the
+  next save; a version saved beside another computer's goes its own way and is offered to merge; a song whose branch
+  hasn't reached the folder waits with its saves. Save Version writes nothing where nothing changed, and keeps what
+  was typed. A merge of another computer's merge of the same version brings no item twice.
+- **A number's text read by the bytes it holds:** a project file whose number ended in half a character (bytes that
+  aren't UTF-8) made the loader read a byte past the text's end; found by the fuzzer under AddressSanitizer in CI. The
+  loader, the comparison of saved values and the writer of a plug-in's class ID take a text's bytes as they are.
 - **S4.7 Automation along the control's travel:** automation is kept and played as the control's position, and
   every knob in hertz travels logarithmically, so a straight line in a lane is an even sweep through the octaves
   (632 Hz halfway from 20 Hz to 20 kHz, 1 kHz halfway from 100 Hz to 10 kHz); keys nudge by a part of the travel,

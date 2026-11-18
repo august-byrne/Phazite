@@ -168,6 +168,13 @@ private:
 inline constexpr int versionHistoryTimeout = 60000;
 bool waitForVersionHistory (ProjectContext&);
 
+// Waits until the changes of the song against the version it grew from (and against a version compared with it, if one is)
+// are worked out on the history's thread for the song as it is now (model/versions/VersionsModel.h: areChangesWorkedOut()),
+// asking for them as the views do, and returns the context: for a test that reads them after an edit,
+// getChangesSinceLastVersion (withChangesIn (context)).
+ProjectContext& withChangesIn (ProjectContext&);
+const ProjectContext& withChangesIn (const ProjectContext&);
+
 // Runs a command of the versions that may read whole songs on the history's thread before it changes the song (a branch
 // switch, a merge's list, a restore: model/versions/internal/VersionHistory.h, startReading()), and waits until
 // what it read is taken in, and the history has done what came of it (a save after a switch): whether the command did what

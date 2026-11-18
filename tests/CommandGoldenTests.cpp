@@ -15,6 +15,7 @@
 #include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
 #include "app/AppCommands.h"
@@ -411,6 +412,8 @@ struct Script
     // what is selected, where the playhead is and the loop's range, each if it changed.
     void snapshot (const juce::String& what)
     {
+        // The versions' commands as they stand once the changes since the last version are worked out, in the background.
+        phazite::test::withChangesIn (context);
         stateLines.add ("after " + what + ":");
 
         for (const auto* command : registry.getAll())

@@ -97,6 +97,7 @@ project.save | ctrl + S
 project.autoSave
 version.save | ctrl + alt + S | plugin-states
 version.undoLast
+version.takeNewer | plugin-states
 version.discardAll | plugin-states
 version.putBack | plugin-states
 version.bringBack | plugin-states

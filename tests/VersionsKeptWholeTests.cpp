@@ -192,7 +192,7 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     REQUIRE (getVersionNames (s.context) == juce::StringArray ("First version"));
 
     s.setVolume (bass, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     auto& song = s.getProject().getSong();
 
     {
@@ -215,7 +215,7 @@ TEST_CASE ("A commit, and a snapshot before it, given as the project closes are 
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (getVersionNames (s.context) == juce::StringArray ("Written as it closed", "First version"));
     CHECK (phazite::getSnapshots (s.context).size() == 1);
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     waitForVersionsFinished();
 }
 
@@ -290,7 +290,7 @@ TEST_CASE ("Closing doesn't wait for what the history reads: a read given as it 
     keepVersion (s.context, "First");
     const auto first = phazite::getLastVersion (s.context)->id;
     s.setVolume (bass, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     const auto before = phazite::VersionStore::countSongsRead();
 
     {
@@ -337,7 +337,7 @@ TEST_CASE ("A project opened from a file that is its last commit has no changes,
     s.setVolume (keys, -3.0f);
 
     keepVersion (s.context, "All of it");
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     SUBCASE ("its plug-ins loaded as it is read")
     {
@@ -356,7 +356,7 @@ TEST_CASE ("A project opened from a file that is its last commit has no changes,
     dispatchPendingMessages();
 
     INFO (phazite::getVersionHistory (s.context)->summariseNextCommit().toStdString());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
 }
 
@@ -378,7 +378,7 @@ TEST_CASE ("A song written into the project's file as it was committed opens wit
     dispatchPendingMessages();
 
     INFO (phazite::getVersionHistory (s.context)->summariseNextCommit().toStdString());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
 }
 
@@ -421,7 +421,7 @@ TEST_CASE ("A device's values written as another tool writes numbers open as the
     dispatchPendingMessages();
 
     INFO (phazite::getVersionHistory (s.context)->summariseNextCommit().toStdString());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
 }
 
@@ -456,15 +456,15 @@ TEST_CASE ("The example song opened from a file that is its last commit has no c
     TestSong s (TestSong::Start::exodus);
     auto& song = *phazite::findSong (s.context);
     REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
-    keepVersion (s.context, "As it came");
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE (waitForVersionHistory (s.context)); // its first version is the song as it came
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     s.reopen (false);
     REQUIRE (waitForVersionHistory (s.context));
     dispatchPendingMessages();
 
     INFO (phazite::getVersionHistory (s.context)->summariseNextCommit().toStdString());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
 }
 
@@ -497,7 +497,7 @@ TEST_CASE (
     CHECK (problem.contains ("can't be read"));
     CHECK (problem.contains ("\"Readable\""));
     CHECK (phazite::canResetToReadable (s.context));
-    CHECK_FALSE (phazite::canSaveVersion (s.context)); // Commit greyed, its field saying why (the review of known bug 59)
+    CHECK_FALSE (phazite::canSaveVersion (withChangesIn (s.context))); // Commit greyed, its field saying why (the review of known bug 59)
     CHECK (problem.contains ("Recover Lost Versions"));
 
     // No commit on top of it meanwhile.
@@ -513,7 +513,7 @@ TEST_CASE (
     REQUIRE (waitForVersionHistory (s.context));
     CHECK (phazite::getCurrentBranch (s.context)->head == readable);
     CHECK (phazite::getHeadProblem (s.context).isEmpty());
-    CHECK (phazite::hasChangesSinceLastVersion (s.context)); // the volume, which the commit that went had
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context))); // the volume, which the commit that went had
 
     keepVersion (s.context, "Again");
     CHECK (getVersionNames (s.context) == juce::StringArray ("Again", "Readable", "First version"));
@@ -566,7 +566,7 @@ TEST_CASE ("A branch whose last commit can't be read offers the newest that read
 
     CHECK (phazite::getHeadProblem (s.context).contains ("\"Readable\""));
     REQUIRE (phazite::canResetToReadable (s.context));
-    CHECK_FALSE (phazite::canSaveVersion (s.context));
+    CHECK_FALSE (phazite::canSaveVersion (withChangesIn (s.context)));
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::resetToReadable (s.context); }));
     CHECK (phazite::getCurrentBranch (s.context)->head == readable);
     CHECK (getVersionNames (s.context) == juce::StringArray ("Readable", "First version"));
@@ -575,6 +575,7 @@ TEST_CASE ("A branch whose last commit can't be read offers the newest that read
 TEST_CASE ("A branch none of whose commits reads says so, and a commit made by hand starts its line again")
 {
     TestSong s;
+    s.addTrack ("Bass"); // a version records a change: one of none isn't written
     keepVersion (s.context, "Gone");
     const auto packs = findPacks (s);
 
@@ -693,7 +694,7 @@ TEST_CASE ("A branch isn't renamed while a commit writes its record, which would
     const auto branch = phazite::getCurrentBranch (s.context)->id;
 
     s.setVolume (bass, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     std::optional<juce::Result> result;
     REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
     const auto renamed = phazite::renameBranch (s.context, branch, "renamed");
@@ -795,13 +796,13 @@ TEST_CASE ("A plug-in that loads after the project opens counts as changed once 
     REQUIRE (dispatchMessagesUntil ([&song] { return phazite::getPluginsLoading (song).isEmpty(); }));
     keepVersion (s.context, "Gain at one");
     TestPlugin::setGain (song, device, 0.25f); // in its own window
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
 
     s.reopen (false); // its state saved, the plug-in loading as the history reads
     auto& reopened = *phazite::findSong (s.context);
     REQUIRE (waitForVersionHistory (s.context));
     REQUIRE (dispatchMessagesUntil ([&reopened] { return phazite::getPluginsLoading (reopened).isEmpty(); }));
-    CHECK (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }, versionHistoryTimeout));
+    CHECK (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }, versionHistoryTimeout));
 }
 
 //==============================================================================
@@ -873,7 +874,7 @@ TEST_CASE ("A song read from the versions' pieces holds together as a project fi
     {
         REQUIRE (finished (s.context, [&] { return phazite::newBranch (s.context, theirs, s.save); }));
         checkSong (song);
-        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context)); // the version as it is read, the same each time
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context))); // the version as it is read, the same each time
     }
 
     SUBCASE ("Restored")

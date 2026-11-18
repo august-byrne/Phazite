@@ -694,16 +694,18 @@ namespace
             const auto cb = getChildren (b, withTracks), cr = getChildren (r, withTracks), ct = getChildren (t, withTracks);
             auto keyed = cr.keyed;
 
-            // The other side's children in its order first, for what it added to go after what it followed, then the others.
+            // The other side's children in its order first, for what it added to go after what it followed, then the others;
+            // each once, known by a set (a clip's thousands of notes made this quadratic).
             std::vector<juce::String> names;
+            std::set<juce::String> listed;
 
             for (const auto& child : t)
-                if (const auto name = keyOf (child); ct.keyed.count (name) > 0)
+                if (const auto name = keyOf (child); ct.keyed.count (name) > 0 && listed.insert (name).second)
                     names.push_back (name);
 
             for (const auto* children : { &cb, &cr })
                 for (const auto& [name, child] : children->keyed)
-                    if (std::find (names.begin(), names.end(), name) == names.end())
+                    if (listed.insert (name).second)
                         names.push_back (name);
 
             for (const auto& name : names)
@@ -1331,7 +1333,7 @@ PluginParameterValues translateKnobs (PluginParameterValues knobs, const std::ve
 }
 
 Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree& theirs, const std::vector<RenumberedID>& recorded,
-                             const std::function<std::uint64_t()>& makeID)
+                             const std::function<std::uint64_t()>& makeID, const std::vector<RenumberedID>& crossed)
 {
     // What was recorded, the later merge's word for an ID over an earlier's.
     CopiedIDs items;
@@ -1361,11 +1363,21 @@ Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree&
     keepOneToOne (items);
     keepOneToOne (notes);
 
-    // The items' IDs the parting holds, alone: what the other line made since is no item a merge numbered.
-    std::set<std::uint64_t> held, inEither;
+    // The items' IDs the parting holds, alone: what the other line made since is no item a merge numbered. Of the other
+    // side's, not those it was translated to first (crossed), each the item this side has under that ID already.
+    std::set<std::uint64_t> held, inEither, theirIDs;
     collectIDs (base, held);
     collectIDs (base, inEither);
-    collectIDs (theirs, inEither);
+    collectIDs (theirs, theirIDs);
+    std::set<std::pair<juce::String, std::uint64_t>> crossedTo;
+
+    for (const auto& id : crossed)
+        crossedTo.insert ({ id.clip, id.to });
+
+    for (const auto id : theirIDs)
+        if (crossedTo.count ({ {}, id }) == 0)
+            inEither.insert (id);
+
     std::erase_if (items, [&held] (const auto& entry) { return held.count (entry.first) == 0; });
 
     Translation result;
@@ -1407,10 +1419,14 @@ Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree&
         }
     };
 
-    std::set<NoteKey> heldNotes, notesInEither;
+    std::set<NoteKey> heldNotes, notesInEither, theirNotes;
     collectNotes (base, heldNotes);
     collectNotes (base, notesInEither);
-    collectNotes (theirs, notesInEither);
+    collectNotes (theirs, theirNotes);
+
+    for (const auto& note : theirNotes)
+        if (crossedTo.count (note) == 0)
+            notesInEither.insert (note);
     std::erase_if (notes, [&heldNotes] (const auto& entry) { return heldNotes.count (entry.first) == 0; });
 
     std::set<NoteKey> noteTargets;

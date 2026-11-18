@@ -84,11 +84,52 @@ std::vector<BranchInfo> getBranches (const ProjectContext&);
 std::optional<BranchInfo> getCurrentBranch (const ProjectContext&);
 std::optional<VersionInfo> getLastVersion (const ProjectContext&);
 
-// What changed since the current branch's last version (docs/design/versions.md: Changes), a line a track, the master or
-// the song's own; whether anything did; and how many lines (the activity bar's badge).
+// The song tied to its version (docs/design/versions.md: The song tied to its version). The version the song grew from (its
+// base), which the changes are worked out against: the current branch's last version, unless the branch has newer versions
+// the song didn't grow from (another computer saved them, or the project file came back from a backup); none before the first
+// version.
+std::optional<VersionInfo> getBaseVersion (const ProjectContext&);
+
+// How many versions the branch has that the song didn't grow from (none while the song grew from its last); and as the
+// Versions view says it, with what to do, none while there are none. Save Version is greyed meanwhile (canSaveVersion()), so
+// that no version is saved over them.
+int countNewerVersions (const ProjectContext&);
+juce::String describeNewerVersions (const ProjectContext&);
+
+// Take the Newer Versions (version.takeNewer): where the song has no changes of its own since its base, a plain update: the
+// song made the branch's last version's, which it grows from then, as one undo step ("Take the Newer Versions"), read on the
+// history's thread first. Where it has changes, Merge the Newer Versions: the branch's last version merged in by the merge
+// that exists (startMerge(), its base the version the song grew from), whose version Save Version then saves, following both
+// lines. What it is called now, and whether it can run.
+bool takeNewerVersions (ProjectContext&);
+bool canTakeNewerVersions (const ProjectContext&);
+juce::String describeTakeNewer (const ProjectContext&);
+
+// What couldn't be read of where the song's names said it stands (the version it grew from, damaged or let go of; a branch
+// the Versions folder hasn't), as the Versions view says it once: the changes are worked out against the branch's last
+// version then. None while there is nothing to say.
+juce::String getBaseProblem (const ProjectContext&);
+
+// Whether a version saved now may go on the branch: not while the branch has versions the song didn't grow from that only this
+// computer holds, nor while the song's branch isn't in the folder (VersionHistory.h: canSaveOnBranch()).
+bool canSaveOnBranch (const ProjectContext&);
+
+// Why the last version given wasn't saved ("Nothing changed since the last version.", a folder that couldn't be written), as the
+// Versions view says it, until the next version saved or the next edit; none while it was.
+juce::String getSaveProblem (const ProjectContext&);
+
+// What changed since the version the song grew from (docs/design/versions.md: Changes), a line a track, the master or the
+// song's own; whether anything did; and how many lines (the activity bar's badge). Worked out on the history's thread from
+// what changed in the song (docs/design/versions.md: Off the message thread): these read the last list worked out, and the
+// listeners (ProjectContext::Listener::versionsChanged()) are told when a newer one is in. Whether the last list is the song's
+// as it is now (nothing changed since its round, which is in; and the list against a version compared with the song, if
+// one is), what a test waits for; and whether the song may have changes, as far as is known now (some in the last list, or a
+// change since it), which the commands that act on the song as it is (Discard All Changes, Save Version) are enabled by.
 std::vector<VersionChange> getChangesSinceLastVersion (const ProjectContext&);
 bool hasChangesSinceLastVersion (const ProjectContext&);
 int countChanges (const ProjectContext&);
+bool areChangesWorkedOut (const ProjectContext&);
+bool mayHaveChangesSinceLastVersion (const ProjectContext&);
 
 // Discard All Changes: the song made the last version's again, as one undo step.
 bool discardAllChanges (ProjectContext&);
@@ -220,6 +261,11 @@ bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProj
 // Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a
 // render has its plug-ins (an export, a freeze, a bounce), while a version is being saved or the versions are read.
 bool canSwitchBranch (const ProjectContext&);
+
+// Why a switch, Create Branch from a version (a switch to it), a merge, Undo Last Version, Reset Branch or a DAWproject's
+// import can't be made: "Create Branch first" while the song's branch isn't in the folder (VersionHistory.h: missingBranch),
+// whose way out is Create Branch from the song as it is. None while it can.
+juce::String whyNotSwitchBranch (const ProjectContext&);
 bool canMakeBranch (const ProjectContext&);
 
 // A branch named anew, as toBranchName() makes the name: false for an empty one, or one another branch has (in any case).

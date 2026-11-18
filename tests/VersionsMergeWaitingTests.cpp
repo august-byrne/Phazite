@@ -177,7 +177,7 @@ TEST_CASE ("A merge taken after the last save goes with the song closed without 
         CHECK_FALSE (phazite::isMerging (m.s.context));
         CHECK (m.volume (m.bass) == doctest::Approx (-6.0f));
         CHECK (m.named ("Pad").empty());
-        CHECK_FALSE (phazite::hasSomethingToCommit (m.s.context));
+        CHECK_FALSE (phazite::hasSomethingToCommit (withChangesIn (m.s.context)));
 
         m.s.setVolume (m.drums, -3.0f);
         keepVersion (m.s.context, "Drums a little down");
@@ -256,7 +256,7 @@ TEST_CASE ("A merge taken counts as an unsaved change, and the merge itself is n
     CHECK (m.s.getProject().hasUnsavedChanges());
 
     // What it brought (Bass and Pad) are lines; its element in the song (Schema.h: MERGING) is none, not even the song's own.
-    const auto lines = phazite::getChangesSinceLastVersion (m.s.context);
+    const auto lines = phazite::getChangesSinceLastVersion (withChangesIn (m.s.context));
     CHECK_FALSE (lines.empty());
     CHECK (std::none_of (lines.begin(), lines.end(), [] (const phazite::VersionChange& line) { return line.isSong; }));
 
@@ -265,10 +265,10 @@ TEST_CASE ("A merge taken counts as an unsaved change, and the merge itself is n
     for (const auto& line : lines)
         REQUIRE (phazite::takeBack (m.s.context, line));
 
-    REQUIRE (dispatchMessagesUntil ([&m] { return ! phazite::hasChangesSinceLastVersion (m.s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&m] { return ! phazite::hasChangesSinceLastVersion (withChangesIn (m.s.context)); }));
     REQUIRE (phazite::isMerging (m.s.context));
     CHECK (m.s.getProject().hasUnsavedChanges());
-    CHECK (phazite::hasSomethingToCommit (m.s.context));
+    CHECK (phazite::hasSomethingToCommit (withChangesIn (m.s.context)));
 }
 
 TEST_CASE ("A merge redone after its Undo and a commit waits on top of that commit, and its commit follows it and the merged one")
@@ -292,9 +292,12 @@ TEST_CASE ("A merge redone after its Undo and a commit waits on top of that comm
     CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
 }
 
-TEST_CASE ("A merge waiting while another computer commits on the branch waits on top of that commit; one it merged there waits no more")
+TEST_CASE ("A merge waiting while another computer commits on the branch goes its own way beside that commit; one it merged there "
+           "waits no more")
 {
-    // Another computer's commit on main, on top of the one the merge was taken at: the merge waits on top of it, and says so.
+    // Another computer's commit on main, on top of the one the merge was taken at, which the song didn't grow from: the view
+    // says the branch has a newer version; the merge's version follows the song's line and the one merged in, never that
+    // commit, whose work the song hasn't, and the branch shows the two lines to merge again (S4.5).
     {
         WaitingMerge m;
         m.merge();
@@ -303,10 +306,13 @@ TEST_CASE ("A merge waiting while another computer commits on the branch waits o
         m.reopenAs (TestSong::Reopening::withoutSaving);
         REQUIRE (m.lastCommit().id == elsewhere);
         REQUIRE (phazite::isMerging (m.s.context));
-        CHECK (phazite::getMergeProblem (m.s.context).contains ("moved on"));
+        CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
+        CHECK (phazite::countNewerVersions (m.s.context) == 1);
+        CHECK (phazite::canSaveVersion (withChangesIn (m.s.context)));
         keepVersion (m.s.context);
-        CHECK (m.lastCommit().parents == juce::StringArray (elsewhere, m.theirs));
+        CHECK (m.lastCommit().parents == juce::StringArray (m.ours, m.theirs));
         CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
+        CHECK (phazite::getDivergentVersions (m.s.context) == juce::StringArray (elsewhere));
     }
 
     // Another computer merged the same commit on main, giving the same IDs: that merge is as good as this one's, and none
@@ -342,9 +348,9 @@ TEST_CASE ("A merge waiting while another computer commits on the branch waits o
 TEST_CASE ("Another computer's merge of the same commit with other IDs leaves this one waiting, and later merges of that line "
            "find this song's items")
 {
-    // Computer A (this one) merged idea-2's Pad as one ID; computer B merged it too, as another, and committed. A commits on
-    // top of B's merge, recording its own IDs; then idea-2 goes on, Pad renamed, or deleted, and A merges it again: Pad
-    // once, renamed, or gone.
+    // Computer A (this one) merged idea-2's Pad as one ID; computer B merged it too, as another, and committed. A commits its
+    // merge as a line of its own beside B's (the song didn't grow from B's), recording its own IDs; then idea-2 goes on, Pad
+    // renamed, or deleted, and A merges it again: Pad once, renamed, or gone.
     for (const auto deletes : { false, true })
     {
         INFO ((deletes ? "deleted" : "renamed"));
@@ -361,7 +367,8 @@ TEST_CASE ("Another computer's merge of the same commit with other IDs leaves th
         REQUIRE (phazite::isMerging (m.s.context));
         CHECK (phazite::getMergeProblem (m.s.context).contains ("already"));
         keepVersion (m.s.context);
-        CHECK (m.lastCommit().parents == juce::StringArray (byB, m.theirs));
+        CHECK (m.lastCommit().parents == juce::StringArray (m.ours, m.theirs));
+        CHECK (phazite::getDivergentVersions (m.s.context) == juce::StringArray (byB));
         CHECK (sorted (m.lastCommit().renumbered) == sorted (m.given));
         CHECK_FALSE (phazite::isMerging (m.s.context));
         CHECK (phazite::getMergeProblem (m.s.context).isEmpty());
@@ -985,4 +992,189 @@ TEST_CASE (
     REQUIRE (waitForVersionHistory (n.s.context));
     CHECK (phazite::findChanges (restored, n.song().getState()).empty());
     CHECK_FALSE (n.hasCurve());
+}
+
+TEST_CASE ("The other computer's merge of the same commit, merged in after this one's went its own way, brings no item twice")
+{
+    // The review of S4.5: computer A's merge of idea-2 saved beside computer B's, which gave Pad another ID; B's line merged in
+    // afterwards must find Pad as A's, by the IDs each merge's record says it gave, not add it again.
+    WaitingMerge m;
+    m.merge();
+    const auto padHere = m.named ("Pad");
+    REQUIRE (padHere.size() == 1);
+    REQUIRE (m.s.getProject().save().wasOk());
+
+    // B's merge: the same song, Pad under the ID B gave it, recorded as B's merge records it.
+    const auto byB = [&m, &padHere]
+    {
+        auto song = m.song().getState().createCopy();
+        song.removeChild (song.getChildWithName (schema::MERGING), nullptr);
+        const auto theirID = padHere[0].getRaw() + 1000;
+
+        for (auto track : phazite::getTrackElements (song))
+            if (phazite::readID (track[schema::trackID]) == padHere[0].getRaw())
+                track.setProperty (schema::trackID, (juce::int64) theirID, nullptr);
+
+        phazite::VersionStore store (phazite::getVersionsFolder (m.song()), "elsewhere");
+        phazite::VersionRecord record;
+        record.name = "Merged there";
+        record.parents = { m.ours, m.theirs };
+        record.renumbered = { { {}, m.pad.getRaw(), theirID } };
+        record.branch = findBranch (m.s.context, "main");
+        record.saved = juce::Time::currentTimeMillis();
+        const auto id = store.writeVersion (record, phazite::splitSong (song));
+        REQUIRE (id.isNotEmpty());
+
+        phazite::BranchRecord branch;
+
+        for (const auto& b : phazite::getVersionHistory (m.s.context)->getBranches())
+            if (b.id == record.branch)
+                branch = b;
+
+        branch.head = id;
+        branch.computer = "elsewhere";
+        branch.working = {};
+        REQUIRE (store.writeBranch (branch));
+        store.getPieces().closeFiles();
+        return id;
+    }();
+
+    m.reopenAs (TestSong::Reopening::withoutSaving);
+    REQUIRE (phazite::isMerging (m.s.context));
+    keepVersion (m.s.context);
+    REQUIRE (phazite::getDivergentVersions (m.s.context) == juce::StringArray (byB));
+
+    // B's line merged in: Pad once, under this song's ID.
+    REQUIRE (phazite::test::finished (m.s.context, [&] { return phazite::startMerge (m.s.context, byB); }));
+
+    if (! phazite::getMergeLines (m.s.context).empty())
+        REQUIRE (phazite::test::finished (m.s.context, [&] { return phazite::finishMerge (m.s.context); }));
+    else
+        phazite::cancelMerge (m.s.context);
+
+    CHECK (m.named ("Pad") == padHere);
+    checkIDs (m.song());
+}
+
+namespace
+{
+// The review of S4.5: idea-2's Pad has the ID c. Line A made Lead with c and merged Pad in under a; line B made Keys with c and
+// merged Pad in under b (other), or under a too (its count where A's was). A merging B's line took B's Keys for the parting's
+// Pad (this line's record says c is a), and B's Pad, crossed to a, for a second item under a: Pad twice, Keys lost.
+void mergeTwoLinesThatMergedPad (bool other)
+{
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto first = keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    const auto count = song.getState()[schema::nextID];
+
+    const auto named = [&song] (const juce::String& name)
+    {
+        std::vector<phazite::TrackID> found;
+
+        for (const auto track : phazite::getTrackIDs (song))
+            if (phazite::getTrackName (song, track) == name)
+                found.push_back (track);
+
+        return found;
+    };
+
+    const auto merge = [&s] (const juce::String& version)
+    {
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, version); }));
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::finishMerge (s.context); }));
+        REQUIRE (phazite::isMerging (s.context));
+        CHECK (phazite::getClashes (s.context).empty());
+    };
+
+    // idea-2: Pad, with c.
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    const auto pad = s.addTrack ("Pad");
+    const auto x = keepVersion (s.context, "Pad");
+
+    // A, on main: Lead with c, then idea-2 merged, Pad given a.
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    song.getState().setProperty (schema::nextID, count, nullptr);
+    REQUIRE (s.addTrack ("Lead") == pad);
+    keepVersion (s.context, "Lead");
+    const auto atMerge = song.getState()[schema::nextID];
+    merge (x);
+    keepVersion (s.context);
+    const auto padA = named ("Pad");
+    REQUIRE (padA.size() == 1);
+    REQUIRE (padA[0] != pad);
+
+    // B, a line of its own from First: Keys with c, then idea-2 merged, Pad given b (or a, its count where A's was).
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, first, s.save); }));
+    REQUIRE (named ("Lead").empty());
+    song.getState().setProperty (schema::nextID, count, nullptr);
+    REQUIRE (s.addTrack ("Keys") == pad);
+    keepVersion (s.context, "Keys");
+    song.getState().setProperty (schema::nextID, other ? (juce::int64) atMerge + 1000 : (juce::int64) atMerge, nullptr);
+    merge (x);
+    const auto byB = keepVersion (s.context);
+    REQUIRE (named ("Pad").size() == 1);
+    REQUIRE ((named ("Pad")[0] == padA[0]) == ! other);
+
+    // A merges B's line: Pad once, under A's ID; Lead and Keys each once; every ID once.
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    merge (byB);
+    CHECK (named ("Pad") == padA);
+    CHECK (named ("Lead") == std::vector { pad });
+    CHECK (named ("Keys").size() == 1);
+    CHECK (named ("Bass") == std::vector { bass });
+    checkSong (song);
+
+    // What crossed (B's Pad, to A's ID) is in the merge waiting, which the song's file holds and its reading again finds.
+    const auto* waiting = &*phazite::getVersionHistory (s.context)->getMerging();
+    const auto crossedToA = [&padA] (const std::vector<phazite::RenumberedID>& ids)
+    { return std::any_of (ids.begin(), ids.end(), [&padA] (const auto& id) { return id.clip.isEmpty() && id.to == padA[0].getRaw(); }); };
+    CHECK (crossedToA (waiting->crossed)); // B's Pad to A's ID, or kept as it is, A's already
+    CHECK (crossedToA (waiting->renumbered));
+    CHECK (song.getState().getChildWithName (schema::MERGING).hasProperty (schema::mergingCrossed) == true);
+
+    REQUIRE (s.getProject().save().wasOk());
+    REQUIRE (s.reopenAs (TestSong::Reopening::withoutSaving));
+    REQUIRE (waitForVersionHistory (s.context));
+    auto& reopened = *phazite::findSong (s.context);
+    REQUIRE (phazite::isMerging (s.context));
+    REQUIRE (dispatchMessagesUntil (
+        [&s]
+        {
+            const auto& found = phazite::getVersionHistory (s.context)->getMerging();
+            return found.has_value() && found->readWhole;
+        }));
+    waiting = &*phazite::getVersionHistory (s.context)->getMerging();
+    CHECK (crossedToA (waiting->crossed));
+    CHECK (waiting->clashes.empty());
+
+    for (const auto& track : phazite::getTrackElements (waiting->theirs))
+        if (track[schema::trackName].toString() == "Pad")
+            CHECK (phazite::readID (track[schema::trackID]) == padA[0].getRaw());
+
+    // Its version records the crossing, beside the IDs the merge gave B's Keys.
+    keepVersion (s.context);
+    const auto* last = phazite::getVersionHistory (s.context)->findLastVersion();
+    REQUIRE (last != nullptr);
+    CHECK (crossedToA (last->renumbered));
+    CHECK (std::any_of (last->renumbered.begin(), last->renumbered.end(),
+                        [&pad] (const auto& id) { return id.clip.isEmpty() && id.from == pad.getRaw(); }));
+    checkSong (reopened);
+}
+} // namespace
+
+TEST_CASE ("Two lines that each merged the same version beside an item of their own under the ID it had merge with each item once")
+{
+    SUBCASE ("each line's merge gave the merged item an ID of its own")
+    {
+        mergeTwoLinesThatMergedPad (true);
+    }
+
+    SUBCASE ("both lines' merges gave it the same ID")
+    {
+        mergeTwoLinesThatMergedPad (false);
+    }
 }

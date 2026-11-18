@@ -509,6 +509,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/internal/Take.h
     src/model/transport/internal/Tempo.h
     src/model/versions/ApplySong.cpp
+    src/model/versions/ChangesWorker.cpp
     src/model/versions/PieceStore.cpp
     src/model/versions/SongDiff.cpp
     src/model/versions/SongMerge.cpp
@@ -519,6 +520,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/VersionsModel.cpp
     src/model/versions/VersionsModel.h
     src/model/versions/internal/ApplySong.h
+    src/model/versions/internal/ChangesWorker.h
     src/model/versions/internal/PieceStore.h
     src/model/versions/internal/SongDiff.h
     src/model/versions/internal/SongMerge.h
@@ -1460,6 +1462,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ValueTextTests.cpp
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
+        tests/VersionsChangesTests.cpp
         tests/VersionsFolderCopyTests.cpp
         tests/VersionsGoingBackTests.cpp
         tests/VersionsHearingTests.cpp
@@ -1469,6 +1472,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsRecoveryTests.cpp
         tests/VersionsSweepTests.cpp
         tests/VersionsTests.cpp
+        tests/VersionsTiedTests.cpp
         tests/VersionsTwoComputersTests.cpp
         tests/VinylTests.cpp
         tests/VocoderTests.cpp

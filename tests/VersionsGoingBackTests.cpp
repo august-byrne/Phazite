@@ -129,10 +129,10 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     s.rename (bass, "Low");
     phazite::findTrackState (song, bass).setProperty (schema::trackHeight, 140, nullptr);
     const auto changed = song.getState().createCopy();
-    REQUIRE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::bringBackVersion (s.context, verse); }));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::findChanges (then, song.getState()).empty());
     CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
     CHECK (phazite::describeUndo (&song) == "Undo Restore \"Verse\"");
@@ -141,7 +141,7 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     // Undo takes it all back, in one step.
     phazite::undo (song);
     CHECK (phazite::findChanges (changed, song.getState()).empty());
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 }
 
 TEST_CASE ("Put Back takes one line back from the last version, and Take from This Version from another")
@@ -161,15 +161,15 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
     s.setVolume (bass, -20.0f);
     s.addTrack ("Strings");
     phazite::deleteTracks (*phazite::findSong (s.context), { keys }, nullptr);
-    CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume; + Strings; - Keys");
+    CHECK (describeChanges (phazite::getListedChanges (withChangesIn (s.context))) == "Bass: volume; + Strings; - Keys");
 
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Bass")));
     CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-12.0f));
     CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard Changes in Bass");
 
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Strings")));
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Keys")));
-    CHECK (describeChanges (phazite::getListedChanges (s.context)).isEmpty());
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Strings")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Keys")));
+    CHECK (describeChanges (phazite::getListedChanges (withChangesIn (s.context))).isEmpty());
 
     // Keys came back where it was, after Bass, with its clip and its note.
     const auto tracks = phazite::getTrackIDs (*phazite::findSong (s.context));
@@ -181,15 +181,15 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
     // Take from This Version: what differs from the first version, and Bass taken from it.
     phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, first); });
     CHECK (phazite::getComparedVersion (s.context) == first);
-    CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume");
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
+    CHECK (describeChanges (phazite::getListedChanges (withChangesIn (s.context))) == "Bass: volume");
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Bass")));
     CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-6.0f));
     CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Restore Bass from \"First\"");
-    CHECK (describeChanges (phazite::getListedChanges (s.context)).isEmpty());
+    CHECK (describeChanges (phazite::getListedChanges (withChangesIn (s.context))).isEmpty());
 
     // Back to the changes since the last version, which that one is now.
     phazite::test::finished (s.context, [&] { return phazite::compareWithVersion (s.context, {}); });
-    CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume");
+    CHECK (describeChanges (phazite::getListedChanges (withChangesIn (s.context))) == "Bass: volume");
 }
 
 TEST_CASE (
@@ -202,7 +202,7 @@ TEST_CASE (
     s.addNote (clip, 60, 0.0, 1.0);
     keepVersion (s.context, "First");
     auto& song = *phazite::findSong (s.context);
-    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (s.context)); };
+    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (withChangesIn (s.context))); };
 
     // Grouped into a folder since: the folder's line discarded, its tracks are where they were, with what they hold.
     phazite::TrackID folder;
@@ -212,8 +212,8 @@ TEST_CASE (
         folder = phazite::groupIntoFolder (song, { bass, keys }, nullptr);
     }
 
-    REQUIRE (findLine (phazite::getListedChanges (s.context), "Folder").has_value());
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Folder")));
+    REQUIRE (findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder").has_value());
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder")));
     checkIDs (song);
     CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
     CHECK (phazite::getTrackIDs (song) == std::vector { s.firstTrack, bass, keys });
@@ -233,13 +233,13 @@ TEST_CASE (
         phazite::ungroupFolder (song, folder);
     }
 
-    REQUIRE (findLine (phazite::getListedChanges (s.context), "Folder").has_value());
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Folder")));
+    REQUIRE (findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder").has_value());
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder")));
     checkIDs (song);
     CHECK (phazite::getTrackIDs (song).size() == 4);
     CHECK (phazite::getTracksInFolder (song, folder).empty());
-    REQUIRE (findLine (phazite::getListedChanges (s.context), "Song").has_value());
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Song")));
+    REQUIRE (findLine (phazite::getListedChanges (withChangesIn (s.context)), "Song").has_value());
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Song")));
     checkIDs (song);
     CHECK (phazite::getTracksInFolder (song, folder) == std::vector { bass, keys });
     CHECK (changes().isEmpty());
@@ -251,7 +251,7 @@ TEST_CASE (
     }
 
     REQUIRE (phazite::getTrackIDs (song).size() == 1);
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Folder")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Folder")));
     checkIDs (song);
     CHECK (phazite::getTracksInFolder (song, folder) == std::vector { bass, keys });
     CHECK (phazite::getClips (song, keys) == std::vector { clip });
@@ -267,7 +267,7 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
     s.addNote (clip, 36, 0.0, 1.0);
     const auto first = keepVersion (s.context, "First");
     auto& song = *phazite::findSong (s.context);
-    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (s.context)); };
+    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (withChangesIn (s.context))); };
 
     const auto moveToKeys = [&song, clip, keys]
     {
@@ -278,7 +278,7 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
     // Moved onto Keys since. Discard Changes in Bass: the clip is on Bass again, and on Keys no more.
     moveToKeys();
     CHECK (changes() == "Bass: 1 clip removed; Keys: 1 clip added");
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Bass")));
     checkIDs (song);
     CHECK (phazite::getClips (song, bass) == std::vector { clip });
     CHECK (phazite::getClips (song, keys).empty());
@@ -310,7 +310,7 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
         phazite::deleteTracks (song, { bass }, nullptr);
     }
 
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Bass")));
     checkIDs (song);
     CHECK (phazite::getClips (song, bass) == std::vector { clip });
     CHECK (phazite::getClips (song, keys).empty());
@@ -324,7 +324,7 @@ TEST_CASE ("A track's line discarded or restored brings a clip moved off the tra
         phazite::groupIntoFolder (song, { bass, keys }, nullptr);
     }
 
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     REQUIRE (phazite::discardAllChanges (s.context));
     REQUIRE (waitForVersionHistory (s.context));
     checkIDs (song);
@@ -342,7 +342,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
     s.addNote (clip, 36, 0.0, 1.0);
     const auto first = keepVersion (s.context, "First");
     auto& song = *phazite::findSong (s.context);
-    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (s.context)); };
+    const auto changes = [&s] { return describeChanges (phazite::getListedChanges (withChangesIn (s.context))); };
 
     const auto moveTo = [&song, clip] (phazite::TrackID track)
     {
@@ -355,7 +355,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
     moveTo (keys);
     s.addNote (clip, 40, 2.0, 1.0);
     CHECK (changes() == "Bass: 1 clip removed; Keys: 1 clip added");
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Keys")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Keys")));
     checkIDs (song);
     CHECK (phazite::getClips (song, bass) == std::vector { clip });
     CHECK (phazite::getClips (song, keys).empty());
@@ -380,7 +380,7 @@ TEST_CASE ("The line of the track a clip was moved onto, discarded or restored a
     // Moved onto a track added since: that track's line discarded, the track goes, and the clip is on Keys again.
     const auto strings = s.addTrack ("Strings");
     moveTo (strings);
-    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Strings")));
+    REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (withChangesIn (s.context)), "Strings")));
     checkIDs (song);
     CHECK_FALSE (phazite::findTrackState (song, strings).isValid());
     CHECK (phazite::getClips (song, keys) == std::vector { clip });
@@ -463,14 +463,15 @@ TEST_CASE ("What is restored into a song opened again as it was saved before it 
         checkNextItems (s, keys);
     }
 
-    // One track of it: the song lacks Keys, which its last commit has, and its line is discarded.
+    // The song grew from the version before Keys (its names say so), so the changes don't list Keys as taken away: the
+    // branch's newer version is offered instead, and taken.
     {
         TestSong s;
         phazite::TrackID keys;
         makeAndReopen (s, keys, true);
-        const auto line = findLine (phazite::getListedChanges (s.context), "Keys");
-        REQUIRE (line.has_value());
-        REQUIRE (phazite::takeBack (s.context, *line));
+        CHECK_FALSE (findLine (phazite::getListedChanges (withChangesIn (s.context)), "Keys").has_value());
+        REQUIRE (phazite::countNewerVersions (s.context) == 1);
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::takeNewerVersions (s.context); }));
         checkNextItems (s, keys);
     }
 }
@@ -489,12 +490,12 @@ TEST_CASE ("The commands bring back the version selected, and put back the line 
     CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Restore \"First\"");
     CHECK_FALSE (phazite::canTakeFrom (s.context)); // it is the last version: its changes are listed already
     REQUIRE (phazite::test::finished (s.context, [&] { return commands.invoke ("version.bringBack"); }));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     s.setVolume (bass, -9.0f);
-    phazite::selectChange (s.context, phazite::getListedChanges (s.context).front());
+    phazite::selectChange (s.context, phazite::getListedChanges (withChangesIn (s.context)).front());
     REQUIRE (phazite::test::finished (s.context, [&] { return commands.invoke ("version.putBack"); }));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK_FALSE (phazite::canPutBack (s.context)); // the line it put back is gone
 }
 
@@ -573,7 +574,8 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
         phazite::setSong (context, &project->getSong());
 
         waitForClipRenders (context);
-        const auto version = keepVersion (context);
+        REQUIRE (waitForVersionHistory (context));
+        const auto version = phazite::getLastVersion (context)->id; // its first version, the song as it came
         REQUIRE (project->save().wasOk());
         const auto saved = readNormalisedProject (project->getFile());
         const auto played = writeFingerprint (renderFingerprint (context, 2.0), "before");
@@ -607,10 +609,10 @@ TEST_CASE ("Every example song, changed through the model and brought back, save
             phazite::deleteTracks (song, { tracks.back() }, nullptr);
         }
 
-        REQUIRE (phazite::hasChangesSinceLastVersion (context));
+        REQUIRE (phazite::hasChangesSinceLastVersion (withChangesIn (context)));
         REQUIRE (phazite::test::finished (context, [&] { return phazite::bringBackVersion (context, version); }));
-        INFO (describeChanges (phazite::getChangesSinceLastVersion (context)).toStdString());
-        CHECK_FALSE (phazite::hasChangesSinceLastVersion (context));
+        INFO (describeChanges (phazite::getChangesSinceLastVersion (withChangesIn (context))).toStdString());
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (context)));
 
         waitForClipRenders (context);
         REQUIRE (project->save().wasOk());

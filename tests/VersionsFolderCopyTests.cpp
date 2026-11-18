@@ -196,6 +196,7 @@ TEST_CASE ("A first save's copy that waits behind the history's writes as the hi
 
             return true;
         });
+    const juce::ScopeGuard letWritesGo { [&holding] { holding = false; } }; // before the song waits for its writes
 
     // A commit being written, held, and the copy waiting behind it.
     s.addTrack ("Bass");
@@ -230,6 +231,7 @@ TEST_CASE ("A first save's copy waits for what a history of the same folder that
 
             return true;
         });
+    const juce::ScopeGuard letWritesGo { [&holding] { holding = false; } }; // before the song waits for its writes
 
     s.addTrack ("Bass");
     REQUIRE (phazite::saveVersion (context));

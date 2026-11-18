@@ -486,7 +486,8 @@ inline bool isTrackViewElement (const juce::ValueTree& element)
 
 // What a project saves that is no change to it: view state (above); how the song plays rather than the song (design question
 // 18): the loop (where it is, whether it is on, and whether it follows the song), the metronome's switch, where playback
-// starts, the punch and the input chosen last; and the song's next ID (nextID), which the item it numbers comes with. As a
+// starts, the punch and the input chosen last; the song's next ID (nextID), which the item it numbers comes with; and where
+// the song stands in the project's versions (versionsBranch, versionsBase), which the versions keep as they move. As a
 // property (isUncountedProperty()), or as an element with everything in it (isUncountedElement()). A project's unsaved
 // changes (model/project/internal/Project.h) and the versions' differences (model/versions/) leave out the same.
 bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
@@ -704,11 +705,41 @@ inline const juce::Identifier mergingBefore { "before" };
 // this branch's, 2 the other line's. None: each this branch's.
 inline const juce::Identifier mergingChosen { "chosen" };
 
-// On MERGING: the IDs the merge gave anew, which its commit records (renumbered), and those the parting's and the other
-// line's songs were translated through before it (translated; model/versions/internal/SongMerge.h: findTranslation()),
-// separated by commas, each "from>to", or for a note "<its clip's group>/from>to" ("clip 66/3>7"), as a commit's RENUMBERED.
-// No ID 0, and no two of one group with the same from, or the same to.
-inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTranslated { "translated" };
+// On MERGING: the IDs the merge gave anew, which its commit records (renumbered); those the parting's and the other line's
+// songs were translated through before it (translated; model/versions/internal/SongMerge.h: findTranslation()); and those
+// the other line's song was translated through before that, where that line's own merges gave what both lines took in other
+// IDs than this line's did (crossed; model/versions/internal/VersionHistory.h: crossRenumbering()). Each separated by commas,
+// each "from>to", or for a note "<its clip's group>/from>to" ("clip 66/3>7"), as a commit's RENUMBERED. No ID 0, and no two
+// of one group with the same from, or the same to.
+inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTranslated { "translated" }, mergingCrossed { "crossed" };
+
+// On PHAZITE: where the song stands in the project's versions (docs/design/versions.md: The song tied to its version): the
+// branch it is on (versionsBranch: the branch's id, 32 lowercase hexadecimal digits) and the version it grew from
+// (versionsBase: the version's id, 64 lowercase hexadecimal digits), which its changes are worked out against; none before
+// the first version. They go wherever the song goes: its project file, its autosave and backups, the song left on a branch
+// and Local History; a version's own song holds neither (VersionHistory::saveVersion() leaves them out). Text of any other
+// form names nothing, and the loader leaves it out (model/project/internal/Project.h: makeConsistent()). No change to the
+// song (isUncountedProperty()): written without undo steps, but by Take the Newer Versions, which moves the song to newer
+// versions as one undo step whose Undo puts them back; a project whose song has no unsaved change has them written into its
+// file as they move (model/project/internal/Project.h). Names that point at nothing the Versions folder holds (a project
+// opened without it, a version that can't be read) leave the versions to take the branch the folder names and its last
+// version (model/versions/internal/VersionHistory.h). state
+inline const juce::Identifier versionsBranch { "versionsBranch" }, versionsBase { "versionsBase" };
+
+// How many lowercase hexadecimal digits each holds, and whether a text is an id of that form: the one check of them, which the
+// loader and the versions use.
+inline constexpr int versionsBranchDigits = 32, versionsBaseDigits = 64;
+
+inline bool isVersionsID (const juce::String& text, int digits)
+{
+    return text.length() == digits && text.containsOnly ("0123456789abcdef");
+}
+
+// Whether a property of the song's own element is one of those two.
+inline bool isVersionsProperty (const juce::ValueTree& tree, const juce::Identifier& p)
+{
+    return tree.hasType (PHAZITE) && (p == versionsBranch || p == versionsBase);
+}
 
 //==============================================================================
 // The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the

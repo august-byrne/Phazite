@@ -90,8 +90,14 @@ namespace
 
 juce::String writeSong (const Song& song, SongPart part)
 {
+    // Without where the song stands in its project's versions (Schema.h: versionsBranch, versionsBase), which the history
+    // writes as a version is saved, a project's first one in the background as it opens: no part of what an edit or its
+    // Undo changes, and at any moment for a test that compares the song before and after (VersionsTiedTests.cpp holds them).
+    auto copy = copyPart (song.getState(), part);
+    copy.removeProperty (schema::versionsBranch, nullptr);
+    copy.removeProperty (schema::versionsBase, nullptr);
     juce::MemoryOutputStream text;
-    writeProjectText (text, copyPart (song.getState(), part));
+    writeProjectText (text, copy);
     return text.toString();
 }
 

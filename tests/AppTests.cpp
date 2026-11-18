@@ -29,6 +29,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -602,7 +603,9 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("First version"));
 
-    // A copy saved as a version is being written: the copy has it, and goes on in its own folder.
+    // A copy saved as a version is being written: the copy has it, and goes on in its own folder. (A version records a change:
+    // one of none isn't written.)
+    phazite::setProjectNotes (context, "A sketch");
     phazite::setVersionDraft (context, "Sketch", {});
     REQUIRE (phazite::saveVersion (context));
     answer = projects.getChildFile ("Beat copy.phazite");
@@ -1580,13 +1583,24 @@ TEST_CASE ("A first save copies the project's versions last, with the commit its
 
 namespace
 {
-// A file of so many bytes in the untitled project's Versions folder, where its history keeps nothing of its own.
+// A file of so many bytes in the untitled project's Versions folder, in `local` itself, where its history writes nothing
+// (its own files are in local/<computer>/).
 juce::File addToVersions (FirstSave& s, juce::int64 bytes)
 {
     const auto file = s.session.getProject()->getFolder().getChildFile ("Versions").getChildFile ("local").getChildFile ("big.bin");
     REQUIRE (file.getParentDirectory().createDirectory());
+
+    // Written in place: File::replaceWithData() renames a temporary file over it, a few tries in half a second, which a
+    // virus scanner reading a new file of many megabytes (a CI runner's) can outlast. Said why if it fails.
     juce::MemoryBlock block ((size_t) bytes, true);
-    REQUIRE (file.replaceWithData (block.getData(), block.getSize()));
+    juce::FileOutputStream out (file);
+    INFO (out.getStatus().getErrorMessage());
+    REQUIRE (out.openedOk());
+    REQUIRE (out.setPosition (0));
+    REQUIRE (out.truncate().wasOk());
+    REQUIRE (out.write (block.getData(), block.getSize()));
+    out.flush();
+    REQUIRE (out.getStatus().wasOk());
     return file;
 }
 } // namespace
@@ -1626,6 +1640,11 @@ TEST_CASE ("A first save's versions are copied by their history's thread, after 
         });
 
     FirstSave s;
+
+    // Let go of before the project goes, which waits for every write its history was given: so a check that fails while
+    // they are held ends the test rather than hanging it.
+    const juce::ScopeGuard letWritesGo { [&holding] { holding = false; } };
+
     auto& context = s.session.getContext();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
     auto* history = phazite::getVersionHistory (context);
@@ -1972,6 +1991,7 @@ TEST_CASE ("A small project's first save waits on the message thread for no comm
         });
 
     FirstSave s;
+    const juce::ScopeGuard letWritesGo { [&holding] { holding = false; } }; // before the project waits for them
     auto& context = s.session.getContext();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
     auto* history = phazite::getVersionHistory (context);

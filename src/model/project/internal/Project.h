@@ -125,7 +125,9 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
 //                    schema::versions), once there is one
 //
 // Create, open and destroy Projects on the message thread.
-class Project : private juce::ValueTree::Listener
+class Project : private juce::ValueTree::Listener,
+                private juce::AsyncUpdater,
+                private juce::Timer
 {
 public:
     static constexpr const char* fileExtension = ".phazite";
@@ -190,6 +192,13 @@ public:
     // Told, on the message thread, when a save (save(), or Auto Save's) couldn't make its backup, which the save goes on
     // without: once, until a backup is made again (known bug 40).
     std::function<void (const juce::String& message)> onBackupFailed;
+
+    // Where the song stands in its versions (Schema.h: versionsBranch, versionsBase), written into the project file as the
+    // versions move them (versionsMoved(), below): told, on the message thread, when that write failed, once until one
+    // works; the next save, Auto Save's too, writes them then, and the autosave holds them. And whether the file holds them as
+    // the song has them (nothing waits to be written, nor is being written), for tests.
+    std::function<void (const juce::String& message)> onVersionsNamesFailed;
+    bool hasVersionsNamesWritten() const;
 
     // Writes the autosave if anything changed since the last save or autosave.
     juce::Result autosave();
@@ -354,6 +363,23 @@ private:
     // The autosave is no backup and stays.
     void backUpProjectFile();
     bool backupFailed = false; // told until a backup is made again
+
+    // Where the song stands in the project's versions (Schema.h: versionsBranch, versionsBase), which the versions move without
+    // an undo step and without an unsaved change (a version saved, a branch made or switched to): written into the project
+    // file in the background (namesWriter: the file as it was saved but for them, so no backup is made of it), while the song
+    // has no unsaved change, once no other write of the file is under way; while it has one, by the next save, and by the
+    // next autosave (marked as a change to autosave). A write that fails leaves them pending (namesPending), which the next
+    // save (Auto Save's too) writes, and is told once (onVersionsNamesFailed). So that the file always says which version
+    // the song in it grew from, and an untouched project stays saved. Written at once as the project closes, if it still
+    // waits. Message thread.
+    std::unique_ptr<BackgroundWriter> namesWriter;
+    bool namesPending = false, namesWriting = false, namesFailed = false;
+    void versionsMoved();
+    void writeVersionsNames();
+    bool takeNamesWritten(); // a names write under way finished, before another write or copy of the file: pending if it failed
+    void tellNamesFailed();  // once, until a write of them works
+    void handleAsyncUpdate() override;
+    void timerCallback() override; // a names write under way, or one waiting for another write of the file, looked at
     void rememberSavedState();
     void forgetSavedState(); // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();

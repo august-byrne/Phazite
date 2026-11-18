@@ -460,6 +460,86 @@ TEST_CASE ("A note the other line made with the ID a merge gave one of its notes
     CHECK_FALSE (phazite::areOneToOne ({ { {}, 0, 2 } }));
 }
 
+TEST_CASE ("The other line's merges of a version both merged cross to this line's IDs: the latest word, for what its song holds, never "
+           "onto an ID it holds, and its own item under such an ID given one of its own")
+{
+    // The review of S4.5: three lines that merged the same version, notes crossed onto a note their clip holds, and the other
+    // line's own item under an ID its merge gave anew, which this line's records would take for the parting's.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
+    const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+    addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
+    addMidiNote (*song, clip, 38, at (1.0), lasting (1.0));
+    const auto theirs = song->getState().createCopy();
+    std::vector<std::uint64_t> notes;
+
+    const auto clips = findItems (theirs, schema::CLIP, clip.getRaw());
+    REQUIRE (clips.size() == 1);
+
+    for (const auto& note : clips.front())
+        if (note.hasType (schema::NOTE))
+            notes.push_back (phazite::readID (note[schema::noteID]));
+
+    REQUIRE (notes.size() == 2);
+    const auto group = "clip " + juce::String ((juce::uint64) clip.getRaw());
+    const auto t0 = tracks[0].getRaw(), t1 = tracks[1].getRaw(), t2 = tracks[2].getRaw();
+    constexpr std::uint64_t far = 1000000; // no ID the song holds
+
+    const std::vector<phazite::RenumberedID> theirMerges {
+        { {}, far + 900, far + 901 },  // what their song no longer holds: nothing
+        { {}, far + 10, far + 902 },   // an earlier merge's word...
+        { {}, far + 10, t1 },          // ...and the latest's, which their song holds
+        { group, far + 20, notes[0] }, // onto a note their clip holds: left out
+        { group, far + 30, notes[1] }, // a note crossed
+        { {}, t2, t0 },                // an item crossed, and their own Lead under t2, which the records translate
+    };
+    const std::vector<phazite::RenumberedID> ourMerges {
+        { group, far + 20, notes[1] },
+        { group, far + 30, far + 31 },
+        { {}, t2, far + 41 },
+        { group, t2, far + 77 }, // a note's word, which says nothing of the item
+    };
+
+    std::uint64_t next = 5000;
+    auto crossed = phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, far + 41 } }, theirs, theirs, [&next] { return next++; });
+    std::sort (crossed.begin(), crossed.end(),
+               [] (const auto& a, const auto& b) { return a.clip != b.clip ? a.clip.compare (b.clip) < 0 : a.from < b.from; });
+
+    const std::vector<phazite::RenumberedID> expected {
+        { {}, t0, far + 41 },
+        { {}, t1, far + 10 },
+        { {}, t2, 5000 },
+        { group, notes[1], far + 31 },
+    };
+    CHECK (crossed == expected);
+
+    // Their own item under t2 given none where the parting hasn't t2 (nothing translates it there).
+    auto without = theirs.createCopy();
+    const auto lead = findItems (without, schema::TRACK, t2);
+    REQUIRE (lead.size() == 1);
+    juce::ValueTree (lead.front()).getParent().removeChild (lead.front(), nullptr);
+    CHECK (phazite::crossRenumbering ({ { {}, t2, t0 } }, { { {}, t2, far + 41 } }, { { {}, t2, far + 41 } }, without, theirs,
+                                      [&next] { return next++; })
+           == std::vector<phazite::RenumberedID> { { {}, t0, far + 41 } });
+}
+
+TEST_CASE ("Crossings that aren't one to one are left out, and the other line's own item still gets an ID of its own")
+{
+    // The review of S4.5: records another history wrote that cross two items to one ID dropped every entry, the new ID of the
+    // other line's own item too, which then was taken for the parting's item under that ID.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
+    const auto theirs = song->getState().createCopy();
+    const auto t0 = tracks[0].getRaw(), t1 = tracks[1].getRaw(), t2 = tracks[2].getRaw();
+    constexpr std::uint64_t far = 1000000; // no ID the song holds
+
+    const std::vector<phazite::RenumberedID> theirMerges { { {}, far + 10, t0 }, { {}, far + 11, t1 }, { {}, t2, far + 60 } };
+    const std::vector<phazite::RenumberedID> ourMerges { { {}, far + 10, far + 50 }, { {}, far + 11, far + 50 } }; // two to one
+    std::uint64_t next = 5000;
+    CHECK (phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, far + 41 } }, theirs, theirs, [&next] { return next++; })
+           == std::vector<phazite::RenumberedID> { { {}, t2, 5000 } });
+}
+
 TEST_CASE ("The renumberings that apply are those of this line's merges since the parting that merged in the other line")
 {
     std::map<juce::String, phazite::VersionRecord> versions;

@@ -462,7 +462,7 @@ TEST_CASE ("Clean Up reads nothing of the versions on the message thread, howeve
     for (int i = 0; i < 8; ++i)
     {
         s.setVolume (track, -1.0f - (float) i);
-        REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+        REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
         history->takeSnapshot ("auto");
         REQUIRE (waitForVersionHistory (s.context));
     }
@@ -494,7 +494,7 @@ TEST_CASE ("Clean Up waits while a snapshot is written, saying why")
     keepVersion (s.context, "Before");
     REQUIRE (phazite::canCleanUpAudio (s.context));
     s.setVolume (track, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
 
     phazite::VersionHistory::holdWritesForTests = true;
     phazite::getVersionHistory (s.context)->takeSnapshot ("auto");

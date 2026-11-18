@@ -3370,13 +3370,14 @@ TEST_CASE ("A command that reads the plug-ins' states runs once one changed in i
     };
 
     commit();
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (song.context));
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context)));
     turnInItsWindow (instance, 0.25f);
 
     // Nothing else changed, nothing stored or saved yet: the change shows at once, and Commit is there.
     REQUIRE (phazite::test::waitForVersionHistory (song.context));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::hasChangesSinceLastVersion (song.context); }, longWait));
-    CHECK (phazite::canSaveVersion (song.context));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context)); }, longWait));
+    CHECK (phazite::canSaveVersion (phazite::test::withChangesIn (song.context)));
     const auto versions = phazite::getVersions (song.context).size();
 
     {
@@ -3390,7 +3391,7 @@ TEST_CASE ("A command that reads the plug-ins' states runs once one changed in i
         [&] { return phazite::getVersions (song.context).size() > versions && ! phazite::isSavingVersion (song.context); }, longWait));
     REQUIRE (phazite::test::waitForVersionHistory (song.context));
     CHECK (getStoredLevel (getSong (song), slow) == doctest::Approx (0.25f));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (song.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context)));
 }
 
 TEST_CASE ("Delete of notes waits for no plug-in; a macro, Bring Back and a preset saved get the states first, once")
@@ -3609,7 +3610,8 @@ TEST_CASE ("A store's answer that comes late shows as a change to commit; an old
 
     // Its answer comes: a change to commit.
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getStoredLevel (getSong (song), slow) > 0.49f; }, longWait));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::hasChangesSinceLastVersion (song.context); }, longWait));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context)); }, longWait));
 }
 
 TEST_CASE ("An answer of a plug-in an undo replaced leaves the new instance's own settings alone")
@@ -4404,7 +4406,8 @@ TEST_CASE ("A preset loaded or a chain duplicated or a version saved straight af
     phazite::addVersionCommands (song.commands, song.context, song.save, renders);
     REQUIRE (phazite::test::waitForVersionHistory (song.context));
     turnInItsWindow (instance, 0.125f);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! phazite::getChangesSinceLastVersion (song.context).empty(); }, longWait));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return ! phazite::getChangesSinceLastVersion (phazite::test::withChangesIn (song.context)).empty(); }, longWait));
 
     {
         SlowGate gate;
@@ -4413,7 +4416,12 @@ TEST_CASE ("A preset loaded or a chain duplicated or a version saved straight af
     }
 
     REQUIRE (phazite::test::dispatchMessagesUntil (
-        [&] { return ! phazite::isSavingVersion (song.context) && ! phazite::hasChangesSinceLastVersion (song.context); }, longWait));
+        [&]
+        {
+            return ! phazite::isSavingVersion (song.context)
+                   && ! phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context));
+        },
+        longWait));
     CHECK (getStoredLevel (opened, slow) == doctest::Approx (0.125f));
 
     // Grouped into a container, turned, and its chain duplicated at once: the copy holds the turned state.
@@ -4476,7 +4484,8 @@ TEST_CASE ("A branch merged from the branch picker straight after a change in a 
     const auto mainBranch = phazite::getCurrentBranch (song.context)->id;
     REQUIRE (phazite::newBranchNamed (song.context, "idea").isNotEmpty());
     turnInItsWindow (getSandboxed (song, slow), 0.25f);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::hasChangesSinceLastVersion (song.context); }, longWait));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (song.context)); }, longWait));
     commit();
     phazite::selectBranch (song.context, mainBranch);
     song.run ("version.switchBranch");

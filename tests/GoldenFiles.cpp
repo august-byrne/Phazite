@@ -79,7 +79,11 @@ namespace
             {
                 const auto name = attribute.name.toString();
 
-                attributes.emplace_back (name, normaliseValue (name, attribute.value));
+                // N7: where the song stands in the project's versions, ids made anew in each run.
+                if (isRoot && (name == "versionsBranch" || name == "versionsBase"))
+                    attributes.emplace_back (name, name == "versionsBranch" ? "$BRANCH" : "$VERSION");
+                else
+                    attributes.emplace_back (name, normaliseValue (name, attribute.value));
             }
 
             std::sort (attributes.begin(), attributes.end(),

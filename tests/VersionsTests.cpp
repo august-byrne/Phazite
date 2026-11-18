@@ -18,6 +18,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -62,7 +63,7 @@ juce::String describe (const std::vector<phazite::VersionChange>& changes)
 
 juce::String describeChanges (phazite::ProjectContext& context)
 {
-    return describe (phazite::getChangesSinceLastVersion (context));
+    return describe (phazite::getChangesSinceLastVersion (withChangesIn (context)));
 }
 
 // The versions' commands as the app registers them (model/versions/VersionsModel.h), for a test's song, whose saves always
@@ -96,9 +97,10 @@ TEST_CASE ("A project starts with its initial commit on main, and lists each com
     CHECK (initial[0].name == "First version");
     CHECK (initial[0].parents.isEmpty());
     CHECK (phazite::getCurrentBranch (s.context)->name == "main");
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (s.getProject().getFolder().getChildFile ("Versions").isDirectory());
 
+    s.addTrack ("Drums"); // a version records a change: one of none isn't written
     keepVersion (s.context, "First idea", "Drums only, for now");
 
     const auto versions = phazite::getVersions (s.context);
@@ -114,7 +116,7 @@ TEST_CASE ("A project starts with its initial commit on main, and lists each com
     CHECK (branch->head == versions[0].id);
     CHECK (versions[0].branch == branch->id);
     CHECK (phazite::getLastVersion (s.context)->id == versions[0].id);
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getVersionDraftName (s.context).isEmpty()); // the draft went with the version
     CHECK (phazite::getVersionsSize (s.context) > 0);
 }
@@ -175,13 +177,13 @@ TEST_CASE ("View state and how the song plays are no change since the last versi
     song.getState().setProperty (schema::gridStep, "1 bar", nullptr);
 
     CHECK (describeChanges (s.context).isEmpty());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // An undo back to where the version was is no change either.
     s.setVolume (track, -3.0f);
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::undo (song);
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 }
 
 TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no change since the last version, nor unsaved")
@@ -215,34 +217,34 @@ TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no c
     CHECK (describeChanges (s.context) == "Keys: Compressor");
     s.setParameter (compressor, "inputGain", defaultOf (compressorParameters, "inputGain"));
     CHECK (describeChanges (s.context).isEmpty());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
     CHECK (values().getNumProperties() == 1);
 
     // Its mix too; and the value set before the version set back, which leaves the device no values at all, as it was made.
     phazite::setMix (song, compressor, 0.5f);
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::setMix (song, compressor, 1.0f);
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     s.setParameter (compressor, "attack", defaultOf (compressorParameters, "attack"));
     CHECK_FALSE (values().isValid());
     CHECK (describeChanges (s.context) == "Keys: Compressor");
     phazite::undo (song);
     CHECK ((float) values()["attack"] == doctest::Approx (30.0f));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // A modulator's parameter: an LFO's rate, and back; and an envelope follower's depth, which it starts at, its default.
     s.setModulatorParameter (lfo, "rate", 5.0f);
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     s.setModulatorParameter (lfo, "rate",
                              defaultOf (phazite::devices::getModulatorParameters (phazite::devices::ModulatorKind::lfo), "rate"));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     s.setModulatorParameter (follower, "depth", 0.5f);
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     s.setModulatorParameter (
         follower, "depth",
         defaultOf (phazite::devices::getModulatorParameters (phazite::devices::ModulatorKind::envelopeFollower), "depth"));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
 
     // The faders too, the master's to where it starts, a little down, which its double-click sets (it set 0 dB: 2026-11-09).
@@ -251,9 +253,9 @@ TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no c
         INFO (fader.getName().toStdString());
         REQUIRE (fader.getDefaultValue().has_value());
         fader.setValue (0.3f);
-        CHECK (phazite::hasChangesSinceLastVersion (s.context));
+        CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
         fader.setValue (*fader.getDefaultValue());
-        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
         CHECK_FALSE (s.getProject().hasUnsavedChanges());
     };
 
@@ -286,7 +288,7 @@ TEST_CASE ("An effect's knob turned in the Devices view, then double-clicked bac
             return phazite::getPluginsWithOlderStates (opened).isEmpty() && phazite::getPluginsAnswering (opened).isEmpty();
         }));
     keepVersion (s.context);
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     auto& song = *phazite::findSong (s.context);
 
     phazite::ui::CommandBridge bridge { s.commands };
@@ -347,14 +349,14 @@ TEST_CASE ("An effect's knob turned in the Devices view, then double-clicked bac
             const auto what = device + ": " + knob()->getTitle();
             INFO (what.toStdString());
             const auto centre = turn (*knob());
-            CHECK (phazite::hasChangesSinceLastVersion (s.context));
+            CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
             mouse.doubleClick (centre);
             dispatchPendingMessages();
             CHECK (knob()->getValue() == doctest::Approx (knob()->getDoubleClickReturnValue()));
             CHECK (describeChanges (s.context) == "");
 
             turn (*knob());
-            CHECK (phazite::hasChangesSinceLastVersion (s.context));
+            CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
             phazite::undo (song);
             dispatchPendingMessages();
             CHECK (describeChanges (s.context) == "");
@@ -492,20 +494,20 @@ TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip mute
     CHECK (describeChanges (s.context) == "Keys: mute");
     phazite::toggleTracksMuted (song, { track });
     CHECK (describeChanges (s.context).isEmpty());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // So do a solo, alone or not, and a clip's mute.
     phazite::toggleTracksSoloed (song, { track });
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::toggleTracksSoloed (song, { track });
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::toggleSoloAlone (song, other);
     phazite::toggleSoloAlone (song, other);
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::toggleClipsMuted (song, { clip });
-    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     phazite::toggleClipsMuted (song, { clip });
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 }
 
 TEST_CASE ("Collapse All and Expand All, the master's row and lanes with the rest, are no change since the last version, nor unsaved")
@@ -533,7 +535,7 @@ TEST_CASE ("Collapse All and Expand All, the master's row and lanes with the res
     REQUIRE_FALSE (phazite::isCollapsed (song, master));
     dispatchPendingMessages();
     CHECK (describeChanges (s.context).isEmpty());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
 }
 
@@ -678,22 +680,22 @@ TEST_CASE ("Saving a version records the whole song as it is, and Discard Change
     s.setVolume (bass, -6.0f);
     s.setVolume (drums, -9.0f);
     CHECK (describeChanges (s.context) == "Bass: volume; Drums: volume");
-    CHECK (phazite::countChanges (s.context) == 2);
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 2);
 
     // Discard Changes on Bass: what the last version has, as one undo step; Drums stays changed.
-    REQUIRE (phazite::takeBack (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
+    REQUIRE (phazite::takeBack (s.context, phazite::getChangesSinceLastVersion (withChangesIn (s.context))[0]));
     CHECK (volume (bass) == doctest::Approx (0.0f));
     CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard Changes in Bass");
     CHECK (describeChanges (s.context) == "Drums: volume");
-    CHECK (phazite::countChanges (s.context) == 1);
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 1);
 
     // A version records every change, the whole song as it is: no change is left since it.
     s.setVolume (bass, -3.0f);
     auto* history = phazite::getVersionHistory (s.context);
     const auto start = phazite::getLastVersion (s.context)->id;
     keepVersion (s.context, "Both down");
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
-    CHECK (phazite::countChanges (s.context) == 0);
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
+    CHECK (phazite::countChanges (withChangesIn (s.context)) == 0);
     const auto saved = history->readSong (phazite::getLastVersion (s.context)->id);
     const auto recorded = phazite::findChanges (history->readSong (start), saved);
     REQUIRE (recorded.size() == 2);
@@ -705,7 +707,7 @@ TEST_CASE ("Saving a version records the whole song as it is, and Discard Change
     s.setVolume (bass, 0.0f);
     s.addTrack ("Keys");
     REQUIRE (phazite::discardAllChanges (s.context));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (volume (bass) == doctest::Approx (-3.0f));
     CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard All Changes");
 }
@@ -738,7 +740,13 @@ TEST_CASE ("A plug-in's stored settings that differ count as a change only after
         device = phazite::test::TestPlugin::add (song, track);
     }
 
+    // Loaded, and every answer of its in, before the bytes below are written by hand: an answer that came after them would
+    // write its own state back over them, sooner or later as the system runs the helper (the review of S4.5).
+    s.waitForPlugins();
     keepVersion (s.context, "First");
+    s.saveWithPluginStates();
+    auto& instance = *phazite::findPluginInstance (song, device);
+    REQUIRE (dispatchMessagesUntil ([&instance] { return ! instance.isStateUnasked() && ! instance.isAskingState(); }));
     CHECK (describeChanges (s.context).isEmpty());
 
     // Other bytes stored with nothing said, as a plug-in that writes a time into its state leaves them at each save.
@@ -765,15 +773,31 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
         device = phazite::test::TestPlugin::add (song, track);
     }
 
-    // A commit stores the version of the plug-in that made the state, as it stores the state.
-    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "1.0.0", nullptr);
+    // A commit stores the version of the plug-in that made the state, as it stores the state: the one installed, which is
+    // all Phazite ever writes there (PluginInstances::write()). Loaded first, and every answer of its in, so that the test
+    // means the same on every system: a version written by hand was written back by the plug-in's answer to an ask on Linux,
+    // where it came after the version was saved (the review of S4.5).
+    s.waitForPlugins();
     keepVersion (s.context, "First");
+    s.saveWithPluginStates();
     const auto then = phazite::findDeviceState (song, device)[schema::pluginVersion].toString();
-    const auto installed = phazite::test::TestPlugin::getDescription().version;
-    CHECK (then == (installed.isNotEmpty() ? installed : juce::String ("1.0.0")));
+    CHECK (then == phazite::test::TestPlugin::getDescription().version);
+    CHECK (then == "1.0");
+    CHECK (describeChanges (s.context).isEmpty());
 
-    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "9.9.9", nullptr);
-    CHECK (describeChanges (s.context).contains ("updated " + then + juce::String::fromUTF8 (" \xe2\x86\x92 9.9.9")));
+    // The plug-in updated, its settings stored again as a save stores them: in the changes, by the versions that made them.
+    const auto updated = "updated 1.0" + juce::String::fromUTF8 (" \xe2\x86\x92 ") + "2.0";
+    testPlugin.setVersion (2);
+    s.saveWithPluginStates();
+    CHECK (describeChanges (s.context).contains (updated));
+
+    // And as the project opens again, once the updated plug-in has loaded in it and its settings are stored as a save stores
+    // them: a plug-in's stored settings count from its first word on, as any plug-in's, so the list read before that word
+    // (a release build on CI read it so) shows none of them yet.
+    s.reopen();
+    s.waitForPlugins();
+    s.saveWithPluginStates();
+    CHECK (describeChanges (s.context).contains (updated));
 }
 
 TEST_CASE ("Verify History finds the versions no branch holds and what is damaged, and Recover Lost Versions makes a branch of each line")
@@ -923,7 +947,13 @@ TEST_CASE ("A branch another computer took its own way keeps this computer's lin
     const auto mine = history->findLastVersion()->id;
 
     phazite::VersionHistory reread (song, {});
-    REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }, versionHistoryTimeout));
+    REQUIRE (dispatchMessagesUntil (
+        [&reread]
+        {
+            reread.getChanges(); // its snapshot as it opened, once its changes are worked out
+            return ! reread.isReading() && ! reread.isBusy() && reread.areChangesWorkedOut();
+        },
+        versionHistoryTimeout));
     REQUIRE (reread.findCurrentBranch() != nullptr);
     CHECK (reread.findCurrentBranch()->head == mine);
     CHECK (reread.findCurrentBranch()->divergent == juce::StringArray (theirs));
@@ -952,19 +982,19 @@ TEST_CASE ("Save Version can run only while there is something to save, and says
     auto& song = *phazite::findSong (s.context);
 
     // Nothing since: nothing to save, and the command waits for a change.
-    CHECK_FALSE (phazite::hasSomethingToCommit (s.context));
-    CHECK_FALSE (phazite::canSaveVersion (s.context));
-    CHECK (phazite::describeNextCommit (s.context).isEmpty());
+    CHECK_FALSE (phazite::hasSomethingToCommit (withChangesIn (s.context)));
+    CHECK_FALSE (phazite::canSaveVersion (withChangesIn (s.context)));
+    CHECK (phazite::describeNextCommit (withChangesIn (s.context)).isEmpty());
     CHECK_FALSE (commands.registry.invoke ("version.save"));
 
     // A change: a version would be named by it; another, by both.
     phazite::setChannelVolume (song, bass, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasSomethingToCommit (s.context); }));
-    CHECK (phazite::canSaveVersion (s.context));
-    CHECK (phazite::describeNextCommit (s.context) == "Update Bass");
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasSomethingToCommit (withChangesIn (s.context)); }));
+    CHECK (phazite::canSaveVersion (withChangesIn (s.context)));
+    CHECK (phazite::describeNextCommit (withChangesIn (s.context)) == "Update Bass");
     s.addTrack ("Keys");
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 2; }));
-    CHECK (phazite::describeNextCommit (s.context) == "Add Keys; update Bass");
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (withChangesIn (s.context)).size() == 2; }));
+    CHECK (phazite::describeNextCommit (withChangesIn (s.context)) == "Add Keys; update Bass");
 }
 
 TEST_CASE ("Undo Last Version takes the last version off its branch, leaves the song, shows what it recorded again, and puts its name back")
@@ -978,7 +1008,7 @@ TEST_CASE ("Undo Last Version takes the last version off its branch, leaves the 
     keepVersion (s.context, "Quieter", "The verse was too loud");
     const auto quieter = phazite::getLastVersion (s.context)->id;
     REQUIRE (phazite::getVersions (s.context).size() == 3); // and the first version
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // The branch back at First; the song as it is; what Quieter recorded in the changes again; its name and note the draft
     // again.
@@ -1012,11 +1042,11 @@ TEST_CASE ("Undo Last Version takes the last version off its branch, leaves the 
 
     // Discard Changes after it: the line what First has, one undo step.
     {
-        const auto line = phazite::getChangesSinceLastVersion (s.context);
+        const auto line = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
         REQUIRE (line.size() == 1);
         REQUIRE (phazite::takeBack (s.context, line[0]));
         CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (0.0f));
-        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
         phazite::undo (song);
         CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-6.0f));
         CHECK (describeChanges (s.context) == "Bass: volume");
@@ -1025,7 +1055,7 @@ TEST_CASE ("Undo Last Version takes the last version off its branch, leaves the 
     // Saved again, with the name back in the field.
     keepVersion (s.context, phazite::getVersionDraftName (s.context));
     CHECK (phazite::getLastVersion (s.context)->name == "Quieter");
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // Never the first version, which follows none.
     REQUIRE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
@@ -1141,7 +1171,7 @@ TEST_CASE (
 
     // A change discarded: kept first.
     phazite::setChannelVolume (song, bass, -6.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     REQUIRE (phazite::discardAllChanges (s.context));
     REQUIRE (waitForVersionHistory (s.context));
     auto snapshots = phazite::getSnapshots (s.context);
@@ -1161,18 +1191,18 @@ TEST_CASE (
 
     // Restore from a commit keeps the song as it is first.
     phazite::setChannelVolume (song, bass, -9.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     phazite::selectVersion (s.context, phazite::getLastVersion (s.context)->id);
     commands.run ("version.bringBack");
     REQUIRE (waitForVersionHistory (s.context));
     snapshots = phazite::getSnapshots (s.context);
     REQUIRE (snapshots.size() == 2);
     CHECK (snapshots.front().reason == "Before Restore"); // newest first
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // The same song twice is kept once.
     phazite::setChannelVolume (song, bass, -3.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (withChangesIn (s.context)); }));
     auto* history = phazite::getVersionHistory (s.context);
     history->takeSnapshot ("auto");
     REQUIRE (waitForVersionHistory (s.context));
@@ -1184,9 +1214,15 @@ TEST_CASE (
     // Kept in the project's folder, as the project opens again: and taken as it opens, while it has changes since its last
     // commit.
     phazite::setChannelVolume (song, bass, -1.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 1; }));
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (withChangesIn (s.context)).size() == 1; }));
     phazite::VersionHistory reread (song, {});
-    REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }, versionHistoryTimeout));
+    REQUIRE (dispatchMessagesUntil (
+        [&reread]
+        {
+            reread.getChanges(); // its snapshot as it opened, once its changes are worked out
+            return ! reread.isReading() && ! reread.isBusy() && reread.areChangesWorkedOut();
+        },
+        versionHistoryTimeout));
     REQUIRE (reread.getSnapshots().size() == 4);
     CHECK (reread.getSnapshots().front().reason == "open");
     CHECK (reread.readSnapshot (reread.getSnapshots().front().time).isValid());
@@ -1226,7 +1262,7 @@ TEST_CASE ("A song another tool wrote with switches as true and false and IDs as
     phazite::setTrackMuted (song, bass, true);
     phazite::setCollapsed (song, bass, false); // a switch Phazite writes as 0
     keepVersion (s.context, "First");
-    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
 
     // The same song, each switch and ID as another tool writes it.
     auto written = song.getState().createCopy();
@@ -1264,7 +1300,7 @@ TEST_CASE ("A song another tool wrote with switches as true and false and IDs as
     REQUIRE (waitForVersionHistory (s.context));
 
     INFO (describeChanges (s.context).toStdString());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (s.context)));
     CHECK (phazite::getSnapshots (s.context).empty());
     const auto bassState = phazite::findTrackState (*phazite::findSong (s.context), bass);
     REQUIRE (bassState.isValid());

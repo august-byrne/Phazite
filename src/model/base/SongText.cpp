@@ -165,7 +165,7 @@ bool isSameValue (const juce::var& a, const juce::var& b)
         if (const auto text = (numberA.has_value() ? b : a).toString(); ! holdsForbidden (text))
         {
             const auto number = numberA.has_value() ? *numberA : *numberB;
-            return text.getNumBytesAsUTF8() == number.size() && std::memcmp (text.toRawUTF8(), number.data(), number.size()) == 0;
+            return std::string_view (text.toRawUTF8()) == std::string_view (number.data(), number.size()); // its bytes as they are
         }
     }
     else if (const auto textA = a.toString(), textB = b.toString(); textA == textB)
