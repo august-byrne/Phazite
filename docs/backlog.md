@@ -129,7 +129,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| Automation kept, drawn and nudged along the control's travel, not in hertz and milliseconds | `src/model/automation/Automation.cpp` | L | 4 | model-mixer 1 |
+| The travel of the knobs that are not in hertz, looked at one device at a time as stage 6 finishes it: times in milliseconds (attacks, releases, delays, envelopes, glides), the reverb's decay, Q, and the levels in decibels still turn on a power curve around a midpoint, where the best plug-ins' time knobs are logarithmic; a change moves what modulations and macros of them reach | `src/devices/core/DeviceInfo.h` | M | 6 | S4.7's review |
 | Devices moved, copied and duplicated between tracks, and deleted, duplicated and dragged in the mixer and the Devices view | `src/model/mixer/MixerModel.h` | M | 5 | model-mixer 2, ui-core-mixer-app 4 |
 | The strip: input trim, polarity, mono, width, a choice of pan law, a track delay | `src/model/mixer/MixerModel.h` | M | 5 | plan, ui-core-mixer-app 1 |
 | Presets that carry their own samples, and say which of their parts are missing | `src/model/presets/Presets.cpp` | M | 5 | model-mixer 13 |

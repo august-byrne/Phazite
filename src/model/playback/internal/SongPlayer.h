@@ -218,10 +218,11 @@ private:
     const std::atomic<std::uint64_t>* blocks = nullptr;
 
     // The song's automation, each curve by its device's ID and its parameter's (those without points apart), read again
-    // only once something of it changed (or every one, after a change of the curves themselves).
+    // only once something of it changed (or every one, after a change of the curves themselves), or while the song hasn't
+    // its parameter, whose control's travel it plays along.
     using CurveKey = std::pair<std::uint64_t, juce::String>;
     std::map<CurveKey, std::shared_ptr<const engine::Curve>> curves;
-    std::set<CurveKey> emptyCurves;
+    std::set<CurveKey> emptyCurves, curvesWithoutTravel;
     std::map<std::uint64_t, std::int64_t> faders; // each fader's track, by the fader's ID (the master's under 0)
     void readCurves();
     std::shared_ptr<const engine::Curve> findCurve (std::uint64_t device, const juce::String& parameter) const;

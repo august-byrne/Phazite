@@ -76,16 +76,16 @@ int countModulations (const phazite::Song& song, DeviceID device)
     return countNaming (song, schema::MODULATES, schema::modulatesDevice, device.getRaw());
 }
 
-// A parameter's value at a beat as its curve in the song has it, as Phazite's engine plays it, whether or not its device
+// A parameter's position at a beat as its curve in the song has it, as Phazite's engine plays it, whether or not its device
 // knows the parameter (a plug-in that isn't loaded doesn't).
-float valueAt (const phazite::Song& song, const ParameterRef& parameter, double beat)
+float positionAt (const phazite::Song& song, const ParameterRef& parameter, double beat)
 {
     std::vector<phazite::engine::CurvePoint> points;
 
     for (const auto& point : phazite::getPoints (song, parameter))
-        points.push_back ({ point.beat.inBeats(), point.value, point.curve });
+        points.push_back ({ point.beat.inBeats(), point.position, point.curve });
 
-    return phazite::engine::Curve (std::move (points)).getValueAt (beat);
+    return phazite::engine::Curve (std::move (points)).getPositionAt (beat);
 }
 
 // A curve as a file holds it, with points (beat, value, bend), put into the song as it opens: for a plug-in that isn't
@@ -99,7 +99,7 @@ void putCurve (phazite::Song& song, const ParameterRef& parameter, std::initiali
 
     for (const auto& point : points)
         curve.appendChild (juce::ValueTree (schema::POINT, { { schema::pointBeat, point.beat.inBeats() },
-                                                             { schema::pointValue, point.value },
+                                                             { schema::pointValue, point.position },
                                                              { schema::pointCurve, point.curve } }),
                            nullptr);
 
@@ -349,8 +349,8 @@ TEST_CASE ("A folder made plain and a bus again keeps its volume's automation an
     {
         const auto points = phazite::getPoints (song, now);
         REQUIRE (points.size() == 2);
-        CHECK (points[0].value == doctest::Approx (0.5f));
-        CHECK (points[1].value == doctest::Approx (0.8f));
+        CHECK (points[0].position == doctest::Approx (0.5f));
+        CHECK (points[1].position == doctest::Approx (0.8f));
         CHECK (phazite::getModulations (song, now).size() == 1);
         const auto lanes = phazite::getLanes (song, bus);
         CHECK (std::any_of (lanes.begin(), lanes.end(), [&] (const phazite::AutomationLane& lane) { return lane.parameter == now; }));
@@ -381,22 +381,22 @@ TEST_CASE ("Time edits and clips moved with their automation take the automation
     const ParameterRef gain { plugin, TestPlugin::gainID };
     putCurve (song, gain, { { at (0.0), 0.2f }, { at (5.0), 0.2f }, { at (6.0), 0.9f }, { at (7.0), 0.2f }, { at (16.0), 0.2f } });
     const auto clip = s.addMidiClip (track, 4.0, 4.0);
-    REQUIRE (valueAt (song, gain, 6.0) == doctest::Approx (0.9f));
+    REQUIRE (positionAt (song, gain, 6.0) == doctest::Approx (0.9f));
 
     change (song, "Insert Time", [&] { phazite::insertTime (song, at (2.0), BeatDuration::fromBeats (4.0)); });
-    CHECK (valueAt (song, gain, 10.0) == doctest::Approx (0.9f));
+    CHECK (positionAt (song, gain, 10.0) == doctest::Approx (0.9f));
     phazite::undo (song);
-    CHECK (valueAt (song, gain, 6.0) == doctest::Approx (0.9f));
+    CHECK (positionAt (song, gain, 6.0) == doctest::Approx (0.9f));
 
     change (song, "Remove Time", [&] { phazite::removeTime (song, { at (0.0), at (2.0) }); });
-    CHECK (valueAt (song, gain, 4.0) == doctest::Approx (0.9f));
+    CHECK (positionAt (song, gain, 4.0) == doctest::Approx (0.9f));
     phazite::undo (song);
 
     change (song, "Nudge", [&] { phazite::nudgeClips (s.context, { clip }, BeatDuration::fromBeats (4.0)); });
-    CHECK (valueAt (song, gain, 10.0) == doctest::Approx (0.9f));
-    CHECK (valueAt (song, gain, 6.0) == doctest::Approx (0.2f));
+    CHECK (positionAt (song, gain, 10.0) == doctest::Approx (0.9f));
+    CHECK (positionAt (song, gain, 6.0) == doctest::Approx (0.2f));
     phazite::undo (song);
-    CHECK (valueAt (song, gain, 6.0) == doctest::Approx (0.9f));
+    CHECK (positionAt (song, gain, 6.0) == doctest::Approx (0.9f));
 }
 
 //==============================================================================
@@ -414,7 +414,7 @@ TEST_CASE ("Automation moved with clips, pasted and moved in time keeps the shap
         std::vector<float> before;
 
         for (auto beat = 0.0; beat <= 32.0; beat += 0.25)
-            before.push_back (valueAt (song, volume, beat));
+            before.push_back (positionAt (song, volume, beat));
 
         const auto original = [&before] (double beat) { return before[(size_t) std::lround (beat * 4.0)]; };
         std::string step;
@@ -424,7 +424,7 @@ TEST_CASE ("Automation moved with clips, pasted and moved in time keeps the shap
             {
                 CAPTURE (step);
                 CAPTURE (beat);
-                CHECK (valueAt (song, volume, beat + shift) == doctest::Approx (original (beat)).epsilon (1.0e-4));
+                CHECK (positionAt (song, volume, beat + shift) == doctest::Approx (original (beat)).epsilon (1.0e-4));
             }
         };
 
@@ -579,8 +579,8 @@ TEST_CASE ("A plain folder's volume ridden in Latch is written, though an effect
     const auto fader = s.getVolumeParameter (folder);
     REQUIRE (fader != vca);
     const auto points = phazite::getPoints (song, fader);
-    CHECK (
-        std::any_of (points.begin(), points.end(), [] (const phazite::AutomationPoint& p) { return std::abs (p.value - 0.3f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [] (const phazite::AutomationPoint& p) { return std::abs (p.position - 0.3f) < 0.001f; }));
 }
 
 TEST_CASE ("Undone, a folder's switch between a bus and a plain folder gives its volume's lane back its place and its height")
@@ -673,7 +673,8 @@ TEST_CASE ("A Latch pass that already runs writes the value a preset sets, as th
 
     const auto points = phazite::getPoints (song, { synth, "cutoff" });
     REQUIRE (points.size() >= 2);
-    CHECK (
-        std::any_of (points.begin(), points.end(), [] (const phazite::AutomationPoint& p) { return std::abs (p.value - 400.0f) < 1.0f; }));
+    const auto at400 = phazite::toControlPosition (phazite::getParameter (s.context, { synth, "cutoff" }).getRange(), 400.0f);
+    CHECK (std::any_of (points.begin(), points.end(),
+                        [&at400] (const phazite::AutomationPoint& p) { return std::abs (p.position - at400) < 0.001f; }));
     CHECK (countNaming (song, schema::CURVE, schema::curveDevice, synth.getRaw()) == 1); // no other parameter's
 }

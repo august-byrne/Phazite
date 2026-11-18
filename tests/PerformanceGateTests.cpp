@@ -276,7 +276,7 @@ TEST_CASE ("Performance gate: an edit's plan reads the values of the devices on 
     check ("the tempo changed", 0, 0);
 
     // An automation point added to the first Synth's cutoff: that curve alone.
-    phazite::addAutomationPoint (s.context, { built.instruments[0], "cutoff" }, { at (3.0), 2000.0f });
+    phazite::addAutomationPoint (s.context, { built.instruments[0], "cutoff" }, { at (3.0), 0.6f });
     check ("an automation point added", 0, 1);
 
     // A device added to one track: that track's devices, each once.

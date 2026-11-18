@@ -59,7 +59,7 @@ struct Song
 
     float volumeAt (double beat) const
     {
-        return phazite::getAutomationValues (context, volume, { BeatPosition::fromBeats (beat), BeatPosition::fromBeats (beat) }, 1)
+        return phazite::getAutomationPositions (context, volume, { BeatPosition::fromBeats (beat), BeatPosition::fromBeats (beat) }, 1)
             .front();
     }
 
@@ -529,7 +529,7 @@ TEST_CASE ("A time range across two tracks pastes on both, each with its own tra
     song.getSong().getUndoManager().clearUndoHistory();
     const auto panAt = [&song, pan] (double beat)
     {
-        return phazite::getAutomationValues (song.context, pan, { BeatPosition::fromBeats (beat), BeatPosition::fromBeats (beat) }, 1)
+        return phazite::getAutomationPositions (song.context, pan, { BeatPosition::fromBeats (beat), BeatPosition::fromBeats (beat) }, 1)
             .front();
     };
 

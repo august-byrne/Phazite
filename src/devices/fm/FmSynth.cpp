@@ -181,7 +181,7 @@ namespace
                                             .maximum = 10000.0f,
                                             .defaultValue = 440.0f,
                                             .unit = Unit::hertz,
-                                            .midpoint = 300.0f };
+                                            .scale = Scale::logarithmic };
             made[at (Field::level)] = makePercent (ids[Field::level], names[Field::level], defaults.level);
             made[at (Field::velocity)] = makePercent (ids[Field::velocity], names[Field::velocity], defaults.velocity);
             made[at (Field::keyScale)] = makePercent (ids[Field::keyScale], names[Field::keyScale], defaults.keyScale, -1.0f, 1.0f);
@@ -217,7 +217,7 @@ namespace
                                   .maximum = 20000.0f,
                                   .defaultValue = 5000.0f,
                                   .unit = Unit::hertz,
-                                  .midpoint = 632.456f };
+                                  .scale = Scale::logarithmic };
         made[FmSynth::resonance] = makePercent ("resonance", "Resonance", 0.1f);
         made[FmSynth::filterSlope] = makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f);
 
@@ -247,7 +247,7 @@ namespace
                                    .maximum = 20.0f,
                                    .defaultValue = 5.0f,
                                    .unit = Unit::hertz,
-                                   .midpoint = 1.0f };
+                                   .scale = Scale::logarithmic };
         made[FmSynth::lfoDepth] = makePercent ("lfoDepth", "LFO Depth", 0.25f);
         made[FmSynth::voiceMode] = makeChoice ("voiceMode", "Voices", voiceModes, 0.0f);
         made[FmSynth::glide] = { .id = "glide",

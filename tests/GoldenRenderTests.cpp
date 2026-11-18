@@ -594,7 +594,7 @@ bool soundsLikeAPanSweep (const Fingerprint& fingerprint, const juce::AudioBuffe
 }
 
 // A high chord on the synth at 120 BPM through Phazite's filter, its cutoff automated to stay at 100 Hz for 2 s, then go up to
-// 10 kHz by 3 s (a line in hertz, so most of the way it is above the chord): the chord comes up as the filter opens.
+// 10 kHz by 3 s (an even turn of its knob, through the octaves evenly): the chord comes up as the filter opens.
 void addDeviceAutomationSong (TestSong& song)
 {
     song.setTempo (120.0);

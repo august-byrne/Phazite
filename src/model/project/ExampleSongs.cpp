@@ -513,10 +513,21 @@ namespace
             return added.empty() ? ClipID() : added.front();
         }
 
-        void automate (const ParameterRef& parameter, std::initializer_list<AutomationPoint> points)
+        // Automation written in the parameter's own units (hertz, a fader's position), each value put where its control would be
+        // (AutomationValues.h: toControlPosition()), so that a straight line is an even turn of the knob.
+        struct ValuePoint
         {
+            BeatPosition beat;
+            float value;
+            float curve = 0.0f; // of the line to the next point
+        };
+
+        void automate (const ParameterRef& parameter, std::initializer_list<ValuePoint> points)
+        {
+            const auto range = getParameter (context, parameter).getRange();
+
             for (const auto& point : points)
-                addAutomationPoint (context, parameter, point);
+                addAutomationPoint (context, parameter, { point.beat, toControlPosition (range, point.value), point.curve });
         }
 
         ModulatorID addLfo (TrackID track, float rateHertz)
@@ -860,9 +871,10 @@ namespace
 
         // The filters' sweeps, in hertz, as the original's automation moves them. LMMS draws each with three to six points
         // and a smooth curve through them in its knob's own scale; here each is a few points from its bar with the line
-        // between two bent (AutomationPoint::curve), fitted to follow the original's within an eighth of an octave where a
-        // filter can be heard (a high-pass over 30 Hz, a low-pass under 18 kHz). A last point marked held stays until the
-        // next sweep's first.
+        // between two, along the knob's logarithmic travel, bent (AutomationPoint::curve) to follow the original's: fitted
+        // within an eighth of an octave as lines in hertz, then fitted again along the travel within a fifth of an octave of
+        // those, where a filter can be heard (a high-pass over 30 Hz, a low-pass under 18 kHz). A last point marked held stays
+        // until the next sweep's first.
         struct SweepPoint
         {
             double bars;
@@ -872,10 +884,12 @@ namespace
 
         const auto sweep = [&song] (DeviceID filter, double fromBar, std::initializer_list<SweepPoint> points, bool thenJumps = true)
         {
+            const auto range = getParameter (song.context, { filter, "cutoff" }).getRange();
+
             for (const auto* point = points.begin(); point != points.end(); ++point)
-                addAutomationPoint (
-                    song.context, { filter, "cutoff" },
-                    { at (bar (fromBar + point->bars)), point->hertz, thenJumps && point + 1 == points.end() ? 1.0f : point->bend });
+                addAutomationPoint (song.context, { filter, "cutoff" },
+                                    { at (bar (fromBar + point->bars)), toControlPosition (range, point->hertz),
+                                      thenJumps && point + 1 == points.end() ? 1.0f : point->bend });
         };
 
         // The high-pass thins the intro, each breakdown and each build-up, dipping at first so that the lows come in, then
@@ -883,29 +897,29 @@ namespace
         // Through the themes it is switched out by its mix: its cutoff can't go under 20 Hz, where its peak would lift the
         // deepest lows.
         sweep (highPass, 0.0,
-               { { 0.0, 342.0f, -0.005f },
-                 { 4.25, 97.0f, -0.5f },
-                 { 5.96875, 85.0f, 0.345f },
-                 { 6.875, 443.0f, -0.2f },
-                 { 7.625, 998.0f, -0.005f },
-                 { 7.90625, 104.0f, -0.47f },
+               { { 0.0, 342.0f, 0.142f },
+                 { 4.25, 97.0f, -0.478f },
+                 { 5.96875, 85.0f, 0.143f },
+                 { 6.875, 443.0f, -0.308f },
+                 { 7.625, 998.0f, 0.27f },
+                 { 7.90625, 104.0f, -0.242f },
                  { 8.0, 20.0f } });
 
         for (const auto breakdown : { 32.0, 72.0 })
         {
             sweep (highPass, breakdown,
-                   { { 0.0, 342.0f, -0.005f },
-                     { 4.25, 97.0f, -0.5f },
-                     { 5.96875, 85.0f, 0.35f },
-                     { 6.84375, 440.0f, -0.11f },
+                   { { 0.0, 342.0f, 0.142f },
+                     { 4.25, 97.0f, -0.478f },
+                     { 5.96875, 85.0f, 0.148f },
+                     { 6.84375, 440.0f, -0.217f },
                      { 7.5625, 1056.0f } });
             sweep (highPass, breakdown + 8.0,
-                   { { 0.0, 342.0f, -0.01f },
-                     { 5.09375, 101.0f, -0.5f },
-                     { 6.375, 94.0f, 0.385f },
-                     { 7.3125, 353.0f, -0.035f },
-                     { 7.5625, 1056.0f, 0.045f },
-                     { 7.90625, 104.0f, -0.47f },
+                   { { 0.0, 342.0f, 0.131f },
+                     { 5.09375, 101.0f, -0.488f },
+                     { 6.375, 94.0f, 0.214f },
+                     { 7.3125, 353.0f, -0.164f },
+                     { 7.5625, 1056.0f, 0.343f },
+                     { 7.90625, 104.0f, -0.242f },
                      { 8.0, 20.0f } });
         }
 
@@ -916,13 +930,13 @@ namespace
         // The low-pass opens the intro from a narrow band, darkens each breakdown, shuts for four bars and opens again
         // before the second breakdown, as the recording does, and closes over the outro.
         constexpr double lastTick = 8.0 - 1.0 / 192.0;
-        sweep (lowPass, 0.0, { { 0.0, 495.0f, 0.5f }, { 7.3125, 5387.0f, 0.015f }, { 8.0, 20000.0f } });
+        sweep (lowPass, 0.0, { { 0.0, 495.0f, 0.191f }, { 7.3125, 5387.0f, -0.137f }, { 8.0, 20000.0f } });
 
         for (const auto breakdown : { 32.0, 72.0 })
-            sweep (lowPass, breakdown, { { 0.0, 5423.0f, 0.5f }, { 7.46875, 8550.0f, -0.015f }, { 8.0, 20000.0f } });
+            sweep (lowPass, breakdown, { { 0.0, 5423.0f, 0.426f }, { 7.46875, 8550.0f, -0.113f }, { 8.0, 20000.0f } });
 
-        sweep (lowPass, 64.0, { { 0.0, 607.0f }, { 4.0, 607.0f, 0.245f }, { lastTick, 20000.0f } });
-        sweep (lowPass, 104.0, { { 0.0, 20000.0f, -0.255f }, { 6.0, 512.0f }, { 8.0, 499.0f } }, false);
+        sweep (lowPass, 64.0, { { 0.0, 607.0f }, { 4.0, 607.0f, -0.147f }, { lastTick, 20000.0f } });
+        sweep (lowPass, 104.0, { { 0.0, 20000.0f, 0.156f }, { 6.0, 512.0f }, { 8.0, 499.0f } }, false);
 
         useKeyOnEveryTrack (song.context, key);
     }
@@ -1125,13 +1139,14 @@ namespace
         if (const auto synth = getInstrument (song.context, chords))
         {
             const ParameterRef cutoff { synth->id, "cutoff" };
-            song.automate (cutoff, { { at (bar (8)), 400.0f, 0.3f },
+            song.automate (cutoff, { { at (bar (8)), 400.0f },
                                      { at (bar (16)), 2500.0f },
-                                     { at (bar (32)), 2500.0f, -0.3f },
+                                     { at (bar (32)), 2500.0f },
                                      { at (bar (34)), 900.0f },
-                                     { at (bar (36)), 900.0f, 0.3f },
+                                     { at (bar (36)), 900.0f },
                                      { at (bar (40)), 2500.0f } });
-            modulate (song.context, song.addLfo (chords, 0.25f), cutoff, 0.15f);
+            // Two octaves either way, a fifth of the knob's logarithmic travel.
+            modulate (song.context, song.addLfo (chords, 0.25f), cutoff, 0.2f);
         }
 
         duckUnder (song.context, chords, beat);
@@ -1368,7 +1383,7 @@ namespace
             if (macros.size() >= 2)
             {
                 renameMacro (song.context, macros[0].id, "Muffle");
-                modulate (song.context, macros[0].id, { filter, "cutoff" }, -0.3f);
+                modulate (song.context, macros[0].id, { filter, "cutoff" }, -0.4f); // all the way, from 3 kHz to 189 Hz
                 renameMacro (song.context, macros[1].id, "Drive");
                 modulate (song.context, macros[1].id, { saturator, "drive" }, 0.25f);
 
@@ -1380,9 +1395,8 @@ namespace
         }
 
         // The keys' filter closes for the break and opens again after it.
-        song.automate (
-            { filter, "cutoff" },
-            { { at (bar (28)), 3000.0f, -0.3f }, { at (bar (30)), 700.0f }, { at (bar (31)), 700.0f, 0.3f }, { at (bar (32)), 3000.0f } });
+        song.automate ({ filter, "cutoff" },
+                       { { at (bar (28)), 3000.0f }, { at (bar (30)), 700.0f }, { at (bar (31)), 700.0f }, { at (bar (32)), 3000.0f } });
         modulate (song.context, song.addLfo (keys, 0.15f), getPan (song.context, keys).getRef(), 0.3f);
 
         // A walking bass after the intro: each chord's root, its fifth and its octave, then a step up to the next bar's root
@@ -1464,9 +1478,8 @@ namespace
 
         // The whole song comes in through a filter on the master, which opens over the intro, and goes out through it.
         const auto master = song.addEffect ({}, devices::FilterEffect::typeID);
-        song.automate (
-            { master, "cutoff" },
-            { { at (bar (0)), 500.0f, 0.4f }, { at (bar (4)), 20000.0f }, { at (bar (44)), 20000.0f, -0.4f }, { at (bar (48)), 600.0f } });
+        song.automate ({ master, "cutoff" },
+                       { { at (bar (0)), 500.0f }, { at (bar (4)), 20000.0f }, { at (bar (44)), 20000.0f }, { at (bar (48)), 600.0f } });
         song.addEffect ({}, devices::Limiter::typeID, "Limiter/Mastering/Transparent Master");
 
         useKeyOnEveryTrack (song.context, key);

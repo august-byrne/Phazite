@@ -165,7 +165,7 @@ TEST_SUITE ("golden")
             [&song, filter]
             {
                 const auto follower = song.addModulator (song.firstTrack, ModulatorType::noteFollower);
-                song.modulate (follower, { filter, "cutoff" }, 0.8f);
+                song.modulate (follower, { filter, "cutoff" }, 1.0f);
             },
             "modulation-note-follower", "a note follower moving a filter's cutoff with four notes an octave apart on Phazite's synth.",
             [] (const Fingerprint& before, const Fingerprint& after)

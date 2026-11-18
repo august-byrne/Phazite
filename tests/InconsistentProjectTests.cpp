@@ -889,6 +889,66 @@ TEST_CASE ("A curve, a lane and a sidechain of what the song hasn't are left out
     CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (1.0f));
 }
 
+TEST_CASE ("A point without a position, or with one that is no number, is left out, and a curve left without points goes")
+{
+    // A point at 0 would be silence on a volume's lane: one that says no position is no point. A curve that held only
+    // elements Phazite doesn't know keeps them, as everything Phazite doesn't know stays.
+    const auto openWith = [] (const std::function<void (juce::XmlElement & curve)>& edit)
+    {
+        Edited edited;
+        const auto project = edited.open (
+            [&edit] (juce::XmlElement& song)
+            {
+                auto* automation = song.getChildByName ("AUTOMATION");
+                REQUIRE (automation != nullptr);
+                REQUIRE (automation->getNumChildElements() == 1);
+                edit (*automation->getFirstChildElement());
+            });
+        REQUIRE (project != nullptr);
+        return findAll (project->getSong().getState(), schema::CURVE);
+    };
+
+    SUBCASE ("A point without a position")
+    {
+        const auto curves = openWith ([] (juce::XmlElement& curve) { curve.getFirstChildElement()->removeAttribute ("value"); });
+        REQUIRE (curves.size() == 1);
+        REQUIRE (curves.front().getNumChildren() == 1);
+        CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (0.8f));
+    }
+
+    SUBCASE ("A point whose position is no number")
+    {
+        const auto curves = openWith ([] (juce::XmlElement& curve) { curve.getFirstChildElement()->setAttribute ("value", "loud"); });
+        REQUIRE (curves.size() == 1);
+        REQUIRE (curves.front().getNumChildren() == 1);
+        CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (0.8f));
+    }
+
+    SUBCASE ("A curve left without points goes")
+    {
+        const auto curves = openWith (
+            [] (juce::XmlElement& curve)
+            {
+                for (auto* point : curve.getChildIterator())
+                    point->setAttribute ("value", "nan");
+            });
+        CHECK (curves.empty());
+    }
+
+    SUBCASE ("A curve holding only what Phazite doesn't know stays, with it")
+    {
+        const auto curves = openWith (
+            [] (juce::XmlElement& curve)
+            {
+                curve.deleteAllChildElements();
+                curve.createNewChildElement ("SHAPE")->setAttribute ("kind", "spline");
+            });
+        REQUIRE (curves.size() == 1);
+        REQUIRE (curves.front().getNumChildren() == 1);
+        CHECK (curves.front().getChild (0).hasType ("SHAPE"));
+    }
+}
+
 TEST_CASE ("A device on a drum sampler's track listening to one of its own pads' tracks opens without that sidechain")
 {
     // Known bug 164: the model refuses such a sidechain (its sound would come round to itself: Sidechain.h, isFedBy()), but

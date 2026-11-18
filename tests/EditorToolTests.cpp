@@ -350,7 +350,7 @@ TEST_CASE ("In an automation lane, a double-click on empty space adds a point, o
     phazite::addAutomationPoint (screen.context, volume.getRef(), { beatAt (8.0), 0.5f });
     phazite::test::deliverChanges();
     const auto from = inLane (8.0, 0.5f);
-    const auto valueOf = [&] { return points().at (0).value; };
+    const auto valueOf = [&] { return points().at (0).position; };
     const auto step = std::max (4, lane->getHeight() / 10); // pixels, past the drag's threshold, the value well inside its range
     undo.check ("a point dragged, Shift pressed in the middle",
                 [&]

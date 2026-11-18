@@ -414,8 +414,8 @@ void addSongSettings (phazite::Song& song, phazite::ProjectContext& context, con
     const phazite::ParameterRef masterVolume { phazite::getFader (song, master), phazite::getVolumeParameterID (song, master) };
     const phazite::ParameterRef masterPan { phazite::getFader (song, master), phazite::getPanParameterID (song, master) };
     phazite::addAutomationPoint (context, masterVolume, { beats (0.0), 0.75f, 0.0f });
-    phazite::addAutomationPoint (context, masterPan, { beats (0.0), 0.0f, 0.0f });
-    phazite::addAutomationPoint (context, masterPan, { beats (16.0), 0.25f, 0.0f });
+    phazite::addAutomationPoint (context, masterPan, { beats (0.0), 0.5f, 0.0f });
+    phazite::addAutomationPoint (context, masterPan, { beats (16.0), 0.625f, 0.0f });
     phazite::showAutomationLane (context, masterVolume);
 
     phazite::addAutomationPoint (context, phazite::getVolume (context, plainFolder).getRef(), { beats (0.0), 0.5f, 0.0f });
@@ -426,9 +426,10 @@ void addSongSettings (phazite::Song& song, phazite::ProjectContext& context, con
 
     for (const auto& device : phazite::getEffects (context, tracks.tone))
         if (device.isContainer && phazite::getContainerSplit (context, device.id) == phazite::ContainerSplit::bands)
-            phazite::addAutomationPoint (context,
-                                         phazite::getChainCrossover (context, phazite::getChains (context, device.id).back().id).getRef(),
-                                         { beats (8.0), 4000.0f, 0.0f });
+            if (const auto crossover = phazite::getChainCrossover (context, phazite::getChains (context, device.id).back().id);
+                crossover.exists())
+                phazite::addAutomationPoint (context, crossover.getRef(),
+                                             { beats (8.0), phazite::toControlPosition (crossover.getRange(), 4000.0f), 0.0f });
 
     phazite::setAutomationMode (context, tracks.keys, phazite::AutomationMode::touch);
     phazite::setAutomationMode (context, tracks.pad, phazite::AutomationMode::latch);

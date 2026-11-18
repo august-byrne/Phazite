@@ -44,6 +44,6 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 
 | Folder | What it holds |
 |---|---|
-| `automation/` | `Curve.h`: a parameter's automation as the engine plays it, and the control points, one every 32 samples from the song's start, that automation and modulation move what they move on. |
+| `automation/` | `Curve.h`: a parameter's automation as the engine plays it, its points positions along the control's travel turned into the parameter's units by its range, and the control points, one every 32 samples from the song's start, that automation and modulation move what they move on. |
 | `modulation/` | `ModulatorNode.h`: a track's modulator or macro as the engine plays it, kept by its ID, its values on a block's control points, and its history for its editor. |
 | `transport/` | `Click.h`: the metronome's click, synthesized. |

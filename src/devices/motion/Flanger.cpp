@@ -31,7 +31,13 @@ namespace
           .defaultValue = dsp::twoBarsNoteValue,
           .unit = Unit::choice,
           .choices = dsp::noteValueNames },
-        { .id = "rate", .name = "Rate", .minimum = 0.05f, .maximum = 20.0f, .defaultValue = 0.25f, .unit = Unit::hertz, .midpoint = 1.0f },
+        { .id = "rate",
+          .name = "Rate",
+          .minimum = 0.05f,
+          .maximum = 20.0f,
+          .defaultValue = 0.25f,
+          .unit = Unit::hertz,
+          .scale = Scale::logarithmic },
         { .id = "shape", .name = "Shape", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::choice, .choices = shapes },
         { .id = "feedback", .name = "Feedback", .minimum = -1.0f, .maximum = 1.0f, .defaultValue = 0.3f, .unit = Unit::percent },
         { .id = "stereo", .name = "Stereo", .defaultValue = 0.5f, .unit = Unit::percent },
@@ -41,7 +47,7 @@ namespace
           .maximum = 1000.0f,
           .defaultValue = 20.0f,
           .unit = Unit::hertz,
-          .midpoint = 150.0f },
+          .scale = Scale::logarithmic },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 

@@ -445,16 +445,13 @@ namespace
                     const ParameterRef parameter { DeviceID::fromRaw (readID (tree[schema::curveDevice])),
                                                    tree[schema::curveParameter].toString() };
 
-                    // A plug-in's parameters are from 0 to 1, and it tells which it has only once it plays.
-                    if (const auto description = describeParameter (song, parameter))
-                        checkNumber (child, schema::pointValue, description->range.start, description->range.end, false, "value");
-                    else if (findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString()
-                             == schema::deviceIsPlugin)
-                        checkNumber (child, schema::pointValue, 0.0, 1.0, false, "value");
-                    // A chain's crossover, while its container isn't split into bands or it is the first chain: kept.
-                    else if (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
-                        checkNumber (child, schema::pointValue, 20.0, 20000.0, false, "value");
-                    else
+                    // A position along its parameter's control's travel. A plug-in tells which parameters it has only once it
+                    // plays; a chain's crossover is kept while its container isn't split into bands or it is the first chain.
+                    checkNumber (child, schema::pointValue, 0.0, 1.0, false, "value");
+
+                    if (! describeParameter (song, parameter).has_value()
+                        && findDevice (song.getState(), parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
+                        && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
                         add ("names", tree, "a curve of a parameter the song hasn't: " + parameter.parameter);
                 }
 

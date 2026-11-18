@@ -552,10 +552,10 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     const auto points = phazite::getAutomationPoints (song.context, level);
     REQUIRE (points.size() >= 3);
     CHECK (points.front().beat.inBeats() == doctest::Approx (grabbedAt).epsilon (0.005)); // within its last block
-    CHECK (points.front().value == doctest::Approx (0.25f));
-    CHECK (points[1].value == doctest::Approx (0.75f));
+    CHECK (points.front().position == doctest::Approx (0.25f));
+    CHECK (points[1].position == doctest::Approx (0.75f));
     CHECK (points.back().beat.inBeats() == doctest::Approx (letGoAt).epsilon (0.005));
-    CHECK (points.back().value == doctest::Approx (0.75f));
+    CHECK (points.back().position == doctest::Approx (0.75f));
 
     // One step takes it back.
     phazite::undo (getSong (song));
@@ -2389,7 +2389,7 @@ TEST_CASE ("A value typed into a plug-in's control lands while a take records an
     const auto pointsAfter = phazite::getAutomationPoints (song.context, panLane);
     CHECK ((pointsAfter.size() != pointsBefore.size()
             || ! std::equal (pointsAfter.begin(), pointsAfter.end(), pointsBefore.begin(),
-                             [] (const auto& a, const auto& b) { return juce::exactlyEqual (a.value, b.value); })));
+                             [] (const auto& a, const auto& b) { return juce::exactlyEqual (a.position, b.position); })));
     CHECK_FALSE (whileWriting->has_value());
     gate.open();
     REQUIRE (phazite::test::dispatchMessagesUntil ([whileWriting] { return whileWriting->has_value(); }, longWait));

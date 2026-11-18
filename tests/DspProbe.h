@@ -123,9 +123,9 @@ public:
     void set (std::string_view parameterID, float value); // the test fails where it has none
     void setAll (const std::vector<float>& newValues) { values = newValues; }
 
-    // Automation, the song's: a parameter along a line from one value at the song's start to another so many samples in at
-    // the rate it is prepared at, which the runner plays on the song's control points (engine/automation/Curve.h). Once
-    // prepared; kept until clearAutomation().
+    // Automation, the song's: a parameter along a line (straight along its knob's travel) from one value at the song's start
+    // to another so many samples in at the rate it is prepared at, which the runner plays on the song's control points
+    // (engine/automation/Curve.h). Once prepared; kept until clearAutomation().
     void automate (int parameter, float from, float to, std::int64_t overSamples);
     void clearAutomation();
 

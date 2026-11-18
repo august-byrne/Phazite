@@ -260,17 +260,17 @@ std::vector<AutomationPoint> getAutomationPoints (const ProjectContext& context,
     return song != nullptr ? getPoints (*song, parameter) : std::vector<AutomationPoint>();
 }
 
-std::vector<float> getAutomationValues (const ProjectContext& context, const ParameterRef& parameter, BeatRange range, int numValues)
+std::vector<float> getAutomationPositions (const ProjectContext& context, const ParameterRef& parameter, BeatRange range, int numValues)
 {
     auto* song = findSong (context);
-    return song != nullptr ? getValues (*song, parameter, range, numValues) : std::vector<float>();
+    return song != nullptr ? getPositions (*song, parameter, range, numValues) : std::vector<float>();
 }
 
-std::vector<float> getAutomationValues (const ProjectContext& context, const ParameterRef& parameter,
-                                        const std::vector<BeatPosition>& beats)
+std::vector<float> getAutomationPositions (const ProjectContext& context, const ParameterRef& parameter,
+                                           const std::vector<BeatPosition>& beats)
 {
     auto* song = findSong (context);
-    return song != nullptr ? getValues (*song, parameter, beats) : std::vector<float>();
+    return song != nullptr ? getPositions (*song, parameter, beats) : std::vector<float>();
 }
 
 int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, AutomationPoint point)
@@ -285,10 +285,10 @@ int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, 
 }
 
 BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices,
-                                   BeatDuration distance, float valueChange)
+                                   BeatDuration distance, float positionChange)
 {
     // Typed: what is no finite number moves nothing (known bug 148).
-    if (! std::isfinite (distance.inBeats()) || ! std::isfinite (valueChange))
+    if (! std::isfinite (distance.inBeats()) || ! std::isfinite (positionChange))
         return {};
 
     auto* song = findSong (context);
@@ -297,7 +297,7 @@ BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& 
         return {};
 
     const UndoStep step (*song, "Move Automation Points");
-    return movePoints (*song, parameter, indices, distance, valueChange);
+    return movePoints (*song, parameter, indices, distance, positionChange);
 }
 
 void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter, int index, float bend)
@@ -312,9 +312,9 @@ void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter,
     }
 }
 
-void setAutomationPointValues (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float value)
+void setAutomationPointPositions (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float position)
 {
-    if (! std::isfinite (value)) // typed: what is no finite number changes nothing (known bug 148)
+    if (! std::isfinite (position)) // typed: what is no finite number changes nothing (known bug 148)
         return;
 
     auto* song = findSong (context);
@@ -327,7 +327,7 @@ void setAutomationPointValues (ProjectContext& context, const ParameterRef& para
 
     for (const auto index : indices)
         if (juce::isPositiveAndBelow (index, (int) points.size()))
-            movePoints (*song, parameter, { index }, {}, value - points[(size_t) index].value);
+            movePoints (*song, parameter, { index }, {}, position - points[(size_t) index].position);
 }
 
 void setAutomationCurves (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float bend)
@@ -476,17 +476,15 @@ bool hasSelectedAutomationPoints (const ProjectContext& context)
     return getSelectedPoints (getSelection (context)).has_value();
 }
 
-void moveSelectedAutomationPoints (ProjectContext& context, BeatDuration distance, float partOfRange)
+void moveSelectedAutomationPoints (ProjectContext& context, BeatDuration distance, float partOfTravel)
 {
     auto* song = findSong (context);
     const auto selected = getSelectedPoints (getSelection (context));
-    const auto description = song != nullptr && selected.has_value() ? describeParameter (*song, selected->parameter) : std::nullopt;
 
-    if (description.has_value())
+    if (song != nullptr && selected.has_value() && locateParameter (*song, selected->parameter).has_value())
     {
         const UndoStep step (*song, "Move Automation Points");
-        movePoints (*song, selected->parameter, selected->indices, distance,
-                    partOfRange * (description->range.end - description->range.start));
+        movePoints (*song, selected->parameter, selected->indices, distance, partOfTravel);
     }
 }
 
@@ -532,7 +530,7 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
     registry.add ({ .id = "automation.raisePoints",
                     .name = "Raise Automation Points",
                     .category = "Automation",
-                    .description = "Raises the selected automation points by a hundredth of their range.",
+                    .description = "Raises the selected automation points by a hundredth of their control's travel.",
                     .synonyms = { "up", "increase" },
                     .perform = [&context] { moveSelectedAutomationPoints (context, {}, 0.01f); },
                     .isEnabled = [&context] { return hasSelectedAutomationPoints (context); },
@@ -543,7 +541,7 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
     registry.add ({ .id = "automation.lowerPoints",
                     .name = "Lower Automation Points",
                     .category = "Automation",
-                    .description = "Lowers the selected automation points by a hundredth of their range.",
+                    .description = "Lowers the selected automation points by a hundredth of their control's travel.",
                     .synonyms = { "down", "decrease" },
                     .perform = [&context] { moveSelectedAutomationPoints (context, {}, -0.01f); },
                     .isEnabled = [&context] { return hasSelectedAutomationPoints (context); },
@@ -554,7 +552,7 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
     registry.add ({ .id = "automation.raisePointsMore",
                     .name = "Raise Automation Points More",
                     .category = "Automation",
-                    .description = "Raises the selected automation points by a tenth of their range.",
+                    .description = "Raises the selected automation points by a tenth of their control's travel.",
                     .synonyms = { "up", "increase" },
                     .perform = [&context] { moveSelectedAutomationPoints (context, {}, 0.1f); },
                     .isEnabled = [&context] { return hasSelectedAutomationPoints (context); },
@@ -565,7 +563,7 @@ void addAutomationCommands (CommandRegistry& registry, ProjectContext& context)
     registry.add ({ .id = "automation.lowerPointsMore",
                     .name = "Lower Automation Points More",
                     .category = "Automation",
-                    .description = "Lowers the selected automation points by a tenth of their range.",
+                    .description = "Lowers the selected automation points by a tenth of their control's travel.",
                     .synonyms = { "down", "decrease" },
                     .perform = [&context] { moveSelectedAutomationPoints (context, {}, -0.1f); },
                     .isEnabled = [&context] { return hasSelectedAutomationPoints (context); },

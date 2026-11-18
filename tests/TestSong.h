@@ -127,7 +127,16 @@ public:
     void waitForClipRenders();
 
     //==============================================================================
-    void addAutomation (const ParameterRef&, std::initializer_list<AutomationPoint>);
+    // Automation as a test writes it: each point's value in the parameter's own units (hertz, a pan from -1 to 1, a fader's
+    // position), put where its control would be (AutomationValues.h: toControlPosition()), with the bend of the line after it.
+    struct ValuePoint
+    {
+        BeatPosition beat;
+        float value = 0.0f;
+        float curve = 0.0f;
+    };
+
+    void addAutomation (const ParameterRef&, std::initializer_list<ValuePoint>);
 
     ModulatorID addModulator (TrackID, ModulatorType);
     void setModulatorParameter (ModulatorID, const juce::String& parameterID, float value);

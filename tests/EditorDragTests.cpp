@@ -441,7 +441,7 @@ TEST_CASE ("What a drag holds, deleted through the model in the middle of it, le
 
         REQUIRE (screen.getPoints().size() == 1);
         CHECK (screen.getPoints()[0].beat.inBeats() == doctest::Approx (12.0));
-        CHECK (screen.getPoints()[0].value == doctest::Approx (0.25f));
+        CHECK (screen.getPoints()[0].position == doctest::Approx (0.25f));
 
         Mouse tempoMouse (*screen.tempoLane);
         undo.check ("a tempo change's move whose tempo change goes",
@@ -1158,12 +1158,12 @@ TEST_CASE ("Automation points and tempo changes off the grid keep their offset f
 
     REQUIRE (screen.getPoints().size() == 1);
     CHECK (screen.getPoints()[0].beat.inBeats() == doctest::Approx (4.3));
-    CHECK (screen.getPoints()[0].value > 0.55f);
+    CHECK (screen.getPoints()[0].position > 0.55f);
 
     undo.check ("a point dragged two beats and a bit along",
                 [&]
                 {
-                    const auto from = screen.inLane (4.3, screen.getPoints()[0].value);
+                    const auto from = screen.inLane (4.3, screen.getPoints()[0].position);
                     laneMouse.press (from);
                     laneMouse.dragTo (from.translated (screen.widthOf (1.0), 0));
                     laneMouse.dragTo (from.translated (screen.widthOf (2.2), 0));

@@ -238,6 +238,13 @@ the [changelog](changelog.md).
 | D2 | Merge Branch... from a branch that changed two tracks; click a line, then Merge | The list shows both lines with their letters and no tick boxes; a click changes nothing; Merge takes both | |
 | D3 | Create a branch, rename it "Half time chorus", and reopen the project | The picker, the branch button and the status bar show "Half time chorus", spaces and all | |
 | D4 | Read the Versions view from top to bottom: its menu, the field, the button, the sections, a version's right-click menu, a line's tooltip | Every word is one a producer would use: Save Version, History, Switch Branch, Restore This Version; nothing says commit, checkout or staged | |
+| D5 | Turn a Filter's Cutoff knob slowly from left to right | Even octave steps all the way: the middle reads about 632 Hz, a quarter about 112 Hz, and the bottom of the knob is no longer a dead stretch | |
+| D6 | Automate a Filter's Cutoff from the bottom of its lane to the top over 4 bars and play | An even sweep, with no rush at the end; the line drawn is the line heard, and the lane's middle reads about 632 Hz | |
+| D7 | Select a cutoff's point and press Up; then right-click it, Type a Value..., and type "2 kHz" | Up moves it a hundredth of the knob's travel, not 200 Hz; the typed point sits at 2.00 kHz, and the knob shows 2.00 kHz there while playing | |
+| D8 | Put an LFO at a fifth of its depth on a cutoff set to 200 Hz, then the same on one set to 5 kHz | The same number of octaves either way | |
+| D9 | Help > Example Songs: listen to House Groove's chord filter, Lo-fi Beat's Muffle macro turned fully, and the filter sweeps of Exodus' intro | Each sounds right for its song; the house chords' filter LFO was fitted again and reaches up to half an octave elsewhere at one end than before | |
+| D10 | Automate an effect's Mix and a Filter's Cutoff, and play at an audio buffer of 441 or another odd size, then at 512 | The same sound at both | |
+| D11 | Save a project many times over a few days of work, then look into its Backups folder | Backups from the last two hours, one an hour for the last day and one a day before that; saves that changed nothing left no copy; a file put there by hand is still there | |
 
 ## Performance on other machines
 

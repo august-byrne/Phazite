@@ -47,14 +47,14 @@ namespace
           .maximum = 2000.0f,
           .defaultValue = 100.0f,
           .unit = Unit::hertz,
-          .midpoint = 200.0f },
+          .scale = Scale::logarithmic },
         { .id = "highCut",
           .name = "High Cut",
           .minimum = 1000.0f,
           .maximum = 20000.0f,
           .defaultValue = 8000.0f,
           .unit = Unit::hertz,
-          .midpoint = 5000.0f },
+          .scale = Scale::logarithmic },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.25f, .unit = Unit::percent },
     };
 

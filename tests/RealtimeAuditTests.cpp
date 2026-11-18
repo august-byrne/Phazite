@@ -552,14 +552,25 @@ juce::String keepAndBounce (TestSong& song, const juce::String& name)
     return version;
 }
 
-// A cutoff swept by its automation, from one value to another and back on every beat, over two bars.
-void sweepCutoff (const TestSong& song, phazite::DeviceID device, float from, float to)
+// A parameter swept by its automation, from one value to another (in its own units, each where its knob would be for it)
+// and back on every beat, over two bars.
+void sweepParameter (const TestSong& song, const phazite::ParameterRef& parameter, float from, float to)
 {
+    const auto range = phazite::getControlTravel (getSong (song), parameter);
+    REQUIRE (range.has_value());
+
     for (int beat = 0; beat < 8; ++beat)
     {
-        phazite::addPoint (getSong (song), { device, "cutoff" }, { phazite::BeatPosition::fromBeats (beat), from, 0.0f });
-        phazite::addPoint (getSong (song), { device, "cutoff" }, { phazite::BeatPosition::fromBeats (beat + 0.5), to, 0.0f });
+        phazite::addPoint (getSong (song), parameter,
+                           { phazite::BeatPosition::fromBeats (beat), phazite::toControlPosition (*range, from), 0.0f });
+        phazite::addPoint (getSong (song), parameter,
+                           { phazite::BeatPosition::fromBeats (beat + 0.5), phazite::toControlPosition (*range, to), 0.0f });
     }
+}
+
+void sweepCutoff (const TestSong& song, phazite::DeviceID device, float from, float to)
+{
+    sweepParameter (song, { device, "cutoff" }, from, to);
 }
 } // namespace
 
@@ -1429,11 +1440,7 @@ TEST_SUITE ("realtime-audit")
         for (const auto& [id, value] : { std::pair<const char*, float> { "drive", 30.0f }, { "amount", 1.0f }, { "highCut", 12000.0f } })
             song.setParameter (exciter, id, value);
 
-        for (int beat = 0; beat < 8; ++beat)
-        {
-            phazite::addPoint (getSong (song), { exciter, "frequency" }, { phazite::BeatPosition::fromBeats (beat), 1000.0f, 0.0f });
-            phazite::addPoint (getSong (song), { exciter, "frequency" }, { phazite::BeatPosition::fromBeats (beat + 0.5), 8000.0f, 0.0f });
-        }
+        sweepParameter (song, { exciter, "frequency" }, 1000.0f, 8000.0f);
 
         // As its open editor has it: its scope and what it adds tapped, its meter read, and Listen held on.
         const auto played = [&song, exciter]() -> auto& { return dynamic_cast<Exciter&> (getPlayed (song, exciter).getProcessor()); };
@@ -1478,11 +1485,7 @@ TEST_SUITE ("realtime-audit")
                                          { "density", 300.0f } })
             song.setParameter (vinyl, id, value);
 
-        for (int beat = 0; beat < 8; ++beat)
-        {
-            phazite::addPoint (getSong (song), { vinyl, "highCut" }, { phazite::BeatPosition::fromBeats (beat), 2000.0f, 0.0f });
-            phazite::addPoint (getSong (song), { vinyl, "highCut" }, { phazite::BeatPosition::fromBeats (beat + 0.5), 16000.0f, 0.0f });
-        }
+        sweepParameter (song, { vinyl, "highCut" }, 2000.0f, 16000.0f);
 
         // As its open editor has it: its scope and its pitch tapped, its clicks counted.
         const auto played = [&song, vinyl]() -> auto& { return dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()); };

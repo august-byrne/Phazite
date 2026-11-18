@@ -19,6 +19,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -56,8 +57,14 @@ private:
 
     double sampleRate = 44100.0;
     int latency = 0;
-    float glide = 0.001f;   // of the way to a new cutoff, per sample (in octaves)
-    float octaves = 10.0f;  // the cutoff now, in octaves above 20 Hz
+    float glide = 0.001f;  // of the way to a new cutoff, per sample (in octaves)
+    float octaves = 10.0f; // the cutoff now, in octaves above 20 Hz
+
+    // The coefficients step on the song's own steps of coefficientStep samples: the samples left of the step under way,
+    // which a block's end cut (it goes on in the next block with the coefficients it began with), and the song's sample the
+    // next block goes on from (any other, a jump or the song stopped, starts a step afresh).
+    int stepLeft = 0;
+    std::int64_t nextSongSample = -1;
     float driveGain = 1.0f; // smoothed, at twice the rate
     float driveSmoothing = 0.001f;
     bool isFirstBlock = true, wasDriven = false;

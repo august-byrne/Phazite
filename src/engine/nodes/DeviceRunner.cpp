@@ -49,7 +49,7 @@ DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_p
         previousValues.push_back (description.defaultValue);
         baseValues.push_back (description.defaultValue);
         glides.push_back (description.unit != devices::Unit::choice && description.unit != devices::Unit::toggle);
-        ranges.push_back (devices::getRange (description));
+        travels.push_back (devices::getTravel (description));
         offsets.push_back (0.0f);
     }
 
@@ -517,15 +517,18 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
             for (const auto& part : stretchMixes)
             {
                 float* const wet[] = { channels[0] + part.start, channels[1] + part.start };
-                mixWithDry (wet, part.start, part.length, part.mix);
+                mixWithDry (wet, part.start, part.length, part.mix, part.ramp);
             }
         }
         else if (mixIndex >= 0)
         {
+            // In stretches, over the whole of each up to its control point, where a block's end cuts it too.
+            const auto ramp = begun.inStretches ? (done == 0 ? toControlPoint : smoothingStep) : length;
             mixWithDry (channels, 0, length,
                         processor->overridesMix() ? 1.0f
                         : begun.isMixMoved        ? currentValues[(size_t) mixIndex]
-                                                  : begun.targetMix);
+                                                  : begun.targetMix,
+                        std::max (ramp, length));
         }
 
         if (isMono)
@@ -616,7 +619,7 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
         [this, plan] (size_t i)
         {
             if (plan->isModulated[i])
-                currentValues[i] = devices::modulate (info.parameters[i], ranges[i], currentValues[i], offsets[i]);
+                currentValues[i] = devices::modulate (info.parameters[i], travels[i], currentValues[i], offsets[i]);
         });
 }
 
@@ -692,7 +695,8 @@ int DeviceRunner::gatherChanges (const Block& in, bool automationMoves, bool isM
         }
 
         if (isMixMoved)
-            stretchMixes.push_back ({ done - from, stretchLength, currentValues[(size_t) mixIndex] });
+            stretchMixes.push_back ({ done - from, stretchLength, currentValues[(size_t) mixIndex],
+                                      std::max (stretchLength, done == 0 ? toControlPoint : smoothingStep) });
 
         done += stretchLength;
     }
@@ -700,7 +704,7 @@ int DeviceRunner::gatherChanges (const Block& in, bool automationMoves, bool isM
     return stretch;
 }
 
-void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, float targetMix)
+void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, float targetMix, int ramp)
 {
     // The dry sound, delayed as much as the effect delays its own, so that the two line up; unless the effect has delayed it
     // itself, through the filters that delay its own (devices::Processor::delaysDry()).
@@ -719,9 +723,11 @@ void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, floa
         }
     }
 
-    // Ramped from the mix the last stretch ended with, so a moving knob doesn't click; nothing to do at 100 %.
+    // Ramped from the mix the last stretch ended with, so a moving knob doesn't click, over the whole ramp: a stretch a block's
+    // end cuts ends where its ramp has reached, and the rest of it goes on from there. Nothing to do at 100 %.
     const auto from = appliedMix;
-    appliedMix = targetMix;
+    const auto rampLength = (float) std::max (ramp, length);
+    appliedMix = from + (targetMix - from) * (float) length / rampLength;
 
     if (from >= 1.0f && targetMix >= 1.0f)
         return;
@@ -732,7 +738,7 @@ void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, floa
 
         for (int i = 0; i < length; ++i)
         {
-            const auto mix = from + (targetMix - from) * (float) (i + 1) / (float) length;
+            const auto mix = from + (targetMix - from) * (float) (i + 1) / rampLength;
             wet[channel][i] = mix * wet[channel][i] + (1.0f - mix) * drySamples[i];
         }
     }

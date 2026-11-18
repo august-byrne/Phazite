@@ -266,7 +266,7 @@ TEST_CASE ("A device's preset holds its settings and mix, not its automation, ou
     phazite::getParameter (context, makeup).setValue (-6.0f);
     phazite::getMix (context, compressor).setValue (0.5f);
     phazite::showAutomationLane (context, makeup);
-    phazite::addAutomationPoint (context, makeup, { phazite::BeatPosition::fromBeats (4.0), 3.0f });
+    phazite::addAutomationPoint (context, makeup, { phazite::BeatPosition::fromBeats (4.0), 0.4f });
     const auto lfo = phazite::addModulator (context, track, ModulatorType::lfo);
     phazite::modulate (context, lfo, makeup, 0.25f);
     phazite::setSidechainSource (context, compressor, other);

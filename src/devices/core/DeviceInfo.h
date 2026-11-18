@@ -32,6 +32,15 @@ enum class Unit
     degrees // an angle, as a part of a turn: 90 is "90°", a quarter of a cycle
 };
 
+// How a knob's travel spreads a parameter's range, which automation and modulation follow too (a straight automation line
+// is an even turn of the knob).
+enum class Scale
+{
+    linear,     // evenly, or skewed so that a midpoint is halfway along (ParameterInfo::midpoint)
+    logarithmic // evenly in ratios, from a minimum above 0: each part of the travel multiplies the value as much, as a
+                // frequency knob goes through as many octaves in each (Ableton Live's filters, FabFilter's)
+};
+
 struct ParameterInfo
 {
     std::string_view id {};   // saved in projects
@@ -41,7 +50,7 @@ struct ParameterInfo
     float defaultValue = 0.0f;
     Unit unit = Unit::none;
 
-    // For a skewed range, such as a frequency or a time: the value halfway along a knob's travel.
+    // For a skewed linear range, such as a time: the value halfway along a knob's travel.
     std::optional<float> midpoint {};
 
     // For Unit::choice: what each whole number from the minimum up means.
@@ -53,17 +62,39 @@ struct ParameterInfo
 
     // For Unit::choice: the name each choice is saved by in projects and presets (model/base/internal/Schema.h: VALUES), as
     // many as there are choices, if not its text in choices: so that what editors show can change (or be translated)
-    // without changing what songs hold. Empty: the choices' own texts are their names. Last, after what descriptions give
-    // in order.
+    // without changing what songs hold. Empty: the choices' own texts are their names. After what descriptions give in
+    // order.
     std::span<const std::string_view> choiceIDs {};
+
+    // How the knob's travel spreads the range. Every parameter in hertz whose range starts above 0 is logarithmic (isValid()
+    // holds it to that), without a midpoint. Last, after what descriptions give in order.
+    Scale scale = Scale::linear;
 };
 
 // Whether a description holds together: a range with the default in it, a midpoint strictly inside it, whole numbers
-// for choices and toggles, as many choices as the range has whole numbers, and a step above 0.
+// for choices and toggles, as many choices as the range has whole numbers, and a step above 0; and a logarithmic scale for
+// one in hertz from above 0, with neither a midpoint nor a step.
 bool isValid (const ParameterInfo&);
 
-// The range a knob moves through: skewed so that the midpoint is halfway along, in whole steps for choices and
-// toggles, and in its steps for one that has them.
+// A knob's travel over a parameter's range as plain numbers, which the audio thread copies and uses without allocating:
+// where a value is along it, from 0 to 1, and the value at a place along it (within the range, not yet on its steps), and
+// a value put on its steps. The same mapping as getRange()'s.
+struct Travel
+{
+    float minimum = 0.0f, maximum = 1.0f;
+    float skew = 1.0f; // a linear scale's, as juce::NormalisableRange's: 1 for none
+    float step = 0.0f; // 0 for none
+    bool logarithmic = false;
+
+    float toPosition (float value) const noexcept;
+    float fromPosition (float position) const noexcept;
+    float snap (float value) const noexcept;
+};
+
+Travel getTravel (const ParameterInfo&);
+
+// The range a knob moves through, as JUCE's controls take it: along its scale (skewed so that the midpoint is halfway
+// along, or logarithmic), in whole steps for choices and toggles, and in its steps for one that has them.
 juce::NormalisableRange<float> getRange (const ParameterInfo&);
 
 // A value as the parameter allows it: within its range, whole for choices and toggles, and on a step for one that has

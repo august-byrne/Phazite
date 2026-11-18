@@ -58,7 +58,7 @@ struct Song
 
     float valueAt (const phazite::ParameterRef& parameter, double beat) const
     {
-        return phazite::getAutomationValues (context, parameter, { beats (beat), beats (beat) }, 1).front();
+        return phazite::getAutomationPositions (context, parameter, { beats (beat), beats (beat) }, 1).front();
     }
 
     float valueAt (double beat) const { return valueAt (volume, beat); }

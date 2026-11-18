@@ -685,13 +685,13 @@ namespace
                 }
                 else if (device == fader && fader != 0 && (parameter == schema::faderPan || parameter == schema::masterPan))
                 {
-                    target = channel + "p", unit = "normalized";
-                    toValue = [] (float pan) { return (pan + 1.0) / 2.0; };
+                    target = channel + "p", unit = "normalized"; // a pan's position, as DAWproject's
+                    toValue = [] (float position) { return (double) position; };
                 }
                 else if (pluginIDs.count (device) > 0)
                 {
                     target = "d" + juce::String ((juce::int64) device) + "p" + parameter, unit = "normalized";
-                    toValue = [] (float value) { return (double) value; };
+                    toValue = [] (float position) { return (double) position; };
                 }
                 else
                 {

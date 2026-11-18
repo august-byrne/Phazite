@@ -3,6 +3,7 @@
 // the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
 #include "PlaybackConditions.h"
+#include "RenderHarness.h"
 #include "TestDevices.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -12,6 +13,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/motion/Chorus.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/AudioClipModel.h"
@@ -63,6 +65,12 @@ int findFirstSound (const juce::AudioBuffer<float>& audio, int from = 0)
             return i;
 
     return -1;
+}
+
+// Where a pan (-1 left to 1 right) is along its knob's travel, as automation keeps it: 0 left, 0.5 centre, 1 right.
+float panPosition (float pan)
+{
+    return (pan + 1.0f) / 2.0f;
 }
 } // namespace
 
@@ -354,15 +362,151 @@ TEST_CASE ("A lane shows its values as Phazite's engine plays them: straight, be
         std::vector<phazite::engine::CurvePoint> enginePoints;
 
         for (const auto& point : phazite::getAutomationPoints (song.context, ref))
-            enginePoints.push_back ({ point.beat.inBeats(), point.value, point.curve });
+            enginePoints.push_back ({ point.beat.inBeats(), point.position, point.curve });
 
         const phazite::engine::Curve curve (std::move (enginePoints));
         const phazite::BeatRange shown { phazite::BeatPosition(), phazite::BeatDuration::fromBeats (beat + 2.0) };
-        const auto values = phazite::getAutomationValues (song.context, ref, shown, 400);
+        const auto values = phazite::getAutomationPositions (song.context, ref, shown, 400);
         REQUIRE (values.size() == 400);
 
         for (size_t i = 0; i < values.size(); ++i)
-            CHECK (values[i] == doctest::Approx (curve.getValueAt ((beat + 2.0) * (double) i / 399.0)).epsilon (1.0e-6));
+            CHECK (values[i] == doctest::Approx (curve.getPositionAt ((beat + 2.0) * (double) i / 399.0)).epsilon (1.0e-6));
+    }
+}
+
+namespace
+{
+// A song at a tempo whose first track plays Test Frequency, its frequency automated: held at 20 Hz for a beat, then a line
+// from the bottom of its travel to the top over eight beats (20 Hz to 20 kHz), and from beat 9 a line from 100 Hz to 10 kHz
+// over eight more. Its frequency, ID and all.
+phazite::ParameterRef addFrequencyRamps (TestSong& song, double tempo)
+{
+    song.setTempo (tempo);
+    const auto device =
+        phazite::test::addTestDevice (*phazite::findSong (song.context), song.firstTrack, phazite::test::TestFrequency::typeID);
+    const phazite::ParameterRef frequency { device, "frequency" };
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    song.addAutomation (
+        frequency, { { at (0.0), 20.0f }, { at (1.0), 20.0f }, { at (9.0), 20000.0f }, { at (9.0), 100.0f }, { at (17.0), 10000.0f } });
+    return frequency;
+}
+
+// What Test Frequency played at a beat, in hertz, as what it plays there to what it played while held at 20 Hz.
+float getFrequencyAt (const juce::AudioBuffer<float>& audio, double sampleRate, double tempo, double beat)
+{
+    const auto sampleAt = [&] (double b) { return audio.getSample (0, (int) std::lround (b * 60.0 / tempo * sampleRate)); };
+    return 20.0f * sampleAt (beat) / sampleAt (0.5);
+}
+
+// That a render or a play of the ramps passes 20 * 1000^p Hz at p along the first line, and 1 kHz halfway along the second,
+// within a fiftieth of an octave.
+void checkFrequencyRamps (const juce::AudioBuffer<float>& audio, double sampleRate, double tempo)
+{
+    for (const auto& [beat, hertz] :
+         { std::pair { 3.0, 112.468f }, std::pair { 5.0, 632.456f }, std::pair { 7.0, 3556.56f }, std::pair { 13.0, 1000.0f } })
+    {
+        CAPTURE (beat);
+        const auto played = getFrequencyAt (audio, sampleRate, tempo, beat);
+        CHECK_MESSAGE (std::abs (std::log2 (played / hertz)) < 0.02f, "played " << played << " Hz, " << hertz << " Hz expected");
+    }
+}
+} // namespace
+
+TEST_CASE ("A straight line on a frequency is an even sweep through the octaves, live at every condition and rendered")
+{
+    // Roadmap S4.7: a frequency's knob is logarithmic, and a line is worked out along its travel and turned into hertz where it
+    // plays, so that it goes through as many octaves in each part of its length: from 20 Hz to 20 kHz it passes 112 Hz, 632 Hz
+    // and 3.56 kHz at its quarters, and from 100 Hz to 10 kHz, 1 kHz halfway. A line straight in hertz played 10 kHz halfway,
+    // and one along a knob skewed around 632 Hz spent a fifth of its travel below 26 Hz.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            TestSong song;
+            addFrequencyRamps (song, condition.getTempo());
+            EnginePlayback playback (condition);
+            song.run ("transport.playStop");
+            const auto audio = playback.play (18.0 * 60.0 / condition.getTempo());
+            song.run ("transport.playStop");
+            checkFrequencyRamps (audio, condition.getSampleRate(), condition.getTempo());
+        });
+
+    TestSong song;
+    addFrequencyRamps (song, 120.0);
+    checkFrequencyRamps (phazite::test::renderOffline (song.context, 9.0), phazite::test::renderSampleRate, 120.0);
+}
+
+TEST_CASE ("Write takes a stepped parameter's lane value on its steps as playback starts: no value off its steps, no step for nothing")
+{
+    // The reviewers of S4.7: a punch-in took the lane's value as the engine turns a position into a value, off a stepped
+    // parameter's steps where the lane lies between two (the sampler's slices: 4.4), set it by hand there, and began a
+    // "Record Automation" step at Play for a value that hadn't changed; and its pass, begun at the lane's own position, wrote
+    // a point more as an Undo during it set the value by hand again, on its step.
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    const auto sampler = song.setInstrument (track, phazite::devices::Sampler::typeID);
+    const phazite::ParameterRef slices { sampler, "sliceCount" };
+    auto& state = *phazite::findSong (song.context);
+    const auto travel = phazite::getControlTravel (state, slices);
+    REQUIRE (travel.has_value());
+
+    for (const auto count : { 4.0f, 11.0f, 23.0f })
+    {
+        CAPTURE (count);
+        phazite::deleteAutomation (phazite::getParameter (song.context, slices));
+        song.setParameter (sampler, "sliceCount", count);
+        song.addAutomation (slices,
+                            { { phazite::BeatPosition(), count + 0.4f }, { phazite::BeatPosition::fromBeats (16.0), count + 0.4f } });
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
+        song.setParameter (sampler, "attack", 5.0f); // a step to undo while the pass writes
+        const auto before = phazite::describeUndo (&state);
+        EnginePlayback playback;
+        song.run ("transport.playStop");
+        playback.play (0.25);
+        CHECK (juce::exactlyEqual (phazite::getValueSetByHand (state, slices), count));
+        CHECK (phazite::describeUndo (&state) == before);
+        phazite::undo (state);
+        playback.play (0.25);
+        song.run ("transport.playStop");
+
+        // What the pass wrote, from where it started up to its end, where the lane comes back: the value on its step all along.
+        const auto points = phazite::getAutomationPoints (song.context, slices);
+        const auto onStep = travel->toPosition (count);
+        REQUIRE (points.size() >= 2);
+        CHECK (points.front().position == doctest::Approx (onStep).epsilon (1.0e-5));
+        auto lastOnStep = 0.0;
+
+        for (const auto& point : points)
+            if (std::abs (point.position - onStep) < 1.0e-5f)
+                lastOnStep = point.beat.inBeats();
+
+        for (const auto& point : points)
+            if (point.beat.inBeats() < lastOnStep)
+                CHECK (point.position == doctest::Approx (onStep).epsilon (1.0e-5));
+
+        phazite::setAutomationMode (song.context, track, phazite::AutomationMode::read);
+    }
+}
+
+TEST_CASE ("A modulation moves a frequency as many octaves wherever it is: an LFO's swing at 200 Hz as at 5 kHz")
+{
+    // Modulation adds along the knob's travel: on a logarithmic one, a depth is a number of octaves, whatever the frequency.
+    // An LFO a tenth of the travel either way swings a frequency an octave each way (1000^0.1 is 2), so from a quarter of it
+    // to four times it.
+    for (const auto base : { 200.0f, 5000.0f })
+    {
+        CAPTURE (base);
+        TestSong song;
+        song.setTempo (120.0);
+        const auto device =
+            phazite::test::addTestDevice (*phazite::findSong (song.context), song.firstTrack, phazite::test::TestFrequency::typeID);
+        song.setParameter (device, "frequency", base);
+        const auto lfo = song.addModulator (song.firstTrack, phazite::ModulatorType::lfo); // a sine, both ways, once a second
+        song.modulate (lfo, { device, "frequency" }, 0.1f);
+        const auto audio = phazite::test::renderOffline (song.context, 2.0);
+        const auto range =
+            audio.findMinMax (0, phazite::test::renderSampleRate / 2, audio.getNumSamples() - phazite::test::renderSampleRate / 2);
+        CHECK (range.getEnd() / range.getStart() == doctest::Approx (4.0f).epsilon (0.01));
     }
 }
 
@@ -419,10 +563,10 @@ TEST_CASE ("Touch writes what a control does while it is held, from the lane's v
     const auto points = phazite::getAutomationPoints (song.context, lane);
     REQUIRE (points.size() >= 5);
     CHECK (points[1].beat.inBeats() == doctest::Approx (1.0).epsilon (0.05));
-    CHECK (points[1].value == doctest::Approx (0.5f));
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.3f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.6f) < 0.001f; }));
-    CHECK (points[points.size() - 2].value == doctest::Approx (0.5f));
+    CHECK (points[1].position == doctest::Approx (0.5f));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - 0.3f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - 0.6f) < 0.001f; }));
+    CHECK (points[points.size() - 2].position == doctest::Approx (0.5f));
     CHECK (points.back().beat.inBeats() == doctest::Approx (16.0));
 
     // One step takes it back, the control's moves with it.
@@ -454,7 +598,7 @@ TEST_CASE ("Touch over a curve of one point writes its pass, and the point stays
 
     const auto meanwhile = phazite::getAutomationPoints (song.context, lane);
     REQUIRE (meanwhile.size() == 1);
-    CHECK (meanwhile.front().value == doctest::Approx (0.5f));
+    CHECK (meanwhile.front().position == doctest::Approx (0.5f));
 
     volume.endGesture();
     song.run ("transport.playStop");
@@ -462,9 +606,9 @@ TEST_CASE ("Touch over a curve of one point writes its pass, and the point stays
     // The pass, from beat 1, and the point at beat 12 as it was.
     const auto points = phazite::getAutomationPoints (song.context, lane);
     CHECK (points.size() > 1);
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.6f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 12.0) < 0.001 && std::abs (p.value - 0.5f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - 0.6f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 12.0) < 0.001 && std::abs (p.position - 0.5f) < 0.001f; }));
 }
 
 TEST_CASE ("Latch writes from a control's first move until playback stops, and write puts its track in latch")
@@ -488,7 +632,7 @@ TEST_CASE ("Latch writes from a control's first move until playback stops, and w
     REQUIRE (points.size() >= 2);
     CHECK (points.front().beat.inBeats() == doctest::Approx (1.0).epsilon (0.05));
     CHECK (points.back().beat.inBeats() == doctest::Approx (3.0).epsilon (0.05));
-    CHECK (points.back().value == doctest::Approx (-0.5f));
+    CHECK (points.back().position == doctest::Approx (panPosition (-0.5f)));
 
     // Write: its automated parameters write from the start, the control's value; let go, the track goes on in latch.
     phazite::setAutomationMode (song.context, track, phazite::AutomationMode::write);
@@ -502,7 +646,7 @@ TEST_CASE ("Latch writes from a control's first move until playback stops, and w
     song.run ("transport.playStop");
     points = phazite::getAutomationPoints (song.context, lane);
     CHECK (points.front().beat.inBeats() == doctest::Approx (0.0));
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.25f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.25f)) < 0.001f; }));
 }
 
 TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: touch as never grabbed, latch and write going on as "
@@ -516,7 +660,7 @@ TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: t
     song.addMidiClip (track, 0.0, 16.0);
     EnginePlayback playback;
     const auto hasValue = [] (const std::vector<phazite::AutomationPoint>& points, float value)
-    { return std::any_of (points.begin(), points.end(), [value] (const auto& p) { return std::abs (p.value - value) < 0.001f; }); };
+    { return std::any_of (points.begin(), points.end(), [value] (const auto& p) { return std::abs (p.position - value) < 0.001f; }); };
 
     SUBCASE ("Touch")
     {
@@ -563,8 +707,8 @@ TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: t
 
         const auto points = phazite::getAutomationPoints (song.context, lane);
         REQUIRE (points.size() >= 2);
-        CHECK_FALSE (hasValue (points, 0.8f));
-        CHECK (points.back().value == doctest::Approx (-0.5f));
+        CHECK_FALSE (hasValue (points, panPosition (0.8f)));
+        CHECK (points.back().position == doctest::Approx (panPosition (-0.5f)));
         CHECK (points.back().beat.inBeats() == doctest::Approx (4.0).epsilon (0.05)); // written to where playback stopped
     }
 
@@ -589,9 +733,9 @@ TEST_CASE ("A control's drag taken back by Escape takes back what it recorded: t
         const auto points = phazite::getAutomationPoints (song.context, lane);
         REQUIRE (points.size() >= 2);
         CHECK (points.front().beat.inBeats() == doctest::Approx (0.0));
-        CHECK_FALSE (hasValue (points, 0.25f));
-        CHECK (std::any_of (points.begin(), points.end(),
-                            [] (const auto& p) { return std::abs (p.beat.inBeats() - 3.0) < 0.15 && std::abs (p.value + 0.5f) < 0.001f; }));
+        CHECK_FALSE (hasValue (points, panPosition (0.25f)));
+        CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                            { return std::abs (p.beat.inBeats() - 3.0) < 0.15 && std::abs (p.position - panPosition (-0.5f)) < 0.001f; }));
     }
 }
 
@@ -627,9 +771,9 @@ TEST_CASE ("A control's moves are written where they were heard: earlier by the 
     const auto points = phazite::getAutomationPoints (song.context, lane);
     REQUIRE (points.size() >= 4);
     CHECK (points[1].beat.inBeats() == doctest::Approx (grabbedAt - 0.2).epsilon (0.001));
-    CHECK (points[1].value == doctest::Approx (0.5f));
+    CHECK (points[1].position == doctest::Approx (0.5f));
     CHECK (std::any_of (points.begin(), points.end(), [&] (const auto& p)
-                        { return std::abs (p.beat.inBeats() - (letGoAt - 0.2)) < 0.002 && std::abs (p.value - 0.3f) < 0.001f; }));
+                        { return std::abs (p.beat.inBeats() - (letGoAt - 0.2)) < 0.002 && std::abs (p.position - 0.3f) < 0.001f; }));
 }
 
 TEST_CASE ("A jump back while writing with the loop on ends the pass where the song was, and writes on from where it lands")
@@ -659,10 +803,10 @@ TEST_CASE ("A jump back while writing with the loop on ends the pass where the s
     REQUIRE (points.size() >= 2);
     CHECK (points.front().beat.inBeats() == doctest::Approx (2.0).epsilon (0.01));
     CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return p.beat.inBeats() > 6.05; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 6.0) < 0.05 && std::abs (p.value + 0.5f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 3.0) < 0.05 && std::abs (p.value + 0.5f) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 6.0) < 0.05 && std::abs (p.position - panPosition (-0.5f)) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 3.0) < 0.05 && std::abs (p.position - panPosition (-0.5f)) < 0.001f; }));
 }
 
 TEST_CASE ("Escape in Write takes back the drag alone: what the pass wrote at the loop's end during it stays, up to the grab")
@@ -694,12 +838,14 @@ TEST_CASE ("Escape in Write takes back the drag alone: what the pass wrote at th
 
     // Written from playback's start to the loop's end at -1, then on again from the loop's start; none of the drag's values.
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.25f) < 0.001f; }));
-    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.001 && std::abs (p.value + 1.0f) < 0.001f; }));
-    CHECK (std::none_of (points.begin(), points.end(),
-                         [] (const auto& p) { return p.beat.inBeats() > 0.9 && p.beat.inBeats() < 1.99 && p.value > -0.99f; }));
+    CHECK (
+        std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.25f)) < 0.001f; }));
+    CHECK (
+        std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.75f)) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 2.0) < 0.001 && std::abs (p.position - panPosition (-1.0f)) < 0.001f; }));
+    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p)
+                         { return p.beat.inBeats() > 0.9 && p.beat.inBeats() < 1.99 && p.position > panPosition (-0.99f); }));
 }
 
 TEST_CASE ("A control grabbed before playback starts, in Write, is taken back by Escape to the pass as playback started")
@@ -727,9 +873,10 @@ TEST_CASE ("A control grabbed before playback starts, in Write, is taken back by
 
     // Written from playback's start at the lane's value there, -1, as far as where playback stopped; without the drag's value.
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value + 1.0f) < 0.001f; }));
+    CHECK (
+        std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.75f)) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.position - panPosition (-1.0f)) < 0.001f; }));
 }
 
 TEST_CASE ("A control held as Play is pressed, in Write, goes back by Escape to the value its pass writes, which is what plays")
@@ -764,9 +911,10 @@ TEST_CASE ("A control held as Play is pressed, in Write, goes back by Escape to 
 
     // What was written, the pass from playback's start at -1, is what played; the drag's values went with it.
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
-    CHECK (std::any_of (points.begin(), points.end(),
-                        [] (const auto& p) { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value + 1.0f) < 0.001f; }));
+    CHECK (
+        std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.75f)) < 0.001f; }));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.position - panPosition (-1.0f)) < 0.001f; }));
     CHECK (pan.getValue() == doctest::Approx (-1.0f));
 }
 
@@ -808,17 +956,18 @@ TEST_CASE ("Undo straight after Escape on a control held as Play was pressed, in
     // Written as it played: the lane's value up to the undo, and the value it set from then to where playback stopped.
     const auto points = phazite::getAutomationPoints (song.context, lane);
     CHECK (std::any_of (points.begin(), points.end(), [undone] (const auto& p)
-                        { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.value - undone) < 0.001f; }));
-    CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.75f) < 0.001f; }));
+                        { return std::abs (p.beat.inBeats() - 2.0) < 0.05 && std::abs (p.position - panPosition (undone)) < 0.001f; }));
+    CHECK (
+        std::none_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.75f)) < 0.001f; }));
     check.walkBackAndForth();
 }
 
 namespace
 {
-bool hasPoint (const std::vector<phazite::AutomationPoint>& points, double beat, float value, double near = 0.05)
+bool hasPanPoint (const std::vector<phazite::AutomationPoint>& points, double beat, float pan, double near = 0.05)
 {
-    return std::any_of (points.begin(), points.end(),
-                        [=] (const auto& p) { return std::abs (p.beat.inBeats() - beat) < near && std::abs (p.value - value) < 0.001f; });
+    return std::any_of (points.begin(), points.end(), [=] (const auto& p)
+                        { return std::abs (p.beat.inBeats() - beat) < near && std::abs (p.position - panPosition (pan)) < 0.001f; });
 }
 } // namespace
 
@@ -846,7 +995,7 @@ TEST_CASE ("Undo or Redo with the loop gone round since a pass's last move: the 
     phazite::undo (songState); // the pan back to 0, which the pass follows: the round before is finished
     CHECK (phazite::getValueSetByHand (songState, lane) == doctest::Approx (0.0f));
     REQUIRE (phazite::test::dispatchMessagesUntil (
-        [&] { return hasPoint (phazite::getAutomationPoints (song.context, lane), 2.0, -0.5f, 0.001); }));
+        [&] { return hasPanPoint (phazite::getAutomationPoints (song.context, lane), 2.0, -0.5f, 0.001); }));
     CHECK (history.getUndoDescription() == "Record Automation");
 
     // Redo, the loop gone round again since an undo that finished nothing: the same.
@@ -858,7 +1007,7 @@ TEST_CASE ("Undo or Redo with the loop gone round since a pass's last move: the 
     phazite::redo (songState);
     CHECK (phazite::getValueSetByHand (songState, lane) == doctest::Approx (0.5f));
     REQUIRE (phazite::test::dispatchMessagesUntil (
-        [&] { return hasPoint (phazite::getAutomationPoints (song.context, lane), 2.0, 0.0f, 0.001); }));
+        [&] { return hasPanPoint (phazite::getAutomationPoints (song.context, lane), 2.0, 0.0f, 0.001); }));
     CHECK (history.getUndoDescription() == "Record Automation");
     playback.play (0.25);
     song.run ("transport.playStop");
@@ -889,9 +1038,9 @@ TEST_CASE ("Stop during a control's drag, then Escape: what was written as playb
     pan.endGesture(); // the mouse goes up
 
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (hasPoint (points, 1.0, -0.5f));
-    CHECK (hasPoint (points, 3.0, -0.5f));
-    CHECK_FALSE (hasPoint (points, 2.0, 0.8f, 2.0));
+    CHECK (hasPanPoint (points, 1.0, -0.5f));
+    CHECK (hasPanPoint (points, 3.0, -0.5f));
+    CHECK_FALSE (hasPanPoint (points, 2.0, 0.8f, 2.0));
     CHECK (song.context.getUndoManager()->getUndoDescription() == juce::String ("Record Automation"));
     phazite::undo (*phazite::findSong (song.context));
     CHECK (phazite::getAutomationPoints (song.context, lane).empty());
@@ -927,8 +1076,8 @@ TEST_CASE ("A plug-in's parameter let go during a control's drag writes its pass
     song.run ("transport.playStop");
 
     const auto points = phazite::getAutomationPoints (song.context, panLane);
-    CHECK (hasPoint (points, 1.0, -0.5f));
-    CHECK (hasPoint (points, 2.0, -0.5f));
+    CHECK (hasPanPoint (points, 1.0, -0.5f));
+    CHECK (hasPanPoint (points, 2.0, -0.5f));
     CHECK (phazite::getAutomationPoints (song.context, volumeLane).size() == 2); // the drag's own pass gone
 }
 
@@ -955,8 +1104,8 @@ TEST_CASE ("A jump after the loop went round without a move writes the pass to t
     song.run ("transport.playStop");
 
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (hasPoint (points, 7.0, -0.5f));
-    CHECK (hasPoint (points, 8.0, -0.5f));
+    CHECK (hasPanPoint (points, 7.0, -0.5f));
+    CHECK (hasPanPoint (points, 8.0, -0.5f));
     CHECK (std::none_of (points.begin(), points.end(), [] (const auto& p) { return p.beat.inBeats() > 1.05 && p.beat.inBeats() < 6.95; }));
 }
 
@@ -985,9 +1134,9 @@ TEST_CASE ("The loop going round between two moves is known from the engine's ro
 
     // The first move held to the loop's end, and the second from its start.
     const auto points = phazite::getAutomationPoints (song.context, lane);
-    CHECK (hasPoint (points, 2.0, -0.5f, 0.001));
-    CHECK (hasPoint (points, 0.0, -0.5f, 0.001));
-    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.value - 0.5f) < 0.001f; }));
+    CHECK (hasPanPoint (points, 2.0, -0.5f, 0.001));
+    CHECK (hasPanPoint (points, 0.0, -0.5f, 0.001));
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - panPosition (0.5f)) < 0.001f; }));
 }
 
 TEST_CASE ("The loop's rounds are counted where the engine goes round: not at a count-in's end inside a block, nor as the tempo slows")

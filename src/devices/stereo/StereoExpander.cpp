@@ -23,7 +23,7 @@ namespace
           .maximum = 500.0f,
           .defaultValue = 120.0f,
           .unit = Unit::hertz,
-          .midpoint = 140.0f },
+          .scale = Scale::logarithmic },
         { .id = "invertLeft", .name = "Invert Left", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "invertRight", .name = "Invert Right", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "gain", .name = "Gain", .minimum = -36.0f, .maximum = 36.0f, .defaultValue = 0.0f, .unit = Unit::decibels },

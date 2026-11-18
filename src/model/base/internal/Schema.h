@@ -426,8 +426,10 @@ inline const juce::Identifier CURVE { "CURVE" };
 inline const juce::Identifier curveDevice { "device" };
 inline const juce::Identifier curveParameter { "parameter" };
 
-// Child of CURVE: a point. On POINT: where it is, in beats from the song's start (double, 0 or more); the parameter's value
-// there (float, in the parameter's own range); and how the line to the next point bends (float -1..1, 0 for straight).
+// Child of CURVE: a point. On POINT: where it is, in beats from the song's start (double, 0 or more); where the parameter's
+// control is there, as a position along its travel (float 0..1, from all the way down or left to all the way up or right,
+// as its knob or fader moves, with the parameter's skew: model/automation/AutomationValues.h), so that a straight line is an
+// even turn of the knob; and how the line to the next point bends (float -1..1, 0 for straight).
 inline const juce::Identifier POINT { "POINT" };
 inline const juce::Identifier pointBeat { "beat" };
 inline const juce::Identifier pointValue { "value" };

@@ -320,7 +320,7 @@ void RandomEdits::edit()
                 const auto along = random.nextFloat();
                 AutomationPoint point;
                 point.beat = at (beat);
-                point.value = description->range.convertFrom0to1 (along);
+                point.position = along;
                 addPoint (song, parameter, point);
             }
             break;

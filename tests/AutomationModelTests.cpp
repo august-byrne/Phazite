@@ -20,12 +20,14 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -204,7 +206,7 @@ TEST_CASE ("Automation never hides: every automated parameter has a lane, which 
 
     // Automation written where no lane showed (as recording, or an older project, gives it) shows one after the others.
     phazite::showAutomationLane (context, volume);
-    phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (4), 0.25f });
     CHECK (lanesOf (context, a) == std::vector { volume, makeup });
     song.song->getUndoManager().clearUndoHistory();
 
@@ -314,39 +316,38 @@ TEST_CASE ("Points are added, moved, bent, deleted and drawn in beats, each edit
     auto& context = song.context;
     const auto makeup = song.makeup();
 
-    CHECK (phazite::addAutomationPoint (context, makeup, { beats (4), -10.0f }) == 0);
+    CHECK (phazite::addAutomationPoint (context, makeup, { beats (4), 0.1f }) == 0);
     CHECK (song.describeUndo() == juce::String ("Undo Add Automation Point"));
-    CHECK (phazite::addAutomationPoint (context, makeup, { beats (0), 10.0f }) == 0); // before the first
-    CHECK (phazite::addAutomationPoint (context, makeup, { beats (8), 40.0f }) == 2); // its value kept in range
+    CHECK (phazite::addAutomationPoint (context, makeup, { beats (0), 0.7f }) == 0); // before the first
+    CHECK (phazite::addAutomationPoint (context, makeup, { beats (8), 1.5f }) == 2); // kept on the control's travel
 
     auto points = phazite::getAutomationPoints (context, makeup);
     REQUIRE (points.size() == 3);
     CHECK (beatsOf (points) == std::vector { 0.0, 4.0, 8.0 });
-    CHECK (points[0].value == doctest::Approx (10.0f));
-    CHECK (points[2].value == doctest::Approx (24.0f));
+    CHECK (points[0].position == doctest::Approx (0.7f));
+    CHECK (points[2].position == doctest::Approx (1.0f));
     CHECK (phazite::getAutomationTarget (context, makeup)->automated);
 
-    // The values in between, as the engine plays them.
-    const auto values = phazite::getAutomationValues (context, makeup, { beats (0), beats (4) }, 3);
-    REQUIRE (values.size() == 3);
-    CHECK (values[0] == doctest::Approx (10.0f));
-    CHECK (values[1] == doctest::Approx (0.0f));
-    CHECK (values[2] == doctest::Approx (-10.0f));
+    // The positions in between, as the engine plays them.
+    const auto positions = phazite::getAutomationPositions (context, makeup, { beats (0), beats (4) }, 3);
+    REQUIRE (positions.size() == 3);
+    CHECK (positions[0] == doctest::Approx (0.7f));
+    CHECK (positions[1] == doctest::Approx (0.4f));
+    CHECK (positions[2] == doctest::Approx (0.1f));
 
-    // A point moves no further than the next one that stays, and its value stays in range.
-    CHECK (phazite::moveAutomationPoints (context, makeup, { 1 }, BeatDuration::fromBeats (10.0), 100.0f).inBeats()
-           == doctest::Approx (4.0));
+    // A point moves no further than the next one that stays, and stays on the control's travel.
+    CHECK (phazite::moveAutomationPoints (context, makeup, { 1 }, BeatDuration::fromBeats (10.0), 2.0f).inBeats() == doctest::Approx (4.0));
     CHECK (song.describeUndo() == juce::String ("Undo Move Automation Points"));
     points = phazite::getAutomationPoints (context, makeup);
     CHECK (beatsOf (points) == std::vector { 0.0, 8.0, 8.0 });
-    CHECK (points[1].value == doctest::Approx (24.0f));
+    CHECK (points[1].position == doctest::Approx (1.0f));
 
-    // Points move together, no earlier than the song's start.
-    CHECK (phazite::moveAutomationPoints (context, makeup, { 0, 1 }, BeatDuration::fromBeats (-3.0), -5.0f).inBeats()
+    // Points move together, no earlier than the song's start, each as far along the travel.
+    CHECK (phazite::moveAutomationPoints (context, makeup, { 0, 1 }, BeatDuration::fromBeats (-3.0), -0.2f).inBeats()
            == doctest::Approx (0.0));
     points = phazite::getAutomationPoints (context, makeup);
-    CHECK (points[0].value == doctest::Approx (5.0f));
-    CHECK (points[1].value == doctest::Approx (19.0f));
+    CHECK (points[0].position == doctest::Approx (0.5f));
+    CHECK (points[1].position == doctest::Approx (0.8f));
 
     phazite::setAutomationCurve (context, makeup, 0, 0.5f);
     CHECK (phazite::getAutomationPoints (context, makeup)[0].curve == doctest::Approx (0.5f));
@@ -357,7 +358,7 @@ TEST_CASE ("Points are added, moved, bent, deleted and drawn in beats, each edit
     CHECK (song.describeUndo() == juce::String ("Undo Delete Automation Points"));
 
     // Drawing replaces the points in a range, both its ends included.
-    phazite::replaceAutomationPoints (context, makeup, { beats (0), beats (8) }, { { beats (2), -6.0f }, { beats (6), -12.0f } });
+    phazite::replaceAutomationPoints (context, makeup, { beats (0), beats (8) }, { { beats (2), 0.2f }, { beats (6), 0.1f } });
     CHECK (beatsOf (phazite::getAutomationPoints (context, makeup)) == std::vector { 2.0, 6.0 });
     CHECK (song.describeUndo() == juce::String ("Undo Draw Automation"));
 
@@ -379,37 +380,37 @@ TEST_CASE ("Shapes repeat a whole number of cycles across a range, starting from
 
     const auto line = phazite::makeAutomationShape (AutomationShape::line, range, cycle, 0.2f, 0.8f);
     REQUIRE (line.size() == 2);
-    CHECK (line[0].value == doctest::Approx (0.2f));
+    CHECK (line[0].position == doctest::Approx (0.2f));
     CHECK (line[1].beat == beats (4));
-    CHECK (line[1].value == doctest::Approx (0.8f));
+    CHECK (line[1].position == doctest::Approx (0.8f));
 
     // Four cycles: up at each half beat, down at each beat, and down at the end.
     const auto triangle = phazite::makeAutomationShape (AutomationShape::triangle, range, cycle, 0.0f, 1.0f);
     REQUIRE (triangle.size() == 9);
     CHECK (triangle[1].beat.inBeats() == doctest::Approx (0.5));
-    CHECK (triangle[1].value == doctest::Approx (1.0f));
+    CHECK (triangle[1].position == doctest::Approx (1.0f));
     CHECK (triangle[8].beat == beats (4));
-    CHECK (triangle[8].value == doctest::Approx (0.0f));
+    CHECK (triangle[8].position == doctest::Approx (0.0f));
 
     // A square jumps: two points at each half beat.
     const auto square = phazite::makeAutomationShape (AutomationShape::square, range, cycle, 0.0f, 1.0f);
     REQUIRE (square.size() == 16);
     CHECK (square[1].beat.inBeats() == doctest::Approx (0.5));
     CHECK (square[2].beat.inBeats() == doctest::Approx (0.5));
-    CHECK (square[1].value == doctest::Approx (0.0f));
-    CHECK (square[2].value == doctest::Approx (1.0f));
+    CHECK (square[1].position == doctest::Approx (0.0f));
+    CHECK (square[2].position == doctest::Approx (1.0f));
 
     const auto sine = phazite::makeAutomationShape (AutomationShape::sine, range, cycle, 0.0f, 1.0f);
     REQUIRE (sine.size() == 65);
-    CHECK (sine[0].value == doctest::Approx (0.0f));
-    CHECK (sine[8].value == doctest::Approx (1.0f)); // half a cycle in
+    CHECK (sine[0].position == doctest::Approx (0.0f));
+    CHECK (sine[8].position == doctest::Approx (1.0f)); // half a cycle in
 
     // A cycle that doesn't fit is stretched to a whole number of them: 4 beats hold 3 of about 1.5.
     const auto saw = phazite::makeAutomationShape (AutomationShape::sawUp, range, BeatDuration::fromBeats (1.5), 0.0f, 1.0f);
     REQUIRE (saw.size() == 6);
     CHECK (saw[1].beat.inBeats() == doctest::Approx (4.0 / 3.0));
-    CHECK (saw[1].value == doctest::Approx (1.0f));
-    CHECK (saw[2].value == doctest::Approx (0.0f));
+    CHECK (saw[1].position == doctest::Approx (1.0f));
+    CHECK (saw[2].position == doctest::Approx (0.0f));
 }
 
 TEST_CASE ("Automation keeps its beats when the tempo or the time signature changes, in the same undo step")
@@ -417,7 +418,7 @@ TEST_CASE ("Automation keeps its beats when the tempo or the time signature chan
     Song song;
     auto& context = song.context;
     const auto makeup = song.makeup();
-    phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (4), 0.25f });
     const auto secondsOfPoint = [&song, &context, makeup]
     { return phazite::toSeconds (*song.song, phazite::getAutomationPoints (context, makeup)[0].beat); };
     CHECK (secondsOfPoint() == doctest::Approx (2.0)); // at 120 BPM
@@ -502,9 +503,9 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     Song song;
     auto& context = song.context;
     const auto makeup = song.makeup();
-    phazite::addAutomationPoint (context, makeup, { beats (0), -3.0f });
-    phazite::addAutomationPoint (context, makeup, { beats (2), -6.0f });
-    phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (0), 0.3f });
+    phazite::addAutomationPoint (context, makeup, { beats (2), 0.2f });
+    phazite::addAutomationPoint (context, makeup, { beats (4), 0.1f });
 
     auto& selection = context.getSongSelection();
     selection.selectOnly (song.a);
@@ -520,19 +521,19 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     phazite::addAutomationCommands (registry, context);
     CHECK (phazite::getCurrentName (*registry.find ("edit.delete")) == juce::String ("Delete 2 Automation Points"));
 
-    // A hundredth of the range is 0.36 dB.
+    // A hundredth of the control's travel.
     REQUIRE (registry.invoke ("automation.raisePoints"));
     auto points = phazite::getAutomationPoints (context, makeup);
-    CHECK (points[0].value == doctest::Approx (-3.0f));
-    CHECK (points[1].value == doctest::Approx (-5.64f));
-    CHECK (points[2].value == doctest::Approx (-8.64f));
+    CHECK (points[0].position == doctest::Approx (0.3f));
+    CHECK (points[1].position == doctest::Approx (0.21f));
+    CHECK (points[2].position == doctest::Approx (0.11f));
     CHECK (song.describeUndo() == juce::String ("Undo Raise Automation Points"));
 
     // The copies go right after them, the first on the last one's beat, and are selected.
     REQUIRE (registry.invoke ("edit.duplicate"));
     points = phazite::getAutomationPoints (context, makeup);
     CHECK (beatsOf (points) == std::vector { 0.0, 2.0, 4.0, 4.0, 6.0 });
-    CHECK (points[3].value == doctest::Approx (-5.64f));
+    CHECK (points[3].position == doctest::Approx (0.21f));
     CHECK (selection.getSelectedAutomationPoints().indices == std::vector { 3, 4 });
 
     REQUIRE (registry.invoke ("edit.delete"));
@@ -546,6 +547,56 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*registry.find ("automation.raisePoints")));
 }
 
+TEST_CASE ("A straight line is an even turn of the knob: a cutoff's halfway is its knob's middle, and keys move along the travel")
+{
+    // Points are positions along the control's travel, as Ableton Live, Bitwig, Logic and FL Studio keep them (roadmap S4.7):
+    // a line from 20 Hz to 20 kHz passes the knob's middle halfway, the geometric middle, not 10 kHz, where a line straight in
+    // hertz was halfway; and Up and Down move a point a hundredth of the travel, not a hundredth of 20 kHz.
+    Song song;
+    auto& context = song.context;
+    const auto synth = phazite::getInstrument (context, song.a);
+    REQUIRE (synth.has_value());
+    const ParameterRef cutoff { synth->id, "cutoff" };
+    const auto range = phazite::getParameter (context, cutoff).getRange();
+    CHECK (phazite::toControlPosition (range, 20.0f) == doctest::Approx (0.0f));
+    CHECK (phazite::toControlPosition (range, 20000.0f) == doctest::Approx (1.0f));
+    CHECK (phazite::fromControlPosition (range, 0.5f) == doctest::Approx (std::sqrt (20.0f * 20000.0f)).epsilon (0.001));
+
+    phazite::addAutomationPoint (context, cutoff, { beats (0), phazite::toControlPosition (range, 20.0f) });
+    phazite::addAutomationPoint (context, cutoff, { beats (4), phazite::toControlPosition (range, 20000.0f) });
+    const auto halfway = phazite::getAutomationPositions (context, cutoff, { beats (2), beats (2) }, 1);
+    REQUIRE (halfway.size() == 1);
+    CHECK (halfway[0] == doctest::Approx (0.5f));
+
+    // What the engine plays there: the knob's middle, 632 Hz.
+    phazite::SongPlayer player (*song.song);
+    REQUIRE (player.compile (48000.0, 512, std::nullopt) != nullptr);
+    const auto* curve = player.findCurve (cutoff);
+    REQUIRE (curve != nullptr);
+    CHECK (curve->getValueAt (2.0) == doctest::Approx (632.456f).epsilon (0.001));
+    CHECK (curve->getValueAt (0.0) == doctest::Approx (20.0f));
+    CHECK (curve->getValueAt (4.0) == doctest::Approx (20000.0f));
+
+    // Raised a hundredth of the travel, the knob's middle goes a hundredth of a turn, not 200 Hz up.
+    phazite::replaceAutomationPoints (context, cutoff, { beats (0), beats (8) }, { { beats (0), 0.5f } });
+    phazite::CommandRegistry registry;
+    phazite::addAutomationCommands (registry, context);
+    context.getSongSelection().selectAutomationPoints (cutoff, { 0 });
+    REQUIRE (registry.invoke ("automation.raisePoints"));
+    const auto raised = phazite::getAutomationPoints (context, cutoff);
+    REQUIRE (raised.size() == 1);
+    CHECK (raised[0].position == doctest::Approx (0.51f));
+    const auto hertz = phazite::fromControlPosition (range, raised[0].position);
+    CHECK (hertz > 640.0f);
+    CHECK (hertz < 700.0f);
+
+    // Typed in hertz, a value lands where the knob would be, and reads back as typed.
+    phazite::setAutomationPointPositions (context, cutoff, { 0 }, phazite::toControlPosition (range, 1000.0f));
+    CHECK (phazite::fromControlPosition (range, phazite::getAutomationPoints (context, cutoff)[0].position)
+           == doctest::Approx (1000.0f).epsilon (0.0001));
+    CHECK (song.describeUndo() == juce::String ("Undo Set Automation Value"));
+}
+
 TEST_CASE ("Selected points stay selected, and only they, as points are added or removed before them, undone and redone")
 {
     // The selection kept the points' indices: an earlier point's addition undone left it on the points after them, which
@@ -553,10 +604,10 @@ TEST_CASE ("Selected points stay selected, and only they, as points are added or
     Song song;
     auto& context = song.context;
     const auto makeup = song.makeup();
-    phazite::addAutomationPoint (context, makeup, { beats (0), -3.0f });
-    phazite::addAutomationPoint (context, makeup, { beats (2), -6.0f });
-    phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
-    phazite::addAutomationPoint (context, makeup, { beats (6), -12.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (0), 0.4f });
+    phazite::addAutomationPoint (context, makeup, { beats (2), 0.3f });
+    phazite::addAutomationPoint (context, makeup, { beats (4), 0.2f });
+    phazite::addAutomationPoint (context, makeup, { beats (6), 0.1f });
     phazite::addAutomationPoint (context, makeup, { beats (8), 0.0f });
 
     auto& selection = context.getSongSelection();
@@ -575,7 +626,7 @@ TEST_CASE ("Selected points stay selected, and only they, as points are added or
     REQUIRE (selectedBeats() == std::vector { 4.0, 6.0 });
 
     // A point added before them, undone, redone, and another removed before them.
-    phazite::addAutomationPoint (context, makeup, { beats (1), -1.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (1), 0.35f });
     CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
     phazite::undo (*song.song);
     CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
@@ -605,7 +656,7 @@ TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows
     Song song;
     auto& context = song.context;
     const auto a = song.a, b = song.b;
-    phazite::addAutomationPoint (context, song.makeup(), { beats (0), -3.0f });
+    phazite::addAutomationPoint (context, song.makeup(), { beats (0), 0.4f });
 
     phazite::CommandRegistry registry;
     phazite::addAutomationCommands (registry, context);
@@ -634,14 +685,14 @@ TEST_CASE ("Automation is the song's own, in beats, undo and redo too")
     const auto makeup = song.makeup();
 
     // A point goes into the song's curve for the parameter, in beats.
-    phazite::addAutomationPoint (song.context, makeup, { beats (4), -9.0f });
+    phazite::addAutomationPoint (song.context, makeup, { beats (4), 0.25f });
     const auto state = phazite::findCurveState (document, makeup);
     REQUIRE (state.isValid());
     CHECK (state.getParent().hasType (phazite::schema::AUTOMATION));
     CHECK (phazite::getCurveParameter (state) == makeup);
     REQUIRE (state.getNumChildren() == 1);
     CHECK ((double) state.getChild (0)[phazite::schema::pointBeat] == doctest::Approx (4.0));
-    CHECK ((float) state.getChild (0)[phazite::schema::pointValue] == doctest::Approx (-9.0f));
+    CHECK ((float) state.getChild (0)[phazite::schema::pointValue] == doctest::Approx (0.25f));
 
     // An undo takes the song's curve away with its last point, and a redo puts it back.
     phazite::undo (document);
@@ -668,19 +719,19 @@ TEST_CASE ("A control turned moves its curve's one point, the song's too, in the
     auto points = phazite::getAutomationPoints (context, song.volume());
     REQUIRE (points.size() == 1);
     CHECK (points[0].beat.inBeats() == doctest::Approx (2.0));
-    CHECK (points[0].value == doctest::Approx (0.7f));
+    CHECK (points[0].position == doctest::Approx (0.7f));
 
     phazite::undo (*song.song);
     points = phazite::getAutomationPoints (context, song.volume());
     REQUIRE (points.size() == 1);
-    CHECK (points[0].value == doctest::Approx (0.5f));
+    CHECK (points[0].position == doctest::Approx (0.5f));
 }
 
 TEST_CASE ("A duplicated track's automation is its own devices', and the original's stays")
 {
     Song song;
     auto& context = song.context;
-    phazite::addAutomationPoint (context, song.makeup(), { beats (4), -9.0f });
+    phazite::addAutomationPoint (context, song.makeup(), { beats (4), 0.25f });
     phazite::addAutomationPoint (context, song.volume(), { beats (2), 0.25f });
 
     std::vector<phazite::TrackID> copies;
@@ -704,7 +755,7 @@ TEST_CASE ("A duplicated track's automation is its own devices', and the origina
         const auto copiedPoints = phazite::getAutomationPoints (context, copied);
         REQUIRE (copiedPoints.size() == 1);
         CHECK (copiedPoints[0].beat.inBeats() == doctest::Approx (points[0].beat.inBeats()));
-        CHECK (copiedPoints[0].value == doctest::Approx (points[0].value));
+        CHECK (copiedPoints[0].position == doctest::Approx (points[0].position));
         CHECK (phazite::findCurveState (*song.song, copied).isValid());
     }
 

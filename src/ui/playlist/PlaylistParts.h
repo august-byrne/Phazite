@@ -114,7 +114,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     bool collapsed = false;
     std::vector<AutomationPoint> points; // as shown
     int pointsVersion = -1;              // the song's (ProjectContext::getSongVersion()) when they were read
-    float shownValue = 0.0f;             // without points: the value its dashed line shows
+    float shownValue = 0.0f;             // without points: the parameter's value its dashed line shows
 
     // Without points, the line shows the parameter's value, which a knob may move at any time: read a few times a second,
     // rather than heard of as a change to the song (docs/archive/performance-audit.md, U1), and the whole line drawn again when it
@@ -130,31 +130,31 @@ struct Playlist::AutomationLaneView : public juce::Component,
     int pressed = -1;                    // the point, or the line after the point, the mouse went down on
     int hovered = -1;                    // the line, by the point it starts at, whose bend handle shows: the one under the mouse
     bool clickSelectsAlone = false;      // a click on a selected point selects it alone, unless it starts a drag
-    float valueDrag = 0.0f;              // how far a drag has moved the points' values, in pixels, each move a fifth with Shift
+    float valueDrag = 0.0f;              // how far a drag has moved the points up or down, in pixels, each move a fifth with Shift
     float lastDragY = 0.0f;              // and where the drag was last
     std::optional<int> addedByClick;     // the point a click on empty space added, which a double-click it began leaves
-    std::map<double, float> steps;       // Draw: each grid cell's value, by its start in beats
+    std::map<double, float> steps;       // Draw: each grid cell's position, by its start in beats
     std::vector<AutomationPoint> stroke; // Draw with Alt: the free line, by beat
     std::optional<BeatRange> drawn;      // Draw and Paint: what they have replaced so far
     std::vector<int> selectedBefore;     // Select with Ctrl: the points selected when it began
     juce::Rectangle<float> rubberBand;   // Select
 
-    // Geometry: the curve's area, and where values and beats are in it.
+    // Geometry: the curve's area, and where positions along the control's travel (bottom to top) and beats are in it.
     juce::Rectangle<float> getCurveArea() const;
-    float valueToY (float) const;
-    float yToValue (float) const;
+    float positionToY (float) const;
+    float yToPosition (float) const; // on the parameter's steps
     float beatToX (BeatPosition) const;
     BeatPosition xToBeat (float) const;
     int getViewOffset() const;                   // where the lane starts in the view's columns (TimelineView::beatToColumn())
     BeatPosition limitBeat (BeatPosition) const; // where points can go: the song
     std::optional<int> getPointAt (juce::Point<float>) const;
-    std::optional<float> getValueAt (BeatPosition) const;         // the line's, as the engine plays it
+    std::optional<float> getPositionAt (BeatPosition) const;      // the line's, as the engine plays it
     bool isOnLine (juce::Point<float>) const;                     // anywhere along it, before the first point and after the last too
     int getLineUnder (float x) const;                             // the point that starts the line across x, or -1
     std::optional<juce::Point<float>> getHandle (int line) const; // in its middle, unless too short or flat to bend
     std::optional<int> getHandleAt (juce::Point<float>) const;    // the line whose handle is under the pointer
-    juce::String getValueText (float) const;
-    juce::String describeHere (juce::Point<float>) const; // for the hint bar
+    juce::String getValueText (float position) const;             // the parameter's value there, as its control shows it
+    juce::String describeHere (juce::Point<float>) const;         // for the hint bar
     void setHovered (int line);
 
     // A point's value typed in a field over it (Playlist::typeAutomationValue()): the selected points of this lane take what it

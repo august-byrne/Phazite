@@ -326,7 +326,7 @@ TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl c
     const auto valueAt = [&screen, &volume] (double beat)
     {
         const auto at = phazite::BeatPosition::fromBeats (beat);
-        return phazite::getAutomationValues (screen.context, volume, { at, at }, 1).front();
+        return phazite::getAutomationPositions (screen.context, volume, { at, at }, 1).front();
     };
 
     // The lower half of a clip moves it. The first track's automation shows its lane under it, above the second track.
@@ -3396,11 +3396,11 @@ TEST_CASE ("Only the automation lanes in view have components; a point dragged i
     phazite::test::dispatchPendingMessages();
     const auto points = phazite::getAutomationPoints (screen.context, volume);
     REQUIRE (points.size() == 1);
-    CHECK (points[0].value > 0.5f);
+    CHECK (points[0].position > 0.5f);
 
     // One undo step, which puts it back.
     phazite::undo (screen.getSong());
-    CHECK (phazite::getAutomationPoints (screen.context, volume)[0].value == doctest::Approx (0.5f));
+    CHECK (phazite::getAutomationPoints (screen.context, volume)[0].position == doctest::Approx (0.5f));
 }
 
 //==============================================================================

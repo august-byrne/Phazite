@@ -102,19 +102,6 @@ namespace
         return hertz < 1000.0f ? juce::String (juce::roundToInt (hertz)) + " Hz"
                                : juce::String (hertz / 1000.0f, hertz < 10000.0f ? 2 : 1) + " kHz";
     }
-
-    // A parameter whose curve has one point plays that point's value everywhere: the point moves to a value set by hand,
-    // in the same step, as a control's change.
-    void moveOnePoint (Song& song, const ParameterRef& ref, float value)
-    {
-        // Not while automation is written by hand (model/playback/internal/AutomationWriter.h), which writes its own points.
-        if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (ref))
-            return;
-
-        if (auto curve = findCurveState (song, ref); curve.getNumChildren() == 1)
-            if (auto point = curve.getChild (0); ! juce::exactlyEqual ((float) point[schema::pointValue], value))
-                point.setProperty (schema::pointValue, value, &song.getUndoManager());
-    }
 } // namespace
 
 //==============================================================================
@@ -400,7 +387,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::device:
         {
             told = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             keepValueSetByHand (state, *parameter.info, told, undo);
             break;
         }
@@ -418,7 +405,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             // A VALUE of the plug-in's element, which its instance takes (model/plugins/internal/PluginInstances.h), made
             // holding the value the plug-in has, so that an undo takes it back there; none for the value it has already.
             told = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             auto stored = findPluginValue (state, ref.parameter);
 
             if (! stored.isValid())
@@ -454,7 +441,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::volume:
         {
             told = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setChannelVolume (song, getTrackID (state), engine::faderPositionToDecibels (told));
             break;
         }
@@ -462,7 +449,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::pan:
         {
             told = juce::jlimit (-1.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setChannelPan (song, getTrackID (state), told);
             break;
         }
@@ -470,7 +457,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::send:
         {
             told = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setSendLevel (song, ref.device, engine::faderPositionToDecibels (told));
             break;
         }
@@ -488,7 +475,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::chainVolume:
         {
             told = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setChainVolume (song, ref.device, engine::faderPositionToDecibels (told));
             break;
         }
@@ -496,7 +483,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         case ParameterSource::chainPan:
         {
             told = juce::jlimit (-1.0f, 1.0f, value);
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setChainPan (song, ref.device, told);
             break;
         }
@@ -505,7 +492,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         {
             // Between its neighbours' crossovers: a band can't pass the one beside it.
             told = getCrossoverRoom (state).clipValue (juce::jlimit (lowestCrossover, highestCrossover, value));
-            moveOnePoint (song, ref, told);
+            moveOnlyPoint (song, ref, told);
             setChainCrossover (song, ref.device, told);
             break;
         }
@@ -544,6 +531,34 @@ juce::String getParameterText (const Song& song, const ParameterRef& ref, float 
 {
     const auto parameter = locateParameter (song, ref);
     return parameter.has_value() ? getParameterText (song, *parameter, value) : juce::String();
+}
+
+std::optional<devices::Travel> getControlTravel (const Song& song, const ParameterRef& ref)
+{
+    if (! ref.isValid())
+        return {};
+
+    // A plug-in's from 0 to 1, in the steps it says it has once it has loaded (describeParameter()).
+    if (isPluginState (findDeviceState (song, ref.device)))
+    {
+        const auto description = describeParameter (song, ref);
+        return devices::Travel { .step = description.has_value() ? description->range.interval : 0.0f };
+    }
+
+    if (ref.parameter == schema::crossoverParameter && findContainerChain (song, ref.device).isValid())
+        return devices::getTravel (engine::crossoverInfo);
+
+    const auto found = locateParameter (song, ref);
+
+    if (! found.has_value())
+        return {};
+
+    if (found->info != nullptr)
+        return devices::getTravel (*found->info);
+
+    // The mixer's controls and a macro: linear, from their ranges' starts to their ends.
+    const auto range = describeParameter (song, *found).range;
+    return devices::Travel { range.start, range.end };
 }
 
 float getValueSetByHand (const Song& song, const ParameterRef& ref)

@@ -33,9 +33,9 @@
     <CURVE device="2"
            parameter="master pan">
       <POINT beat="0"
-             value="0"/>
+             value="0.5"/>
       <POINT beat="16"
-             value="0.25"/>
+             value="0.625"/>
     </CURVE>
     <CURVE device="110"
            parameter="vca">
@@ -50,7 +50,7 @@
     <CURVE device="63"
            parameter="crossover">
       <POINT beat="8"
-             value="4000"/>
+             value="0.76701"/>
     </CURVE>
   </AUTOMATION>
   <CHORDLANE>

@@ -15,10 +15,17 @@ namespace phazite
 {
 namespace
 {
-    constexpr double thinning = 0.002; // a move within this much of the line, as a part of the parameter's range, is left out
+    constexpr float thinning = 0.002f; // a move within this much of the line, as a part of the control's travel, is left out
+
+    // Whether two positions are one, a value having gone to the parameter's units and back between them (an undo or a redo
+    // during a pass): no point is written for a float's rounding.
+    bool isSamePosition (float a, float b)
+    {
+        return std::abs (a - b) < 1.0e-5f;
+    }
 
     // The moves that change the line: each further from the line between the last one kept and the next than the thinning.
-    std::vector<AutomationPoint> thin (const std::vector<AutomationPoint>& points, float range)
+    std::vector<AutomationPoint> thin (const std::vector<AutomationPoint>& points)
     {
         if (points.size() < 3)
             return points;
@@ -32,7 +39,7 @@ namespace
             const auto span = (to.beat - from.beat).inBeats();
             const auto along = span > 0.0 ? (float) ((points[i].beat - from.beat).inBeats() / span) : 0.0f;
 
-            if (std::abs (from.value + along * (to.value - from.value) - points[i].value) > (float) thinning * range)
+            if (std::abs (from.position + along * (to.position - from.position) - points[i].position) > thinning)
                 kept.push_back (points[i]);
         }
 
@@ -87,10 +94,13 @@ void AutomationWriter::playbackStarted()
             {
                 // Begun only for a punch-in that sets a value (as punchIn() does): beginning a step keeps an open trial
                 // (Swap), which nothing else here changes.
+                // The lane's value on the parameter's steps, as punchIn() sets it.
                 const auto* lane = session.getPlayer().findCurve (ref);
+                const auto travel = getControlTravel (song, ref);
                 const auto setByHand = getValueSetByHand (song, ref);
-                const auto value = lane != nullptr ? lane->getValueAt (getHeard().beat)
-                                                   : session.getPlayer().getPlayedValue (ref, false).value_or (setByHand);
+                const auto value = lane != nullptr && travel.has_value()
+                                       ? fromControlPosition (*travel, lane->getPositionAt (getHeard().beat))
+                                       : session.getPlayer().getPlayedValue (ref, false).value_or (setByHand);
 
                 if (! step.has_value() && ! juce::exactlyEqual (value, setByHand))
                     step.emplace (song, "Record Automation");
@@ -145,7 +155,7 @@ void AutomationWriter::playheadJumped (BeatPosition to)
     for (auto& pass : passes)
     {
         goRound (pass, heard.round);
-        auto points = std::exchange (pass.points, { { to, pass.points.back().value, 0.0f } });
+        auto points = std::exchange (pass.points, { { to, pass.points.back().position, 0.0f } });
         finishPart (pass, std::move (points), BeatPosition::fromBeats (heard.beat));
     }
 }
@@ -168,7 +178,7 @@ void AutomationWriter::goRound (Pass& pass, std::uint32_t round)
         return;
 
     const auto loop = getLoopBeats (song);
-    const auto last = pass.points.back().value;
+    const auto last = pass.points.back().position;
     auto points = std::exchange (pass.points, { { loop.getStart(), last, 0.0f } });
     finishPart (pass, std::move (points), loop.getEnd());
 
@@ -248,9 +258,9 @@ AutomationWriter::Pass* AutomationWriter::findPass (const ParameterRef& paramete
 
 AutomationWriter::Pass* AutomationWriter::punchIn (const ParameterRef& parameter, AutomationMode mode, bool byMove)
 {
-    const auto description = describeParameter (song, parameter);
+    const auto travel = getControlTravel (song, parameter);
 
-    if (! description.has_value())
+    if (! travel.has_value() || ! locateParameter (song, parameter).has_value())
         return nullptr;
 
     // From the value the engine played there: its lane's, or the one set by hand before (for a pass a move starts, which
@@ -259,17 +269,15 @@ AutomationWriter::Pass* AutomationWriter::punchIn (const ParameterRef& parameter
     const auto beat = BeatPosition::fromBeats (heard.beat);
     const auto* lane = session.getPlayer().findCurve (parameter);
     const auto setByHand = getValueSetByHand (song, parameter);
-    const auto value =
-        lane != nullptr ? lane->getValueAt (beat.inBeats()) : session.getPlayer().getPlayedValue (parameter, false).value_or (setByHand);
+    // The lane's on the parameter's steps (a ratio's, a count's), so that a value set by hand where it already is opens no
+    // step, and none is set off its steps; and the pass starts where that value is, the value set by hand it compares with
+    // later (followValuesSetByHand(), keepPassesValues()).
+    const auto value = lane != nullptr ? fromControlPosition (*travel, lane->getPositionAt (beat.inBeats()))
+                                       : session.getPlayer().getPlayedValue (parameter, false).value_or (setByHand);
+    const auto passPosition = toControlPosition (*travel, value);
 
     session.getPlayer().setWriting (parameter, true);
-    passes.push_back ({ parameter,
-                        mode,
-                        false,
-                        description->range.getRange().getLength(),
-                        isDiscrete (song, parameter),
-                        { { beat, value, 0.0f } },
-                        heard.round });
+    passes.push_back ({ parameter, mode, false, *travel, isDiscrete (song, parameter), { { beat, passPosition, 0.0f } }, heard.round });
 
     if (! byMove && ! juce::exactlyEqual (value, setByHand))
     {
@@ -288,7 +296,7 @@ void AutomationWriter::record (Pass& pass, float value)
     const auto heard = getHeard();
     goRound (pass, heard.round);
     const auto beat = std::max (BeatPosition::fromBeats (heard.beat), pass.points.back().beat);
-    pass.points.push_back ({ beat, value, pass.discrete ? 1.0f : 0.0f });
+    pass.points.push_back ({ beat, toControlPosition (pass.travel, value), pass.discrete ? 1.0f : 0.0f });
 }
 
 void AutomationWriter::punchOut (Pass pass, bool intoDrag)
@@ -382,16 +390,16 @@ void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> poi
     if (! locateParameter (song, pass.parameter).has_value()) // its device gone meanwhile
         return;
 
-    // The moves that change the line, held to the end, where the lane's value comes back (the lane as it was before).
+    // The moves that change the line, held to the end, where the lane's position comes back (the lane as it was before).
     const auto* lane = session.getPlayer().findCurve (pass.parameter);
     const auto start = points.front().beat;
     end = std::max (end, points.back().beat);
-    points = thin (points, pass.range);
-    points.push_back ({ end, points.back().value, 0.0f });
+    points = thin (points);
+    points.push_back ({ end, points.back().position, 0.0f });
 
     if (lane != nullptr)
-        if (const auto laneValue = lane->getValueAt (end.inBeats()); ! juce::exactlyEqual (laneValue, points.back().value))
-            points.push_back ({ end, laneValue, 0.0f });
+        if (const auto lanePosition = lane->getPositionAt (end.inBeats()); ! juce::exactlyEqual (lanePosition, points.back().position))
+            points.push_back ({ end, lanePosition, 0.0f });
 
     replacePoints (song, pass.parameter, BeatRange (start, end), points);
 }
@@ -434,7 +442,7 @@ void AutomationWriter::rememberGrab (const ParameterRef& parameter)
     std::erase_if (grabs, [&parameter] (const Grab& grab) { return grab.parameter == parameter; });
     const auto* pass = findPass (parameter);
     grabs.push_back (
-        { parameter, pass != nullptr, pass != nullptr ? pass->points.size() : 0, pass != nullptr ? pass->points.back().value : 0.0f });
+        { parameter, pass != nullptr, pass != nullptr ? pass->points.size() : 0, pass != nullptr ? pass->points.back().position : 0.0f });
 }
 
 void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
@@ -467,7 +475,7 @@ void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
                        if (std::exchange (first, false))
                            points.resize (std::clamp<size_t> (grab.points, 1, points.size()));
                        else
-                           points = { { points.front().beat, grab.value, 0.0f } };
+                           points = { { points.front().beat, grab.position, 0.0f } };
 
                        part.ownStep = true;
                        return false;
@@ -506,7 +514,7 @@ void AutomationWriter::gestureCancelled (const ParameterRef& parameter)
     // One that wrote before (latch, write): the moves since go, and it goes on from where it was; gone round the loop or
     // jumped since the grab, from where this part started, with the value from before the grab.
     if (! first)
-        pass->points = { { pass->points.front().beat, grab.value, 0.0f } };
+        pass->points = { { pass->points.front().beat, grab.position, 0.0f } };
     else if (pass->points.size() > grab.points)
         pass->points.resize (std::max<size_t> (1, grab.points));
 
@@ -523,7 +531,7 @@ void AutomationWriter::followValuesSetByHand()
 
     for (auto& pass : passes)
         if (const auto value = getValueSetByHand (song, pass.parameter);
-            ! pass.points.empty() && ! juce::exactlyEqual (value, pass.points.back().value))
+            ! pass.points.empty() && ! isSamePosition (toControlPosition (pass.travel, value), pass.points.back().position))
             record (pass, value);
 }
 
@@ -538,13 +546,14 @@ void AutomationWriter::keepPassesValues()
         if (pass.points.empty() || ! locateParameter (song, pass.parameter).has_value())
             continue;
 
-        if (const auto writes = pass.points.back().value; ! juce::exactlyEqual (getValueSetByHand (song, pass.parameter), writes))
+        if (const auto writes = pass.points.back().position;
+            ! isSamePosition (toControlPosition (pass.travel, getValueSetByHand (song, pass.parameter)), writes))
         {
             if (! step.has_value())
                 step.emplace (song, "Record Automation");
 
             const juce::ScopedValueSetter<bool> setting (settingValue, true);
-            setValueSetByHand (song, pass.parameter, writes);
+            setValueSetByHand (song, pass.parameter, fromControlPosition (pass.travel, writes));
         }
     }
 }

@@ -62,6 +62,19 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
+- **192. A send's automation and modulation never play** (found in S4.7's review, 2026-11-17; older than it): a send's
+  level offers a lane, points are drawn, written and saved, and a modulator can be pointed at it, but the engine plays
+  the send at the level the song holds: `SongPlayer::getSendLevel()` sets one gain from `sendLevel` alone, and
+  `engine::SendLevel` is one gain a block with no curve. To fix: give `SendLevel` the curve and the modulation, worked
+  out at the control points as a fader's are, with the writer's and the played value's paths (the level shown while it
+  plays), a golden render and a case at every playback condition.
+- **193. A DAWproject's volume automation plays another curve in another DAW** (found in S4.7, 2026-11-17; older than
+  it): the export writes a volume lane's points as linear gain with linear interpolation, while Phazite draws and plays
+  the line along the fader's travel, so between two points the other DAW's level differs (the points themselves
+  agree). To fix: write the points the format's way and add points along each line until the other DAW's straight
+  lines stay within a fraction of a decibel of Phazite's, in `src/model/project/DawProject.cpp`, with a test that reads
+  the exported lane back.
+
 ## Tests
 
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it

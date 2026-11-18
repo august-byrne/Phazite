@@ -397,9 +397,12 @@ void Device::set (std::string_view parameterID, float value)
 
 void Device::automate (int parameter, float from, float to, std::int64_t overSamples)
 {
-    // In the song's beats, at the rate it is prepared at.
+    // In the song's beats, at the rate it is prepared at; a line along the knob's travel, as a song's curve is, between the
+    // places the two values are at on it.
     const auto beats = (double) overSamples * songTempo / (60.0 * sampleRate);
-    curves.push_back (std::make_unique<engine::Curve> (std::vector<engine::CurvePoint> { { 0.0, from, 0.0f }, { beats, to, 0.0f } }));
+    const auto travel = devices::getTravel (info.parameters[(size_t) parameter]);
+    curves.push_back (std::make_unique<engine::Curve> (
+        std::vector<engine::CurvePoint> { { 0.0, travel.toPosition (from), 0.0f }, { beats, travel.toPosition (to), 0.0f } }, travel));
     automation.push_back ({ parameter, curves.back().get() });
 }
 

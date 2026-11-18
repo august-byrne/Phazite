@@ -38,14 +38,14 @@ enum class Split
 };
 
 // A chain's crossover, where its band starts, in hertz, as automation draws it and modulation moves it: from 20 Hz to
-// 20 kHz, halfway along its travel at 630 Hz.
+// 20 kHz along a logarithmic travel, as many octaves in each part of it.
 inline constexpr devices::ParameterInfo crossoverInfo { .id = "crossover",
                                                         .name = "Crossover",
                                                         .minimum = 20.0f,
                                                         .maximum = 20000.0f,
                                                         .defaultValue = 1000.0f,
                                                         .unit = devices::Unit::hertz,
-                                                        .midpoint = 630.0f };
+                                                        .scale = devices::Scale::logarithmic };
 
 // What comes into a container of effects, kept and delayed as much as its chains delay their sound (its latest chain), to
 // mix with what they put out by its mix, which the message thread sets and the audio thread glides to over a block. Kept
@@ -127,7 +127,7 @@ public:
 
 private:
     Channel fader;
-    juce::NormalisableRange<float> crossoverRange;
+    devices::Travel crossoverTravel;
     std::atomic<float> crossover { crossoverInfo.defaultValue }, playedCrossover { crossoverInfo.defaultValue },
         playedBaseCrossover { crossoverInfo.defaultValue };
     std::atomic<bool> crossoverWriting { false };

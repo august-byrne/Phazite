@@ -90,7 +90,7 @@ namespace
           .maximum = 20000.0f,
           .defaultValue = 3000.0f,
           .unit = Unit::hertz,
-          .midpoint = 632.456f }, // the middle of the range, on a log scale
+          .scale = Scale::logarithmic },
         makePercent ("resonance", "Resonance", 0.15f),
         makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 0.0f), // 12 dB, the synth's gentler sound
         { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels }, // the wavetable's
@@ -124,7 +124,7 @@ namespace
           .maximum = 20.0f,
           .defaultValue = 5.0f,
           .unit = Unit::hertz,
-          .midpoint = 1.0f },
+          .scale = Scale::logarithmic },
         makePercent ("lfoDepth", "LFO Depth", 0.25f), // heard at once, as the LFO is switched on
         makeTime ("lfoFade", "LFO Fade In", 0.0f, 0.0f),
         { .id = "pitchAmount", // the FM synth's pitch envelope

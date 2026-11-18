@@ -1751,6 +1751,7 @@ void SongPlayer::readCurves()
 
     auto before = std::exchange (curves, {});
     const auto emptyBefore = std::exchange (emptyCurves, {});
+    const auto withoutTravelBefore = std::exchange (curvesWithoutTravel, {});
     faders.clear();
 
     for (const auto& [key, ofKey] : states)
@@ -1767,26 +1768,52 @@ void SongPlayer::readCurves()
                                                                [] (const engine::CurvePoint& a, const engine::CurvePoint& b)
                                                                {
                                                                    return juce::exactlyEqual (a.beat, b.beat)
-                                                                          && juce::exactlyEqual (a.value, b.value)
+                                                                          && juce::exactlyEqual (a.position, b.position)
                                                                           && juce::exactlyEqual (a.curve, b.curve);
                                                                });
                 jassert (same); // the curve changed without the song saying so (markChange())
             }
 
-            if (kept != before.end())
-                curves[key] = kept->second;
-            else
+            if (kept == before.end())
+            {
                 emptyCurves.insert (key);
+            }
+            else if (! withoutTravelBefore.contains (key))
+            {
+                curves[key] = kept->second;
+            }
+            else if (const auto travel = getControlTravel (song, { DeviceID::fromRaw (key.first), key.second }))
+            {
+                // Its parameter is there now (its device brought back): its points, kept, along its travel.
+                curves[key] = std::make_shared<const engine::Curve> (kept->second->getPoints(), *travel);
+            }
+            else
+            {
+                curves[key] = kept->second;
+                curvesWithoutTravel.insert (key);
+            }
 
             continue;
         }
 
         ++curvesRead;
 
+        // Its points are positions along its parameter's control's travel, which the engine turns into the parameter's
+        // units (engine/automation/Curve.h). One of a parameter the song hasn't (a device's that is gone, kept for an undo)
+        // plays from 0 to 1 until it has, which each plan looks for again.
         if (auto points = read (ofKey); ! points.empty())
-            curves[key] = std::make_shared<const engine::Curve> (std::move (points));
+        {
+            const auto travel = getControlTravel (song, { DeviceID::fromRaw (key.first), key.second });
+
+            if (! travel.has_value())
+                curvesWithoutTravel.insert (key);
+
+            curves[key] = std::make_shared<const engine::Curve> (std::move (points), travel.value_or (devices::Travel()));
+        }
         else
+        {
             emptyCurves.insert (key);
+        }
     }
 }
 

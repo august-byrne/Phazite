@@ -189,7 +189,7 @@ The chord lane, a guide the playlist shows while the song has chords.
 | File | What it holds |
 |---|---|
 | `AutomationModel.h` | Automation by IDs, as the playlist's lanes and the controls' menus reach it. |
-| `AutomationValues.h` | The lanes, curves, points, shapes and write modes, as plain values. |
+| `AutomationValues.h` | The lanes, curves, points (each a position along its control's travel, and the conversions to and from the parameter's units), shapes and write modes, as plain values. |
 | `internal/Automation.h` | The song's curves, in beats, each a parameter's by its reference, and each track's write mode on its element; its `AutomationWatcher` remembers the parameter touched last. |
 
 ## modulation/

@@ -168,7 +168,7 @@ private:
     // one's range, in which modulation moves it; and each one's modulation in a stretch.
     std::vector<float> currentValues, targetValues, previousValues, baseValues;
     std::vector<bool> glides;
-    std::vector<juce::NormalisableRange<float>> ranges;
+    std::vector<devices::Travel> travels;
     std::vector<float> offsets;
     bool hasPreviousValues = false;
     bool lastMoved = true, lastSettled = false; // the last block moved its values (automation, a glide, a stretch); or settled
@@ -185,6 +185,7 @@ private:
     {
         int start = 0, length = 0;
         float mix = 1.0f;
+        int ramp = 0; // from its start to its control point: as long, or longer where the block's end cuts it
     };
 
     std::vector<int> movedNow, movedBefore, stretchParameters;
@@ -220,10 +221,12 @@ private:
     // An effect's mix (DeviceInfo.h, mixParameterID): what came in, turned as the effect turns its phase, then delayed as
     // much as the effect delays its sound, unless the effect delays and turns it itself (Processor::delaysDry()).
     int mixIndex = -1;
-    float appliedMix = 1.0f; // where the last stretch's ramp ended
+    float appliedMix = 1.0f; // where the last stretch's ramp ended, or reached where a block's end cut it
     juce::AudioBuffer<float> dry;
     std::array<devices::dsp::DelayLine, 2> dryDelays;
-    void mixWithDry (float* const* wet, int dryStart, int length, float targetMix); // dry from so far into its buffer
+    // The dry from so far into its buffer, the mix ramped to its target over `ramp` samples of which these are the first
+    // `length` (a stretch a block's end cuts goes on ramping in the next block), so that it plays the same in any blocks.
+    void mixWithDry (float* const* wet, int dryStart, int length, float targetMix, int ramp);
 
     // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency,
     // and as long as the tail it reports then: devices::Processor::getTailSeconds()), with nothing to play, it skips its

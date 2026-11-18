@@ -41,14 +41,15 @@ juce::String getParameterName (const Song&, const ParameterRef&);
 juce::String getParameterDeviceName (const Song&, const ParameterRef&);
 
 //==============================================================================
-// A parameter's curve as points in song beats, and edits of it. They change the song through its undo manager without
-// beginning a step: they join the caller's.
+// A parameter's curve as points in song beats, each at a position along the parameter's control's travel
+// (AutomationValues.h), and edits of it. They change the song through its undo manager without beginning a step: they join
+// the caller's.
 std::vector<AutomationPoint> getPoints (const Song&, const ParameterRef&);
 bool hasPoints (const Song&, const ParameterRef&);
-std::vector<float> getValues (const Song&, const ParameterRef&, BeatRange, int numValues); // getAutomationValues()
-std::vector<float> getValues (const Song&, const ParameterRef&, const std::vector<BeatPosition>&);
+std::vector<float> getPositions (const Song&, const ParameterRef&, BeatRange, int numValues); // getAutomationPositions()
+std::vector<float> getPositions (const Song&, const ParameterRef&, const std::vector<BeatPosition>&);
 int addPoint (Song&, const ParameterRef&, AutomationPoint);
-BeatDuration movePoints (Song&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float valueChange);
+BeatDuration movePoints (Song&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float positionChange);
 void setCurve (Song&, const ParameterRef&, int index, float curve);
 void deletePoints (Song&, const ParameterRef&, const std::vector<int>& indices);
 void replacePoints (Song&, const ParameterRef&, BeatRange, const std::vector<AutomationPoint>&);
@@ -56,6 +57,12 @@ void replacePoints (Song&, const ParameterRef&, BeatRange, const std::vector<Aut
 // Copies points right after themselves, as Duplicate does: each copy as far after its original as the points span (a
 // grid step at least, for one point), replacing the points where they land. Returns the copies' indices.
 std::vector<int> duplicatePoints (Song&, const ParameterRef&, const std::vector<int>& indices, BeatDuration minimumSpan);
+
+// A parameter whose curve has one point plays that point's position everywhere: the point moves to a value set by hand, in
+// the parameter's own units (model/devices/internal/Parameters.h: setValueSetByHand()), in the caller's undo step, as the
+// control's change. Not while the automation writer writes the parameter (model/playback/internal/AutomationWriter.h), which
+// writes its own points.
+void moveOnlyPoint (Song&, const ParameterRef&, float value);
 
 //==============================================================================
 // Automation that goes with the clips above it (docs/design.md, section 10), as Ableton Live, Bitwig and Studio One move

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Devices made for tests, which songs hold and Phazite's engine plays as its own (registered as such:
-// model/devices/internal/Devices.h): an effect (a gain), an instrument that plays the velocity of the note it holds, an
-// effect with latency and a mix (a delay), an effect of any latency, an effect that plays its sidechain, and one that takes
-// a share of the time.
+// model/devices/internal/Devices.h): an effect (a gain), an instrument that plays the velocity of the note it holds, one
+// that plays its frequency as a level (on a logarithmic travel), an effect with latency and a mix (a delay), an effect
+// of any latency, an effect that plays its sidechain, and one that takes a share of the time.
 #pragma once
 
 #include "TestHelpers.h"
@@ -111,6 +111,41 @@ struct TestTone final : devices::Processor
     float held = 0.0f;
     std::vector<devices::NoteEvent> received;
     int processed = 0; // stretches
+};
+
+inline constexpr devices::ParameterInfo testFrequencyParameters[] = {
+    { .id = "frequency",
+      .name = "Frequency",
+      .minimum = 20.0f,
+      .maximum = 20000.0f,
+      .defaultValue = 1000.0f,
+      .unit = devices::Unit::hertz,
+      .scale = devices::Scale::logarithmic },
+};
+
+// Plays its frequency as a level, 1 at 20 kHz, on both channels: what its automation and its modulation move it to, sample
+// by sample, which a render shows. It never sleeps.
+struct TestFrequency final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestFrequency";
+    static constexpr devices::DeviceInfo info { .typeID = typeID,
+                                                .name = "Test Frequency",
+                                                .kind = devices::DeviceKind::instrument,
+                                                .parameters = testFrequencyParameters };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const devices::ProcessContext& block) override
+    {
+        const auto level = block.parameters[0] / 20000.0f;
+
+        for (int channel = 0; channel < std::min (2, block.numChannels); ++channel)
+            for (int i = 0; i < block.numSamples; ++i)
+                block.channels[channel][i] += level;
+    }
+
+    bool sleepsOnSilence() const noexcept override { return false; }
 };
 
 inline constexpr devices::ParameterInfo testDelayParameters[] = {
@@ -267,6 +302,7 @@ inline void registerTestDevices()
         const auto add = [] (const devices::DeviceInfo& info, DeviceFactory make) { registerDeviceType (info, make); };
         add (TestGain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestGain>(); });
         add (TestTone::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestTone>(); });
+        add (TestFrequency::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestFrequency>(); });
         add (TestDelay::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestDelay>(); });
         add (TestSidechain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestSidechain>(); });
         add (TestBusy::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestBusy>(); });

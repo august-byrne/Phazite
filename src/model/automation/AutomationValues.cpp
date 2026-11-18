@@ -8,6 +8,32 @@
 
 namespace phazite
 {
+float toControlPosition (const juce::NormalisableRange<float>& range, float value)
+{
+    if (! (range.end > range.start) || std::isnan (value))
+        return 0.0f;
+
+    return range.convertTo0to1 (juce::jlimit (range.start, range.end, value));
+}
+
+float fromControlPosition (const juce::NormalisableRange<float>& range, float position)
+{
+    if (! (range.end > range.start))
+        return range.start;
+
+    return range.snapToLegalValue (range.convertFrom0to1 (std::isnan (position) ? 0.0f : juce::jlimit (0.0f, 1.0f, position)));
+}
+
+float toControlPosition (const devices::Travel& travel, float value)
+{
+    return travel.toPosition (value);
+}
+
+float fromControlPosition (const devices::Travel& travel, float position)
+{
+    return travel.snap (travel.fromPosition (position));
+}
+
 std::vector<AutomationPoint> makeAutomationShape (AutomationShape shape, BeatRange range, BeatDuration cycle, float from, float to)
 {
     const auto length = range.getLength();

@@ -81,7 +81,7 @@ namespace
                                                 .maximum = 20000.0f,
                                                 .defaultValue = d.frequency,
                                                 .unit = Unit::hertz,
-                                                .midpoint = 632.456f }; // the middle of the range, on a log scale
+                                                .scale = Scale::logarithmic };
             made[at (Equalizer::gain)] = { .id = gainIDs[band],
                                            .name = gainNames[band],
                                            .minimum = -24.0f,

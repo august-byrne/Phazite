@@ -64,12 +64,12 @@ float movePhase (float phase, double cycles)
     return (float) (moved < 0.0 ? moved + 1.0 : moved);
 }
 
-float modulate (const ParameterInfo& parameter, const juce::NormalisableRange<float>& range, float value, float offset)
+float modulate (const ParameterInfo& parameter, const Travel& travel, float value, float offset)
 {
     if (juce::exactlyEqual (offset, 0.0f))
         return constrain (parameter, value);
 
-    const auto moved = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (range.getRange().clipValue (value)) + offset);
-    return constrain (parameter, range.convertFrom0to1 (moved));
+    const auto moved = juce::jlimit (0.0f, 1.0f, travel.toPosition (value) + offset);
+    return constrain (parameter, travel.fromPosition (moved));
 }
 } // namespace phazite::devices

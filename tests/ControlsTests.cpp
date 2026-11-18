@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UiTestHelpers.h"
+#include "devices/filter/FilterEffect.h"
 #include "engine/nodes/LevelMeter.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -18,6 +20,8 @@
 #include "ui/components/ValueText.h"
 #include "ui/theme/DesignTokens.h"
 #include "ui/theme/LookAndFeel.h"
+
+#include <cmath>
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {
@@ -671,4 +675,42 @@ TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, an
     CHECK_FALSE (editor.fade.isShown());
     CHECK (editor.getComponentAt (editor.bar.getBounds().getCentre()) == &editor.bar);
     CHECK (rests());
+}
+
+TEST_CASE ("A frequency's knob turns along its logarithmic travel: a cutoff at 632 Hz sits halfway round")
+{
+    // Roadmap S4.7: a frequency's knob goes through as many octaves in each part of its turn, as its automation and
+    // modulation do (devices::getTravel()); the slider takes the travel's own mapping, not a skew that would bend it.
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song)[0];
+
+    for (const auto& type : phazite::getDeviceTypes (context))
+        if (type.description.fileOrIdentifier == juce::String (phazite::devices::FilterEffect::typeID))
+            phazite::addEffect (context, track, type);
+
+    const auto effects = phazite::getEffects (context, track);
+    REQUIRE (effects.size() == 1);
+    auto cutoff = phazite::getParameter (context, { effects[0].id, "cutoff" });
+    REQUIRE (cutoff.exists());
+    cutoff.setValue (632.456f);
+
+    phazite::ui::Knob knob ("Cutoff", 0.0);
+    phazite::ui::ParameterAttachment attachment (knob);
+    attachment.setParameter (phazite::getParameter (context, { effects[0].id, "cutoff" }));
+    attachment.update();
+    CHECK (knob.getValue() == doctest::Approx (632.456).epsilon (0.0001));
+    CHECK (knob.valueToProportionOfLength (knob.getValue()) == doctest::Approx (0.5).epsilon (0.0001));
+
+    const auto travel = phazite::devices::getTravel (*cutoff.getInfo());
+
+    for (const auto position : { 0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0 })
+    {
+        CAPTURE (position);
+        CHECK (knob.proportionOfLengthToValue (position) == doctest::Approx (travel.fromPosition ((float) position)).epsilon (0.0001));
+        CHECK (knob.proportionOfLengthToValue (position) == doctest::Approx (20.0 * std::pow (1000.0, position)).epsilon (0.0001));
+    }
+
+    phazite::setSong (context, nullptr);
 }

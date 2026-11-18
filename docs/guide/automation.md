@@ -69,6 +69,10 @@ The playlist's tools work in a lane:
 Paint's shape is **Sine**, **Triangle**, **Square**, **Saw Up**, **Saw Down** or **Line**, chosen in the lane menu's
 **Shape for Paint**.
 
+A lane runs from the bottom of its control's travel to the top, as the knob or fader turns, and a straight line is an
+even turn of the knob, as in most DAWs. A frequency's knob goes through as many octaves in each part of its turn, so a
+straight line on a cutoff from 100 Hz to 10 kHz sweeps evenly through the octaves, passing 1 kHz halfway.
+
 While you drag or click, **Alt** places off the grid, **Shift** moves a value in fine steps, and **Ctrl** adds a point
 to the selection or takes it out.
 
@@ -76,7 +80,7 @@ to the selection or takes it out.
 
 | Key | Does |
 |---|---|
-| **Up**, **Down** | Raises or lowers them by a hundredth of the control's range |
+| **Up**, **Down** | Raises or lowers them by a hundredth of the control's travel |
 | **Shift+Up**, **Shift+Down** | By a tenth |
 | **Left**, **Right** | Nudges them a step of the grid |
 | **Delete** | Deletes them |
@@ -149,8 +153,6 @@ Automation sets a control's value along the song, and modulators move it around 
 ## Not yet
 
 - MIDI learn, a hardware knob assigned to a control: planned.
-- A straight line in a lane is an even change in the control's own units (hertz, for a cutoff), not an even turn of
-  the knob; lines that move the knob evenly: planned.
 - Automating or modulating a modulator's own settings: planned.
 - Modulation for each note an instrument plays: planned.
 - Copying automation points with Cut, Copy and Paste: planned (Duplicate copies them).

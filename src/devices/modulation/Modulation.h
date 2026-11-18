@@ -50,7 +50,7 @@ float getLfoValue (const LfoShape&, float phase);
 float movePhase (float phase, double cycles);
 
 // A parameter's value moved by modulation: offset is the sum of each modulator's value times the amount it modulates
-// the parameter by, as a part of the parameter's range as its control spans it (range, its getRange()). The result is
+// the parameter by, as a part of the parameter's range as its control spans it (travel, its getTravel()). The result is
 // kept to the range and to the parameter's steps.
-float modulate (const ParameterInfo&, const juce::NormalisableRange<float>& range, float value, float offset);
+float modulate (const ParameterInfo&, const Travel& travel, float value, float offset);
 } // namespace phazite::devices

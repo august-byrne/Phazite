@@ -332,7 +332,7 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     CHECK (screen.shows ("Bar 1 to Bar 2"));
 
     const auto valueOf = [&screen, &volume] (int index)
-    { return phazite::getAutomationPoints (screen.context, volume)[(size_t) index].value; };
+    { return phazite::getAutomationPoints (screen.context, volume)[(size_t) index].position; };
     const auto before = valueOf (1);
     step (findField (screen, "Value"), true);
     CHECK (valueOf (1) > before);
@@ -395,13 +395,13 @@ TEST_CASE ("A value typed that is no finite number changes nothing: a clip's sta
 
     for (const auto value : { std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
     {
-        phazite::setAutomationPointValues (screen.context, volume, { 0 }, value);
+        phazite::setAutomationPointPositions (screen.context, volume, { 0 }, value);
         phazite::setAutomationCurves (screen.context, volume, { 0 }, value);
         phazite::moveAutomationPoints (screen.context, volume, { 0 }, phazite::BeatDuration::fromBeats ((double) value), value);
     }
 
     CHECK (point().beat.inBeats() == doctest::Approx (4.0));
-    CHECK (point().value == doctest::Approx (0.5f));
+    CHECK (point().position == doctest::Approx (0.5f));
     CHECK (std::isfinite (point().curve));
 
     // A note's, typed.

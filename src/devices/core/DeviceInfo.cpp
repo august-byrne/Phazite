@@ -39,6 +39,13 @@ bool isValid (const ParameterInfo& parameter)
     if (parameter.step.has_value() && ! (*parameter.step > 0.0f))
         return false;
 
+    // A frequency's knob goes through as many octaves in each part of its travel.
+    if ((parameter.unit == Unit::hertz && parameter.minimum > 0.0f) != (parameter.scale == Scale::logarithmic))
+        return false;
+
+    if (parameter.scale == Scale::logarithmic && (parameter.midpoint.has_value() || parameter.step.has_value()))
+        return false;
+
     if (takesWholeNumbers (parameter.unit))
     {
         // Whole steps, which a skew would only bend.
@@ -84,8 +91,63 @@ std::optional<int> findChoice (const ParameterInfo& parameter, std::string_view 
     return std::nullopt;
 }
 
+float Travel::toPosition (float value) const noexcept
+{
+    if (! (maximum > minimum) || std::isnan (value))
+        return 0.0f;
+
+    value = std::clamp (value, minimum, maximum);
+
+    if (logarithmic)
+        return std::clamp (std::log (value / minimum) / std::log (maximum / minimum), 0.0f, 1.0f);
+
+    // As juce::NormalisableRange::convertTo0to1() works it out, so that the two agree.
+    const auto proportion = std::clamp ((value - minimum) / (maximum - minimum), 0.0f, 1.0f);
+    return juce::exactlyEqual (skew, 1.0f) ? proportion : std::pow (proportion, skew);
+}
+
+float Travel::fromPosition (float position) const noexcept
+{
+    position = std::isnan (position) ? 0.0f : std::clamp (position, 0.0f, 1.0f);
+
+    if (logarithmic)
+        return std::clamp (minimum * std::exp (position * std::log (maximum / minimum)), minimum, maximum);
+
+    if (! juce::exactlyEqual (skew, 1.0f) && position > 0.0f)
+        position = std::exp (std::log (position) / skew);
+
+    return minimum + (maximum - minimum) * position;
+}
+
+float Travel::snap (float value) const noexcept
+{
+    if (step > 0.0f)
+        value = minimum + step * std::round ((value - minimum) / step);
+
+    return std::clamp (value, minimum, maximum);
+}
+
+Travel getTravel (const ParameterInfo& parameter)
+{
+    Travel travel { parameter.minimum, parameter.maximum };
+    travel.step = takesWholeNumbers (parameter.unit) ? 1.0f : parameter.step.value_or (0.0f);
+    travel.logarithmic = parameter.scale == Scale::logarithmic && parameter.minimum > 0.0f;
+
+    // As juce::NormalisableRange::setSkewForCentre() works it out.
+    if (parameter.midpoint.has_value() && ! travel.logarithmic)
+        travel.skew = std::log (0.5f) / std::log ((*parameter.midpoint - parameter.minimum) / (parameter.maximum - parameter.minimum));
+
+    return travel;
+}
+
 juce::NormalisableRange<float> getRange (const ParameterInfo& parameter)
 {
+    // A logarithmic one through the travel's own mapping, which JUCE's range takes as functions (copying it may allocate:
+    // for the message thread; the audio thread uses the Travel).
+    if (const auto travel = getTravel (parameter); travel.logarithmic)
+        return { parameter.minimum, parameter.maximum, [travel] (float, float, float position) { return travel.fromPosition (position); },
+                 [travel] (float, float, float value) { return travel.toPosition (value); } };
+
     juce::NormalisableRange<float> range (parameter.minimum, parameter.maximum,
                                           takesWholeNumbers (parameter.unit) ? 1.0f : parameter.step.value_or (0.0f));
 

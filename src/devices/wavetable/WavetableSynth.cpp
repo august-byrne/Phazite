@@ -93,7 +93,7 @@ namespace
                  .maximum = 20.0f,
                  .defaultValue = defaultValue,
                  .unit = Unit::hertz,
-                 .midpoint = 1.0f };
+                 .scale = Scale::logarithmic };
     }
 
     constexpr float sawPosition = 2.0f / 3.0f; // the saw in the first factory table, Basic Shapes
@@ -133,7 +133,7 @@ namespace
           .maximum = 20000.0f,
           .defaultValue = 2500.0f,
           .unit = Unit::hertz,
-          .midpoint = 632.456f }, // the middle of the range, on a log scale
+          .scale = Scale::logarithmic },
         makePercent ("resonance", "Filter Resonance", 0.1f),
         makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f),
         { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },

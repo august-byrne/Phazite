@@ -18,11 +18,10 @@ namespace phazite
 {
 namespace
 {
-    // A value within its parameter's range (model/devices/internal/Parameters.h).
-    float limitValue (const Song& song, const ParameterRef& ref, float value)
+    // A position along a control's travel (AutomationValues.h).
+    float limitPosition (float position)
     {
-        const auto description = describeParameter (song, ref);
-        return description.has_value() ? description->range.getRange().clipValue (value) : value;
+        return juce::jlimit (0.0f, 1.0f, position);
     }
 
     float limitCurve (float curve)
@@ -30,7 +29,7 @@ namespace
         return juce::jlimit (-1.0f, 1.0f, curve);
     }
 
-    // A curve of the song's (Schema.h: CURVE) as Phazite's engine plays it (engine/automation/Curve.h).
+    // A curve of the song's (Schema.h: CURVE) as Phazite's engine plays it (engine/automation/Curve.h), in positions.
     engine::Curve makeEngineCurve (const juce::ValueTree& curveState)
     {
         std::vector<engine::CurvePoint> points;
@@ -53,13 +52,17 @@ namespace
         return juce::String ((juce::int64) id.getRaw());
     }
 
-    // A parameter's value at a beat as its curve has it, as Phazite's engine plays it; without points, its value set by hand.
-    float getCurveValueAt (const Song& song, const ParameterRef& ref, const juce::ValueTree& curveState, BeatPosition beat)
+    // A parameter's position at a beat as its curve has it, as Phazite's engine plays it; without points, its value set by
+    // hand's.
+    float getCurvePositionAt (const Song& song, const ParameterRef& ref, const juce::ValueTree& curveState, BeatPosition beat)
     {
         if (curveState.getNumChildren() == 0)
-            return getValueSetByHand (song, ref);
+        {
+            const auto travel = getControlTravel (song, ref);
+            return travel.has_value() ? toControlPosition (*travel, getValueSetByHand (song, ref)) : 0.0f;
+        }
 
-        return makeEngineCurve (curveState).getValueAt (std::max (0.0, beat.inBeats()));
+        return makeEngineCurve (curveState).getPositionAt (std::max (0.0, beat.inBeats()));
     }
 
     //==========================================================================
@@ -90,8 +93,8 @@ namespace
         // Before the first point or after the last the curve holds: a straight line holds it there too.
         if (before < 0 || before + 1 >= (int) points.size())
         {
-            const auto value = points.empty() ? 0.0f : points[(size_t) std::max (0, before)].value;
-            plan.points.push_back ({ beat, value, 0.0f });
+            const auto position = points.empty() ? 0.0f : points[(size_t) std::max (0, before)].position;
+            plan.points.push_back ({ beat, position, 0.0f });
             return plan;
         }
 
@@ -100,8 +103,8 @@ namespace
         const auto length = (to.beat - from.beat).inBeats();
         const auto along = std::clamp ((beat - from.beat).inBeats() / length, 0.0, 1.0);
         const auto bend = (double) juce::jlimit (-1.0f, 1.0f, from.curve);
-        const auto valueAlong = [&] (double place)
-        { return from.value + (float) engine::getCurveProgress (place, bend) * (to.value - from.value); };
+        const auto positionAlong = [&] (double place)
+        { return from.position + (float) engine::getCurveProgress (place, bend) * (to.position - from.position); };
         const auto beatAlong = [&] (double place) { return from.beat + BeatDuration::fromBeats (place * length); };
 
         plan.from = before;
@@ -110,17 +113,17 @@ namespace
         // At the line's start, a second point where the first is, bending as it does.
         if (along <= 0.0)
         {
-            plan.points.push_back ({ beat, from.value, from.curve });
+            plan.points.push_back ({ beat, from.position, from.curve });
             return plan;
         }
 
         const auto amount = std::abs (bend);
-        const auto at = AutomationPoint { beat, valueAlong (along), 0.0f };
+        const auto at = AutomationPoint { beat, positionAlong (along), 0.0f };
 
         if (amount <= 0.5)
         {
             plan.fromCurve = (float) (bend * along);
-            plan.points.push_back ({ at.beat, at.value, (float) (bend * (1.0 - along)) });
+            plan.points.push_back ({ at.beat, at.position, (float) (bend * (1.0 - along)) });
             return plan;
         }
 
@@ -132,15 +135,15 @@ namespace
             if (along <= held)
             {
                 plan.fromCurve = 0.0f;
-                plan.points.push_back ({ at.beat, at.value, (float) (0.5 + 0.5 * (held - along) / (1.0 - along)) });
+                plan.points.push_back ({ at.beat, at.position, (float) (0.5 + 0.5 * (held - along) / (1.0 - along)) });
                 return plan;
             }
 
             // Past the hold: a point where it ends, then each part eases over its share of the rest.
             const auto eased = (along - held) / (1.0 - held);
             plan.fromCurve = 0.0f;
-            plan.points.push_back ({ beatAlong (held), from.value, (float) (0.5 * eased) });
-            plan.points.push_back ({ at.beat, at.value, (float) (0.5 * (1.0 - eased)) });
+            plan.points.push_back ({ beatAlong (held), from.position, (float) (0.5 * eased) });
+            plan.points.push_back ({ at.beat, at.position, (float) (0.5 * (1.0 - eased)) });
             plan.atBeat = 1;
             return plan;
         }
@@ -150,14 +153,14 @@ namespace
         if (along >= easing)
         {
             plan.fromCurve = (float) -(0.5 + 0.5 * (along - easing) / along);
-            plan.points.push_back ({ at.beat, at.value, 0.0f });
+            plan.points.push_back ({ at.beat, at.position, 0.0f });
             return plan;
         }
 
         const auto eased = along / easing;
         plan.fromCurve = (float) (-0.5 * eased);
-        plan.points.push_back ({ at.beat, at.value, (float) (-0.5 * (1.0 - eased)) });
-        plan.points.push_back ({ beatAlong (easing), to.value, 0.0f });
+        plan.points.push_back ({ at.beat, at.position, (float) (-0.5 * (1.0 - eased)) });
+        plan.points.push_back ({ beatAlong (easing), to.position, 0.0f });
         return plan;
     }
 
@@ -217,18 +220,18 @@ namespace
 
         int getNumPoints() const { return state.getNumChildren(); }
         BeatPosition getPointBeat (int index) const { return BeatPosition::fromBeats (state.getChild (index)[schema::pointBeat]); }
-        float getPointValue (int index) const { return state.getChild (index)[schema::pointValue]; }
+        float getPointPosition (int index) const { return state.getChild (index)[schema::pointValue]; }
         float getPointCurve (int index) const { return state.getChild (index).getProperty (schema::pointCurve, 0.0f); }
 
-        // As Phazite's engine plays it; without points, the parameter's value set by hand.
-        float getValueAt (BeatPosition beat) const { return getCurveValueAt (song, ref, state, beat); }
+        // Its position as Phazite's engine plays it; without points, the parameter's value set by hand's.
+        float getPositionAt (BeatPosition beat) const { return getCurvePositionAt (song, ref, state, beat); }
 
         std::vector<AutomationPoint> getPoints() const
         {
             std::vector<AutomationPoint> points;
 
             for (int i = 0; i < getNumPoints(); ++i)
-                points.push_back ({ getPointBeat (i), getPointValue (i), getPointCurve (i) });
+                points.push_back ({ getPointBeat (i), getPointPosition (i), getPointCurve (i) });
 
             return points;
         }
@@ -238,7 +241,7 @@ namespace
         int addPointOnLine (BeatPosition beat)
         {
             if (getNumPoints() == 0)
-                return addPoint (beat, getValueAt (beat), 0.0f); // the value set by hand
+                return addPoint (beat, getPositionAt (beat), 0.0f); // the value set by hand's
 
             const auto plan = planPointOnLine (getPoints(), beat);
 
@@ -248,7 +251,7 @@ namespace
             auto index = -1;
 
             for (size_t i = 0; i < plan.points.size(); ++i)
-                if (const auto added = addPoint (plan.points[i].beat, plan.points[i].value, plan.points[i].curve); i == plan.atBeat)
+                if (const auto added = addPoint (plan.points[i].beat, plan.points[i].position, plan.points[i].curve); i == plan.atBeat)
                     index = added;
 
             return index;
@@ -282,7 +285,7 @@ namespace
             return before >= 0 && before + 1 < getNumPoints() ? getPointCurve (before) : 0.0f;
         }
 
-        int addPoint (BeatPosition beat, float value, float curve)
+        int addPoint (BeatPosition beat, float position, float curve)
         {
             if (! ref.isValid())
                 return -1;
@@ -303,7 +306,7 @@ namespace
 
             juce::ValueTree point (schema::POINT);
             point.setProperty (schema::pointBeat, std::max (0.0, beat.inBeats()), nullptr);
-            point.setProperty (schema::pointValue, value, nullptr);
+            point.setProperty (schema::pointValue, position, nullptr);
 
             if (! juce::exactlyEqual (curve, 0.0f))
                 point.setProperty (schema::pointCurve, curve, nullptr);
@@ -324,11 +327,11 @@ namespace
             }
         }
 
-        void setPoint (int index, BeatPosition beat, float value)
+        void setPoint (int index, BeatPosition beat, float position)
         {
             auto point = state.getChild (index);
             point.setProperty (schema::pointBeat, std::max (0.0, beat.inBeats()), getUndo());
-            point.setProperty (schema::pointValue, value, getUndo());
+            point.setProperty (schema::pointValue, position, getUndo());
         }
 
         void setCurve (int index, float curve)
@@ -352,12 +355,12 @@ namespace
                 if (! range.contains (getPointBeat (i)))
                     continue;
 
-                const auto v = getPointValue (i);
-                const auto sameLeft = i <= 0 || std::abs (getPointValue (i - 1) - v) < threshold;
-                const auto sameRight = i >= getNumPoints() - 1 || std::abs (getPointValue (i + 1) - v) < threshold;
+                const auto v = getPointPosition (i);
+                const auto sameLeft = i <= 0 || std::abs (getPointPosition (i - 1) - v) < threshold;
+                const auto sameRight = i >= getNumPoints() - 1 || std::abs (getPointPosition (i + 1) - v) < threshold;
 
                 if ((sameLeft && sameRight)
-                    || (i < getNumPoints() - 1 && std::abs (getPointValue (i + 1) - v) < threshold
+                    || (i < getNumPoints() - 1 && std::abs (getPointPosition (i + 1) - v) < threshold
                         && std::abs (secondsBetween (i + 1, i)) < threshold)
                     || (i > 0 && i < getNumPoints() - 1 && std::abs (secondsBetween (i - 1, i)) < threshold
                         && std::abs (secondsBetween (i + 1, i)) < threshold))
@@ -637,17 +640,6 @@ namespace
         }
     }
 
-    // A plug-in's value that it set itself moves the one point of its parameter's curve, as one set by a control does
-    // (model/devices/internal/Parameters.h), in the song's history: the step the change joins. Not while the automation
-    // writer writes the parameter, which writes its own points.
-    void moveOnePoint (Song& song, const ParameterRef& parameter, float value)
-    {
-        if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (parameter))
-            return;
-
-        if (SongCurve curve (song, parameter); curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), value))
-            curve.setPoint (0, curve.getPointBeat (0), value);
-    }
 } // namespace
 
 //==============================================================================
@@ -818,7 +810,7 @@ bool hasPoints (const Song& song, const ParameterRef& parameter)
     return findCurveState (song, parameter).getNumChildren() > 0;
 }
 
-std::vector<float> getValues (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
+std::vector<float> getPositions (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
 {
     std::vector<BeatPosition> beats;
     beats.reserve ((size_t) std::max (0, numValues));
@@ -827,52 +819,50 @@ std::vector<float> getValues (const Song& song, const ParameterRef& parameter, B
     for (int i = 0; i < numValues; ++i)
         beats.push_back (range.getStart() + step * (double) i);
 
-    return getValues (song, parameter, beats);
+    return getPositions (song, parameter, beats);
 }
 
-std::vector<float> getValues (const Song& song, const ParameterRef& parameter, const std::vector<BeatPosition>& beats)
+std::vector<float> getPositions (const Song& song, const ParameterRef& parameter, const std::vector<BeatPosition>& beats)
 {
     // As Phazite's engine plays the song's points.
-    std::vector<float> values;
+    std::vector<float> positions;
     const auto state = findCurveState (song, parameter);
 
     if (! state.isValid() || state.getNumChildren() == 0 || beats.empty())
-        return values;
+        return positions;
 
     const auto curve = makeEngineCurve (state);
-    values.reserve (beats.size());
+    positions.reserve (beats.size());
 
     for (const auto beat : beats)
-        values.push_back (curve.getValueAt (std::max (0.0, beat.inBeats())));
+        positions.push_back (curve.getPositionAt (std::max (0.0, beat.inBeats())));
 
-    return values;
+    return positions;
 }
 
 int addPoint (Song& song, const ParameterRef& parameter, AutomationPoint point)
 {
     SongCurve curve (song, parameter);
-    return curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
+    return curve.addPoint (point.beat, limitPosition (point.position), limitCurve (point.curve));
 }
 
 BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration distance,
-                         float valueChange)
+                         float positionChange)
 {
     SongCurve curve (song, parameter);
     const auto indices = getValidIndices (curve.getNumPoints(), requested);
-    const auto description = describeParameter (song, parameter);
 
-    if (indices.empty() || ! description.has_value())
+    if (indices.empty())
         return {};
 
     const auto points = getPoints (song, parameter);
-    const auto& range = description->range;
     std::vector<bool> moving (points.size(), false);
 
     for (const auto index : indices)
         moving[(size_t) index] = true;
 
     // The distance, cut so that no point passes one that stays or goes before the song's start; the change, so that every
-    // value stays in range.
+    // point stays on the control's travel.
     auto earliest = -std::numeric_limits<double>::max(), latest = std::numeric_limits<double>::max();
     auto lowest = -std::numeric_limits<float>::max(), highest = std::numeric_limits<float>::max();
 
@@ -901,18 +891,18 @@ BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::v
             }
         }
 
-        lowest = std::max (lowest, range.start - point.value);
-        highest = std::min (highest, range.end - point.value);
+        lowest = std::max (lowest, -point.position);
+        highest = std::min (highest, 1.0f - point.position);
     }
 
     const auto beats = juce::jlimit (std::min (earliest, 0.0), std::max (latest, 0.0), distance.inBeats());
-    const auto change = juce::jlimit (std::min (lowest, 0.0f), std::max (highest, 0.0f), valueChange);
+    const auto change = juce::jlimit (std::min (lowest, 0.0f), std::max (highest, 0.0f), positionChange);
 
     // In the order that keeps the points in time order all along.
     const auto move = [&] (int index)
     {
         const auto& point = points[(size_t) index];
-        curve.setPoint (index, point.beat + BeatDuration::fromBeats (beats), limitValue (song, parameter, point.value + change));
+        curve.setPoint (index, point.beat + BeatDuration::fromBeats (beats), limitPosition (point.position + change));
     };
 
     if (beats > 0.0)
@@ -948,7 +938,7 @@ void replacePoints (Song& song, const ParameterRef& parameter, BeatRange range, 
 
     // Each after any at its beat already, so that two at one beat stay in the order given: a jump.
     for (const auto& point : points)
-        curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
+        curve.addPoint (point.beat, limitPosition (point.position), limitCurve (point.curve));
 }
 
 std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration minimumSpan)
@@ -974,10 +964,21 @@ std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, con
     for (const auto index : indices)
     {
         const auto& point = points[(size_t) index];
-        copies.push_back (curve.addPoint (point.beat + span, point.value, point.curve));
+        copies.push_back (curve.addPoint (point.beat + span, point.position, point.curve));
     }
 
     return copies;
+}
+
+void moveOnlyPoint (Song& song, const ParameterRef& parameter, float value)
+{
+    if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (parameter))
+        return;
+
+    if (SongCurve curve (song, parameter); curve.getNumPoints() == 1)
+        if (const auto travel = getControlTravel (song, parameter))
+            if (const auto position = toControlPosition (*travel, value); ! juce::exactlyEqual (curve.getPointPosition (0), position))
+                curve.setPoint (0, curve.getPointBeat (0), position);
 }
 
 //==============================================================================
@@ -1012,7 +1013,7 @@ void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches
 
             for (int i = 0; i < curve.getNumPoints(); ++i)
                 if (const auto beat = curve.getPointBeat (i); isInAny (beat, {}))
-                    moved.push_back ({ beat + distance, curve.getPointValue (i), curve.getPointCurve (i) });
+                    moved.push_back ({ beat + distance, curve.getPointPosition (i), curve.getPointCurve (i) });
 
             for (auto i = curve.getNumPoints(); --i >= 0;)
                 if (const auto beat = curve.getPointBeat (i); (! copy && isInAny (beat, {})) || isInAny (beat, distance))
@@ -1020,7 +1021,7 @@ void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches
 
             // In order, each after any at its beat already, so that a jump stays one.
             for (const auto& point : moved)
-                curve.addPoint (point.beat, point.value, point.curve);
+                curve.addPoint (point.beat, point.position, point.curve);
 
             tidyEdges (curve, edges);
         }
@@ -1049,7 +1050,7 @@ void deleteAutomation (Song& song, const std::vector<AutomationStretch>& stretch
                     if (range->contains (beat))
                         curve.removePoint (i);
                     else if (closeGap && beat >= range->getEnd())
-                        curve.setPoint (i, beat - range->getLength(), curve.getPointValue (i));
+                        curve.setPoint (i, beat - range->getLength(), curve.getPointPosition (i));
                 }
 
                 edges.push_back (range->getStart());
@@ -1081,7 +1082,7 @@ std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<
                 AutomationCopy copy { ref, range.getLength(), {}, range.getStart() };
 
                 for (auto i = first; i <= last; ++i)
-                    copy.points.push_back ({ BeatPosition() + (points[(size_t) i].beat - range.getStart()), points[(size_t) i].value,
+                    copy.points.push_back ({ BeatPosition() + (points[(size_t) i].beat - range.getStart()), points[(size_t) i].position,
                                              i < last ? points[(size_t) i].curve : 0.0f });
 
                 copies.push_back (std::move (copy));
@@ -1110,8 +1111,7 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
                 curve.removePoint (i);
 
         for (const auto& point : copy.points)
-            curve.addPoint (landing.getStart() + (point.beat - BeatPosition()), limitValue (song, copy.parameter, point.value),
-                            limitCurve (point.curve));
+            curve.addPoint (landing.getStart() + (point.beat - BeatPosition()), limitPosition (point.position), limitCurve (point.curve));
 
         tidyEdges (curve, { landing.getStart(), landing.getEnd() });
     }
@@ -1148,17 +1148,17 @@ void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
         // A bent line across the time cut first, so that each part keeps its shape (addPointOnLine()).
         SongCurve curve (song, parameter);
         const auto cut = curve.cutBentLineAt (at);
-        const auto valueThere = curve.getValueAt (at);
+        const auto positionThere = curve.getPositionAt (at);
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
             if (const auto beat = curve.getPointBeat (i); beat >= at)
-                curve.setPoint (i, beat + length, curve.getPointValue (i));
+                curve.setPoint (i, beat + length, curve.getPointPosition (i));
 
-        if (cut || ! juce::approximatelyEqual (valueThere, curve.getValueAt (at))) // a bent line's first part ends there
-            curve.addPoint (at, valueThere, 0.0f);
+        if (cut || ! juce::approximatelyEqual (positionThere, curve.getPositionAt (at))) // a bent line's first part ends there
+            curve.addPoint (at, positionThere, 0.0f);
 
-        if (! juce::approximatelyEqual (valueThere, curve.getValueAt (at + length)))
-            curve.addPoint (at + length, valueThere, 0.0f);
+        if (! juce::approximatelyEqual (positionThere, curve.getPositionAt (at + length)))
+            curve.addPoint (at + length, positionThere, 0.0f);
     }
 }
 
@@ -1171,7 +1171,7 @@ void removeAutomationTime (Song& song, BeatRange range)
         SongCurve curve (song, parameter);
         const auto cut = curve.cutBentLineAt (range.getStart());
         curve.cutBentLineAt (range.getEnd());
-        const auto valueAtStart = curve.getValueAt (range.getStart()), valueAtEnd = curve.getValueAt (range.getEnd());
+        const auto positionAtStart = curve.getPositionAt (range.getStart()), positionAtEnd = curve.getPositionAt (range.getEnd());
         const auto curveAtEnd = curve.getCurveAt (range.getEnd());
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
@@ -1180,13 +1180,13 @@ void removeAutomationTime (Song& song, BeatRange range)
 
         for (int i = 0; i < curve.getNumPoints(); ++i)
             if (const auto beat = curve.getPointBeat (i); beat >= range.getEnd())
-                curve.setPoint (i, beat - range.getLength(), curve.getPointValue (i));
+                curve.setPoint (i, beat - range.getLength(), curve.getPointPosition (i));
 
-        if (cut || ! juce::exactlyEqual (curve.getValueAt (range.getStart()), valueAtStart)) // as above
-            curve.addPoint (range.getStart(), valueAtStart, 0.0f);
+        if (cut || ! juce::exactlyEqual (curve.getPositionAt (range.getStart()), positionAtStart)) // as above
+            curve.addPoint (range.getStart(), positionAtStart, 0.0f);
 
-        if (! juce::exactlyEqual (valueAtStart, valueAtEnd) || ! juce::exactlyEqual (curveAtEnd, 0.0f))
-            curve.addPoint (range.getStart(), valueAtEnd, curveAtEnd);
+        if (! juce::exactlyEqual (positionAtStart, positionAtEnd) || ! juce::exactlyEqual (curveAtEnd, 0.0f))
+            curve.addPoint (range.getStart(), positionAtEnd, curveAtEnd);
     }
 }
 
@@ -1242,7 +1242,7 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 
             for (const auto& [pointParameter, point] : points)
                 if (pointParameter == ref)
-                    curve.addPoint (point.beat, point.value, point.curve);
+                    curve.addPoint (point.beat, point.position, point.curve);
         }
     }
 }
@@ -1535,9 +1535,9 @@ void AutomationWatcher::valueSetByHand (const ParameterRef& parameter, float val
         return;
 
     // A value set by a control has moved the one point already (setValueSetByHand()); one the plug-in set itself moves it
-    // here.
+    // here, in the song's history: the step the change joins.
     if (byPlugin)
-        moveOnePoint (*song, parameter, value);
+        moveOnlyPoint (*song, parameter, value);
 
     if (std::find (changedAtOnce.begin(), changedAtOnce.end(), parameter) == changedAtOnce.end())
         changedAtOnce.push_back (parameter);

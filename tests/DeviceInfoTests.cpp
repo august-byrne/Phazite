@@ -5,6 +5,7 @@
 
 #include <array>
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -18,7 +19,15 @@ constexpr devices::ParameterInfo cutoff { .id = "cutoff",
                                           .maximum = 20000.0f,
                                           .defaultValue = 2000.0f,
                                           .unit = devices::Unit::hertz,
-                                          .midpoint = 1000.0f };
+                                          .scale = devices::Scale::logarithmic };
+
+constexpr devices::ParameterInfo release { .id = "release",
+                                           .name = "Release",
+                                           .minimum = 1.0f,
+                                           .maximum = 1000.0f,
+                                           .defaultValue = 100.0f,
+                                           .unit = devices::Unit::milliseconds,
+                                           .midpoint = 100.0f };
 
 constexpr devices::ParameterInfo shape { .id = "shape",
                                          .name = "Shape",
@@ -31,13 +40,36 @@ constexpr devices::ParameterInfo shape { .id = "shape",
 constexpr devices::ParameterInfo bypass { .id = "bypass", .name = "Bypass", .unit = devices::Unit::toggle };
 } // namespace
 
-TEST_CASE ("A device parameter's range is skewed around its midpoint, and whole for choices")
+TEST_CASE ("A frequency's knob travels logarithmically, a time's is skewed around its midpoint, and a choice's is whole")
 {
+    // A frequency goes through as many octaves in each part of its knob's travel: 20 Hz to 20 kHz is 20 * 1000^p at p.
     REQUIRE (devices::isValid (cutoff));
     const auto range = devices::getRange (cutoff);
-    CHECK (range.convertFrom0to1 (0.5f) == doctest::Approx (1000.0f).epsilon (0.001));
-    CHECK (range.convertFrom0to1 (0.0f) == doctest::Approx (20.0f));
-    CHECK (range.convertFrom0to1 (1.0f) == doctest::Approx (20000.0f));
+    const auto travel = devices::getTravel (cutoff);
+    CHECK (travel.logarithmic);
+
+    for (const auto& [position, hertz] : { std::pair { 0.0f, 20.0f }, std::pair { 0.25f, 112.468f }, std::pair { 0.5f, 632.456f },
+                                           std::pair { 0.75f, 3556.56f }, std::pair { 1.0f, 20000.0f } })
+    {
+        CAPTURE (position);
+        CHECK (range.convertFrom0to1 (position) == doctest::Approx (hertz).epsilon (0.0001));
+        CHECK (travel.fromPosition (position) == doctest::Approx (hertz).epsilon (0.0001));
+        CHECK (range.convertTo0to1 (hertz) == doctest::Approx (position).epsilon (0.0001));
+        CHECK (travel.toPosition (hertz) == doctest::Approx (position).epsilon (0.0001));
+    }
+
+    // A time's is skewed around its midpoint, as JUCE's range skews it, and the travel the engine holds is the same.
+    REQUIRE (devices::isValid (release));
+    const auto times = devices::getRange (release);
+    const auto timeTravel = devices::getTravel (release);
+    CHECK_FALSE (timeTravel.logarithmic);
+    CHECK (times.convertFrom0to1 (0.5f) == doctest::Approx (100.0f).epsilon (0.001));
+
+    for (const auto position : { 0.0f, 0.1f, 0.33f, 0.5f, 0.9f, 1.0f })
+    {
+        CHECK (timeTravel.fromPosition (position) == doctest::Approx (times.convertFrom0to1 (position)).epsilon (1.0e-6));
+        CHECK (timeTravel.toPosition (times.convertFrom0to1 (position)) == doctest::Approx (position).epsilon (1.0e-5));
+    }
 
     REQUIRE (devices::isValid (shape));
     CHECK (devices::getRange (shape).interval == doctest::Approx (1.0f));
@@ -56,8 +88,21 @@ TEST_CASE ("A device parameter's description must hold together")
     p.defaultValue = 30000.0f; // outside the range
     CHECK_FALSE (devices::isValid (p));
 
+    p = release;
+    p.midpoint = 1.0f; // not strictly inside
+    CHECK_FALSE (devices::isValid (p));
+
     p = cutoff;
-    p.midpoint = 20.0f; // not strictly inside
+    p.midpoint = 632.0f; // a frequency's knob is logarithmic, with no midpoint
+    CHECK_FALSE (devices::isValid (p));
+
+    p = cutoff;
+    p.scale = devices::Scale::linear; // a frequency's knob is logarithmic
+    CHECK_FALSE (devices::isValid (p));
+
+    p = release;
+    p.midpoint = {};
+    p.scale = devices::Scale::logarithmic; // only a frequency's
     CHECK_FALSE (devices::isValid (p));
 
     p = cutoff;

@@ -20,7 +20,7 @@ macro knob. Any knob or fader of Phazite's, and any parameter a plug-in lets be 
 | Plug-in parameters automated | Built | From the plug-in's slot, a lane's menu or Automate Last Touched |
 | Write modes for each track: Read, Touch, Latch, Write | Built | |
 | Automation moves with the clips above it | Built | |
-| A straight line as an even move of the control | Planned | Today a line is straight in the parameter's own units |
+| A straight line as an even move of the control | Built | Points are positions along the control's travel |
 | Automation clips, placed freely as FL Studio's | Declined | Lanes are the one way to automate |
 | Linked automation (aliases that share a curve) | Declined | Went with automation clips |
 | Six modulators for each track, folder and the master | Built | |
@@ -61,7 +61,8 @@ below the tracks while it has lanes.
   and the track's write mode. In a lane without automation the name is a button, as wide as its text, that shows
   another of the track's parameters in the lane instead: the track's volume, pan and sends, then each device's
   parameters in a submenu (a drum sampler's by pad).
-- **Curve:** drawn as the engine plays it, in the track's colour.
+- **Curve:** drawn as the engine plays it, in the track's colour, the control's travel from the lane's bottom to its
+  top, evenly: a cutoff's lane has its knob's middle (632 Hz) halfway up, as its knob has it halfway round.
 - **Height:** 48 pixels at first, from 32 to 320, changed by dragging the header's bottom edge; a double-click on
   that edge resets it.
 - **View state:** which lanes show, their heights and whether they are collapsed are saved with the track, but
@@ -125,8 +126,8 @@ as the notes' commands do):
 
 | Key | Command | What it does |
 | --- | --- | --- |
-| Up, Down | Raise, Lower Automation Points | Moves them by a hundredth of the parameter's range |
-| Shift+Up, Shift+Down | Raise, Lower Automation Points More | Moves them by a tenth of the range |
+| Up, Down | Raise, Lower Automation Points | Moves them by a hundredth of the control's travel |
+| Shift+Up, Shift+Down | Raise, Lower Automation Points More | Moves them by a tenth of the travel |
 | Left, Right | Nudge | Moves them a grid step |
 | Delete | Delete | Deletes them |
 | Ctrl+D | Duplicate | Copies them right after themselves |
@@ -138,19 +139,36 @@ shortcut while the computer keyboard plays notes ([commands-keys-help.md](comman
 key the user gives it reach it) opens a field over the point with its value in the parameter's units, all of it
 selected ("-6.0 dB", "L20", "2.50 kHz"). Enter sets every selected point in the lane to what the field says, as one
 undo step ("Set Automation Value"); Esc leaves them. The field reads text as a knob's field does. The inspector
-shows the selected points' value and bend as fields too.
+shows the selected points' value and bend as fields too; dragging or scrolling its value field moves the points along
+the control's travel, a hundredth of it a step, as the lane does.
 
 ## Points, lines and time
 
-- A point has a place in beats, a value in the parameter's own range, and the bend of the line to the next point.
-  Before the first point and after the last, the value stays at theirs. Two points at one beat are a jump.
+- A point has a place in beats, a position along its parameter's control's travel, and the bend of the line to the
+  next point. Before the first point and after the last, the position stays at theirs. Two points at one beat are a
+  jump.
+- **A straight line is an even turn of the knob,** as in Ableton Live, Bitwig, Logic and FL Studio. A point's
+  position runs from 0 (the control all the way down or left) to 1, as the knob or fader moves along its scale. The
+  line between two points (with its bend) is worked out in positions and turned into the parameter's own units where
+  it plays, at each control point.
+- **A frequency's knob is logarithmic,** as Live's filters' and FabFilter's are: every parameter in hertz whose range
+  starts above 0 (cutoffs, EQ bands, crossovers, rates in hertz) goes through as many octaves in each part of its
+  travel, value = minimum × (maximum / minimum)^position. A cutoff from 20 Hz to 20 kHz is at 112 Hz a quarter of the
+  way, 632 Hz halfway and 3.56 kHz three quarters of the way; a straight line from 100 Hz to 10 kHz passes 1 kHz
+  halfway. Times, ratios and other skewed parameters keep a knob skewed around a midpoint
+  (`devices::ParameterInfo::midpoint`).
+- Values are shown and typed in the parameter's own units ("2.50 kHz", "-6.0 dB"), as its control shows them; what
+  moves points by an amount (dragging, the keys, the inspector's field) moves them along the travel, so a skewed
+  parameter's points keep their shape.
+- A fader's volume was a position already (a fader's travel), and a plug-in's parameters are from 0 to 1, as
+  plug-ins take them: their automation plays as before. A pan's position is its knob's: 0 left, 0.5 centre, 1 right.
+  A choice or a switch steps as before: its travel goes evenly through its choices. The tempo lane is not a control's
+  travel: its line stays straight in BPM ([playlist.md](playlist.md)). A send's level has a lane, but Phazite's engine
+  doesn't play a send's automation yet (a known bug, [known-bugs.md](../known-bugs.md)).
+- Modulation adds along the same travel: a frequency's modulation is so many octaves either way, wherever the knob is.
 - The song keeps automation in beats, as it keeps clips, so it stays on its beats when the tempo or the time
   signature changes.
 - What automation plays changes nothing in the song: playing a lane is not an edit.
-- **A line is straight in the parameter's own units** (hertz, milliseconds, decibels as the fader holds them):
-  points are stored, and the values between them worked out, in those units. So a straight line on a filter's cutoff
-  is an even change in hertz, not an even turn of the knob, and sounds as if it moves slowly and then quickly. This is
-  to change (see [Decisions](#decisions)).
 
 ## Write modes
 
@@ -276,8 +294,10 @@ no switch: it is a knob, turned down to do nothing.
 - Automation and modulation move what they move on the song's control points, one every 32 samples from the song's
   start, not once an audio block. So fast modulation keeps its edges on time and a song plays the same at any buffer
   size.
+- An automated parameter is at its curve's position on each control point, turned into its own units by its
+  control's range (`engine::Curve::getValueAt()`): a binary search and a power, no allocation.
 - A parameter moves from the value its automation leaves; modulation is added in the parameter's range as its control
-  spans it, one sum for the whole device.
+  spans it, one sum for the whole device: along the same travel as its automation.
 - Plug-ins' parameters are moved on the same points, each change handed to the plug-in at its sample, and so are the
   faders' volume and pan: an LFO moves a plug-in, a device and a fader in step.
 - Steady playback of automation and modulation allocates nothing on the audio thread; a guarded scenario of the
@@ -294,15 +314,15 @@ no switch: it is a knob, turned down to do nothing.
   rearranged) without them.
 - **Write modes are each track's,** Read by default, rather than one global arm button.
 - **Modulators belong to a track** and modulate only that track's devices and mixer controls.
-- **A straight line is to be an even move of the knob.** Automation is to be stored and played along the control's
-  travel, as other DAWs do, so that a straight line on a cutoff is an even sweep. Today it is stored and
-  interpolated in the parameter's own units.
+- **A straight line is an even move of the knob.** Automation is stored and played along the control's travel, as
+  Ableton Live, Bitwig, Logic and FL Studio play it, so that a straight line on a cutoff is an even sweep (built
+  2026-11-17, roadmap S4.7), along a logarithmic knob for every frequency. Plug-ins' parameters were positions
+  already; choices and switches step as before; the tempo lane stays in BPM.
 - **Ctrl+Shift+A, not Shift+A,** for Automate Last Touched Parameter, so that Shift and a letter stay free for the
   letter's shortcut while the computer keyboard plays notes.
 
 ## Not built
 
-- Automation stored and played along the control's travel (above): Planned.
 - MIDI learn, a hardware control assigned to a parameter: Planned.
 - Automating or modulating a modulator's own parameters: Planned.
 - Modulation for each note, an instrument moving a parameter for each voice (the note follower's each note's pitch
@@ -313,10 +333,12 @@ no switch: it is a knob, turned down to do nothing.
 ## In the code
 
 - `src/model/automation/AutomationModel.h`, `AutomationValues.h`: lanes, points, shapes, write modes and the
-  automation commands, by IDs; `internal/Automation.h`: the song's curves, the lanes a track keeps, and automation
-  that goes with clips.
+  automation commands, by IDs, and a point's position turned into the parameter's units and back
+  (`toControlPosition()`, `fromControlPosition()`); `internal/Automation.h`: the song's curves, the lanes a track
+  keeps, and automation that goes with clips.
 - `src/model/playback/internal/AutomationWriter.h`: what Touch, Latch and Write record while the engine plays.
-- `src/engine/automation/Curve.h`: a curve as the engine plays it, and the control points' spacing.
+- `src/engine/automation/Curve.h`: a curve as the engine plays it, in positions turned into the parameter's units by its
+  control's range (`getControlTravel()`, `src/model/devices/internal/Parameters.h`), and the control points' spacing.
 - `src/ui/playlist/PlaylistAutomation.cpp`: the lanes, their headers, tools and menus.
 - `src/ui/components/Controls.h`: `ui::ParameterAttachment`, whose menu has Automate and Modulate, and the knob's
   ring; `ModulatorDrag.h`: what a dragged modulator carries.

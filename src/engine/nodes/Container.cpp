@@ -71,7 +71,7 @@ void ChainState::prepare (double rate, int maximumBlockSize)
     panModulation.assign (points, 0.0f);
     crossoverModulation.assign (points, 0.0f);
     fader.prepare (rate);
-    crossoverRange = devices::getRange (crossoverInfo);
+    crossoverTravel = devices::getTravel (crossoverInfo);
     madeFor = -1.0f;
     reset();
 }
@@ -93,8 +93,8 @@ float ChainState::findCrossover (const Curve* automation, double beat, std::span
     playedBaseCrossover.store (value, std::memory_order_relaxed);
 
     if (! modulation.empty())
-        value = crossoverRange.convertFrom0to1 (
-            juce::jlimit (0.0f, 1.0f, crossoverRange.convertTo0to1 (value) + modulation[std::min (point, modulation.size() - 1)]));
+        value = crossoverTravel.fromPosition (
+            juce::jlimit (0.0f, 1.0f, crossoverTravel.toPosition (value) + modulation[std::min (point, modulation.size() - 1)]));
 
     playedCrossover.store (value, std::memory_order_relaxed);
     return value;

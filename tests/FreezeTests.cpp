@@ -530,7 +530,7 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     phazite::addPoint (model, volume, { at (0.0), 0.7f, 0.0f });
     phazite::addPoint (model, volume, { at (4.0), 0.2f, 0.5f });
     phazite::addPoint (model, level, { at (2.0), 0.6f, 0.0f });
-    phazite::addPoint (model, gain, { at (0.0), 6.0f, 0.0f }); // a device's: rendered, not copied
+    phazite::addPoint (model, gain, { at (0.0), 0.9f, 0.0f }); // a device's: rendered, not copied
 
     const auto lfo = phazite::addModulator (model, song.bass, phazite::ModulatorType::lfo);
     const auto macro = phazite::addModulator (model, song.bass, phazite::ModulatorType::macro);
@@ -567,7 +567,7 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
                && std::equal (first.begin(), first.end(), second.begin(),
                               [] (const auto& x, const auto& y)
                               {
-                                  return x.beat == y.beat && juce::approximatelyEqual (x.value, y.value)
+                                  return x.beat == y.beat && juce::approximatelyEqual (x.position, y.position)
                                          && juce::approximatelyEqual (x.curve, y.curve);
                               });
     };

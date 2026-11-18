@@ -154,7 +154,7 @@ namespace
                  { .minimum = 1.0f, .maximum = 2000.0f, .defaultValue = 50.0f, .unit = Unit::milliseconds, .midpoint = 100.0f });
             set (Field::filter, { .maximum = 3.0f, .unit = Unit::choice, .choices = filterTypes });
             set (Field::cutoff,
-                 { .minimum = 20.0f, .maximum = 20000.0f, .defaultValue = 1000.0f, .unit = Unit::hertz, .midpoint = 1000.0f });
+                 { .minimum = 20.0f, .maximum = 20000.0f, .defaultValue = 1000.0f, .unit = Unit::hertz, .scale = Scale::logarithmic });
             set (Field::resonance, { .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::percent });
             set (Field::velocity, { .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::percent });
             set (Field::velocityToCutoff, { .minimum = 0.0f, .maximum = 48.0f, .defaultValue = 0.0f, .unit = Unit::semitones });

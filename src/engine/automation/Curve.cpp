@@ -30,30 +30,37 @@ double getCurveProgress (double along, double curve) noexcept
     return along >= easing ? 1.0 : devices::dsp::getEasedProgress (along / easing, -1.0);
 }
 
-Curve::Curve (std::vector<CurvePoint> p)
-    : points (std::move (p))
+Curve::Curve (std::vector<CurvePoint> p, devices::Travel t)
+    : points (std::move (p)),
+      travel (t)
 {
 }
 
-float Curve::getValueAt (double beat) const noexcept
+float Curve::getPositionAt (double beat) const noexcept
 {
     // The first point after the beat: at a point, the line from it plays; at a jump, the line from its second point.
     const auto next = std::upper_bound (points.begin(), points.end(), beat, [] (double b, const CurvePoint& p) { return b < p.beat; });
 
     if (next == points.begin())
-        return points.empty() ? 0.0f : points.front().value;
+        return points.empty() ? 0.0f : points.front().position;
 
     if (next == points.end())
-        return points.back().value;
+        return points.back().position;
 
     const auto& from = *(next - 1);
     const auto& to = *next;
     const auto length = to.beat - from.beat;
 
     if (length <= 0.0)
-        return to.value;
+        return to.position;
 
     const auto progress = getCurveProgress ((beat - from.beat) / length, (double) from.curve);
-    return from.value + (float) progress * (to.value - from.value);
+    return from.position + (float) progress * (to.position - from.position);
+}
+
+float Curve::getValueAt (double beat) const noexcept
+{
+    // Kept to the travel: a float's rounding can take a line a hair past its end.
+    return travel.fromPosition (getPositionAt (beat));
 }
 } // namespace phazite::engine

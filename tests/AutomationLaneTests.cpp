@@ -13,6 +13,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ParameterText.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/Playlist.h"
@@ -64,11 +65,12 @@ struct LaneScreen
         return *found;
     }
 
-    // Where a beat and a value are in the volume's lane: values from 0 to 1, as the lane draws them.
-    juce::Point<int> at (double beat, float value)
+    // Where a beat and a position along the control's travel are in a lane (the volume's), from 0 to 1, as the lane draws
+    // them.
+    juce::Point<int> at (double beat, float value, const juce::String& title = "Automation of Volume")
     {
-        const auto area =
-            lane().getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, phazite::ui::LaneTint::selectedPointRadius + 1.0f);
+        const auto area = lane (title).getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (
+            0.0f, phazite::ui::LaneTint::selectedPointRadius + 1.0f);
         return { juce::roundToInt (playlist.getView().beatToX (BeatPosition::fromBeats (beat))),
                  juce::roundToInt (area.getBottom() - value * area.getHeight()) };
     }
@@ -116,7 +118,7 @@ TEST_CASE ("A lane shows under its track, and a click on it adds a point, on the
     const auto points = screen.getPoints();
     REQUIRE (points.size() == 1);
     CHECK (points[0].beat.inBeats() == doctest::Approx (4.0)); // snapped
-    CHECK (points[0].value == doctest::Approx (0.75f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.75f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
     CHECK (screen.context.getSongSelection().getSelectedAutomationPoints().indices == std::vector { 0 });
 }
@@ -157,7 +159,7 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     auto points = screen.getPoints();
     REQUIRE (points.size() == 1);
     CHECK (points[0].beat.inBeats() == doctest::Approx (6.0));
-    CHECK (points[0].value == doctest::Approx (0.75f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.75f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 
     // One step takes the whole drag back.
@@ -165,7 +167,7 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     CHECK (screen.getBeats() == std::vector { 4.0 });
     phazite::redo (*screen.song);
 
-    mouse.doubleClick (screen.at (6.0, screen.getPoints()[0].value));
+    mouse.doubleClick (screen.at (6.0, screen.getPoints()[0].position));
     CHECK (screen.getPoints().empty());
 }
 
@@ -220,8 +222,8 @@ TEST_CASE ("A point's menu types its value in a field over it, in the parameter'
 
     screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
     CHECK (screen.playlist.getAutomationValueField() == nullptr);
-    CHECK (screen.getPoints()[1].value == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
-    CHECK (screen.getPoints()[0].value == doctest::Approx (0.5f));
+    CHECK (screen.getPoints()[1].position == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
+    CHECK (screen.getPoints()[0].position == doctest::Approx (0.5f));
     CHECK (screen.describeUndo() == juce::String ("Undo Set Automation Value"));
     phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
 
@@ -231,8 +233,8 @@ TEST_CASE ("A point's menu types its value in a field over it, in the parameter'
     REQUIRE (screen.playlist.getAutomationValueField() != nullptr);
     screen.playlist.getAutomationValueField()->setText ("0 dB", false);
     screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
-    CHECK (screen.getPoints()[0].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
-    CHECK (screen.getPoints()[2].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+    CHECK (screen.getPoints()[0].position == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+    CHECK (screen.getPoints()[2].position == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
     phazite::test::dispatchPendingMessages();
 
     for (const auto* text : { "", "loud" })
@@ -241,13 +243,69 @@ TEST_CASE ("A point's menu types its value in a field over it, in the parameter'
         REQUIRE (screen.playlist.getAutomationValueField() != nullptr);
         screen.playlist.getAutomationValueField()->setText (text, false);
         screen.window.pressKey (juce::KeyPress (juce::String (text).isEmpty() ? juce::KeyPress::escapeKey : juce::KeyPress::returnKey));
-        CHECK (screen.getPoints()[0].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+        CHECK (screen.getPoints()[0].position == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
         phazite::test::dispatchPendingMessages();
     }
 
     CHECK (screen.describeUndo() == juce::String ("Undo Set Automation Value"));
     phazite::undo (*screen.song);
-    CHECK (screen.getPoints()[0].value == doctest::Approx (0.5f));
+    CHECK (screen.getPoints()[0].position == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("A cutoff's lane runs evenly along its knob: the line drawn is the line played, its middle the knob's, typed in hertz")
+{
+    // Roadmap S4.7: a lane's height is the control's travel, as its knob turns, so a straight line drawn is the even sweep the
+    // engine plays: halfway from 20 Hz to 20 kHz, the line is halfway up, at the knob's middle, 632 Hz.
+    LaneScreen screen;
+
+    for (const auto& type : phazite::getDeviceTypes (screen.context))
+        if (type.description.fileOrIdentifier == juce::String ("phaziteFilter"))
+            phazite::addEffect (screen.context, screen.trackID (0), type);
+
+    const auto effects = phazite::getEffects (screen.context, screen.trackID (0));
+    REQUIRE (effects.size() == 1);
+    const ParameterRef cutoff { effects[0].id, "cutoff" };
+    const auto handle = phazite::getParameter (screen.context, cutoff);
+    const auto range = handle.getRange();
+    phazite::showAutomationLane (screen.context, cutoff);
+    phazite::addAutomationPoint (screen.context, cutoff, { BeatPosition(), phazite::toControlPosition (range, 20.0f) });
+    phazite::addAutomationPoint (screen.context, cutoff, { BeatPosition::fromBeats (8.0), phazite::toControlPosition (range, 20000.0f) });
+    phazite::test::dispatchPendingMessages();
+    const juce::String title ("Automation of Filter: Cutoff");
+    auto& lane = screen.lane (title);
+
+    // The line's bend handle, in its middle, is halfway up the lane, at the knob's middle, not where 10 kHz would be; a
+    // quarter of the way along, the Smart Tool finds the line a quarter of the way up (where 5 kHz would be, for a line
+    // straight in hertz), and a press there puts a point on it.
+    phazite::test::Mouse mouse (lane);
+    mouse.moveTo (screen.at (4.0, 0.5f, title));
+    CHECK (lane.getDescription().startsWith ("Drag the handle"));
+    mouse.moveTo (screen.at (4.0, phazite::toControlPosition (range, 10010.0f), title));
+    CHECK_FALSE (lane.getDescription().startsWith ("Drag the handle"));
+    mouse.moveTo (screen.at (2.0, 0.25f, title));
+    CHECK (lane.getDescription().startsWith ("Click to add a point on the line"));
+    mouse.moveTo (screen.at (2.0, phazite::toControlPosition (range, 5015.0f), title));
+    CHECK_FALSE (lane.getDescription().startsWith ("Click to add a point on the line"));
+    mouse.click (screen.at (2.0, 0.25f, title));
+    auto points = phazite::getAutomationPoints (screen.context, cutoff);
+    REQUIRE (points.size() == 3);
+    CHECK (points[1].beat.inBeats() == doctest::Approx (2.0));
+    CHECK (points[1].position == doctest::Approx (0.25f).epsilon (0.001));
+
+    // Typed in hertz, as its knob shows it, the point goes where the knob would be for it: 632 Hz, the knob's middle.
+    screen.context.getSongSelection().selectAutomationPoints (cutoff, { 1 });
+    REQUIRE (screen.registry.invoke ("automation.typeValue"));
+    auto* field = screen.playlist.getAutomationValueField();
+    REQUIRE (field != nullptr);
+    CHECK (field->getText()
+           == phazite::ui::formatParameterText (handle, phazite::ParameterKind::other,
+                                                phazite::fromControlPosition (range, points[1].position)));
+    field->setText ("632.456 Hz", false);
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    points = phazite::getAutomationPoints (screen.context, cutoff);
+    CHECK (points[1].position == doctest::Approx (0.5f).epsilon (0.0001));
+    CHECK (phazite::fromControlPosition (range, points[1].position) == doctest::Approx (632.456f).epsilon (0.0001));
+    phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
 }
 
 TEST_CASE ("Dragging one of several points moves that point only")
@@ -273,9 +331,9 @@ TEST_CASE ("Dragging one of several points moves that point only")
     const auto points = screen.getPoints();
     REQUIRE (points.size() == 3);
     CHECK (screen.getBeats() == std::vector { 2.0, 5.0, 6.0 });
-    CHECK (points[0].value == doctest::Approx (0.5f).epsilon (0.05));
-    CHECK (points[1].value == doctest::Approx (0.75f).epsilon (0.05));
-    CHECK (points[2].value == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK (points[1].position == doctest::Approx (0.75f).epsilon (0.05));
+    CHECK (points[2].position == doctest::Approx (0.5f).epsilon (0.05));
 }
 
 TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one step")
@@ -298,9 +356,9 @@ TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one s
     auto points = screen.getPoints();
     REQUIRE (points.size() == 3);
     CHECK (screen.getBeats() == std::vector { 2.0, 3.0, 6.0 }); // on the grid
-    CHECK (points[1].value == doctest::Approx (0.8f).epsilon (0.05));
-    CHECK (points[0].value == doctest::Approx (0.2f).epsilon (0.05)); // the line's ends stay
-    CHECK (points[2].value == doctest::Approx (0.6f).epsilon (0.05));
+    CHECK (points[1].position == doctest::Approx (0.8f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.2f).epsilon (0.05)); // the line's ends stay
+    CHECK (points[2].position == doctest::Approx (0.6f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
     phazite::undo (*screen.song);
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
@@ -312,7 +370,7 @@ TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one s
     points = screen.getPoints();
     REQUIRE (points.size() == 3);
     CHECK (points[1].beat.inBeats() == doctest::Approx (5.3).epsilon (0.005));
-    CHECK (points[1].value == doctest::Approx (0.53f).epsilon (0.02));
+    CHECK (points[1].position == doctest::Approx (0.53f).epsilon (0.02));
     CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
 }
 
@@ -339,13 +397,13 @@ TEST_CASE ("The handle in the middle of a line bends it, and a double-click on t
     REQUIRE (points.size() == 2);
     CHECK (points[0].curve == doctest::Approx (-phazite::AutomationPoint::maxBend));
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
-    CHECK (points[0].value == doctest::Approx (0.2f).epsilon (0.05));
-    CHECK (points[1].value == doctest::Approx (0.6f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.2f).epsilon (0.05));
+    CHECK (points[1].position == doctest::Approx (0.6f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Bend Automation"));
 
     // The handle stays on the bent line, in its middle: a double-click there straightens it.
-    const auto middle =
-        phazite::getAutomationValues (screen.context, screen.volume, { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (4.0) }, 1);
+    const auto middle = phazite::getAutomationPositions (screen.context, screen.volume,
+                                                         { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (4.0) }, 1);
     REQUIRE (middle.size() == 1);
     CHECK (middle[0] > 0.45f);
     mouse.doubleClick (screen.at (4.0, middle[0]));
@@ -376,18 +434,18 @@ TEST_CASE ("Ctrl adds a point to the selection, and dragging one of the selected
     mouse.pause();
     auto points = screen.getPoints();
     REQUIRE (points.size() == 2);
-    CHECK (points[0].value == doctest::Approx (0.28f).epsilon (0.05)); // a fifth as far as the mouse went
-    CHECK (points[1].value == doctest::Approx (0.68f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.28f).epsilon (0.05)); // a fifth as far as the mouse went
+    CHECK (points[1].position == doctest::Approx (0.68f).epsilon (0.05));
 
     // Without Shift, as far as the mouse goes.
-    mouse.press (screen.at (6.0, points[1].value));
-    mouse.dragTo (screen.at (6.0, points[1].value + 0.2f));
-    mouse.dragTo (screen.at (6.0, points[1].value + 0.1f));
+    mouse.press (screen.at (6.0, points[1].position));
+    mouse.dragTo (screen.at (6.0, points[1].position + 0.2f));
+    mouse.dragTo (screen.at (6.0, points[1].position + 0.1f));
     mouse.release();
     mouse.pause();
     points = screen.getPoints();
-    CHECK (points[0].value == doctest::Approx (0.38f).epsilon (0.05));
-    CHECK (points[1].value == doctest::Approx (0.78f).epsilon (0.05));
+    CHECK (points[0].position == doctest::Approx (0.38f).epsilon (0.05));
+    CHECK (points[1].position == doctest::Approx (0.78f).epsilon (0.05));
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
     CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 }
@@ -404,7 +462,7 @@ TEST_CASE ("A press a little beside a point takes the point rather than selectin
     mouse.dragTo (beside + juce::Point<int> (0, -10));
     mouse.release();
     mouse.pause();
-    CHECK (screen.getPoints()[0].value > 0.55f);
+    CHECK (screen.getPoints()[0].position > 0.55f);
     CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 }
 
@@ -423,7 +481,7 @@ TEST_CASE ("Draw draws steps on the grid, and Paint the chosen shape between whe
     mouse.release();
     mouse.pause();
     CHECK (screen.getBeats() == std::vector { 0.0, 1.0, 1.0, 2.0, 2.0, 3.0 });
-    CHECK (screen.getPoints()[4].value == doctest::Approx (0.75f).epsilon (0.05));
+    CHECK (screen.getPoints()[4].position == doctest::Approx (0.75f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Draw Automation"));
 
     // Paint: a square from beat 4 to beat 8 at a grid of a beat: four cycles, replacing nothing else.

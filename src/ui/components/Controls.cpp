@@ -910,7 +910,16 @@ void ParameterAttachment::showRange (const ParameterHandle& shown)
         return;
 
     const auto range = shown.getRange();
-    slider.setNormalisableRange ({ range.start, range.end, range.interval, range.skew });
+    const auto info = shown.getInfo();
+
+    // A frequency's knob is logarithmic, as many octaves in each part of its travel: its range's own mapping, which JUCE's
+    // slider takes as functions (devices::getRange()).
+    if (info.has_value() && info->scale == devices::Scale::logarithmic)
+        slider.setNormalisableRange ({ range.start, range.end, [range] (double, double, double position)
+                                       { return (double) range.convertFrom0to1 ((float) position); },
+                                       [range] (double, double, double value) { return (double) range.convertTo0to1 ((float) value); } });
+    else
+        slider.setNormalisableRange ({ range.start, range.end, range.interval, range.skew });
 
     if (const auto defaultValue = shown.getDefaultValue())
         slider.setDoubleClickReturnValue (true, *defaultValue);

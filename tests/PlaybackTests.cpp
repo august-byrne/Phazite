@@ -567,9 +567,10 @@ TEST_CASE ("A song holding two curves of one parameter, the first without points
 
         if (withPoints)
             for (const auto beat : { 0.0, 8.0 })
-                curve.appendChild (juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, beat },
-                                                                              { phazite::schema::pointValue, 400.0 + 1000.0 * beat } }),
-                                   nullptr);
+                curve.appendChild (
+                    juce::ValueTree (phazite::schema::POINT, { { phazite::schema::pointBeat, beat },
+                                                               { phazite::schema::pointValue, 0.2 + 0.05 * beat } }), // along the travel
+                    nullptr);
 
         automation.appendChild (curve, nullptr);
     }

@@ -845,7 +845,7 @@ namespace
         }
 
         // Whether a property holds a number Schema.h writes down, which a reader takes as a double: one the loader's table
-        // gives a range (getRanges()), a device's or a modulator's value set by hand (VALUES), a point's value; or numbers
+        // gives a range (getRanges()), a device's or a modulator's value set by hand (VALUES), a point's position; or numbers
         // separated by spaces (inList): a step sequencer's steps, the sampler's slices.
         bool holdsNumbers (const juce::ValueTree& element, const juce::Identifier& property, bool& inList)
         {
@@ -1516,9 +1516,13 @@ namespace
             }
 
             //==============================================================================
-            // Each curve's points within its parameter's range, and none of a parameter its device hasn't. A plug-in tells
-            // its parameters only once it plays (from 0 to 1); a chain's crossover is kept while its container isn't split
-            // into bands, or while it is the first chain, which have none for now (describeParameter() finds none).
+            // Each curve's points at positions along the control's travel, 0 to 1, one without a position, or with one that is no
+            // number, left out (0 would be silence on a volume's lane), and a curve that had points and is left without gone (one
+            // holding only what Phazite doesn't know stays); and no curve of a parameter its device hasn't. A plug-in tells its
+            // parameters only once it plays: its curves are kept, as its element says it is one, never asked of its instance (a
+            // song that belongs to no session, one read from the versions on the history's thread, has none). A chain's crossover is
+            // kept while its container isn't split into bands, or while it is the first chain, which have none for now
+            // (describeParameter() finds none); and a device's in what wasn't read, which the song that takes it in knows.
             void keepCurves()
             {
                 auto automation = song.getState().getChildWithName (schema::AUTOMATION);
@@ -1532,39 +1536,40 @@ namespace
 
                     const ParameterRef parameter { DeviceID::fromRaw (readID (curve[schema::curveDevice])),
                                                    curve[schema::curveParameter].toString() };
-                    auto low = 0.0, high = 1.0, fallback = 0.0;
 
-                    if (const auto device = findDeviceState (song, parameter.device);
-                        device.isValid() && device[schema::deviceType].toString() == schema::deviceIsPlugin)
-                    {
-                        // A plug-in's from 0 to 1, as its element says it is one, never asked of its instance: a song that belongs
-                        // to no session (one read from the versions, on the history's thread) has none.
-                    }
-                    else if (const auto description = describeParameter (song, parameter))
-                    {
-                        low = fallback = (double) description->range.start;
-                        high = (double) description->range.end;
-                    }
-                    else if (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
-                    {
-                        low = fallback = (double) lowestCrossover;
-                        high = (double) highestCrossover;
-                    }
-                    else if (readInPart)
-                    {
-                        // Of a device in what wasn't read: kept, its points finite (the song that takes it in knows the device).
-                        low = -std::numeric_limits<double>::max();
-                        high = std::numeric_limits<double>::max();
-                    }
-                    else if (findDeviceState (song, parameter.device)[schema::deviceType].toString() != schema::deviceIsPlugin)
+                    if (findDeviceState (song, parameter.device)[schema::deviceType].toString() != schema::deviceIsPlugin
+                        && ! describeParameter (song, parameter).has_value()
+                        && ! (findContainerChain (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter)
+                        && ! readInPart)
                     {
                         automation.removeChild (i, nullptr);
                         continue;
                     }
 
-                    for (auto point : curve)
-                        if (point.hasType (schema::POINT))
-                            keepInRange (point, schema::pointValue, low, high, false, fallback);
+                    auto hadPoints = false;
+                    auto numPoints = 0;
+
+                    for (auto j = curve.getNumChildren(); --j >= 0;)
+                    {
+                        auto point = curve.getChild (j);
+
+                        if (! point.hasType (schema::POINT))
+                            continue; // one of a type Phazite doesn't know, which stays
+
+                        hadPoints = true;
+
+                        if (const auto number = readNumber (point[schema::pointValue]); ! number.has_value() || ! std::isfinite (*number))
+                        {
+                            curve.removeChild (j, nullptr);
+                            continue;
+                        }
+
+                        keepInRange (point, schema::pointValue, 0.0, 1.0, false, 0.0);
+                        ++numPoints;
+                    }
+
+                    if (hadPoints && numPoints == 0)
+                        automation.removeChild (i, nullptr);
                 }
             }
 

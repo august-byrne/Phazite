@@ -90,7 +90,7 @@ private:
         ParameterRef parameter;
         AutomationMode mode = AutomationMode::read;
         bool held = false;                   // its control is grabbed
-        float range = 1.0f;                  // how far its parameter's value goes
+        devices::Travel travel;              // its parameter's control's, which its points are positions along
         bool discrete = false;               // its parameter steps (each point holds, then jumps)
         std::vector<AutomationPoint> points; // from where it punched in, or the loop's start
         std::uint32_t round = 0;             // the engine's round of the loop its last point was heard on
@@ -103,9 +103,9 @@ private:
     struct Grab
     {
         ParameterRef parameter;
-        bool hadPass = false; // a pass wrote it before the grab
-        size_t points = 0;    // and its points then
-        float value = 0.0f;   // and its value then
+        bool hadPass = false;  // a pass wrote it before the grab
+        size_t points = 0;     // and its points then
+        float position = 0.0f; // and its position then
     };
 
     std::vector<Grab> grabs;   // the controls grabbed now (rememberGrab())

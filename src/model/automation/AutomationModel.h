@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation as the UI reaches it (docs/design.md, section 10; roadmap step 2.1), by IDs and plain values: the parameters
 // a track's devices offer, the lanes the playlist shows under a track, the points on a lane and their edits, each track's
-// write mode, and the parameter changed by hand last. Positions are song beats, and values are in the parameter's own
-// range (ParameterHandle::getRange()). Each function takes the open project's context and gives nothing, or does
+// write mode, and the parameter changed by hand last. Points are at song beats, each at a position along its parameter's
+// control's travel, from 0 to 1 (AutomationValues.h: AutomationPoint::position), which toControlPosition() and
+// fromControlPosition() turn into the parameter's own units and back by its range (ParameterHandle::getRange()), as its knob
+// does. Each function takes the open project's context and gives nothing, or does
 // nothing, for an ID of something that is gone. Edits are undo steps of their own, named as each says, unless a gesture is
 // open (SongGesture.h): then they join its one step. The song's side is internal/Automation.h.
 #pragma once
@@ -82,28 +84,30 @@ void setAutomationLanesCollapsed (ProjectContext&, TrackID, bool);
 // Points (AutomationValues.h) of a parameter's automation, at song beats.
 std::vector<AutomationPoint> getAutomationPoints (const ProjectContext&, const ParameterRef&); // in time order
 
-// The automation's value at evenly spaced beats across a range (the first at its start, the last at its end), or at each
-// of some beats, as the engine plays it, for drawing a lane; empty without points.
-std::vector<float> getAutomationValues (const ProjectContext&, const ParameterRef&, BeatRange, int numValues);
-std::vector<float> getAutomationValues (const ProjectContext&, const ParameterRef&, const std::vector<BeatPosition>&);
+// The automation's position at evenly spaced beats across a range (the first at its start, the last at its end), or at
+// each of some beats, as the engine plays it, for drawing a lane; empty without points.
+std::vector<float> getAutomationPositions (const ProjectContext&, const ParameterRef&, BeatRange, int numValues);
+std::vector<float> getAutomationPositions (const ProjectContext&, const ParameterRef&, const std::vector<BeatPosition>&);
 
-// Edits. Indices are points' places in time order. Values are kept within the parameter's range, and beats at or after
-// the song's start.
+// Edits. Indices are points' places in time order. Positions are kept from 0 to 1, and beats at or after the song's start.
 
 // Adds a point, after any at the same beat, as "Add Automation Point". Returns its index.
 int addAutomationPoint (ProjectContext&, const ParameterRef&, AutomationPoint);
 
-// Moves points (their indices in order) later by a distance (earlier, if negative) and up by an amount (down, if
-// negative), as "Move Automation Points". They keep their order among the points that don't move, and their values stay in
-// the parameter's range, so the distance and the amount are cut to fit. Returns the distance they moved.
-BeatDuration moveAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float valueChange);
+// Moves points (their indices in order) later by a distance (earlier, if negative) and up by a part of the control's travel
+// (down, if negative), as "Move Automation Points": each as far along the travel, so that a skewed parameter's points keep
+// their shape. They keep their order among the points that don't move, and stay on the travel, so the distance and the
+// change are cut to fit. Returns the distance they moved.
+BeatDuration moveAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, BeatDuration,
+                                   float positionChange);
 
 // Bends the line after a point (AutomationPoint::curve, -1 to 1), as "Bend Automation".
 void setAutomationCurve (ProjectContext&, const ParameterRef&, int index, float bend);
 
-// The inspector's edits of the selected points, typed: each point's value set to one, as "Set Automation Value"; and the
-// line after each bent as much, as "Bend Automation". (Dragged, they move by an amount: moveAutomationPoints().)
-void setAutomationPointValues (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, float value);
+// The inspector's and a lane's edits of the selected points, typed: each point set to one position, as "Set Automation
+// Value"; and the line after each bent as much, as "Bend Automation". (Dragged, they move by a change:
+// moveAutomationPoints().)
+void setAutomationPointPositions (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, float position);
 void setAutomationCurves (ProjectContext&, const ParameterRef&, const std::vector<int>& indices, float bend);
 
 void deleteAutomationPoints (ProjectContext&, const ParameterRef&, const std::vector<int>& indices); // "Delete Automation Points"
@@ -143,9 +147,9 @@ bool areAutomationLanesExpanded (const ProjectContext&); // a selected track sho
 void toggleAutomationLanes (ProjectContext&);
 
 // The selected points (SongSelection): whether there are any, and moving them later by a distance (earlier, if negative)
-// and up by a part of their parameter's range (1 is all of it; down, if negative), as "Move Automation Points".
+// and up by a part of their control's travel (1 is all of it; down, if negative), as "Move Automation Points".
 bool hasSelectedAutomationPoints (const ProjectContext&);
-void moveSelectedAutomationPoints (ProjectContext&, BeatDuration, float partOfRange);
+void moveSelectedAutomationPoints (ProjectContext&, BeatDuration, float partOfTravel);
 
 // The selected tracks' write mode: whether each of them is in this one, and putting them all in it.
 bool isAutomationModeOfSelection (const ProjectContext&, AutomationMode);

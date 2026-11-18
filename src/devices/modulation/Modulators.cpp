@@ -61,7 +61,13 @@ namespace
     // What several kinds share: how a cycle is timed, and its rate, in hertz or in lengths of the song (getBars(),
     // getNoteBeats()).
     constexpr ParameterInfo syncParameter { "syncType", "Sync", 0.0f, 2.0f, 0.0f, Unit::choice, {}, syncChoices };
-    constexpr ParameterInfo rateParameter { "rate", "Rate", 0.01f, 50.0f, 1.0f, Unit::hertz, 1.0f };
+    constexpr ParameterInfo rateParameter { .id = "rate",
+                                            .name = "Rate",
+                                            .minimum = 0.01f,
+                                            .maximum = 50.0f,
+                                            .defaultValue = 1.0f,
+                                            .unit = Unit::hertz,
+                                            .scale = Scale::logarithmic };
     constexpr ParameterInfo rateTypeParameter { "rateType", "Rate Type", 0.0f, 21.0f, 3.0f, Unit::choice, {}, rateTypeChoices };
     constexpr ParameterInfo polarityParameter { "bipolar", "Polarity", 0.0f, 1.0f, 0.0f, Unit::choice, {}, polarityChoices };
 
@@ -83,8 +89,10 @@ namespace
         { "offset", "Offset", 0.0f, 1.0f, 0.0f },
         { "lowPassEnabled", "Low Pass", 0.0f, 1.0f, 0.0f, Unit::toggle },
         { "highPassEnabled", "High Pass", 0.0f, 1.0f, 0.0f, Unit::toggle },
-        { "lowPassFrequency", "Low Pass Frequency", 20.0f, 20000.0f, 2000.0f, Unit::hertz, 700.0f },
-        { "highPassFrequency", "High Pass Frequency", 20.0f, 20000.0f, 500.0f, Unit::hertz, 700.0f }
+        { .id = "lowPassFrequency", .name = "Low Pass Frequency", .minimum = 20.0f, .maximum = 20000.0f, .defaultValue = 2000.0f,
+          .unit = Unit::hertz, .scale = Scale::logarithmic },
+        { .id = "highPassFrequency", .name = "High Pass Frequency", .minimum = 20.0f, .maximum = 20000.0f, .defaultValue = 500.0f,
+          .unit = Unit::hertz, .scale = Scale::logarithmic }
     };
     constexpr ParameterInfo stepsParameters[] = {
         syncParameter,

@@ -17,7 +17,7 @@ namespace
           .maximum = 12000.0f,
           .defaultValue = 5000.0f,
           .unit = Unit::hertz,
-          .midpoint = 3500.0f },
+          .scale = Scale::logarithmic },
         { .id = "drive", .name = "Drive", .minimum = 0.0f, .maximum = 36.0f, .defaultValue = 18.0f, .unit = Unit::decibels },
         { .id = "colour", .name = "Colour", .defaultValue = 0.5f, .unit = Unit::percent },
         { .id = "amount", .name = "Amount", .maximum = 4.0f, .defaultValue = 0.35f, .unit = Unit::percent, .midpoint = 0.5f },
@@ -27,7 +27,7 @@ namespace
           .maximum = 20000.0f,
           .defaultValue = 20000.0f,
           .unit = Unit::hertz,
-          .midpoint = 8000.0f },
+          .scale = Scale::logarithmic },
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 

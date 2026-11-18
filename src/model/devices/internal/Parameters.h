@@ -51,6 +51,13 @@ struct ParameterDescription
 std::optional<ParameterDescription> describeParameter (const Song&, const ParameterRef&);
 juce::String getParameterText (const Song&, const ParameterRef&, float value);
 
+// The travel of a parameter's control, its scale and steps (devices::Travel), which its automation's points are positions
+// along (model/automation/AutomationValues.h) and Phazite's engine plays them by: one of Phazite's own devices' by its
+// description; a plug-in's, any parameter of a plug-in's element, from 0 to 1, in the steps its instance says it has
+// once loaded; a chain's crossover's whether or not its container is split into bands now, so that what its automation
+// plays doesn't hang on that; the mixer's controls' by their ranges. Nothing for a parameter the song hasn't.
+std::optional<devices::Travel> getControlTravel (const Song&, const ParameterRef&);
+
 // The value it is set to by hand, which automation and modulation move from; and setting it, in the caller's undo step,
 // clipped to its range, which tells the song's listeners (Song::tellValueSetByHand()). A parameter whose curve has one
 // point (model/automation/) plays that point's value everywhere, so its point moves to the value too, as the control's

@@ -54,7 +54,11 @@ its tags). An element it does know, where `Schema.h` doesn't put it, it leaves o
 - `TEMPOMAP`: the tempos and time signatures, each from its beat;
 - `TRACKS`: the tracks top to bottom, a folder's tracks inside it, each with its clips, its devices, its sends and its
   channel; and `MASTER`, the master's channel and devices;
-- `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID;
+- `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID, with its points in beats,
+  each at a position along the parameter's control's travel (`value`, 0 to 1, as its knob or fader moves along its
+  scale: for a frequency, logarithmic, minimum × (maximum / minimum)^position, so 0.5 on a 20 Hz to 20 kHz cutoff is
+  632 Hz; for another skewed parameter, skewed so that its midpoint is at 0.5), so that a straight line between two
+  points is an even turn of the knob; a plug-in's parameters are from 0 to 1 already, and a pan's centre is 0.5;
 - `SECTIONS`, `CHORDLANE`: the song's parts and its chords;
 - `MERGING`, while a merge taken into the song waits for its version: what it merged, where, and the song before it
   (a piece in the project's Versions folder), as [versions-format.md](versions-format.md) says (section 8). It goes in
@@ -85,7 +89,8 @@ A track's devices are `DEVICE` elements in the order the sound goes through them
 for each parameter by its ID; a parameter at its default isn't written. A number is its value; **a choice is written by
 its name** ("Low Pass", "1/8D"), so that what it means doesn't hang on the choices' order.
 [`tests/golden/format/devices.json`](../tests/golden/format/devices.json) lists every device's parameters, their ranges,
-defaults and choices' names. A device's sounds and files are in a `SOUNDS` child.
+their knobs' scales (`scale` "logarithmic", or a `midpoint` halfway along), defaults and choices' names. A device's
+sounds and files are in a `SOUNDS` child.
 
 **A plug-in** is a `DEVICE` of `type` `plugin`, naming the plug-in by its `format` ("VST3"), `name`, `manufacturer`,
 `identifier` (its file on the computer it was added on) and `uid` (JUCE's number for it, which for a VST3 is made from
@@ -122,13 +127,13 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
   that is no number at all takes its default (a tempo of 0 opens at the slowest tempo, one that is no number at 120
   BPM). A channel's volume and a send's level are held to -100 to +6 dB, places to a million beats, every value set by
-  hand and every automation point to its parameter's range, and a parameter its device hasn't is left out; a step
-  sequencer's steps are held to -1..1 (one that is no finite number becomes 0) and a sampler's slices to 0..1 (one that is
-  none is left out), each in place, the others as they are written. First of all,
-  before any number is read, a number whose exponent has ten digits or more ("1e12345678901", which JUCE's reader of
-  numbers can't count) is taken as JUCE's reader takes it, past every number for an exponent above 0 ("0e12345678901"
-  too, which that reader reads as infinity) and 0 for one below, and so as no finite number; a name that reads as one stays
-  as it is.
+  hand to its parameter's range and every automation point to 0..1 (one that is none or no number is left out,
+  and a curve that had points and is left without goes), and a value or a curve of a parameter its device hasn't is left out; a step
+  sequencer's steps are held to -1..1 (one that is no finite number becomes 0) and a sampler's slices to 0..1 (one that
+  is none is left out), each in place, the others as they are written. First of all, before any number is read, a
+  number whose exponent has ten digits or more ("1e12345678901", which JUCE's reader of numbers can't count) is taken as
+  JUCE's reader takes it, past every number for an exponent above 0 ("0e12345678901" too, which that reader reads as
+  infinity) and 0 for one below, and so as no finite number; a name that reads as one stays as it is.
 - **Switches:** a switch written another way than Phazite writes it ("true", "false", "yes") is written as Phazite
   writes it, as it plays: "1", or "0" or none where Phazite leaves one that is off out; so that the versions, which
   compare text, see no change where there is none.

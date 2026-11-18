@@ -408,10 +408,12 @@ void TestSong::waitForClipRenders()
 }
 
 //==============================================================================
-void TestSong::addAutomation (const ParameterRef& parameter, std::initializer_list<AutomationPoint> points)
+void TestSong::addAutomation (const ParameterRef& parameter, std::initializer_list<ValuePoint> points)
 {
+    const auto range = getParameter (context, parameter).getRange();
+
     for (const auto& point : points)
-        addAutomationPoint (context, parameter, point);
+        addAutomationPoint (context, parameter, { point.beat, toControlPosition (range, point.value), point.curve });
 
     REQUIRE (getAutomationPoints (context, parameter).size() >= points.size());
 }

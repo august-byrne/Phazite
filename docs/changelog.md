@@ -17,6 +17,11 @@ The full text of every step, as it was written when it was built, is in the
   lines are gone (a version records the whole song, a double-click hears a version, bouncing it first if it has no
   bounce, and a merge takes every line), and the view is called Versions and speaks in plain words: Save Version,
   History, Switch Branch, Restore This Version. A branch is named as typed.
+- **S4.7 Automation along the control's travel:** automation is kept and played as the control's position, and
+  every knob in hertz travels logarithmically, so a straight line in a lane is an even sweep through the octaves
+  (632 Hz halfway from 20 Hz to 20 kHz, 1 kHz halfway from 100 Hz to 10 kHz); keys nudge by a part of the travel,
+  typed values stay in the parameter's own units, and the example songs' sweeps and modulation depths were fitted
+  again. With it, the Filter and every effect's automated mix play the same at every block size.
 - **S4.6 Backups kept by age:** a save backs the project file up only when it differs from the newest backup, and
   Backups/ keeps what Local History keeps (every one of the last two hours, the newest of each hour for a day, the
   newest of each day for 30 days), each backup dated by when its version was saved, and the newest older than that

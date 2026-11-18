@@ -1243,12 +1243,14 @@ namespace
             positionField.set = [this] (double value)
             { moveAutomationPoints (context, parameter, indices, BeatDuration::fromBeats (value - earliest), 0.0f); };
 
+            // The field holds the points' positions along the control's travel, so that a drag or a scroll moves them evenly
+            // along it, as their lane does; it shows and takes them in the parameter's own units.
             valueField.setTooltip ("The points' value: drag or scroll to move them all, or type one for all of them");
             // A plug-in's as it writes and reads them, asked of its helper without waiting (known bug 166): the field shows its
             // text again once it has come, and sets a value typed once the plug-in has read it.
-            valueField.format = [this] (double value)
+            valueField.format = [this] (double position)
             {
-                return formatParameterText (handle, getParameterKind(), (float) value,
+                return formatParameterText (handle, getParameterKind(), fromControlPosition (handle.getRange(), (float) position),
                                             [safeField = juce::Component::SafePointer<MultiField> (&valueField)]
                                             {
                                                 if (safeField != nullptr)
@@ -1258,13 +1260,15 @@ namespace
             valueField.parse = [this] (const juce::String& text) { return parseValue (text); };
             valueField.change = [this] (double amount)
             { moveAutomationPoints (context, parameter, indices, {}, toFloat (amount, noNumber)); };
-            valueField.set = [this] (double value) { setAutomationPointValues (context, parameter, indices, toFloat (value, noNumber)); };
+            valueField.set = [this] (double position)
+            { setAutomationPointPositions (context, parameter, indices, toFloat (position, noNumber)); };
 
             if (handle.readsTextLater())
                 valueField.parseLater = [this] (const juce::String& text, std::function<void (std::optional<double>)> then)
                 {
-                    parseParameterText (handle, getParameterKind(), text, [then = std::move (then)] (std::optional<float> value)
-                                        { then (value.has_value() ? std::optional ((double) *value) : std::nullopt); });
+                    parseParameterText (
+                        handle, getParameterKind(), text, [then = std::move (then), range = handle.getRange()] (std::optional<float> value)
+                        { then (value.has_value() ? std::optional ((double) toControlPosition (range, *value)) : std::nullopt); });
                 };
 
             curveField.setTooltip ("How the line after each point bends: 0% is straight, up to 100% either way");
@@ -1285,15 +1289,13 @@ namespace
             refresh();
         }
 
-        // A value as the parameter's lane and control show it, and one typed so.
+        // A value as the parameter's lane and control show it, and one typed so, as the position along the travel it is at.
         ParameterKind getParameterKind() const { return target.has_value() ? target->kind : ParameterKind::other; }
-
-        juce::String getValueText (float value) const { return formatParameterText (handle, getParameterKind(), value); }
 
         std::optional<double> parseValue (const juce::String& text) const
         {
             const auto value = parseParameterText (handle, getParameterKind(), text);
-            return value.has_value() ? std::optional ((double) *value) : std::nullopt;
+            return value.has_value() ? std::optional ((double) toControlPosition (handle.getRange(), *value)) : std::nullopt;
         }
 
         void refresh() override
@@ -1324,7 +1326,7 @@ namespace
             const auto [first, last] = range ([] (const AutomationPoint& point) { return point.beat.inBeats(); });
             earliest = first;
             positionField.show (first, last);
-            const auto [lowest, highest] = range ([] (const AutomationPoint& point) { return (double) point.value; });
+            const auto [lowest, highest] = range ([] (const AutomationPoint& point) { return (double) point.position; });
             valueField.show (lowest, highest);
             const auto [least, most] = range ([] (const AutomationPoint& point) { return (double) point.curve; });
             curveField.show (least, most);
@@ -1348,25 +1350,7 @@ namespace
         double earliest = 0.0; // the earliest point's beat
         juce::Label parameterLabel;
         MultiField positionField { context, "Position", 0.0, 100000.0, 0.25, "Move Automation Points" };
-        MultiField valueField { context,
-                                "Value",
-                                getLowest (handle),
-                                getHighest (handle),
-                                (getHighest (handle) - getLowest (handle)) / 100.0,
-                                "Move Automation Points" };
-
-        // The parameter's range, or 0 to 1 for one that is gone.
-        static double getLowest (const ParameterHandle& h)
-        {
-            const auto range = h.getRange();
-            return range.end > range.start ? range.start : 0.0;
-        }
-
-        static double getHighest (const ParameterHandle& h)
-        {
-            const auto range = h.getRange();
-            return range.end > range.start ? range.end : 1.0;
-        }
+        MultiField valueField { context, "Value", 0.0, 1.0, 0.01, "Move Automation Points" }; // along the travel
         MultiField curveField { context, "Curve", -1.0, 1.0, 0.01, "Bend Automation" };
     };
 

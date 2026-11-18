@@ -27,7 +27,7 @@ namespace
           .maximum = highestCutoff,
           .defaultValue = highestCutoff,
           .unit = Unit::hertz,
-          .midpoint = 632.456f }, // the middle of the range, on a log scale
+          .scale = Scale::logarithmic },
         { .id = "resonance", .name = "Resonance", .defaultValue = 0.1f, .unit = Unit::percent },
         { .id = "filterSlope",
           .name = "Slope",
@@ -122,6 +122,8 @@ void FilterEffect::reset()
     lastMix = 1.0f;
     dryInStep = false;
     isFirstBlock = true;
+    stepLeft = 0;
+    nextSongSample = -1;
     wasDriven = false;
     driveBlend = 0.0f;
 }
@@ -302,20 +304,36 @@ void FilterEffect::process (const ProcessContext& block)
     driveBlock (block, numChannels, targetDrive);
     auto coefficients = makeCoefficients (values, toHertz (octaves), sampleRate);
 
-    for (int start = 0; start < block.numSamples; start += coefficientStep)
-    {
-        const auto end = std::min (block.numSamples, start + coefficientStep);
+    // New coefficients on the song's steps of coefficientStep samples, each made as the step starts for where the cutoff
+    // will be at its end; a step a block's end cuts goes on in the next block with them. So a cutoff that moves (its
+    // automation, on the song's control points, which are whole steps apart) plays the same in blocks of any size. Where the
+    // song didn't go on from the last block (a jump, the song stopped), a step starts afresh.
+    if (block.songSample != nextSongSample)
+        stepLeft = 0;
 
-        // The cutoff glides in octaves, so a sweep sounds even all the way; new coefficients every few samples, a comb's
-        // delay gliding between them too.
-        if (std::abs (targetOctaves - octaves) > 1.0e-4f)
+    nextSongSample = block.songSample + block.numSamples;
+
+    for (int start = 0, end = 0; start < block.numSamples; start = end)
+    {
+        if (stepLeft == 0)
         {
-            octaves += (targetOctaves - octaves) * (1.0f - std::pow (1.0f - glide, (float) (end - start)));
-            coefficients = makeCoefficients (values, toHertz (octaves), sampleRate);
+            const auto sinceStep = (int) (((block.songSample + start) % coefficientStep + coefficientStep) % coefficientStep);
+            stepLeft = coefficientStep - sinceStep;
+
+            // The cutoff glides in octaves, so a sweep sounds even all the way; a comb's delay glides between the coefficients
+            // too, over the step.
+            if (std::abs (targetOctaves - octaves) > 1.0e-4f)
+            {
+                octaves += (targetOctaves - octaves) * (1.0f - std::pow (1.0f - glide, (float) stepLeft));
+                coefficients = makeCoefficients (values, toHertz (octaves), sampleRate);
+            }
+
+            for (int channel = 0; channel < numChannels; ++channel)
+                filters[(size_t) channel].set (coefficients, stepLeft);
         }
 
-        for (int channel = 0; channel < numChannels; ++channel)
-            filters[(size_t) channel].set (coefficients, end - start);
+        end = std::min (block.numSamples, start + stepLeft);
+        stepLeft -= end - start;
 
         for (int i = start; i < end; ++i)
             for (int channel = 0; channel < numChannels; ++channel)

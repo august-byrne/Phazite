@@ -161,6 +161,14 @@ TEST_SUITE ("golden")
                 entry->setProperty ("maximum", asNumber (parameter.maximum));
                 entry->setProperty ("default", phazite::toSavedValue (parameter, parameter.defaultValue));
 
+                // The knob's travel, which an automation point's position is along (docs/project-format.md): logarithmic, or
+                // skewed so that the midpoint is halfway along (as JUCE's NormalisableRange::setSkewForCentre() skews), or
+                // linear without either.
+                if (parameter.scale == phazite::devices::Scale::logarithmic)
+                    entry->setProperty ("scale", "logarithmic");
+                else if (parameter.midpoint.has_value())
+                    entry->setProperty ("midpoint", asNumber (*parameter.midpoint));
+
                 if (parameter.unit == phazite::devices::Unit::choice)
                 {
                     juce::Array<juce::var> choices;

@@ -28,7 +28,7 @@ namespace
         return std::equal (x.begin(), x.end(), y.begin(), y.end(),
                            [] (const engine::CurvePoint& p, const engine::CurvePoint& q)
                            {
-                               return juce::exactlyEqual (p.beat, q.beat) && juce::exactlyEqual (p.value, q.value)
+                               return juce::exactlyEqual (p.beat, q.beat) && juce::exactlyEqual (p.position, q.position)
                                       && juce::exactlyEqual (p.curve, q.curve);
                            });
     }

@@ -793,6 +793,7 @@ TEST_CASE ("The FM synth's filter envelope and velocity are the synth's: the sam
         CHECK (ours.maximum == theirs.maximum);
         CHECK (ours.unit == theirs.unit);
         CHECK (ours.midpoint == theirs.midpoint);
+        CHECK (ours.scale == theirs.scale);
 
         if (std::string_view (id) != "filterEnvelope" && std::string_view (id) != "cutoff")
             CHECK (ours.defaultValue == theirs.defaultValue);
