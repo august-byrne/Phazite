@@ -51,26 +51,31 @@ With Ping-Pong on, the two sides of the sound go into the left line as one, the 
 and the right's feeds the left, so each echo crosses to the other side; with Link off it bounces between the two times.
 
 **A change of time.** With Repitch, a time glides to a new one over about 50 ms, as a tape's would, which bends the
-echoes' pitch on the way instead of clicking. With Fade, the line is read at the new time at once while the read at the
-old time fades out over 50 ms and the new one fades in (two reads of the line for that long), at equal power (a sine and
-a cosine), so that sound unrelated between the two reads keeps its level and no pitch bends: for automation of the time,
-and a note value switched while playing. A change that comes while a fade is under way waits for it to end, then fades on
-from what is heard. A change shorter than 1 ms or than 1 % of the time (a tempo that ramps, with Sync on) glides even with
-Fade: it bends the pitch by next to nothing, where a fade every block between reads a few samples apart would comb the
-echoes as a flanger does. Each side's time changes on its own. An echo that falls between samples is
-read by 4-point Lagrange interpolation, so that it keeps its treble pass after pass.
+echoes' pitch on the way instead of clicking. With Fade, a change of time never bends the pitch by more than 10 cents:
+the time read follows the time set by a glide no faster than 10 cents (0.58 % of real time), and once it is more than
+1 ms behind, the line is read at the time set at once while the read as it is fades out over 50 ms and the new one fades
+in (two reads of the line for that long), at equal power (a sine and a cosine), so that sound unrelated between the two
+reads keeps its level. A change that comes while a fade is under way waits for it to end, then glides or fades on from
+what is heard. So a nudge glides in (half a millisecond takes about 90 ms), a jump or a note value switched fades, and a
+time that moves faster than 10 cents fades again and again, one fade at a time: the time ramped from 375 to 400 ms over
+2 s fades 18 times a side, gliding between; a tempo ramped from 120 to 150 BPM over 2 s with Sync on (the time moving 4 %
+of real time) fades 40 times a side, back to back (the time moves 2 ms during each fade's 50 ms), which combs noise by
+0.3 dB in thirds of an octave from 1 to 8 kHz for as long as the ramp lasts: the price of no bend, which is what Fade is
+chosen for. Each side's time changes on its own. An echo that falls between samples is read by 4-point Lagrange
+interpolation, so that it keeps its treble pass after pass.
 
 **The modulation** wavers each line's time as a sine at the Mod Rate, by up to 4 ms either way at 100 % Mod Depth, the
 right side a quarter of a cycle ahead, never taking a line under its shortest time (1 ms: nearer it, the swing is less;
 while Fade crosses, each read is swung by its own time's swing). Its phase runs on a sample at a time from the Mod Rate,
 as an LFO in hertz does, so that a move of the rate, by hand or by automation, changes how fast it runs and never where
-it is. It is tied to the song only as playback starts: at once in the first block after the delay is made ready (a
-render's start, so that every render of a song plays the same), and otherwise by a glide to where the song is (the
-song's sample times the rate) that moves the phase no faster than the rate does, so that it bends the pitch no more than
-the modulation at its fastest. A loop going round and a jump of the playhead while the song plays leave it running on,
-as Motion's LFO does at a rate in hertz (`SyncedLfo.h` takes its phase from the song only in time with it), so that a
-passage reached by a jump while the song plays may swing at another point of its cycle than the same passage played
-through. The modulation always bends the pitch, whatever the Transition. Its depth glides over 20 ms, and at 0 % it does
+it is. It counts the song's samples, not its beats, so a change of tempo moves nothing. As playback starts it is set at
+once from where the song is, its sample times the rate: the engine resets the device at every start and at every jump of
+the playhead while the song plays, and a render starts so too, so a passage reached by a jump plays as one played from
+there, and every render of a song plays the same. While the song plays on it runs on; a block that comes later than the
+last one ended (the runner let the delay sleep on silence, as live playback does and a render never does) moves it on
+by the samples it missed, at the rate it has then, as if it had played them, so that after a sleep live playback swings
+as the render does. A loop going round (the engine doesn't reset the device at a loop's wrap) leaves it running on, live
+as in a render of the loop. Stopped, it runs free. The modulation always bends the pitch, whatever the Transition. Its depth glides over 20 ms, and at 0 % it does
 nothing at all.
 
 **The duck** follows the sound coming in, the loudest of the louder side's peaks over the last 20 ms (so that the level
@@ -86,8 +91,11 @@ at the time rounded to a whole number of samples and without the modulation, so 
 pass, as a read between samples pushed back would dull it. What is heard is still read as before, at the time set (between
 samples, once), swung by the modulation, through the cuts: each pass repeats the echo heard as the freeze came on, so
 that freezing changes nothing of what is heard but that it goes on, and the sound's lows, highs and any offset, which the
-lines hold whole, stay out of it. The Feedback and the Character do nothing meanwhile; a change of time re-cuts what goes
-round. Switched on and off it crossfades over 20 ms; off, the loop goes on from what the lines hold, with its Feedback and
+lines hold whole, stay out of it. The Feedback and the Character do nothing meanwhile. While the time moves (a glide, or a
+fade), what goes round is read at it, between samples, so that the loop is stretched with it rather than cut by a sample
+here and there (cut so, a tempo automated by 1 BPM left some 150 ticks in the loop for good); that dulls only what goes
+round during the move, once, and when the time rests again, what goes round moves to the nearest whole sample, no faster
+than 10 cents, and copies whole samples from there. Switched on and off it crossfades over 20 ms; off, the loop goes on from what the lines hold, with its Feedback and
 cuts back.
 
 The delay reports as its tail the time its echoes take to fall by 60 dB at the longer side's time (at most 60 s), and 60 s
@@ -119,6 +127,11 @@ Link is on), the Feedback, large, with Ping-Pong and Freeze; the Character, with
 - No reverse, no diffusion, no width control and no swing.
 - Two characters only: no bucket-brigade or other character, and Tape's curve isn't anti-aliased.
 - A synced echo is a bar at most, and any echo 5 s.
+- Fade crosses at equal power, which keeps the level of sound unrelated between the two reads (the usual case: a note value
+  switched); where the two reads match (a steady tone changed by whole cycles, or a low sound whose time moves just over
+  1 ms), the sum is up to 3 dB louder at the fade's middle.
+- Repitch's glide comes to rest a little short of the time set at long times, where its last steps are too small for the
+  float it is kept in: about 3 samples at 375 ms and 48 kHz, some 10 (0.2 ms) at 2 s.
 - A press over the echoes sets the time and the feedback together from where the pointer is, and a right-click presses
   as a left-click does.
 

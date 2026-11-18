@@ -20,6 +20,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <span>
 
 namespace phazite::devices
@@ -105,8 +106,10 @@ public:
     double getTailSeconds() const override { return tailSeconds.load (std::memory_order_relaxed); }
 
 private:
-    // A side's line and where it is read: at its time, which Repitch glides to a new one; and while Fade fades, also at the
-    // time it fades from, which fades out as the new one fades in.
+    // A side's line and where it is read: at its time, which Repitch glides to a new one (Fade too, but no faster than
+    // 10 cents); and while Fade fades, also at the time it fades from, which fades out as the new one fades in. While frozen,
+    // where what goes round is read, apart from what is heard: at the time while it moves, on a whole sample while it
+    // rests, and from where it was while it fades.
     struct Side
     {
         dsp::DelayLine line;
@@ -114,12 +117,14 @@ private:
         float delaySamples = 1.0f;
         float fadingFrom = 1.0f;
         int fadeLeft = 0; // samples of the fade left; 0 while it doesn't fade
+        float loopNow = 1.0f, loopFrom = 1.0f;
+        bool looping = false; // frozen, its loop's reads under way
     };
 
     double sampleRate = 44100.0;
-    float timeSmoothing = 0.001f; // of the way to a new time, per sample
+    float timeSmoothing = 0.001f; // of the way to a new time, per sample (Repitch)
     int fadeLength = 2205;        // a Fade's samples
-    float smallestFade = 48.0f;   // a change of time shorter than this, in samples (1 ms), glides even with Fade
+    float fadeAfter = 48.0f;      // with Fade, the time read this far behind the time set (1 ms), in samples, fades to it
     float shareStep = 0.001f;     // of a switch's crossfade, per sample (the character's and the freeze's)
     float depthSmoothing = 0.001f, duckRise = 0.0f, duckFall = 0.0f, duckSmoothing = 0.001f;
     bool isFirstBlock = true;
@@ -129,13 +134,13 @@ private:
     // The switches' crossfades: how much of the loop is Tape's, and how frozen it is, from 0 to 1.
     float tapeShare = 1.0f, frozenShare = 0.0f;
 
-    // The modulation: its phase (0 to 1), built up a sample at a time from the rate, as an LFO in hertz runs; tied to where
-    // the song is as playback starts, by a glide of what is left of the way there, which moves the phase no faster than the
-    // rate itself; its depth now, in samples.
-    double modPhase = 0.0, modIncrement = 0.0, modGlideLeft = 0.0;
-    bool modFresh = true, wasPlaying = false;
+    // The modulation: its phase (0 to 1), built up a sample at a time from the rate, as an LFO in hertz runs, and set from
+    // where the song is as playback starts; where the song was to be at the next block, so that a block that comes later
+    // (the device slept meanwhile) moves the phase on as far, as if it had played them; its depth now, in samples.
+    double modPhase = 0.0, modIncrement = 0.0;
+    std::int64_t nextSongSample = 0;
+    bool wasPlaying = false;
     float depthNow = 0.0f;
-
     // The duck: the loudest the sound reached in each of the last milliseconds (a running maximum over the hold), what
     // follows it (a gain), and the gain on the echoes now.
     std::array<float, duckHoldMilliseconds> duckPeaks {};
@@ -149,11 +154,12 @@ private:
 
     void startModulation (const ProcessContext&, float rate) noexcept;
     void advanceModulation() noexcept;
-    void moveTime (Side&, float target, bool fades) noexcept;
-    float readEcho (const Side&, float wave) const noexcept; // wave: the modulation's sine now, from -1 to 1
-    float readLoop (const Side&) const noexcept;             // what goes round while frozen: whole samples
-    float getSwing (float time) const noexcept;              // how far the modulation moves a read at a time, in samples
-    float followDuck (float level) noexcept;                 // the duck's follower a sample on, from what comes in
+    bool moveTime (Side&, float target, bool fades) noexcept; // whether a fade started
+    float readEcho (const Side&, float wave) const noexcept;  // wave: the modulation's sine now, from -1 to 1
+    float readLoop (const Side&) const noexcept;              // what goes round while frozen
+    void moveLoop (Side&, float moved, bool fadeStarted) noexcept;
+    float getSwing (float time) const noexcept; // how far the modulation moves a read at a time, in samples
+    float followDuck (float level) noexcept;    // the duck's follower a sample on, from what comes in
     void restDuck() noexcept;
 };
 } // namespace phazite::devices

@@ -20,7 +20,8 @@ The full text of every step, as it was written when it was built, is in the
   until its gain has come back, so that a long release sounds live as it renders.
 - **S6.6 The Delay:** a time for each side (Link), a Clean loop beside the Tape one and a Feedback to 110 % whose
   echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
-  holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power (Fade); at its defaults
+  holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power without bending the pitch by more than 10 cents
+  (Fade); at its defaults
   it plays as before, sample for sample, and seven presets join its six. Left of S6.6: the Filter.
 - **S6.6 The Saturator takes the Exciter in:** the Saturator gains a Colour (the curve's working point, for even
   harmonics from any shape), a Crush shape (fewer bits the harder it is driven), a Quality of 2x, 4x or 8x the rate,

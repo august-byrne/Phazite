@@ -4,6 +4,7 @@
 // Clean character's straight line and Tape's harmonics; a feedback over 100 % held by the loop's curve; the modulation's
 // swing, its sides a quarter of a cycle apart and where the song is; the duck; the freeze; the two transitions; and all of it
 // in blocks of any size.
+#include "DspProbe.h"
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/dsp/DelayLine.h"
@@ -18,9 +19,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -29,6 +32,7 @@ namespace
 {
 namespace devices = phazite::devices;
 namespace dsp = devices::dsp;
+namespace probe = phazite::test::probe;
 using devices::Delay;
 constexpr double rate = 48000.0;
 constexpr double twoPi = juce::MathConstants<double>::twoPi;
@@ -347,18 +351,98 @@ std::vector<double> getBandLevels (const std::vector<float>& sound, size_t from,
     return levels;
 }
 
-// The largest difference between two sounds' levels in thirds of an octave, in decibels, over the bands from a frequency up
-// where the first is within 60 dB of its loudest band.
-double getLargestBandDifference (const std::vector<double>& first, const std::vector<double>& second, double lowestHertz = 0.0)
+// The largest difference between two sounds' levels in thirds of an octave, in decibels, over the bands between two
+// frequencies where the first is within 60 dB of its loudest band.
+double getLargestBandDifference (const std::vector<double>& first, const std::vector<double>& second, double lowestHertz = 0.0,
+                                 double highestHertz = 1.0e9)
 {
     const auto loudest = *std::max_element (first.begin(), first.end());
     auto largest = 0.0;
 
     for (size_t band = 0; band < first.size(); ++band)
-        if (25.0 * std::pow (2.0, (double) band / 3.0) >= lowestHertz && first[band] > loudest - 60.0)
+        if (const auto hertz = 25.0 * std::pow (2.0, (double) band / 3.0);
+            hertz >= lowestHertz && hertz <= highestHertz && first[band] > loudest - 60.0)
             largest = std::max (largest, std::abs (first[band] - second[band]));
 
     return largest;
+}
+// Plays a prepared delay as play() does, in blocks of 48, noting each block in which a fade was under way (and a block on
+// either side of it), sample by sample.
+struct Marked
+{
+    Stereo sound;
+    std::vector<char> fading;
+};
+
+Marked playMarked (Delay& delay, int numSamples, const Input& input, const Values& values, Transport transport = {})
+{
+    constexpr int blockSize = 48;
+    Marked marked;
+    std::vector<char> blocks;
+
+    for (int done = 0; done < numSamples; done += blockSize)
+    {
+        const auto started = delay.getFadesStarted();
+        auto part = transport;
+        part.from = transport.from + done;
+        part.tempoAt = transport.tempoAt == nullptr
+                           ? nullptr
+                           : std::function<double (int)> ([&transport, done] (int t) { return transport.tempoAt (done + t); });
+        const auto played = play (
+            delay, std::min (blockSize, numSamples - done), blockSize, [&input, done] (int t) { return input (done + t); },
+            [&values, done] (int t) { return values (done + t); }, part);
+        marked.sound.left.insert (marked.sound.left.end(), played.left.begin(), played.left.end());
+        marked.sound.right.insert (marked.sound.right.end(), played.right.begin(), played.right.end());
+        blocks.push_back (delay.getFadesUnderWay() > 0 || delay.getFadesStarted() != started ? 1 : 0);
+    }
+
+    for (size_t block = 0; block < blocks.size(); ++block)
+    {
+        const auto near =
+            blocks[block] != 0 || (block > 0 && blocks[block - 1] != 0) || (block + 1 < blocks.size() && blocks[block + 1] != 0);
+
+        for (int i = 0; i < blockSize; ++i)
+            marked.fading.push_back (near ? 1 : 0);
+    }
+
+    marked.fading.resize (marked.sound.left.size());
+    return marked;
+}
+
+// The pitch of a tone, in cents from a frequency, between each two of its rising zero crossings in a stretch, leaving out
+// those with a marked sample between them: the furthest from it, and how many it measured.
+struct Pitch
+{
+    double cents = 0.0;
+    int periods = 0;
+};
+
+Pitch getFurthestCentsOutside (const std::vector<float>& sound, size_t from, size_t to, double frequency, const std::vector<char>& marked)
+{
+    Pitch pitch;
+    auto lastCrossing = -1.0;
+    auto lastAt = from;
+
+    for (auto i = std::max<size_t> (from, 1); i < to; ++i)
+    {
+        if (sound[i - 1] < 0.0f && sound[i] >= 0.0f)
+        {
+            const auto crossing = (double) (i - 1) + sound[i - 1] / (sound[i - 1] - sound[i]);
+            const auto clear = std::none_of (marked.begin() + (std::ptrdiff_t) lastAt, marked.begin() + (std::ptrdiff_t) i + 1,
+                                             [] (char mark) { return mark != 0; });
+
+            if (lastCrossing >= 0.0 && clear)
+            {
+                pitch.cents = std::max (pitch.cents, std::abs (1200.0 * std::log2 (rate / (crossing - lastCrossing) / frequency)));
+                ++pitch.periods;
+            }
+
+            lastCrossing = crossing;
+            lastAt = i - 1;
+        }
+    }
+
+    return pitch;
 }
 // The delay as it played before step S6.6, sample for sample (its Delay.cpp at 5227a470): one time for both sides, every
 // echo bent by the soft saturation, a feedback of at most 95 %. Its values read from the parameters it had.
@@ -987,6 +1071,95 @@ TEST_CASE ("Frozen at a time between samples, the delay's lines go round unchang
     CHECK (getRms (out.left, (size_t) last, (size_t) (last + length)) > 0.01);
 }
 
+TEST_CASE ("Frozen, a change of time stretches the delay's loop between samples without a tick, and settles it on whole samples")
+{
+    // A 2 kHz sine at 0.5 into a dotted eighth, Sync on, the cuts open, frozen at a second; then the tempo automated from 120
+    // to 121 BPM over 4 s, as the loop goes round. Cut by whole samples, the loop dropped or doubled a sample each time its
+    // rounded length stepped (some 150 times), each a step of 0.14 in the tone, there for good. Stretched between samples
+    // while the time moves, and settled on whole samples as it rests again, no step between two samples goes past 1.5 times
+    // the largest the steady loop makes (the sine's own, and the echo's read between samples).
+    const auto values = [] (int t)
+    { return with ({ { "lowCut", 20.0f }, { "highCut", 20000.0f }, { "freeze", t >= 48000 ? 1.0f : 0.0f } }); };
+    const auto playAt = [&] (std::function<double (int)> tempoAt)
+    {
+        Delay delay;
+        delay.prepare (rate, 480);
+        return play (delay, 48000 * 7, 480, both (sine (2000.0, 0.5f)), values, { .tempoAt = tempoAt });
+    };
+
+    const auto steady = playAt ([] (int) { return 120.0; });
+    const auto moving = playAt ([] (int t) { return 120.0 + std::clamp ((double) (t - 96000) / 192000.0, 0.0, 1.0); });
+    const auto steadyStep = getLargestStep (steady.left, 72000, steady.left.size());
+    CAPTURE (steadyStep);
+    CHECK (steadyStep > 0.1f);
+    CHECK (getLargestStep (moving.left, 72000, moving.left.size()) < 1.5f * steadyStep);
+    CHECK (getLargestStep (moving.right, 72000, moving.right.size()) < 1.5f * steadyStep);
+
+    // Noise frozen, the tempo moved the same way, then 30 s more frozen: the loop on whole samples again (about 17851 of them
+    // at 121 BPM: Repitch's glide comes to rest a sample or two from the time set, where its steps grow too small for its
+    // float), what is heard read between them as the time says. What comes out repeats a loop's length later sample for
+    // sample, and 30 s on, every third of an octave is within 0.1 dB.
+    const auto noise = makeNoise (24000, 17, 0.5f);
+    constexpr int length = 32768;
+    const auto first = 288000;
+    const auto numSamples = first + 82 * 17860 + length;
+    Delay delay;
+    delay.prepare (rate, 480);
+    const auto out =
+        play (delay, numSamples, 480, both ([&noise] (int t) { return t < (int) noise.size() ? noise[(size_t) t] : 0.0f; }),
+              [] (int t) { return with ({ { "lowCut", 20.0f }, { "highCut", 20000.0f }, { "freeze", t >= 24000 ? 1.0f : 0.0f } }); },
+              { .tempoAt = [] (int t) { return 120.0 + std::clamp ((double) (t - 48000) / 192000.0, 0.0, 1.0); } });
+
+    // The loop's length: where what comes out is most like itself.
+    auto period = 0;
+    auto closest = 1.0e9;
+
+    for (int lag = 17830; lag <= 17880; ++lag)
+    {
+        auto difference = 0.0;
+
+        for (int i = 0; i < 4096; ++i)
+            difference = std::max (difference, (double) std::abs (out.left[(size_t) (first + i)] - out.left[(size_t) (first + lag + i)]));
+
+        if (difference < closest)
+        {
+            closest = difference;
+            period = lag;
+        }
+    }
+
+    CAPTURE (period);
+    CHECK (closest < 1.0e-5);
+    const auto last = first + 80 * period;
+    CHECK (getLargestBandDifference (getBandLevels (out.left, (size_t) first, length, rate, 15),
+                                     getBandLevels (out.left, (size_t) last, length, rate, 15))
+           < 0.1);
+    CHECK (getRms (out.left, (size_t) last, (size_t) (last + length)) > 0.01);
+}
+
+TEST_CASE ("After a sleep, the delay swings as one that never slept: its modulation's phase moves on with the song's samples")
+{
+    // Through its runner, Mod Depth at 50 %: a second of noise, nine of silence (it falls asleep once its tail has passed,
+    // live, where a render plays on), then three of noise. From half a second into the second sound, live plays what the
+    // render plays, sample for sample.
+    const auto sound = probe::join (probe::join (probe::makeNoise (48000, 3, 0.5f), probe::makeSilence (48000 * 9)),
+                                    probe::makeNoise (48000 * 3, 4, 0.5f));
+    const auto playIt = [&sound] (bool rendering, std::uint64_t& worked)
+    {
+        probe::Device device (Delay::info);
+        device.set ("modDepth", 0.5f);
+        device.isRendering = rendering;
+        device.prepare (rate, 480);
+        auto played = device.played (sound, 480);
+        worked = device.getRunner().getBlocksWorked();
+        return played;
+    };
+
+    std::uint64_t liveBlocks = 0, renderBlocks = 0;
+    const auto live = playIt (false, liveBlocks), render = playIt (true, renderBlocks);
+    CHECK (liveBlocks < renderBlocks); // it slept
+    CHECK (probe::getLargestDifference (live, render, 48000 * 10 + 24000) < 1.0e-5);
+}
 TEST_CASE ("The delay's transitions: Repitch glides to a new time, bending the echoes' pitch; Fade doesn't glide, and doesn't click")
 {
     // The time a function of where the block starts: 375 ms, changed at a second, and again 20 ms later (during the fade).
@@ -1073,51 +1246,94 @@ TEST_CASE ("The delay's Fade crosses at equal power: noise keeps its level throu
     }
 }
 
-TEST_CASE ("The delay's Fade glides a change of time under 1 ms or 1 % of it, as under a tempo that ramps, combing nothing")
+TEST_CASE ("The delay's Fade never bends the pitch past 10 cents: a nudge glides in, a jump and a steep move fade")
 {
-    // A dotted eighth, Sync on, with Fade, the tempo ramping block by block: from 120 to 126 BPM over eight seconds (each
-    // block's change a sample or so), and from 120 to 150 over two (18 samples a block). Each change glides; no fade starts,
-    // where a fade every block crossed reads a few samples apart, a flanger on the echoes (its notches every 2.7 kHz in the
-    // faster ramp). Noise through it keeps its spectrum: every third of an octave from 1 to 8 kHz within 1 dB of the noise
-    // that went in (above, the read between samples, which the glide moves through every fraction, dulls the top octave a
-    // little, as any moving read does).
-    const auto noise = makeNoise (48000 * 8, 31, 0.5f);
+    // A steady 1 kHz sine, 0.5, echoed with Fade, the cuts open, no feedback; the pitch of what comes out between each two
+    // rising zero crossings, wherever no fade is under way (a crossing of two reads of a steady tone turns its phase, which
+    // isn't a bend of the time), held within 12 cents.
+    const auto withFade = [] (std::initializer_list<std::pair<std::string_view, float>> changes)
+    { return with (changes, with ({ { "feedback", 0.0f }, { "lowCut", 20.0f }, { "highCut", 20000.0f }, { "transition", 1.0f } })); };
 
-    for (const auto& ramp : { std::pair { 8, 126.0 }, std::pair { 2, 150.0 } })
+    struct Case
     {
-        const auto numSamples = 48000 * ramp.first;
-        const auto toTempo = ramp.second;
-        CAPTURE (toTempo);
+        const char* name;
+        int numSamples;
+        Values values;
+        std::function<double (int)> tempoAt;
+    };
+
+    const Case cases[] = {
+        // A nudge of 0.5 ms: under 1 ms behind, it glides at 10 cents, and no fade starts.
+        { "a nudge", 48000 * 3, [=] (int t) { return withFade ({ { "sync", 0.0f }, { "time", t < 48000 ? 375.0f : 375.5f } }); }, nullptr },
+        // A typed change of 19 ms at a time of 2 s: it fades.
+        { "a typed change", 48000 * 5, [=] (int t) { return withFade ({ { "sync", 0.0f }, { "time", t < 144000 ? 2000.0f : 2019.0f } }); },
+          nullptr },
+        // The time ramped from 375 to 400 ms over 2 s (21 cents' worth): it glides, falls behind, fades, and again.
+        { "a ramp of the time", 48000 * 4,
+          [=] (int t)
+          {
+              const auto along = std::clamp ((float) (t - 48000) / 96000.0f, 0.0f, 1.0f);
+              return withFade ({ { "sync", 0.0f }, { "time", 375.0f + 25.0f * along } });
+          },
+          nullptr },
+        // A dotted eighth, Sync on, the tempo ramped from 120 to 150 BPM over 2 s (375 ms to 300: 4 % of real time).
+        { "a ramp of the tempo", 48000 * 4, [=] (int) { return withFade ({}); },
+          [] (int t) { return 120.0 + 30.0 * std::clamp ((double) (t - 48000) / 96000.0, 0.0, 1.0); } },
+    };
+
+    for (const auto& each : cases)
+    {
+        const auto name = std::string (each.name);
+        CAPTURE (name);
         Delay delay;
         delay.prepare (rate, 480);
-        const auto out =
-            play (delay, numSamples, 480, both ([&noise] (int t) { return noise[(size_t) t]; }), [] (int)
-                  { return with ({ { "feedback", 0.0f }, { "lowCut", 20.0f }, { "highCut", 20000.0f }, { "transition", 1.0f } }); },
-                  { .tempoAt = [=] (int t) { return 120.0 + (toTempo - 120.0) * t / numSamples; } });
-        CHECK (delay.getFadesStarted() == 0);
-        CHECK (delay.getFadesUnderWay() == 0);
+        const auto out = playMarked (delay, each.numSamples, both (sine (1000.0, 0.5f)), each.values, { .tempoAt = each.tempoAt });
+        const auto pitch = getFurthestCentsOutside (out.sound.left, 24000, out.sound.left.size(), 1000.0, out.fading);
+        MESSAGE (name << ": " << delay.getFadesStarted() / 2 << " fades a side; " << pitch.periods
+                      << " cycles measured between fades, the furthest " << pitch.cents << " cents off");
+        CHECK (pitch.cents < 12.0);
 
-        const auto echoed = getBandLevels (out.left, 24000, (size_t) numSamples - 24000, rate);
-        const auto came = getBandLevels (noise, 0, (size_t) numSamples - 24000, rate);
-        std::vector<double> inBand, cameInBand;
+        if (name == "a nudge")
+        {
+            CHECK (delay.getFadesStarted() == 0);
+            CHECK (pitch.periods > 2000);
+        }
+        else
+        {
+            CHECK (delay.getFadesStarted() >= 2);
+        }
 
-        for (size_t band = 0; band < came.size(); ++band)
-            if (const auto hertz = 25.0 * std::pow (2.0, (double) band / 3.0); hertz >= 1000.0 && hertz <= 8000.0)
-            {
-                inBand.push_back (echoed[band]);
-                cameInBand.push_back (came[band]);
-            }
-
-        CHECK (getLargestBandDifference (cameInBand, inBand) < 1.0);
+        if (name == "a ramp of the time")
+            CHECK (pitch.periods > 500); // it glides between its fades
     }
-    // A change of a few milliseconds, more than 1 % of a short time, still fades.
+
+    // Noise through the tempo's ramp: the comb its fades one after another make, in thirds of an octave from 1 to 8 kHz
+    // against the noise that went in, over the ramp.
+    const auto noise = makeNoise (48000 * 4, 31, 0.5f);
+    Delay combing;
+    combing.prepare (rate, 480);
+    const auto combed =
+        play (combing, 48000 * 4, 480, both ([&noise] (int t) { return noise[(size_t) t]; }), [=] (int) { return withFade ({}); },
+              { .tempoAt = [] (int t) { return 120.0 + 30.0 * std::clamp ((double) (t - 48000) / 96000.0, 0.0, 1.0); } });
+    const auto comb = getLargestBandDifference (getBandLevels (noise, 48000 - 17000, 96000, rate),
+                                                getBandLevels (combed.left, 48000, 96000, rate), 1000.0, 8000.0);
+    MESSAGE ("the tempo's ramp combs noise by " << comb << " dB in thirds of an octave from 1 to 8 kHz");
+    CHECK (comb < 1.0);
+
+    // A tempo that moves slower than 10 cents' worth (120 to 126 BPM over eight seconds) glides all the way: no fade.
+    Delay gentle;
+    gentle.prepare (rate, 480);
+    play (gentle, 48000 * 8, 480, both (sine (1000.0, 0.5f)), [=] (int) { return withFade ({}); },
+          { .tempoAt = [] (int t) { return 120.0 + 6.0 * t / (48000.0 * 8.0); } });
+    CHECK (gentle.getFadesStarted() == 0);
+
+    // A change of 3 ms fades.
     Delay shorter;
     shorter.prepare (rate, 480);
     play (shorter, 9600, 480, both ([&noise] (int t) { return noise[(size_t) t]; }),
           [] (int t) { return plain (t < 4800 ? 100.0f : 103.0f, { { "transition", 1.0f } }); });
     CHECK (shorter.getFadesStarted() == 2);
 }
-
 TEST_CASE ("The delay's Fade swings each of its two reads by its own time's swing: a short time with the modulation doesn't click")
 {
     // 3 ms faded to 5 ms with the modulation at 100 %: near the shortest time the swing is less (2 ms at 3 ms, the whole 4 ms

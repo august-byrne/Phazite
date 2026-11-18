@@ -81,14 +81,17 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.25f, .unit = Unit::percent },
     };
 
-    constexpr double glideSeconds = 0.05;         // how long a change of time takes to glide (Repitch), about
-    constexpr double fadeSeconds = 0.05;          // and to fade (Fade)
-    constexpr double smallestFadeSeconds = 0.001; // a change shorter than this, or than 1 % of the time, glides even with Fade
-    constexpr double switchSeconds = 0.02;        // a change of character, and the freeze switched, crossfade
-    constexpr double depthGlideSeconds = 0.02;    // the modulation's depth glides
-    constexpr double shortestSeconds = 0.001;     // the shortest time, which the modulation never takes a line under
+    constexpr double glideSeconds = 0.05;      // how long a change of time takes to glide (Repitch), about
+    constexpr double fadeSeconds = 0.05;       // and to fade (Fade)
+    constexpr double fadeAfterSeconds = 0.001; // with Fade, a time read this far behind the time set fades to it
+    constexpr double switchSeconds = 0.02;     // a change of character, and the freeze switched, crossfade
+    constexpr double depthGlideSeconds = 0.02; // the modulation's depth glides
+    constexpr double shortestSeconds = 0.001;  // the shortest time, which the modulation never takes a line under
     constexpr double butterworthQ = 0.70710678;
     constexpr double halfPi = juce::MathConstants<double>::halfPi;
+
+    // With Fade, how fast the time read may follow the time set: as far as bends the pitch 10 cents, 0.58 % of real time.
+    constexpr float fadeGlideStep = 0.00579294f; // 2 to the power 10/1200, less 1
 
     // The duck's follower rises 60 dB in 5 ms and falls 60 dB in 250 ms, as a tail's 60 dB are counted (a sound coming back
     // from loud to silence is out of the duck's range in that time), from the loudest of the last 20 ms; its gain glides
@@ -159,7 +162,7 @@ void Delay::prepare (double newSampleRate, int)
     sampleRate = newSampleRate;
     timeSmoothing = (float) (1.0 - std::exp (-1.0 / (glideSeconds * sampleRate)));
     fadeLength = std::max (1, (int) std::lround (fadeSeconds * sampleRate));
-    smallestFade = (float) (smallestFadeSeconds * sampleRate);
+    fadeAfter = (float) (fadeAfterSeconds * sampleRate);
     shareStep = (float) (1.0 / std::max (1.0, switchSeconds * sampleRate));
     depthSmoothing = (float) (1.0 - std::exp (-1.0 / (depthGlideSeconds * sampleRate)));
     samplesPerDuckPeak = std::max (1, (int) std::lround (sampleRate * 0.001));
@@ -184,11 +187,11 @@ void Delay::reset()
         side.lowFilter.reset();
         side.highFilter.reset();
         side.fadeLeft = 0;
+        side.looping = false;
     }
 
     modPhase = 0.0;
-    modGlideLeft = 0.0;
-    modFresh = true;
+    nextSongSample = 0;
     wasPlaying = false;
     restDuck();
     duckGain = 1.0f;
@@ -198,80 +201,79 @@ void Delay::reset()
 }
 
 // The modulation's phase runs on a sample at a time from its rate, as an LFO in hertz does (a move of the rate, by hand or
-// by automation, changes how fast it runs, never where it is). It is tied to the song only as playback starts: at once in
-// the first block after the device is made ready (a render's start, so that a render plays the same every time), and
-// otherwise by a glide of the way from where it is to where the song is, which moves it no faster than the rate does, so
-// that it bends the pitch no more than the modulation at its fastest. A loop going round and a jump while the song plays
-// leave it running on, as Motion's LFO in hertz does (devices/dsp/SyncedLfo.h): the engine tells neither from the other.
+// by automation, changes how fast it runs, never where it is). It counts the song's samples, not its beats: a change of
+// tempo moves nothing. As playback starts (the engine resets the device at every start and every jump of the playhead, and
+// a render starts so too) it is set at once from where the song is, its sample times the rate; while the song plays on, it
+// runs on from there. A block that comes later than the last one ended (the runner let the device sleep on silence, its
+// lines empty) moves it on as far as the samples it missed, at the rate it has, as if it had played them, so that live
+// playback and a render, which never sleeps, swing alike after a sleep. A loop going round (a block earlier than the last
+// one ended: the engine doesn't reset the device at a loop's wrap) leaves it running on, in a render of the loop as live.
+// Stopped, it runs free.
 void Delay::startModulation (const ProcessContext& block, float rate) noexcept
 {
     modIncrement = std::max (0.0, (double) rate) / sampleRate;
-    const auto starts = block.isPlaying && ! wasPlaying;
-    wasPlaying = block.isPlaying;
 
     if (! block.isPlaying)
-        modFresh = false; // a start after this glides
-
-    if (! starts)
-        return;
-
-    const auto wanted = (double) block.songSample * modIncrement;
-    const auto target = wanted - std::floor (wanted);
-
-    if (modFresh)
     {
-        modPhase = target;
-        modGlideLeft = 0.0;
-        modFresh = false;
+        wasPlaying = false;
         return;
     }
 
-    auto difference = target - modPhase;
-    difference -= std::floor (difference + 0.5);
-    modGlideLeft = difference;
+    if (! wasPlaying)
+    {
+        const auto wanted = (double) block.songSample * modIncrement;
+        modPhase = wanted - std::floor (wanted);
+    }
+    else if (block.songSample > nextSongSample)
+    {
+        modPhase += (double) (block.songSample - nextSongSample) * modIncrement;
+        modPhase -= std::floor (modPhase);
+    }
+
+    wasPlaying = true;
+    nextSongSample = block.songSample + block.numSamples;
 }
 
 void Delay::advanceModulation() noexcept
 {
     modPhase += modIncrement;
 
-    if (std::abs (modGlideLeft) > 0.0)
-    {
-        const auto step = std::clamp (modGlideLeft, -modIncrement, modIncrement);
-        modPhase += step;
-        modGlideLeft -= step;
-    }
-
-    if (modPhase >= 1.0 || modPhase < 0.0)
+    if (modPhase >= 1.0)
         modPhase -= std::floor (modPhase);
 }
-
-// A side's time a sample nearer its target: gliding there (Repitch); or, with Fade, read at the target at once while the read
-// at the time before fades out. A change while a fade is under way waits for it to end, then fades on from what is heard. A
-// change shorter than 1 ms or than 1 % of the time (a tempo that ramps, with Sync on) glides even with Fade: it bends the
-// pitch by next to nothing, where fades a few samples apart, one after another, would comb the echoes as a flanger does.
-void Delay::moveTime (Side& side, float target, bool fades) noexcept
+// A side's time a sample nearer its target: gliding there (Repitch); or, with Fade, no faster than bends the pitch 10 cents,
+// and once the time read is more than 1 ms behind the time set, read at the time set at once while the read as it is fades
+// out. A change while a fade is under way waits for it to end, then glides or fades on from what is heard. So a nudge glides
+// in without a bend anyone hears, a jump fades, and a time that moves faster than 10 cents (a steep ramp of the tempo) fades
+// again and again.
+bool Delay::moveTime (Side& side, float target, bool fades) noexcept
 {
     if (side.fadeLeft > 0)
     {
         --side.fadeLeft;
-        return;
+        return false;
     }
 
-    const auto change = target - side.delaySamples;
+    const auto lag = target - side.delaySamples;
 
-    if (! fades || std::abs (change) < std::max (smallestFade, 0.01f * side.delaySamples))
+    if (! fades)
     {
-        side.delaySamples += change * timeSmoothing;
-        return;
+        side.delaySamples += lag * timeSmoothing;
+        return false;
+    }
+
+    if (std::abs (lag) <= fadeAfter)
+    {
+        side.delaySamples += std::clamp (lag, -fadeGlideStep, fadeGlideStep);
+        return false;
     }
 
     side.fadingFrom = side.delaySamples;
     side.fadeLeft = fadeLength;
     side.delaySamples = target;
     ++fadesStarted;
+    return true;
 }
-
 // How far the modulation moves a read at a time, in samples: its depth now, but never under the shortest time.
 float Delay::getSwing (float delay) const noexcept
 {
@@ -292,20 +294,50 @@ float Delay::readEcho (const Side& side, float wave) const noexcept
     return crossfade (before, now, 1.0f - (float) side.fadeLeft / (float) fadeLength);
 }
 
-// What goes round while frozen: whole samples, at the time rounded to one, so that the line's content comes back unchanged
-// pass after pass (a read between samples, pushed back, would dull it a little each time); unmodulated. While it fades, the
-// two times' whole samples, crossfaded.
+// What goes round while frozen, unmodulated: while the time rests, whole samples, so that the line's content comes back
+// unchanged pass after pass (a read between samples, pushed back, would dull it a little each time); while it moves, read
+// between samples at the time, so that the loop is stretched with it rather than cut by a sample here and there, which
+// dulls only what goes round during the move, once. While it fades, the two reads crossfaded.
 float Delay::readLoop (const Side& side) const noexcept
 {
-    const auto now = side.line.read ((int) std::lround (side.delaySamples) - 1);
+    const auto now = side.line.read (side.loopNow - 1.0f);
 
     if (side.fadeLeft <= 0)
         return now;
 
-    const auto before = side.line.read ((int) std::lround (side.fadingFrom) - 1);
-    return crossfade (before, now, 1.0f - (float) side.fadeLeft / (float) fadeLength);
+    return crossfade (side.line.read (side.loopFrom - 1.0f), now, 1.0f - (float) side.fadeLeft / (float) fadeLength);
 }
 
+// Where what goes round is read, a sample on: as the freeze comes on, where the time is; as a fade starts, from where it was
+// to the time set; otherwise the time while it moves, and the whole sample nearest it while it rests, which it moves to no
+// faster than the time moves and 10 cents more, so that it never steps.
+void Delay::moveLoop (Side& side, float moved, bool fadeStarted) noexcept
+{
+    if (! side.looping)
+    {
+        side.loopNow = side.delaySamples;
+        side.loopFrom = side.fadingFrom;
+        side.looping = true;
+        return;
+    }
+
+    if (fadeStarted)
+    {
+        side.loopFrom = side.loopNow;
+        side.loopNow = side.delaySamples;
+        return;
+    }
+
+    if (side.fadeLeft > 0)
+        return;
+
+    // Resting: the time moved less this sample than half of what 10 cents move it (Repitch's glide ends so, its last steps
+    // too small to tell from its float's, two samples or so from the time set at a long time, where it stays).
+    const auto rests = std::abs (moved) < 0.5f * fadeGlideStep;
+    const auto goal = rests ? std::round (side.delaySamples) : side.delaySamples;
+    const auto reach = fadeGlideStep + std::abs (moved);
+    side.loopNow += std::clamp (goal - side.loopNow, -reach, reach);
+}
 // The duck's follower a sample on: the loudest of the last 20 ms (a running maximum of each millisecond's peak, as the
 // compressor's Duck holds its key's, dynamics/Compressor.cpp), which it rises to and falls to.
 float Delay::followDuck (float level) noexcept
@@ -403,7 +435,8 @@ void Delay::process (const ProcessContext& block)
         for (int s = 0; s < numSides; ++s)
         {
             auto& side = sides[(size_t) s];
-            moveTime (side, targets[s], fades);
+            const auto before = side.delaySamples;
+            const auto fadeStarted = moveTime (side, targets[s], fades);
 
             // The modulation: a sine, the right a quarter of a cycle ahead.
             const auto wave = depthNow > 0.0f ? (float) std::sin (juce::MathConstants<double>::twoPi * (modPhase + 0.25 * s)) : 0.0f;
@@ -414,7 +447,14 @@ void Delay::process (const ProcessContext& block)
             back[s] = tapeShare >= 1.0f ? dsp::softClip (x) : blend (bendClean (x), dsp::softClip (x), tapeShare);
 
             if (frozenShare > 0.0f)
+            {
+                moveLoop (side, side.delaySamples - before, fadeStarted);
                 held[s] = readLoop (side);
+            }
+            else
+            {
+                side.looping = false;
+            }
         }
 
         // What goes back into the lines; frozen, what they hold goes round unchanged, and nothing new goes in.

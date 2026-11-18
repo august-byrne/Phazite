@@ -141,6 +141,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   of its own, neither a `Gesture`, so nothing is in progress to wait for. To fix: let the session wait while a `Trial`
   is open too (a `Trial::whenEnded`, as `Gesture::whenEnded`), or run the knob's key steps and wheel bursts through
   one gesture that ends when they rest, as the dynamics curve's arrow keys do.
+- **202. The Delay's Repitch glide stops a few samples short of the time set at long times** (found in S6.6's reviews,
+  2026-11-18; older than that step): the glide's step becomes smaller than the precision of the float that holds the
+  time read, so it stops about 3 samples short at 375 ms and about 10 (0.2 ms) at 2 s; the echo plays that much off
+  the time set, and a frozen loop settles at that length. To fix: hold the time read in a double, or set it to the
+  time set once what is left is under a hundredth of a sample. Either moves what a project that changes a delay's
+  time plays by a few samples; the defaults, which don't glide, stay exact.
 
 ## Tests
 
