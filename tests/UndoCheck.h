@@ -57,7 +57,8 @@ enum class SongPart
     undoableWithoutSwitches
 };
 
-// A song, or a part of it, as a project file's text.
+// A song, or a part of it, as a project file's text, without where it stands in its project's versions (the branch and
+// the version it grew from, which the history writes whenever a version is saved, a project's first in the background).
 juce::String writeSong (const Song&, SongPart);
 
 // What differs between two such texts, a line each, by its place in the song; a few lines at most. Empty for the same text.

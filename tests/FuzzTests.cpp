@@ -40,6 +40,7 @@
 
 #include <cstring>
 #include <limits>
+#include <string>
 #include <unordered_map>
 
 namespace
@@ -162,6 +163,35 @@ TEST_CASE ("Fuzz: project files open as a song that holds together, or not at al
                               juce::MemoryBlock (nearTheLastText.toRawUTF8(), nearTheLastText.getNumBytesAsUTF8()) };
 
     fuzz::run ("project files", seeds, fuzz::Shape::xml, 300, [&] (const juce::MemoryBlock& input) { return openProject (file, input); });
+}
+
+TEST_CASE ("A number in a project file whose text ends in half a character is read by the bytes it holds, not past them")
+{
+    // What the fuzzer found under AddressSanitizer (CI, 2026-11-18): the loader took a number's text as the count of bytes its
+    // characters need as UTF-8 (getNumBytesAsUTF8()), which for bytes that aren't UTF-8, the first byte of a longer
+    // character at the end, is more than the text holds, and read past its end. Every number of the empty project in
+    // turn: read as no number and given its default or refused, the song holding together. Only a sanitizer sees the
+    // read itself.
+    TemporaryFolder temporary;
+    const auto file = temporary.folder.getChildFile ("Half.phazite");
+    const auto whole = readBytes (getGoldenFolder().getChildFile ("projects/empty.xml")).toString().toStdString();
+    int tried = 0;
+
+    for (const std::string name : { "nextID", "bpm", "numerator", "denominator", "fader", "beat" })
+        for (const std::string half : { "à", "ð", "Ã", "ðŸ" })
+        {
+            const auto at = whole.find (" " + name + "=\"");
+            REQUIRE (at != std::string::npos);
+            const auto end = whole.find ('"', at + name.size() + 3);
+            REQUIRE (end != std::string::npos);
+            auto text = whole;
+            text.insert (end, half);
+            CAPTURE (name);
+            CHECK (openProject (file, juce::MemoryBlock (text.data(), text.size())).empty());
+            ++tried;
+        }
+
+    CHECK (tried == 24);
 }
 
 TEST_CASE ("Fuzz: a version's pieces join into a song that holds together, or not at all")

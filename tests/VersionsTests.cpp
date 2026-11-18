@@ -18,6 +18,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -739,7 +740,13 @@ TEST_CASE ("A plug-in's stored settings that differ count as a change only after
         device = phazite::test::TestPlugin::add (song, track);
     }
 
+    // Loaded, and every answer of its in, before the bytes below are written by hand: an answer that came after them would
+    // write its own state back over them, sooner or later as the system runs the helper (the review of S4.5).
+    s.waitForPlugins();
     keepVersion (s.context, "First");
+    s.saveWithPluginStates();
+    auto& instance = *phazite::findPluginInstance (song, device);
+    REQUIRE (dispatchMessagesUntil ([&instance] { return ! instance.isStateUnasked() && ! instance.isAskingState(); }));
     CHECK (describeChanges (s.context).isEmpty());
 
     // Other bytes stored with nothing said, as a plug-in that writes a time into its state leaves them at each save.
@@ -766,15 +773,27 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
         device = phazite::test::TestPlugin::add (song, track);
     }
 
-    // A commit stores the version of the plug-in that made the state, as it stores the state.
-    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "1.0.0", nullptr);
+    // A commit stores the version of the plug-in that made the state, as it stores the state: the one installed, which is
+    // all Phazite ever writes there (PluginInstances::write()). Loaded first, and every answer of its in, so that the test
+    // means the same on every system: a version written by hand was written back by the plug-in's answer to an ask on Linux,
+    // where it came after the version was saved (the review of S4.5).
+    s.waitForPlugins();
     keepVersion (s.context, "First");
+    s.saveWithPluginStates();
     const auto then = phazite::findDeviceState (song, device)[schema::pluginVersion].toString();
-    const auto installed = phazite::test::TestPlugin::getDescription().version;
-    CHECK (then == (installed.isNotEmpty() ? installed : juce::String ("1.0.0")));
+    CHECK (then == phazite::test::TestPlugin::getDescription().version);
+    CHECK (then == "1.0");
+    CHECK (describeChanges (s.context).isEmpty());
 
-    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "9.9.9", nullptr);
-    CHECK (describeChanges (s.context).contains ("updated " + then + juce::String::fromUTF8 (" \xe2\x86\x92 9.9.9")));
+    // The plug-in updated, its settings stored again as a save stores them: in the changes, by the versions that made them.
+    const auto updated = "updated 1.0" + juce::String::fromUTF8 (" \xe2\x86\x92 ") + "2.0";
+    testPlugin.setVersion (2);
+    s.saveWithPluginStates();
+    CHECK (describeChanges (s.context).contains (updated));
+
+    // And as the project opens again, the updated plug-in loading in it.
+    s.reopen();
+    CHECK (describeChanges (s.context).contains (updated));
 }
 
 TEST_CASE ("Verify History finds the versions no branch holds and what is damaged, and Recover Lost Versions makes a branch of each line")

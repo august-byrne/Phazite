@@ -34,6 +34,9 @@ The full text of every step, as it was written when it was built, is in the
   next save; a version saved beside another computer's goes its own way and is offered to merge; a song whose branch
   hasn't reached the folder waits with its saves. Save Version writes nothing where nothing changed, and keeps what
   was typed. A merge of another computer's merge of the same version brings no item twice.
+- **A number's text read by the bytes it holds:** a project file whose number ended in half a character (bytes that
+  aren't UTF-8) made the loader read a byte past the text's end; found by the fuzzer under AddressSanitizer in CI. The
+  loader, the comparison of saved values and the writer of a plug-in's class ID take a text's bytes as they are.
 - **S4.7 Automation along the control's travel:** automation is kept and played as the control's position, and
   every knob in hertz travels logarithmically, so a straight line in a lane is an even sweep through the octaves
   (632 Hz halfway from 20 Hz to 20 kHz, 1 kHz halfway from 100 Hz to 10 kHz); keys nudge by a part of the travel,

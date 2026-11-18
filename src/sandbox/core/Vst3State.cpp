@@ -97,7 +97,7 @@ juce::MemoryBlock writeVst3Preset (const Vst3State& state)
     out.writeInt (1);
 
     char classID[classIDSize] = {};
-    std::memcpy (classID, state.classID.toRawUTF8(), std::min ((size_t) classIDSize, state.classID.getNumBytesAsUTF8()));
+    std::memcpy (classID, state.classID.toRawUTF8(), std::min ((size_t) classIDSize, std::strlen (state.classID.toRawUTF8())));
     out.write (classID, classIDSize);
     out.writeInt64 (0); // where the list starts, written once it is known
 

@@ -779,8 +779,9 @@ namespace
             const auto string = value.toString();
             const auto isVisible = [] (char c) { return c > ' ' && c < 127; };
 
-            if (const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
-                ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
+            // Its bytes as they are, up to their end: a text from a file anyone wrote needn't be UTF-8, and the count JUCE works
+            // out from its characters (getNumBytesAsUTF8()) is then not the count it holds.
+            if (const std::string_view text (string.toRawUTF8()); ! text.empty() && isVisible (text.front()) && isVisible (text.back()))
                 return read (text);
 
             return read (string.trim().toStdString());
@@ -798,7 +799,7 @@ namespace
                 return false;
 
             const auto string = value.toString();
-            const std::string_view text (string.toRawUTF8(), string.getNumBytesAsUTF8());
+            const std::string_view text (string.toRawUTF8()); // its bytes as they are (readNumber())
             const auto isDigit = [] (char c) { return c >= '0' && c <= '9'; };
             size_t i = text.starts_with ('-') ? 1 : 0;
             const auto wholeStart = i;
