@@ -133,6 +133,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   debug build when a plan is compiled in between (`SongPlayer.cpp`, `checkAudio`). To fix: whatever replaces a played
   file tells the player (a change marked for the tracks that play it), or kept files are looked at once a plan and the
   track's audio made again when one changed.
+- **201. The wheel or the keyboard on a knob that a device's latency follows remakes the device at every notch** (the
+  Compressor's Look-Ahead; found in S6.3's reviews, 2026-11-18): each notch of the wheel or step of a key makes a new
+  plan, the device starts from silence, and its reduction and the sound on its way are dropped, a click or a gap each
+  time. A drag of the knob doesn't: the playback session waits for a gesture's end before it makes the plan
+  (`PlaybackSession::valueTreePropertyChanged`). Why: a burst of the wheel is a `Trial` and a key's step an undo step
+  of its own, neither a `Gesture`, so nothing is in progress to wait for. To fix: let the session wait while a `Trial`
+  is open too (a `Trial::whenEnded`, as `Gesture::whenEnded`), or run the knob's key steps and wheel bursts through
+  one gesture that ends when they rest, as the dynamics curve's arrow keys do.
 
 ## Tests
 

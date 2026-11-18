@@ -854,6 +854,19 @@ TEST_CASE ("Type Values reads a decimal comma where it can't be mistaken, and sa
     CHECK (curve.getRefusal().contains ("\"loud\" isn't a level"));
     CHECK_FALSE (curve.setPointLevels (last, "-3, -4"));
     CHECK (curve.getRefusal().contains ("level out alone"));
+
+    // A number alone, its sign, a decimal point or comma, and "dB": "1e3" isn't +13 dB, nor "abc5" 5 dB.
+    for (const auto* text : { "1e3, -12", "abc5, -12", "-18, 5x", "--18, -12", "-1.8.5, -12" })
+    {
+        CAPTURE (text);
+        CHECK_FALSE (curve.setPointLevels (1, text));
+        CHECK (curve.getRefusal().contains ("isn't a level"));
+    }
+
+    // The refusal shows until the next edit or move of the pointer: a key press is one.
+    curve.keyPressed (juce::KeyPress ('a'));
+    CHECK (curve.getRefusal().isEmpty());
+    CHECK (curve.getReadout().isEmpty());
     CHECK (decibelsOf ("point2X") == doctest::Approx (-21.0f).epsilon (1.0e-4));
     REQUIRE (curve.setPointLevels (1, "-18, -18"));
     CHECK (curve.getRefusal().isEmpty());

@@ -14,8 +14,10 @@ The full text of every step, as it was written when it was built, is in the
   its detector, so that a gate drawn on its curve opens in a tenth of a millisecond and doesn't chatter (two more gate
   shapes, three gate presets); a third mode, Transient, turns each hit's attack and what follows it up or down
   whatever the level (Punch, Sustain, Speed; two presets); the curve's points, the Multiband's too, are read, typed
-  and moved by number; a change of mode turns what is on its way by the mode it was meant for; and a drag of a knob
-  that a device's latency follows remakes the device once, as the drag ends.
+  and moved by number; a change of mode turns what is on its way by the mode it was meant for; a drag of a knob
+  that a device's latency follows remakes the device once, as the drag ends; however often the mode changes, each
+  sample is turned by the mode it came in under and the gain never steps; and the compressor's tail keeps it awake
+  until its gain has come back, so that a long release sounds live as it renders.
 - **S6.6 The Delay:** a time for each side (Link), a Clean loop beside the Tape one and a Feedback to 110 % whose
   echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
   holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power (Fade); at its defaults

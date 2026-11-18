@@ -171,6 +171,15 @@ public:
 
     int getLatencySamples() const override { return latency; }
     bool delaysDry() const noexcept override { return true; }
+
+    // How long its gain goes on moving after what comes in has stopped, in seconds, so that its runner lets it finish before
+    // it lets it sleep: asleep, its gain would stand still, and the next phrase would come turned as it was as it slept, live
+    // only (a render never sleeps). Compressing, its Hold and the time its slower way (Attack or Release, Opto's slow
+    // stage) takes to come within a tenth of a decibel across as far as its curve can move its gain; ducking, its Hold and
+    // Release; shaping transients, its long follower's fall; at most maxTailSeconds. Worked out as it plays a block, read by
+    // any thread.
+    double getTailSeconds() const override { return tail.load (std::memory_order_relaxed); }
+    static constexpr float maxTailSeconds = 10.0f;
     int getLatencySamplesFor (std::span<const float> valuesSetByHand) const override;
     void takeValuesBeforePrepare (std::span<const float> valuesSetByHand) override;
 
@@ -347,42 +356,56 @@ private:
     // ahead); and Compress's and Transient's gain, by what is left of the latency over the drive's less the Look-Ahead, the
     // place it is read from gliding an eighth of a sample a sample as automation moves the Look-Ahead, so that the gain
     // never steps. In every mode the sound takes the same way through: a delay for the rest of the latency over the drive's,
-    // then the drive's delay (or the drive), and each mode's gain is read for the sound it was worked out for, whichever mode
-    // plays it out: Duck turns what leaves the first delay by the gain Compress or Transient worked out for it, and they turn
-    // what leaves the drive's by Duck's; the gain a mode would have worked out ahead of a change, from what it would have
-    // heard, is the one it had as it changed. So automation that changes the mode plays on what is on its way, nothing lost,
-    // played again or turned by neither mode.
+    // then the drive's delay (or the drive). Each sample is owned by the mode that played as it came in, which a ring as long
+    // as the delays keeps (owners): Compress or Transient turn what they own as it leaves the first delay, Duck as it leaves
+    // the drive's, each by its own gain worked out for that sample, or, where it had stopped playing before it could look
+    // ahead at it, the one it had as it stopped (each mode pushes the other's gain held, as it was). Around the first sample
+    // of another owner, the two gains are faded between over 5 ms, in decibels (shares), so that no change of mode steps the
+    // gain. So automation that changes the mode, however often, plays on what is on its way, nothing lost, played again,
+    // turned by both modes or by neither.
     Mode preparedMode = Mode::compress;
     float preparedLookahead = 0.0f; // in milliseconds
     int latency = 0;
     bool prepared = false;
     std::array<dsp::DelayLine, 2> soundDelays, keyDelays;
-    dsp::DelayLine gainDelay;                        // Duck's gain
-    dsp::DelayLine curveGainDelay;                   // Compress's and Transient's, its makeup with it
-    dsp::DelayLine reductionDelay;                   // Compress's reduction, for FET's and Tube's colour, as late as its gain
-    dsp::DelayLine makeupDelay;                      // Compress's makeup alone, for its drive, as late as its gain
-    float curveLate = -1.0f;                         // where Compress's and Transient's gain is read from, in samples (none yet below 0)
-    int duckLate = 0;                                // where Duck's gain was read from, in samples
-    float heldCurveGain = 1.0f, heldDuckGain = 1.0f; // each mode's gain as it changed to another,
-    int heldCurveSamples = 0, heldDuckSamples = 0;   // and for how many samples more it is the gain for what is on its way
+    dsp::DelayLine gainDelay;      // Duck's gain
+    dsp::DelayLine curveGainDelay; // Compress's and Transient's, its makeup with it
+    dsp::DelayLine reductionDelay; // Compress's reduction, for FET's and Tube's colour, as late as its gain
+    dsp::DelayLine makeupDelay;    // Compress's makeup alone, for its drive, as late as its gain
+    dsp::DelayLine owners;         // each sample's owner as it came in: 1 Compress or Transient, 0 Duck
+    dsp::DelayLine shares;         // how much of each sample Compress's or Transient's gain turns, as it left the first delay
+    float curveLate = -1.0f;       // where Compress's and Transient's gain is read from, in samples (none yet below 0)
+    float curveTarget = -1.0f;     // where it glides to (none below 0: it stays)
+    int duckLate = 0;              // where Duck's gain is read from, in samples
+    float ownedShare = -1.0f;      // the share of the sample leaving the first delay, as it moves to its owner's
+    float shareStep = 0.004f;      // its step a sample: over 5 ms
+    dsp::DelayLine curvesTurned;   // what Compress's or Transient's gain turned each sample by, as it left the first delay
+    int changeLeft = 0;            // samples until a change of mode is through, as far as what goes out goes
+    bool changing = false;         // the gain going out still held to changeSlew, catching up
+    float changedDecibels = 0.0f;  // what the gain going out was last, in decibels
+    float lastTurned = 1.0f;       // and what it was, as no change was going on
 
-    // Each mode's gain for the sound on its way through it, pushed by a mode that plays now in place of the other: the gain
-    // the other had as it changed while it would have looked ahead, then none.
-    float takeHeldCurveGain() noexcept { return heldCurveSamples > 0 ? (--heldCurveSamples, heldCurveGain) : 1.0f; }
-    float takeHeldDuckGain() noexcept { return heldDuckSamples > 0 ? (--heldDuckSamples, heldDuckGain) : 1.0f; }
+    // The gains for the sample at each place on its way, from each mode's gains for now (the one not playing pushing its
+    // own held), the sample coming in owned by the mode playing (curveOwns): Compress's or Transient's as it leaves the first
+    // delay (curve), with the makeup the drive takes off and puts back and the reduction FET's and Tube's colour follow, and
+    // Duck's as it leaves the drive's (duck), each 1 for a sample the other mode owns, and faded between them about a change.
+    struct Turned
+    {
+        float curve = 1.0f, makeup = 1.0f, amount = 0.0f, duck = 1.0f;
+    };
 
-    // As a mode takes over from one that turns the sound elsewhere on its way (Duck from Compress or Transient, or they from
-    // Duck), the gains it works out for what it looks ahead at are for sound the mode before turns: for as many samples as it
-    // looks ahead, it pushes none (unity), so that no sample is turned by both.
-    bool freshPending = false;
-    int freshSamples = 0;
-    bool takeFresh() noexcept { return freshSamples > 0 ? (--freshSamples, true) : false; }
+    Turned route (bool curveOwns, float curveGainNow, float makeupNow, float amountNow, float duckGainNow) noexcept;
+    void startRoute (bool curveOwns) noexcept; // as the first mode plays: everything on its way owned by it
+    float getShareAhead() const noexcept;      // the share of the next sample to come in, once it reaches its place
 
     // Fills the gains' delays with none (unity), as a reset leaves them.
     void clearGainDelays() noexcept;
 
     // The latency for a mode and a Look-Ahead (in milliseconds) set by hand.
     int getLatencyFor (Mode, float lookaheadMilliseconds) const noexcept;
+
+    std::atomic<float> tail { 0.0f }; // getTailSeconds()'s
+    void workOutTail (Mode, std::span<const float> values) noexcept;
 
     static_assert (std::atomic<double>::is_always_lock_free);
 };

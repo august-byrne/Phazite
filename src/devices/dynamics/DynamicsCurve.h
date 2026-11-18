@@ -100,6 +100,10 @@ public:
     // For a level heard (an amplitude); past the axes' end, out as loud as the curve's end.
     float getDecibels (float level) const noexcept;
 
+    // How far apart, in decibels, the most its curve turns a level up and the most it turns one down: as far as its gain can
+    // move, from one level to another.
+    float getSpan() const noexcept { return span; }
+
 private:
     std::array<float, tableSize + 1> gains {};
     std::array<float, parameterCount> shownCurve {}; // the values the table was made from
@@ -107,5 +111,6 @@ private:
     float lastGain = 1.0f;      // the amplitude the curve puts out at the axes' end
     float endDecibels = 12.0f;  // the axes' end
     float stepDecibels = 0.25f; // between the table's entries
+    float span = 0.0f;
 };
 } // namespace phazite::devices::curves

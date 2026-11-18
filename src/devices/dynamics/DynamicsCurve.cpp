@@ -249,6 +249,8 @@ bool Gains::update (std::span<const float> curve) noexcept
         gains[(size_t) i] = juce::jlimit (quietest, loudest, dsp::gainToDecibels (out) - decibels);
     }
 
+    const auto [lowest, highest] = std::minmax_element (gains.begin(), gains.end());
+    span = *highest - *lowest;
     lastGain = fromAxis (getAt (curve, 1.0f));
     return true;
 }

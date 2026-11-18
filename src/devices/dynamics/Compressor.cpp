@@ -179,6 +179,14 @@ namespace
     // How far the place a gain is read from moves a sample, as automation moves the Look-Ahead (or the mode): an eighth of a
     // sample, so that reading towards what is newer plays the gain's own moves an eighth faster at most, and never a step.
     constexpr float curveGlide = 0.125f;
+
+    // Over how long a change of mode fades from one mode's gain to the other's, in decibels, from the first sample of the new
+    // mode's as it reaches its place; and the shortest release Duck plays
+    // (its Release goes down to a tenth of a millisecond for Compress's gates: Duck, letting its whole depth go that fast,
+    // would click).
+    constexpr double modeFadeSeconds = 0.005;
+    constexpr float changeSlew = 0.25f;         // decibels a sample, about a change of mode: 12 dB a millisecond
+    constexpr float duckShortestRelease = 1.0f; // milliseconds
     constexpr double transientGlideSeconds = 0.001;
 
     Compressor::Character getCharacter (float value) noexcept
@@ -323,8 +331,10 @@ void Compressor::prepare (double newSampleRate, int)
 
     driveBlendStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
     evenWarmUp = std::max (driveWarmUp, (int) std::lround (evenWarmUpSeconds * sampleRate));
-    for (auto* delay : { &gainDelay, &curveGainDelay, &reductionDelay, &makeupDelay })
+    for (auto* delay : { &gainDelay, &curveGainDelay, &reductionDelay, &makeupDelay, &owners, &shares, &curvesTurned })
         delay->prepare (std::max (1, latency));
+
+    shareStep = (float) std::min (1.0, 1.0 / (modeFadeSeconds * sampleRate));
 
     prepared = true;
     reset();
@@ -420,11 +430,13 @@ void Compressor::reset()
     nextBlend = 0.0f;
     clearGainDelays();
     curveLate = -1.0f;
+    curveTarget = -1.0f;
     duckLate = latency;
-    heldCurveSamples = 0;
-    heldDuckSamples = 0;
-    freshPending = false;
-    freshSamples = 0;
+    ownedShare = -1.0f;
+    changeLeft = 0;
+    changing = false;
+    changedDecibels = 0.0f;
+    lastTurned = 1.0f;
     transientHeld = 0.0f;
     isFirstBlock = true;
     keyShare = 0.0f;
@@ -451,6 +463,89 @@ void Compressor::clearGainDelays() noexcept
         curveGainDelay.push (1.0f);
         makeupDelay.push (1.0f);
     }
+}
+
+void Compressor::startRoute (bool curveOwns) noexcept
+{
+    // Every sample on its way as the mode that plays first owns it, as if it had always played.
+    for (int i = 0; i <= latency + 3; ++i)
+    {
+        owners.push (curveOwns ? 1.0f : 0.0f);
+        shares.push (curveOwns ? 1.0f : 0.0f);
+    }
+
+    ownedShare = curveOwns ? 1.0f : 0.0f;
+}
+
+Compressor::Turned Compressor::route (bool curveOwns, float curveGainNow, float makeupNow, float amountNow, float duckGainNow) noexcept
+{
+    // Each mode's gains for this moment, the ones it holds for the mode not playing: Duck's held while Compress or Transient
+    // play, theirs while Duck plays. And the sample coming in now, owned by the mode playing.
+    owners.push (curveOwns ? 1.0f : 0.0f);
+    curveGainDelay.push (curveGainNow);
+    makeupDelay.push (makeupNow);
+    reductionDelay.push (amountNow);
+    gainDelay.push (duckGainNow);
+
+    if (curveTarget >= 0.0f)
+        curveLate += std::clamp (curveTarget - curveLate, -curveGlide, curveGlide);
+
+    // The share of the sample leaving the first delay that its curve's gain turns (the rest Duck's, as it leaves the drive's
+    // delay): towards its owner's, 1 for Compress or Transient, 0 for Duck, over 5 ms from the first sample of another
+    // owner, which the mode before turns meanwhile by the gain it had as it stopped, faded out: so that a change of mode never
+    // steps the gain. (A fade begun before that sample would fade to the new mode's gain for samples it never worked one out
+    // for: what it held from long ago.)
+    const auto rest = latency - driveLatency;
+    const auto next = rest > 0 ? owners.read (rest) : (curveOwns ? 1.0f : 0.0f);
+    ownedShare += std::clamp (next - ownedShare, -shareStep, shareStep);
+    shares.push (ownedShare);
+
+    Turned turned;
+    const auto isLate = curveLate > 0.0f;
+    const auto curve = isLate ? curveGainDelay.read (curveLate) : curveGainNow;
+    const auto makeup = isLate ? makeupDelay.read (curveLate) : makeupNow;
+    turned.amount = isLate ? reductionDelay.read (curveLate) : amountNow;
+
+    if (ownedShare >= 1.0f)
+    {
+        turned.curve = curve;
+        turned.makeup = makeup;
+    }
+    else if (ownedShare > 0.0f)
+    {
+        turned.curve = std::pow (curve, ownedShare);
+        turned.makeup = std::pow (makeup, ownedShare);
+    }
+
+    const auto duckShare = 1.0f - shares.read (driveLatency); // of the sample leaving the drive's delay
+    const auto duck = duckLate > 0 ? gainDelay.read (duckLate) : duckGainNow;
+
+    if (duckShare >= 1.0f)
+        turned.duck = duck;
+    else if (duckShare > 0.0f)
+        turned.duck = std::pow (duck, duckShare);
+
+    // About a change of mode, what the two modes' gains make of the sample going out moves no further a sample than a change
+    // may (changeSlew): what each mode works out for what it hears is its own, and the gain one starts from, or holds for
+    // what the other turns, can be some way from where the sound was. From the change until the fade is done and the gain
+    // has caught up; at no other time, so that a mode's own moves are its own.
+    curvesTurned.push (turned.curve);
+
+    if (changeLeft > 0 || changing)
+    {
+        const auto wanted = dsp::gainToDecibels (curvesTurned.read (driveLatency) * turned.duck);
+        const auto moved = changedDecibels + std::clamp (wanted - changedDecibels, -changeSlew, changeSlew);
+        turned.duck *= dsp::decibelsToGain (moved - wanted);
+        changedDecibels = moved;
+        changeLeft = std::max (0, changeLeft - 1);
+        changing = changeLeft > 0 || std::abs (wanted - moved) > 1.0e-3f;
+    }
+    else
+    {
+        lastTurned = curvesTurned.read (driveLatency) * turned.duck;
+    }
+
+    return turned;
 }
 
 void Compressor::startGlides (std::span<const float> values, float targetMakeup) noexcept
@@ -487,51 +582,62 @@ void Compressor::hearTransients (float left, float right, const dsp::FilterCoeff
         follower->process (transientLevel);
 }
 
+float Compressor::getShareAhead() const noexcept
+{
+    // The share goes on towards the owner of each sample on its way, as it reaches the first delay's end (route()).
+    auto share = ownedShare;
+
+    for (auto k = latency - driveLatency - 1; k >= 0; --k)
+        share += std::clamp (owners.read (k) - share, -shareStep, shareStep);
+
+    return share;
+}
+
 void Compressor::handOver (Mode to, std::span<const float> values) noexcept
 {
-    // The gain goes on from where the mode before left it, so that the sound doesn't jump, each mode then moving as its own
-    // times say: in decibels, Compress's is its makeup less its reduction, Duck's its duck down, Transient's its makeup and
-    // its own.
+    changeLeft = latency + 2 * (int) std::lround (modeFadeSeconds * sampleRate);
+
+    if (! std::exchange (changing, true))
+        changedDecibels = dsp::gainToDecibels (lastTurned);
+
+    // The gain goes on so that the sound doesn't jump, each mode then moving as its own times say. In decibels, Compress's is
+    // its makeup less its reduction, Transient's its makeup and its own: the one gain they share, which one goes on from where
+    // the other left it. Between them and Duck, the share each turns of the first sample the new mode owns decides
+    // (getShareAhead()): where the mode before still turns some of it (a change back within the fade), the new mode's own
+    // gain goes on from where it held it, which that sample's share is turned by already; where it turns none of it, from
+    // where the mode before left its own, as the fade starts there.
     const auto from = lastMode;
-    const auto gainBefore = from == Mode::duck       ? -ducked
-                            : from == Mode::compress ? makeupDecibels - reduction.getValue()
-                                                     : makeupDecibels + transientDecibels;
+    const auto curveGain = from == Mode::compress    ? makeupDecibels - reduction.getValue()
+                           : from == Mode::transient ? makeupDecibels + transientDecibels
+                                                     : (getShareAhead() > 0.0f ? lastGainDecibels : -ducked);
 
     switch (to)
     {
         case Mode::compress:
-            reduction.reset (makeupDecibels - gainBefore);
+            reduction.reset (makeupDecibels - curveGain);
             break;
         case Mode::transient:
-            transientDecibels = gainBefore - makeupDecibels;
+            transientDecibels = curveGain - makeupDecibels;
             startFollowers();
             break;
         case Mode::duck:
-            ducked = std::clamp (-gainBefore, 0.0f, std::max (0.0f, values[depth]));
-            releasing = false;
+            if (getShareAhead() >= 1.0f)
+            {
+                ducked = std::clamp (-curveGain, 0.0f, std::max (0.0f, values[depth]));
+                releasing = false;
+            }
+
             break;
     }
 
-    // What is on its way through the first delay, or the drive's, was turned, or is to be, by the mode before: its gain for
-    // what it would have looked ahead at is the one it had as it changed (the mode playing now pushes it for as long as that
-    // look-ahead, then none). Compress's and Transient's gain is turned as the sound leaves the first delay; Duck's as it
-    // leaves the drive's.
-    if (from == Mode::duck)
+    // From Duck, Compress's or Transient's read place goes at once to where they want it: what Duck pushed there is the gain
+    // they had as it took over, which the samples they own on their way are turned by (route()).
+    if (from == Mode::duck && to != Mode::duck)
     {
-        heldDuckGain = duckGain;
-        heldDuckSamples = latency - duckLate;
-        heldCurveSamples = 0;
+        const auto rest = latency - driveLatency;
+        const auto ahead = to == Mode::compress ? std::clamp ((int) std::lround (values[lookahead] * 0.001 * sampleRate), 0, rest) : 0;
+        curveLate = (float) (rest - ahead);
     }
-    else if (to == Mode::duck)
-    {
-        heldCurveGain = lastGain;
-        heldCurveSamples = curveLate >= 0.0f ? (latency - driveLatency) - (int) std::floor (curveLate) : 0;
-        heldDuckSamples = 0;
-    }
-
-    // And the gain the new mode works out for what it looks ahead at, as it starts, is for what the mode before turns: none,
-    // for as long as that look-ahead (freshSamples), so that nothing is turned by both.
-    freshPending = (from == Mode::duck) != (to == Mode::duck);
 }
 
 void Compressor::process (const ProcessContext& block)
@@ -550,7 +656,17 @@ void Compressor::process (const ProcessContext& block)
     longFollower.setTimes (transientSustainRise, transientLongFall);
     shortFollower.setTimes (transientSustainRise, fall);
 
-    if (playedYet && shownMode != lastMode)
+    // A first block of Compress or Transient sets its glides where they are set, before a hand-over reads its makeup.
+    if (isFirstBlock && shownMode != Mode::duck)
+    {
+        gains.update (getCurve (values));
+        startGlides (values,
+                     values[makeup] + (shownMode == Mode::compress && values[autoMakeup] >= 0.5f ? getAutoMakeupDecibels (gains) : 0.0f));
+    }
+
+    if (! playedYet)
+        startRoute (shownMode != Mode::duck);
+    else if (shownMode != lastMode)
         handOver (shownMode, values);
 
     lastMode = shownMode;
@@ -581,7 +697,36 @@ void Compressor::process (const ProcessContext& block)
             break;
     }
 
+    workOutTail (shownMode, values);
     isFresh = false;
+}
+
+void Compressor::workOutTail (Mode shownMode, std::span<const float> values) noexcept
+{
+    // Seconds for a gain that moves by its time constant to come within a tenth of a decibel across a span of decibels.
+    const auto settle = [] (float seconds, float span) { return seconds * std::log (std::max (1.0f, span / 0.1f)); };
+    auto seconds = 0.0f;
+
+    switch (shownMode)
+    {
+        case Mode::compress:
+        {
+            const auto slowRelease =
+                values[release] * (getCharacter (values[character]) == Character::opto ? opticalSlowdown + opticalMemorySlowdown : 1.0f);
+            const auto slowest = 0.001f * std::max (values[attack], slowRelease);
+            seconds = 0.001f * (values[levelHold] + values[lookahead]) + (float) rmsSeconds + settle (slowest, gains.getSpan());
+            break;
+        }
+        case Mode::duck:
+            seconds =
+                0.001f * (values[hold] + std::max (duckShortestRelease, values[release]) + values[attack] + (float) keyPeakMilliseconds);
+            break;
+        case Mode::transient:
+            seconds = settle (transientLongFall, -transientFloor) + 0.001f * (float) keyPeakMilliseconds;
+            break;
+    }
+
+    tail.store (std::min (maxTailSeconds, seconds), std::memory_order_relaxed);
 }
 
 void Compressor::compress (const ProcessContext& block)
@@ -717,8 +862,7 @@ void Compressor::compress (const ProcessContext& block)
     if (curveLate < 0.0f)
         curveLate = targetLate;
 
-    if (std::exchange (freshPending, false))
-        freshSamples = rest - (int) std::floor (curveLate);
+    curveTarget = targetLate;
     const auto turnsDry = block.dry != nullptr && drivesRun;
 
     // The gain is worked out again only when it changes (docs/archive/performance-audit.md, A5).
@@ -809,26 +953,18 @@ void Compressor::compress (const ProcessContext& block)
         // The gain for the sound as late as the Look-Ahead leaves it, the place it is read from gliding to where the Look-Ahead
         // puts it; and as late, its reduction, which FET's and Tube's colour follows, and its makeup, which the drive takes off
         // and puts back, so that each is the one worked out for the sound it turns.
-        curveLate += std::clamp (targetLate - curveLate, -curveGlide, curveGlide);
-        const auto pushed = takeFresh() ? 1.0f : lastGain;
-        curveGainDelay.push (pushed);
-        reductionDelay.push (amount);
-        makeupDelay.push (makeupGain);
-        const auto isLate = curveLate > 0.0f;
-        const auto gain = isLate ? curveGainDelay.read (curveLate) : pushed;
-        const auto lateAmount = isLate ? reductionDelay.read (curveLate) : amount;
-        const auto lateMakeup = isLate ? makeupDelay.read (curveLate) : makeupGain;
-        colourAmount += (std::max (0.0f, lateAmount) - colourAmount) * makeupSmoothing;
+        // Duck's gain is the one it had, held, for samples Duck owns that are still on their way, which it turns as they leave
+        // the drive's delay (route()).
+        const auto turned = route (true, lastGain, makeupGain, amount, duckGain);
+        const auto gain = turned.curve;
+        const auto lateMakeup = turned.makeup;
+        colourAmount += (std::max (0.0f, turned.amount) - colourAmount) * makeupSmoothing;
 
         // The sound, turned down and driven into its curve (the makeup after it); or what it hears, to listen to, faded in and
         // out.
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
 
-        // Duck's gain, which it plays late, is none for what goes through now (but for what Duck worked out for the sound on its
-        // way, should it have ducked before): should automation have it duck next, it turns what is still on its way no further
-        // down. What leaves the drive's delay is turned by it.
-        gainDelay.push (takeHeldDuckGain());
-        const auto duckedBefore = gainDelay.read (duckLate);
+        const auto duckedBefore = turned.duck;
 
         // The drive: the knob's, and FET's and Tube's colour's as far as they turn down.
         const auto colouring = std::min (1.0f, colourAmount / colourReduction);
@@ -974,12 +1110,11 @@ void Compressor::duck (const ProcessContext& block)
     const auto gainLate = latency - ahead;
     const auto rest = latency - driveLatency; // what the sound is late by after the drive's own delay
     duckLate = gainLate;
-
-    if (std::exchange (freshPending, false))
-        freshSamples = ahead;
+    curveTarget = -1.0f; // Compress's and Transient's read place stays where it was: what they own on its way is read there
+    const auto shortestRelease = std::max (duckShortestRelease, values[release]);
     const auto holdSamples =
         (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate) + (double) ahead);
-    const auto releaseStep = 1.0 / std::max (1.0, (double) values[release] * 0.001 * sampleRate);
+    const auto releaseStep = 1.0 / std::max (1.0, (double) shortestRelease * 0.001 * sampleRate);
     const auto curve = (double) juce::jlimit (-1.0f, 1.0f, values[releaseCurve]);
     const auto thresholdDecibels = values[Compressor::threshold];
 
@@ -1064,21 +1199,11 @@ void Compressor::duck (const ProcessContext& block)
 
         // The sound, turned down, as late as the look-ahead; or what it hears, to listen to, as late, faded in and out.
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
-        auto gain = duckGain;
-
-        if (latency > 0)
-        {
-            gainDelay.push (takeFresh() ? 1.0f : duckGain);
-            gain = gainDelay.read (gainLate);
-        }
-
-        // Compress's and Transient's gain, which they play late, is none for what goes through now (but for the gain they had
-        // as Duck took over, for what they would have looked ahead at); what leaves the first delay, which they would have
-        // turned, is turned by the gain they worked out for it.
-        curveGainDelay.push (takeHeldCurveGain());
-        reductionDelay.push (0.0f);
-        makeupDelay.push (makeupGain);
-        const auto curvedBefore = curveLate >= 0.0f ? curveGainDelay.read (curveLate) : 1.0f;
+        // Its gain for what it owns as it leaves the drive's delay; and Compress's or Transient's, the one they had, held, for
+        // what they own still on its way, as it leaves the first (route()).
+        const auto turned = route (false, lastGain, makeupGain, reduction.getValue(), duckGain);
+        const auto gain = turned.duck;
+        const auto curvedBefore = turned.curve;
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
@@ -1091,9 +1216,9 @@ void Compressor::duck (const ProcessContext& block)
             {
                 soundDelays[c].push (sound);
                 sound = soundDelays[c].read (rest);
-                sound *= curvedBefore;
             }
 
+            sound *= curvedBefore;
             undriven[c].push (sound);
             sound = undriven[c].read (driveLatency);
 
@@ -1150,8 +1275,7 @@ void Compressor::shapeTransients (const ProcessContext& block)
     if (curveLate < 0.0f)
         curveLate = (float) rest;
 
-    if (std::exchange (freshPending, false))
-        freshSamples = rest - (int) std::floor (curveLate);
+    curveTarget = (float) rest;
     const auto share = [] (float part) { return std::clamp ((part - transientUnheard) / (transientWhole - transientUnheard), 0.0f, 1.0f); };
 
     if (isFirstBlock)
@@ -1193,17 +1317,11 @@ void Compressor::shapeTransients (const ProcessContext& block)
             makeupGain = dsp::decibelsToGain (makeupDecibels);
         }
 
-        // As late as Compress turns its sound, the place it is read from gliding there from Compress's, so that a change of
-        // mode plays on what is on its way; and what leaves the drive's delay turned by what Duck worked out for it, should it
-        // have ducked before.
-        curveLate += std::clamp ((float) rest - curveLate, -curveGlide, curveGlide);
-        const auto pushed = takeFresh() ? 1.0f : lastGain;
-        curveGainDelay.push (pushed);
-        reductionDelay.push (0.0f);
-        makeupDelay.push (makeupGain);
-        const auto gain = curveLate > 0.0f ? curveGainDelay.read (curveLate) : pushed;
-        gainDelay.push (takeHeldDuckGain());
-        const auto duckedBefore = gainDelay.read (duckLate);
+        // As late as Compress turns its sound, the place it is read from gliding there from Compress's; and Duck's gain, held,
+        // for what Duck owns still on its way, as it leaves the drive's delay (route()).
+        const auto turned = route (true, lastGain, makeupGain, 0.0f, duckGain);
+        const auto gain = turned.curve;
+        const auto duckedBefore = turned.duck;
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
 
         for (int channel = 0; channel < numChannels; ++channel)

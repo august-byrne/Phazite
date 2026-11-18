@@ -15,7 +15,7 @@ curve drawn as a step it is a gate. **Duck** turns the sound down while its key 
 | --- | --- | --- | --- |
 | Mode | Compress, Duck, Transient | Compress | Which of the three the device does. The editor's three tabs set it. |
 | Attack | 0.1 to 200 ms | 10 ms | Compress: the time constant of the gain going down. Duck: the time the sound takes to go down by the whole Depth. |
-| Release | 0.1 to 2000 ms | 120 ms | Compress: the time constant of the gain coming back. Duck: the time the sound takes to come back. Its knob's middle is at 100 ms, as before its range reached under 5 ms. |
+| Release | 0.1 to 2000 ms | 120 ms | Compress: the time constant of the gain coming back. Duck: the time the sound takes to come back, a millisecond at least (a shorter one, a gate's, comes back over 1 ms in Duck, so that its whole depth doesn't click back; its tooltip on Duck's page says so). Its knob's middle is at 100 ms, as before its range reached under 5 ms. |
 | Sidechain Low Cut | 20 to 500 Hz | 20 Hz | A 12 dB per octave low cut on what the detector hears, so that bass doesn't pump it (Transient's too). Labelled Low Cut. |
 | Sidechain High Cut | 100 Hz to 20 kHz | 20 kHz (off) | A 24 dB per octave high cut on what the detector hears in Compress and Duck, so that only a kick's body is heard from a whole kit. Labelled High Cut. |
 | Mix | 0 to 100 % | 100 % | How much of what goes out is the compressor's sound, for parallel compression; applied by the device's runner, not by the DSP (see [Devices](../devices.md)). |
@@ -180,14 +180,15 @@ comes out within a tenth of a decibel of how it went in. Its latency is Compress
 
 ### Changing mode
 
-From one mode to another the gain goes on from where it was: each mode's from what the one before turned the sound by
-(Duck's no further down than its Depth), each then moving as its own times say, so that a switch doesn't click. And what
-is on its way through the device as the mode changes is turned by the mode it was meant for: every mode sends the sound
-through the same delays, Compress and Transient turning it as it leaves the first and Duck as it leaves the drive's, so
-Duck turns what leaves the first by the gain Compress or Transient worked out for it, and they turn what leaves the
-drive's by Duck's. Where the mode before would have looked ahead at what is still to come, its gain for that is the one
-it had as it changed. Through any change, each millisecond's level stays between the two modes' settled levels, within a
-decibel.
+Every sample is owned by the mode that played as it came in, which the device remembers for as long as the sample is on
+its way through it: Compress and Transient turn what they own as it leaves the first of its delays, Duck as it leaves the
+drive's, each by its own gain worked out for that sample, or, where it stopped playing before it could look ahead at the
+sample, by the gain it had as it stopped. From the first sample the new mode owns, the two modes' gains are faded between
+over 5 ms, in decibels, the mode before turning those samples meanwhile by the gain it had as it stopped, faded out; and
+each mode's gain starts from where the one before left it (Duck's no further down than its Depth). So any changes of
+mode, however many and however close, play on what is on its way, nothing lost, played again, or turned by both modes or
+neither; the level stays between the modes' settled levels, within a decibel, and the gain never steps further from one
+sample to the next than the faster of the modes' own moves and the fade's.
 
 ### Choosing a sidechain
 
@@ -215,6 +216,16 @@ makes the device anew once, as the drag ends, not at each step (each would start
 plays the value within the latency it has. While Low Latency is on, a
 compressor whose latency is over 1 ms is left out of what plays and the sound passes as it comes: one set to Duck, and
 one set to Compress with a Look-Ahead of about 0.9 ms or more (at 48 kHz).
+
+### Its tail
+
+Its runner lets a device sleep once what comes in and what it plays have been silent for as long as the tail it reports
+([Devices](../devices.md)), and doesn't reset it as it wakes. The compressor's tail covers its gain's way back, so that a
+phrase after a silence comes in turned as it would have been had it never slept: compressing, its Hold and the time its
+slower way (Attack or Release, an Opto's Release with its slow stage) takes to come within a tenth of a decibel across as
+far as its curve can move its gain; ducking, its Hold, Release and Attack; shaping transients, its long follower's fall,
+about 4 s; at most 10 s. While it rings out it plays nothing, silence in; an export plays on that long to find no sound,
+and writes none.
 
 ## Its editor
 
@@ -248,7 +259,8 @@ Type Values... opens a field over it, as an automation point's Type a Value... d
 ("-18, -12"; "silence" for none), the curve's first and last points their level out alone, and moves it there as one
 undo step, Move Point, as a drag is. The two levels are separated by a semicolon, white space, or a comma followed by a
 space or a sign, so that a comma between digits is a decimal comma ("-18,5, -12"; an end's "-3,5" is -3.5 dB). Text it
-can't read, or a level missing, it refuses and says why in the curve's corner (and to screen readers) until the next
+can't read (anything but a number, its sign, a decimal point or comma and "dB", or "silence"), or a level missing, it
+refuses and says why in the curve's corner (and to screen readers) until the next
 edit or move of the pointer; the automation points' and the knobs' typed fields leave the value as it was without a word.
 Tab reaches the curve (a click on it doesn't take the keys, as on every graph); Left and Right choose a point, lit as
 under the pointer; with Ctrl the arrows move it a tenth of a decibel in (Left, Right) or out (Up, Down), with Shift a
@@ -267,6 +279,8 @@ Mix is the knob on the device's row in the Devices view.
 ## Limits
 
 - Compress has no automatic release, and its look-ahead is at most 10 ms.
+- Its tail is at most 10 s: an Opto that held a long while forgets its holding over 6 s and more, which a longer silence
+  live can leave a little of (its next release a little slower than a render's).
 - While the Look-Ahead's knob is dragged, the compressor looks ahead no further than the latency it had as the drag
   began; the new latency comes as the drag ends.
 - Transient has no look-ahead, and hears only its own sound.

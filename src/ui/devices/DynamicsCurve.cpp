@@ -60,17 +60,23 @@ namespace
     // text that says neither.
     std::optional<float> readLevel (juce::String text)
     {
+        // A number alone, with its sign, a decimal point (a comma is one already: splitLevels()) and its unit, "dB"; or silence.
+        // Anything else is no level: "1e3" isn't 13 dB, nor "abc5" 5.
         text = text.trim().toLowerCase();
 
-        if (text.startsWith ("sil") || text.contains ("inf"))
+        if (text == "silence" || text == "-inf" || text == "inf")
             return 0.0f;
 
-        const auto number = text.retainCharacters ("0123456789.-+");
+        if (text.endsWith ("db"))
+            text = text.dropLastCharacters (2);
 
-        if (! number.containsAnyOf ("0123456789"))
+        const auto digits = text.trimCharactersAtStart ("+-");
+
+        if (text.length() - digits.length() > 1 || ! digits.containsOnly ("0123456789.") || ! digits.containsAnyOf ("0123456789")
+            || digits.indexOfChar ('.') != digits.lastIndexOfChar ('.'))
             return {};
 
-        return juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (number.getFloatValue()));
+        return juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (text.getFloatValue()));
     }
 
     // The levels typed: separated by a semicolon, white space, or a comma followed by a space or a sign; a comma between digits
@@ -314,7 +320,12 @@ juce::TextEditor* DynamicsCurve::getValuesField() const
 //==============================================================================
 bool DynamicsCurve::keyPressed (const juce::KeyPress& key)
 {
-    refusal = {};
+    // A refusal shows until the next edit or move of the pointer: a key is one.
+    if (refusal.isNotEmpty())
+    {
+        refusal = {};
+        repaint();
+    }
     const auto code = key.getKeyCode();
     const auto across = code == juce::KeyPress::leftKey ? -1.0f : code == juce::KeyPress::rightKey ? 1.0f : 0.0f;
     const auto up = code == juce::KeyPress::downKey ? -1.0f : code == juce::KeyPress::upKey ? 1.0f : 0.0f;
@@ -791,10 +802,16 @@ void DynamicsCurve::mouseMove (const juce::MouseEvent& e)
     const auto target = frozen ? std::optional<Target>() : findTarget (e.position);
     showCursorFor (target);
 
+    // A refusal shows until the next edit or move of the pointer.
+    if (refusal.isNotEmpty())
+    {
+        refusal = {};
+        repaint();
+    }
+
     if (target != hovered)
     {
         hovered = target;
-        refusal = {};
         repaint();
     }
 }

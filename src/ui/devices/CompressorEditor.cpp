@@ -264,6 +264,15 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
                                        ParameterControls::Size::compact, { "Threshold", "Depth", "Attack", "Hold", "Release", "Curve" });
     duckKnobs.minimumWidth = 6 * narrowestKnob;
 
+    // Duck takes a millisecond at least to come back, under the Release's floor, which is the gates': its tooltip here says so.
+    if (auto* knobs = dynamic_cast<ParameterControls*> (duckKnobs.content))
+        if (auto* client = dynamic_cast<juce::SettableTooltipClient*> (knobs->findControl ("release")))
+            client->setTooltip (
+                "Release: the time the sound takes to come back, 1 ms at least while it ducks (a shorter one, which a gate on "
+                "Compress's page may have, comes back over 1 ms here, so that the whole depth doesn't click back). "
+                + client->getTooltip().fromFirstOccurrenceOf (": ", false, false).substring (0, 1).toUpperCase()
+                + client->getTooltip().fromFirstOccurrenceOf (": ", false, false).substring (1));
+
     // Transient: the history, beside its punch and sustain, large, over its speed, makeup and low cut.
     const auto punchAndSustain = makeControlsPart ("Transient", { "punch", "sustain" }, 0, ParameterControls::Size::large);
     auto transientKnobs = makeControlsPart ("Ear and Out", { "speed", "makeup", "keyLowCut" }, 0, ParameterControls::Size::compact,

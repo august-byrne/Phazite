@@ -8,6 +8,7 @@
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/dynamics/Compressor.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "model/devices/internal/Parameters.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <complex>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <type_traits>
 #include <vector>
 
@@ -2259,59 +2261,197 @@ std::vector<float> getModeValues (Compressor::Mode mode, float lookaheadMillisec
 }
 } // namespace
 
-TEST_CASE ("A change of mode by automation, either way between any two, with sound on its way, keeps between the two modes' levels")
+namespace
 {
-    // A sine at -6 dB, 300 ms in one mode and 300 ms in another, a lane moving the mode between blocks. Made for Duck (10 ms on
-    // its way), or for Compress with a 5 ms look-ahead: what is on its way as the mode changes is turned by the mode it was
-    // meant for, and the new mode's gain goes on from the old one's. Each millisecond's level through the change stays
-    // between the two modes' settled levels, give or take a decibel: Duck once let 10 ms through as loud as the curve was
-    // taking off.
+// The gain of what comes out against what came in over a window up to each sample, in decibels, for a steady sine in at an
+// amplitude whose cycles fill the window whole.
+std::vector<float> getWindowGains (const std::vector<float>& out, float amplitude, int window)
+{
+    std::vector<float> gains (out.size(), 0.0f);
+    auto squares = 0.0;
+
+    for (size_t i = 0; i < out.size(); ++i)
+    {
+        squares += (double) out[i] * out[i];
+
+        if (i >= (size_t) window)
+            squares -= (double) out[i - window] * out[i - window];
+
+        const auto rms = std::sqrt (std::max (0.0, squares) / window);
+        gains[i] = (float) (20.0 * std::log10 (std::max (1.0e-9, rms) / (amplitude / std::sqrt (2.0))));
+    }
+
+    return gains;
+}
+
+// Every run of modes, each different from the one before, of a length.
+std::vector<std::vector<Compressor::Mode>> getRunsOfModes (int length)
+{
     using Mode = Compressor::Mode;
-    constexpr float amplitude = 0.5011872f; // -6 dB
-    constexpr int change = 56 * testBlockSize, numSamples = 2 * change;
-    const auto tone = [] (int time)
-    { return amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * time / testRate); };
+    std::vector<std::vector<Mode>> runs { {} };
+
+    for (int step = 0; step < length; ++step)
+    {
+        std::vector<std::vector<Mode>> longer;
+
+        for (const auto& run : runs)
+            for (const auto mode : { Mode::compress, Mode::duck, Mode::transient })
+                if (run.empty() || run.back() != mode)
+                {
+                    longer.push_back (run);
+                    longer.back().push_back (mode);
+                }
+
+        runs = longer;
+    }
+
+    return runs;
+}
+} // namespace
+
+TEST_CASE ("Changes of mode by automation, one or many in a row however close, keep between the modes' levels and never step")
+{
+    // A sine at -6 dB, 300 ms in one mode, then two to five modes in a row, a millisecond, 3 ms or 7 ms each, a lane moving the
+    // mode between blocks, then 300 ms in the last. Made for Duck (10 ms on its way), or for Compress with a 5 ms look-ahead.
+    // Each sample is turned by the mode it came in under, by that mode's gain for it, and the two gains are faded between over
+    // 5 ms about each change: so the level, each half millisecond, stays between the lowest and the highest of the modes'
+    // settled levels, give or take a decibel (a burst of Duck's whole depth, or a dip of both modes' gains, once came of two
+    // changes within its delay), and no sample's gain is further from the one before than the faster of the modes' own moves
+    // and the fade's make (a step of 6 dB once came at each change into Duck). The right channel carries a sound too quiet to
+    // hear, which shows the gain sample by sample.
+    using Mode = Compressor::Mode;
+    constexpr float amplitude = 0.5011872f, carrier = -100.0f; // -6 dB
+    constexpr int blockSize = 48, settle = 300 * blockSize;
+    const auto sound = [] (int t, int channel)
+    {
+        return channel == 1 ? steady (t, carrier)
+                            : amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 4000.0 * t / testRate);
+    };
+
+    // The fastest move of the modes' own here: Compress's 1 ms attack over its 15 dB (from 0 dB, as Transient leaves it), and
+    // the fade's share of the 15 dB between the two furthest levels a sample.
+    const auto fastest = 15.0f * (1.0f - std::exp (-1.0f / 48.0f)) + 15.0f / (0.005f * (float) testRate) + 0.01f;
 
     for (const auto& [made, lookahead] : { std::pair (Mode::duck, 0.0f), std::pair (Mode::compress, 5.0f) })
     {
-        for (const auto from : { Mode::compress, Mode::duck, Mode::transient })
+        // Each mode's settled level here, alone.
+        std::map<Mode, float> settled;
+
+        for (const auto mode : { Mode::compress, Mode::duck, Mode::transient })
         {
-            for (const auto to : { Mode::compress, Mode::duck, Mode::transient })
+            const auto values = getModeValues (mode, lookahead);
+            const auto compressor = makeFor (getModeValues (made, lookahead));
+            settled[mode] = getWindowGains (playLinedUp (*compressor, settle, blockSize, sound, always (values))[0], amplitude, 24).back();
+        }
+
+        CHECK (settled[Mode::compress] == doctest::Approx (-15.0f).epsilon (0.05));
+        CHECK (settled[Mode::duck] == doctest::Approx (-9.0f).epsilon (0.05));
+        CHECK (std::abs (settled[Mode::transient]) < 0.2f);
+
+        for (const auto changes : { 1, 3, 4 })
+        {
+            for (const auto& run : getRunsOfModes (changes + 1))
             {
-                if (from == to)
-                    continue;
-
-                const auto before = getModeValues (from, lookahead), after = getModeValues (to, lookahead);
-                const auto compressor = makeFor (getModeValues (made, lookahead));
-                REQUIRE (compressor->getLatencySamples() > Compressor::getDriveLatency()); // sound on its way
-                const auto out =
-                    playInBlocks (*compressor, numSamples, testBlockSize, tone,
-                                  [&before, &after] (int done) -> const std::vector<float>& { return done < change ? before : after; });
-                const auto gains = getMillisecondGains (out, amplitude);
-                const auto settledBefore = gains[(size_t) change - 1], settledAfter = gains.back();
-                const auto low = std::min (settledBefore, settledAfter) - 1.0f, high = std::max (settledBefore, settledAfter) + 1.0f;
-                auto worst = 0.0f;
-                auto where = 0;
-
-                for (int t = change - 2400; t < numSamples; ++t)
+                for (const auto apart : { 1, 3, 7 }) // in milliseconds: blocks
                 {
-                    const auto outside = std::max (low - gains[(size_t) t], gains[(size_t) t] - high);
+                    std::vector<std::vector<float>> valuesOf;
 
-                    if (outside > worst)
+                    for (const auto mode : run)
+                        valuesOf.push_back (getModeValues (mode, lookahead));
+
+                    const auto valuesAt = [&valuesOf, apart] (int done) -> const std::vector<float>&
                     {
-                        worst = outside;
-                        where = t;
-                    }
-                }
+                        const auto block = done / blockSize - settle / blockSize;
+                        return valuesOf[(size_t) std::clamp (block < 0 ? 0 : 1 + block / apart, 0, (int) valuesOf.size() - 1)];
+                    };
 
-                INFO ("made for " << (int) made << ", from " << (int) from << " to " << (int) to << ": " << settledBefore << " dB, then "
-                                  << settledAfter << " dB; " << worst << " dB outside at " << where - change
-                                  << " samples after the change");
-                CHECK (std::abs (settledBefore - settledAfter) > 5.0f);
-                CHECK (juce::exactlyEqual (worst, 0.0f));
+                    const auto numSamples = 2 * settle + (int) run.size() * apart * blockSize;
+                    const auto compressor = makeFor (getModeValues (made, lookahead));
+                    const auto played = playLinedUp (*compressor, numSamples, blockSize, sound, valuesAt);
+                    const auto levels = getWindowGains (played[0], amplitude, 24);
+                    const auto gains = getGains (played[1], carrier);
+                    auto low = 1000.0f, high = -1000.0f;
+
+                    for (const auto mode : run)
+                    {
+                        low = std::min (low, settled[mode] - 1.0f);
+                        high = std::max (high, settled[mode] + 1.0f);
+                    }
+
+                    auto outside = 0.0f, step = 0.0f;
+                    auto whereOutside = 0, whereStep = 0;
+
+                    for (int t = settle - 2400; t < numSamples; ++t)
+                    {
+                        if (const auto off = std::max (low - levels[(size_t) t], levels[(size_t) t] - high); off > outside)
+                        {
+                            outside = off;
+                            whereOutside = t - settle;
+                        }
+
+                        if (const auto moved = std::abs (gains[(size_t) t] - gains[(size_t) t - 1]); moved > step)
+                        {
+                            step = moved;
+                            whereStep = t - settle;
+                        }
+                    }
+
+                    juce::String modes;
+
+                    for (const auto mode : run)
+                        modes << (int) mode << " ";
+
+                    INFO ("made for " << (int) made << ", modes " << modes << apart << " ms apart: " << outside << " dB outside at "
+                                      << whereOutside << ", a step of " << step << " dB at " << whereStep);
+                    CHECK (outside < 1.0e-3f);
+                    CHECK (step <= fastest);
+                }
             }
         }
     }
+}
+
+TEST_CASE ("Into Compress on a device made for Duck, with Auto Makeup on, the make-up glides in: no step")
+{
+    // Its first Compress block set its make-up where it is set after the hand-over had read it as none: a step of the whole
+    // automatic make-up, 6.75 dB for the default curve.
+    constexpr float carrier = -100.0f;
+    auto ducking = getDefaults();
+    ducking[Compressor::mode] = (float) Compressor::Mode::duck;
+    ducking[Compressor::threshold] = -12.0f; // a quiet sound doesn't duck
+    auto compressing = ducking;
+    compressing[Compressor::mode] = (float) Compressor::Mode::compress;
+    compressing[Compressor::autoMakeup] = 1.0f;
+    const auto quiet = [] (int t, int channel) { return steady (t, channel == 1 ? carrier : -46.0f); };
+    const auto compressor = makeFor (ducking);
+    const auto gains = getGains (playLinedUp (*compressor, 48000, testBlockSize, quiet, [&] (int done) -> const std::vector<float>&
+                                              { return done < 9600 ? ducking : compressing; })[1],
+                                 carrier);
+    auto largest = 0.0f;
+
+    for (size_t t = 1; t < gains.size(); ++t)
+        largest = std::max (largest, std::abs (gains[t] - gains[t - 1]));
+
+    INFO ("the largest step " << largest << " dB");
+    CHECK (largest < 0.1f);
+    CHECK (gains.back() == doctest::Approx (6.75f).epsilon (0.02));
+}
+
+TEST_CASE ("Duck's Release under a millisecond lets go over a millisecond: no click")
+{
+    // Its Release's floor is a tenth of a millisecond, for Compress's gates; Duck letting its whole depth go that fast took
+    // it back in five samples.
+    auto values = getDuckValues();
+    values[Compressor::release] = 0.1f;
+    const auto ducked = duckUnder (values, 9600, [] (int t) { return t < 4800; });
+    auto largest = 0.0f;
+
+    for (size_t t = 4800; t < ducked.size(); ++t)
+        largest = std::max (largest, std::abs (ducked[t] - ducked[t - 1]));
+
+    INFO ("the largest step as it lets go: " << largest << " dB");
+    CHECK (largest <= 15.0f / 48.0f + 0.01f); // its 15 dB over a millisecond at least
+    CHECK (ducked.back() < 0.01f);
 }
 
 TEST_CASE ("Drum Gate lets a drum hit's start through whole, and holds bleed 30 dB down or more before it")
@@ -2459,4 +2599,101 @@ TEST_CASE ("Changing to Transient in the middle of a sound starts its ear at the
         INFO ("the largest step about the change: " << largest << " dB");
         CHECK (largest < 1.0f);
     }
+}
+
+TEST_CASE ("Asleep on silence after a phrase, the compressor plays the next as one that never slept does, in each of its modes")
+{
+    // Its runner lets it sleep once what comes in and what it plays have been silent for as long as the tail it reports
+    // (engine/nodes/DeviceRunner.cpp), and doesn't reset it as it wakes; a render never lets it sleep. With no tail, it slept
+    // a quarter of a second in, its gain standing where it was: with a Release of 2 s, the next phrase came in turned down by
+    // what it held, live only. Its tail now covers its gain's way back.
+    using phazite::engine::DeviceRunner;
+    constexpr int blockSize = 480, phrase = 24000, silence = 144000; // half a second, three seconds
+    const auto sound = [] (int t)
+    {
+        const auto playing = t < phrase || t >= phrase + silence;
+        return playing ? toGain (-6.0f) * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * t / testRate) : 0.0f;
+    };
+
+    auto compressing = getTestValues(), ducking = getDuckValues(), shaping = getTransientValues (1.0f, 1.0f);
+
+    for (auto* values : { &compressing, &ducking, &shaping })
+    {
+        (*values)[Compressor::release] = 2000.0f;
+        CAPTURE ((int) Compressor::getMode ((*values)[Compressor::mode]));
+
+        const auto playThrough = [&] (bool rendering, std::uint64_t& worked)
+        {
+            DeviceRunner runner (Compressor::info, std::make_unique<Compressor>());
+            runner.prepare (testRate, blockSize);
+            juce::AudioBuffer<float> buffer (2, blockSize);
+            DeviceRunner::Block block;
+            block.values = *values;
+            block.isPlaying = true;
+            block.isRendering = rendering;
+            std::vector<float> out;
+
+            for (int done = 0; done < 2 * phrase + silence; done += blockSize)
+            {
+                for (int i = 0; i < blockSize; ++i)
+                    for (int channel = 0; channel < 2; ++channel)
+                        buffer.setSample (channel, i, sound (done + i));
+
+                runner.process (buffer, 0, blockSize, block);
+                out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
+            }
+
+            worked = runner.getBlocksWorked();
+            return out;
+        };
+
+        std::uint64_t workedLive = 0, workedRendered = 0;
+        const auto live = playThrough (false, workedLive), rendered = playThrough (true, workedRendered);
+        auto largest = 0.0f;
+
+        for (size_t i = (size_t) (phrase + silence); i < live.size(); ++i)
+            largest = std::max (largest, std::abs (live[i] - rendered[i]));
+
+        INFO ("the next phrase differs by " << largest << "; worked " << workedLive << " blocks live, " << workedRendered << " rendered");
+        CHECK (largest < 1.0e-5f);
+    }
+
+    // Ducking, its tail is its Hold and Release, 2 s: it sleeps through the rest of the silence.
+    Compressor duck;
+    duck.prepare (testRate, blockSize);
+    play (duck, ducking, 4800, [] (int t, int) { return steady (t, -6.0f); });
+    CHECK (duck.getTailSeconds() == doctest::Approx (2.0 + 0.002 + 0.01).epsilon (0.01));
+}
+
+TEST_CASE ("The compressor's tail covers its gain's way back, and is a gate's, an Opto's and Transient's own, at most 10 s")
+{
+    const auto tailOf = [] (const std::vector<float>& values)
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        play (compressor, values, testBlockSize, [] (int t, int) { return steady (t, -6.0f); });
+        return compressor.getTailSeconds();
+    };
+
+    // Compress at its defaults: its Release, 120 ms, across its curve's span (a few tenths of a second).
+    const auto atFirst = tailOf (getDefaults());
+    CHECK (atFirst > 0.3);
+    CHECK (atFirst < 1.5);
+
+    // Held 200 ms: as much longer; a gate, whose curve spans more than 100 dB, longer still; Opto's slow stage, longer again.
+    auto held = getDefaults();
+    held[Compressor::levelHold] = 200.0f;
+    CHECK (tailOf (held) == doctest::Approx (atFirst + 0.2).epsilon (0.01));
+    auto gate = getDefaults();
+    setCurve (gate, curves::findShape ("Gate under -40 dB")->points);
+    CHECK (tailOf (gate) > atFirst);
+    auto opto = getDefaults();
+    opto[Compressor::character] = (float) Compressor::Character::opto;
+    CHECK (tailOf (opto) > 5.0 * atFirst);
+
+    // At most 10 s; Transient's: its long follower's fall, about 4 s.
+    auto slow = getDefaults();
+    slow[Compressor::release] = 2000.0f;
+    CHECK (tailOf (slow) == doctest::Approx (Compressor::maxTailSeconds));
+    CHECK (tailOf (getTransientValues (0.5f, 0.5f)) == doctest::Approx (4.09).epsilon (0.01));
 }
