@@ -27,6 +27,17 @@ The full text of every step, as it was written when it was built, is in the
   newest of each day for 30 days), each backup dated by when its version was saved, and the newest older than that
   too, so a day's work leaves backups from an hour, a day and a week before. Only files named as the project's
   backups are thinned or offered; anything else in the folder stays.
+- **Known bug 192, sends' automation and modulation** (found in S4.7's review): a send's level follows its lane and its
+  track's modulators and macros along the fader's travel, on the song's control points as a fader does. It plays live at
+  any rate and block size and in renders, freezes and bounces, stays in time with the sound it sends through delay
+  compensation, is written by Touch, Latch and Write, and its knob shows it. A send that leaves its lane eases to the
+  level set by hand over 15 ms.
+- **Known bug 193, DAWproject automation:** an exported lane plays in another DAW as in Phazite: points are added along
+  each line, bent ones too, until DAWproject's straight lines stay within 0.1 dB (a thousandth of the range on a pan or
+  a plug-in's parameter), and sends' lanes are exported as well.
+- **Known bug 194, Bounce in Place and sends:** a track's sends move to the bounce's new track with their automation and
+  modulation, so a send before the fader no longer plays the bounced sound into its return twice from the muted
+  original; Undo gives them back.
 
 ## After the known bugs' first push (2026-11-17)
 

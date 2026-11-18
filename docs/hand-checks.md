@@ -245,6 +245,10 @@ the [changelog](changelog.md).
 | D9 | Help > Example Songs: listen to House Groove's chord filter, Lo-fi Beat's Muffle macro turned fully, and the filter sweeps of Exodus' intro | Each sounds right for its song; the house chords' filter LFO was fitted again and reaches up to half an octave elsewhere at one end than before | |
 | D10 | Automate an effect's Mix and a Filter's Cutoff, and play at an audio buffer of 441 or another odd size, then at 512 | The same sound at both | |
 | D11 | Save a project many times over a few days of work, then look into its Backups folder | Backups from the last two hours, one an hour for the last day and one a day before that; saves that changed nothing left no copy; a file put there by hand is still there | |
+| D12 | Send a track to a reverb return and draw the send's lane from the bottom up to 0 dB over a bar, then play; in Touch, hold the send's knob while it plays; put an LFO on the send; stop | The reverb swells in with the line and the knob turns with it; in Touch the reverb follows the hand and the lane takes over on letting go; the LFO makes the reverb pulse; stopped, the knob shows the lane's value at the playhead | |
+| D13 | While a send with a lane at its bottom plays into a reverb, delete the lane | The reverb comes up to the knob's level smoothly, without a click | |
+| D14 | Export as DAWproject a song with a volume fade from 0 to -24 dB, a bent pan line and a send ramp, and open it in Bitwig Studio or Studio One | Halfway through, the fade reads about -8.6 dB, as Phazite's fader does; the pan's bend keeps its shape, and the send's lane is there | |
+| D15 | Bounce in Place a track that has a send before the fader to a reverb; then Undo | The reverb is as loud as before the bounce, not louder; the send is on the new track; Undo puts it back on the original | |
 
 ## Performance on other machines
 

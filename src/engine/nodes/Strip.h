@@ -8,6 +8,7 @@
 #include "Channel.h"
 #include "DeviceRunner.h"
 #include "NoteSequence.h"
+#include "engine/automation/Curve.h"
 #include "engine/modulation/ModulatorNode.h"
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <bitset>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -51,6 +53,10 @@ public:
     // control points (Channel::Automation).
     std::vector<ModulatorNode::NoteStart> noteStarts;
     std::vector<float> volumeModulation, panModulation;
+
+    // For what is sent to it, one send at a time: a send's level on each of a block's samples, and its modulation on each
+    // of the block's control points (SendLevel).
+    std::vector<float> sendGains, sendModulation;
 
     // The engine's pass it has played last (Engine.h), which the strips that take it in wait for; and for one whose
     // instrument is handed its blocks early, the pass whose block it was last handed, which the strip's own task waits for.
@@ -190,10 +196,10 @@ public:
     int getGrowth() const noexcept;
 
     // Audio thread: adds what came in so many samples ago to the outputs, at a gain going in a straight line from one to
-    // another over the block; and keeps what comes in now, in its own ring (a tapped one's is written by its strip, and
-    // what comes in isn't read).
-    void addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain = 1.0f,
-                     float endGain = 1.0f) noexcept;
+    // another over the block, times each sample's own gain if given (a send that follows its automation: SendLevel); and
+    // keeps what comes in now, in its own ring (a tapped one's is written by its strip, and what comes in isn't read).
+    void addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain = 1.0f, float endGain = 1.0f,
+                     const float* gains = nullptr) noexcept;
     void reset() noexcept; // audio thread: silence in it, as when it was made (a tapped one's ring is its strip's to reset)
 
     // Message thread: the path goes with the plan of these departures (engine/core/Plan.h: departures); any thread: which,
@@ -229,24 +235,75 @@ private:
     int touched = 0;
 };
 
-// A send's level, which the message thread sets and the audio thread glides to over a block. Kept by the send's ID. Cut, it
-// sends nothing whatever its level, gliding there over a block too (the model says when: a muted track's sends after its
-// fader, and every send of a track another's solo silences but one to a return that is soloed).
+// A send's level, kept by the send's ID: set by hand, which the message thread sets and the audio thread glides to over a
+// block; or, while the song plays, its automation and its track's modulation of it, which it follows as a fader follows its
+// volume's (Channel.h): along the fader's travel (its knob's and its lane's, Channel.h: faderPositionToDecibels()), at their
+// values on the song's control points and in a straight line between, from where the line was as a block started, whatever
+// the block's size. Stopped, it glides to its automation's value where the song is, as to a level set by hand. As it stops
+// following (its lane deleted while the song plays, a pass of Write begun, Stop), it eases to where it goes over 15 ms at
+// least, as a fader does, rather than in a block: at 64 samples a block, a lane at -30 dB deleted under a send set to 0 dB
+// went up 30 dB in 1.3 ms. Cut, it sends nothing whatever its level, gliding there over a block too (the model says when: a
+// muted track's sends after its fader, and every send of a track another's solo silences but one to a return that is
+// soloed).
 class SendLevel
 {
 public:
+    // Message thread: the level set by hand.
     void setDecibels (float decibels) noexcept;
     void setCut (bool shouldCut) noexcept { cut.store (shouldCut, std::memory_order_relaxed); }
     bool isCut() const noexcept { return cut.load (std::memory_order_relaxed); }
     float getGain() const noexcept { return gain.load (std::memory_order_relaxed); } // as set (the tests' comparisons)
 
-    // Audio thread: the gain as the last block ended, and as this one does.
-    std::pair<float, float> moveOn() noexcept;
+    // Message thread: whether its level is written by hand now (automation's touch, latch and write modes), so that it plays
+    // its level set by hand rather than its automation.
+    void setWriting (bool isWriting) noexcept { writing.store (isWriting, std::memory_order_relaxed); }
+
+    // Any thread: the level it played last, in the fader's positions, its automation's or the one set by hand, with its
+    // modulation or without; below 0 before it has played.
+    float getPlayedPosition (bool withModulation = true) const noexcept
+    {
+        return (withModulation ? playedPosition : playedBasePosition).load (std::memory_order_relaxed);
+    }
+
+    // A block's automation of the level, in the fader's positions (or none), where the song is for it (as late as the sound
+    // it sends comes into its return) and where the song is: while it plays (beatsPerSample above 0) it follows it; and its
+    // modulation, as parts of the fader's travel on each control point from the one at or before the block's start (none for
+    // none), which moves it from there, as Channel::Automation's volume.
+    struct Automation
+    {
+        const Curve* curve = nullptr;
+        double beat = 0.0;
+        double beatsPerSample = 0.0; // 0 while the song is stopped
+        std::int64_t sample = 0;     // the song's sample at the block's start
+        std::span<const float> modulation;
+        int easeSamples = 0; // what leaving its automation for another level is spread over at least: 15 ms at the rate
+    };
+
+    static constexpr double easeSeconds = 0.015;
+
+    // Its gain over a block: a straight line from one to the other; and while it follows its automation or modulation
+    // (followed), each sample's level too, in the gains it was given, which the line (its cut's glide) then turns.
+    struct Gains
+    {
+        float start = 1.0f, end = 1.0f;
+        bool followed = false;
+    };
+
+    // Audio thread: its gains over a block of as many samples as it is given room for. Given none (a block longer than its
+    // strip was prepared for), it neither follows nor eases: it glides to the level set by hand over the block.
+    Gains moveOn (const Automation&, std::span<float> gains) noexcept;
 
 private:
-    std::atomic<float> gain { 1.0f };
-    std::atomic<bool> cut { false };
-    float applied = -1.0f; // none yet
+    std::atomic<float> gain { 1.0f }, position { decibelsToFaderPosition (0.0f) }; // set by hand: 0 dB
+    std::atomic<float> playedPosition { -1.0f }, playedBasePosition { -1.0f };
+    std::atomic<bool> cut { false }, writing { false };
+    static_assert (std::atomic<float>::is_always_lock_free);
+
+    // The audio thread's: its level's gain as the last block ended, and its cut's (1 sending, 0 cut); below 0 for none yet.
+    // Whether the last block followed its automation or modulation, and how many samples are left of the ease after it.
+    float level = -1.0f, heard = -1.0f;
+    bool followedLast = false;
+    int easing = 0;
 };
 
 } // namespace phazite::engine

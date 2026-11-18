@@ -8,10 +8,12 @@
 #include "app/ProjectSession.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "engine/automation/Curve.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -28,9 +30,12 @@
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <tuple>
+#include <vector>
 
 namespace
 {
@@ -161,12 +166,14 @@ TEST_CASE ("A song as a DAWproject: its tracks, clips and notes, channels and se
     CHECK (note->getStringAttribute ("duration") == "0.5");
     CHECK (note->getDoubleAttribute ("vel") == doctest::Approx (1.0));
 
-    // The fader's automation, as points on its volume.
+    // The fader's automation, as points on its volume: its two, and more between them along the fader's travel.
     const auto* points = find (*lanes, "Points", "id", "q" + id ("c", song.bass) + "v");
     REQUIRE (points != nullptr);
     CHECK (points->getChildByName ("Target")->getStringAttribute ("parameter") == id ("c", song.bass) + "v");
-    REQUIRE (points->getNumChildElements() == 3);
-    CHECK (points->getChildElement (2)->getDoubleAttribute ("value") == doctest::Approx (0.251189).epsilon (0.001));
+    REQUIRE (points->getNumChildElements() > 3);
+    CHECK (points->getChildElement (1)->getDoubleAttribute ("value") == doctest::Approx (1.0).epsilon (0.001));
+    CHECK (points->getChildElement (points->getNumChildElements() - 1)->getDoubleAttribute ("value")
+           == doctest::Approx (0.251189).epsilon (0.001));
 
     // The section, as a marker; the master; and the metadata.
     const auto* marker = find (project, "Marker", "name", "Intro");
@@ -176,6 +183,130 @@ TEST_CASE ("A song as a DAWproject: its tracks, clips and notes, channels and se
     REQUIRE (master != nullptr);
     CHECK (master->getChildByName ("Channel")->getStringAttribute ("role") == "master");
     CHECK (content.metadata->getChildByName ("Title")->getAllSubText() == "Test");
+}
+
+namespace
+{
+// A point of a lane as a DAWproject holds it: its time in beats, its value in the lane's unit, and whether it holds to the
+// next point (else a straight line to it).
+struct WrittenPoint
+{
+    double time = 0.0, value = 0.0;
+    bool held = false;
+};
+
+std::vector<WrittenPoint> readPoints (const juce::XmlElement& points)
+{
+    std::vector<WrittenPoint> read;
+
+    for (const auto* point : points.getChildWithTagNameIterator ("RealPoint"))
+        read.push_back ({ point->getDoubleAttribute ("time"), point->getDoubleAttribute ("value"),
+                          point->getStringAttribute ("interpolation") == "hold" });
+
+    return read;
+}
+
+// What another DAW plays of them at a beat: the first's value before it and the last's after; a held point's value up to
+// the next; else a straight line between the points either side (at two points at one beat, the later's).
+double playWritten (const std::vector<WrittenPoint>& points, double beat)
+{
+    const auto next = std::upper_bound (points.begin(), points.end(), beat, [] (double b, const WrittenPoint& p) { return b < p.time; });
+
+    if (next == points.begin())
+        return points.front().value;
+
+    const auto& from = *(next - 1);
+
+    if (next == points.end() || from.held)
+        return from.value;
+
+    return from.value + (next->value - from.value) * (beat - from.time) / (next->time - from.time);
+}
+
+// A level in linear gain in decibels, below -80 dB (where nothing is heard) as -80 dB.
+double toFlooredDecibels (double gain)
+{
+    return gain > 0.0 ? std::max (-80.0, 20.0 * std::log10 (gain)) : -80.0;
+}
+} // namespace
+
+TEST_CASE ("A DAWproject's automation plays Phazite's lines in another DAW: points along each, its straight lines within 0.1 dB")
+{
+    // Known bug 193: the export wrote a volume lane's points as linear gain with straight lines between them, while Phazite
+    // plays a straight line along the fader's travel, so another DAW played other levels between them (a line from 0 dB to
+    // -24 dB was 3.1 dB louder halfway), and left bent lines out. Each line now has points along it until DAWproject's straight
+    // lines stay within 0.1 dB of Phazite's (a thousandth of the range on a pan), with no more points than that takes.
+    Song song;
+    auto& context = song.s.context;
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    const auto level = [] (float decibels) { return phazite::decibelsToFaderPosition (decibels); };
+    const auto volume = song.s.getVolumeParameter (song.bass);
+    const phazite::BeatRange all { phazite::BeatPosition(), phazite::BeatDuration::fromBeats (100.0) };
+
+    // The volume: straight, bent both ways, from silence, held and jumping at a line's end, jumping at a line's start, a jump
+    // between two points at one beat, and bent nearly all the way.
+    phazite::replaceAutomationPoints (context, volume, all,
+                                      { { at (0.0), level (0.0f), 0.0f },
+                                        { at (4.0), level (-24.0f), 0.6f },
+                                        { at (6.0), level (0.0f), -0.3f },
+                                        { at (8.0), 0.0f, 0.0f },
+                                        { at (10.0), level (6.0f), 1.0f },
+                                        { at (11.0), level (-6.0f), -1.0f },
+                                        { at (12.0), level (-20.0f), 0.0f },
+                                        { at (12.0), level (-3.0f), 0.95f },
+                                        { at (13.0), level (-40.0f), 0.0f } });
+
+    // The send's level from silence to 0 dB, straight; the pan bent.
+    const phazite::ParameterRef send { phazite::getSends (context, song.bass).front().id, phazite::schema::sendLevelParameter };
+    phazite::replaceAutomationPoints (context, send, all, { { at (0.0), 0.0f, 0.0f }, { at (8.0), level (0.0f), 0.0f } });
+    const auto pan = song.s.getPanParameter (song.bass);
+    phazite::replaceAutomationPoints (context, pan, all, { { at (0.0), 0.2f, 0.7f }, { at (4.0), 0.9f, -0.4f }, { at (8.0), 0.5f, 0.0f } });
+
+    auto content = song.describe();
+    const auto* lanes = find (*content.project, "Lanes", "track", id ("t", song.bass));
+    REQUIRE (lanes != nullptr);
+
+    // Each lane read back, as another DAW plays it, against Phazite's line at many places.
+    const auto check = [&] (const phazite::ParameterRef& parameter, const juce::String& target, bool inDecibels, size_t mostPoints)
+    {
+        CAPTURE (target);
+        const auto* points = find (*lanes, "Points", "id", "q" + target);
+        REQUIRE (points != nullptr);
+        CHECK (points->getStringAttribute ("unit") == (inDecibels ? "linear" : "normalized"));
+        const auto written = readPoints (*points);
+        CHECK (written.size() <= mostPoints);
+
+        std::vector<phazite::engine::CurvePoint> phazites;
+
+        for (const auto& point : phazite::getAutomationPoints (context, parameter))
+            phazites.push_back ({ point.beat.inBeats(), point.position, point.curve });
+
+        const phazite::engine::Curve line (phazites);
+        auto furthest = 0.0;
+
+        for (int k = 0; k < 20000; ++k)
+        {
+            const auto beat = 14.0 * (k + 0.371) / 20000.0;
+            const auto position = line.getPositionAt (beat);
+            const auto played = playWritten (written, beat);
+            furthest = std::max (furthest, inDecibels ? std::abs (toFlooredDecibels (played)
+                                                                  - toFlooredDecibels (juce::Decibels::decibelsToGain (
+                                                                      (double) phazite::faderPositionToDecibels (position), -100.0)))
+                                                      : std::abs (played - position));
+        }
+
+        CHECK (furthest <= (inDecibels ? 0.1 : 0.001) + 1.0e-6);
+        return written.size();
+    };
+
+    const auto volumePoints = check (volume, id ("c", song.bass) + "v", true, 300);
+    const auto sendPoints = check (send, id ("c", song.bass) + "s" + juce::String ((juce::int64) send.device.getRaw()) + "v", true, 100);
+    check (pan, id ("c", song.bass) + "p", false, 100);
+    MESSAGE ("volume: " << volumePoints << " points, send: " << sendPoints);
+
+    // The send's lane names the send's volume, as its channel writes it.
+    const auto* channel = find (*content.project, "Track", "id", id ("t", song.bass))->getChildByName ("Channel");
+    CHECK (find (*channel, "Volume", "id", id ("c", song.bass) + "s" + juce::String ((juce::int64) send.device.getRaw()) + "v") != nullptr);
 }
 
 TEST_CASE ("What another DAW can't play is bounced beside it: the track muted with its notes, its sound on an audio track")

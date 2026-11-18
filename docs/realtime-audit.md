@@ -48,6 +48,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Phazite's engine recording a take: an armed track's input, heard and recorded, and notes played live from another thread | 0 | 0 |
 | A take's input that falls a whole buffer behind, noting what it loses | 0 | 0 |
 | Volume automation and an LFO on pan | 0 | 0 |
+| A send's level following its lane and an LFO, the lane edited, redrawn, deleted and undone while it plays (known bug 192, 2026-11-17) | 0 | 0 |
 | A tone through a bus, with a send to Phazite's reverb on a return, into the loudness meter | 0 | 0 |
 | Phazite's EQ, every band on and one automated, with its analyzer listening | 0 | 0 |
 | Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume | 0 | 0 |

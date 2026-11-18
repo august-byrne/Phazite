@@ -77,7 +77,8 @@ A return holds effects that several tracks share, such as a reverb.
 - **+ Send** on a strip offers **With an Effect...** and **Empty**: it makes the return and the track's send to it in
   one step. The **+** at the end of the returns adds an empty return, and **Add > Add Return Track** does too.
 - Turn a send's knob to send to that return. Once a send is made, its **Pre** / **Post** switch says whether it takes
-  the sound before or after the fader.
+  the sound before or after the fader. Like any knob, a send can be automated (a reverb throw on one word) and
+  modulated ([Automation and modulation](automation.md)).
 - A send gives the return a copy: the track still plays through its own output. To run several tracks' whole sound
   through one effect, put them in a bus instead.
 
@@ -169,7 +170,8 @@ another. Click a device in a chain to show it; the line over it leads back to th
   to play the track live again. Changing what it froze (its clips or a frozen device) unfreezes it. Freezing is not an
   undo step.
 - **Bounce in Place** (in the track's right-click menu) renders the track through its instrument and effects onto a
-  new audio track under it, and mutes the original. A muted track goes on playing underneath, so the original is
+  new audio track under it, and mutes the original. The new track gets the fader's settings, and the sends move to it
+  with their automation, so the returns hear the sound once. A muted track goes on playing underneath, so the original is
   frozen too where it can be (unless a device of it listens to another track's sidechain), and costs no CPU. It is one
   undo step: Undo plays the original live again.
 - **Consolidate** joins clips into one ([Audio clips](audio-clips.md#consolidating)).

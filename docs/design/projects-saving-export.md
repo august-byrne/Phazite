@@ -309,7 +309,9 @@ before its fader, from the song's start to the end of its last clip and its tail
 `Audio` folder.
 
 - The file plays on a new audio track right under the original, named after it with "(Bounce)", in its colour, with
-  its fader, pan, sends and output, and the automation and modulation of its fader and sends.
+  its fader, pan and output, and the automation and modulation of its fader, copied. Its sends move to the new track,
+  with their automation and modulation: the original is muted, and a muted track's sends before its fader go on, so a
+  copy left on it played the sound into the return twice. Undo gives them back to the original.
 - The original is muted, and shown as it was (its rows are view state, which no undo step holds, so the bounce leaves
   them alone and Undo gives back exactly what was): nothing is lost, and nothing hidden plays. A muted track plays on
   underneath, its instrument and effects too ([mixer.md](mixer.md#mute-and-solo)), so the original is also frozen,
@@ -339,8 +341,15 @@ is, or the version selected in the history, into the project's `Renders` folder 
 
 - **What goes in:** the tracks, folders (a bus as a submix), returns with the sends to them, and the master; each
   channel's volume, pan, mute, solo and output; MIDI clips' notes; audio clips' files with their fades; the tempo
-  and time signature with their changes; sections, as markers; the faders' volume and pan automation; and VST3
-  plug-ins, each with its state as its `.vstpreset` and its automation.
+  and time signature with their changes; sections, as markers; the faders' volume and pan automation and the sends'
+  level automation; and VST3 plug-ins, each with its state as its `.vstpreset` and its automation.
+- **Automation plays as in Phazite:** DAWproject joins a lane's points with straight lines in the lane's unit (a
+  linear gain for a volume or a send, from 0 to 1 for a pan or a plug-in's parameter), or holds a point to the next.
+  Phazite draws its lines along the control's travel, and bends them, so the export adds points along each line until
+  those straight lines stay within 0.1 dB of what Phazite plays (a thousandth of the range on a pan or a plug-in's
+  parameter; a level below -80 dB counts as -80 dB), halving a line at most twelve times. A straight line on a pan or a
+  plug-in's parameter needs none; one on a send from silence to 0 dB takes about forty points. A line bent all the way is
+  written as a hold and a jump. Import doesn't read automation (below), so nothing reads these points back.
 - **What another DAW can't play is bounced:** Phazite's own devices and containers, a plug-in of another format,
   modulation, an audio clip's gain, stretch, pitch, reverse or takes, and a frozen track. The track's or return's
   sound, before its fader, goes onto an audio track of its own beside it, and the track itself is muted with its

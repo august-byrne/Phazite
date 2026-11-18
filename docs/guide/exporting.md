@@ -58,7 +58,8 @@ DAWproject is an open format that other DAWs open, to take a song from one DAW t
 **File > Export as DAWproject...** writes the song into the project's `Renders` folder as a `.dawproject` file. It
 holds the tracks, folders, returns and sends, each channel's volume, pan, mute, solo and output, the MIDI clips'
 notes, the audio clips' files with their fades, the tempo and time signature with their changes, the sections as
-markers, the volume and pan automation, and VST®3 plug-ins with their settings and automation.
+markers, the volume, pan and send automation, and VST®3 plug-ins with their settings and automation. Automation
+plays in the other DAW as it does in Phazite: its lines and bends are written with as many points as that takes.
 
 What another DAW can't play is bounced: Phazite's own devices and containers, modulation, an audio clip's gain,
 stretch, pitch or reverse, and frozen tracks. Such a track's sound goes onto an audio track of its own beside it, and

@@ -1563,16 +1563,41 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         juce::FloatVectorOperations::clear (channels[1], numSamples);
 
         // What it adds up, each lined up with the others: strips after their faders, or before them (sends), at their sends'
-        // levels.
+        // levels, which follow their automation as late as what they send comes in, and their tracks' modulators.
         for (const auto& input : strip.inputs)
         {
-            const auto& from = *plan.strips[(size_t) input.strip].state;
+            const auto& sender = plan.strips[(size_t) input.strip];
+            const auto& from = *sender.state;
             const auto& sound = input.beforeFader ? from.beforeFader : (input.beforeMute ? from.beforeMute : from.buffer);
             const float* sides[] = { input.part != nullptr ? input.part->getChannel (0) + offset : sound.getReadPointer (0, offset),
                                      input.part != nullptr ? input.part->getChannel (1) + offset : sound.getReadPointer (1, offset) };
-            const auto [startGain, endGain] =
-                span.getPathGains (input.delay.get(), input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f));
-            (input.delay != nullptr ? *input.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
+            SendLevel::Gains level;
+
+            if (input.level != nullptr)
+            {
+                // Its level on each sample, where its strip has room for them (it was prepared for blocks this long); else
+                // the level set by hand, over the block.
+                const auto fits = (size_t) numSamples <= state.sendGains.size();
+                jassert (fits);
+                SendLevel::Automation automation;
+
+                if (fits)
+                {
+                    automation.curve = input.levelCurve.get();
+                    automation.beatsPerSample = beatsPerSample;
+                    automation.sample = gridSample;
+                    automation.beat = input.levelCurve != nullptr ? getAutomationBeat (input.latency) : beat;
+                    automation.modulation = getFaderModulation (sender, input.levelModulation, state.sendModulation);
+                    automation.easeSamples = (int) (SendLevel::easeSeconds * sampleRate);
+                }
+
+                level =
+                    input.level->moveOn (automation, fits ? std::span (state.sendGains.data(), (size_t) numSamples) : std::span<float>());
+            }
+
+            const auto [startGain, endGain] = span.getPathGains (input.delay.get(), { level.start, level.end });
+            (input.delay != nullptr ? *input.delay : noDelay)
+                .addDelayed (sides, channels, numSamples, startGain, endGain, level.followed ? state.sendGains.data() : nullptr);
         }
 
         // Its events and modulators, unless they were taken as its instrument was handed its block.

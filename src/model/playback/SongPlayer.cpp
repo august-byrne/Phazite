@@ -479,6 +479,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     usedContainers.clear();
     usedChains.clear();
     modulated.clear();
+    sendModulation.clear();
     readCurves();
 
     // The song's channels, each a strip: its tracks, its buses (folders with faders of their own: a plain folder's VCA
@@ -528,9 +529,14 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
                 if (getID (send, schema::sendTo) == channel.id)
                 {
                     // After the fader, the track's sound before its mute: the send's cut says whether it sends
-                    // (updateAudibility()), so that a track soloed out still sends to a return that is soloed.
+                    // (updateAudibility()), so that a track soloed out still sends to a return that is soloed. Its level
+                    // follows its automation and its track's modulators (addModulation(), as the track was compiled).
                     const auto beforeFader = (bool) send[schema::sendPreFader];
-                    inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send), nullptr, ! beforeFader });
+                    const auto sendID = getID (send, schema::sendID);
+                    const auto modulation = sendModulation.find (sendID);
+                    inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send), nullptr, ! beforeFader,
+                                        findCurve ((std::uint64_t) sendID, schema::sendLevelParameter),
+                                        modulation != sendModulation.end() ? modulation->second : std::vector<engine::Plan::Route>() });
                     plan->strips[(size_t) places[other.id]].feedsBeforeFader |= beforeFader;
                     plan->strips[(size_t) places[other.id]].feedsBeforeMute |= ! beforeFader;
                 }
@@ -1176,12 +1182,14 @@ void SongPlayer::addInputs (engine::Plan& plan, engine::Plan::Strip& strip, std:
         return plan.strips[(size_t) input.strip].latency;
     };
 
-    // Each lined up with the latest (delay compensation): the strip's own sound comes in as late as that.
+    // Each lined up with the latest (delay compensation): the strip's own sound comes in as late as that, which a send's
+    // automation follows the song as late as.
     for (const auto& input : inputs)
         strip.latency = std::max (strip.latency, getLatency (input));
 
     for (auto& input : inputs)
     {
+        input.latency = strip.latency;
         const auto& from = plan.strips[(size_t) input.strip];
         using Point = engine::Plan::Strip::TapPoint;
         const auto part = input.part != nullptr ? -1 - (from.id * engine::maximumParts + input.part->getPart()) : 0;
@@ -1558,7 +1566,8 @@ void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const juce::Va
 void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs)
 {
     // Its modulators and macros, in their order, then its containers' macros, and what each moves: its devices' parameters
-    // (a container's macros those in it) and its fader.
+    // (a container's macros those in it), its fader and its sends' levels (which the strips they go to take, by the sends'
+    // IDs: compile()).
     std::vector<juce::ValueTree> sources;
 
     const auto addSources = [this, &strip, &sources] (const juce::ValueTree& parent)
@@ -1602,6 +1611,15 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
                     strip.volumeModulation.push_back ({ (int) source, amount });
                 else if (target.parameter == "pan" || target.parameter == "master pan")
                     strip.panModulation.push_back ({ (int) source, amount });
+
+                continue;
+            }
+
+            if (target.parameter == schema::sendLevelParameter)
+            {
+                for (const auto& send : channelState)
+                    if (send.hasType (schema::SEND) && getID (send, schema::sendID) == device)
+                        sendModulation[device].push_back ({ (int) source, amount });
 
                 continue;
             }
@@ -2527,6 +2545,16 @@ std::optional<float> SongPlayer::getPlayedValue (const ParameterRef& parameter, 
         return {};
     }
 
+    // A send's level, in the fader's positions, once it has played.
+    if (const auto send = sendLevels.find (id); send != sendLevels.end())
+    {
+        if (const auto played = send->second->getPlayedPosition (withModulation);
+            parameter.parameter == schema::sendLevelParameter && played >= 0.0f)
+            return played;
+
+        return {};
+    }
+
     // A container's chain's volume, pan and crossover.
     if (const auto* chain = findChain (id))
     {
@@ -2571,6 +2599,14 @@ void SongPlayer::setWriting (const ParameterRef& parameter, bool isWriting)
             processor->getInstance().setMovedByEngine (index,
                                                        (! isWriting && findCurve (parameter) != nullptr)
                                                            || modulated.contains ({ parameter.device.getRaw(), parameter.parameter }));
+
+        return;
+    }
+
+    if (const auto send = sendLevels.find (id); send != sendLevels.end())
+    {
+        if (parameter.parameter == schema::sendLevelParameter)
+            send->second->setWriting (isWriting);
 
         return;
     }

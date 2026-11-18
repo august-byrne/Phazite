@@ -17,6 +17,7 @@
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -29,8 +30,10 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/ContainerModel.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
@@ -1407,6 +1410,377 @@ TEST_CASE ("Phazite's engine sends to a return before or after the fader, at the
     // Its level is taken in at once.
     phazite::getSendLevel (song.context, send).setValue (phazite::decibelsToFaderPosition (0.0f));
     CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+namespace
+{
+// A song at a tempo whose first track holds a note on Test Tone (a steady level, its note's velocity) for 32 beats, and sends
+// it at 0 dB to an empty return: before its fader, the fader down, so that the master hears the return alone, what the send
+// sends; or after it, the fader at 0 dB, so that the master hears both. The send's level, its track and all.
+struct SendToReturn
+{
+    phazite::TrackID track, returnTrack;
+    phazite::ParameterRef level;
+};
+
+SendToReturn addSendToReturn (TestSong& song, double tempo, bool preFader = true)
+{
+    song.setTempo (tempo);
+    auto& state = *phazite::findSong (song.context);
+    const auto track = song.firstTrack;
+    phazite::test::addTestDevice (state, track, phazite::test::TestTone::typeID);
+    song.addNote (song.addMidiClip (track, 0.0, 32.0), 60, 0.0, 32.0);
+    phazite::TrackID returnTrack;
+
+    {
+        const phazite::UndoStep step (state, "Add Return");
+        returnTrack = phazite::addNewReturnTrack (state, nullptr);
+    }
+
+    song.addSend (track, returnTrack, 0.0f);
+    const auto send = phazite::getSends (song.context, track).front().id;
+
+    if (preFader)
+    {
+        phazite::setPreFader (song.context, send, true);
+        song.setVolume (track, -100.0f);
+    }
+
+    return { track, returnTrack, { send, phazite::schema::sendLevelParameter } };
+}
+
+// What Test Tone's held note plays through the master's -3 dB, as the return plays it at a send's 0 dB; and a send's gain at a
+// position along the fader's travel.
+float heldTone()
+{
+    return juce::Decibels::decibelsToGain (phazite::defaultMasterVolume) * 100.0f / 127.0f;
+}
+
+float sendGainAt (float position)
+{
+    return juce::Decibels::decibelsToGain (phazite::faderPositionToDecibels (position), -100.0f);
+}
+
+// A send's lane held at silence for a beat, then a straight line up the fader's travel to 0 dB over eight beats.
+void addSendRamp (TestSong& song, const phazite::ParameterRef& level)
+{
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    song.addAutomation (level, { { at (0.0), 0.0f }, { at (1.0), 0.0f }, { at (9.0), phazite::decibelsToFaderPosition (0.0f) } });
+}
+
+// That what played (the return alone) follows the ramp: silent before it, and at each beat the tone at the send's gain on the
+// line there, along the fader's travel.
+void checkSendRamp (const juce::AudioBuffer<float>& audio, double sampleRate, double tempo)
+{
+    const auto top = phazite::decibelsToFaderPosition (0.0f);
+
+    for (const auto beat : { 0.5, 2.0, 3.0, 5.0, 7.0, 8.5, 10.0 })
+    {
+        CAPTURE (beat);
+        const auto position = top * (float) std::clamp ((beat - 1.0) / 8.0, 0.0, 1.0);
+        const auto played = audio.getSample (0, (int) std::lround (beat * 60.0 / tempo * sampleRate));
+        CHECK (played == doctest::Approx (heldTone() * sendGainAt (position)).epsilon (0.002));
+    }
+}
+} // namespace
+
+TEST_CASE ("A send's lane ramping from silence moves what its return plays, live at every condition and rendered alike")
+{
+    // Known bug 192: a send's lane was drawn, written and saved, but Phazite's engine played the send at its level set by hand,
+    // so the return here played the tone at 0 dB from the start. The send follows its lane as a fader follows its volume's:
+    // along the fader's travel, on the song's control points, whatever the rate, the block size and the tempo.
+    phazite::test::atEveryCondition (
+        [] (const phazite::test::PlaybackCondition& condition)
+        {
+            TestSong song;
+            const auto sent = addSendToReturn (song, condition.getTempo());
+            addSendRamp (song, sent.level);
+            EnginePlayback playback (condition);
+            song.run ("transport.playStop");
+            const auto audio = playback.play (11.0 * 60.0 / condition.getTempo());
+            song.run ("transport.playStop");
+            checkSendRamp (audio, condition.getSampleRate(), condition.getTempo());
+        });
+
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    addSendRamp (song, sent.level);
+    checkSendRamp (phazite::test::renderOffline (song.context, 5.5), phazite::test::renderSampleRate, 120.0);
+}
+
+TEST_CASE ("A send that follows its lane and an LFO plays the same in blocks of 441 samples as in blocks of 512")
+{
+    // The ramp from one control point to the next goes on where a block's end cuts it, from where it reached, so that the send
+    // plays the same in any blocks, as a fader does (and the runner's mix: DeviceRunner::mixWithDry()).
+    std::vector<juce::AudioBuffer<float>> played;
+
+    for (const auto blockSize : { 441, 512 })
+    {
+        CAPTURE (blockSize);
+        TestSong song;
+        const auto sent = addSendToReturn (song, 120.0);
+        addSendRamp (song, sent.level);
+        const auto lfo = song.addModulator (sent.track, phazite::ModulatorType::lfo);
+        song.setModulatorParameter (lfo, "syncType", 1.0f); // with the transport, so that the half second stopped first counts
+        song.setModulatorParameter (lfo, "rateType", 8.0f); // a cycle a quarter note
+        song.modulate (lfo, sent.level, 0.1f);
+        EnginePlayback playback (phazite::test::PlaybackCondition { "44.1 kHz", 44100, blockSize, 120 });
+        song.run ("transport.playStop");
+        played.push_back (playback.play (5.0));
+        song.run ("transport.playStop");
+    }
+
+    REQUIRE (played[0].getNumSamples() == played[1].getNumSamples());
+    auto largest = 0.0f;
+
+    for (int i = 0; i < played[0].getNumSamples(); ++i)
+        largest = std::max (largest, std::abs (played[0].getSample (0, i) - played[1].getSample (0, i)));
+
+    CHECK (played[0].getMagnitude (0, 0, played[0].getNumSamples()) > 0.1f);
+    CHECK (largest < 1.0e-5f);
+
+    // And what they play is the lane and the LFO, not the level set by hand (known bug 192): nearly silent at beat 0.5, where
+    // the lane holds silence and the LFO moves it a tenth of the travel at most, and swinging after beat 9, where the lane is
+    // at 0 dB, by about 5 dB over a cycle.
+    for (const auto& audio : played)
+    {
+        CHECK (std::abs (audio.getSample (0, 11025)) < 0.02f * heldTone());
+        const auto range = audio.findMinMax (0, 4 * 44100 + 22050, 22050); // from beat 9, a quarter note
+        CHECK (range.getStart() > 0.0f);
+        CHECK (range.getEnd() > 1.5f * range.getStart());
+    }
+}
+
+TEST_CASE ("A send leaving its lane for the level set by hand eases there over 15 ms, as a fader does, not in a short block")
+{
+    // The review of known bug 192: a lane at -30 dB deleted under a send set to 0 dB while the song plays went up 30 dB within
+    // a block, 1.3 ms at 64 samples, a click on whatever the return plays. A send that has followed nothing stays as it was.
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    const auto low = phazite::decibelsToFaderPosition (-30.0f);
+    song.addAutomation (sent.level, { { phazite::BeatPosition(), low }, { phazite::BeatPosition::fromBeats (32.0), low } });
+    EnginePlayback playback (phazite::test::PlaybackCondition { "48 kHz in blocks of 64", 48000, 64, 120 });
+    song.run ("transport.playStop");
+    const auto before = playback.play (0.5);
+    CHECK (before.getSample (0, before.getNumSamples() - 1) == doctest::Approx (heldTone() * sendGainAt (low)).epsilon (0.01));
+
+    phazite::deleteAutomation (phazite::getParameter (song.context, sent.level));
+    const auto after = playback.play (0.5);
+    song.run ("transport.playStop");
+    CHECK (after.getSample (0, after.getNumSamples() - 1) == doctest::Approx (heldTone()).epsilon (0.001));
+
+    // The largest step from one sample to the next, as a part of the way from -30 dB to 0 dB: over 15 ms (720 samples), about
+    // 1/720 of it; over a block, 1/64.
+    auto largest = std::abs (after.getSample (0, 0) - before.getSample (0, before.getNumSamples() - 1));
+
+    for (int i = 1; i < after.getNumSamples(); ++i)
+        largest = std::max (largest, std::abs (after.getSample (0, i) - after.getSample (0, i - 1)));
+
+    const auto way = heldTone() * (1.0f - sendGainAt (low));
+    INFO ("the largest step is " << largest / way << " of the way");
+    CHECK (largest < way / 600.0f);
+}
+
+TEST_CASE ("Phazite's engine plays a send's automation, which its knob shows, the lane's value at the playhead while stopped, and "
+           "Touch writes it")
+{
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    const auto top = phazite::decibelsToFaderPosition (0.0f), bottom = phazite::decibelsToFaderPosition (-24.0f);
+    song.addAutomation (sent.level, { { phazite::BeatPosition(), top }, { phazite::BeatPosition::fromBeats (4.0), bottom } });
+    EnginePlayback playback;
+    auto knob = phazite::getSendLevel (song.context, sent.level.device);
+    const auto lastSample = [] (const juce::AudioBuffer<float>& audio) { return audio.getSample (0, audio.getNumSamples() - 1); };
+
+    // Half way along the line at beat 2: the knob there, and the return playing it.
+    song.run ("transport.playStop");
+    const auto halfway = playback.play (1.0);
+    CHECK (knob.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.01));
+    CHECK (lastSample (halfway) == doctest::Approx (heldTone() * sendGainAt ((top + bottom) / 2.0f)).epsilon (0.01));
+
+    // Stopped, back at the start: the lane's value there.
+    song.run ("transport.playStop");
+    playback.play (0.05);
+    CHECK (knob.getValue() == doctest::Approx (top).epsilon (0.001));
+
+    // In Touch, held, it plays as set by hand, and the lane plays again once it is let go.
+    phazite::setAutomationMode (song.context, sent.track, phazite::AutomationMode::touch);
+    song.run ("transport.playStop");
+    playback.play (0.25); // to beat 0.5
+    knob.beginGesture();
+    knob.setValue (0.3f);
+    const auto held = playback.play (0.25);
+    CHECK (knob.getValue() == doctest::Approx (0.3f));
+    CHECK (lastSample (held) == doctest::Approx (heldTone() * sendGainAt (0.3f)).epsilon (0.01));
+    knob.endGesture();
+    playback.play (0.5); // to beat 2
+    CHECK (knob.getValue() == doctest::Approx ((top + bottom) / 2.0f).epsilon (0.02));
+    song.run ("transport.playStop");
+
+    // What it wrote, as one undo step.
+    const auto points = phazite::getAutomationPoints (song.context, sent.level);
+    CHECK (points.size() > 2);
+    CHECK (std::any_of (points.begin(), points.end(), [] (const auto& p) { return std::abs (p.position - 0.3f) < 0.001f; }));
+    phazite::undo (*phazite::findSong (song.context));
+    CHECK (phazite::getAutomationPoints (song.context, sent.level).size() == 2);
+}
+
+TEST_CASE ("A track's macro turns its send down, which the return plays and the knob shows, and an LFO swings it")
+{
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    const auto top = phazite::decibelsToFaderPosition (0.0f);
+    const auto macro = song.addModulator (sent.track, phazite::ModulatorType::macro);
+    song.modulate (macro, sent.level, -0.5f);
+    song.setMacroValue (macro, 1.0f);
+    const auto audio = renderOwn (song);
+    CHECK (audio.getSample (0, 24000) == doctest::Approx (heldTone() * sendGainAt (top - 0.5f)).epsilon (0.002));
+
+    EnginePlayback playback;
+    auto knob = phazite::getSendLevel (song.context, sent.level.device);
+    song.run ("transport.playStop");
+    playback.play (0.25);
+    CHECK (knob.getValue() == doctest::Approx (top - 0.5f).epsilon (0.001));
+    CHECK (knob.getBaseValue() == doctest::Approx (top).epsilon (0.001));
+    song.run ("transport.playStop");
+
+    // An LFO in its place: the return swings around the send's level.
+    phazite::removeModulator (song.context, macro);
+    const auto lfo = song.addModulator (sent.track, phazite::ModulatorType::lfo);
+    song.setModulatorParameter (lfo, "rateType", 0.0f); // in hertz, at 1 Hz
+    song.modulate (lfo, sent.level, 0.2f);
+    const auto swung = renderOwn (song, 2.0);
+    const auto range = swung.findMinMax (0, 0, swung.getNumSamples());
+    CHECK (range.getEnd() > heldTone() * sendGainAt (top) * 1.5f);
+    CHECK (range.getStart() < heldTone() * sendGainAt (top) * 0.5f);
+}
+
+TEST_CASE ("A send's lane stays in time with the sound it sends through a device with latency, and an Undo of its edit plays as before")
+{
+    // Delay compensation: what a send sends comes into its return as late as the latest path there, so its lane follows the
+    // song as late, as a fader's follows its track's. Here the track's sound comes 1000 samples late through Test Latency; the
+    // lane jumps from silence to 0 dB at beat 2, which a render plays at beat 2's sample (it plays ahead by the compensation).
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0);
+    auto& state = *phazite::findSong (song.context);
+
+    {
+        const phazite::UndoStep step (state, "Add Latency");
+        const auto latency = phazite::test::addTestDevice (state, sent.track, phazite::test::TestLatency::typeID);
+        phazite::setValueSetByHand (state, phazite::ParameterRef { latency, "samples" }, 1000.0f);
+    }
+
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+    const auto top = phazite::decibelsToFaderPosition (0.0f);
+    song.addAutomation (sent.level, { { at (0.0), 0.0f }, { at (2.0), 0.0f }, { at (2.0), top } });
+    const auto jumped = renderOwn (song, 1.5);
+    const auto beat2 = 48000; // at 120 BPM and 48 kHz
+    CHECK (std::abs (jumped.getSample (0, beat2 - 64)) < 1.0e-6f);
+    CHECK (jumped.getSample (0, beat2 + 64) == doctest::Approx (heldTone()).epsilon (0.002));
+
+    // An edit of the lane and its Undo and Redo, exact in the song and in the plan compiled after each; and undone, the
+    // send plays as it did.
+    phazite::test::UndoCheck undo (song.context);
+    undo.check ("Add Automation Point", [&] { phazite::addAutomationPoint (song.context, sent.level, { at (1.0), top, 0.0f }); });
+    CHECK (renderOwn (song, 1.5).getSample (0, beat2 / 2) == doctest::Approx (heldTone()).epsilon (0.01));
+    phazite::undo (state);
+    CHECK (phazite::test::getDifference (renderOwn (song, 1.5), jumped, 48000.0).peakDb <= -100.0f); // none
+}
+
+TEST_CASE ("A send's lane plays on as its track is frozen, and on the track that Bounce in Place makes")
+{
+    // A freeze renders the track before its fader: its fader and its sends play on live, and so do their lanes. Bounce in
+    // Place copies the send and its lane onto the new track, and mutes the original (its send after the fader with it).
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0, false);
+    addSendRamp (song, sent.level);
+    const auto before = renderOwn (song, 5.0);
+    CHECK (before.getSample (0, 8 * 24000) > before.getSample (0, 2 * 24000) * 1.5f); // the return comes up
+
+    // The largest difference from that after the first tenth of a second (the file's first samples, at another rate than the
+    // render's, ring as the tone starts there), as a part of the tone.
+    const auto differenceFrom = [&before] (const juce::AudioBuffer<float>& after)
+    {
+        auto largest = 0.0f;
+
+        for (int i = 4800; i < std::min (before.getNumSamples(), after.getNumSamples()); ++i)
+            largest = std::max (largest, std::abs (after.getSample (0, i) - before.getSample (0, i)));
+
+        return largest / heldTone();
+    };
+
+    song.context.getSongSelection().selectOnly (sent.track);
+    song.run ("track.freeze");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
+    REQUIRE (phazite::isFrozen (song.context, sent.track));
+    CHECK (differenceFrom (renderOwn (song, 5.0)) < 1.0e-3f);
+
+    song.run ("track.freeze"); // unfrozen
+    REQUIRE_FALSE (phazite::isFrozen (song.context, sent.track));
+    song.renders.finished.clear();
+    song.run ("track.bounceInPlace");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
+    REQUIRE (phazite::getAllPlaylistTracks (song.context).size() == 3); // the return, and the bounce
+    CHECK (differenceFrom (renderOwn (song, 5.0)) < 1.0e-3f);
+}
+
+TEST_CASE ("Bounce in Place moves a send before the fader, its lane and its modulation to the new track: the return hears the "
+           "sound once, and Undo puts the send back")
+{
+    // Known bug 194: the bounce copied every send onto the new track and muted the original, whose sends before its fader go
+    // on while it is muted (Ableton Live's and most DAWs' mute), so the return played the bounced sound twice, 6 dB louder.
+    TestSong song;
+    const auto sent = addSendToReturn (song, 120.0, true);
+    addSendRamp (song, sent.level);
+    const auto macro = song.addModulator (sent.track, phazite::ModulatorType::macro);
+    song.modulate (macro, sent.level, -0.2f);
+    song.setMacroValue (macro, 0.5f);
+    const auto before = renderOwn (song, 5.0);
+    CHECK (before.getSample (0, 8 * 24000) > 0.1f);
+
+    // The largest difference from that after the first tenth of a second (the file's first samples, at another rate than the
+    // render's, ring as the tone starts there), as a part of the tone.
+    const auto differenceFrom = [&before] (const juce::AudioBuffer<float>& after)
+    {
+        auto largest = 0.0f;
+
+        for (int i = 4800; i < std::min (before.getNumSamples(), after.getNumSamples()); ++i)
+            largest = std::max (largest, std::abs (after.getSample (0, i) - before.getSample (0, i)));
+
+        return largest / heldTone();
+    };
+
+    // Exact in the song, undone and redone (the render's file stays for the redo).
+    song.context.getSongSelection().selectOnly (sent.track);
+    phazite::test::UndoCheck undo (song.context);
+    undo.check ("Bounce in Place",
+                [&song]
+                {
+                    song.run ("track.bounceInPlace");
+                    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }));
+                });
+
+    phazite::TrackID bounced;
+
+    for (const auto track : phazite::getAllPlaylistTracks (song.context))
+        if (track != sent.track && track != sent.returnTrack)
+            bounced = track;
+
+    REQUIRE (bounced.isValid());
+    CHECK (phazite::getSends (song.context, sent.track).empty());
+    const auto moved = phazite::getSends (song.context, bounced);
+    REQUIRE (moved.size() == 1);
+    const phazite::ParameterRef movedLevel { moved.front().id, phazite::schema::sendLevelParameter };
+    CHECK (phazite::getAutomationPoints (song.context, movedLevel).size() == 3);
+    CHECK (phazite::getModulations (song.context, movedLevel).size() == 1);
+    CHECK (differenceFrom (renderOwn (song, 5.0)) < 1.0e-3f);
+
+    // Undone: the send back on the original, with its lane and its modulation, as it played.
+    phazite::undo (*phazite::findSong (song.context));
+    CHECK (phazite::getSends (song.context, sent.track).size() == 1);
+    CHECK (phazite::getAutomationPoints (song.context, sent.level).size() == 3);
+    CHECK (phazite::getModulations (song.context, sent.level).size() == 1);
+    CHECK (phazite::test::getDifference (renderOwn (song, 5.0), before, 48000.0).peakDb <= -100.0f); // none
 }
 
 TEST_CASE (

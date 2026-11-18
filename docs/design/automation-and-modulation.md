@@ -161,10 +161,10 @@ the control's travel, a hundredth of it a step, as the lane does.
   moves points by an amount (dragging, the keys, the inspector's field) moves them along the travel, so a skewed
   parameter's points keep their shape.
 - A fader's volume was a position already (a fader's travel), and a plug-in's parameters are from 0 to 1, as
-  plug-ins take them: their automation plays as before. A pan's position is its knob's: 0 left, 0.5 centre, 1 right.
-  A choice or a switch steps as before: its travel goes evenly through its choices. The tempo lane is not a control's
-  travel: its line stays straight in BPM ([playlist.md](playlist.md)). A send's level has a lane, but Phazite's engine
-  doesn't play a send's automation yet (a known bug, [known-bugs.md](../known-bugs.md)).
+  plug-ins take them: their automation plays as before. A send's level is on a fader's travel too, as its knob shows
+  it. A pan's position is its knob's: 0 left, 0.5 centre, 1 right. A choice or a switch steps as before: its travel
+  goes evenly through its choices. The tempo lane is not a control's travel: its line stays straight in BPM
+  ([playlist.md](playlist.md)).
 - Modulation adds along the same travel: a frequency's modulation is so many octaves either way, wherever the knob is.
 - The song keeps automation in beats, as it keeps clips, so it stays on its beats when the tempo or the time
   signature changes.
@@ -299,7 +299,9 @@ no switch: it is a knob, turned down to do nothing.
 - A parameter moves from the value its automation leaves; modulation is added in the parameter's range as its control
   spans it, one sum for the whole device: along the same travel as its automation.
 - Plug-ins' parameters are moved on the same points, each change handed to the plug-in at its sample, and so are the
-  faders' volume and pan: an LFO moves a plug-in, a device and a fader in step.
+  faders' volume and pan and the sends' levels: an LFO moves a plug-in, a device, a fader and a send in step.
+- A fader's and a send's automation follow the song as late as the sound they turn comes to them (the song's delay
+  compensation), so that a fade stays on the sound it fades.
 - Steady playback of automation and modulation allocates nothing on the audio thread; a guarded scenario of the
   [real-time audit](../realtime-audit.md) checks it.
 

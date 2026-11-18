@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DawProject.h"
 #include "Export.h"
+#include "engine/automation/Curve.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
@@ -39,6 +40,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 namespace phazite
 {
@@ -69,6 +71,14 @@ namespace
     {
         return decibels <= -100.0f ? 0.0 : juce::jlimit (0.0, 2.0, std::pow (10.0, decibels / 20.0));
     }
+
+    // How far another DAW's straight lines between the points written may be from the line Phazite plays: in decibels for a
+    // linear gain (a fader's volume, a send's level), a level below automationFloorDb counting as that, where nothing is
+    // heard; and as a part of the range for a normalized value (a pan, a plug-in's parameter). A line is halved at most so
+    // many times: 4096 pieces.
+    constexpr double automationToleranceDb = 0.1, automationFloorDb = -80.0, automationToleranceNormalized = 0.001;
+    constexpr int maximumHalvings = 12;
+    constexpr int probesPerPiece = 8; // the places in each piece its straight line is compared at
 
     juce::XmlElement* addParameter (juce::XmlElement& parent, const char* type, const juce::String& id, const juce::String& name)
     {
@@ -658,15 +668,23 @@ namespace
             return path;
         }
 
-        // The automation of a channel's fader (its volume and pan) and of its VST3 plug-ins, as points on its lanes.
+        // The automation of a channel's fader (its volume and pan), of its sends' levels and of its VST3 plug-ins, as points on
+        // its lanes.
         void writeAutomation (juce::XmlElement& lane, const juce::ValueTree& track, const juce::String& channel)
         {
             const auto fader = readID (track[schema::channelFader]);
-            std::set<std::uint64_t> pluginIDs;
+            std::set<std::uint64_t> pluginIDs, sendIDs;
 
-            for (const auto& device : track)
-                if (isVst3 (device))
-                    pluginIDs.insert (readID (device[schema::deviceID]));
+            for (const auto& child : track)
+            {
+                if (isVst3 (child))
+                    pluginIDs.insert (readID (child[schema::deviceID]));
+                else if (child.hasType (schema::SEND))
+                    sendIDs.insert (readID (child[schema::sendID]));
+            }
+
+            const auto toGain = [] (float position) { return toLinear (faderPositionToDecibels (position)); };
+            const auto toNormalized = [] (float position) { return (double) position; };
 
             for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
             {
@@ -681,17 +699,22 @@ namespace
                 if (device == fader && fader != 0 && (parameter == schema::faderVolume || parameter == schema::masterVolume))
                 {
                     target = channel + "v", unit = "linear";
-                    toValue = [] (float position) { return toLinear (faderPositionToDecibels (position)); };
+                    toValue = toGain;
                 }
                 else if (device == fader && fader != 0 && (parameter == schema::faderPan || parameter == schema::masterPan))
                 {
                     target = channel + "p", unit = "normalized"; // a pan's position, as DAWproject's
-                    toValue = [] (float position) { return (double) position; };
+                    toValue = toNormalized;
+                }
+                else if (sendIDs.count (device) > 0 && parameter == schema::sendLevelParameter)
+                {
+                    target = channel + "s" + juce::String ((juce::int64) device) + "v", unit = "linear"; // writeSends()' Volume
+                    toValue = toGain;
                 }
                 else if (pluginIDs.count (device) > 0)
                 {
                     target = "d" + juce::String ((juce::int64) device) + "p" + parameter, unit = "normalized";
-                    toValue = [] (float position) { return (double) position; };
+                    toValue = toNormalized;
                 }
                 else
                 {
@@ -702,20 +725,87 @@ namespace
                 points->setAttribute ("unit", unit);
                 points->setAttribute ("id", "q" + target);
                 points->createNewChildElement ("Target")->setAttribute ("parameter", target);
+                writePoints (*points, curve, toValue, unit == "linear");
+            }
+        }
 
-                for (const auto& point : curve)
+        // A curve's points as another DAW plays them: each with the value it has there, a straight line to the next in the
+        // lane's unit (or held, a step at the next), and as many more along each of Phazite's lines as keep those straight
+        // lines close to what Phazite plays there (engine/automation/Curve.h; the automation tolerances, above). Phazite's
+        // line is straight along the control's travel: on a fader's travel that is no straight line in linear gain (known bug
+        // 193: another DAW played other levels between the points), and a bent line is bent in any unit. Two points at one
+        // beat are a jump, written so; a line bent all the way is a hold and a jump, at its end (held) or its start.
+        static void writePoints (juce::XmlElement& points, const juce::ValueTree& curveState, const std::function<double (float)>& toValue,
+                                 bool inDecibels)
+        {
+            std::vector<engine::CurvePoint> read;
+
+            for (const auto& point : curveState)
+                if (point.hasType (schema::POINT))
+                    read.push_back ({ (double) point[schema::pointBeat], (float) point[schema::pointValue],
+                                      (float) point.getProperty (schema::pointCurve, 0.0f) });
+
+            std::stable_sort (read.begin(), read.end(), [] (const auto& a, const auto& b) { return a.beat < b.beat; });
+            const engine::Curve line (read);
+
+            const auto add = [&points] (double beat, double value, bool held)
+            {
+                auto* element = points.createNewChildElement ("RealPoint");
+                element->setAttribute ("time", number (beat));
+                element->setAttribute ("value", number (value));
+                element->setAttribute ("interpolation", held ? "hold" : "linear");
+            };
+
+            const auto isClose = [inDecibels] (double written, double played)
+            {
+                if (! inDecibels)
+                    return std::abs (written - played) <= automationToleranceNormalized;
+
+                const auto toDecibels = [] (double gain)
+                { return gain > 0.0 ? std::max (automationFloorDb, 20.0 * std::log10 (gain)) : automationFloorDb; };
+                return std::abs (toDecibels (written) - toDecibels (played)) <= automationToleranceDb;
+            };
+
+            // Points along a line from one beat to another, each value as Phazite plays it there: none where a straight line
+            // keeps close, else the middle, and as many on each half.
+            const std::function<void (double, double, double, double, int)> addAlong =
+                [&] (double start, double startValue, double end, double endValue, int halvings)
+            {
+                auto close = true;
+
+                for (int k = 1; k < probesPerPiece && close; ++k)
                 {
-                    if (! point.hasType (schema::POINT))
-                        continue;
-
-                    if (! juce::approximatelyEqual ((float) point[schema::pointCurve], 0.0f))
-                        leftOut.addIfNotAlreadyThere ("automation's bends");
-
-                    auto* element = points->createNewChildElement ("RealPoint");
-                    element->setAttribute ("time", number ((double) point[schema::pointBeat]));
-                    element->setAttribute ("value", number (toValue ((float) point[schema::pointValue])));
-                    element->setAttribute ("interpolation", "linear");
+                    const auto along = (double) k / probesPerPiece;
+                    close = isClose (startValue + (endValue - startValue) * along,
+                                     toValue (line.getPositionAt (start + (end - start) * along)));
                 }
+
+                if (close || halvings >= maximumHalvings)
+                    return;
+
+                const auto middle = (start + end) / 2.0;
+                const auto middleValue = toValue (line.getPositionAt (middle));
+                addAlong (start, startValue, middle, middleValue, halvings + 1);
+                add (middle, middleValue, false);
+                addAlong (middle, middleValue, end, endValue, halvings + 1);
+            };
+
+            for (size_t i = 0; i < read.size(); ++i)
+            {
+                const auto& from = read[i];
+                const auto hasLine = i + 1 < read.size() && read[i + 1].beat > from.beat;
+                const auto held = hasLine && from.curve >= 1.0f;
+                add (from.beat, toValue (from.position), held);
+
+                if (! hasLine || held)
+                    continue;
+
+                const auto& to = read[i + 1];
+
+                if (from.curve <= -1.0f)
+                    add (from.beat, toValue (to.position), false); // it jumps as it starts, and holds there
+                else
+                    addAlong (from.beat, toValue (from.position), to.beat, toValue (to.position), 0);
             }
         }
     };

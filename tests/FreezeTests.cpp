@@ -410,13 +410,14 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (file.getFileName() == "Bass (Bounce).wav");
 
     // The sound before the fader: the sine at a quarter of full scale in each channel, with the expander's 6 dB, without the
-    // fader's -6 dB (or its pan law). The fader and the send come along, on the new track.
+    // fader's -6 dB (or its pan law). The fader comes along, on the new track, and the send moves there (known bug 194).
     const auto sineDecibels = juce::Decibels::gainToDecibels (0.25 / std::sqrt (2.0));
     CHECK (juce::Decibels::gainToDecibels (getLevel (file, 0.1, 1.4)) == doctest::Approx (sineDecibels + 6.0).epsilon (0.05));
     CHECK (phazite::getChannelVolume (model, bounced) == doctest::Approx (-6.0f).epsilon (0.01));
     const auto sends = phazite::getSends (model, bounced);
     REQUIRE (sends.size() == 1);
     CHECK (phazite::getSendTarget (model, sends[0]) == song.reverb);
+    CHECK (phazite::getSends (model, song.bass).empty());
     CHECK (phazite::getDevices (model, bounced).empty());
 
     // The original muted, and shown as it was: collapsing it was view state, outside the step, which Undo left collapsed
@@ -439,6 +440,7 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
     CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
     CHECK_FALSE (phazite::isCollapsed (model, song.bass));
+    CHECK (phazite::getSends (model, song.bass).size() == 1);
     REQUIRE (phazite::canRedo (model));
     phazite::redo (model);
     CHECK (phazite::getTrackIDs (model).size() == 3);
@@ -543,6 +545,7 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     phazite::setModulation (model, macro, level, -0.5f);
     phazite::setModulation (model, other, gain, 0.5f); // modulates the devices alone: stays behind
     model.getUndoManager().clearUndoHistory();
+    const auto levelPoints = phazite::getPoints (model, level);
 
     phazite::bounceSelectedTrack (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
@@ -559,10 +562,10 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     const phazite::ParameterRef newVolume { newFader, volume.parameter }, newPan { newFader, pan.parameter };
     const phazite::ParameterRef newLevel { newSends[0], level.parameter };
 
-    // The fader's and the send's curves, point for point; the originals keep theirs.
-    const auto samePoints = [&model] (const phazite::ParameterRef& a, const phazite::ParameterRef& b)
+    // The fader's and the send's curves, point for point; the original fader keeps its own, and the send moved (known bug
+    // 194: a copy left with the muted original sent before its fader too).
+    const auto samePoints = [] (const auto& first, const auto& second)
     {
-        const auto first = phazite::getPoints (model, a), second = phazite::getPoints (model, b);
         return first.size() == second.size()
                && std::equal (first.begin(), first.end(), second.begin(),
                               [] (const auto& x, const auto& y)
@@ -573,12 +576,14 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     };
 
     CHECK (phazite::getPoints (model, newVolume).size() == 2);
-    CHECK (samePoints (newVolume, volume));
+    CHECK (samePoints (phazite::getPoints (model, newVolume), phazite::getPoints (model, volume)));
     CHECK (phazite::getPoints (model, newLevel).size() == 1);
-    CHECK (samePoints (newLevel, level));
+    CHECK (samePoints (phazite::getPoints (model, newLevel), levelPoints));
     CHECK (phazite::getPoints (model, newPan).empty());
+    CHECK (phazite::getSends (model, song.bass).empty());
 
-    // The modulators that moved the fader and the send, copied onto the new track with those modulations alone.
+    // The modulators that moved the fader and the send, copied onto the new track with those modulations alone; the
+    // original's macro modulated the send alone, which has gone, and modulates nothing now.
     const auto modulators = phazite::getModulators (model, bounced);
     REQUIRE (modulators.size() == 2);
     CHECK (phazite::getModulatorType (model, modulators[0]) == phazite::ModulatorType::lfo);
@@ -592,12 +597,16 @@ TEST_CASE ("Bounce in Place takes the automation and the modulation of the track
     CHECK (ofMacro[0].amount == doctest::Approx (-0.5f));
     CHECK (phazite::getModulators (model, song.bass).size() == 3);
     CHECK (phazite::getModulations (model, lfo).size() == 2);
+    CHECK (phazite::getModulations (model, macro).empty());
 
-    // All of it in the bounce's one undo step.
+    // All of it in the bounce's one undo step, the send and its modulation back on the original.
     phazite::undo (model);
     CHECK (phazite::getTrackIDs (model).size() == 2);
     CHECK (phazite::getPoints (model, newVolume).empty());
     CHECK (phazite::getPoints (model, newLevel).empty());
+    CHECK (phazite::getSends (model, song.bass) == std::vector { send });
+    CHECK (samePoints (phazite::getPoints (model, level), levelPoints));
+    CHECK (phazite::getModulations (model, macro).size() == 1);
     CHECK_FALSE (phazite::canUndo (model));
 }
 

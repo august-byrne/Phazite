@@ -2,6 +2,7 @@
 #include "Strip.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite::engine
 {
@@ -17,6 +18,8 @@ void StripState::prepare (double sampleRate, int maximumBlockSize)
     noteStarts.reserve ((size_t) DeviceRunner::maximumEvents);
     volumeModulation.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), 0.0f);
     panModulation.assign (volumeModulation.size(), 0.0f);
+    sendGains.assign ((size_t) maximumBlockSize, 0.0f);
+    sendModulation.assign (volumeModulation.size(), 0.0f);
     channel.prepare (sampleRate);
     sequence = nullptr;
     nextEvent = 0;
@@ -202,19 +205,31 @@ std::pair<float, float> Delay::leave (int fadeLength, int numSamples, std::pair<
     return { gains.first * from, gains.second * to };
 }
 
-void Delay::addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain, float endGain) noexcept
+void Delay::addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain, float endGain,
+                        const float* gains) noexcept
 {
-    // At a gain: a straight line from one to the other over the block; and through its fade in, if it makes one, from so
-    // far into it.
-    const auto add = [this, numSamples, startGain, endGain] (float* to, const float* from, int offset, int count, int faded)
+    // At a gain: a straight line from one to the other over the block, times each sample's own if given; and through its
+    // fade in, if it makes one, from so far into it.
+    const auto add = [this, numSamples, startGain, endGain, gains] (float* to, const float* from, int offset, int count, int faded)
     {
-        if (juce::exactlyEqual (startGain, 1.0f) && juce::exactlyEqual (endGain, 1.0f) && faded < 0)
+        if (gains == nullptr && juce::exactlyEqual (startGain, 1.0f) && juce::exactlyEqual (endGain, 1.0f) && faded < 0)
         {
             juce::FloatVectorOperations::add (to, from, count);
             return;
         }
 
         const auto step = (endGain - startGain) / (float) numSamples;
+
+        if (gains != nullptr)
+        {
+            for (int i = 0; i < count; ++i)
+            {
+                const auto fade = faded >= 0 && faded + i < fadeSamples ? (float) (faded + i + 1) / (float) (fadeSamples + 1) : 1.0f;
+                to[i] += from[i] * gains[offset + i] * (startGain + step * (float) (offset + i)) * fade;
+            }
+
+            return;
+        }
 
         for (int i = 0; i < count; ++i)
         {
@@ -315,18 +330,109 @@ void Delay::reset() noexcept
 }
 
 //==============================================================================
+namespace
+{
+    float toGain (float decibels) noexcept
+    {
+        return decibels <= Channel::silenceDb ? 0.0f : juce::Decibels::decibelsToGain (decibels, Channel::silenceDb);
+    }
+} // namespace
+
 void SendLevel::setDecibels (float decibels) noexcept
 {
-    gain.store (decibels <= Channel::silenceDb ? 0.0f : juce::Decibels::decibelsToGain (decibels, Channel::silenceDb),
-                std::memory_order_relaxed);
+    gain.store (toGain (decibels), std::memory_order_relaxed);
+    position.store (decibelsToFaderPosition (decibels), std::memory_order_relaxed);
 }
 
-std::pair<float, float> SendLevel::moveOn() noexcept
+SendLevel::Gains SendLevel::moveOn (const Automation& automation, std::span<float> gains) noexcept
 {
-    const auto now = cut.load (std::memory_order_relaxed) ? 0.0f : gain.load (std::memory_order_relaxed);
-    const auto from = applied < 0.0f ? now : applied;
-    applied = now;
-    return { from, now };
+    // Where it is set: by hand, or by its automation where the song is (but what is written by hand now); then moved by its
+    // modulation on a control point, as parts of the fader's travel.
+    const auto room = ! gains.empty();
+    const auto* curve = writing.load (std::memory_order_relaxed) || ! room ? nullptr : automation.curve;
+    const auto& offsets = room ? automation.modulation : std::span<const float>();
+    const auto follows = ! offsets.empty() || (automation.beatsPerSample > 0.0 && curve != nullptr);
+    const auto positionAt = [this, curve] (double beat)
+    { return curve != nullptr ? std::clamp (curve->getValueAt (beat), 0.0f, 1.0f) : position.load (std::memory_order_relaxed); };
+    const auto modulate = [&offsets] (float at, size_t point)
+    { return offsets.empty() ? at : std::clamp (at + offsets[std::min (point, offsets.size() - 1)], 0.0f, 1.0f); };
+
+    // Cut or sending again: over the block, from where it was.
+    const auto heardNow = isCut() ? 0.0f : 1.0f;
+    const auto heardFrom = heard < 0.0f ? heardNow : heard;
+    heard = heardNow;
+
+    if (! follows)
+    {
+        // Set: from where it is, over the block; at once as it first plays. By hand at the gain set, so that a send that
+        // follows nothing sends as it always has.
+        const auto at = positionAt (automation.beat);
+        const auto target = curve != nullptr ? toGain (faderPositionToDecibels (at)) : getGain();
+        playedPosition.store (at, std::memory_order_relaxed);
+        playedBasePosition.store (at, std::memory_order_relaxed);
+
+        // Just done following: eased there over 15 ms at least, from where the line left it, sample by sample, toward where
+        // it goes now in each.
+        if (std::exchange (followedLast, false) && room && level >= 0.0f)
+            easing = std::max ((int) gains.size(), automation.easeSamples);
+
+        if (! room)
+            easing = 0;
+
+        if (easing > 0)
+        {
+            for (auto& sample : gains)
+            {
+                if (easing > 0)
+                    level += (target - level) / (float) easing--;
+                else
+                    level = target;
+
+                sample = level;
+            }
+
+            return { heardFrom, heardNow, true };
+        }
+
+        const auto from = level < 0.0f ? target : level;
+        level = target;
+        return { from * heardFrom, target * heardNow, false };
+    }
+
+    // Its automation and modulation: a straight line to its value on each control point, the first the song's next, from
+    // where the line was as the block started, whatever the block's size; at once as it first plays.
+    followedLast = true;
+    easing = 0;
+
+    if (level < 0.0f)
+        level = toGain (faderPositionToDecibels (modulate (positionAt (automation.beat), 0)));
+
+    const auto numSamples = (int) gains.size();
+    const auto toControlPoint =
+        controlPointSpacing - (int) (((automation.sample % controlPointSpacing) + controlPointSpacing) % controlPointSpacing);
+    auto base = positionAt (automation.beat), moved = modulate (base, 0);
+
+    for (int done = 0, stretch = 0; done < numSamples; ++stretch)
+    {
+        const auto toPoint = done == 0 ? toControlPoint : controlPointSpacing;
+        const auto length = std::min (numSamples - done, toPoint);
+        base = positionAt (automation.beat + (done + toPoint) * automation.beatsPerSample);
+        moved = modulate (base, (size_t) stretch + 1);
+        const auto end = toGain (faderPositionToDecibels (moved));
+        const auto step = (end - level) / (float) toPoint;
+
+        for (int i = done; i < done + length; ++i)
+            gains[(size_t) i] = (level += step);
+
+        if (length == toPoint)
+            level = end;
+
+        done += length;
+    }
+
+    playedPosition.store (moved, std::memory_order_relaxed);
+    playedBasePosition.store (base, std::memory_order_relaxed);
+    return { heardFrom, heardNow, true };
 }
 
 } // namespace phazite::engine

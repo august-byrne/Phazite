@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders of the mixer (tests/golden/renders, RenderHarness.h): a sidechain, a send before the fader, mute and
-// solo, delay compensation across two paths, each of Phazite's effects, a frozen track and an export's stems, in songs
+// Golden renders of the mixer (tests/golden/renders, RenderHarness.h): a sidechain, a send before the fader, a send's lane,
+// mute and solo, delay compensation across two paths, each of Phazite's effects, a frozen track and an export's stems, in songs
 // made through the model (TestSong.h). Most are renders of a change, whose check compares the song before and after it.
 #include "RenderHarness.h"
 #include "TestSong.h"
@@ -22,6 +22,7 @@
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/base/internal/Schema.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/Export.h"
@@ -189,6 +190,37 @@ TEST_SUITE ("golden")
             {
                 auto ok = isBetween (before, 20, -100.0f, floorDb, "after the fader, the send sends nothing");
                 return isBetween (after, 20, -40.0f, 6.0f, "before the fader, it sends the tone to the reverb") && ok;
+            });
+    }
+
+    TEST_CASE ("Golden render: a send's lane brings its reverb return in from silence, along the fader's travel")
+    {
+        // Known bug 192: the engine played a send at its level set by hand, whatever its lane drew.
+        TestSong song;
+        song.setTempo (120.0);
+        const auto track = song.firstTrack;
+        song.addAudioClip (track, writeTone (song, "Tone", 440.0), 0.0);
+        song.addReturn (track, phazite::devices::Reverb::typeID, 0.0f);
+        song.setVolume (track, -100.0f);
+        const auto sends = phazite::getSends (song.context, track);
+        REQUIRE (sends.size() == 1);
+        phazite::setPreFader (song.context, sends.front().id, true);
+        const phazite::ParameterRef level { sends.front().id, phazite::schema::sendLevelParameter };
+
+        checkChange (
+            song,
+            [&song, &level]
+            {
+                song.addAutomation (level, { { phazite::BeatPosition(), 0.0f },
+                                             { phazite::BeatPosition::fromBeats (6.0), phazite::decibelsToFaderPosition (0.0f) } });
+            },
+            "send-automated",
+            "a tone with its fader down, sent before the fader to a reverb return, the send's lane a straight line from silence to "
+            "0 dB over three seconds.",
+            [] (const Fingerprint& before, const Fingerprint& after)
+            {
+                auto ok = changesLevel (before, after, 5, -20.0f, "early on, the lane holds the send nearly silent");
+                return isLouder (after, 35, 10, 10.0f, "the return comes up as the lane rises") && ok;
             });
     }
 

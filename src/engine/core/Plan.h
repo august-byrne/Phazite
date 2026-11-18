@@ -53,11 +53,21 @@ struct Plan
     // Whether the metronome clicks on each of the time signature's beats while the song plays.
     bool metronome = false;
 
+    // A modulator moving a fader's volume or pan (a channel's, or a container's chain's), a chain's crossover or a send's
+    // level, by its place among its strip's (for a send, the sending strip's), by an amount from -1 to 1.
+    struct Route
+    {
+        int source = 0;
+        float amount = 0.0f;
+    };
+
     // A strip whose sound another adds up: after its fader, or before it (a send before the fader); at a send's level (or
     // as it is); lined up with the others there by a delay (none when it needs none). Or one of its devices' parts, which
     // that device plays into an output of its own (a drum sampler's pad on a track of its own), from where the device is.
     // A send after the fader takes the strip's sound before its mute (beforeMute), so that its level's cut alone says
-    // whether it sends (SendLevel): a strip that isn't heard can still send to one that is (a soloed return).
+    // whether it sends (SendLevel): a strip that isn't heard can still send to one that is (a soloed return). A send's
+    // level may follow its automation (in the fader's positions), as late as the sound it sends comes into the sum (latency,
+    // the delay compensation's there), and its track's modulators (by their places among the sending strip's).
     struct Input
     {
         int strip = 0;
@@ -66,6 +76,9 @@ struct Plan
         std::shared_ptr<SendLevel> level {};
         std::shared_ptr<PartOutput> part {};
         bool beforeMute = false;
+        std::shared_ptr<const Curve> levelCurve {}; // or none
+        std::vector<Route> levelModulation {};
+        int latency = 0;
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
@@ -88,14 +101,6 @@ struct Plan
         // same as the device takes them; none for most devices.
         std::vector<std::shared_ptr<PartOutput>> partOutputs {};
         std::vector<devices::PartOutput> parts {};
-    };
-
-    // A modulator moving a fader's volume or pan (a channel's, or a container's chain's) or a chain's crossover, by its place
-    // among its strip's, by an amount from -1 to 1.
-    struct Route
-    {
-        int source = 0;
-        float amount = 0.0f;
     };
 
     // A container among a strip's devices (nodes/Container.h): all its chains' devices, in their order, so many from its

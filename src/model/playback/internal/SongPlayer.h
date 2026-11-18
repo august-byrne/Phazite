@@ -59,7 +59,8 @@ public:
 
     // What the engine plays of the song now, at a rate and in blocks of up to so many samples: the tempo map; live, the loop
     // and the metronome (a render plays the song once, from its start, without the metronome); and its channels, with
-    // their devices, plug-ins among them, their automation and the faders', into the master; or in a render, a part of it.
+    // their devices, plug-ins among them, their automation and the faders' and sends', into the master; or in a render, a
+    // part of it.
     std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, const std::optional<Live>& live,
                                            const std::optional<RenderOf>& of = std::nullopt);
 
@@ -79,7 +80,8 @@ public:
     engine::ChainState* findChain (std::int64_t id) const;
 
     // A parameter's automation as the plan has it, or nullptr; and its value as the engine played it last, with its
-    // modulation or without (nothing for one it doesn't play). A fader's volume is in its positions, as its automation is.
+    // modulation or without (nothing for one it doesn't play). A fader's volume and a send's level are in the fader's
+    // positions, as their automation is.
     const engine::Curve* findCurve (const ParameterRef&) const;
     std::optional<float> getPlayedValue (const ParameterRef&, bool withModulation) const;
 
@@ -158,6 +160,7 @@ private:
     // their IDs.
     std::map<std::pair<std::int64_t, std::int64_t>, std::shared_ptr<engine::Delay>> delays;
     std::map<std::int64_t, std::shared_ptr<engine::SendLevel>> sendLevels;
+    std::map<std::int64_t, std::vector<engine::Plan::Route>> sendModulation; // the plan being compiled's, by the sends' IDs
     std::map<std::int64_t, std::shared_ptr<engine::ContainerState>> containers;
     std::map<std::int64_t, std::shared_ptr<engine::ChainState>> chains; // each container's chain's, by its ID
     std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;         // every path's, those that need no delay too

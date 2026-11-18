@@ -668,6 +668,14 @@ namespace
             copyCurves (bouncedSong, copied);
             copyModulators (bouncedSong, track, bounced, copied);
 
+            // The sends move to the new track, with their lanes and modulation: the original is muted, but a muted track's
+            // sends before its fader go on, and with a copy of each on the new track the return played the sound twice (known
+            // bug 194). So each send is the new track's alone; the original keeps its clips, devices and fader, and Undo gives
+            // its sends back with the rest of the step. What modulated a send there goes with it (forgetWhatNamesTheGone()).
+            for (const auto send : getSends (bouncedSong, track))
+                if (copied.contains (send.getRaw()))
+                    removeSend (bouncedSong, send);
+
             if (! placeClipState (bouncedSong, makeAudioClipState (bouncedSong, name, target, BeatPosition(), { 0.0, length }), bounced)
                       .isValid())
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");

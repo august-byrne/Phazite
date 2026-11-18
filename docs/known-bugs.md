@@ -62,21 +62,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
-- **192. A send's automation and modulation never play** (found in S4.7's review, 2026-11-17; older than it): a send's
-  level offers a lane, points are drawn, written and saved, and a modulator can be pointed at it, but the engine plays
-  the send at the level the song holds: `SongPlayer::getSendLevel()` sets one gain from `sendLevel` alone, and
-  `engine::SendLevel` is one gain a block with no curve. To fix: give `SendLevel` the curve and the modulation, worked
-  out at the control points as a fader's are, with the writer's and the played value's paths (the level shown while it
-  plays), a golden render and a case at every playback condition.
-- **193. A DAWproject's volume automation plays another curve in another DAW** (found in S4.7, 2026-11-17; older than
-  it): the export writes a volume lane's points as linear gain with linear interpolation, while Phazite draws and plays
-  the line along the fader's travel, so between two points the other DAW's level differs (the points themselves
-  agree). To fix: write the points the format's way and add points along each line until the other DAW's straight
-  lines stay within a fraction of a decibel of Phazite's, in `src/model/project/DawProject.cpp`, with a test that reads
-  the exported lane back.
-
 ## Tests
 
+- **195. A performance gate fails after other test files in one process** (seen by four agents, 2026-11-17): "Performance
+  gate: a stopped song's devices work no block once their sound has ended" fails (the Drum Sampler and the FM synth
+  each worked 188 blocks as the song opened) when `phazite_tests` runs it after other test files in one process (after
+  `AppTests`, and in a run of the playback and mixer files), and passes alone and with its own file, so `ctest`, which
+  starts each file by itself, passes. Something an earlier test leaves behind makes a stopped song's devices work as the
+  song opens: a counter the gate reads that is the program's rather than the song's, or state an earlier test file
+  leaves (the audio device, a setting). To fix: find the earlier case by bisecting the run's test files, then make the
+  gate count its own song's blocks or the earlier test put back what it changed.
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
   crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
   its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter

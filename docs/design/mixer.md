@@ -137,6 +137,9 @@ One small switch, a light, in a track's playlist header, its mixer strip and the
 - **A send gives the return a copy.** The track still plays through its own Out, and the return's effect plays
   alongside it. To run several tracks' whole sound through one effect, they go into a bus instead. The tooltips of the
   send knobs, + Send, the returns' "+" and the Out button say so.
+- A send knob reads and takes decibels on the fader's curve, and is automated and modulated as a fader is: its lane and
+  its track's modulators and macros move it along that travel while the song plays, and the knob shows where they put
+  it ([automation-and-modulation.md](automation-and-modulation.md)).
 - A strip has a send knob for each return its sound can go to without coming back to it; a send that changes where
   sound goes takes away or brings back the other strips' knobs. A send whose sound would come back through sends and
   buses is never made (a loop, which the engine can't play); one that comes back only through a sidechain is made, and

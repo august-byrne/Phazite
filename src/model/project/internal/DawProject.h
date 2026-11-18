@@ -6,8 +6,10 @@
 // What goes in: the song's tracks, its folders (their tracks in them, a bus's channel a submix), its returns (effect
 // channels, with the tracks' sends to them) and the master, each channel's volume, pan, mute and solo and where its sound
 // goes; its MIDI clips' notes and its audio clips' files (in audio/), with their fades; the tempo and the time signature,
-// with their changes; its sections, as markers; the faders' volume and pan automation; and its VST3 plug-ins, each with its
-// state as its .vstpreset (in plugins/), taken from the plug-in's instance, and its automation. What another DAW can't play
+// with their changes; its sections, as markers; the faders' volume and pan automation and the sends' level automation; and
+// its VST3 plug-ins, each with its state as its .vstpreset (in plugins/), taken from the plug-in's instance, and its
+// automation; each lane's lines as DAWproject's straight ones, with points added along them where a straight line in its
+// unit would stray from Phazite's (a line on a fader's travel in linear gain, a bent line). What another DAW can't play
 // (Phazite's own devices and containers, a plug-in of another format, modulation, an audio clip's gain, stretch, pitch,
 // reverse or takes, a frozen track) is bounced: a track's or a return's sound before its fader, through its devices, on an
 // audio track of its own beside it (in bounces/), the track itself muted, its notes and clips kept. A bus's or the master's

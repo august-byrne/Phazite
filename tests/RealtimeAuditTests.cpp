@@ -49,7 +49,9 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -2255,6 +2257,56 @@ TEST_SUITE ("realtime-audit")
         report ("Edited while it plays: the vinyl's Mix through 100 % and back", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         CHECK (dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()).getDryRebuilds() >= 2);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: a send's lane and the LFO on it, a point added, the lane redrawn, set by hand, "
+               "deleted and undone")
+    {
+        // Known bug 192: a send's level follows its lane and its track's modulators on the control points, the curve handed over
+        // with each plan and the level's ramp carried from block to block in the send's own state.
+        using phazite::BeatPosition;
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        song.addReturn (keys, phazite::devices::Reverb::typeID, -6.0f);
+        const phazite::ParameterRef level { phazite::getSends (song.context, keys).front().id, phazite::schema::sendLevelParameter };
+        song.addAutomation (level,
+                            { { BeatPosition(), 0.2f }, { BeatPosition::fromBeats (2.0), 0.8f }, { BeatPosition::fromBeats (4.0), 0.3f } });
+        song.modulate (song.addModulator (keys, phazite::ModulatorType::lfo), level, 0.2f);
+        auto& played = getSong (song);
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing {
+                .edits = {
+                    { 10, "a point added to the send's lane ahead of the playhead",
+                      [&] { phazite::addAutomationPoint (song.context, level, { BeatPosition::fromBeats (1.0), 0.9f, 0.5f }); } },
+                    { 30, "the lane redrawn under the playhead",
+                      [&]
+                      {
+                          phazite::replaceAutomationPoints (
+                              song.context, level, { BeatPosition(), BeatPosition::fromBeats (8.0) },
+                              { { BeatPosition(), 0.7f, 0.0f }, { BeatPosition::fromBeats (8.0), 0.1f, -0.4f } });
+                      } },
+                    { 50, "the send's knob set by hand", [&] { phazite::getSendLevel (song.context, level.device).setValue (0.5f); } },
+                    { 70, "the lane deleted", [&] { phazite::deleteAutomation (phazite::getParameter (song.context, level)); } },
+                    { 90, "undone: the lane back", [&] { phazite::undo (played); } },
+                    { 110, "the send switched before the fader",
+                      [&]
+                      {
+                          const phazite::UndoStep step (played, "Change Send");
+                          phazite::setPreFader (played, level.device, true);
+                      } },
+                } });
+        report ("Edited while it plays: a send's lane and its LFO", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (phazite::getAutomationPoints (song.context, level).size() == 2);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
