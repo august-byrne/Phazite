@@ -15,10 +15,15 @@ The full text of every step, as it was written when it was built, is in the
   and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the
   band is kept out. The Exciter goes, its eight presets converted to the Band and measured against it. Left of
   S6.6: the Filter and the Delay.
+- **S6.7 One synth, part A:** the Wavetable gains what only the Synth had, so that the two can become one: each
+  LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
+  a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias
+  as little as the Synth's.
 - **S6.10 Motion:** the Chorus, the Flanger and the Phaser become the three modes of one device, Motion, under three
   tabs: one Mix that means the effect alone in every mode (half and half at 50 %), a 10 ms fade between modes, their
   24 presets converted to play as they did, so that Swap tries a chorus, a flanger and a phaser on a sound in place,
-  and the chorus's Feedback below 0.
+  and the chorus's Feedback below 0. Its level holds through a change of mode, and the flanger's and the phaser's
+  pictures draw what plays at the Mix set.
 - **S6.12 Stereo:** the Stereo Expander becomes Stereo, the one device for a channel's two sides, adding Balance, a
   Mono switch, Swap Sides and a DC filter to its width, spread, bass in mono, polarity flips and gain, each switched
   without a click; its presets gain Swap Sides and DC Filter under Checks.

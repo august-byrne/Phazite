@@ -84,7 +84,7 @@ the level; Envelopes 2 and 3 do nothing until a modulation slot uses them.
 
 ### LFO 1 and LFO 2
 
-In the editor: Shape, Rate, Sync, Division, Retrigger. An LFO has no depth of its own: the slot that uses it has.
+In the editor: Shape, Rate, Sync, Division, Retrigger, Fade In. An LFO has no depth of its own: the slot that uses it has.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -93,6 +93,7 @@ In the editor: Shape, Rate, Sync, Division, Retrigger. An LFO has no depth of it
 | LFO 1/2 Sync | Off, On | Off | Whether it runs on a note value at the song's tempo. |
 | LFO 1/2 Division | 1/32, 1/16T, 1/16, 1/16D, 1/8T, 1/8, 1/8D, 1/4T, 1/4, 1/4D, 1/2T, 1/2, 1/2D, 1 bar, 2 bars, 4 bars, 8 bars | 1/4 | The length of its cycle while Sync is on. |
 | LFO 1/2 Retrigger | Off, On | On for LFO 1, Off for LFO 2 | On, each note has an LFO of its own that starts with it; off, one LFO runs on for every note. |
+| LFO 1/2 Fade In | 0 ms to 10 s | 0 ms | How long each note's share of the LFO takes to come in, from nothing, counted from the note's start, whether the LFO retriggers or not, as the [Synth](synth.md)'s LFO Fade In. |
 
 ### Matrix
 
@@ -100,21 +101,22 @@ Eight rows, each a slot: its source, its target and its amount.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Mod 1 to 8 Source | None, Envelope 2, Envelope 3, LFO 1, LFO 2, Velocity, Note, Mod Wheel, Random | Envelope 2 for Mod 1, None for the others | What moves the target. Note is the key around middle C; Random is a value drawn for each note. |
-| Mod 1 to 8 Target | None, Osc 1 Position, Osc 1 Warp, Osc 1 Pitch, Osc 1 Level, Osc 2 Position, Osc 2 Warp, Osc 2 Pitch, Osc 2 Level, Pitch, Sub Level, Noise Level, Cutoff, Resonance, Volume, Pan, Unison Detune | Cutoff for Mod 1, None for the others | What is moved. Pitch is both oscillators' and the sub's. |
-| Mod 1 to 8 Amount | -100 to +100 % | 25 % for Mod 1, 0 % for the others | How far. At 100 % a slot moves a position, a warp amount, a level or the resonance across its whole range, a pitch by 24 semitones, the cutoff by eight octaves, the unison detune by 100 cents, the volume from silence to twice as loud and the pan all the way to a side. |
+| Mod 1 to 8 Source | None, Envelope 2, Envelope 3, LFO 1, LFO 2, Velocity, Note, Mod Wheel, Random, Drift | Envelope 2 for Mod 1, None for the others | What moves the target. Note is the key around middle C; Random is a value drawn for each note; Drift is a slow wander of each voice's own, from -1 to 1. |
+| Mod 1 to 8 Target | None, Osc 1 Position, Osc 1 Warp, Osc 1 Pitch, Osc 1 Level, Osc 2 Position, Osc 2 Warp, Osc 2 Pitch, Osc 2 Level, Pitch, Sub Level, Noise Level, Cutoff, Resonance, Volume, Pan, Unison Detune, Mod 1 Amount to Mod 8 Amount | Cutoff for Mod 1, None for the others | What is moved. Pitch is both oscillators' and the sub's. Mod N Amount is another slot's amount: a slot's own is shown in its list but can't be chosen. |
+| Mod 1 to 8 Amount | -100 to +100 % | 25 % for Mod 1, 0 % for the others | How far. At 100 % a slot moves a position, a warp amount, a level, the resonance or another slot's amount across its whole range, a pitch by 24 semitones, the cutoff by eight octaves, the unison detune by 100 cents, the volume from silence to twice as loud and the pan all the way to a side. |
 
 A new synth's first slot is Envelope 2 on the cutoff at 25 % (two octaves), so it starts as a saw that opens with each
 note.
 
 ### Voice
 
-In the editor: Mode, Glide, Bend, Velocity, Level.
+In the editor: Mode, Glide, Glide Mode, Bend, Velocity, Level.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Voices | Poly, Mono | Poly | Sixteen voices, or one that plays legato. |
 | Glide | 0 ms to 2 s | 0 ms | How long a note takes to glide from the one before; 0 is none. |
+| Glide Mode | Always, Legato | Always | Whether every note glides, or only one played while another is held, as the [Synth](synth.md)'s. |
 | Bend Range | 0 to 24 semitones | 2 semitones | How far the pitch wheel bends, either way. |
 | Velocity | 0 to 100 % | 60 % | How much of the level depends on the note's velocity, which counts squared. |
 | Level | -36 to +6 dB | -6 dB | The synth's output level. |
@@ -122,9 +124,15 @@ In the editor: Mode, Glide, Bend, Velocity, Level.
 ## How it works
 
 **Tables.** A table is up to 256 single-cycle frames. Each frame is kept band-limited at every pitch: 21 copies, one
-each half octave, each with only the harmonics that level may play, made with an FFT when the table is made. An
-oscillator reads the copy whose highest harmonic's alias stays above 20 kHz at the pitch it plays, with four-point
-cubic interpolation, and crossfades between the two frames each side of its position.
+each half octave, each with only the harmonics that level may play, made with an FFT when the table is made, with 16
+samples for each cycle of its highest harmonic, at least 64 and at most 8192 (so the two copies of the most harmonics,
+which only notes below 39 Hz play, keep 8 and 11). An oscillator reads the copy whose highest harmonic's
+alias stays above 20 kHz at the pitch it plays, with four-point cubic interpolation, and crossfades between the two
+frames each side of its position. So the images the interpolation leaves are far down: Basic Shapes' saw, square and
+triangle, and the Pulse Width table at 25 %, alias more than 90 dB under the note from A0 to A7, as far down as the
+[Synth](synth.md)'s own waves or further ([tests/AntialiasingTests.cpp](../../../tests/AntialiasingTests.cpp)). A frame
+takes about 212 KB, 2.6 times what four samples a cycle took: Basic Shapes 850 KB, a factory table of 32 frames 6.8 MB,
+a sound file of 256 frames 54 MB, which takes about 2.7 times as long to make.
 
 Thirteen tables come with the synth, made from formulas when first needed, so that no sound files ship: Basic Shapes
 (sine, triangle, saw, square), Pulse Width, Saw Build, Square Build, Vowels, Sync, FM, FM Hollow, Fold, Digital, Comb,
@@ -139,8 +147,10 @@ project that loads it ([devices.md](../devices.md)).
 
 **Warps.** Each oscillator has one:
 
-- **Sync**: hard sync. The wave is read 1 to 8 times in each of the note's cycles, starting again with each; the jump
-  back is smoothed by a two-point PolyBLEP.
+- **Sync**: hard sync. The wave is read 2^(3 a) times in each of the note's cycles, a the Warp Amount, starting again
+  with each; the jump back is smoothed by a two-point PolyBLEP. So the amount is even in pitch, 36 semitones across the
+  knob (1 to 8 times): a slot from an envelope to the warp at N / 36 sweeps it N semitones, as the [Synth](synth.md)'s Osc
+  2 Envelope sweeps its synced oscillator. A slot can take it a third past the knob's end, to 16 times (48 semitones).
 - **Bend +** and **Bend -**: the wave's start squeezed and its end stretched, or the other way.
 - **Pulse Width**: the whole wave squeezed into the first part of the cycle, down to a twentieth of it, its start held
   for the rest.
@@ -170,7 +180,14 @@ rate through a per-voice oversampler, the curve played by its antiderivative so 
 aliasing; it fades in and out over two thirds of a millisecond, at any rate.
 
 **Modulation.** The slots are worked out for each voice on its own, so an envelope sweeps every note's table from its
-start. Several slots on one target add up. Envelopes 2 and 3, the LFOs, the slots, the pitch, the frames read and the
+start. Several slots on one target add up. Each LFO comes into each note over its Fade In, the note's share growing in a
+straight line from nothing, as the Synth's does, counted from the note's start (a legato note in Mono goes on with the
+voice's). Drift wanders as the Synth's Drift moves its cutoff: each note from a place of its own, toward a new one every
+0.45 s, gliding there with a time constant of 0.3 s, from a fixed seed for each voice, moved only while a slot plays it;
+a slot from Drift to Cutoff at 2.08 % (two semitones) is the Synth's Drift at full on its cutoff. A slot aimed at Mod N
+Amount adds its source, times its own amount, to slot N's amount, so the mod wheel on an LFO slot's amount brings its
+vibrato in. So that nothing loops, those slots are worked out first, each by its own amount as set, which nothing moves;
+one aimed at its own amount does nothing; and an amount moved stays within -100 and +100 %. Envelopes 2 and 3, the LFOs, the slots, the pitch, the frames read and the
 filter's coefficients are worked out at the control rate, every 16 samples, on the song's own grid while it plays and on
 a running count while it is stopped, as the [Synth](synth.md)'s; the oscillators, the filter and Envelope 1 run at every sample. A track's modulators and macros
 ([automation-and-modulation.md](../automation-and-modulation.md)) still move any of its knobs for the whole track.
@@ -178,11 +195,12 @@ a running count while it is stopped, as the [Synth](synth.md)'s; the oscillators
 **Notes.** As the [Synth](synth.md)'s: in Poly every note takes a voice of its own, a key played again too; with all
 16 busy a new note takes the voice ringing out longest, then the oldest, whose sound fades out over 3 ms in a place of
 its own (one for each voice, so a chord that takes several at once fades each); Mono plays
-one voice legato and returns to the key still held. Glide works in both modes, for every note. Portamento and slide
+one voice legato and returns to the key still held. Glide works in both modes, for every note, or with Glide Mode on
+Legato only for a note played while another key is held. Portamento and slide
 notes ([piano-roll.md](../piano-roll.md)) glide as on the Synth. Pitch bend, the sustain pedal (controller 64) and the
 mod wheel (controller 1, a modulation source) are the controllers it answers.
 
-**The same every time.** Noise, the unison's starting phases, the drift and the Random source come from fixed seeds,
+**The same every time.** Noise, the unison's starting phases, the drift and the Random and Drift sources come from fixed seeds,
 so a render repeats exactly. A table chosen while notes play is read from the next control step on, which takes what was
 given last; one given and replaced before a step took it is freed at once, so that a synth that plays nothing (on a muted
 track) holds at most the table it plays and the newest. One a step took is freed once the count of steps begun has moved
@@ -192,7 +210,7 @@ dB at 5 Hz) takes away what ring modulation and FM leave at whole ratios. It pla
 has one of those warps: it changes the waveform of whatever it plays, so every other patch, whose waves are centred as
 they are made (the other warps by their areas and bent means), plays without it, bit for bit. Taken on and let go in
 mid-note, it fades in and out over 5 ms; once playback has stopped and no note sounds, what it still rings with fades
-out over 3 ms, so that nothing sounds on after Stop. Envelopes 2 and 3, the LFOs and the drift move a control step at a
+out over 3 ms, so that nothing sounds on after Stop. Envelopes 2 and 3, the LFOs and both drifts move a control step at a
 time; where the grid cuts a step short (a loop going round, a jump), they move on only when that keeps them nearer the
 samples played, so that they keep their pace, and a comb's delay set at a step of one sample glides over the next step
 rather than jumping.
@@ -201,7 +219,8 @@ rather than jumping.
 
 Seven columns, built on the frame every device editor shares ([devices.md](../devices.md)): Osc 1; Osc 2; Filter;
 Amp; Sub and Noise over Voice; Unison; and Modulation, a list down its side of Envelope 2, Envelope 3, LFO 1, LFO 2
-and Matrix, one showing at a time. In the dock they show in pages, two to a page.
+and Matrix, one showing at a time. In the dock they show in four pages: the oscillators; Filter and Amp; Sub and Noise
+over Voice; Unison and Modulation.
 
 - **Each oscillator** draws its table as its frames one behind another, with the frame the newest note plays lit in
   the device's colour, moving as modulation moves it. Dragging across the drawing, right or up, moves the position:
@@ -214,7 +233,8 @@ and Matrix, one showing at a time. In the dock they show in pages, two to a page
   curves drag as the [Synth](synth.md)'s do.
 - **LFO 1 and LFO 2** draw one cycle with a dot where the LFO is (the newest note's, for one that retriggers). The
   wheel over the picture turns its rate, or its division while Sync is on.
-- **Matrix** is a row for each slot: two lists and a knob.
+- **Matrix** is a row for each slot: two lists and a knob. In a slot's list of targets its own amount is shown but can't
+  be chosen.
 
 ## Limits
 
@@ -222,18 +242,18 @@ and Matrix, one showing at a time. In the dock they show in pages, two to a page
 - One warp for each oscillator, and none that works on the spectrum.
 - Two oscillators and one filter; no third oscillator, no second filter, no filter routing.
 - The unison is shared: both oscillators have the same number of copies, detune, spread, stack and drift.
-- Eight slots and eight sources; no aftertouch or MPE; modulation is set in the Matrix's lists, not dragged onto the
-  knobs it moves.
+- Eight slots and nine sources; no aftertouch or MPE; modulation is set in the Matrix's lists, not dragged onto the
+  knobs it moves. A slot that moves another's amount can't itself be moved, and one Drift for each voice moves every
+  slot that plays it alike (the Synth's oscillators and cutoff wander each their own way).
 - The LFOs' shapes are fixed; none can be drawn. No arpeggiator.
 - No oversampling of the oscillators and no quality setting: Sync's jump is smoothed by a two-point PolyBLEP only, and
   Bend, Pulse Width, Mirror and FM only read a copy with fewer harmonics, so warped sounds alias on high notes.
-- A frame's copies keep four samples for each cycle of their highest harmonic and are read by cubic interpolation,
-  which leaves images under bright tables; the Synth's own waves keep 32.
+- A frame's copies keep 16 samples for each cycle of their highest harmonic (up to 8192 a copy), 2.6 times the memory
+  four took: a sound file of 256 frames takes 54 MB, and about 2.7 times as long to make, on the message thread.
 - Position, pitch, levels and cutoff move in steps of 16 samples without interpolation, and Envelopes 2 and 3 and the
   LFOs run at that rate: a fast sweep of a table or a resonant filter can be heard stepping.
 - The filter is linear: it never self-oscillates, there is no ladder or diode model, and Filter Drive, before the
   filter, gives back the gain it adds, so a loud voice driven hard comes out quieter.
-- Glide has no legato-only mode, as the Synth's has.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).
 - No effects of its own: Phazite's devices follow it.
 

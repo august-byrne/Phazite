@@ -167,7 +167,7 @@ TEST_CASE ("Dragging across a wavetable oscillator's drawing moves its position,
     CHECK (screen.getValue ("osc1Position") == doctest::Approx (before));
 }
 
-TEST_CASE ("The wavetable synth's editor fits the dock: its parts in pages, two to a page, the modulation a list down the side")
+TEST_CASE ("The wavetable synth's editor fits the dock: its parts in pages, the modulation a list down the side")
 {
     Screen screen;
     auto& editor = *screen.editor;
@@ -185,12 +185,14 @@ TEST_CASE ("The wavetable synth's editor fits the dock: its parts in pages, two 
     CHECK (editor.getTableView (1).isShowing());
     CHECK (editor.getLayout().usesTabs (6));
 
-    // As wide and as tall as the dock at the default window: four pages, the first with both oscillators, whole.
+    // As wide and as tall as the dock at the default window: four pages, the first with both oscillators, whole, the last the
+    // unison beside the modulation.
     constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
     REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
     editor.setSize (dockWidth, dockHeight);
     REQUIRE (editor.getLayout().getNumPages() == 4);
-    CHECK (editor.getLayout().getPageName (3) == "Modulation");
+    CHECK (editor.getLayout().getPageName (3).contains ("Unison"));
+    CHECK (editor.getLayout().getPageName (3).contains ("Modulation"));
     CHECK (editor.getTableView (0).isShowing());
     CHECK (editor.getTableView (1).isShowing());
     CHECK (editor.getTableView (0).getHeight() > 0);
@@ -206,27 +208,36 @@ TEST_CASE ("The wavetable synth's editor shows the unison's stack and drift with
     Screen screen;
     auto& editor = *screen.editor;
 
-    // In the dock at the default window: the unison's six controls on the third page, whole, beside the sub, the noise and
-    // how it plays, none under a tab.
+    // In the dock at the default window: the sub, the noise and how it plays on the third page, and the unison's six controls
+    // on the fourth, beside the modulation, all whole, none under a tab.
     constexpr int dockWidth = 552, dockHeight = 268;
     editor.setSize (dockWidth, dockHeight);
     REQUIRE (editor.getLayout().getNumPages() == 4);
-    CHECK (editor.getLayout().getPageName (2).contains ("Unison"));
-    editor.getLayout().showPage (2);
-    phazite::test::checkChildrenApart (editor);
+    CHECK (editor.getLayout().getPageName (2).contains ("Sub and Noise"));
+    CHECK (editor.getLayout().getPageName (3).contains ("Unison"));
 
     for (int column = 0; column < 6; ++column)
         CHECK_FALSE (editor.getLayout().usesTabs (column));
 
-    for (const auto* id : { "unisonVoices", "unisonDetune", "unisonSpread", "unisonStack", "unisonDrift", "unisonPosition", "subLevel",
-                            "noiseLevel", "voiceMode", "glide", "bendRange", "velocity", "level" })
+    const auto checkShowing = [&editor] (std::initializer_list<const char*> ids)
     {
-        CAPTURE (id);
-        auto* control = editor.findControl (id);
-        REQUIRE (control != nullptr);
-        CHECK (control->isShowing());
-        CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
-    }
+        for (const auto* id : ids)
+        {
+            CAPTURE (id);
+            auto* control = editor.findControl (id);
+            REQUIRE (control != nullptr);
+            CHECK (control->isShowing());
+            CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+        }
+    };
+
+    editor.getLayout().showPage (2);
+    phazite::test::checkChildrenApart (editor);
+    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "bendRange", "velocity", "level" });
+
+    editor.getLayout().showPage (3);
+    phazite::test::checkChildrenApart (editor);
+    checkShowing ({ "unisonVoices", "unisonDetune", "unisonSpread", "unisonStack", "unisonDrift", "unisonPosition" });
 
     // Named within their part, as their neighbours are.
     juce::StringArray names;
@@ -266,4 +277,59 @@ TEST_CASE ("The wavetable synth's editor shows the unison's stack and drift with
     phazite::undo (screen.getSong());
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (stack->getText() == juce::String ("Off"));
+}
+
+TEST_CASE (
+    "The wavetable synth's editor shows each LFO's fade after its retrigger, Glide Mode after Glide, and Drift and the slots' amounts in the matrix")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+
+    // Each LFO's fade a knob in milliseconds, named within its part; Glide Mode a list of its two ways.
+    for (const auto* id : { "lfo1FadeIn", "lfo2FadeIn" })
+    {
+        CAPTURE (id);
+        auto* fade = dynamic_cast<phazite::ui::Knob*> (editor.findControl (id));
+        REQUIRE (fade != nullptr);
+        CHECK (fade->getValue() == doctest::Approx (0.0));
+        CHECK (fade->getMaximum() == doctest::Approx (10000.0));
+    }
+
+    auto* fade = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("lfo1FadeIn"));
+    fade->setValue (250.0, juce::sendNotificationSync);
+    CHECK (screen.getValue ("lfo1FadeIn") == doctest::Approx (250.0f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change LFO 1 Fade In"));
+
+    auto* glideMode = dynamic_cast<juce::ComboBox*> (editor.findControl ("glideMode"));
+    REQUIRE (glideMode != nullptr);
+    REQUIRE (glideMode->getNumItems() == 2);
+    CHECK (glideMode->getText() == juce::String ("Always"));
+    CHECK (glideMode->getItemText (1) == juce::String ("Legato"));
+    glideMode->setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (screen.getValue ("glideMode") == doctest::Approx ((float) WavetableSynth::GlideMode::legato));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Glide Mode"));
+
+    // The matrix's sources end with Drift, its targets with the eight slots' amounts, of which a slot's own can't be chosen.
+    auto* source = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod2Source"));
+    REQUIRE (source != nullptr);
+    CHECK (source->getItemText (source->getNumItems() - 1) == juce::String ("Drift"));
+
+    for (int slot = 0; slot < WavetableSynth::numModSlots; ++slot)
+    {
+        CAPTURE (slot);
+        auto* target = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod" + std::to_string (slot + 1) + "Target"));
+        REQUIRE (target != nullptr);
+        REQUIRE (target->getNumItems() == (int) WavetableSynth::ModTarget::slot8Amount + 1);
+
+        for (int other = 0; other < WavetableSynth::numModSlots; ++other)
+        {
+            const auto item = (int) WavetableSynth::getAmountTarget (other);
+            CHECK (target->getItemText (item) == "Mod " + juce::String (other + 1) + " Amount");
+            CHECK (target->isItemEnabled (item + 1) == (other != slot));
+        }
+    }
+
+    auto* target = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod1Target"));
+    target->setSelectedItemIndex ((int) WavetableSynth::ModTarget::slot2Amount, juce::sendNotificationSync);
+    CHECK (screen.getValue ("mod1Target") == doctest::Approx ((float) WavetableSynth::ModTarget::slot2Amount));
 }

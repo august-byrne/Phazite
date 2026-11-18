@@ -9,8 +9,11 @@
 // ZynAddSubFX's unison vibrato does, the way the synth's Drift lets an analog voice's oscillators wander. A resonant filter
 // with drive follows, of any type of dsp/MultimodeFilter.h (low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb,
 // vowel, phaser, sample and hold); three envelopes (the first shapes the level) and two LFOs, free or starting again with
-// each note; and eight modulation slots, each a source moving a destination by an amount, for each voice on its own, so
-// an envelope sweeps every note's table from its start. 16 voices, or one in mono mode, legato, with glide; in poly mode
+// each note, each note's share of them coming in over a fade as a Juno's LFO delay does; and eight modulation slots, each a
+// source moving a destination by an amount, for each voice on its own, so an envelope sweeps every note's table from its
+// start; a slot may move another's amount, as the mod wheel brings an LFO's vibrato in, and Drift, a slow wander of each
+// voice's own, lets its cutoff wander as an analog voice's does. 16 voices, or one in mono mode, legato, with glide (for
+// every note, or only those played over a held one, as the synth's); in poly mode
 // every note takes a voice of its own, a key played again too: what still rings of it rings out over its release,
 // untouched, as the synth's does (Synth.h). It has no effects of its own: Phazite's devices follow it. Its noise, unison
 // phases, drift and random values come from fixed seeds, so it renders the same every time.
@@ -104,11 +107,13 @@ public:
         lfo1Sync,
         lfo1Division,
         lfo1Retrigger,
+        lfo1FadeIn, // how long each note's share of the LFO takes to come in, from nothing
         lfo2Shape,
         lfo2Rate,
         lfo2Sync,
         lfo2Division,
         lfo2Retrigger,
+        lfo2FadeIn,
         mod1Source,
         mod1Target,
         mod1Amount,
@@ -135,6 +140,7 @@ public:
         mod8Amount,
         voiceMode,
         glide,
+        glideMode, // a GlideMode
         bendRange,
         velocity,
         level
@@ -173,6 +179,7 @@ public:
         lfoSync,
         lfoDivision,
         lfoRetrigger,
+        lfoFadeIn,
         lfoFields
     };
 
@@ -196,7 +203,7 @@ public:
     enum class Warp
     {
         none,
-        sync,       // hard sync: the wave read 1 to 8 times a cycle, starting again with each
+        sync,       // hard sync: the wave read 1 to 8 times a cycle (to 16 by modulation), starting again with each
         bendUp,     // the wave's start squeezed, its end stretched
         bendDown,   // the other way
         pulseWidth, // the whole wave in the first part of the cycle, then its start held
@@ -232,9 +239,12 @@ public:
         velocity,
         note, // the key, centred on middle C (60), an octave each side for each 0.25
         modWheel,
-        random // a value for each note, from 0 to 1
+        random, // a value for each note, from 0 to 1
+        drift   // a slow wander of each voice's own, from -1 to 1, as the synth's Drift moves an analog voice's cutoff
     };
 
+    // What a slot moves: a part of the sound, or another slot's amount (slot1Amount to slot8Amount: "Mod 1 Amount" to "Mod 8
+    // Amount"), which the slots that aim at amounts move first, by their own amounts as set.
     enum class ModTarget
     {
         none,
@@ -253,7 +263,24 @@ public:
         resonance,
         volume,
         pan,
-        unisonDetune
+        unisonDetune,
+        slot1Amount,
+        slot2Amount,
+        slot3Amount,
+        slot4Amount,
+        slot5Amount,
+        slot6Amount,
+        slot7Amount,
+        slot8Amount
+    };
+
+    // The target that moves a slot's amount, from the first slot.
+    static constexpr ModTarget getAmountTarget (int slot) noexcept { return (ModTarget) ((int) ModTarget::slot1Amount + slot); }
+
+    enum class GlideMode
+    {
+        always, // every note glides from the one before
+        legato  // only a note played while another is held, as the synth's (Synth::GlideMode)
     };
 
     static const DeviceInfo info;
@@ -347,6 +374,8 @@ private:
         dsp::Noise noise;
         dsp::Random phases;
         dsp::Random drifting;                           // where its unison's drift wanders, the same every time
+        dsp::Random wandering;                          // where the Drift source wanders, the same every time,
+        Wander wander;                                  // and where it is (its pace the middle one)
         dsp::Adsr amp, envelope2, envelope3;            // the second and third at the control rate
         std::array<dsp::Lfo, 2> lfos;                   // those that start again with each note, at the control rate
         std::array<dsp::MultimodeFilter, 2> filters;    // each side
@@ -426,8 +455,11 @@ private:
     void slideTo (int note, float seconds); // every sounding voice, evenly
     void stopNote (int note, std::span<const float> parameters);
     void startVoice (Voice&);
-    void startDrift (Voice&) noexcept;            // a note's drift, each unison voice from somewhere new
-    void moveDrift (Voice&, int unison) noexcept; // a control step on
+    void startDrift (Voice&) noexcept;               // a note's drift, each unison voice from somewhere new
+    void moveDrift (Voice&, int unison) noexcept;    // a control step on
+    void startWander (Voice&) noexcept;              // a note's Drift source, from somewhere new, as the synth's drift starts
+    void moveWander (Voice&) noexcept;               // a control step on
+    bool isAnotherKeyHeld (int note) const noexcept; // a voice but one playing this note is held: a legato note glides
 
     // Whether the control-rate parts move on at a step that starts now, each move a whole control step's, so that they keep
     // up with the samples played where a step runs short (a note starting within one, the grid cutting one short as a loop

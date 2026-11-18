@@ -21,14 +21,16 @@ namespace
     constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
     constexpr std::string_view unisonStacks[] = { "Off", "Octave", "Two Octaves", "Fifth", "Power Chord" };
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
-    constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1", "LFO 2",
-                                                "Velocity", "Note",       "Mod Wheel",  "Random" };
-    constexpr std::string_view modTargets[] = { "None",         "Osc 1 Position", "Osc 1 Warp", "Osc 1 Pitch",
-                                                "Osc 1 Level",  "Osc 2 Position", "Osc 2 Warp", "Osc 2 Pitch",
-                                                "Osc 2 Level",  "Pitch",          "Sub Level",  "Noise Level",
-                                                "Cutoff",       "Resonance",      "Volume",     "Pan",
-                                                "Unison Detune" };
+    constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1",  "LFO 2",
+                                                "Velocity", "Note",       "Mod Wheel",  "Random", "Drift" };
+    constexpr std::string_view modTargets[] = {
+        "None",          "Osc 1 Position", "Osc 1 Warp",   "Osc 1 Pitch",  "Osc 1 Level",  "Osc 2 Position", "Osc 2 Warp",   "Osc 2 Pitch",
+        "Osc 2 Level",   "Pitch",          "Sub Level",    "Noise Level",  "Cutoff",       "Resonance",      "Volume",       "Pan",
+        "Unison Detune", "Mod 1 Amount",   "Mod 2 Amount", "Mod 3 Amount", "Mod 4 Amount", "Mod 5 Amount",   "Mod 6 Amount", "Mod 7 Amount",
+        "Mod 8 Amount"
+    };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
+    constexpr std::string_view glideModes[] = { "Always", "Legato" }; // the synth's
 
     // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
     constexpr auto& divisions = dsp::noteValueNames;
@@ -164,11 +166,13 @@ namespace
         makeToggle ("lfo1Sync", "LFO 1 Sync", 0.0f),
         makeChoice ("lfo1Division", "LFO 1 Division", divisions, quarterNote),
         makeToggle ("lfo1Retrigger", "LFO 1 Retrigger", 1.0f),
+        makeTime ("lfo1FadeIn", "LFO 1 Fade In", 0.0f, 0.0f), // the synth's LFO Fade In
         makeChoice ("lfo2Shape", "LFO 2 Shape", lfoShapes, 1.0f),
         makeRate ("lfo2Rate", "LFO 2 Rate", 0.5f),
         makeToggle ("lfo2Sync", "LFO 2 Sync", 0.0f),
         makeChoice ("lfo2Division", "LFO 2 Division", divisions, quarterNote),
         makeToggle ("lfo2Retrigger", "LFO 2 Retrigger", 0.0f),
+        makeTime ("lfo2FadeIn", "LFO 2 Fade In", 0.0f, 0.0f),
         // A new synth's first slot opens its filter with each note, as a pluck does.
         makeChoice ("mod1Source", "Mod 1 Source", modSources, (float) Synth::ModSource::envelope2),
         makeChoice ("mod1Target", "Mod 1 Target", modTargets, (float) Synth::ModTarget::cutoff),
@@ -202,6 +206,7 @@ namespace
           .defaultValue = 0.0f,
           .unit = Unit::milliseconds,
           .midpoint = 200.0f },
+        makeChoice ("glideMode", "Glide Mode", glideModes, 0.0f),
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
@@ -210,15 +215,22 @@ namespace
     static_assert (std::size (parameters) == (size_t) Synth::level + 1);
     static_assert (Synth::getParameter (1, Synth::oscWarpAmount) == Synth::osc2WarpAmount);
     static_assert (Synth::getEnvelopeParameter (2, Synth::envReleaseCurve) == Synth::env3ReleaseCurve);
-    static_assert (Synth::getLfoParameter (1, Synth::lfoRetrigger) == Synth::lfo2Retrigger);
+    static_assert (Synth::getLfoParameter (1, Synth::lfoFadeIn) == Synth::lfo2FadeIn);
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
-    static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
-    static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
+    static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::slot8Amount + 1);
+    static_assert (Synth::getAmountTarget (Synth::numModSlots - 1) == Synth::ModTarget::slot8Amount);
+    static_assert (std::size (modSources) == (size_t) Synth::ModSource::drift + 1);
+    static_assert (std::size (glideModes) == (size_t) Synth::GlideMode::legato + 1);
     static_assert (std::size (unisonStacks) == (size_t) Synth::Stack::powerChord + 1);
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x7ab1e5u, unisonSeed = 0x0715e7u, lfoSeed = 0x1f0e5u, randomSeed = 0x2a7d0u;
     constexpr std::uint32_t driftSeed = 0xd71f77u;
+    constexpr std::uint32_t wanderSeed = 0x3a9c51e7u; // the Drift source's: far from the unison drift's, whose seeds run on by voice
+
+    // How far Osc Warp Amount takes the Sync warp's reading, by modulation: 2^(3 a) times the note's cycle, so a third past the
+    // knob's end, 16 times (four octaves, the synth's Osc 2 Envelope's reach); the knob's own 0 to 100 % is 1 to 8 times.
+    constexpr float maxSyncAmount = 4.0f / 3.0f;
 
     // The unison's drift: each copy's pitch wanders toward a new place every so often, gliding there, at the pace of the
     // synth's Drift (Synth.cpp), but each copy at a pace of its own, from half to twice that, so that no two move together,
@@ -389,13 +401,21 @@ namespace
         float cutoff = 20000.0f, resonance = 0.0f, driveGain = 1.0f, keyTracking = 0.0f;
         std::array<dsp::LfoShape, 2> lfoShapes {};
         std::array<bool, 2> lfoRetrigger {};
+        std::array<float, 2> lfoFades {}; // the samples over which each note's share of each LFO comes in; 0, at once
         std::array<Synth::ModSource, Synth::numModSlots> sources {};
         std::array<Synth::ModTarget, Synth::numModSlots> targets {};
         std::array<float, Synth::numModSlots> amounts {};
+        bool movesAmounts = false; // a slot aims at another's amount
+        bool wanders = false;      // a slot plays the Drift source
         float outputGain = 1.0f, bent = 0.0f;
     };
 
-    Settings readSettings (std::span<const float> values, float bend, bool hasRight)
+    bool isAmountTarget (Synth::ModTarget target) noexcept
+    {
+        return target >= Synth::ModTarget::slot1Amount && target <= Synth::ModTarget::slot8Amount;
+    }
+
+    Settings readSettings (std::span<const float> values, float bend, bool hasRight, double sampleRate)
     {
         Settings settings;
 
@@ -446,13 +466,23 @@ namespace
         {
             settings.lfoShapes[(size_t) lfo] = choiceOf<dsp::LfoShape> (values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoShape)]);
             settings.lfoRetrigger[(size_t) lfo] = values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoRetrigger)] > 0.5f;
+            settings.lfoFades[(size_t) lfo] =
+                (float) (values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoFadeIn)] * 0.001 * sampleRate);
         }
 
         for (int slot = 0; slot < Synth::numModSlots; ++slot)
         {
-            settings.sources[(size_t) slot] = choiceOf<Synth::ModSource> (values[(size_t) Synth::getModParameter (slot, Synth::modSource)]);
-            settings.targets[(size_t) slot] = choiceOf<Synth::ModTarget> (values[(size_t) Synth::getModParameter (slot, Synth::modTarget)]);
+            const auto source = choiceOf<Synth::ModSource> (values[(size_t) Synth::getModParameter (slot, Synth::modSource)]);
+            const auto target = choiceOf<Synth::ModTarget> (values[(size_t) Synth::getModParameter (slot, Synth::modTarget)]);
+            settings.sources[(size_t) slot] = source;
+            settings.targets[(size_t) slot] = target;
             settings.amounts[(size_t) slot] = values[(size_t) Synth::getModParameter (slot, Synth::modAmount)];
+
+            if (source != Synth::ModSource::none && target != Synth::ModTarget::none)
+            {
+                settings.movesAmounts = settings.movesAmounts || isAmountTarget (target);
+                settings.wanders = settings.wanders || source == Synth::ModSource::drift;
+            }
         }
 
         settings.outputGain = dsp::decibelsToGain (values[Synth::level]);
@@ -575,6 +605,8 @@ void WavetableSynth::reset()
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
         voice.drifting.setSeed (driftSeed + (std::uint32_t) index);
+        voice.wandering.setSeed (wanderSeed + (std::uint32_t) index);
+        voice.wander = {};
 
         for (auto& oscillator : voice.oscillators)
             oscillator.wanders = {};
@@ -750,12 +782,48 @@ void WavetableSynth::moveDrift (Voice& voice, int unison) noexcept
     }
 }
 
+// The Drift source, as the synth's drift moves its cutoff (Synth::startDrift(), moveDrift()): each note from somewhere of its
+// own, toward a new place every 0.45 s, gliding there with a time constant of 0.3 s; a control step at a time, as Envelopes 2
+// and 3 and the LFOs move (movesOn()).
+void WavetableSynth::startWander (Voice& voice) noexcept
+{
+    voice.wander.now = voice.wandering.nextBipolar();
+    voice.wander.to = voice.wandering.nextBipolar();
+    voice.wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+}
+
+void WavetableSynth::moveWander (Voice& voice) noexcept
+{
+    auto& wander = voice.wander;
+
+    if (--wander.stepsLeft <= 0)
+    {
+        wander.to = voice.wandering.nextBipolar();
+        wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+    }
+
+    wander.now += (wander.to - wander.now) * driftFollow;
+}
+
+bool WavetableSynth::isAnotherKeyHeld (int note) const noexcept
+{
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+        if (const auto& voice = voices[i]; voice.held && voice.note != note && voice.amp.isActive())
+            return true;
+
+    return false;
+}
+
 void WavetableSynth::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
 {
     const auto sensitivity = values[velocity];
     const auto gain = 1.0f - sensitivity + sensitivity * velocityValue * velocityValue;
     const auto glidesIn = portamento && lastNote >= 0.0f;
-    const auto from = glidesIn || (values[glide] > 0.0f && lastNote >= 0.0f) ? lastNote : (float) note;
+
+    // Glide from the note before: always, or only for a note played over a held one (legato), as the synth's.
+    const auto glides = values[glide] > 0.0f && lastNote >= 0.0f
+                        && (choiceOf<GlideMode> (values[glideMode]) == GlideMode::always || isAnotherKeyHeld (note));
+    const auto from = glidesIn || glides ? lastNote : (float) note;
     lastNote = (float) note;
 
     // A portamento note slides in evenly over Glide's time, or a short one while Glide is off.
@@ -803,6 +871,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
             voice.envelope3.noteOn();
             voice.stepPending = true;
             startDrift (voice);
+            startWander (voice);
         }
 
         voice.slidePerSample = slideFrom (voice.pitch);
@@ -833,6 +902,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     voice.stepPending = true;
     voice.controlAhead = 0;
     startDrift (voice);
+    startWander (voice);
 }
 
 void WavetableSynth::stopNote (int note, std::span<const float> values)
@@ -993,7 +1063,7 @@ namespace
 void WavetableSynth::render (float* left, float* right, int numSamples, std::span<const float> values, bool playing,
                              std::int64_t songSample)
 {
-    const auto settings = readSettings (values, bend, right != nullptr);
+    const auto settings = readSettings (values, bend, right != nullptr, sampleRate);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
     const auto nyquistLimit = 0.45 * sampleRate;
 
@@ -1037,6 +1107,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             if (! voice.amp.isActive())
                 continue;
 
+            const auto ageAtStretch = voice.age; // the samples since its note began, at this stretch's start
             voice.age = std::min (voice.age + length, 1 << 30);
 
             //==================================================================
@@ -1063,7 +1134,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                     voice.pitch += (voice.target - voice.pitch) * glideStep;
                 }
 
-                std::array<float, (size_t) ModSource::random + 1> sources {};
+                std::array<float, (size_t) ModSource::drift + 1> sources {};
                 if (movesOnNow)
                 {
                     voice.envelope2Now = voice.envelope2.next();
@@ -1072,24 +1143,57 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                     for (size_t i = 0; i < voice.lfos.size(); ++i)
                         if (settings.lfoRetrigger[i])
                             voice.lfosNow[i] = voice.lfos[i].next (settings.lfoShapes[i]);
+
+                    // The Drift source, only while a slot plays it.
+                    if (settings.wanders)
+                        moveWander (voice);
                 }
 
                 sources[(size_t) ModSource::envelope2] = voice.envelope2Now;
                 sources[(size_t) ModSource::envelope3] = voice.envelope3Now;
 
                 for (size_t i = 0; i < voice.lfos.size(); ++i)
+                {
                     sources[(size_t) ModSource::lfo1 + i] = settings.lfoRetrigger[i] ? voice.lfosNow[i] : freeLfoValues[i];
+
+                    // Each note's share of the LFO comes in from nothing over its fade, from the note's start (a legato note
+                    // in mono mode goes on with its voice's), as the synth's LFO Fade In: whether the LFO starts with the note
+                    // or runs on for every note.
+                    if (const auto fade = settings.lfoFades[i]; fade > 0.0f)
+                        sources[(size_t) ModSource::lfo1 + i] *= std::min (1.0f, (float) ageAtStretch / fade);
+                }
 
                 sources[(size_t) ModSource::velocity] = voice.velocity;
                 sources[(size_t) ModSource::note] = (voice.pitch - 60.0f) / 48.0f;
                 sources[(size_t) ModSource::modWheel] = modWheel;
                 sources[(size_t) ModSource::random] = voice.random;
+                sources[(size_t) ModSource::drift] = voice.wander.now;
+
+                // The slots that aim at other slots' amounts first, each by its own amount as set, so that nothing loops:
+                // one that aims at its own does nothing, and an amount moved stays within its range.
+                auto amounts = settings.amounts;
+
+                if (settings.movesAmounts)
+                {
+                    for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
+                    {
+                        const auto target = settings.targets[slot];
+                        const auto moved = (size_t) target - (size_t) ModTarget::slot1Amount;
+
+                        if (settings.sources[slot] != ModSource::none && isAmountTarget (target) && moved != slot)
+                            amounts[moved] += sources[(size_t) settings.sources[slot]] * settings.amounts[slot];
+                    }
+
+                    for (auto& amount : amounts)
+                        amount = std::clamp (amount, -1.0f, 1.0f);
+                }
 
                 Moves moves {};
 
                 for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
-                    if (settings.sources[slot] != ModSource::none && settings.targets[slot] != ModTarget::none)
-                        moves[(size_t) settings.targets[slot]] += sources[(size_t) settings.sources[slot]] * settings.amounts[slot];
+                    if (settings.sources[slot] != ModSource::none && settings.targets[slot] != ModTarget::none
+                        && ! isAmountTarget (settings.targets[slot]))
+                        moves[(size_t) settings.targets[slot]] += sources[(size_t) settings.sources[slot]] * amounts[slot];
 
                 const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
                 const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
@@ -1123,8 +1227,9 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                     run.warp = settings.warp[(size_t) osc];
                     run.position =
                         std::clamp (settings.position[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Position)), 0.0f, 1.0f);
-                    run.warpAmount =
-                        std::clamp (settings.warpAmount[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Warp)), 0.0f, 1.0f);
+                    // Sync's modulation reaches past the knob's end, to 16 times (maxSyncAmount).
+                    run.warpAmount = std::clamp (settings.warpAmount[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Warp)), 0.0f,
+                                                 run.warp == Warp::sync ? maxSyncAmount : 1.0f);
                     run.level = std::clamp (settings.level[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Level)), 0.0f, 1.0f);
                     run.syncRatio = std::exp2 (3.0f * run.warpAmount);
                     run.bend = run.warp == Warp::bendUp ? 1.0f + 7.0f * run.warpAmount : 1.0f / (1.0f + 7.0f * run.warpAmount);

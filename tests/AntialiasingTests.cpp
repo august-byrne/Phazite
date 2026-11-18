@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the DSP audit (docs/archive/dsp-audit.md) fixed, measured: the band-limited synth waves (src/devices/dsp/Oscillators.h), the
+// What the DSP audit (docs/archive/dsp-audit.md) fixed, measured: the band-limited synth waves (src/devices/dsp/Oscillators.h) and
+// the wavetable synth's basic waves and pulse, as clean (src/devices/wavetable/Wavetable.h), the
 // saturator and the drives played by their antiderivatives at twice the rate (src/devices/dsp/Saturation.h), the EQ's
 // matched bands (src/devices/dsp/Filters.h), the delay line's Lagrange interpolation (src/devices/dsp/DelayLine.h) and the
 // drum sampler's windowed sinc (src/devices/dsp/SincReader.h). Aliases are measured as the reference measurements of the
@@ -14,6 +15,8 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/wavetable/FactoryWavetables.h"
+#include "devices/wavetable/WavetableSynth.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -129,7 +132,136 @@ double getLevel (const float* sound, int numSamples, double frequency, double sa
     const auto a = (ys * cc - yc * sc) / determinant, b = (yc * ss - ys * sc) / determinant;
     return std::sqrt (a * a + b * b);
 }
+
+// A note's frequency (A3, A5, A6 or A7) and a sample rate within a tenth of a percent of 48 kHz at which it is a whole, odd number
+// of bins: an oscillator's step, that many bins over fftSize, is then exact in floats, as the wavetable synth works its
+// frequency out from the note, so that what is measured is the oscillator's aliases alone, not a tone between two bins.
+struct OnBin
+{
+    int note = 69;
+    double frequency = 440.0, rate = 48000.0;
+};
+
+OnBin onBinRate (int note)
+{
+    const auto frequency = 440.0 * std::exp2 ((note - 69) / 12.0);
+    auto bin = (int) std::lround (frequency * fftSize / 48000.0);
+
+    if (bin % 2 == 0)
+        ++bin;
+
+    return { note, frequency, frequency * fftSize / bin };
+}
+
+constexpr int measuredNotes[] = { 57, 81, 93, 105 }; // 220, 880, 1760 and 3520 Hz, the synth's own measurement's
+constexpr int lowNotes[] = { 21, 33, 45 };           // 27.5, 55 and 110 Hz: the lowest read the tables' levels that are capped
+
+// The wavetable synth's first oscillator alone at full level, on a table at a position: the filter off, no modulation, no
+// velocity, full sustain. A note held from the start, its left side from 4800 samples on, fftSize of them.
+std::vector<float> playWavetable (const OnBin& at, float position, std::shared_ptr<const devices::Wavetable> table = nullptr)
+{
+    using devices::WavetableSynth;
+    auto values = getDefaults (WavetableSynth::info);
+    values[WavetableSynth::osc1Position] = position;
+    values[WavetableSynth::osc1Level] = 1.0f;
+    values[WavetableSynth::filterOn] = 0.0f;
+    values[WavetableSynth::mod1Source] = 0.0f;
+    values[WavetableSynth::env1Sustain] = 1.0f;
+    values[WavetableSynth::velocity] = 0.0f;
+    values[WavetableSynth::level] = 0.0f;
+
+    constexpr int blockSize = 480, skipped = 4800;
+    WavetableSynth synth;
+    synth.prepare (at.rate, blockSize);
+
+    if (table != nullptr)
+        synth.setTable (0, table);
+
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::vector<float> played;
+    const devices::NoteEvent start { devices::NoteEvent::Type::noteOn, 0, at.note, 1.0f };
+
+    for (int done = 0; done < skipped + fftSize; done += blockSize)
+    {
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = blockSize;
+        context.parameters = values;
+
+        if (done == 0)
+            context.events = std::span (&start, 1);
+
+        synth.process (context);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
+    }
+
+    played.erase (played.begin(), played.begin() + skipped);
+    played.resize ((size_t) fftSize);
+    return played;
+}
+
+// The synth's oscillator at a note, fftSize samples of it.
+std::vector<float> playOscillator (const OnBin& at, dsp::Waveform wave, float width = 0.5f)
+{
+    dsp::Oscillator oscillator;
+    oscillator.setFrequency (at.frequency, at.rate);
+    std::vector<float> sound ((size_t) fftSize);
+
+    for (auto& sample : sound)
+        sample = oscillator.next (wave, width);
+
+    return sound;
+}
+
 } // namespace
+
+TEST_CASE ("The wavetable synth's basic saw, square and triangle, and its 25 % pulse, keep their aliases as far down as the synth's")
+{
+    // The Basic Shapes table's saw, square and triangle (at 67 %, 100 % and 33 % of it) and the Pulse Width table at 25 %,
+    // against the synth's own waves at the same notes. Kept with four samples for each cycle of a level's highest harmonic and
+    // read by cubic interpolation, their images left the saw's loudest alias 56 dB under the note at A6, 31 dB above the
+    // synth's; with sixteen, they are more than 90 dB under at every note, and never more than 3 dB above the synth's.
+    const auto basic = devices::getFactoryWavetable (0);
+    const auto pulses = devices::getFactoryWavetable (devices::findFactoryWavetable ("Pulse Width"));
+
+    struct Wave
+    {
+        dsp::Waveform wave;
+        float width, position;
+        std::shared_ptr<const devices::Wavetable> table;
+    };
+
+    const Wave waves[] = { { dsp::Waveform::saw, 0.5f, 2.0f / 3.0f, basic },
+                           { dsp::Waveform::square, 0.5f, 1.0f, basic },
+                           { dsp::Waveform::triangle, 0.5f, 1.0f / 3.0f, basic },
+                           { dsp::Waveform::square, 0.25f, (0.5f - 0.25f) / 0.48f, pulses } }; // that table's width at 25 %
+
+    std::vector<int> notes (std::begin (lowNotes), std::end (lowNotes));
+    notes.insert (notes.end(), std::begin (measuredNotes), std::end (measuredNotes));
+
+    for (const auto note : notes)
+    {
+        const auto at = onBinRate (note);
+
+        for (const auto& wave : waves)
+        {
+            const auto synth = playOscillator (at, wave.wave, wave.width);
+            const auto table = playWavetable (at, wave.position, wave.table);
+            const auto synthAliases = getAliasesUnder (synth.data(), at.frequency, at.rate);
+            const auto tableAliases = getAliasesUnder (table.data(), at.frequency, at.rate);
+            CAPTURE (note);
+            CAPTURE ((int) wave.wave);
+            CAPTURE (wave.width);
+            CAPTURE (synthAliases);
+            CAPTURE (tableAliases);
+            CHECK (tableAliases > 90.0);
+            CHECK (tableAliases > synthAliases - 3.0);
+        }
+    }
+}
 
 TEST_CASE ("The synth's saw, pulse and triangle keep their aliases out of hearing, up to A7")
 {

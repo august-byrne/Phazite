@@ -1742,3 +1742,354 @@ TEST_CASE ("The wavetable synth's comb glides its delay across a step the grid c
     INFO ("at the cut steps " << atCut / numAtCut << ", elsewhere " << elsewhere / numElsewhere);
     CHECK (atCut / numAtCut < 1.5 * (elsewhere / numElsewhere));
 }
+
+//==============================================================================
+// What the wavetable synth took from the synth (roadmap step S6.7): each LFO's fade, Glide Mode, the Drift source, slots that
+// move other slots' amounts, and Sync's reach to 16 times.
+namespace
+{
+NoteEvent wheel (int sample, float value)
+{
+    return { NoteEvent::Type::controller, sample, 1, value };
+}
+
+// Plays the synth as play() does, calling `afterBlock` after each block.
+void playWatching (WavetableSynth& synth, const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& events,
+                   const std::function<void()>& afterBlock)
+{
+    for (int done = 0; done < numSamples; done += testBlockSize)
+    {
+        std::vector<NoteEvent> inBlock;
+
+        for (auto event : events)
+        {
+            if (event.sample >= done && event.sample < done + testBlockSize)
+            {
+                event.sample -= done;
+                inBlock.push_back (event);
+            }
+        }
+
+        play (synth, values, testBlockSize, inBlock);
+        afterBlock();
+    }
+}
+
+// How far a steady tone's pitch swings between two samples, in semitones: from the lowest to the highest frequency its
+// cycles take, each from one rising zero crossing to the next (each crossing placed between its samples).
+double measurePitchSwing (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto lowest = std::numeric_limits<double>::max(), highest = 0.0, last = -1.0;
+
+    for (auto i = from + 1; i < to && i < sound.size(); ++i)
+    {
+        if (sound[i - 1] < 0.0f && sound[i] >= 0.0f)
+        {
+            const auto crossing = (double) i - 1.0 + sound[i - 1] / ((double) sound[i - 1] - sound[i]);
+
+            if (last >= 0.0)
+            {
+                const auto frequency = testRate / (crossing - last);
+                lowest = std::min (lowest, frequency);
+                highest = std::max (highest, frequency);
+            }
+
+            last = crossing;
+        }
+    }
+
+    return highest > 0.0 ? 12.0 * std::log2 (highest / lowest) : 0.0;
+}
+} // namespace
+
+TEST_CASE ("The wavetable synth's LFO fade brings each note's share of the LFO in from nothing, from that note's start")
+{
+    // A sine at A4 and LFO 1 on its pitch, a semitone either way at 5 Hz, faded in over 400 ms: the swing grows from nothing
+    // to two semitones, for a note let go and played again too, whether the LFO starts with each note or runs on for all.
+    for (const auto retriggered : { true, false })
+    {
+        CAPTURE (retriggered);
+        auto values = getPlainValues (0.0f);
+        values[WavetableSynth::env1Release] = 0.5f; // the first note gone before the second
+        values[WavetableSynth::lfo1Rate] = 5.0f;
+        values[WavetableSynth::lfo1Retrigger] = retriggered ? 1.0f : 0.0f;
+        values[WavetableSynth::lfo1FadeIn] = 400.0f;
+        values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+        values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::pitch;
+        values[WavetableSynth::mod1Amount] = 1.0f / 24.0f;
+        const auto played = play (*makeSynth(), values, 86400, { noteOn (0, 69), noteOff (33600, 69), noteOn (38400, 69) });
+
+        const auto early = measurePitchSwing (played.left, 0, 4800), later = measurePitchSwing (played.left, 9600, 14400);
+        INFO ("the first 100 ms " << early << ", from 200 to 300 ms " << later);
+        CHECK (early < 0.3);
+        CHECK (later > early + 0.3);
+        CHECK (later < 1.8);
+        CHECK (measurePitchSwing (played.left, 19200, 33600) == doctest::Approx (2.0).epsilon (0.05)); // whole from 400 ms
+
+        // The second note's fade starts with it.
+        CHECK (measurePitchSwing (played.left, 38400 + 240, 38400 + 4800) < 0.3);
+        CHECK (measurePitchSwing (played.left, 38400 + 19200, 86400) == doctest::Approx (2.0).epsilon (0.05));
+    }
+
+    // In mono mode a legato note goes on with its voice's fade: the swing is whole at once, an octave up.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::voiceMode] = 1.0f;
+    values[WavetableSynth::lfo1Rate] = 5.0f;
+    values[WavetableSynth::lfo1FadeIn] = 400.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::pitch;
+    values[WavetableSynth::mod1Amount] = 1.0f / 24.0f;
+    const auto legato = play (*makeSynth(), values, 48000, { noteOn (0, 69), noteOn (28800, 81) });
+    CHECK (measureFrequency (legato.left, 28800 + 480, 48000) == doctest::Approx (880.0).epsilon (0.03));
+    CHECK (measurePitchSwing (legato.left, 28800 + 480, 48000) == doctest::Approx (2.0).epsilon (0.05));
+
+    // With no fade, the LFO is there from the note's start: a semitone up within its first 100 ms.
+    values[WavetableSynth::voiceMode] = 0.0f;
+    values[WavetableSynth::lfo1FadeIn] = 0.0f;
+    CHECK (measurePitchSwing (play (*makeSynth(), values, 4800, { noteOn (0, 69) }).left, 0, 4800) > 0.9);
+}
+
+TEST_CASE ("In Legato glide mode only a wavetable note played while another is held glides, in poly and mono mode")
+{
+    // The Note source on Osc 1's position: where the newest note plays in the table follows its pitch, C4 at the table's
+    // start, C5 a quarter of the way along. Just after C5 starts, a glide from C4 has barely begun; without one it is there.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::glide] = 100.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::note;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod1Amount] = 1.0f;
+
+    const auto positionAfter = [&values] (int samples, bool held)
+    {
+        auto synth = makeSynth();
+        play (*synth, values, samples,
+              held ? std::vector<NoteEvent> { noteOn (0, 60), noteOn (12000, 72) }
+                   : std::vector<NoteEvent> { noteOn (0, 60), noteOff (12000, 60), noteOn (12000, 72) });
+        return synth->getPlayedPosition (0);
+    };
+
+    for (const auto mono : { false, true })
+    {
+        CAPTURE (mono);
+        values[WavetableSynth::voiceMode] = mono ? 1.0f : 0.0f;
+        values[WavetableSynth::glideMode] = (float) WavetableSynth::GlideMode::legato;
+
+        // C4 let go, then C5: no glide, C5 at once.
+        CHECK (positionAfter (12032, false) == doctest::Approx (0.25f));
+
+        // C4 held, then C5: it glides there.
+        CHECK (positionAfter (12032, true) < 0.05f);
+        CHECK (positionAfter (48000, true) == doctest::Approx (0.25f).epsilon (0.01));
+
+        // Always, as before: the note let go of still glides into the next.
+        values[WavetableSynth::glideMode] = (float) WavetableSynth::GlideMode::always;
+        CHECK (positionAfter (12032, false) < 0.05f);
+    }
+}
+
+TEST_CASE ("The wavetable synth's Drift source lets each voice's cutoff wander on its own, within what its slot's amount allows")
+{
+    // Drift on the cutoff at 2 semitones (as the synth's Drift at full), the keys not followed: the newest note's cutoff
+    // wanders around 1 kHz, no further than 2 semitones either way; a second voice wanders a way of its own; and two renders
+    // are the same.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::filterOn] = 1.0f;
+    values[WavetableSynth::cutoff] = 1000.0f;
+    values[WavetableSynth::keyTracking] = 0.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::drift;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::cutoff;
+    values[WavetableSynth::mod1Amount] = 2.0f / 96.0f;
+
+    const auto cutoffs = [&values] (const std::vector<NoteEvent>& events)
+    {
+        auto synth = makeSynth();
+        std::vector<float> shown;
+        playWatching (*synth, values, 96000, events, [&] { shown.push_back (synth->getShown().cutoff.get()); });
+        return shown;
+    };
+
+    const auto first = cutoffs ({ noteOn (0, 60) });
+    const auto second = cutoffs ({ noteOn (0, 60), noteOn (0, 64) }); // the newest, 64, on the second voice
+    CHECK (cutoffs ({ noteOn (0, 60), noteOn (0, 64) }) == second);
+
+    const auto lowest = 1000.0f * std::exp2 (-2.0f / 12.0f) * 0.999f, highest = 1000.0f * std::exp2 (2.0f / 12.0f) * 1.001f;
+
+    for (const auto* each : { &first, &second })
+    {
+        const auto [low, high] = std::minmax_element (each->begin(), each->end());
+        INFO ("from " << *low << " to " << *high << " Hz");
+        CHECK (*low >= lowest);
+        CHECK (*high <= highest);
+        CHECK (12.0f * std::log2 (*high / *low) > 0.5f); // it wanders
+    }
+
+    auto apart = 0.0f;
+
+    for (size_t i = 0; i < first.size(); ++i)
+        apart = std::max (apart, std::abs (12.0f * std::log2 (first[i] / second[i])));
+
+    CHECK (apart > 0.5f);
+}
+
+TEST_CASE ("The wavetable synth's Drift source takes nothing from the other random values: unused, everything plays as it did")
+{
+    // A patch with unison drift, noise and a random value for each note: with a slot that plays Drift at nothing, and with
+    // its source on nothing, every sample the same.
+    auto values = getDefaults();
+    values[WavetableSynth::unisonVoices] = 3.0f;
+    values[WavetableSynth::unisonDrift] = 20.0f;
+    values[WavetableSynth::noiseLevel] = 0.2f;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::random;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::pan;
+    values[WavetableSynth::mod2Amount] = 0.5f;
+    const std::vector<NoteEvent> notes { noteOn (0, 48), noteOn (3000, 55), noteOff (9000, 48), noteOn (12000, 60) };
+    const auto without = play (*makeSynth(), values, 24000, notes);
+
+    values[WavetableSynth::mod3Source] = (float) WavetableSynth::ModSource::drift;
+    values[WavetableSynth::mod3Target] = (float) WavetableSynth::ModTarget::cutoff;
+    values[WavetableSynth::mod3Amount] = 0.0f;
+    const auto with = play (*makeSynth(), values, 24000, notes);
+    CHECK (with.left == without.left);
+    CHECK (with.right == without.right);
+}
+
+TEST_CASE ("A wavetable slot can move another slot's amount: the mod wheel brings an LFO's vibrato in from nothing")
+{
+    // Slot 2: LFO 1 on the pitch at nothing. Slot 1: the mod wheel on Mod 2 Amount at 50 %. Without the wheel, a steady A4;
+    // the wheel up, slot 2 at half its range: twelve semitones either way.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::lfo1Rate] = 2.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::modWheel;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::slot2Amount;
+    values[WavetableSynth::mod1Amount] = 0.5f;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::pitch;
+    values[WavetableSynth::mod2Amount] = 0.0f;
+
+    const auto still = play (*makeSynth(), values, 24000, { noteOn (0, 69) });
+    CHECK (measurePitchSwing (still.left, 480, 24000) < 0.01);
+    CHECK (measureFrequency (still.left, 480, 24000) == doctest::Approx (440.0).epsilon (0.002));
+
+    const auto moving = play (*makeSynth(), values, 24000, { wheel (0, 1.0f), noteOn (0, 69) });
+    CHECK (measurePitchSwing (moving.left, 480, 24000) == doctest::Approx (24.0).epsilon (0.05));
+
+    // The amount moved stays in its range: slot 2 at 80 % and the wheel adding 50 % plays it at 100 %, 24 semitones up while
+    // a square LFO is high, not 31.
+    values[WavetableSynth::lfo1Shape] = (float) devices::dsp::LfoShape::square;
+    values[WavetableSynth::lfo1Rate] = 1.0f;
+    values[WavetableSynth::mod2Amount] = 0.8f;
+    const auto kept = play (*makeSynth(), values, 19200, { wheel (0, 1.0f), noteOn (0, 45) });
+    CHECK (measureFrequency (kept.left, 480, 19200) == doctest::Approx (440.0).epsilon (0.002));
+}
+
+TEST_CASE ("A wavetable slot on its own amount, and two on each other's, change nothing and don't loop")
+{
+    // LFO 1 on Osc 1's position, and the other slots on amounts: on their own, or each on the other's. A slot that aims at an
+    // amount plays by its own as set, which nothing moves, so the sound is that of the first slot alone.
+    auto values = getPlainValues (0.3f);
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod1Amount] = 0.4f;
+    const std::vector<NoteEvent> notes { wheel (0, 1.0f), noteOn (0, 57), noteOn (4000, 64) };
+    const auto alone = play (*makeSynth(), values, 19200, notes);
+
+    auto own = values;
+    own[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::modWheel;
+    own[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::slot2Amount;
+    own[WavetableSynth::mod2Amount] = 1.0f;
+    CHECK (play (*makeSynth(), own, 19200, notes).left == alone.left);
+
+    auto each = values;
+    each[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::lfo2;
+    each[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::slot3Amount;
+    each[WavetableSynth::mod2Amount] = 1.0f;
+    each[WavetableSynth::mod3Source] = (float) WavetableSynth::ModSource::modWheel;
+    each[WavetableSynth::mod3Target] = (float) WavetableSynth::ModTarget::slot2Amount;
+    each[WavetableSynth::mod3Amount] = -1.0f;
+    CHECK (play (*makeSynth(), each, 19200, notes).left == alone.left);
+}
+
+TEST_CASE ("Wavetable slots that move amounts don't depend on their order: a moved amount moves nothing further")
+{
+    // Slot 1: LFO 1 on Osc 1's position at 25 %. Slot 3: the mod wheel on Mod 1 Amount at 25 %. Slot 2: the mod wheel on Mod 3
+    // Amount at 50 %. A slot aimed at an amount plays by its own amount as set, so slot 3 adds 25 % to slot 1 whatever slot 2
+    // does to it: the sound of slot 1 alone at 50 %. Were the amounts moved in the slots' order, slot 3 would add 75 %.
+    auto values = getPlainValues (0.3f);
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod1Amount] = 0.5f;
+    const std::vector<NoteEvent> notes { wheel (0, 1.0f), noteOn (0, 57), noteOn (4000, 64) };
+    const auto alone = play (*makeSynth(), values, 19200, notes);
+
+    const auto chain = [&] (int moverOfSlot3, int moverOfSlot1)
+    {
+        auto chained = values;
+        chained[WavetableSynth::mod1Amount] = 0.25f;
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot1, WavetableSynth::modSource)] =
+            (float) WavetableSynth::ModSource::modWheel;
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot1, WavetableSynth::modTarget)] =
+            (float) WavetableSynth::ModTarget::slot1Amount;
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot1, WavetableSynth::modAmount)] = 0.25f;
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot3, WavetableSynth::modSource)] =
+            (float) WavetableSynth::ModSource::modWheel;
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot3, WavetableSynth::modTarget)] =
+            (float) (moverOfSlot1 == 2 ? WavetableSynth::ModTarget::slot3Amount : WavetableSynth::ModTarget::slot2Amount);
+        chained[(size_t) WavetableSynth::getModParameter (moverOfSlot3, WavetableSynth::modAmount)] = 0.5f;
+        return play (*makeSynth(), chained, 19200, notes);
+    };
+
+    // The slot that moves slot 1's amount before the slot that moves its own, and after it.
+    CHECK (chain (1, 2).left == alone.left);
+    CHECK (chain (2, 1).left == alone.left);
+}
+
+TEST_CASE ("The wavetable synth's Sync warp reaches 16 times the note's cycle by modulation, the synth's sweep of four octaves")
+{
+    // A sine synced: at the knob's end it reads its wave 8 times a cycle, its 8th harmonic loudest; a slot from the mod wheel
+    // to the warp at a third more takes it to 16 times, its 16th.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::osc1Warp] = (float) WavetableSynth::Warp::sync;
+    values[WavetableSynth::osc1WarpAmount] = 1.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::modWheel;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Warp;
+    values[WavetableSynth::mod1Amount] = 1.0f / 3.0f;
+    const auto f0 = noteFrequency (45);
+
+    const auto knob = play (*makeSynth(), values, 19200, { noteOn (0, 45) });
+    CHECK (measureLevelAt (knob.left, 4800, 19200, 8.0 * f0) > 10.0 * measureLevelAt (knob.left, 4800, 19200, 16.0 * f0));
+
+    const auto swept = play (*makeSynth(), values, 19200, { wheel (0, 1.0f), noteOn (0, 45) });
+    CHECK (measureLevelAt (swept.left, 4800, 19200, 16.0 * f0) > 10.0 * measureLevelAt (swept.left, 4800, 19200, 8.0 * f0));
+}
+
+TEST_CASE ("The wavetable synth's LFO fade, legato glide, Drift and a slot on another's amount play alike in blocks of 32 and 512")
+{
+    // Every one of them in use while notes overlap, the wheel moving in the middle: what plays doesn't depend on how the
+    // samples come in blocks.
+    auto values = getPlainValues (0.2f);
+    values[WavetableSynth::filterOn] = 1.0f;
+    values[WavetableSynth::glide] = 80.0f;
+    values[WavetableSynth::glideMode] = (float) WavetableSynth::GlideMode::legato;
+    values[WavetableSynth::lfo1FadeIn] = 150.0f;
+    values[WavetableSynth::lfo2FadeIn] = 90.0f;
+    values[WavetableSynth::lfo2Retrigger] = 0.0f;
+    values[WavetableSynth::lfo2Rate] = 3.0f;
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::lfo1;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Position;
+    values[WavetableSynth::mod1Amount] = 0.0f;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::modWheel;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::slot1Amount;
+    values[WavetableSynth::mod2Amount] = 0.6f;
+    values[WavetableSynth::mod3Source] = (float) WavetableSynth::ModSource::drift;
+    values[WavetableSynth::mod3Target] = (float) WavetableSynth::ModTarget::cutoff;
+    values[WavetableSynth::mod3Amount] = 0.1f;
+    values[WavetableSynth::mod4Source] = (float) WavetableSynth::ModSource::lfo2;
+    values[WavetableSynth::mod4Target] = (float) WavetableSynth::ModTarget::pitch;
+    values[WavetableSynth::mod4Amount] = 0.05f;
+    const std::vector<NoteEvent> events { noteOn (0, 60), noteOn (1000, 67), wheel (3000, 0.7f), noteOff (5003, 67), noteOn (9001, 64) };
+
+    const auto small = play (*makeSynth(), values, 24000, events, 32);
+    const auto large = play (*makeSynth(), values, 24000, events, 512);
+    CHECK (peakOf (small.left, 0, 24000) > 0.05f);
+    CHECK (largestDifference (small, large) < 1.0e-4f);
+}

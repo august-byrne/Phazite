@@ -1327,7 +1327,7 @@ TEST_SUITE ("realtime-audit")
     }
 
     TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope "
-               "sweeping each note's table")
+               "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated")
     {
         using phazite::devices::WavetableSynth;
         TestSong song;
@@ -1355,12 +1355,26 @@ TEST_SUITE ("realtime-audit")
         set ("mod3Target", (float) WavetableSynth::ModTarget::osc2Position);
         set ("mod3Amount", 0.5f);
 
+        // What it took from the synth (S6.7): each LFO's fade, legato glides, Drift on the cutoff, and LFO 2 moving slot 3's
+        // amount; the fade and that slot's amount automated.
+        set ("lfo1FadeIn", 120.0f);
+        set ("lfo2Retrigger", 0.0f);
+        set ("glide", 40.0f);
+        set ("glideMode", (float) WavetableSynth::GlideMode::legato);
+        set ("mod4Source", (float) WavetableSynth::ModSource::drift);
+        set ("mod4Target", (float) WavetableSynth::ModTarget::cutoff);
+        set ("mod4Amount", 0.05f);
+        set ("mod5Source", (float) WavetableSynth::ModSource::lfo2);
+        set ("mod5Target", (float) WavetableSynth::ModTarget::slot3Amount);
+        sweepParameter (song, { wavetable, "lfo2FadeIn" }, 0.0f, 300.0f);
+        sweepParameter (song, { wavetable, "mod5Amount" }, -1.0f, 1.0f);
+
         // Chords a sixteenth long, as for the synth's unison.
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
         report ("Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
-                "table",
+                "table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated",
                 m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);

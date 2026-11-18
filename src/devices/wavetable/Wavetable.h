@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A wavetable (roadmap step 2.13): single-cycle waves, its frames, that an oscillator morphs through, as Serum's, Vital's
 // and Ableton Live's Wavetable do. Each frame is kept band-limited at every pitch: for each half octave, a copy with only
-// the harmonics whose aliases stay above hearing, made with an FFT when the table is made, which the oscillator reads
-// with cubic interpolation, crossfading between neighbouring frames. So a plain table plays without aliasing, as
+// the harmonics whose aliases stay above hearing, made with an FFT when the table is made, with 16 samples for each cycle of
+// its highest harmonic (up to 8192 a copy), which the oscillator reads with cubic interpolation, crossfading between
+// neighbouring frames. So a plain table plays without aliasing, as
 // Ableton's manual promises of its own. A table is made off the audio thread, from its frames' harmonics or samples, and
 // never changes once made.
 #pragma once
@@ -35,7 +36,7 @@ public:
     static std::shared_ptr<const Wavetable> fromHarmonics (const juce::String& name, const std::vector<Harmonics>& frames);
 
     // A table for an oscillator that reads one frame (devices/dsp/Oscillators.h): its harmonics at the level they give,
-    // and each level with 32 samples for each cycle of its highest harmonic rather than 4, so that the oscillator reads it
+    // and each level with 32 samples for each cycle of its highest harmonic rather than 16, so that the oscillator reads it
     // by straight lines between its samples, cheaply, and what that adds is more than 80 dB down.
     static std::shared_ptr<const Wavetable> forOscillator (const juce::String& name, const Harmonics& frame);
     static std::shared_ptr<const Wavetable> fromFrames (const juce::String& name, const std::vector<std::vector<float>>& frames);
@@ -109,7 +110,7 @@ private:
     void findAreasAndMeans (const std::vector<Harmonics>& frames, float scale); // once its frames are made, scaled as they were
 
     static std::shared_ptr<const Wavetable> make (const juce::String& name, const std::vector<Harmonics>& frames, bool peakAtOne,
-                                                  int samplesPerCycle);
+                                                  int samplesPerCycle, int longestLevel);
 };
 
 // A level's wave at a place in its cycle (in samples, from 0 up to its length), with 4-point cubic (Catmull-Rom)

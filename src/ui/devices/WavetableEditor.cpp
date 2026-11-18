@@ -303,6 +303,9 @@ public:
             row->target.setTitle ("Mod " + juce::String (slot + 1) + " Target");
             row->sourceAttachment.setParameter (device.getParameter (id (WavetableSynth::modSource)));
             row->targetAttachment.setParameter (device.getParameter (id (WavetableSynth::modTarget)));
+
+            // A slot can't move its own amount: shown in its list, but not to be chosen (the item IDs are the choices from 1).
+            row->target.setItemEnabled ((int) WavetableSynth::getAmountTarget (slot) + 1, false);
             row->amount = std::make_unique<Knob> (juce::String (amount.name.data(), amount.name.size()), amount.defaultValue);
             showAsParameter (*row->amount, amount);
             row->amountAttachment = std::make_unique<ParameterAttachment> (*row->amount);
@@ -491,11 +494,11 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
         std::vector<std::string_view> ids;
 
         for (const auto field : { WavetableSynth::lfoShape, WavetableSynth::lfoRate, WavetableSynth::lfoSync, WavetableSynth::lfoDivision,
-                                  WavetableSynth::lfoRetrigger })
+                                  WavetableSynth::lfoRetrigger, WavetableSynth::lfoFadeIn })
             ids.push_back (getParameterID (WavetableSynth::getLfoParameter (lfo, field)));
 
         modulation.push_back (makePicturePart ("LFO " + juce::String (lfo + 1), view, 64, 36, ids, 3, ParameterControls::Size::compact,
-                                               { "Shape", "Rate", "Sync", "Division", "Retrigger" }));
+                                               { "Shape", "Rate", "Sync", "Division", "Retrigger", "Fade In" }));
     }
 
     auto& matrix = keep (std::make_unique<Matrix> (device));
@@ -506,12 +509,13 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
                 addControl (getParameterID (WavetableSynth::getModParameter (slot, field)), *control);
 
     modulation.push_back ({ "Matrix", &matrix, Matrix::getPreferredWidth(), Matrix::getPreferredHeight(), Matrix::getPreferredHeight() });
-    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 5,
-                                            ParameterControls::Size::compact, { "Mode", "Glide", "Bend", "Velocity", "Level" }));
+    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "glideMode", "bendRange", "velocity", "level" }, 6,
+                                            ParameterControls::Size::compact,
+                                            { "Mode", "Glide", "Glide Mode", "Bend", "Velocity", "Level" }));
 
-    // A part to a column, as tall as the dock is short, so that only the list has tabs: in the dock, two side by side on each
-    // page: the oscillators; the filter and the amp's envelope; the sub and noise over how it plays, and the unison; then the
-    // rest of the modulation, the list down its side.
+    // A part to a column, as tall as the dock is short, so that only the list has tabs: in the dock, side by side on each
+    // page: the oscillators; the filter and the amp's envelope; the sub and noise over how it plays (a row of six, with its
+    // glide's mode, as wide as a page); then the unison and the rest of the modulation, the list down its side.
     const auto amp = modulation.front(), voice = modulation.back();
     const std::vector<DeviceLayout::Part> rest (modulation.begin() + 1, modulation.end() - 1);
     setParts ({ { oscillatorParts[0] }, { oscillatorParts[1] }, { filter }, { amp }, { subAndNoise, voice }, { unison }, rest }, { 6 });

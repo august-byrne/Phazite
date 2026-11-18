@@ -1087,6 +1087,15 @@
         "default": 1.0
       },
       {
+        "id": "lfo1FadeIn",
+        "name": "LFO 1 Fade In",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 0.0,
+        "midpoint": 300.0
+      },
+      {
         "id": "lfo2Shape",
         "name": "LFO 2 Shape",
         "unit": "choice",
@@ -1155,11 +1164,20 @@
         "default": 0.0
       },
       {
+        "id": "lfo2FadeIn",
+        "name": "LFO 2 Fade In",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 0.0,
+        "midpoint": 300.0
+      },
+      {
         "id": "mod1Source",
         "name": "Mod 1 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "Envelope 2",
         "choices": [
           "None",
@@ -1170,7 +1188,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1178,7 +1197,7 @@
         "name": "Mod 1 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "Cutoff",
         "choices": [
           "None",
@@ -1197,7 +1216,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1213,7 +1240,7 @@
         "name": "Mod 2 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1224,7 +1251,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1232,7 +1260,7 @@
         "name": "Mod 2 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1251,7 +1279,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1267,7 +1303,7 @@
         "name": "Mod 3 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1278,7 +1314,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1286,7 +1323,7 @@
         "name": "Mod 3 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1305,7 +1342,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1321,7 +1366,7 @@
         "name": "Mod 4 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1332,7 +1377,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1340,7 +1386,7 @@
         "name": "Mod 4 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1359,7 +1405,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1375,7 +1429,7 @@
         "name": "Mod 5 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1386,7 +1440,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1394,7 +1449,7 @@
         "name": "Mod 5 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1413,7 +1468,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1429,7 +1492,7 @@
         "name": "Mod 6 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1440,7 +1503,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1448,7 +1512,7 @@
         "name": "Mod 6 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1467,7 +1531,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1483,7 +1555,7 @@
         "name": "Mod 7 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1494,7 +1566,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1502,7 +1575,7 @@
         "name": "Mod 7 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1521,7 +1594,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1537,7 +1618,7 @@
         "name": "Mod 8 Source",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 8.0,
+        "maximum": 9.0,
         "default": "None",
         "choices": [
           "None",
@@ -1548,7 +1629,8 @@
           "Velocity",
           "Note",
           "Mod Wheel",
-          "Random"
+          "Random",
+          "Drift"
         ]
       },
       {
@@ -1556,7 +1638,7 @@
         "name": "Mod 8 Target",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 16.0,
+        "maximum": 24.0,
         "default": "None",
         "choices": [
           "None",
@@ -1575,7 +1657,15 @@
           "Resonance",
           "Volume",
           "Pan",
-          "Unison Detune"
+          "Unison Detune",
+          "Mod 1 Amount",
+          "Mod 2 Amount",
+          "Mod 3 Amount",
+          "Mod 4 Amount",
+          "Mod 5 Amount",
+          "Mod 6 Amount",
+          "Mod 7 Amount",
+          "Mod 8 Amount"
         ]
       },
       {
@@ -1606,6 +1696,18 @@
         "maximum": 2000.0,
         "default": 0.0,
         "midpoint": 200.0
+      },
+      {
+        "id": "glideMode",
+        "name": "Glide Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Always",
+        "choices": [
+          "Always",
+          "Legato"
+        ]
       },
       {
         "id": "bendRange",

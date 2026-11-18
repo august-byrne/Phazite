@@ -18,11 +18,18 @@ namespace
 
     constexpr int guardBefore = 1, guardAfter = 2; // the samples around each level's cycle, for interpolation
 
-    // The samples a level keeps: at least so many for each cycle of its highest harmonic (four for a wavetable), so that
-    // cubic interpolation reads it cleanly, as a power of two, and at least 64.
-    int getLevelLength (int harmonics, int samplesPerCycle)
+    // The samples a level keeps: at least so many for each cycle of its highest harmonic, so that the interpolation that reads
+    // it leaves its images far down, as a power of two, at least 64 and at most `longest`. A wavetable's, read by cubic
+    // interpolation, keep 16, up to 8192: its aliases are then more than 90 dB under the note for a saw up to A7, under the
+    // synth's own waves' (Oscillators.h), where four left them 56 dB under at A6 (tests/AntialiasingTests.cpp). The cap
+    // keeps the two levels of the most harmonics, which only notes below 39 Hz read, at 8 and 11 samples a cycle of their
+    // highest, whose harmonics are too quiet for their images to be heard: a frame takes 2.6 times what four samples a
+    // cycle took, rather than 3.4, and is made in less time.
+    constexpr int tableSamplesPerCycle = 16, longestTableLevel = 8192;
+
+    int getLevelLength (int harmonics, int samplesPerCycle, int longest)
     {
-        return std::max (64, juce::nextPowerOfTwo (samplesPerCycle * harmonics));
+        return std::clamp (juce::nextPowerOfTwo (samplesPerCycle * harmonics), 64, longest);
     }
 
     int getOrder (int size)
@@ -127,16 +134,16 @@ namespace
 
 std::shared_ptr<const Wavetable> Wavetable::fromHarmonics (const juce::String& tableName, const std::vector<Harmonics>& frames)
 {
-    return make (tableName, frames, true, 4);
+    return make (tableName, frames, true, tableSamplesPerCycle, longestTableLevel);
 }
 
 std::shared_ptr<const Wavetable> Wavetable::forOscillator (const juce::String& tableName, const Harmonics& frame)
 {
-    return make (tableName, { frame }, false, 32);
+    return make (tableName, { frame }, false, 32, 32 * maxHarmonics); // read by straight lines: never capped
 }
 
 std::shared_ptr<const Wavetable> Wavetable::make (const juce::String& tableName, const std::vector<Harmonics>& frames, bool peakAtOne,
-                                                  int samplesPerCycle)
+                                                  int samplesPerCycle, int longestLevel)
 {
     std::shared_ptr<Wavetable> table (new Wavetable());
     table->name = tableName;
@@ -147,7 +154,7 @@ std::shared_ptr<const Wavetable> Wavetable::make (const juce::String& tableName,
 
     for (int level = 0; level < numLevels; ++level)
     {
-        table->levelLengths[(size_t) level] = getLevelLength (harmonicsAtLevel[(size_t) level], samplesPerCycle);
+        table->levelLengths[(size_t) level] = getLevelLength (harmonicsAtLevel[(size_t) level], samplesPerCycle, longestLevel);
         table->levelOffsets[(size_t) level] = offset + guardBefore;
         offset += guardBefore + table->levelLengths[(size_t) level] + guardAfter;
     }
