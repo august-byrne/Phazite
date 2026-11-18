@@ -38,6 +38,10 @@ The full text of every step, as it was written when it was built, is in the
 - **Known bug 194, Bounce in Place and sends:** a track's sends move to the bounce's new track with their automation and
   modulation, so a send before the fader no longer plays the bounced sound into its return twice from the muted
   original; Undo gives them back.
+- **Known bug 195, instruments rest as a project opens:** a stopped song's instruments rest as a project opens after one
+  closed while it played: the stop that reaches them, an all-notes-off, no longer counts as something heard, so the FM
+  synth, the drum sampler and other instruments with long tails no longer work through those tails. It showed as a
+  performance gate that failed after other test files in one process.
 
 ## After the known bugs' first push (2026-11-17)
 

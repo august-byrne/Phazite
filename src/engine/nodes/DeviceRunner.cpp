@@ -144,6 +144,14 @@ namespace
         return true;
     }
 
+    // Whether events start a note, which can sound from silence.
+    bool startsNote (std::span<const devices::NoteEvent> events) noexcept
+    {
+        using Type = devices::NoteEvent::Type;
+        return std::any_of (events.begin(), events.end(), [] (const devices::NoteEvent& event)
+                            { return event.type == Type::noteOn || event.type == Type::portamentoOn; });
+    }
+
     // The events before a sample.
     std::span<devices::NoteEvent> getEventsBefore (std::span<devices::NoteEvent> events, int sample) noexcept
     {
@@ -289,7 +297,16 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
     }
 
     asleep = false;
-    heard = heard || ! begun.quietIn;
+
+    // Heard: what can sound came in, a note's start, sound, or what waits in the device to play. Not an event alone that
+    // ends or bends what sounds (the all-notes-off of a stop, a note's end, a controller), which leaves a device that has
+    // heard nothing with nothing to ring with (known bug 195: the stop of the song closed before reached the next one's
+    // instruments, and each waited for its tail).
+    if (! heard && ! begun.quietIn)
+        heard = processor->isWaitingToPlay() || startsNote (in.events)
+                || (! isSynth && ! isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
+                || (begun.hasSidechain && ! isQuiet (buffer, start, numSamples, 2, 2, silence));
+
     blocksWorked.store (blocksWorked.load (std::memory_order_relaxed) + 1, std::memory_order_relaxed);
 
     // Taken whole, it gets the values of what moves as changes: those it moves now, and those it moved in the last block.

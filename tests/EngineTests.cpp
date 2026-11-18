@@ -267,6 +267,85 @@ TEST_CASE ("A device's runner sleeps after a quarter of a second of silence, and
     CHECK (counting.blocksPlayed == played + 2 + quarter + 10);
 }
 
+namespace
+{
+// An instrument that plays a level of 0.5 while a note is held, says it rings on for two seconds after, and counts the blocks
+// it is asked to play.
+class Tailed final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testTailed", .name = "Tailed", .kind = dev::DeviceKind::instrument };
+
+    int blocksPlayed = 0;
+
+    void prepare (double, int) override {}
+    void reset() override { held = 0; }
+    double getTailSeconds() const override { return 2.0; }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        ++blocksPlayed;
+
+        for (const auto& event : context.events)
+            held += event.type == dev::NoteEvent::Type::noteOn ? 1 : event.type == dev::NoteEvent::Type::noteOff && held > 0 ? -1 : 0;
+
+        for (int channel = 0; channel < context.numChannels; ++channel)
+            juce::FloatVectorOperations::fill (context.channels[channel], held > 0 ? 0.5f : 0.0f, context.numSamples);
+    }
+
+private:
+    int held = 0;
+};
+} // namespace
+
+TEST_CASE ("Stopped, a runner handed only an all-notes-off, a note's end or a controller rests in a quarter of a second, not its tail")
+{
+    // Known bug 195: the all-notes-off of a stop asked of the song closed before reached the next song's instruments as its
+    // plan came, and each, having heard something, waited for its tail before it rested (the drum sampler's 2.2 s). What
+    // ends or bends what sounds leaves a device that has heard nothing with nothing to ring with; a note's start doesn't.
+    using Type = dev::NoteEvent::Type;
+    auto device = std::make_unique<Tailed>();
+    auto& counting = *device;
+    engine::DeviceRunner runner (Tailed::info, std::move (device));
+    runner.prepare (rate, blockSize);
+
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::array<dev::NoteEvent, 4> handed { dev::NoteEvent { Type::allNotesOff, 0, 0, 0.0f }, dev::NoteEvent { Type::noteOff, 10, 60, 0.0f },
+                                           dev::NoteEvent { Type::controller, 20, 1, 0.5f },
+                                           dev::NoteEvent { Type::pitchBend, 30, 0, 0.25f } };
+    engine::DeviceRunner::Block block;
+    block.events = handed;
+    runner.process (buffer, 0, blockSize, block);
+    block.events = {};
+
+    // Played for a quarter of a second of silence after, then no more.
+    const auto quarter = (int) (rate / 4) / blockSize + 1;
+    const auto playFor = [&] (int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            runner.process (buffer, 0, blockSize, block);
+    };
+
+    playFor (quarter);
+    auto played = counting.blocksPlayed;
+    playFor (10);
+    CHECK (counting.blocksPlayed == played);
+
+    // A note played and let go of: it waits for its tail, two seconds, before it rests.
+    std::array<dev::NoteEvent, 2> note { dev::NoteEvent { Type::noteOn, 0, 60, 0.8f }, dev::NoteEvent { Type::noteOff, 100, 60, 0.0f } };
+    block.events = note;
+    runner.process (buffer, 0, blockSize, block);
+    block.events = {};
+    played = counting.blocksPlayed;
+    const auto tail = (int) (2.0 * rate) / blockSize + 1;
+    playFor (quarter + 10);
+    CHECK (counting.blocksPlayed == played + quarter + 10);
+    playFor (tail - quarter - 10);
+    played = counting.blocksPlayed;
+    playFor (10);
+    CHECK (counting.blocksPlayed == played);
+}
+
 //==============================================================================
 // Devices through their runners and nodes, with the devices made for tests (TestDevices.h): an effect (a gain), an
 // instrument that plays the velocity of the note it holds, and an effect with latency and a mix (a delay).
@@ -1566,6 +1645,54 @@ TEST_CASE ("Playback started or jumping starts from silence: a tail rings on aft
     // Played again, where no note is, it is silent from the first sample.
     player.locate (8.0);
     CHECK (player.render (blockSize).getMagnitude (0, 0, blockSize) == 0.0f);
+}
+
+TEST_CASE ("The instruments of a song played after one closed as it played rest as it opens, though that one's stop reaches them")
+{
+    // Known bug 195: a project closed as it plays asks the engine to stop and lets go of its plan (model/playback/
+    // PlaybackHost::remove()), which no block plays, so the stop is taken as the next project's plan comes, whose instruments
+    // are handed its all-notes-off. Each took that for something heard, and worked through its tail before it rested as
+    // that project opened, stopped (the drum sampler's 2.2 s).
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    juce::AudioBuffer<float> out (2, blockSize);
+    float* channels[] = { out.getWritePointer (0), out.getWritePointer (1) };
+    const auto play = [&] (int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            player.process (channels, 2, blockSize);
+    };
+
+    auto last = makeClickPlan();
+    last->metronome = false;
+    player.setPlan (std::move (last));
+    player.play();
+    play ((int) rate / blockSize);
+    REQUIRE (player.isPlaying());
+
+    // Closed as it plays, as the playback host closes it: stopped, its plan let go of, two blocks played without one, gone.
+    player.stop();
+    player.setPlan (nullptr);
+    play (2);
+    player.dropPlans();
+
+    // The next song, of an instrument that says it rings for two seconds, stopped, from its start, as its playback session
+    // gives it to the engine: it works for a quarter of a second, and no more.
+    auto device = std::make_unique<Tailed>();
+    auto& tailed = *device;
+    auto next = makeClickPlan();
+    next->metronome = false;
+    next->strips.push_back (makeTrack (1, Tailed::info, std::move (device), {}, blockSize));
+    next->strips.push_back (makeMaster (*next, blockSize));
+    player.stop();
+    player.locate (0.0);
+    player.setPlan (std::move (next));
+
+    play ((int) (rate / 4) / blockSize + 2);
+    REQUIRE (tailed.blocksPlayed > 0);
+    const auto played = tailed.blocksPlayed;
+    play (10);
+    CHECK (tailed.blocksPlayed == played);
 }
 
 namespace

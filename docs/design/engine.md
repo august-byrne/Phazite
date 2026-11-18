@@ -212,8 +212,11 @@ surroundings:
   it plays have been silent for a quarter of a second and for as long as the tail it reports: a reverb rings out its
   decay, a delay its echoes. While the song is stopped, one that has heard nothing since it was last reset or made ready
   (a project just opened, a device added or switched on) has nothing to ring with, and sleeps after the quarter of a
-  second alone. A device is reset by Play, by a jump while the song plays and by being switched on; a jump while the
-  song is stopped resets nothing, so what rings on before it is waited for. While the song plays, every device
+  second alone; only what can sound counts as heard (a note's start, sound coming in, a pad its editor played), not an
+  all-notes-off, a note's end, a bend, a slide, pressure or a controller alone (the stop of a project closed as it
+  played reaches the next project's instruments as an all-notes-off). A device is reset by Play, by a jump while the
+  song plays and by being switched on; a jump while the song is stopped resets nothing, so what rings on before it is
+  waited for. While the song plays, every device
   waits for its tail, so that one whose sound starts within it plays as a render does (a render never sleeps, and a
   reverb's sway runs on through silence). A muted track's devices sleep the same way. The vinyl, whose surface noise
   plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays.

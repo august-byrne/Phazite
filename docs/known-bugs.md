@@ -64,14 +64,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **195. A performance gate fails after other test files in one process** (seen by four agents, 2026-11-17): "Performance
-  gate: a stopped song's devices work no block once their sound has ended" fails (the Drum Sampler and the FM synth
-  each worked 188 blocks as the song opened) when `phazite_tests` runs it after other test files in one process (after
-  `AppTests`, and in a run of the playback and mixer files), and passes alone and with its own file, so `ctest`, which
-  starts each file by itself, passes. Something an earlier test leaves behind makes a stopped song's devices work as the
-  song opens: a counter the gate reads that is the program's rather than the song's, or state an earlier test file
-  leaves (the audio device, a setting). To fix: find the earlier case by bisecting the run's test files, then make the
-  gate count its own song's blocks or the earlier test put back what it changed.
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
   crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
   its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter

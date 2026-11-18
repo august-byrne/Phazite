@@ -234,8 +234,10 @@ private:
     // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render, nor an instrument while it holds
     // a note or its sustain pedal is down: a held note can be silent for a while and sound again (a slow LFO on its filter,
     // a sample with a gap), and asleep it would stay silent (known bug 37 until 2026-11-14). While the song is stopped, its
-    // tail is waited for only once something has come in since it was prepared or reset (heard): until then it holds
-    // nothing to ring with (a device given nothing plays nothing, stopped or playing, from prepare() or a reset(): the
+    // tail is waited for only once something that can sound has come in since it was prepared or reset (heard: a note's
+    // start, sound, or what waits in it to play; not an all-notes-off, a note's end, a bend, a slide, pressure or a
+    // controller alone): until then it
+    // holds nothing to ring with (a device given nothing plays nothing, stopped or playing, from prepare() or a reset(): the
     // conformance suite's rule), so a reverb that hasn't heard anything rests after sleepAfterSeconds rather than its decay:
     // as a project opens, or a device is added or switched on while the song is stopped. A device is reset by Play, by a
     // jump while the song plays (Engine::flushStrip()), by being switched on (DeviceNode), and prepared by prepare(); a jump
