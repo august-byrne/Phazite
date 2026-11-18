@@ -835,6 +835,21 @@ TEST_CASE ("The branch picker merges another branch in, and deletes one, asking 
     CHECK (phazite::getBranches (context).size() == 1);
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.deleteBranch")));
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.mergeBranch")));
+
+    // Recover Lost Versions...: the deleted branch, with when it went; picked, it is back as a branch.
+    REQUIRE (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.recover")));
+
+    {
+        BranchPicker picker (screen.commands, context, BranchPicker::Mode::recover);
+        REQUIRE (picker.getNumRows() == 1);
+        CHECK (picker.getNameForRow (0).startsWith ("Quieter, On idea-2, deleted just now"));
+        picker.choose (0);
+        phazite::test::dispatchPendingMessages();
+    }
+
+    CHECK (phazite::getBranches (context).size() == 2);
+    CHECK (phazite::getBranches (context).back().name == "idea-2 (recovered)");
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*screen.registry.find ("version.recover")));
 }
 
 TEST_CASE ("Rename Version names the version the history selects anew in a picker, a note under its name")

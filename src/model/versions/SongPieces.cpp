@@ -547,7 +547,12 @@ juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, Plugi
 
 std::vector<PieceReference> findReferences (const juce::MemoryBlock& piece)
 {
+    // A piece whose bytes are no UTF-8 text (a plug-in's state) names nothing, as one whose text is no XML.
     std::vector<PieceReference> found;
+
+    if (! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (piece.getData()), (int) piece.getSize()))
+        return found;
+
     const auto xml = juce::parseXML (piece.toString());
 
     if (xml == nullptr)
@@ -592,6 +597,9 @@ juce::MemoryBlock writeElement (const juce::ValueTree& element)
 
 juce::ValueTree readElement (const juce::MemoryBlock& block)
 {
+    if (! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (block.getData()), (int) block.getSize()))
+        return {};
+
     if (const auto xml = juce::parseXML (block.toString()))
         return juce::ValueTree::fromXml (*xml);
 

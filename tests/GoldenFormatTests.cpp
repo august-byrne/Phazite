@@ -5,6 +5,7 @@
 // they hold, as tools/read-versions.pl lists them (song.txt), which CI checks that reader against.
 #include "GoldenFiles.h"
 #include "TestClips.h"
+#include "TestSong.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -194,6 +195,7 @@ TEST_SUITE ("golden")
         TemporaryFolder temporary;
         auto song = makeVectorSong();
         const auto versions = temporary.folder.getChildFile ("Versions");
+        const phazite::test::VersionsTime clock (1793800000000); // each piece's time in the pack, the same each time
 
         {
             phazite::VersionStore store (versions, "test-vectors");
@@ -216,16 +218,19 @@ TEST_SUITE ("golden")
             REQUIRE (packs[0].copyFileTo (golden));
         }
 
-        // Copied under its own name, the SHA-256 of its index, as a store finds a pack.
+        // Copied under its own name, the SHA-256 of its index and its writer, as a store finds a pack.
         REQUIRE (golden.existsAsFile());
         juce::MemoryBlock bytes;
         REQUIRE (golden.loadFileAsData (bytes));
-        REQUIRE (bytes.getSize() > 16);
-        const auto* end = static_cast<const char*> (bytes.getData()) + bytes.getSize() - 16;
+        REQUIRE (bytes.getSize() > 32);
+        const auto* end = static_cast<const char*> (bytes.getData()) + bytes.getSize() - 32;
         const auto count = (size_t) juce::ByteOrder::littleEndianInt (end);
         const auto indexStart = (size_t) juce::ByteOrder::littleEndianInt64 (end + 4);
-        REQUIRE (indexStart + count * 48 <= bytes.getSize());
-        const auto name = juce::SHA256 (static_cast<const char*> (bytes.getData()) + indexStart, count * 48).toHexString();
+        REQUIRE (indexStart + count * 56 <= bytes.getSize());
+        juce::MemoryBlock named (static_cast<const char*> (bytes.getData()) + indexStart, count * 56);
+        named.append (end + 12, 16);
+        const auto name = juce::SHA256 (named.getData(), named.getSize()).toHexString();
+        CHECK (packs[0].getFileNameWithoutExtension() == name);
 
         const auto copy = temporary.folder.getChildFile ("Golden").getChildFile ("pieces");
         REQUIRE (copy.createDirectory());

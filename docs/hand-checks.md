@@ -249,6 +249,9 @@ the [changelog](changelog.md).
 | D13 | While a send with a lane at its bottom plays into a reverb, delete the lane | The reverb comes up to the knob's level smoothly, without a click | |
 | D14 | Export as DAWproject a song with a volume fade from 0 to -24 dB, a bent pan line and a send ramp, and open it in Bitwig Studio or Studio One | Halfway through, the fade reads about -8.6 dB, as Phazite's fader does; the pan's bend keeps its shape, and the send's lane is there | |
 | D15 | Bounce in Place a track that has a send before the fader to a reverb; then Undo | The reverb is as loud as before the bounce, not louder; the send is on the new track; Undo puts it back on the original | |
+| D16 | Delete a branch that has a version and changes left on it, then open the Versions view's menu > Recover Lost Versions...; pick its row and switch to the branch it makes | The row says the branch was deleted just now, with the changes left on it; the song on "<name> (recovered)" is as it was left | |
+| D17 | Delete an audio file that a version plays, then run Verify History; run it on a big project and choose Stop Verifying History, or save a version while it runs | Progress shows, then the version is named with the file that is missing; stopped, it says so and never says the history is whole | |
+| D18 | Open a project whose versions an earlier build saved | Its branches are listed and their versions can't be read (known bug 197); the song opens, Save Version works, and nothing in its `Versions` folder was deleted | |
 
 ## Performance on other machines
 

@@ -2,9 +2,11 @@
 // Clean Up Unused Audio... (docs/design/versions.md: outside the steps): the audio files in the open project's Audio and Generated
 // folders that neither its song plays, nor its files on the disk (the project file
 // as saved, its autosave and its backups, which closing without saving, restoring or opening a backup brings back), nor any
-// of its versions (every version, on a branch or one Recover Lost Versions brings back, the songs left on branches, Local
-// History, and the songs before the merges they hold: VersionHistory.h, makeAudioPathsFinder()), to delete those the user
-// ticks. Takes, imports and generated sounds pile up there, versions or not. Deleting moves them to the recycle bin, where
+// of its versions (every version the store still holds, on a branch or one Recover Lost Versions brings back; the songs
+// left on branches, Local History as thinned, the songs left on branches deleted within 30 days, and the songs before the
+// merges they hold: VersionHistory.h, makeAudioPathsFinder()), to delete those the user ticks. It goes by what the store
+// still holds rather than by the versions' 30 days, so that it keeps more than Recover Lost Versions can bring back, never
+// less: a version's audio is offered once the store's sweep let the version go (StoreSweep.h). Takes, imports and generated sounds pile up there, versions or not. Deleting moves them to the recycle bin, where
 // they can still be found: no undo brings them back, and a clip that an undo brings back plays without them. Not an undo
 // step. Where a version can't be read whole (another computer's song whose pieces haven't all arrived, a pack another
 // program holds), what it plays is unknown, so nothing is offered: never counted as unused.

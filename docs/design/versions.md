@@ -23,8 +23,11 @@ history, a branch, a merge. A version can carry a bounce, so that it can be hear
 | Local History | Built | |
 | Undo History | Built | |
 | Undo Last Version, Rename Version... | Built | |
-| Verify History, Recover Lost Versions | Built | |
-| A version off every branch kept 30 days, a swept store, the song tied to its version | Planned | S4.3 to S4.5 ([versions-cut.md](versions-cut.md)) |
+| Verify History, with every version's audio files, Local History's songs and those left on branches | Built | S4.4 |
+| A version off every branch offered 30 days by Recover Lost Versions..., with when and why it left | Built | S4.3 |
+| The store's packs joined by size, losing nothing | Built | S4.4 |
+| The store swept of what nothing names, older than 30 days | Built, off | Known bug 196: nothing is deleted yet |
+| The song tied to the version it grew from | Planned | S4.5 ([versions-cut.md](versions-cut.md)) |
 | The playlist marking what changed | Planned | No roadmap step |
 | Staging, a version checked out on its own, a merge of some lines | Removed | S4.2 ([versions-cut.md](versions-cut.md)) |
 | Tags, stash, rebase, squash, cherry-pick, blame, bisect | Declined | Not needed by one person working alone |
@@ -61,7 +64,7 @@ heading. The layout is VS Code's Source Control view's; the words are a producer
   Bounce") renders the song into each version as Export Song renders it. The settings keep it.
 - **Undo Last Version** (`version.undoLast`): the branch goes back to the version before its last and the song stays as
   it is, so what that version recorded shows in the changes again; its name and note go back into the field. Not for the
-  first version, nor a merge's. The version stays in the store, where Recover Lost Versions finds it.
+  first version, nor a merge's. For 30 days, Recover Lost Versions... brings it back.
 - **Rename Version...** (`version.editMessage`) names any version anew, and its note. A version never changes, so the
   name is kept beside it; its id, its place in the history and its bounce stay.
 - Saving a version is not an undo step: it changes the history, not the song.
@@ -120,8 +123,10 @@ master, and the song's own (its tempo, sections, chord lane and track order).
 - **Rename Branch...** (`version.renameBranch`) names the current branch anew.
 - **Delete Branch...** (`version.deleteBranch`) lists the other branches. When the branch has versions no other
   branch has, or changes left on it, it asks first, saying so ("This also deletes 1 version that no other branch has,
-  and the changes left on it. Recover Lost Versions brings the versions back."). Its versions stay in the store. Not
-  while a merge waiting (here, or in the song left on another branch) took in a version only its line holds.
+  and the changes left on it. Recover Lost Versions brings them back for 30 days."). Recover Lost Versions offers its
+  versions and the song left on it for 30 days (Keeping the history whole, below). Not while a merge waiting (here, or
+  in the song left on another branch) took in a version only its line holds. A branch a command made and takes back as
+  it doesn't finish (Create Branch from a version, an import of a DAWproject, cancelled) leaves nothing to recover.
 
 ## Merging
 
@@ -212,8 +217,8 @@ Local History keeps the song as it was at times while it differed from its last 
   Changes, a merge taken, Cancel Merge, a snapshot restored.
 - **What it costs:** a snapshot is taken only when the song differs from the one before it, and is stored as
   versions are, so it costs what changed.
-- **How long:** every snapshot of the last two hours, then the newest of each hour for a day, then the newest of
-  each day for 30 days.
+- **How long:** the list shows every snapshot of the last two hours, then the newest of each hour for a day, then the
+  newest of each day for 30 days. Those it no longer shows are still in the store (known bug 196).
 - **Restore from Local History** (`version.restoreSnapshot`) makes the song what it was then, as one undo step, the
   song as it is kept first.
 - It is this computer's own, and folded at first.
@@ -223,10 +228,31 @@ Local History keeps the song as it was at times while it differed from its last 
 
 ## Keeping the history whole
 
-- **Verify History** (`version.verify`) reads every piece and checks it against its name, reads every version's song,
-  and finds the versions no branch holds.
-- **Recover Lost Versions** (`version.recover`) makes a branch of each line of those versions, named after the branch
-  they were saved on ("main (recovered)").
+- **Nothing a command does ends a version at once.** Three commands take a version off every branch: Undo Last Version,
+  Delete Branch and Reset Branch to Last Readable Version. Each computer's log of a branch's moves says when, and why,
+  with the branch's name, and a deleted branch's log line names the song left on it; a version that left every branch
+  is offered by Recover Lost Versions for 30 days from then (`keptByAge::dailyFor`, the time Local History keeps), with
+  the song left on a deleted branch, whichever computer it left on. What is older is no longer offered, but is still in
+  the store: nothing is deleted from it yet (The store, below; known bug 196). Nothing else takes a version off a
+  branch: a rename, a switch, Cancel Merge and a cancelled command move no branch, and a branch a command made and takes
+  back as it doesn't finish (Create Branch from a version, an import of a DAWproject) held only versions other branches
+  hold. Restores, Discard All Changes, a
+  merge taken and Cancel Merge keep the song as it was in Local History first.
+- **Recover Lost Versions...** (`version.recover`, the branch picker's) lists what can come back, newest first, each
+  line of versions with when and why it left, as the history says dates: "Undone on 12 Nov, from main", "On idea-3,
+  deleted on 14 Nov, with the changes left on it"; a deleted branch whose versions other branches hold, for the changes
+  left on it alone; and the lines Verify History found that no log names (a record damaged, or another computer's whose
+  log hasn't arrived), "Found by Verify History". A click brings a line back as a branch at its last version, named
+  after the branch it was on ("idea-3 (recovered)", "recovered" where no log names it), with the song left on it as the
+  branch's, so that switching to it gives the song as it was left. Not an undo step.
+- **Verify History** (`version.verify`) reads every piece and checks it against its name; walks every version's song,
+  Local History's songs and the songs left on branches piece by piece; checks every version's audio files against its
+  record (the file is there, of the recorded size, and of the recorded SHA-256), each file read once however many
+  versions name it, in parts; and finds the versions no branch holds. It says which version misses which file ("Verse 2"
+  (Audio/Kick.wav missing; Audio/Snare.wav changed since)) and which snapshot or song left on a branch can't be read
+  whole. It runs on the history's thread, the view showing how far it has come (the audio by its bytes), and the command,
+  named Stop Verifying History meanwhile, stops it between pieces and between parts of a file. Saving a version, or a
+  command that reads songs (a switch, a restore), stops it too and goes ahead rather than waiting behind it.
 - A version with a damaged piece is restored in part, and the view says what it couldn't take, which stays as it is
   now. **Restore This Version** (the whole song) takes every element it can read, and a track the song hasn't now comes
   back without what of it can't be read (a clip). On one of its lines, it takes that line where the version holds it
@@ -255,13 +281,56 @@ The history is the `Versions` folder beside the project file. Its format is writ
   curve's points are split into runs, so one note changed in a long clip stores one run. A plug-in's state is a
   piece of its own, in its bytes.
 - **The same song always makes the same pieces:** each value is written in one way, as in the project file.
-- **Packs.** Pieces are kept in packs, written once and never changed, but where every piece of one was found damaged:
-  the next version that holds them writes it again whole under its own name, in its place (where another program holds
-  the damaged file, the save fails and says so). More than 50 packs are joined into one as the history opens.
-- **Audio files** are named by their paths, sizes and hashes, not copied. Clean Up Unused Audio keeps every file a
-  version plays (on a branch, or one Recover Lost Versions brings back), and every song left on a branch or kept in
-  Local History, on any computer, and the song before a merge any of them holds. The Project view finds how many are
-  unused in the background, reading each piece once.
+- **Packs.** Pieces are kept in packs, written once and never changed. Each piece's entry says when it was written, and
+  each pack which computer wrote it; a pack is named by its index and its writer, so two computers' packs never share
+  a name. Reading finds a piece in any pack; writing writes the pieces this computer's own packs don't hold yet.
+- **Nothing is deleted yet** (known bug 196). The store keeps every piece, bounce and edited message it was given: an
+  undone version, a deleted branch with the song left on it, and the snapshots Local History no longer lists keep their
+  room. Recover Lost Versions offers what left within 30 days; what is older is still in the store.
+- **Joined** (git's repack; `StoreSweep.h`). As the history opens, on its thread before anything else reads the store,
+  once a week (the keeping time: now, but no more than a week past its last sweep, its first sweep noting the time),
+  this computer joins its own packs by size, as git's geometric repacking does: those under 1 MiB, and of each size
+  four times the one before, once four of a size gather, and packs a crash left with the same pieces twice. Every piece
+  of every pack it joins is copied into the new pack from a copy it read whole, never left to a copy elsewhere it didn't
+  read, so the count of its packs grows with the log of their size, not with the versions and
+  snapshots it takes (a year of daily snapshots stays under 50), and a piece is rewritten a few times at most. The joined
+  pack is written whole beside the others, its bytes checksummed as they are written and read back against that before
+  the packs it replaces go; a computer deletes only packs it wrote and a join replaced (a pack's writer read again
+  first), so nothing another computer wrote is ever deleted. A write that fails (a full disk), a crash, or a pack another
+  program holds leaves every piece readable. What a join a crash cut off leaves beside the packs is counted in the room
+  the view shows until it goes, a day later.
+- **The walk.** At a weekly sweep, the history also walks what names a piece, on any computer (each computer's records
+  are files of its own, all read as far as they have arrived): every branch's last version and the versions its line
+  reaches, the lines gone their own way, the songs left on branches, Local History's snapshots (thinned as of the
+  keeping time, as the view shows them), the songs before the merges waiting in the open song and in those, what left
+  every branch within 30 days by the logs, where a computer's record of a branch is gone its log's last place for it,
+  every piece written within those 30 days, and what each of those names. Nothing is left out of a join by it yet; a
+  file that names something and doesn't read whole, a sync program's copy of one, or a named piece that can't be read
+  makes it unsure, and the Versions view says so where Verify History says what it found ("Phazite is keeping everything
+  in the Versions folder, because ..."). Logs are read as bytes: a line a crash cut off, a line of another shape, or zero
+  bytes a power loss left at a log's end make it unsure only while they are recent (a time within 30 days, or recent
+  lines beside the zero bytes), and the log is written again whole at its next move; the files a system puts in folders
+  (`desktop.ini`, `Thumbs.db`, `.DS_Store`, `.directory`, dot-files) are passed over.
+- **Times that never go back.** What the store stamps (a version, a branch's record and log, a snapshot, an edited
+  message, a piece's entry) is always later than the stamp before it, and never older than the newest stamp this
+  computer ever made: a floor kept in its own folder (`stamped`) and taken again from its logs, its Local History and its
+  packs as the history opens (a time more than ten years past the clock passed over, as a damaged file's), never
+  lowered, apart from the sweep's time. So a clock set back, even at every start (a dead battery), stamps nothing that
+  would read as old, and no two snapshots share a time. A clock that was ahead keeps this computer's stamps ahead until
+  real time passes them: new versions show as saved "now" meanwhile, and Local History isn't thinned (known bug 196). A
+  noted sweep time after now is written again as now, so that once the clock is put right the weekly sweeps go on.
+- **Nothing waits for it.** The sweep copies without holding the store's lock, so the window's room text and Clean Up's
+  look don't wait for it; the Versions view says it is reading meanwhile, as it does while the history opens, and
+  commands that change the history wait. A save into a new folder (Save As, a first save) stops it rather than waiting,
+  changing nothing, and it runs at a later open; so is Verify History stopped, and by a save of a version or a command
+  that reads songs, saying it was stopped and never that the history is whole.
+- **Audio files** are named by their paths, sizes and hashes, not copied. Clean Up Unused Audio keeps every file that a
+  version the store still holds plays (on a branch, or one Recover Lost Versions... or Verify History can bring back),
+  and every song left on a branch, in Local History or left on a deleted branch, on any computer, and the song before a
+  merge any of them holds; while one of those songs, or a version a log names from the last 30 days, can't be read (its
+  pack held, or not arrived), or the folder holds a pack the store can't read (held, damaged, or written by another
+  build), it offers nothing and says why. It never goes by the clock.
+  The Project view finds how many are unused in the background, reading each piece once.
 - **Written safely:** every file is written whole or not at all. Reading checks each piece's hash, so a damaged one
   affects only the versions that hold it.
 - **Each computer writes only files of its own:** its record of each branch, its log of each branch's moves, its
@@ -356,9 +425,7 @@ comes back as a branch from that version, showing only what the other DAW change
 
 ## Not built
 
-- What S4.3 to S4.5 build next ([versions-cut.md](versions-cut.md)): a version that leaves every branch kept 30 days
-  and listed by Recover Lost Versions, the store swept of what nothing names, Verify History's check of the audio, and
-  the song tied to the version it grew from: Planned.
+- What S4.5 builds next ([versions-cut.md](versions-cut.md)): the song tied to the version it grew from: Planned.
 - The playlist marking the clips and tracks that changed since the last version: Planned.
 - A branch's colour chosen by hand: Planned.
 - One undo for every versions operation (a switch, a deleted branch): Planned.
@@ -368,13 +435,26 @@ comes back as a branch from that version, showing only what the other DAW change
   branches: Planned.
 - Tags, stash, rebase, squash, cherry-pick, blame and bisect: Declined.
 - A benchmark of saving a version and of the changes list on a 100-track song: Planned (S4.5).
+- Letting go of what nothing names (known bug 196), built and tested but off in the product (`sweepLetsGo`,
+  `StoreSweep.h`): the sweep leaving out each piece of this computer's own that nothing names and that it wrote more than
+  30 days before the keeping time, at most a week's worth at one open, with the bounces and this computer's edited
+  messages of the versions that go, only when that frees at least 4 MiB and a tenth of this computer's packs. Waits for
+  what must come first:
+  - **Each computer copying what it names** (`adoptVersions()`, built, off with it): whatever another computer's
+    history names (a merge of its version, a version saved on top of it, a branch from it, a switch to its branch, an
+    undo back onto it, a line or a song recovered from its log, the merge a song holds) copied into this computer's own
+    packs before the other may delete it, in the background, a batch a job, never making a save or Save As wait.
+  - **One computer id per machine:** an id carried to a second machine (a roaming profile, a restored backup) would let
+    one computer's sweep take what the other needs; binding the id to the machine must keep every existing install's
+    id, its songs left on branches and its Local History.
 
 ## In the code
 
 - `src/model/versions/VersionsModel.h`: everything the UI reaches, by plain values and ids, and the commands.
 - `src/model/versions/internal/VersionHistory.h`: the open song's history, its branches, the merge under way, Local
   History.
-- `src/model/versions/internal/VersionStore.h`, `PieceStore.h`, `SongPieces.h`: the folder, the packs and the pieces.
+- `src/model/versions/internal/VersionStore.h`, `PieceStore.h`, `SongPieces.h`: the folder, the packs and the pieces;
+  `StoreSweep.h`: the sweep (its letting go off) and each computer's copy (off with it).
 - `src/model/versions/internal/SongDiff.h`: what differs between two songs.
 - `src/model/versions/internal/ApplySong.h`: the song made like another with the fewest edits (`makeSongLike()`,
   `makeTrackLike()`, `makeSongTheSame()`).
@@ -384,4 +464,6 @@ comes back as a branch from that version, showing only what the other DAW change
 - `src/ui/versions/VersionsView.h`, `BranchPicker.h`; `src/ui/shell/ActivityBar.h`, `StatusBar.h`, `TopBar.h` (A/B).
 - Tests: `tests/VersionsTests.cpp`, `VersionsBranchTests.cpp`, `VersionsMergeTests.cpp`, `VersionsMergeWaitingTests.cpp`,
   `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
-  `VersionsHearingTests.cpp` (and A/B), `VersionsKeptWholeTests.cpp`, `VersionStoreTests.cpp`, `tests/golden/format/`.
+  `VersionsHearingTests.cpp` (and A/B), `VersionsKeptWholeTests.cpp`, `VersionsRecoveryTests.cpp` (the 30 days),
+  `VersionsSweepTests.cpp` (the sweep, with its letting go on but for the product's own test, and Verify History),
+  `VersionsTwoComputersTests.cpp` (each computer's copy, clocks, Verify's limits), `VersionStoreTests.cpp`, `tests/golden/format/`.

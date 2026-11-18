@@ -92,8 +92,7 @@ what they found is fixed or in known-bugs.md.
 
 | Step | Size | What | Done when |
 |---|---|---|---|
-| S4.3 | M | A history that cannot lose work: a version that leaves every branch is kept 30 days and can be recovered ([the note](design/versions-cut.md)) | No command leaves a version out of reach without asking |
-| S4.4 | M | Housekeeping: unused pieces swept, Clean Up aware of Local History, Verify History checking audio | Verify reports a missing audio file |
+| S4.4 | M | Housekeeping, what is left of it: the store lets go of what nothing names, in a history one computer alone has written ([known bug 196](known-bugs.md)). Built: packs joined by size, Verify History checking audio and every kept song, Clean Up following | A history's folder shrinks once what left every branch is 30 days gone, and a review finds no way for it to lose work |
 | S4.5 | M | The song tied to its version; differences worked out off the message thread | The Versions view never stalls the window on a large song |
 
 ### Stage 5. Wide: what a beat maker meets in the first week

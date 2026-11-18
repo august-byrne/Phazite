@@ -1333,6 +1333,16 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::remove); },
                     .isEnabled = [this] { return canDeleteAnyBranch (projectContext); } });
 
+    registry.add ({ .id = "version.recover",
+                    .name = "Recover Lost Versions...",
+                    .category = "Versions",
+                    .description = "Lists the versions that left every branch in the last 30 days (undone, or on a branch "
+                                   "deleted, with the changes left on it), and those Verify History found, to bring one back "
+                                   "as a branch.",
+                    .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits", "lost commits", "undelete", "restore branch" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::recover); },
+                    .isEnabled = [this] { return canRecoverLostVersions (projectContext); } });
+
     registry.add ({ .id = "version.editMessage",
                     .name = "Rename Version...",
                     .category = "Versions",

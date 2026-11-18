@@ -12,6 +12,8 @@
 //   branch has, or changes left on it, with it.
 // - Rename Version...: the selected version's name and note, its first line the name and the lines after it the note, to
 //   type over; Ctrl+Enter, or a click on its row, keeps them.
+// - Recover Lost Versions...: the lines of versions that can come back, each with when and why it left ("Undone on 12 Nov",
+//   "On idea-3, deleted on 14 Nov"); the one picked comes back as a branch.
 #pragma once
 
 #include "model/project/ProjectContext.h"
@@ -35,7 +37,8 @@ public:
         rename,
         merge,
         remove,
-        message
+        message,
+        recover
     };
 
     BranchPicker (CommandBridge&, ProjectContext&, Mode);
@@ -62,7 +65,7 @@ public:
 
 private:
     // What a row does: makes a branch from Now with the name typed, switches to a branch, names the current one anew, merges
-    // a branch in, deletes one, or renames a version.
+    // a branch in, deletes one, renames a version, or brings back a line of lost versions.
     struct Row
     {
         enum class Kind
@@ -72,13 +75,15 @@ private:
             rename,
             merge,
             remove,
-            message
+            message,
+            recover
         };
 
         Kind kind = Kind::branch;
         BranchInfo branch;
         juce::String name, about; // what it says, and what is muted after it
         bool current = false, enabled = true;
+        juce::String lost = {}; // the line of lost versions it brings back
     };
 
     class MessageField;
@@ -96,6 +101,16 @@ private:
 
     void updateRows();
     void addBranchRows (Row::Kind, const juce::String& typed);
+    void addLostRows (const juce::String& typed);
+
+public:
+    // When something left, as the rows say it: "on 12 Nov", "on Tue", "3 h ago", "just now" (VersionsView::describeWhen()).
+    static juce::String describeOn (juce::Time when, juce::Time now);
+
+    // What a lost line says after its name: "Undone on 12 Nov", "On idea-3, deleted on 14 Nov, with the changes left on it".
+    static juce::String describeLost (const LostVersionsInfo&, juce::Time now);
+
+private:
     bool moveSelection (const juce::KeyPress&);
     void close();
 

@@ -33,51 +33,56 @@ Versions/
   branches/<branch>/<computer>.xml   a branch as one computer last had it (section 6); only that computer writes it
   messages/<computer>.xml            versions' messages as one computer edited them (section 6); only it writes it
   current                            the id of the branch the project file is (one line, no end of line needed)
-  local/<computer>/files.xml         this computer's cache of its audio files' hashes (section 7)
+  local/<computer>/files.xml         this computer's cache of its audio files' hashes (section 8)
   local/<computer>/working.xml       the songs this computer left on branches when it switched away (section 6)
   local/<computer>/logs/<branch>     each move of a branch's last version on this computer (section 6)
   local/<computer>/history           this computer's Local History: the song at times, without versions (section 6)
+  local/<computer>/swept             when this computer last swept its packs, and what of it is still to delete (section 7)
+  local/<computer>/stamped           the newest time this computer stamped anything with (section 7)
   bounces/<version>.flac             a version's bounce, if it has one: its song rendered, FLAC, 16 bits
 ```
 
 `<branch>` is the branch's id and `<computer>` the computer's: each 32 lowercase hexadecimal digits (a UUID without its
 dashes). A computer's id is made once, at random, and never names the user or the machine.
 
-**Who writes what.** Pieces and bounces are written once and never changed. (A pack whose every piece a reader found damaged
-is written again whole, by the next writer that holds those pieces, under its own name: the same index, and so the same
-name, in place of the damaged one; its pieces are the same.) Each computer writes only its own files: its
-record of each branch, its file of edited messages, and everything under `local/<computer>/`. So a folder that Dropbox, OneDrive or a NAS syncs
-between computers never has two writers on one file, but `current`, which goes with the project file, as the project file
-does.
+**Who writes what.** Pieces and bounces are written once and never changed. Each computer writes only its own files: its
+record of each branch, its file of edited messages, everything under `local/<computer>/`, and its own packs (the pack's
+writer, section 3), which only it deletes, as a sweep joins them (section 7). So a folder that Dropbox, OneDrive or a NAS
+syncs between computers never has two writers on one file, but `current`, which goes with the project file, as the
+project file does.
 
 **Writing safely.** Every file is written whole to a temporary name, flushed to the disk, then renamed into place; a log
 is appended to and flushed. A reader ignores what it doesn't know: files, elements and properties.
 
 ## 3. Packs
 
-A pack holds pieces and an index of them, and is named by the SHA-256 of its index, in lowercase hexadecimal:
-`<SHA-256 of index>.pack`. Numbers are little-endian.
+A pack holds pieces and an index of them, and is named by the SHA-256 of its index followed by its writer's 16 bytes
+(below), in lowercase hexadecimal: `<SHA-256 of index and writer>.pack`. Numbers are little-endian.
 
 | Part | Bytes | |
 |---|---|---|
 | mark | 4 | `PZPK` |
 | pieces | ... | each compressed by zlib (RFC 1950: zlib's header and checksum, not gzip's), one after another |
-| index | 48 per piece | its name (32 bytes, the SHA-256 itself), where it starts in the file (8), its size compressed (4) and not (4) |
+| index | 56 per piece | its name (32 bytes, the SHA-256 itself), where it starts in the file (8), its size compressed (4) and not (4), and when it was written into the store (8, milliseconds since 1970) |
 | count | 4 | how many pieces the index lists |
 | index start | 8 | where the index starts in the file |
+| writer | 16 | who wrote the pack: the first 16 bytes of the SHA-256 of the computer's id (its UTF-8) |
 | mark | 4 | `PZPK` |
 
 A reader:
 - leaves out a pack whose marks aren't both there, whose index doesn't fit exactly between its start and the count, or
-  whose index's SHA-256 isn't the pack's name;
+  whose index's and writer's SHA-256 isn't the pack's name;
 - refuses a piece whose uncompressed size is more than zlib can make of its compressed bytes (1,032 times them, and a
   little), or that doesn't inflate to that size;
 - checks each piece's SHA-256 against its name, and treats one that doesn't match as missing;
 - takes a piece from the first pack that lists it, when several do, and from the next one where that copy is damaged.
 
-A writer writes the pieces no pack has yet into a new pack; Phazite forgets a copy it found damaged, so that its next
-write that holds the piece writes it again. Phazite joins its packs into one once there are more than 50,
-writing the joined pack before deleting the others, and keeps a pack that holds a damaged piece.
+A reader reads a piece from any pack, whoever wrote it. A writer writes the pieces its own packs don't hold yet into a new
+pack: a piece only another computer's pack holds is written again. Phazite forgets a copy it found damaged, so that its
+next write that holds the piece writes it again. A pack of one writer holding the same pieces, written at the same
+time, has the same name: one there already that doesn't read whole is written again in its place; two writers' packs
+never share a name. Joining its own packs (section 7), a writer gives each piece the time of its newest own copy, reading it from any copy that checks out; a pack of its own that holds a damaged
+copy goes once every piece it lists is kept in another pack, and stays while one isn't.
 
 [`tools/read-versions.pl`](../tools/read-versions.pl) is a reader of packs in under 100 lines of Perl, written from this
 section alone.
@@ -139,7 +144,7 @@ tables its code reads (`src/model/base/Schema.cpp`), says:
 - `piecesOfTheirOwn`, `inRuns`, `bytes`: how Phazite splits a song (section 4).
 
 IDs are 64-bit numbers a song counts up (`nextID` on `PHAZITE`), never given twice. Two lines of history count on from the
-same place, so a merge can find one ID on two different things (section 8).
+same place, so a merge can find one ID on two different things (section 9).
 
 [`tests/golden/format/devices.json`](../tests/golden/format/devices.json) lists Phazite's own devices' parameters, their
 ranges and defaults, and the name each choice is saved by. The song's elements and properties are described one by one
@@ -185,28 +190,81 @@ is the oldest.
 **This computer's own.** `local/<computer>/working.xml` is a `WORKING` element with a `LEFT` for each branch this
 computer switched away from with a song of its own on it: the `branch` and the `song` (a song piece, view state
 included). `local/<computer>/logs/<branch>` is a line for each move of the branch's last version on this computer, as
-git's reflog: when (milliseconds since 1970), the version it was at (`-` for none), the one it went to (`-` for none), and
+git's reflog: when (milliseconds since 1970), the version it was at (`-` for none), the one it went to (`-` for none),
 why (`commit` for a version saved, `merge`, `branch`, `recover`, `undo` for Undo Last Version, `delete` for a branch
 deleted, `reset` for a branch whose last version couldn't be read taken back to the newest version of its log that
-reads), separated by spaces. A last line without its line end was cut off and is left out.
+reads, `cancel` for a branch a command made and took away again as it didn't finish), the song left on the branch (a
+song piece: a deleted branch's, kept with its versions; a recovered branch's, which it came back with; `-` for none),
+and the branch's name then, which may hold spaces and is the rest of the line; separated by single spaces. A log is read
+as bytes: a line of another shape (one a crash cut off, without its line end) and zero bytes (which a power loss can
+leave at a file's end) are left out, and the writer writes the log again whole, of its lines alone, at its next move.
+Every computer's logs, read together, say when and why a version left every branch, from which Recover Lost Versions
+offers it 30 days (section 7).
 
 `local/<computer>/history` is this computer's Local History, a line for each snapshot of the song, oldest first: when it
 was taken (milliseconds since 1970), the id of the branch the song was on, the song's piece (written as a branch's song
 left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `abort` (before Cancel
 Merge), `history`), separated by spaces. Phazite writes the file whole, thinned: every snapshot of the last two hours,
-the newest of each hour for a day, the newest of each day for 30 days. A last line without its line end was cut off and
-is left out.
+the newest of each hour for a day, the newest of each day for 30 days; and reads it thinned as of now, so that a snapshot
+the file still lists past that is none. It is read as a log is: a line of another shape, and zero bytes, are left out.
 
-**Versions no branch holds** are still in the packs: a reader finds them by the `<VERSION ` their pieces start with.
-Phazite's Verify History lists them, and Recover Lost Versions makes a branch of each line of them.
+**Versions no branch holds** are still in the packs (section 7): a reader finds them by the `<VERSION ` their pieces
+start with, and when and why they left by the logs. Phazite's Recover Lost Versions lists those that left within 30
+days, and makes a branch of a line of them, with the song left on it where a branch was deleted.
 
-## 7. Audio files
+## 7. Keeping and sweeping
+
+**Phazite deletes nothing from the store yet**: no piece, bounce or edited message. What follows is how it joins its
+packs, losing nothing, and what a writer that lets go of pieces must keep.
+
+**What names a piece.** Every branch as the computers' records make it (its last version and the lines that went their
+own way), the songs left on branches (`working.xml`), Local History's snapshots, the songs before the merges waiting in
+the open song and in any of those (`MERGING`'s `before`, `version` and `head`), and, by every computer's logs, the
+versions a move of the last 30 days went from or to and the song a branch deleted within 30 days left; where a
+computer's record of a branch can't be found, the branch's last place by that computer's log, in the log's order, unless
+the log deleted it. A version names its song and the versions it follows; a song's piece names those it references
+(section 4). Edited messages and audio files name no piece; a plug-in's state and its parameters' values name nothing.
+A writer that lets go of pieces must leave out only pieces of its own that nothing names and that it wrote more than 30
+days before the keeping time; and, where its own records name a version or a song that only another computer's packs
+hold, write its own copy of it first, as that computer may let go of its own.
+
+**The sweep.** A writer joins its own packs as of the keeping time: now, but no more than a week past its last sweep
+(`local/<computer>/swept`: its first line when, a time after now taken as now; then a line for each version that went
+whose bounce and edited message are still to delete, none while nothing goes), by which Local History is thinned and
+the logs' 30 days are counted too; a writer's first sweep (none noted) notes the time. Every piece written within those
+30 days counts as named, with what it names. Where a file that names something doesn't read whole (a branch's record,
+`working.xml`, a recent line of a history or a log), or a sync program left its copy of one (a "conflicted copy", or
+another name no writer gives), or a named piece can't be read (damaged, or not arrived), the walk of what is named is
+unsure. A log's or a history's line of another shape, or zero bytes, count as a file that doesn't read whole only while
+they are recent: a line whose first word is a time within the last 30 days, or zero bytes beside such lines; older ones,
+and lines without a time, are passed over. Files a system puts in folders (`desktop.ini`, `Thumbs.db`, `.DS_Store`,
+`.directory`, and every name starting with a dot) are no writer's and are passed over. A writer never deletes another's
+pack.
+
+**Times.** Every time a writer stamps (a version's `saved`, a branch record's `changed`, an edited message's, a log's
+line, a snapshot, a piece's entry) is later than the stamp it gave before, and later than a floor set as the history
+opens: the newest time it ever stamped, kept in `local/<computer>/stamped` (one line, milliseconds since 1970) and taken
+again from its logs, its history and its own packs' entries (a time later than ten years past the clock passed over, as
+a damaged file's), never lowered and apart from the sweep's time. So a clock
+set back, even at every start, stamps nothing older than what came before it, and no two stamps of a writer are the
+same; a clock that was ahead keeps what it stamped meanwhile longer. A noted sweep time after now is written again as
+now, so that a clock put right lets weekly sweeps go on.
+
+Phazite sweeps as a history opens, once a week. It joins its packs by size, as git's geometric repacking does: those
+under 1 MiB, those of a size class (each four times the one before, from 1 MiB) once four of a class gather, and those
+that hold the same pieces twice (left by a crash), keeping every piece; a pack with none of its class to join is left
+as it is. The joined pack is written whole beside the others (under a name starting `joining-`, which a writer deletes
+once it is a day old), its bytes checksummed as they are written and read back against it before the packs it replaces
+are deleted (each one's writer read again first); a join with nothing to write writes no pack. A pack that can't be
+deleted (another program holds it) stays for the next sweep.
+
+## 8. Audio files
 
 `local/<computer>/files.xml` is a cache: a `FILES` element with a `FILE` for each file this computer hashed, its `path`,
 `size`, `modified` (milliseconds since 1970) and `sha256`, so that a file is read again only when its size or time
 change. A tool can delete it.
 
-## 8. Comparing and merging
+## 9. Comparing and merging
 
 Two songs are compared element by element, matched by their keys (section 5); two values are the same when they write
 the same text (section 4).
@@ -258,7 +316,7 @@ parting's or the other line's song can't be read (the merge then waits without i
 `before` naming a track's piece), Cancel Merge makes the song the branch's last version. Its conflicts are found again by
 merging the same three songs.
 
-## 9. Test vectors
+## 10. Test vectors
 
 [`tests/golden/format/song.pack`](../tests/golden/format/song.pack) is a pack Phazite wrote of a small song and its
 version; [`tests/golden/format/song.txt`](../tests/golden/format/song.txt) lists its pieces, a line each in the order of

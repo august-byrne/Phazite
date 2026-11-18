@@ -17,6 +17,15 @@ The full text of every step, as it was written when it was built, is in the
   lines are gone (a version records the whole song, a double-click hears a version, bouncing it first if it has no
   bounce, and a merge takes every line), and the view is called Versions and speaks in plain words: Save Version,
   History, Switch Branch, Restore This Version. A branch is named as typed.
+- **S4.3 A history that cannot lose work:** a version that leaves every branch (undone, its branch deleted, reset) is
+  listed by Recover Lost Versions... for 30 days with when and why it left, and comes back as a branch, a deleted
+  branch with the changes left on it; the logs say why each branch moved, on every computer.
+- **S4.4 Housekeeping, the part that is sound:** Verify History checks every version's audio files (missing, another
+  size, changed) and every kept song, with progress, and stops for a save; Clean Up Unused Audio keeps what any
+  version the store holds plays and offers nothing while a pack can't be read; a computer's packs are joined by size,
+  each piece copied from a copy that reads, so their count stays small; every time the store writes is later than
+  the one before, whatever the clock does. The store lets go of nothing yet (known bug 196), and a history written
+  by an earlier build is not read (known bug 197).
 - **S4.7 Automation along the control's travel:** automation is kept and played as the control's position, and
   every knob in hertz travels logarithmically, so a straight line in a lane is an even sweep through the octaves
   (632 Hz halfway from 20 Hz to 20 kHz, 1 kHz halfway from 100 Hz to 10 kHz); keys nudge by a part of the travel,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/VersionHistory.h"
 #include "internal/ApplySong.h"
+#include "internal/StoreSweep.h"
 #include "model/arrangement/TrackColours.h"
 #include "model/base/KeptByAge.h"
 #include "model/base/WholeFile.h"
@@ -244,6 +245,45 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    // A file read for its hash in parts, as juce::SHA256 reads it: none more once stop says so (the hash then of what was
+    // read), and each part told as it is read.
+    class StoppableStream final : public juce::InputStream
+    {
+    public:
+        StoppableStream (juce::InputStream& source, std::function<bool()> stopped, std::function<void (int)> partRead)
+            : in (source),
+              stop (std::move (stopped)),
+              told (std::move (partRead))
+        {
+        }
+
+        juce::int64 getTotalLength() override { return in.getTotalLength(); }
+        bool isExhausted() override { return in.isExhausted() || stop(); }
+        juce::int64 getPosition() override { return in.getPosition(); }
+        bool setPosition (juce::int64 position) override { return in.setPosition (position); }
+
+        int read (void* destination, int maxBytes) override
+        {
+            if (stop())
+                return 0;
+
+            const auto numRead = in.read (destination, juce::jmin (maxBytes, 1 << 20));
+
+            if (numRead > 0)
+                told (numRead);
+
+            return numRead;
+        }
+
+    private:
+        juce::InputStream& in;
+        std::function<bool()> stop;
+        std::function<void (int)> told;
+    };
+} // namespace
+
 juce::ValueTree readCommitSong (const VersionStore& store, const juce::String& songPiece, PluginParameterValues* parameters,
                                 std::vector<MissingPiece>* missing, bool* idsGivenAnew)
 {
@@ -393,6 +433,12 @@ struct VersionsAudio
         look.key = findVersionsAudioKey (store);
         std::set<juce::String> found;
 
+        // A pack that couldn't be read (held by another program, damaged, or of a layout this build doesn't read) might
+        // hold any version or song: the look is unsure while one is there.
+        for (const auto& pack : pieces.findUnreadPacks())
+            look.unreadable.add ("a pack of the Versions folder (" + pack.getFileName().substring (0, 7)
+                                 + ") can't be read: another program holds it, it is damaged, or another build of Phazite wrote it");
+
         // Every commit the packs hold, on a branch or not, by its record: a small piece, which the others' starts tell from
         // the rest without reading them whole.
         for (const auto& name : pieces.getNames())
@@ -442,11 +488,24 @@ struct VersionsAudio
                 look.unreadable.add ("the last version of a branch on computer " + branch.computer + " (" + branch.head.substring (0, 7)
                                      + ") isn't in the Versions folder yet");
 
-        // The songs kept without a commit, every piece of each read, and the songs before the merges they hold.
-        for (const auto& kept : store.findKeptSongs())
-            songsToo.push_back ({ kept.piece, kept.time != 0
+        // And so for a version that left a branch within the last 30 days, by every computer's logs, which Recover Lost
+        // Versions may bring back once its pack can be read (one held as the store opened, or not arrived yet).
+        const auto now = getVersionsTime();
+
+        for (const auto& move : store.readEveryLog())
+            for (const auto& version : { move.from, move.to })
+                if (version.isNotEmpty() && ! look.stopped && now - move.time <= keptByAge::dailyFor && records.count (version) == 0)
+                    look.unreadable.addIfNotAlreadyThere ("a version a branch's log on computer " + move.computer + " names ("
+                                                          + version.substring (0, 7) + ") can't be read from the Versions folder");
+
+        // The songs kept without a commit, every piece of each read, and the songs before the merges they hold: every one the
+        // files list whose piece the store still holds, whatever the clock says.
+        for (const auto& kept : store.findKeptSongs (0))
+            songsToo.push_back ({ kept.piece, kept.kind == KeptSong::Kind::snapshot
                                                   ? "a snapshot of Local History of " + juce::Time (kept.time).toString (true, true, false)
                                                         + " (computer " + kept.computer + ")"
+                                              : kept.kind == KeptSong::Kind::deleted
+                                                  ? "the song computer " + kept.computer + " left on a branch deleted since"
                                                   : "the song computer " + kept.computer + " left on a branch" });
 
         for (size_t i = 0; i < songsToo.size() && ! look.stopped; ++i)
@@ -499,13 +558,15 @@ struct VersionsAudio
 
 juce::String findVersionsAudioKey (VersionStore& store)
 {
-    // What names a version's audio, cheaply: how many pieces the packs hold, every kept song's piece, and every branch's
-    // last commit. A look for the audio found under another key may have missed what came since.
-    auto& pieces = store.getPieces();
-    pieces.readNewPacks();
-    juce::StringArray parts (juce::String (pieces.getNumPieces()));
+    // What names a version's audio, cheaply: the packs by their names, read from the folder (so that a join under way keeps
+    // none of this waiting), every kept song's piece, and every branch's last version. A look for the audio found under
+    // another key may have missed what came since.
+    juce::StringArray parts;
 
-    for (const auto& kept : store.findKeptSongs())
+    for (const auto& pack : store.getPieces().getFolder().findChildFiles (juce::File::findFiles, false, "*.pack"))
+        parts.add (pack.getFileName());
+
+    for (const auto& kept : store.findKeptSongs (0))
         parts.add (kept.piece);
 
     for (const auto& branch : store.readBranches())
@@ -704,6 +765,7 @@ namespace
 } // namespace
 
 std::atomic<bool> VersionHistory::holdWritesForTests { false }, VersionHistory::holdReadsForTests { false };
+std::atomic<bool> VersionHistory::noAdoptionAtOpenForTests { false };
 std::atomic<bool> VersionHistory::holdFirstReadsForTests { false };
 std::atomic<int> VersionHistory::firstReadsHeldForTests { 0 };
 std::atomic<int> VersionHistory::readsToStartForTests { -1 };
@@ -837,9 +899,17 @@ void VersionHistory::waitForThread() const
 
     // Its jobs tell the message thread what they did with callAsync and never wait for it, so it can wait for them,
     // however long they take: a folder copied while a job still writes into it wouldn't be whole. And so for a history of
-    // the same folder that went before it.
+    // the same folder that went before it. Nothing waits for housekeeping: a sweep under way stops, changing nothing (a later
+    // open sweeps), and so does Verify History.
+    stopHousekeeping();
     FinishingHistories::get().waitFor (folder);
     thread->waitForAll();
+}
+
+void VersionHistory::stopHousekeeping() const
+{
+    sweepStopped->store (true);
+    checkCancelled->store (true);
 }
 
 void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJobs::ShouldStop&)> copy,
@@ -859,6 +929,7 @@ void VersionHistory::copyFolder (std::function<juce::Result (const BackgroundJob
 
     restartBounce = std::move (bounceAgain);
     copyingFolder = true;
+    stopHousekeeping(); // the copy doesn't wait behind a sweep or a check
     tellNow();
 
     // What the copy job and the message thread share: whether the copy is over (its hold let go), whether the job has run,
@@ -966,6 +1037,21 @@ void VersionHistory::startWhatWaitedForTheCopy()
         restartBounce (bounce);
 }
 
+struct VersionHistory::Opened
+{
+    std::vector<BranchRecord> branches;
+    juce::String current;
+    std::map<juce::String, VersionRecord> versions, departed;
+    juce::ValueTree head;
+    PluginParameterValues parameters;
+    std::map<juce::String, MessageEdit> messages;
+    std::vector<Snapshot> snapshots;
+    std::optional<std::pair<juce::String, Merge>> mergeRead;
+    std::map<juce::String, UnreadableHead> unreadable;
+    std::vector<BranchMove> recentMoves;
+    juce::String sweepProblem;
+};
+
 void VersionHistory::open()
 {
     ++generation;
@@ -978,6 +1064,14 @@ void VersionHistory::open()
     messageEdits.clear();
     snapshots.clear();
     unreadableHeads.clear();
+    departed.clear();
+    recentMoves.clear();
+    lastCheck.reset(); // another folder's (Save As), or this one's before its sweep
+    sweepProblem.clear();
+    adoptionProblem.clear();
+    adoptionFailed.clear();
+    adoptionQueued = adoptAgain = false;                        // a round of the store before ends unheard (its generation)
+    sweepStopped = std::make_shared<std::atomic<bool>> (false); // this store's sweep, as it opens
     selectedSnapshot = 0;
     editedSinceSnapshot = false;
     currentBranch.clear();
@@ -992,7 +1086,7 @@ void VersionHistory::open()
     run (
         [shared = store, number = generation, weak = juce::WeakReference<VersionHistory> (this),
          mergingElement = song.getState().getChildWithName (schema::MERGING).createCopy(), closingNow = closing,
-         earlier = FinishingHistories::get().getKept (folder)]
+         earlier = FinishingHistories::get().getKept (folder), sweepStop = sweepStopped]
         {
             // Tests' seam: the read held here, begun, and counted while it is (holdFirstReadsForTests).
             if (holdFirstReadsForTests.load())
@@ -1011,10 +1105,11 @@ void VersionHistory::open()
                 jobs->waitForAll();
             shared->getPieces().readNewPacks();
 
-            // Its packs joined into one once there are many, as each is read as the store opens; given up, the packs as
-            // they were, if the history goes meanwhile.
-            if (shared->getPieces().getNumPacks() > maxPacks)
-                shared->getPieces().joinPacks ([&closingNow] { return closingNow->load(); });
+            // Swept (StoreSweep.h): its packs joined into one once there are many, as each is read as the store opens, or
+            // once a week while something may have aged out, leaving out what nothing names that is older than 30 days;
+            // before anything else here reads or writes it. Given up, the packs as they were, if the history goes meanwhile.
+            const auto swept = sweepStore (*shared, mergingElement, maxPacks,
+                                           [&closingNow, &sweepStop] { return closingNow->load() || sweepStop->load(); });
 
             // Every computer's record of each branch, and every version their last ones follow; then each branch as this
             // computer takes them together.
@@ -1113,56 +1208,90 @@ void VersionHistory::open()
                     head = juce::ValueTree (schema::PHAZITE);
             }
 
-            std::optional<std::pair<juce::String, Merge>> mergeRead;
+            auto read = std::make_shared<Opened>();
+            read->sweepProblem = swept.sure ? juce::String() : swept.why;
 
             if (const auto mergeState = readMergeState (mergingElement))
-                mergeRead.emplace (getMergeKey (mergingElement), findMergeAgain (*shared, versionsRead, *mergeState));
+                read->mergeRead.emplace (getMergeKey (mergingElement), findMergeAgain (*shared, versionsRead, *mergeState));
+
+            // What left every branch within the last 30 days, by every computer's logs: the lines it left, read, which
+            // Recover Lost Versions lists.
+            const auto now = getVersionsTime();
+
+            for (auto& move : shared->readEveryLog())
+                if (now - move.time <= keptByAge::dailyFor)
+                    read->recentMoves.push_back (std::move (move));
+
+            for (const auto& move : read->recentMoves)
+            {
+                juce::StringArray toRead (move.from);
+
+                while (! toRead.isEmpty() && ! closingNow->load())
+                {
+                    const auto id = toRead[toRead.size() - 1];
+                    toRead.remove (toRead.size() - 1);
+
+                    if (id.isEmpty() || versionsRead.count (id) > 0 || read->departed.count (id) > 0)
+                        continue;
+
+                    if (auto version = shared->readVersion (id))
+                    {
+                        toRead.addArray (version->parents);
+                        read->departed.emplace (id, std::move (*version));
+                    }
+                }
+            }
 
             shared->getPieces().closeFiles();
-            auto messages = shared->readMessages();
-            auto snapshotsRead = shared->readSnapshots();
+            read->branches = std::move (branchesRead);
+            read->current = current;
+            read->versions = std::move (versionsRead);
+            read->head = head;
+            read->parameters = std::move (parameters);
+            read->messages = shared->readMessages();
+            read->snapshots = shared->readSnapshots (shared->getKeepingTime());
+            read->unreadable = std::move (unreadable);
 
             juce::MessageManager::callAsync (
-                [weak, number, branchesRead, current, versionsRead, head, parameters, messages, snapshotsRead, mergeRead,
-                 unreadable]() mutable
+                [weak, number, read]
                 {
                     if (auto* self = weak.get())
-                        self->opened (number, std::move (branchesRead), current, std::move (versionsRead), head, std::move (parameters),
-                                      std::move (messages), std::move (snapshotsRead), std::move (mergeRead), std::move (unreadable));
+                        self->opened (number, std::move (*read));
                 });
         },
         Work::reads);
 }
 
-void VersionHistory::opened (int number, std::vector<BranchRecord> branchesRead, const juce::String& current,
-                             std::map<juce::String, VersionRecord> versionsRead, const juce::ValueTree& head,
-                             PluginParameterValues parameters, std::map<juce::String, MessageEdit> messages,
-                             std::vector<Snapshot> snapshotsRead, std::optional<std::pair<juce::String, Merge>> mergeRead,
-                             std::map<juce::String, UnreadableHead> unreadable)
+void VersionHistory::opened (int number, Opened read)
 {
     --pendingJobs;
 
     if (number != generation)
         return;
 
-    branches = std::move (branchesRead);
-    versions = std::move (versionsRead);
-    unreadableHeads = std::move (unreadable);
-    messageEdits = std::move (messages);
+    branches = std::move (read.branches);
+    versions = std::move (read.versions);
+    departed = std::move (read.departed);
+    sweepProblem = read.sweepProblem;
+    recentMoves = std::move (read.recentMoves);
+    unreadableHeads = std::move (read.unreadable);
+    messageEdits = std::move (read.messages);
     applyMessageEdits();
-    snapshots.assign (snapshotsRead.rbegin(), snapshotsRead.rend());
-    lastSnapshotTime = juce::Time::currentTimeMillis();
-    currentBranch = current;
-    setBaseline (head, std::move (parameters), song.getDeviceChangesOutsideHistory());
+    snapshots.assign (read.snapshots.rbegin(), read.snapshots.rend());
+    lastSnapshotTime = getVersionsTime();
+    currentBranch = read.current;
+    setBaseline (read.head, std::move (read.parameters), song.getDeviceChangesOutsideHistory());
 
     // The merge the song holds, as found on the history's thread, its plug-ins' clashes named here.
-    if (mergeRead.has_value())
-        keepFound (mergeRead->first, std::move (mergeRead->second));
+    if (read.mergeRead.has_value())
+        keepFound (read.mergeRead->first, std::move (read.mergeRead->second));
 
     mergeDirty = true;
     hasRead = true;
     getMerging();  // the merge the song holds, as read already, or read now
     readBounces(); // and tells
+    if (! noAdoptionAtOpenForTests.load())
+        adoptLater(); // what the history shows that another computer wrote, made this computer's own too
 
     // A project keeps versions from its start, as a repository from its first commit: the song as it is now, on main; once a
     // first save's copy of the folder is over, if one is under way (copyFolder()). Only where the Versions folder has no
@@ -1188,7 +1317,9 @@ void VersionHistory::followFolder()
     if (const auto moved = getVersionsFolder (song); moved != folder && store != nullptr && moved != juce::File())
     {
         folder = moved;
+        const auto newest = store->getPieces().getNewestStamp(); // the stamps go on from where they were
         store = std::make_shared<VersionStore> (folder, getThisComputer());
+        store->getPieces().raiseStampFloor (newest < std::numeric_limits<juce::int64>::max() ? newest + 1 : newest);
         readBounces(); // those the copy took: a bounce that wasn't copied is none here (known bug 169)
     }
     else if (moved != folder)
@@ -1298,11 +1429,14 @@ bool VersionHistory::checkHistory (std::function<void()> done)
         return false;
 
     checking = true;
+    checkProgress->store (0.0f);
+    checkCancelled->store (false);
+    checkProgressTold = 0.0f;
     tellNow(); // "Verifying..."
 
     run (
         [shared = store, number = generation, known = versions, weak = juce::WeakReference<VersionHistory> (this), done,
-         closingNow = closing]
+         closingNow = closing, progress = checkProgress, cancelled = checkCancelled, projectFolder = song.getFile().getParentDirectory()]
         {
             // Every pack the folder holds now, those written since the history opened too.
             shared->getPieces().readNewPacks();
@@ -1312,21 +1446,29 @@ bool VersionHistory::checkHistory (std::function<void()> done)
             check.numPieces = names.size();
             check.numVersions = (int) known.size();
 
-            // Every piece read, which checks it against its name, and the commits among them.
+            // Let go of, at its next step, as the history goes; stopped there, as it is cancelled.
+            const auto stop = [&]
+            {
+                check.stopped = check.stopped || cancelled->load();
+                return closingNow->load() || check.stopped;
+            };
+
+            // How far it has come: the pieces a tenth of it, the songs kept another, the audio, by its bytes, the rest.
+            const auto tell = [&progress] (float from, float to, double part, double all)
+            { progress->store (from + (to - from) * (all > 0.0 ? (float) juce::jlimit (0.0, 1.0, part / all) : 1.0f)); };
+
+            // Every piece read, which checks it against its name, and the versions among them. A damaged piece's copies are
+            // forgotten as they are read, so that the next version that holds it writes it again (PieceStore.h).
             std::vector<VersionRecord> found;
 
-            // A damaged piece's copies are forgotten as they are read, so that the next commit that holds it writes it again
-            // (PieceStore.h). Let go of, at its next step, as the history goes.
-            for (const auto& name : names)
+            for (int i = 0; i < names.size() && ! stop(); ++i)
             {
-                if (closingNow->load())
-                    return;
-
-                const auto bytes = shared->getPieces().read (name);
+                tell (0.0f, 0.1f, i, names.size());
+                const auto bytes = shared->getPieces().read (names[i]);
 
                 if (! bytes.has_value())
                 {
-                    check.damagedPieces.add (name);
+                    check.damagedPieces.add (names[i]);
                     continue;
                 }
 
@@ -1334,29 +1476,134 @@ bool VersionHistory::checkHistory (std::function<void()> done)
 
                 if (bytes->getSize() > std::strlen (versionStart)
                     && std::memcmp (bytes->getData(), versionStart, std::strlen (versionStart)) == 0)
-                    if (auto record = toVersionRecord (readElement (*bytes), name))
+                    if (auto record = toVersionRecord (readElement (*bytes), names[i]))
                         found.push_back (std::move (*record));
             }
 
-            // Each commit's song walked piece by piece; the commits no branch's line holds.
+            // Each version's song walked piece by piece, and each song kept without a version (Local History's, those
+            // left on branches); the versions no branch's line holds.
             for (const auto& [id, version] : known)
             {
-                if (closingNow->load())
-                    return;
+                if (stop())
+                    break;
 
                 std::vector<MissingPiece> missing;
                 shared->readSong (version.song, nullptr, &missing);
 
                 if (! missing.empty())
                     check.damaged[id] = std::move (missing);
+
+                // The versions it follows, which the history and Restore need: one that can't be read is said.
+                for (const auto& parent : version.parents)
+                    if (known.count (parent) == 0 && ! shared->readVersion (parent).has_value())
+                        check.unreadableParents[id].add (parent);
             }
+
+            const auto kept = shared->findKeptSongs (getVersionsTime());
+            check.numSongs = (int) kept.size();
+
+            for (size_t i = 0; i < kept.size() && ! stop(); ++i)
+            {
+                tell (0.1f, 0.2f, (double) i, (double) kept.size());
+                std::vector<MissingPiece> missing;
+
+                if (const auto song = shared->readSong (kept[i].piece, nullptr, &missing); ! song.isValid() && missing.empty())
+                    missing.push_back ({ {}, kept[i].piece });
+
+                if (! missing.empty())
+                    check.damagedSongs.push_back ({ kept[i], std::move (missing) });
+            }
+
+            shared->getPieces().closeFiles();
 
             for (auto& record : found)
                 if (known.count (record.id) == 0)
                     check.lost.push_back (std::move (record));
 
             std::sort (check.lost.begin(), check.lost.end(), [] (const auto& a, const auto& b) { return a.saved > b.saved; });
-            shared->getPieces().closeFiles();
+
+            // Every version's audio files, each file read once however many versions name it, against what each version
+            // recorded of it: there, of that size, and of that SHA-256.
+            struct Recorded
+            {
+                juce::String version;
+                VersionRecord::File file;
+            };
+
+            std::map<juce::String, std::vector<Recorded>> byPath;
+
+            for (const auto& [id, version] : known)
+                for (const auto& file : version.files)
+                    byPath[file.path].push_back ({ id, file });
+
+            check.numAudioFiles = (int) byPath.size();
+            const auto resolve = [&projectFolder] (const juce::String& path)
+            { return juce::File::isAbsolutePath (path) ? makeFileOfFullPath (path) : projectFolder.getChildFile (path); };
+
+            double bytesToRead = 0.0, bytesRead = 0.0;
+
+            for (const auto& [path, recorded] : byPath)
+                bytesToRead += (double) juce::jmax ((juce::int64) 0, resolve (path).getSize());
+
+            for (const auto& [path, recorded] : byPath)
+            {
+                if (stop())
+                    break;
+
+                const auto file = resolve (path);
+                const auto exists = file.existsAsFile();
+                const auto size = exists ? file.getSize() : 0;
+                juce::String hash;
+
+                // Hashed in parts, Stop (and the history going) looked at between them, the bytes counted as they go.
+                if (exists
+                    && std::any_of (recorded.begin(), recorded.end(), [size] (const Recorded& each) { return each.file.size == size; }))
+                {
+                    // Read a megabyte at a time (JUCE's SHA-256 asks for 64 bytes a call, and a file's stream doesn't buffer).
+                    juce::FileInputStream in (file);
+                    juce::BufferedInputStream buffered (in, 1 << 20);
+                    StoppableStream parts (buffered, stop,
+                                           [&] (int numRead)
+                                           {
+                                               bytesRead += numRead;
+                                               tell (0.2f, 1.0f, bytesRead, bytesToRead);
+                                           });
+
+                    if (in.openedOk())
+                        hash = juce::SHA256 (parts).toHexString();
+
+                    if (stop())
+                        break; // its hash only of what was read before
+
+                    if (! in.openedOk() || in.getStatus().failed() || in.getPosition() != size)
+                        hash = {}; // it can't be read: said so, not as changed
+                }
+                else
+                {
+                    bytesRead += (double) size;
+                }
+
+                tell (0.2f, 1.0f, bytesRead, bytesToRead);
+
+                for (const auto& each : recorded)
+                {
+                    using Kind = AudioProblem::Kind;
+
+                    if (! exists)
+                        check.audio[each.version].push_back ({ path, Kind::missing });
+                    else if (size != each.file.size)
+                        check.audio[each.version].push_back ({ path, Kind::otherSize });
+                    else if (hash.isEmpty())
+                        check.audio[each.version].push_back ({ path, Kind::unreadable });
+                    else if (hash != each.file.sha256)
+                        check.audio[each.version].push_back ({ path, Kind::otherContent });
+                }
+            }
+
+            if (closingNow->load())
+                return;
+
+            progress->store (1.0f);
 
             juce::MessageManager::callAsync (
                 [weak, number, check, done]() mutable
@@ -1384,73 +1631,318 @@ void VersionHistory::checked (int number, Check check)
     tellNow();
 }
 
-int VersionHistory::recoverLostVersions()
+std::vector<VersionHistory::LostLine> VersionHistory::getLostLines() const
 {
-    if (store == nullptr || copyingFolder || ! lastCheck.has_value() || lastCheck->lost.empty())
-        return 0;
+    const auto now = getVersionsTime();
 
-    // Taken into the history; then a branch at each line's newest commit, which no other lost one follows.
+    // The versions no branch holds that can come back: those that left within 30 days, and those the last check found.
+    std::map<juce::String, const VersionRecord*> lost;
+
+    for (const auto& [id, record] : departed)
+        if (versions.count (id) == 0)
+            lost.emplace (id, &record);
+
+    if (lastCheck.has_value())
+        for (const auto& record : lastCheck->lost)
+            if (versions.count (record.id) == 0)
+                lost.emplace (record.id, &record);
+
+    // A line's last version is one no other lost one follows; its versions, those of the lost it follows, newest first.
     std::set<juce::String> followed;
 
-    for (const auto& version : lastCheck->lost)
-    {
-        versions.emplace (version.id, version);
+    for (const auto& [id, record] : lost)
+        for (const auto& parent : record->parents)
+            if (lost.count (parent) > 0)
+                followed.insert (parent);
 
-        for (const auto& parent : version.parents)
-            followed.insert (parent);
+    const auto findLine = [&lost] (const juce::String& head)
+    {
+        std::vector<const VersionRecord*> line;
+        std::set<juce::String> seen;
+        juce::StringArray toVisit (head);
+
+        while (! toVisit.isEmpty())
+        {
+            const auto id = toVisit[toVisit.size() - 1];
+            toVisit.remove (toVisit.size() - 1);
+
+            if (const auto found = lost.find (id); found != lost.end() && seen.insert (id).second)
+            {
+                line.push_back (found->second);
+                toVisit.addArray (found->second->parents);
+            }
+        }
+
+        std::sort (line.begin(), line.end(), [] (const auto* a, const auto* b) { return a->saved > b->saved; });
+        juce::StringArray ids;
+
+        for (const auto* record : line)
+            ids.add (record->id);
+
+        return ids;
+    };
+
+    // A deleted branch's song brought back already, by a recovery since.
+    const auto wasRecovered = [this] (const BranchMove& deleted)
+    {
+        return std::any_of (
+            recentMoves.begin(), recentMoves.end(), [&deleted] (const BranchMove& move)
+            { return move.why == "recover" && move.to == deleted.from && move.song == deleted.song && move.time >= deleted.time; });
+    };
+
+    // Each by the newest move that left it, within 30 days; a deleted branch's song by its deletion.
+    std::vector<LostLine> lines;
+    std::set<juce::String> keys;
+
+    for (auto move = recentMoves.rbegin(); move != recentMoves.rend(); ++move)
+    {
+        if (move->from.isEmpty() || now - move->time > keptByAge::dailyFor || move->why == "cancel")
+            continue;
+
+        // A song left there that is its last version's, the same pieces, holds nothing to bring back.
+        const auto isLine = lost.count (move->from) > 0 && followed.count (move->from) == 0;
+        const auto* last = lost.count (move->from) > 0 ? lost.at (move->from) : findVersion (move->from);
+        const auto leftSong =
+            move->why == "delete" && ! wasRecovered (*move) && (last == nullptr || last->song != move->song) ? move->song : juce::String();
+
+        if (! isLine && leftSong.isEmpty())
+            continue;
+
+        // One row for a head: the newest move's, but for a deleted branch's song no newer row brings back (another branch
+        // deleted at the same version, with changes of its own).
+        const auto sameHead = std::any_of (lines.begin(), lines.end(), [&move] (const LostLine& line) { return line.head == move->from; });
+
+        if (sameHead
+            && (leftSong.isEmpty()
+                || std::any_of (lines.begin(), lines.end(), [&leftSong] (const LostLine& line) { return line.song == leftSong; })))
+            continue;
+
+        if (const auto key = move->from + "/" + leftSong; keys.insert (key).second)
+            lines.push_back (
+                { key, move->from, move->name, move->why, move->time, leftSong, isLine ? findLine (move->from) : juce::StringArray(), {} });
     }
 
-    applyMessageEdits(); // as their messages were edited, before they were lost
+    // The lines the check found that no move names, by their last versions' branches.
+    for (const auto& [id, record] : lost)
+    {
+        if (followed.count (id) > 0 || std::any_of (lines.begin(), lines.end(), [&id] (const LostLine& line) { return line.head == id; }))
+            continue;
 
+        juce::String branchName;
+
+        for (const auto& branch : branches)
+            if (branch.id == record->branch)
+                branchName = branch.name;
+
+        lines.push_back ({ id + "/", id, branchName, "found", record->saved, {}, findLine (id), {} });
+    }
+
+    // What each one's last version is called, as its message was edited.
+    for (auto& line : lines)
+    {
+        const auto* last = lost.count (line.head) > 0 ? lost.at (line.head) : findVersion (line.head);
+        const auto edit = messageEdits.find (line.head);
+
+        if (last != nullptr)
+            line.name =
+                edit != messageEdits.end() ? (edit->second.name.isNotEmpty() ? edit->second.name : last->summary) : getDisplayName (*last);
+    }
+
+    std::stable_sort (lines.begin(), lines.end(), [] (const LostLine& a, const LostLine& b) { return a.time > b.time; });
+    return lines;
+}
+
+juce::String VersionHistory::recoverLine (const juce::String& key)
+{
+    followFolder();
+
+    if (store == nullptr || ! hasRead || isSaving())
+        return {};
+
+    const auto lines = getLostLines();
+    const auto line = std::find_if (lines.begin(), lines.end(), [&key] (const LostLine& each) { return each.key == key; });
+
+    if (line == lines.end())
+        return {};
+
+    // Still in the store: one the sweep let go of since it was listed (a check of another folder's, a list read before a
+    // sweep) comes back as nothing, and the view says so.
+    if (! store->getPieces().has (line->head) || (line->song.isNotEmpty() && ! store->getPieces().has (line->song)))
+    {
+        readingProblem = "That line of versions is no longer kept in the Versions folder: more than 30 days went by since it left "
+                         "its branch, and it was let go of.";
+        tellNow();
+        return {};
+    }
+
+    // Its versions taken into the history again, as their messages were edited before they were lost.
+    std::map<juce::String, VersionRecord> records;
+
+    for (const auto& id : line->versions)
+    {
+        if (const auto found = departed.find (id); found != departed.end())
+            records.emplace (id, found->second);
+        else if (lastCheck.has_value())
+            for (const auto& record : lastCheck->lost)
+                if (record.id == id)
+                    records.emplace (id, record);
+    }
+
+    if (records.count (line->head) == 0 && findVersion (line->head) == nullptr)
+        return {};
+
+    // "main (recovered)", "main (recovered 2)"; "recovered" for a branch no log names.
     const auto isTaken = [this] (const juce::String& name)
     {
         return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name.equalsIgnoreCase (name); });
     };
 
-    int made = 0;
-
-    for (const auto& version : lastCheck->lost)
+    const auto of = line->branch.isNotEmpty() ? line->branch.substring (0, 80).trimEnd() + " " : juce::String();
+    const auto named = [&of] (int number)
     {
-        if (followed.count (version.id) > 0)
-            continue;
+        const auto word = "recovered" + (number > 1 ? " " + juce::String (number) : juce::String());
+        return of.isEmpty() ? word : of + "(" + word + ")";
+    };
 
-        // "main (recovered)", "main (recovered 2)"; "recovered" for a branch this history doesn't know.
-        juce::String of;
+    auto name = named (1);
 
-        for (const auto& branch : branches)
-            if (branch.id == version.branch)
-                of = branch.name.substring (0, 80).trimEnd() + " ";
+    for (int number = 2; isTaken (name); ++number)
+        name = named (number);
 
-        const auto named = [&of] (int number)
-        {
-            const auto word = "recovered" + (number > 1 ? " " + juce::String (number) : juce::String());
-            return of.isEmpty() ? word : of + "(" + word + ")";
-        };
+    BranchRecord branch;
+    branch.id = juce::Uuid().toString();
+    branch.name = toBranchName (name);
+    branch.colour = getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour;
+    branch.head = line->head;
+    branch.computer = getThisComputer();
+    branch.changed = stampNow();
+    branch.working = line->song; // the song as it was left there, to switch to
 
-        auto name = named (1);
+    if (! store->writeBranch (branch))
+        return {};
 
-        for (int number = 2; isTaken (name); ++number)
-            name = named (number);
+    logMove (branch.id, {}, line->head, "recover", branch.name, line->song);
+    branches.push_back (branch);
 
-        BranchRecord branch;
-        branch.id = juce::Uuid().toString();
-        branch.name = name;
-        branch.colour = getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour;
-        branch.head = version.id;
-        branch.computer = getThisComputer();
-        branch.changed = juce::Time::currentTimeMillis();
+    for (auto& [id, record] : records)
+        versions.emplace (id, std::move (record));
 
-        if (store->writeBranch (branch))
-        {
-            store->logBranchMove (branch.id, {}, version.id, "recover");
-            branches.push_back (branch);
-            ++made;
-        }
+    applyMessageEdits();
+    adoptLater();
+    readBounces(); // theirs count again; and tells
+    return branch.id;
+}
+
+juce::int64 VersionHistory::stampNow() const
+{
+    return store != nullptr ? store->stamp() : getVersionsTime();
+}
+
+void VersionHistory::adoptLater()
+{
+    // Only while the sweep lets go: with nothing deleted, nothing another computer wrote needs a copy of this one's.
+    if (store == nullptr || ! hasRead || ! doesSweepLetGo())
+        return;
+
+    if (adoptionQueued)
+    {
+        adoptAgain = true; // once the round under way is done, with what the history names then
+        return;
     }
 
-    lastCheck->lost.clear();
-    tellNow();
-    return made;
+    // Every version the history shows and those Recover Lost Versions offers, the merge waiting in the song, and the songs
+    // the branches name as left on them (a recovered branch's, which another computer may have left); not what couldn't be
+    // copied before, until the history opens again. What already has an own copy is passed over at once.
+    Adoption work;
+
+    const auto add = [this] (juce::StringArray& into, const juce::String& id)
+    {
+        if (id.isNotEmpty() && adoptionFailed.count (id) == 0)
+            into.addIfNotAlreadyThere (id);
+    };
+
+    for (const auto* named : { &versions, &departed })
+        for (const auto& [id, version] : *named)
+            add (work.versions, id);
+
+    if (const auto waiting = song.getState().getChildWithName (schema::MERGING); waiting.isValid())
+    {
+        add (work.versions, waiting[schema::mergingVersion].toString());
+        add (work.versions, waiting[schema::mergingHead].toString());
+        add (work.songs, waiting[schema::mergingBefore].toString());
+    }
+
+    for (const auto& branch : branches)
+        add (work.songs, branch.working);
+
+    adoptionQueued = true;
+    adoptAgain = false;
+    adoptRound (std::move (work));
+}
+
+void VersionHistory::adoptRound (Adoption work)
+{
+    run (
+        [shared = store, work, closingNow = closing, stopped = sweepStopped, number = generation,
+         weak = juce::WeakReference<VersionHistory> (this)]() mutable
+        {
+            const auto adopted = adoptVersions (*shared, work, [&closingNow, &stopped] { return closingNow->load() || stopped->load(); });
+            shared->getPieces().closeFiles();
+
+            juce::MessageManager::callAsync (
+                [weak, number, left = std::move (work), adopted]() mutable
+                {
+                    if (auto* self = weak.get())
+                    {
+                        --self->pendingJobs;
+
+                        if (number == self->generation)
+                            self->adoptionDone (std::move (left), adopted);
+                    }
+                });
+        },
+        Work::reads);
+}
+
+void VersionHistory::adoptionDone (Adoption left, const Adopted& adopted)
+{
+    // What couldn't be copied: said, and not tried again until the history opens again.
+    for (const auto& id : adopted.unreadable)
+        adoptionFailed.insert (id);
+
+    if (! adopted.unreadable.isEmpty() || ! adopted.written)
+    {
+        adoptionProblem = adopted.written ? "Phazite couldn't copy " + juce::String (adoptionFailed.size())
+                                                + (adoptionFailed.size() == 1 ? " version or song" : " versions or songs")
+                                                + " another computer saved into this computer's own packs: a piece of it can't be "
+                                                  "read (damaged, or not arrived). It tries again as the project opens"
+                                          : "Phazite couldn't write into the Versions folder what another computer saved that this "
+                                            "computer's history uses. It tries again as the project opens";
+        tellNow();
+    }
+
+    // The rest as a further job, a batch a job, so that nothing waits long behind it; none once the sweep was stopped
+    // (a save into a new folder): the next open copies it.
+    if (! left.isEmpty() && adopted.written && ! sweepStopped->load())
+    {
+        adoptRound (std::move (left));
+        return;
+    }
+
+    adoptionQueued = false;
+
+    if (adoptAgain)
+        adoptLater();
+}
+
+void VersionHistory::logMove (const juce::String& branchID, const juce::String& from, const juce::String& to, const juce::String& why,
+                              const juce::String& name, const juce::String& leftSong)
+{
+    if (store == nullptr)
+        return;
+
+    store->logBranchMove (branchID, from, to, why, name, leftSong);
+    recentMoves.push_back ({ stampNow(), from, to, why, name, leftSong, branchID, makeUsableFileName (getThisComputer()) });
 }
 
 juce::StringArray VersionHistory::getOfferedCommits() const
@@ -1523,11 +2015,12 @@ bool VersionHistory::resetToReadable (juce::ValueTree then, PluginParameterValue
     if (! store->writeBranch (moved))
         return false;
 
-    store->logBranchMove (moved.id, entry.head, entry.readable, "reset");
+    logMove (moved.id, entry.head, entry.readable, "reset", moved.name);
     *current = moved;
     unreadableHeads.erase (currentBranch);
     setBaseline (std::move (then), std::move (parameters), song.getDeviceChangesOutsideHistory());
     forgetUnreachable();
+    adoptLater();
     readBounces(); // and tells
     return true;
 }
@@ -1613,7 +2106,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
         branch.id = juce::Uuid().toString();
         branch.name = "main";
         branch.colour = getTrackColours()[1].colour;
-        branch.changed = juce::Time::currentTimeMillis();
+        branch.changed = stampNow();
     }
 
     branch.computer = getThisComputer();
@@ -1624,7 +2117,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     version.name = name.trim();
     version.note = note.trim();
     version.summary = findVersion (branch.head) == nullptr ? juce::String ("First version") : summariseNextCommit();
-    version.saved = juce::Time::currentTimeMillis();
+    version.saved = stampNow();
     version.branch = branch.id;
     version.phazite = getVersionString();
 
@@ -1637,6 +2130,10 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
         version.parents.add (waiting->version);
         version.renumbered = waiting->renumbered;
     }
+
+    // Verify History under way stops: saving goes ahead rather than waiting behind its hashing (a check stopped says so).
+    if (checking)
+        cancelCheck();
 
     saving = true;
     tellNow(); // "Saving..."
@@ -1659,7 +2156,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
                 branch.working = {};
                 branch.divergent.clear(); // a merge's commit follows the other line; any other leaves it as it was
                 ok = shared->writeBranch (branch) && shared->writeCurrentBranch (branch.id);
-                shared->logBranchMove (branch.id, before, version.id, mergesAnother ? "merge" : "commit");
+                shared->logBranchMove (branch.id, before, version.id, mergesAnother ? "merge" : "commit", branch.name);
             }
 
             shared->getPieces().closeFiles();
@@ -1728,6 +2225,7 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
         branches.push_back (branch);
 
     setBaseline (copy, std::move (parameters), std::move (committed));
+    adoptLater(); // the versions it follows, another computer's too
     tellNow();
 }
 
@@ -1911,6 +2409,10 @@ void VersionHistory::findMerging() const
 
     if (problem.isEmpty() && merge.reading)
         problem = "Reading the merge of " + name + " from the Versions folder...";
+    else if (problem.isEmpty() && ! merge.before.isValid())
+        problem = "Phazite can't read the song as it was before the merge of " + name
+                  + " from the Versions folder: it is no longer kept, or it is damaged. Cancel Merge makes the song the branch's "
+                    "last version instead.";
     else if (problem.isEmpty() && ! merge.readWhole)
         problem = "Phazite can't read all of the merge of " + name + " from the Versions folder: its conflicts aren't shown, and "
                   + (merge.before.isValid() ? juce::String ("Cancel Merge makes the song what it was before it.")
@@ -1948,7 +2450,7 @@ juce::ValueTree VersionHistory::keepMerge (const Merge& merge, std::vector<int> 
     const auto element =
         writeMergeState ({ kept.version, kept.head, kept.beforePiece, std::move (chosen), kept.renumbered, kept.translation });
     mergesFound.insert_or_assign (getMergeKey (element), std::move (kept));
-    mergeDirty = true;
+    mergeDirty = true; // its copy made this computer's own once the merge is in the song (VersionsModel.cpp: takeMergeIn())
     return element;
 }
 
@@ -2523,6 +3025,13 @@ void VersionHistory::timerCallback()
     takeChangesOutsideHistory();
     takePluginsJoined();
 
+    // Verify History's progress, as it moves.
+    if (checking && std::abs (checkProgress->load() - checkProgressTold) >= 0.01f)
+    {
+        checkProgressTold = checkProgress->load();
+        changed();
+    }
+
     // An old version's bounce goes on, its progress shown, unless recording starts: it never runs while the song records.
     if (backgroundBounce != nullptr)
     {
@@ -2541,7 +3050,7 @@ void VersionHistory::timerCallback()
     // Local History: the song every few minutes while it changes, as long as it differs from its last commit; not while it
     // records (the take isn't in it yet), nor while a commit is being made.
     if (editedSinceSnapshot && hasRead && store != nullptr && ! isSaving() && ! isRecording (song)
-        && juce::Time::currentTimeMillis() - lastSnapshotTime >= (juce::int64) snapshotMinutes * 60 * 1000 && hasChanges())
+        && getVersionsTime() - lastSnapshotTime >= (juce::int64) snapshotMinutes * 60 * 1000 && hasChanges())
         takeSnapshot ("auto");
 
     if (std::exchange (notifyPending, false) && onChange != nullptr)
@@ -2579,18 +3088,19 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
     branch.colour = getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour;
     branch.head = head;
     branch.computer = getThisComputer();
-    branch.changed = juce::Time::currentTimeMillis();
+    branch.changed = stampNow();
 
     if (! store->writeBranch (branch) || (makeCurrent && ! store->writeCurrentBranch (branch.id)))
         return {};
 
-    store->logBranchMove (branch.id, {}, head, "branch");
+    logMove (branch.id, {}, head, "branch", branch.name);
 
     branches.push_back (branch);
 
     if (makeCurrent)
         currentBranch = branch.id; // the same last version: the changes since stay as they are
 
+    adoptLater(); // a branch from another computer's version
     tellNow();
     return branch.id;
 }
@@ -2625,6 +3135,10 @@ bool VersionHistory::startReading (const juce::String& title, std::function<Take
 {
     if (store == nullptr || ! hasRead || commandRead.has_value() || isSaving())
         return false;
+
+    // Verify History under way stops: the command reads at once rather than behind its hashing, the window held.
+    if (checking)
+        cancelCheck();
 
     const auto number = ++readingsStarted;
     commandRead = CommandRead { title, std::move (hold), std::move (done), number, folder };
@@ -2866,6 +3380,7 @@ VersionHistory::Taken VersionHistory::finishSwitch (const Switch& plan, SwitchRe
     if (! hearingBounce)
         bounceCompared.clear();
 
+    adoptLater(); // a branch whose last version another computer wrote
     tellNow();
     return true;
 }
@@ -2885,7 +3400,7 @@ bool VersionHistory::renameBranch (const juce::String& branchID, const juce::Str
 
     auto renamed = *found;
     renamed.name = newName;
-    renamed.changed = juce::Time::currentTimeMillis(); // the newest name, on every computer
+    renamed.changed = stampNow(); // the newest name, on every computer
 
     if (! store->writeBranch (renamed))
         return false;
@@ -2895,7 +3410,7 @@ bool VersionHistory::renameBranch (const juce::String& branchID, const juce::Str
     return true;
 }
 
-bool VersionHistory::deleteBranch (const juce::String& branchID)
+bool VersionHistory::deleteBranch (const juce::String& branchID, bool takenBack)
 {
     followFolder();
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
@@ -2908,10 +3423,11 @@ bool VersionHistory::deleteBranch (const juce::String& branchID)
     if ((preview.has_value() && preview->version == found->head) || holdsCommitMergeWaits (*found))
         return false;
 
-    // This computer's record says it is deleted, the newest word on it; the song left on it goes.
+    // This computer's record says it is deleted, the newest word on it; the song left on it goes from the record, and is
+    // kept 30 days with the branch's versions by the log's line, which names it (but for a branch taken back).
     auto gone = *found;
     gone.deleted = true;
-    gone.changed = juce::Time::currentTimeMillis();
+    gone.changed = stampNow();
     gone.computer = getThisComputer();
     gone.working = {};
     gone.divergent.clear();
@@ -2919,7 +3435,7 @@ bool VersionHistory::deleteBranch (const juce::String& branchID)
     if (! store->writeBranch (gone))
         return false;
 
-    store->logBranchMove (branchID, found->head, {}, "delete");
+    logMove (branchID, found->head, {}, takenBack ? "cancel" : "delete", found->name, takenBack ? juce::String() : found->working);
     branches.erase (found);
 
     if (selectedBranch == branchID)
@@ -3033,7 +3549,7 @@ bool VersionHistory::undoLastCommit (juce::ValueTree beforeSong, PluginParameter
     if (! store->writeBranch (moved))
         return false;
 
-    store->logBranchMove (moved.id, undone.id, before, "undo");
+    logMove (moved.id, undone.id, before, "undo", moved.name);
     *current = moved;
 
     // The song stays as it is, and the changes are from the version before, so that what the undone version recorded shows
@@ -3065,6 +3581,7 @@ bool VersionHistory::undoLastCommit (juce::ValueTree beforeSong, PluginParameter
     }
 
     forgetUnreachable();
+    adoptLater();
     readBounces(); // and tells
     return true;
 }
@@ -3154,20 +3671,23 @@ void VersionHistory::takeSnapshot (const juce::String& reason)
         song.storeDeviceStates();
 
     editedSinceSnapshot = false;
-    lastSnapshotTime = juce::Time::currentTimeMillis();
+    lastSnapshotTime = getVersionsTime();
 
     run (
         [shared = store, number = generation, copy = song.getState().createCopy(), parameters = readPluginParameters(),
-         branch = currentBranch, time = lastSnapshotTime, reason, weak = juce::WeakReference<VersionHistory> (this)]() mutable
+         branch = currentBranch, time = stampNow(), reason, weak = juce::WeakReference<VersionHistory> (this)]() mutable
         {
             // Only when the song differs from the snapshot before it; thinned as it grows.
             const auto pieces = splitSong (copy, parameters);
-            auto all = shared->readSnapshots();
+            // Thinned by the keeping time (VersionStore::getKeepingTime()), as the sweep keeps them: a clock set ahead
+            // thins away no more than a week's worth.
+            const auto keepingTime = shared->getKeepingTime();
+            auto all = shared->readSnapshots (keepingTime);
 
             if ((all.empty() || all.back().song != pieces.song) && shared->writeSong (pieces))
             {
                 all.push_back ({ time, branch, pieces.song, reason });
-                all = thinSnapshots (all, time);
+                all = thinSnapshots (all, keepingTime);
                 shared->writeSnapshots (all);
             }
 
@@ -3238,7 +3758,7 @@ bool VersionHistory::editMessage (const juce::String& versionID, const juce::Str
     if (store == nullptr || ! hasRead || copyingFolder || found == versions.end())
         return false;
 
-    const MessageEdit edit { name.trim(), note.trim(), juce::Time::currentTimeMillis() };
+    const MessageEdit edit { name.trim(), note.trim(), stampNow() };
 
     if (! store->writeMessage (versionID, edit))
         return false;
@@ -3264,7 +3784,12 @@ void VersionHistory::applyMessageEdits()
 void VersionHistory::forgetUnreachable()
 {
     mergeDirty = true; // the commit a merge waiting merged in may be among those that went
+    const auto before = versions;
     keepReachable (versions, branches, getOfferedCommits());
+
+    for (const auto& [id, record] : before)
+        if (versions.count (id) == 0)
+            departed[id] = record;
 
     if (findVersion (selectedVersion) == nullptr)
     {

@@ -141,8 +141,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| The store swept of what nothing names any more | `src/model/versions/PieceStore.cpp` | (M) | 4 | model-versions 7 |
-| Verify History checks the audio, the snapshots and the songs left on branches too | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 10 |
+| The store swept of what nothing names any more: built, and off until it is sound ([known bug 196](known-bugs.md)); to be turned on for histories one computer alone has written | `src/model/versions/StoreSweep.cpp` | (M) | 4 | model-versions 7 |
 | The open song tied to the version it grew from | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 9 |
 | One undo for every versions operation: a log of operations (a branch switch, a deletion) to take back | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
 | The undo history kept across a branch switch | `src/model/versions/VersionsModel.cpp` | — | — | source control audit |

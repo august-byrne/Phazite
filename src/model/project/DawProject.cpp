@@ -2127,7 +2127,7 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
 
                         // Its audio only once nothing names it: the branch gone. One that can't go now (a commit being
                         // written) stays whole, with the audio it plays, which Clean Up can offer later; and is said.
-                        if (making->deleteBranch (import->branch))
+                        if (making->deleteBranch (import->branch, true))
                         {
                             const std::scoped_lock held (import->lock);
 

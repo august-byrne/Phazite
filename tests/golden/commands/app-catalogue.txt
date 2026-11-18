@@ -115,7 +115,6 @@ version.deleteBounce
 version.exportDawProject | plugin-states
 version.restoreSnapshot | plugin-states
 version.verify
-version.recover
 version.resetToReadable
 project.export | ctrl + shift + R
 project.cleanUpAudio
@@ -130,6 +129,7 @@ version.pickBranch
 version.renameBranch
 version.mergeBranch
 version.deleteBranch
+version.recover
 version.editMessage
 version.bounceEach
 device.add | F8

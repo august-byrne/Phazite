@@ -173,4 +173,39 @@ bool waitForVersionHistory (ProjectContext&);
 // what it read is taken in, and the history has done what came of it (a save after a switch): whether the command did what
 // it does (false if it couldn't start). One that read nothing is done as it returns.
 bool finished (ProjectContext&, const std::function<bool()>& command);
+
+// The time the versions keep by (model/versions/internal/PieceStore.h: getVersionsTime()), set while one lives, so that a
+// test lets days pass without waiting; the computer's clock again as it goes. Days later, by addDays(). Meanwhile the
+// store's sweep leaves out whatever it may, however few bytes that frees (StoreSweep.h: setSweepFloorForTests()).
+class VersionsTime
+{
+public:
+    explicit VersionsTime (juce::int64 now);
+    ~VersionsTime();
+
+    juce::int64 get() const noexcept { return now; }
+    void set (juce::int64);
+    void addDays (double days);
+
+private:
+    juce::int64 now;
+
+    JUCE_DECLARE_NON_COPYABLE (VersionsTime)
+};
+
+// Days passing for a project opened once a week of them (and at their end), as its history sweeps its store as it opens
+// (StoreSweep.h): the store keeps by a week past its last sweep at most.
+void openEachWeek (TestSong&, VersionsTime&, double days);
+
+// The store's sweep letting go of what nothing names, and each computer copying what its history names, while one lives
+// (StoreSweep.h: doesSweepLetGo(), off in the product), so that what is turned on later stays tested. Made before the song
+// it is for, as the sweep runs as a history opens.
+class SweepLetsGo
+{
+public:
+    SweepLetsGo();
+    ~SweepLetsGo();
+
+    JUCE_DECLARE_NON_COPYABLE (SweepLetsGo)
+};
 } // namespace phazite::test

@@ -207,7 +207,8 @@ The project's versions ([docs/design/versions.md](../../docs/design/versions.md)
 | File | What it holds |
 |---|---|
 | `internal/SongPieces.h` | The song in pieces, each named by the SHA-256 of what it holds. |
-| `internal/PieceStore.h`, `internal/VersionStore.h` | The pieces, kept in packs in the project's Versions folder, with each computer's record of its branches and their logs, as [docs/versions-format.md](../../docs/versions-format.md) writes them down for other tools. |
+| `internal/PieceStore.h`, `internal/VersionStore.h` | The pieces, kept in packs in the project's Versions folder, with each computer's record of its branches and their logs, as [docs/versions-format.md](../../docs/versions-format.md) writes them down for other tools; and the versions' clock (`getVersionsTime()`), which tests set. |
+| `internal/StoreSweep.h` | The store swept as a history opens: this computer's own packs joined by size, keeping every piece; another computer's packs are never touched. Its letting go of what nothing names (older than 30 days, with the bounces of the versions that go) and each computer's copy of what its history names (`adoptVersions()`) are built but off in the product (`sweepLetsGo`; known bug 196). |
 | `internal/SongDiff.h` | What differs between two songs, by track, in Phazite's own words. |
 | `internal/ApplySong.h` | The song made like a version, or a line of it, with the fewest edits. |
 | `internal/SongMerge.h` | The three-way merge of two lines by IDs, with its clashes. |

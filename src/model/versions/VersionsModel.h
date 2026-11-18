@@ -125,8 +125,8 @@ bool canEditSelectedMessage (const ProjectContext&);
 // Undo Last Version (version.undoLast; as git reset --soft HEAD~): the current branch back at the version before its last,
 // the song as it is, so that what that version recorded shows in the changes again, and its name and note back in the field
 // while none is typed. Not for the first version or a merge's, nor while one is being saved or a merge is under way. Not an
-// undo step: it changes the history, not the song. The version stays in the store: while no branch holds it, Verify History
-// finds it and Recover Lost Versions brings it back.
+// undo step: it changes the history, not the song. The version stays in the store for 30 days, while Recover Lost Versions
+// brings it back.
 bool canUndoLastCommit (const ProjectContext&);
 bool undoLastCommit (ProjectContext&);
 
@@ -228,11 +228,11 @@ bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::St
 bool canRenameBranch (const ProjectContext&);
 
 // Delete Branch... (version.deleteBranch, the branch picker's; git branch -D): a branch but the current one gone, and the
-// song left on it. Its versions that no other branch holds leave the history and stay in the store, where Verify History
-// finds them and Recover Lost Versions brings them back; the song left on it doesn't come back. Whether one can be deleted
-// (not the current branch, nor while a merge of its line is under way); and what deleting it would take with it, as the
-// question before it says it ("3 versions that no other branch has, and the changes left on it"), none for nothing. Not an
-// undo step.
+// song left on it. Its versions that no other branch holds leave the history, and they and the song left on it stay in the
+// store for 30 days, while Recover Lost Versions brings them back. Whether one can be deleted (not the current branch, nor
+// while a merge of its line is under way); and what deleting it would take with it, as the question before it says it ("3
+// versions that no other branch has, and the changes left on it. Recover Lost Versions brings them back for 30 days."),
+// none for nothing. Not an undo step.
 bool canDeleteBranch (const ProjectContext&, const juce::String& branchID);
 bool canDeleteAnyBranch (const ProjectContext&); // Delete Branch...'s: one of the branches can be
 juce::String describeBranchDeletion (const ProjectContext&, const juce::String& branchID);
@@ -367,19 +367,42 @@ void restoreSelectedSnapshot (ProjectContext&);
 //==============================================================================
 // Keeping the history whole (docs/archive/format-audit.md, R3 and R4).
 
-// Verify History (version.verify, git's fsck): every piece read and checked, every version's song walked, and the versions no
-// branch holds found, in the background; whether it is under way; and what it found, as the Versions view says it ("12
-// versions and 340 pieces, all whole"), until the next check; none before the first.
+// Verify History (version.verify, git's fsck): every piece read and checked, every version's song and every song kept
+// without a version (Local History's, those left on branches) walked, every version's audio files checked against its record
+// (there, of its size and its SHA-256), and the versions no branch holds found, in the background; whether it is under way;
+// and what it found, as the Versions view says it ("Verifying the history... 40%"; "Verified 12 versions, ... : all whole";
+// ""Verse 2" (Audio/Kick.wav missing)"), until the next check; none before the first.
 bool verifyHistory (ProjectContext&);
 bool canVerifyHistory (const ProjectContext&);
 bool isVerifyingHistory (const ProjectContext&);
 juce::String describeHistoryCheck (const ProjectContext&);
 
-// Recover Lost Versions (version.recover): each line of the versions the last check found that no branch holds made a branch
-// of its own, named after the branch it was made on ("main (recovered)"); how many the check found, and how many branches it
-// made.
-int countLostVersions (const ProjectContext&);
-int recoverLostVersions (ProjectContext&);
+// While it runs (version.verify, then named "Stop Verifying History"), stopped between pieces and between audio files:
+// "Verify History was stopped before it was done." And the command's three: the check, or its stop; its name now.
+void stopVerifyingHistory (ProjectContext&);
+void verifyOrStopVerifying (ProjectContext&);
+juce::String describeVerify (const ProjectContext&);
+
+// Recover Lost Versions... (version.recover, the branch picker's): what can come back, newest first (VersionHistory.h:
+// getLostLines()): each line of versions that left every branch within the last 30 days, with when and why (undone, its
+// branch deleted, a reset), a deleted branch's song left on it, and the lines Verify History found that no log names. One
+// brought back as a branch at its last version, named after the branch it was on ("main (recovered)"), with the song left
+// on it; its id, none if it couldn't be. Not an undo step: it changes the history, not the song. Whether there is any to
+// bring back now (not while the history is read or a version saved).
+struct LostVersionsInfo
+{
+    juce::String key;      // which line
+    juce::String branch;   // the branch it was on, as it was called; none if no log names it
+    juce::String why;      // "undo", "delete", "reset", "found" by Verify History, or another move's
+    juce::Time time;       // when it left (for one Verify History found, when its last version was saved)
+    int numVersions = 0;   // its versions no branch holds
+    juce::String lastName; // what its last version is called
+    bool withSong = false; // a deleted branch's song left on it comes back with it
+};
+
+std::vector<LostVersionsInfo> getLostVersions (const ProjectContext&);
+bool canRecoverLostVersions (const ProjectContext&);
+juce::String recoverLostVersions (ProjectContext&, const juce::String& key);
 
 // A current branch whose last version can't be read (VersionHistory.h: getHeadProblem()), as the Versions view says it, with
 // the newest version of the branch's log that reads, offered; none while it reads. Reset Branch to Last Readable Version

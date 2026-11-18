@@ -424,7 +424,7 @@ TEST_CASE ("Delete Branch takes another branch away, with the commits only it ha
     REQUIRE (waitForVersionHistory (b.s.context));
     CHECK (phazite::describeBranchDeletion (b.s.context, idea)
            == "This also deletes 1 version that no other branch has, and the changes left on it. Recover Lost Versions brings "
-              "the versions back.");
+              "them back for 30 days.");
 
     // Gone, its commit out of the graph, and so on every computer as the project opens again.
     REQUIRE (phazite::deleteBranch (b.s.context, idea));
@@ -437,12 +437,26 @@ TEST_CASE ("Delete Branch takes another branch away, with the commits only it ha
     CHECK (phazite::getBranches (b.s.context).size() == 1);
     CHECK (b.current() == "main");
 
-    // Its commit is still in the store.
-    REQUIRE (phazite::verifyHistory (b.s.context));
-    REQUIRE (dispatchMessagesUntil ([&b] { return ! phazite::isVerifyingHistory (b.s.context); }, versionHistoryTimeout));
-    CHECK (phazite::countLostVersions (b.s.context) == 1);
-    CHECK (phazite::recoverLostVersions (b.s.context) == 1);
+    // Its version and the song left on it are still in the store: Recover Lost Versions lists the deleted branch, with when
+    // it was deleted, and brings it back with the song as it was left there. The empty one left nothing to bring back.
+    const auto lost = phazite::getLostVersions (b.s.context);
+    REQUIRE (lost.size() == 1);
+    CHECK (lost[0].why == "delete");
+    CHECK (lost[0].branch == "idea-3");
+    CHECK (lost[0].numVersions == 1);
+    CHECK (lost[0].withSong);
+    CHECK (lost[0].lastName == "Quiet drums");
+    const auto recovered = phazite::recoverLostVersions (b.s.context, lost[0].key);
+    REQUIRE (recovered.isNotEmpty());
     CHECK (phazite::getBranches (b.s.context).size() == 2);
+    CHECK (findBranch (b.s.context, "idea-3 (recovered)") == recovered);
+    CHECK (phazite::getLostVersions (b.s.context).empty());
+
+    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, recovered, b.s.save); }));
+    CHECK (phazite::getChannelVolume (*phazite::findSong (b.s.context), b.drums) == doctest::Approx (-12.0f));
+    const auto changes = phazite::getChangesSinceLastVersion (b.s.context);
+    REQUIRE (changes.size() == 1);
+    CHECK (changes[0].what == "volume");
 }
 
 TEST_CASE ("A branch deleted on one computer comes back where another computer committed on it since")

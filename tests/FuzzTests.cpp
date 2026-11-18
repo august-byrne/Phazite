@@ -19,6 +19,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/PluginScanner.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/DawProject.h"
@@ -27,6 +28,7 @@
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/PieceStore.h"
 #include "model/versions/internal/SongPieces.h"
+#include "model/versions/internal/StoreSweep.h"
 #include "model/versions/internal/VersionStore.h"
 #include "sandbox/core/PluginInfo.h"
 #include "sandbox/core/Vst3State.h"
@@ -310,17 +312,22 @@ TEST_CASE ("Fuzz: a pack of a version's pieces is read whole or not at all")
     fuzz::run ("version packs", seeds, fuzz::Shape::bytes, 150,
                [&] (const juce::MemoryBlock& input) -> std::string
                {
-                   // Named as a store finds a pack, by the SHA-256 of its index, where the end of it says the index is.
+                   // Named as a store finds a pack, by the SHA-256 of its index, where the end of it says the index is, and
+                   // its writer.
                    juce::String name ("0000000000000000000000000000000000000000000000000000000000000000");
 
-                   if (input.getSize() > 16)
+                   if (input.getSize() > 32)
                    {
-                       const auto* end = static_cast<const char*> (input.getData()) + input.getSize() - 16;
+                       const auto* end = static_cast<const char*> (input.getData()) + input.getSize() - 32;
                        const auto count = (juce::uint64) juce::ByteOrder::littleEndianInt (end);
                        const auto start = (juce::uint64) juce::ByteOrder::littleEndianInt64 (end + 4);
 
-                       if (start <= input.getSize() && count <= (input.getSize() - start) / 48)
-                           name = juce::SHA256 (static_cast<const char*> (input.getData()) + start, (size_t) (count * 48)).toHexString();
+                       if (start <= input.getSize() && count <= (input.getSize() - start) / 56)
+                       {
+                           juce::MemoryBlock named (static_cast<const char*> (input.getData()) + start, (size_t) (count * 56));
+                           named.append (end + 12, 16);
+                           name = juce::SHA256 (named.getData(), named.getSize()).toHexString();
+                       }
                    }
 
                    for (const auto& old : pieces.findChildFiles (juce::File::findFiles, false))
@@ -349,6 +356,7 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
     TemporaryFolder temporary;
     const auto versions = temporary.folder.getChildFile ("Versions");
     const auto songFile = temporary.folder.getChildFile ("Fuzzed.phazite");
+    const phazite::test::VersionsTime clock (1793800000003); // Local History's snapshot is minutes old, not thinned away
     juce::String branchID, versionID;
 
     {
@@ -439,6 +447,127 @@ TEST_CASE ("Fuzz: a project's versions' records, branches, logs, messages and lo
                      });
 }
 
+TEST_CASE ("Fuzz: a sweep of a folder whose records anyone may have damaged never takes what a sound record names")
+{
+    // A store with what each kind of record names (another computer's branch, logs, a song left on a branch, Local History,
+    // the last sweep), a month old; each file but the packs and this computer's record of main damaged in turn, and the
+    // store swept (model/versions/internal/StoreSweep.h). It may keep more, never less: main's version and another
+    // computer's always read; where a file that names something no longer reads whole (VersionStore::areRecordsWhole()),
+    // nothing is left out at all; else the song left on main and Local History's read unless their own file was the one
+    // damaged. And it never loops or crashes.
+    TemporaryFolder temporary;
+    const auto pristine = temporary.folder.getChildFile ("Pristine"), versions = temporary.folder.getChildFile ("Versions");
+    phazite::test::VersionsTime clock (1793800000000);
+    const auto mainRecord = pristine.getChildFile ("branches").getChildFile ("main").getChildFile ("fuzz-computer.xml");
+    juce::String kept, theirs, nothing, leftSong, snapshotSong;
+
+    {
+        phazite::VersionStore store (pristine, "fuzz-computer"), other (pristine, "other-computer");
+        auto song = phazite::createSong();
+        const auto track = phazite::ensureTracks (*song, 1)[0];
+        const auto write = [&song, track] (phazite::VersionStore& into, float volume, juce::StringArray parents)
+        {
+            phazite::setChannelVolume (*song, track, volume);
+            phazite::VersionRecord record;
+            record.parents = std::move (parents);
+            record.saved = 1793800000000;
+            const auto id = into.writeVersion (record, phazite::splitSong (song->getState()));
+            REQUIRE (id.isNotEmpty());
+            return id;
+        };
+
+        const auto keep = [&song, track, &store] (float volume)
+        {
+            phazite::setChannelVolume (*song, track, volume);
+            const auto pieces = phazite::splitSong (song->getState());
+            REQUIRE (store.writeSong (pieces));
+            return pieces.song;
+        };
+
+        kept = write (store, -1.0f, {});
+        const auto undone = write (store, -2.0f, { kept });
+        theirs = write (other, -3.0f, { kept });
+        nothing = write (store, -4.0f, {}); // named by nothing
+        leftSong = keep (-5.0f);
+        snapshotSong = keep (-6.0f);
+
+        phazite::BranchRecord main;
+        main.id = "main";
+        main.name = "main";
+        main.head = kept;
+        main.computer = "fuzz-computer";
+        main.changed = 1793800000000;
+        main.working = leftSong;
+        REQUIRE (store.writeBranch (main));
+        main.computer = "other-computer";
+        main.head = theirs;
+        main.working = {};
+        REQUIRE (other.writeBranch (main));
+        REQUIRE (store.logBranchMove ("main", undone, kept, "undo", "main"));
+        REQUIRE (other.logBranchMove ("idea", theirs, {}, "delete", "idea", leftSong));
+        REQUIRE (store.writeMessage (undone, { "Undone", {}, 1793800000000 }));
+        store.getPieces().closeFiles();
+        other.getPieces().closeFiles();
+    }
+
+    // A month on, swept a week before, Local History's snapshot of a minute ago.
+    clock.addDays (31.0);
+
+    {
+        phazite::VersionStore store (pristine, "fuzz-computer");
+        REQUIRE (store.writeSnapshots ({ { clock.get() - 60000, "main", snapshotSong, "auto" } }));
+        REQUIRE (store.writeSwept ({ clock.get() - 7LL * 24 * 60 * 60 * 1000, {} }));
+    }
+
+    REQUIRE (mainRecord.existsAsFile());
+    juce::StringArray files;
+
+    for (const auto& file : pristine.findChildFiles (juce::File::findFiles, true))
+        if (! file.hasFileExtension ("pack") && file != mainRecord)
+            files.add (file.getRelativePathFrom (pristine));
+
+    REQUIRE (files.size() >= 6);
+
+    fuzz::runRounds ("version sweeps", 100,
+                     [&] (fuzz::Mutator& mutator, juce::MemoryBlock& fed) -> std::string
+                     {
+                         versions.deleteRecursively();
+                         REQUIRE (pristine.copyDirectoryTo (versions));
+                         const auto file = versions.getChildFile (files[mutator.random.nextInt (files.size())]);
+                         fed = mutator.mutate (readBytes (file), file.hasFileExtension ("xml") ? fuzz::Shape::xml : fuzz::Shape::bytes);
+                         file.replaceWithData (fed.getData(), fed.getSize());
+
+                         phazite::VersionStore store (versions, "fuzz-computer");
+                         const auto whole = store.areRecordsWhole();
+                         phazite::sweepStore (store, {}, 50, [] { return false; }, true);
+
+                         const auto readsVersion = [&store] (const juce::String& id)
+                         {
+                             const auto version = store.readVersion (id);
+                             return version.has_value() && store.readSong (version->song).isValid();
+                         };
+
+                         std::vector<std::string> problems;
+
+                         if (! readsVersion (kept))
+                             problems.push_back ("main's last version can't be read after the sweep");
+
+                         if (! readsVersion (theirs))
+                             problems.push_back ("another computer's version can't be read after the sweep");
+
+                         if (! whole && ! readsVersion (nothing))
+                             problems.push_back ("a file that names something didn't read whole, yet the sweep left something out");
+
+                         if ((! whole || file.getFileName() != "working.xml") && ! store.readSong (leftSong).isValid())
+                             problems.push_back ("the song left on main can't be read after the sweep");
+
+                         if ((! whole || file.getFileName() != "history") && ! store.readSong (snapshotSong).isValid())
+                             problems.push_back ("Local History's song can't be read after the sweep");
+
+                         store.getPieces().closeFiles();
+                         return fuzz::joinProblems (problems);
+                     });
+}
 TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, and the song holds together through Cancel Merge")
 {
     // A real merge waiting, its element (Schema.h: MERGING) as Phazite writes it, and one whose song before it names a

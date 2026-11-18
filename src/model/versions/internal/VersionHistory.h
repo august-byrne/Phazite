@@ -8,6 +8,7 @@
 
 #include "SongDiff.h"
 #include "SongMerge.h"
+#include "StoreSweep.h"
 #include "VersionStore.h"
 #include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
@@ -41,8 +42,8 @@ struct VersionsAudioFound
     bool stopped = false;
 };
 
-// The key of what names the versions' audio in a store: how many pieces it holds, its kept songs and its branches' last
-// commits. Any thread.
+// The key of what names the versions' audio in a store: its packs' names, its kept songs and its branches' last versions,
+// read without waiting for a join under way. Any thread.
 juce::String findVersionsAudioKey (VersionStore&);
 
 class VersionHistory : private juce::ValueTree::Listener,
@@ -64,7 +65,8 @@ public:
 
     // Waits until the history's thread has done what it was given (a version written, the store read), so that the Versions
     // folder can be copied whole and nothing is written into the old one after it: before a new project's first save moves
-    // it, and before Save As copies it. What the thread did still reaches the message thread later. Message thread.
+    // it, and before Save As copies it. A sweep under way and Verify History stop first, rather than be waited for. What the
+    // thread did still reaches the message thread later. Message thread.
     void waitForThread() const;
 
     // A first save's copy of the history's folder as the project moves (Project::moveTo(), VersionsCopier): run as a job of
@@ -133,24 +135,89 @@ public:
     std::vector<MissingPiece> restoreMissing;
     juce::String restoreRefused;
 
-    // Verify History (git's fsck): every piece of every pack read and checked against its name, every commit's song walked
-    // piece by piece, and the commits found in the packs that no branch's line holds. On the history's thread; done is told
-    // on the message thread, and the report kept for the Versions view until the next check.
+    // Verify History (git's fsck): every piece of every pack read and checked against its name, every version's song walked
+    // piece by piece, and so every song kept without a version (Local History's, those left on branches: VersionStore::
+    // findKeptSongs()); every version's audio files checked against its record (there, of the size and the SHA-256 it
+    // recorded), each file read once however many versions name it; and the versions found in the packs that no branch's
+    // line holds. On the history's thread, how far it has come (from 0 to 1: the audio by its bytes, which take the time)
+    // told meanwhile, and cancelCheck() stopping it between pieces and between files; done is told on the message thread,
+    // and the report kept for the Versions view until the next check.
+    struct AudioProblem
+    {
+        enum class Kind
+        {
+            missing,      // no file at its path
+            otherSize,    // a file of another size
+            otherContent, // of its size, but not what it held (changed in place)
+            unreadable    // there, but it can't be read (another program holds it, a disk error)
+        };
+
+        juce::String path;
+        Kind kind = Kind::missing;
+    };
+
+    struct DamagedSong
+    {
+        KeptSong song;
+        std::vector<MissingPiece> missing; // what of it can't be read; its own piece alone, where none of it can
+    };
+
     struct Check
     {
-        int numPieces = 0, numVersions = 0;
-        juce::StringArray damagedPieces;                           // in a pack, but not what their names say
-        std::map<juce::String, std::vector<MissingPiece>> damaged; // by version: what of its song can't be read
-        std::vector<VersionRecord> lost;                           // commits no branch's line holds, newest first
+        int numPieces = 0, numVersions = 0, numSongs = 0, numAudioFiles = 0;
+        juce::StringArray damagedPieces;                             // in a pack, but not what their names say
+        std::map<juce::String, std::vector<MissingPiece>> damaged;   // by version: what of its song can't be read
+        std::map<juce::String, std::vector<AudioProblem>> audio;     // by version: its audio files that aren't as it recorded
+        std::vector<DamagedSong> damagedSongs;                       // songs kept without a version that can't be read whole
+        std::map<juce::String, juce::StringArray> unreadableParents; // by version: the versions it follows that can't be read
+        std::vector<VersionRecord> lost;                             // versions no branch's line holds, newest first
+        bool stopped = false;                                        // cancelled before it was done: none of it is sure
     };
 
     bool checkHistory (std::function<void()> done = {});
     bool isChecking() const noexcept { return checking; }
+    float getCheckProgress() const noexcept { return checkProgress->load(); }
+    void cancelCheck() { checkCancelled->store (true); }
     const std::optional<Check>& getLastCheck() const noexcept { return lastCheck; }
 
-    // The lost commits the last check found, each line of them made a branch of its own at its newest commit (named after
-    // the branch they were made on, "main (recovered)", or "recovered" for one this history doesn't know): how many branches.
-    int recoverLostVersions();
+    // Why the store's sweep as the history opened left nothing out (StoreSweep.h: a file or a piece it needs can't be read),
+    // which the view says where Verify History says what it found; none while it was sure.
+    const juce::String& getSweepProblem() const noexcept { return sweepProblem; }
+
+    // Every version the history shows (and those Recover Lost Versions offers), the merge waiting in the song and the songs
+    // the branches name as left on them, made this computer's own (StoreSweep.h: adoptVersions()), on the history's thread,
+    // a batch a job: as the history opens and after each command that starts naming one (a save on top, a merge put into the
+    // song, a branch made, a switch, a recovery, a reset, an undo). Only while the sweep lets go (StoreSweep.h:
+    // doesSweepLetGo()): with nothing deleted there is nothing to protect. Stops with the sweep (stopHousekeeping()). What
+    // couldn't be copied, said where the sweep's problem is (none while all was); and, for tests, while set, the copy as the
+    // history opens left out, so that a command's own is seen.
+    void adoptLater();
+    const juce::String& getAdoptionProblem() const noexcept { return adoptionProblem; }
+    static std::atomic<bool> noAdoptionAtOpenForTests;
+
+    // What Recover Lost Versions lists (docs/design/versions.md: Keeping the history whole): each line of versions that left
+    // every branch within the last 30 days (keptByAge::dailyFor), by every computer's logs (Undo Last Version, Delete Branch,
+    // Reset Branch to Last Readable Version), with when and why; a deleted branch's song left on it, which comes back with it,
+    // even where every version of it is on another branch; and the lines the last check found that no log names (a record
+    // damaged, another computer's whose log hasn't arrived), as found by the check. Newest first.
+    struct LostLine
+    {
+        juce::String key;           // what names it among the lines: its last version and its song
+        juce::String head;          // its last version
+        juce::String branch;        // the branch it was on: its name then, none if no log names it
+        juce::String why;           // what took it off: "undo", "delete", "reset", another move's; "found" by the check
+        juce::int64 time = 0;       // when, milliseconds since 1970 (for one the check found, its last version's)
+        juce::String song;          // the song left on the deleted branch, none for none
+        juce::StringArray versions; // its versions no branch holds, newest first
+        juce::String name;          // what its last version is called (getDisplayName(), as its message was edited)
+    };
+
+    std::vector<LostLine> getLostLines() const;
+
+    // A line brought back as a branch at its last version, named after the branch it was on ("main (recovered)", or
+    // "recovered"), with the song left on it as the branch's (so that switching to it gives the song as it was left), its
+    // versions in the history again: the branch's id, or none if it can't be.
+    juce::String recoverLine (const juce::String& key);
     const juce::ValueTree& getLastVersionSong() const noexcept { return baseline; }
 
     // A current branch whose last commit can't be read as the history opened (a piece of it damaged or missing): said, with
@@ -184,8 +251,9 @@ public:
 
     // A finder of the audio files the versions still play (model/project/UnusedAudio.h), for another thread (a background
     // job's), which looks until shouldStop says it should stop: their paths as the songs hold them (findAudioFilePaths()),
-    // each once, of every commit in the store's packs, those no branch holds too (Recover Lost Commits brings them back);
-    // of every computer's songs left on branches and in Local History; and of the songs before the merges those and the
+    // each once, of every version in the store's packs, those no branch holds too (Recover Lost Versions brings them back
+    // until the sweep lets them go: StoreSweep.h); of every computer's songs left on branches, in Local History (as thinned)
+    // and left on branches deleted within 30 days; and of the songs before the merges those and the
     // song hold, which Abort Merge brings back; with what of them can't be read whole (VersionsAudioFound). What each piece
     // read whole names is kept, as a piece never changes, so that only what came since is read again. None for a song
     // that keeps no versions. And what names them, cheaply (findVersionsAudioKey(), message thread): another key than a
@@ -241,12 +309,15 @@ public:
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
 
-    // Delete Branch (git branch -D): a branch but the current one, and the song left on it, gone; its commits that no other
-    // branch holds go from the graph and stay in the store, where Verify History finds them and Recover Lost Commits brings
-    // them back. Its record says so (Schema.h: branchDeleted), so that every computer leaves it out, until commits made on it
-    // elsewhere since bring it back. Not while a merge of its line is under way. And what deleting one would take with it:
-    // how many commits no other branch holds, and whether the song left there had changes since its last commit.
-    bool deleteBranch (const juce::String& branchID);
+    // Delete Branch (git branch -D): a branch but the current one, and the song left on it, gone from the history; its
+    // versions that no other branch holds, and the song left on it, stay in the store for 30 days, which this computer's log
+    // says with the branch's name, and Recover Lost Versions brings the branch back with them meanwhile. Its record says so
+    // (Schema.h: branchDeleted), so that every computer leaves it out, until versions made on it elsewhere since bring it back.
+    // Not while a merge of its line is under way. A branch a command made and takes away again as it didn't finish
+    // (takenBack: Create Branch from a version, an import of a DAWproject, cancelled) leaves nothing to recover. And what
+    // deleting one would take with it: how many versions no other branch holds, and whether the song left there had changes
+    // since its last version.
+    bool deleteBranch (const juce::String& branchID, bool takenBack = false);
     int countVersionsOnlyOn (const juce::String& branchID) const;
     enum class LeftSong
     {
@@ -487,6 +558,14 @@ private:
     std::shared_ptr<VersionsAudio> audioPaths; // what each piece names of audio (makeAudioPathsFinder())
     bool hasRead = false, saving = false, checking = false;
     std::optional<Check> lastCheck;
+    std::shared_ptr<std::atomic<float>> checkProgress = std::make_shared<std::atomic<float>> (0.0f);
+    std::shared_ptr<std::atomic<bool>> checkCancelled = std::make_shared<std::atomic<bool>> (false);
+    float checkProgressTold = 0.0f;
+
+    // Housekeeping stopped before anything waits for the history's thread (waitForThread(), copyFolder()): the sweep as the
+    // store opens (StoreSweep.h), which changes nothing then and runs at a later open, and Verify History.
+    std::shared_ptr<std::atomic<bool>> sweepStopped = std::make_shared<std::atomic<bool>> (false);
+    void stopHousekeeping() const;
 
     std::vector<BranchRecord> branches;
     juce::String currentBranch; // its id
@@ -548,8 +627,29 @@ private:
     std::map<juce::String, LeftSong> changesLeft;
     std::set<juce::String> changesLeftBeingRead;
 
-    // The versions no branch's line holds any more (a branch deleted, a commit undone) let go of: they stay in the store.
+    // The versions no branch's line holds any more (a branch deleted, a version undone) let go of from the history, kept
+    // among those that left (departed), which Recover Lost Versions lists: they stay in the store for 30 days.
     void forgetUnreachable();
+
+    // What left every branch: the records of the versions no branch holds that left within 30 days, read as the history
+    // opened or kept as they left since; and every computer's logs' moves of the last 30 days, this computer's since too.
+    std::map<juce::String, VersionRecord> departed;
+    std::vector<BranchMove> recentMoves;
+
+    // The time what the history writes now is stamped with (VersionStore::stamp()).
+    juce::int64 stampNow() const;
+
+    // A round of adoptLater()'s copy, a batch a job on the history's thread, and what came of it on the message thread: the
+    // versions and songs that couldn't be copied whole aren't tried again until the history opens again, and are said.
+    void adoptRound (Adoption);
+    void adoptionDone (Adoption left, const Adopted&);
+    bool adoptionQueued = false, adoptAgain = false;
+    std::set<juce::String> adoptionFailed;
+    juce::String sweepProblem, adoptionProblem;
+
+    // A move of a branch's last version, written into this computer's log and kept among the recent moves.
+    void logMove (const juce::String& branchID, const juce::String& from, const juce::String& to, const juce::String& why,
+                  const juce::String& name, const juce::String& leftSong = {});
 
     // The branches whose last commits couldn't be read as the history opened (getHeadProblem()), by their ids: that commit,
     // and the newest commit of the branch's log that reads (none for none).
@@ -561,10 +661,9 @@ private:
     std::map<juce::String, UnreadableHead> unreadableHeads;
     juce::StringArray getOfferedCommits() const; // the readable ones, which the graph keeps
 
-    void open(); // the store beside the song's file, read on the history's thread
-    void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,
-                 const juce::ValueTree& head, PluginParameterValues, std::map<juce::String, MessageEdit>, std::vector<Snapshot>,
-                 std::optional<std::pair<juce::String, Merge>> mergeRead, std::map<juce::String, UnreadableHead>);
+    void open();   // the store beside the song's file, read on the history's thread
+    struct Opened; // what the history's thread read as it opened
+    void opened (int generation, Opened);
 
     // The merge the song's element says, found again (getMerging()): whether it must be, and those found, by the element
     // each was found from (its text but for the choices), a few, with why it doesn't wait as taken; those being read on the

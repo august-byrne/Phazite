@@ -219,6 +219,67 @@ TEST_CASE ("Clean Up keeps the audio that Local History, and the versions Recove
     CHECK (phazite::findAudioFilePaths (snapshot).contains ("Audio/Snapshotted.wav"));
 }
 
+TEST_CASE (
+    "Clean Up follows the versions' 30 days: what an undone version and a deleted branch's song play is kept, then offered once they went")
+{
+    // Clean Up keeps the audio of every version the store still holds, and of the songs kept without a version as the rule
+    // keeps them (Local History thinned, a deleted branch's song for 30 days): never less than Recover Lost Versions can
+    // bring back, so that no recoverable version finds its audio deleted; and once the sweep let a version go, its audio is
+    // offered. With the sweep letting go (off in the product: then nothing is offered, as the store keeps every version).
+    phazite::test::SweepLetsGo letGo;
+    VersionsTime clock (juce::Time::currentTimeMillis());
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    auto& project = s.getProject();
+    keepVersion (s.context, "Before");
+
+    // Left on a branch that is then deleted.
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, {}, s.save); }));
+    s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Tried.wav"), 0.5), 0.0);
+    REQUIRE (
+        phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save); }));
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (phazite::deleteBranch (s.context, findBranch (s.context, "idea-2")));
+
+    // In a version that was undone, the clip taken out after.
+    const auto undone = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Undone.wav"), 0.5), 0.0);
+    keepVersion (s.context, "Undone");
+    REQUIRE (phazite::test::finished (s.context, [&] { return phazite::undoLastCommit (s.context); }));
+    s.select (undone);
+    s.run ("edit.delete");
+    REQUIRE (project.save().wasOk());
+    project.getFolder().getChildFile ("Backups").deleteRecursively();
+
+    REQUIRE (phazite::getLostVersions (s.context).size() == 2);
+    CHECK (getNames (lookForUnused (s.context)).isEmpty());
+
+    // Five weeks on, the project opened once a week and its store swept: nothing can bring them back, and their audio is
+    // offered.
+    openEachWeek (s, clock, 35.0);
+    REQUIRE (phazite::getLostVersions (s.context).empty());
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Tried.wav", "Audio/Undone.wav"));
+}
+
+TEST_CASE ("Clean Up offers nothing while a version a log names from the last 30 days can't be read")
+{
+    // Another computer undid a version whose pack hasn't arrived here (or is held as the store opens): what it plays is
+    // unknown, and Recover Lost Versions may bring it back once it can be read.
+    TestSong s;
+    s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    writeSound (s.getProject().getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+
+    {
+        phazite::VersionStore elsewhere (phazite::getVersionsFolder (*phazite::findSong (s.context)), "computer-b");
+        REQUIRE (elsewhere.logBranchMove ("their-branch", juce::String::repeatedString ("d", 64), {}, "undo", "theirs"));
+    }
+
+    const auto found = lookForUnused (s.context);
+    CHECK (found.files.empty());
+    CHECK_FALSE (found.unreadable.isEmpty());
+}
+
 TEST_CASE ("Clean Up offers nothing while a song another computer kept can't be read whole, and offers again once its pieces arrive")
 {
     // The review of known bug 61: computer B records Take.wav and leaves it on a branch; the take and B's working.xml reach
@@ -308,6 +369,86 @@ TEST_CASE ("Clean Up offers nothing while a commit's pack can't be opened, and d
     CHECK (getNames (found).isEmpty());
     CHECK (deleteUnused (s.context, { committed }) == 0);
     CHECK (committed.existsAsFile());
+}
+
+TEST_CASE ("Clean Up offers nothing while a snapshot another computer took can't be read, its pack not arrived")
+{
+    // Computer B records Take.wav and a snapshot of its Local History holds it; B deletes the clip. B's history file and the
+    // take reach this computer before B's pack does: the take must not be offered.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    auto& song = *phazite::findSong (s.context);
+    const auto take = s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile ("Take.wav"), 0.5), 0.0);
+    const auto theirs = phazite::splitSong (song.getState().createCopy());
+    s.select (take);
+    s.run ("edit.delete");
+    REQUIRE (s.getProject().save().wasOk());
+    s.getProject().getFolder().getChildFile ("Backups").deleteRecursively();
+    writeSound (s.getProject().getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    REQUIRE (waitForVersionHistory (s.context));
+
+    phazite::VersionStore other (s.getProject().getFolder().getChildFile ("Versions"), "computer-b");
+    REQUIRE (
+        other.writeSnapshots ({ { juce::Time::currentTimeMillis(), phazite::getCurrentBranch (s.context)->id, theirs.song, "auto" } }));
+
+    const auto takeFile = s.getProject().getAudioFolder().getChildFile ("Take.wav");
+    auto found = lookForUnused (s.context);
+    CHECK (found.files.empty());
+    CHECK_FALSE (found.unreadable.isEmpty());
+    CHECK (deleteUnused (s.context, { takeFile }) == 0);
+    CHECK (takeFile.existsAsFile());
+
+    // B's pack arrives: the snapshot read whole, the take is in use, the old take isn't.
+    REQUIRE (other.writeSong (theirs));
+    found = lookForUnused (s.context);
+    CHECK (found.unreadable.isEmpty());
+    CHECK (getNames (found) == juce::StringArray ("Audio/Old take.wav"));
+}
+
+TEST_CASE ("Clean Up offers nothing while the Versions folder holds a pack the store can't read: held, or damaged")
+{
+    TestSong s;
+    s.addTrack ("Audio");
+    keepVersion (s.context, "Before");
+    writeSound (s.getProject().getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    REQUIRE (waitForVersionHistory (s.context));
+    CHECK (getNames (lookForUnused (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+    const auto pieces = s.getProject().getFolder().getChildFile ("Versions").getChildFile ("pieces");
+
+    SUBCASE ("Another computer's pack, held by another program as the store reads it")
+    {
+        const auto before = pieces.findChildFiles (juce::File::findFiles, false, "*.pack");
+
+        {
+            phazite::VersionStore other (s.getProject().getFolder().getChildFile ("Versions"), "computer-b");
+            auto song = phazite::findSong (s.context)->getState().createCopy();
+            song.setProperty ("madeOnB", true, nullptr);
+            REQUIRE (other.writeSong (phazite::splitSong (song)));
+            other.getPieces().closeFiles();
+        }
+
+        auto packs = pieces.findChildFiles (juce::File::findFiles, false, "*.pack");
+        packs.removeValuesIn (before);
+        REQUIRE (packs.size() == 1);
+        const HeldFile held (packs[0]);
+
+        if (held.works())
+        {
+            const auto found = lookForUnused (s.context);
+            CHECK (found.files.empty());
+            CHECK_FALSE (found.unreadable.isEmpty());
+        }
+    }
+
+    SUBCASE ("A pack whose trailer is damaged")
+    {
+        REQUIRE (
+            pieces.getChildFile (juce::String::repeatedString ("0", 64) + ".pack").replaceWithText ("PZPK and nothing a pack ends with"));
+        const auto found = lookForUnused (s.context);
+        CHECK (found.files.empty());
+        CHECK_FALSE (found.unreadable.isEmpty());
+    }
 }
 
 TEST_CASE ("Clean Up reads nothing of the versions on the message thread, however many snapshots Local History keeps")

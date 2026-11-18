@@ -805,14 +805,19 @@ TEST_CASE ("Verify History finds the versions no branch holds and what is damage
         REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }));
     };
 
+    // No log names it: only the check finds it, and Recover Lost Versions lists it as found by the check.
+    CHECK (phazite::getLostVersions (s.context).empty());
     verify();
     CHECK (phazite::describeHistoryCheck (s.context).contains ("all whole"));
-    CHECK (phazite::countLostVersions (s.context) == 1);
+    const auto lost = phazite::getLostVersions (s.context);
+    REQUIRE (lost.size() == 1);
+    CHECK (lost[0].why == "found");
+    CHECK (lost[0].lastName == "Lost");
     CHECK (phazite::describeHistoryCheck (s.context).contains ("Recover Lost Versions"));
 
     // Recovered: a branch at it, named after the branch it was made on.
-    CHECK (phazite::recoverLostVersions (s.context) == 1);
-    CHECK (phazite::countLostVersions (s.context) == 0);
+    CHECK (phazite::recoverLostVersions (s.context, lost[0].key).isNotEmpty());
+    CHECK (phazite::getLostVersions (s.context).empty());
     const auto branches = phazite::getBranches (s.context);
     CHECK (std::any_of (branches.begin(), branches.end(), [&lostID] (const phazite::BranchInfo& branch)
                         { return branch.name == "main (recovered)" && branch.head == lostID; }));
@@ -952,10 +957,12 @@ TEST_CASE ("Undo Last Version takes the last version off its branch, leaves the 
         CHECK (reread.findVersion (quieter) == nullptr);
     }
 
-    // The version is still in the store: Verify History finds it, for Recover Lost Versions.
-    REQUIRE (phazite::verifyHistory (s.context));
-    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, versionHistoryTimeout));
-    CHECK (phazite::countLostVersions (s.context) == 1);
+    // The version is still in the store, and Recover Lost Versions lists it as undone.
+    const auto lost = phazite::getLostVersions (s.context);
+    REQUIRE (lost.size() == 1);
+    CHECK (lost[0].why == "undo");
+    CHECK (lost[0].lastName == "Quieter");
+    CHECK (lost[0].numVersions == 1);
 
     // Discard Changes after it: the line what First has, one undo step.
     {

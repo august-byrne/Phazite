@@ -26,6 +26,7 @@
 #include "model/versions/internal/VersionStore.h"
 
 #include <atomic>
+#include <cstring>
 #include <memory>
 #include <thread>
 
@@ -97,13 +98,40 @@ void damageFirstPiece (const juce::File& pack)
     REQUIRE (pack.replaceWithData (bytes.getData(), bytes.getSize()));
 }
 
-// Every piece of a pack damaged, its index left as it is (PieceStore.h: where it starts is 12 bytes from its end).
+// One piece of a pack, by its name, damaged in its bytes, its index left as it is (PieceStore.h: each entry 56 bytes, its
+// name first and where the piece starts after it; where the index starts 28 bytes from the pack's end).
+void damagePiece (const juce::File& pack, const juce::String& name)
+{
+    juce::MemoryBlock bytes, wanted;
+    REQUIRE (pack.loadFileAsData (bytes));
+    wanted.loadFromHexString (name);
+    const auto* data = static_cast<const char*> (bytes.getData());
+    const auto count = (size_t) juce::ByteOrder::littleEndianInt (data + bytes.getSize() - 32);
+    const auto indexStart = (size_t) juce::ByteOrder::littleEndianInt64 (data + bytes.getSize() - 28);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto* entry = data + indexStart + i * 56;
+
+        if (std::memcmp (entry, wanted.getData(), 32) == 0)
+        {
+            const auto start = (size_t) juce::ByteOrder::littleEndianInt64 (entry + 32);
+            bytes[start + 2] = (char) (bytes[start + 2] ^ 0x5a);
+            REQUIRE (pack.replaceWithData (bytes.getData(), bytes.getSize()));
+            return;
+        }
+    }
+
+    FAIL ("the pack doesn't hold that piece");
+}
+
+// Every piece of a pack damaged, its index left as it is (PieceStore.h: where it starts is 28 bytes from its end).
 void damageEveryPiece (const juce::File& pack)
 {
     juce::MemoryBlock bytes;
     REQUIRE (pack.loadFileAsData (bytes));
-    REQUIRE (bytes.getSize() > 16);
-    const auto indexStart = (size_t) juce::ByteOrder::littleEndianInt64 (static_cast<const char*> (bytes.getData()) + bytes.getSize() - 12);
+    REQUIRE (bytes.getSize() > 32);
+    const auto indexStart = (size_t) juce::ByteOrder::littleEndianInt64 (static_cast<const char*> (bytes.getData()) + bytes.getSize() - 28);
     REQUIRE (indexStart <= bytes.getSize());
 
     for (size_t i = 4; i < indexStart; ++i)
@@ -596,7 +624,7 @@ TEST_CASE ("A piece damaged in one pack is read from another that holds it, and 
 
         auto copied = folder.findChildFiles (juce::File::findFiles, false, "*.pack");
         copied.sort();
-        damageFirstPiece (copied[0]); // the first by name, whose entries the index takes first
+        damagePiece (copied[0], name); // in the first by name, whose entries the index takes first
 
         const phazite::PieceStore store (folder);
         const auto read = store.read (name);

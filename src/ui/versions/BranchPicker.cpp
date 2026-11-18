@@ -56,6 +56,8 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
                 return { "Delete a branch", "Select a branch to delete" };
             case Mode::message:
                 return { "Rename the version", "The version's name" };
+            case Mode::recover:
+                return { "Recover lost versions", "Select what to bring back as a branch" };
             case Mode::pick:
             default:
                 return { "Branches", "Select a branch to switch to, or type a new branch's name" };
@@ -191,7 +193,7 @@ void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
         const auto head = std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
         const auto last =
             head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now) : juce::String ("no versions yet");
-        Row row { kind, branch, branch.name, last, false, true };
+        Row row { kind, branch, branch.name, last, false, true, {} };
 
         if (kind == Row::Kind::merge)
         {
@@ -206,6 +208,60 @@ void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
         }
 
         rows.push_back (std::move (row));
+    }
+}
+
+juce::String BranchPicker::describeOn (juce::Time when, juce::Time now)
+{
+    // As the history says when a version was saved: within the hour and the day as how long ago; within the week its day;
+    // else its date.
+    const auto said = VersionsView::describeWhen (when, now);
+    const auto elapsed = now - when;
+
+    if (elapsed.inMinutes() < 1.0)
+        return "just now";
+
+    return elapsed.inHours() < 24.0 ? said + " ago" : "on " + said;
+}
+
+juce::String BranchPicker::describeLost (const LostVersionsInfo& lost, juce::Time now)
+{
+    const auto on = describeOn (lost.time, now);
+    const auto versionsToo = lost.numVersions > 1 ? ", " + juce::String (lost.numVersions) + " versions" : juce::String();
+
+    if (lost.why == "delete")
+        return "On " + (lost.branch.isNotEmpty() ? lost.branch : juce::String ("a branch")) + ", deleted " + on + versionsToo
+               + (lost.withSong ? juce::String (", with the changes left on it") : juce::String());
+
+    if (lost.why == "undo")
+        return "Undone " + on + (lost.branch.isNotEmpty() ? ", from " + lost.branch : juce::String()) + versionsToo;
+
+    if (lost.why == "reset")
+        return "Reset away " + on + (lost.branch.isNotEmpty() ? ", from " + lost.branch : juce::String()) + versionsToo;
+
+    if (lost.why == "found")
+        return "Found by Verify History" + (lost.branch.isNotEmpty() ? ", from " + lost.branch : juce::String()) + versionsToo;
+
+    return "Left " + (lost.branch.isNotEmpty() ? lost.branch : juce::String ("its branch")) + " " + on + versionsToo;
+}
+
+void BranchPicker::addLostRows (const juce::String& typed)
+{
+    // Each line that can come back, newest first: its last version's name (or, for a deleted branch's song alone, the
+    // branch's), and when and why it left.
+    const auto now = juce::Time::getCurrentTime();
+
+    for (const auto& lost : getLostVersions (context))
+    {
+        Row row;
+        row.kind = Row::Kind::recover;
+        row.lost = lost.key;
+        row.name = lost.numVersions > 0 || lost.lastName.isEmpty() ? lost.lastName : "Changes left on " + lost.branch;
+        row.about = describeLost (lost, now);
+        row.branch.colour = getPalette (*this).textMuted;
+
+        if (typed.isEmpty() || row.name.containsIgnoreCase (typed) || row.about.containsIgnoreCase (typed))
+            rows.push_back (std::move (row));
     }
 }
 
@@ -234,7 +290,7 @@ void BranchPicker::updateRows()
         // The one row: the name kept, as typed (an empty first line leaves the version named by what it changed).
         const auto versions = getVersions (context);
         const auto exists = std::any_of (versions.begin(), versions.end(), [this] (const VersionInfo& info) { return info.id == version; });
-        Row row { Row::Kind::message, {}, "Rename the version", {}, false, exists };
+        Row row { Row::Kind::message, {}, "Rename the version", {}, false, exists, {} };
         row.about = formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
                         .replace ("Return", "Enter");
         rows.push_back (std::move (row));
@@ -248,7 +304,7 @@ void BranchPicker::updateRows()
         if (current.has_value())
         {
             const auto taken = isTaken (current->id);
-            Row row { Row::Kind::rename, *current, {}, {}, false, name.isNotEmpty() && ! taken && name != current->name };
+            Row row { Row::Kind::rename, *current, {}, {}, false, name.isNotEmpty() && ! taken && name != current->name, {} };
             row.name = name.isEmpty() ? juce::String ("Type the branch's new name") : "Rename '" + current->name + "' to '" + name + "'";
             row.about = taken ? juce::String ("another branch has that name") : juce::String();
             rows.push_back (std::move (row));
@@ -258,9 +314,12 @@ void BranchPicker::updateRows()
         return;
     }
 
-    if (mode == Mode::merge || mode == Mode::remove)
+    if (mode == Mode::merge || mode == Mode::remove || mode == Mode::recover)
     {
-        addBranchRows (mode == Mode::merge ? Row::Kind::merge : Row::Kind::remove, typed);
+        if (mode == Mode::recover)
+            addLostRows (typed);
+        else
+            addBranchRows (mode == Mode::merge ? Row::Kind::merge : Row::Kind::remove, typed);
 
         // Enter takes the first one that can be.
         const auto first = std::find_if (rows.begin(), rows.end(), [] (const Row& row) { return row.enabled; });
@@ -274,7 +333,7 @@ void BranchPicker::updateRows()
     {
         const auto last = getLastVersion (context);
         Row row {
-            Row::Kind::newBranch, {}, {}, {}, false, last.has_value() && ! isSavingVersion (context) && ! isReadingVersions (context)
+            Row::Kind::newBranch, {}, {}, {}, false, last.has_value() && ! isSavingVersion (context) && ! isReadingVersions (context), {}
         };
         row.name = name.isEmpty() ? juce::String ("Create new branch...") : "Create new branch '" + name + "'";
         row.about = last.has_value() ? juce::String ("from the song as it is, with its changes") : juce::String ("no version yet");
@@ -295,7 +354,7 @@ void BranchPicker::updateRows()
             continue;
 
         const auto isCurrent = current.has_value() && branch.id == current->id;
-        Row row { Row::Kind::branch, branch, branch.name, {}, isCurrent, isCurrent || canSwitchBranch (context) };
+        Row row { Row::Kind::branch, branch, branch.name, {}, isCurrent, isCurrent || canSwitchBranch (context), {} };
 
         if (isCurrent)
         {
@@ -411,6 +470,10 @@ void BranchPicker::choose (int index)
                     // Its first line the name, the lines after it the note.
                     editVersionMessage (projectContext, renamed, message.upToFirstOccurrenceOf ("\n", false, false).trim(),
                                         message.fromFirstOccurrenceOf ("\n", false, false).trim());
+                    break;
+
+                case Row::Kind::recover:
+                    recoverLostVersions (projectContext, row.lost);
                     break;
             }
         });

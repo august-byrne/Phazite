@@ -48,6 +48,46 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   commit or carries the old-to-new map through `joinSong()` so that the plug-ins' parameter values, kept by device
   ID, follow. About a day, with tests. Found by the reviews of the loader's IDs (2026-11-16); never seen, and no file
   Phazite wrote from a project of its own can reach it.
+- **196. The versions' store lets go of nothing yet: a project's `Versions` folder only grows.** An undone version, a
+  deleted branch's versions and the song left on it, the snapshots Local History no longer lists, and their bounces and
+  edited messages keep their room for ever. Recover Lost Versions stops offering them after 30 days, and the room the
+  Project view shows never falls but by Delete Bounce. The weekly sweep runs (it walks what is named, says when it can't
+  be sure, and joins this computer's packs by size, so their count stays small), but its letting go is off in the
+  product (`sweepLetsGo` in `src/model/versions/internal/StoreSweep.h`; the tests turn it on with `SweepLetsGo`). Why:
+  three reviews of S4.4 each found a way for the letting go to lose work that two computers sharing a folder need, and
+  the copying that should stop it isn't sound yet:
+  - a song recovered from another computer's log, named only in this computer's records, was never copied into this
+    computer's packs, so the other computer's sweep could take it (the copy now takes the songs the branches name and
+    the merges whole songs hold, but nothing proves the list of what a computer names is complete);
+  - two computers: before either may delete a piece of its own, every version and song the other's history names must
+    be in the other's own packs, and that must hold for every command that starts naming one, on both computers,
+    whatever has arrived through the sync;
+  - one computer id on two machines (a settings folder carried by a roaming profile or a restored backup) makes the two
+    one writer, so one's sweep deletes what the other needs; binding the id to the machine gave every existing install
+    a new id at its first run (and again after a CPU swap on Windows, or a BIOS update on Linux), which hides the songs
+    left on branches and Local History filed under the old one;
+  - the first copy is the size of a whole history: it must never make a save or Save As wait behind it on the message
+    thread;
+  - a clock once set ahead keeps this computer's stamps ahead until real time passes them (the stamps' floor is never
+    lowered, so that a clock set back can't make new work look old): new versions show as saved "now" for as long, and
+    Local History isn't thinned meanwhile; the letting go, which goes by the stamps, must decide how far it trusts a
+    stamp ahead of the clock (a version's shown time is its stamp);
+  - what a project's file, its autosave and its backups name as the version the song grew from
+    (`findVersionsNamedByProject()`) is not yet among what the sweep's walk takes as named.
+
+  To fix, the plan: let go only in a history that one computer alone has ever written to (every pack's writer, every
+  branch record, log and `local/` folder is this computer's), which takes the two-computer cases out by construction
+  and covers most projects; a history two computers share is not swept until collaboration is designed. That still
+  needs the list of what a computer's records name taken from one place that the walk uses, with a test for each
+  command that starts naming a version or a song; the rule for stamps ahead of the clock; what the project's file
+  names among the roots; and its own review. Found by the reviews of S4.3 and S4.4 (2026-11-17).
+- **197. A history written by a build before S4.4 is not read.** The packs' layout changed (an entry holds when its piece
+  was written, a pack who wrote it, and a pack's name takes its writer in): a project whose `Versions` folder an earlier
+  build wrote lists its branches, but their versions and its Local History can't be read, and Clean Up Unused Audio
+  offers nothing while such a pack is in the folder. Nothing of the old history is deleted or written over, and the
+  song opens and saves versions as ever. Phazite keeps no backward compatibility yet, so this is as decided; it is
+  entered so that it is not a surprise. To fix, if the owner wants the old histories: a reader of the old layout that
+  writes each old pack again in the new one, once, as a history opens.
 
 ## Devices and playback
 
@@ -61,6 +101,13 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
+- **198. A sound file replaced on disk at the same path plays as first read** (found in S4.5's review, 2026-11-17; older than
+  it): a plan keeps a track's audio while its clips don't change, without asking the disk again, so a file replaced at
+  the same path (a DAWproject import unpacking over files the song plays; another program writing a file in `Audio/`
+  again) plays as it was first read until that track's clips change, and the plan's check of its audio asserts in a
+  debug build when a plan is compiled in between (`SongPlayer.cpp`, `checkAudio`). To fix: whatever replaces a played
+  file tells the player (a change marked for the tracks that play it), or kept files are looked at once a plan and the
+  track's audio made again when one changed.
 
 ## Tests
 

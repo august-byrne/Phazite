@@ -15,6 +15,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/StoreSweep.h"
 #include "model/versions/internal/VersionHistory.h"
 
 namespace phazite::test
@@ -451,5 +452,51 @@ namespace phazite::test
 void waitForVersionsWrites()
 {
     waitForVersionsFinished();
+}
+
+VersionsTime::VersionsTime (juce::int64 time)
+    : now (time)
+{
+    setVersionsTimeForTests (now);
+    setSweepFloorForTests (0);
+}
+
+VersionsTime::~VersionsTime()
+{
+    setVersionsTimeForTests (0);
+    setSweepFloorForTests (-1);
+}
+
+SweepLetsGo::SweepLetsGo()
+{
+    setSweepLetsGoForTests (true);
+}
+
+SweepLetsGo::~SweepLetsGo()
+{
+    setSweepLetsGoForTests (false);
+}
+
+void openEachWeek (TestSong& song, VersionsTime& clock, double days)
+{
+    while (days > 0.0)
+    {
+        const auto step = juce::jmin (7.0, days);
+        clock.addDays (step);
+        days -= step;
+        song.reopen();
+        REQUIRE (waitForVersionHistory (song.context));
+    }
+}
+
+void VersionsTime::set (juce::int64 time)
+{
+    now = time;
+    setVersionsTimeForTests (now);
+}
+
+void VersionsTime::addDays (double days)
+{
+    set (now + (juce::int64) (days * 24.0 * 60.0 * 60.0 * 1000.0));
 }
 } // namespace phazite::test

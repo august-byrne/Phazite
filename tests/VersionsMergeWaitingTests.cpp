@@ -10,6 +10,7 @@
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -20,13 +21,13 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
-#include "model/versions/internal/PieceStore.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
 
 #include <algorithm>
+#include <atomic>
 
 namespace
 {
@@ -636,40 +637,17 @@ TEST_CASE ("Cancel Merge keeps the song in Local History first, and makes it the
     }
 }
 
-namespace
-{
-// The pack the store would write a song's pieces it hasn't yet into, made a folder (with a file in it, so that it can't
-// be replaced either): the next write of those pieces fails, as a full or locked drive makes it.
-juce::File blockPackFor (const juce::ValueTree& song, const juce::File& versionsFolder, const juce::File& scratch)
-{
-    const phazite::PieceStore store (versionsFolder.getChildFile ("pieces"));
-    std::map<juce::String, juce::MemoryBlock> fresh;
-
-    for (const auto& [name, piece] : phazite::splitSong (song).pieces)
-        if (! store.read (name).has_value())
-            fresh.emplace (name, piece);
-
-    store.closeFiles();
-    REQUIRE_FALSE (fresh.empty());
-    phazite::PieceStore other (scratch);
-    REQUIRE (other.write (fresh));
-    other.closeFiles();
-    const auto packs = scratch.findChildFiles (juce::File::findFiles, false, "*.pack");
-    REQUIRE (packs.size() == 1);
-    const auto blocked = versionsFolder.getChildFile ("pieces").getChildFile (packs[0].getFileName());
-    REQUIRE (blocked.createDirectory());
-    REQUIRE (blocked.getChildFile ("held").replaceWithText ("held"));
-    return blocked;
-}
-} // namespace
-
 TEST_CASE ("A merge the store can't keep the song before takes nothing, its list stays, and the view says why")
 {
     WaitingMerge m;
     m.s.setVolume (m.drums, -3.0f); // so that the song before the merge has a piece the store hasn't
     REQUIRE (waitForVersionHistory (m.s.context));
-    TemporaryFolder scratch;
-    const auto blocked = blockPackFor (m.song().getState(), phazite::getVersionsFolder (m.song()), scratch.folder);
+
+    // Every pack written into the project's store fails meanwhile, as a full or locked drive makes it.
+    std::atomic<bool> blocked { true };
+    const auto pieces = phazite::getVersionsFolder (m.song()).getChildFile ("pieces");
+    const phazite::WholeFileHook hook ([&blocked, pieces] (const juce::File& file)
+                                       { return ! (blocked.load() && file.isAChildOf (pieces) && file.hasFileExtension ("pack")); });
 
     // Kept as the merge's list is worked out, on the history's thread (known bug 126); that failing, kept again as Merge is
     // clicked, failing too.
@@ -685,7 +663,7 @@ TEST_CASE ("A merge the store can't keep the song before takes nothing, its list
     CHECK (phazite::getMergeProblem (m.s.context).contains ("Nothing was merged"));
     CHECK (m.named ("Pad").empty());
 
-    REQUIRE (blocked.deleteRecursively());
+    blocked = false;
     REQUIRE (phazite::test::finished (m.s.context,
                                       [&]
                                       {
@@ -721,7 +699,7 @@ TEST_CASE ("A branch whose line alone holds the commit a merge waiting took in c
 namespace
 {
 // A commit of a song written into the history by another computer, with what it holds of it lost (the pieces of the
-// elements given), and made a branch of, as Recover Lost Commits makes one: its id.
+// elements given), and made a branch of, as Recover Lost Versions makes one: its id.
 juce::String commitDamaged (TestSong& s, const juce::ValueTree& song, const std::function<bool (const juce::ValueTree&)>& lost)
 {
     auto pieces = phazite::splitSong (song);
@@ -745,7 +723,9 @@ juce::String commitDamaged (TestSong& s, const juce::ValueTree& song, const std:
     REQUIRE (id.isNotEmpty());
     REQUIRE (phazite::verifyHistory (s.context));
     REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, versionHistoryTimeout));
-    REQUIRE (phazite::recoverLostVersions (s.context) == 1);
+    const auto found = phazite::getLostVersions (s.context);
+    REQUIRE (found.size() == 1);
+    REQUIRE (phazite::recoverLostVersions (s.context, found[0].key).isNotEmpty());
     REQUIRE (phazite::getVersionHistory (s.context)->findVersion (id) != nullptr);
     return id;
 }

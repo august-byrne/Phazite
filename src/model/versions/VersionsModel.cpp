@@ -955,7 +955,7 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
                 [&context, branch]
                 {
                     if (auto* found = findHistory (context))
-                        found->deleteBranch (branch);
+                        found->deleteBranch (branch, true);
                 });
     };
 
@@ -1110,7 +1110,7 @@ juce::String describeBranchDeletion (const ProjectContext& context, const juce::
     if (history == nullptr)
         return {};
 
-    // What goes with it: its own commits, which Recover Lost Commits can bring back, and the changes left on it, which nothing can.
+    // What goes with it: its own versions and the changes left on it, which Recover Lost Versions brings back for 30 days.
     juce::StringArray parts;
     const auto only = history->countVersionsOnlyOn (branchID);
 
@@ -1131,8 +1131,8 @@ juce::String describeBranchDeletion (const ProjectContext& context, const juce::
     if (parts.isEmpty())
         return {};
 
-    return "This also deletes " + parts.joinIntoString (", and ") + "."
-           + (only > 0 ? juce::String (" Recover Lost Versions brings the versions back.") : juce::String());
+    return "This also deletes " + parts.joinIntoString (", and ") + ". Recover Lost Versions brings "
+           + (parts.size() == 1 && only == 1 ? "it" : "them") + " back for 30 days.";
 }
 
 bool deleteBranch (ProjectContext& context, const juce::String& branchID)
@@ -1616,7 +1616,8 @@ namespace
         removeBrokenReferences (*song); // what one side names that the other took away: a send to a return it deleted
         countIDs (*song);
         setMergingElement (*song, element);
-        history->tellNow(); // the view shows the merge's conflicts at once
+        history->adoptLater(); // the line merged in, another computer's too, now that the song holds the merge
+        history->tellNow();    // the view shows the merge's conflicts at once
         return true;
     }
 } // namespace
@@ -2327,13 +2328,32 @@ void restoreSelectedSnapshot (ProjectContext& context)
 bool verifyHistory (ProjectContext& context)
 {
     auto* history = findHistory (context);
-    return history != nullptr && history->checkHistory();
+    return history != nullptr && ! history->isChecking() && history->checkHistory();
+}
+
+void stopVerifyingHistory (ProjectContext& context)
+{
+    if (auto* history = findHistory (context); history != nullptr && history->isChecking())
+        history->cancelCheck();
+}
+
+void verifyOrStopVerifying (ProjectContext& context)
+{
+    if (isVerifyingHistory (context))
+        stopVerifyingHistory (context);
+    else
+        verifyHistory (context);
+}
+
+juce::String describeVerify (const ProjectContext& context)
+{
+    return isVerifyingHistory (context) ? "Stop Verifying History" : juce::String();
 }
 
 bool canVerifyHistory (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->keepsVersions() && ! history->isReading() && ! history->isSaving() && ! history->isChecking();
+    return history != nullptr && history->keepsVersions() && ! history->isReading() && (history->isChecking() || ! history->isSaving());
 }
 
 bool isVerifyingHistory (const ProjectContext& context)
@@ -2351,18 +2371,34 @@ juce::String describeHistoryCheck (const ProjectContext& context)
         return {};
 
     if (history->isChecking())
-        return "Verifying the history...";
+        return "Verifying the history... " + juce::String (juce::roundToInt (history->getCheckProgress() * 100.0f)) + "%";
+
+    // What the sweep as the history opened couldn't be sure of, first.
+    juce::StringArray parts;
+
+    if (const auto& unsure = history->getSweepProblem(); unsure.isNotEmpty())
+        parts.add ("Phazite is keeping everything in the Versions folder, because " + unsure + ". Verify History says what is damaged.");
+
+    if (const auto& uncopied = history->getAdoptionProblem(); uncopied.isNotEmpty())
+        parts.add (uncopied + ".");
 
     const auto& check = history->getLastCheck();
 
     if (! check.has_value())
-        return {};
+        return parts.joinIntoString (" ");
 
-    juce::StringArray parts;
+    if (check->stopped)
+    {
+        parts.add ("Verify History was stopped before it was done.");
+        return parts.joinIntoString (" ");
+    }
 
-    if (check->damagedPieces.isEmpty() && check->damaged.empty())
-        parts.add ("Verified " + count ((size_t) check->numVersions, "version", "versions") + " and "
-                   + count ((size_t) check->numPieces, "piece", "pieces") + ": all whole.");
+    if (check->damagedPieces.isEmpty() && check->damaged.empty() && check->audio.empty() && check->damagedSongs.empty()
+        && check->unreadableParents.empty())
+        parts.add ("Verified " + count ((size_t) check->numVersions, "version", "versions") + ", "
+                   + count ((size_t) check->numSongs, "song kept without a version", "songs kept without a version") + ", "
+                   + count ((size_t) check->numPieces, "piece", "pieces") + " and "
+                   + count ((size_t) check->numAudioFiles, "audio file", "audio files") + ": all whole.");
 
     if (! check->damagedPieces.isEmpty())
         parts.add (count ((size_t) check->damagedPieces.size(), "piece is", "pieces are") + " damaged.");
@@ -2379,23 +2415,95 @@ juce::String describeHistoryCheck (const ProjectContext& context)
                    + ". Restore This Version takes what can be.");
     }
 
+    // The audio a version plays that isn't as it recorded it, by version: "Verse 2" (Audio/Kick.wav missing).
+    if (! check->audio.empty())
+    {
+        juce::StringArray names;
+
+        for (const auto& [id, problems] : check->audio)
+        {
+            juce::StringArray files;
+
+            for (const auto& problem : problems)
+                files.add (problem.path
+                           + (problem.kind == VersionHistory::AudioProblem::Kind::missing      ? " missing"
+                              : problem.kind == VersionHistory::AudioProblem::Kind::unreadable ? " can't be read"
+                              : problem.kind == VersionHistory::AudioProblem::Kind::otherSize  ? " changed: another size"
+                                                                                               : " changed since"));
+
+            names.add (describeVersion (*history, id) + " (" + files.joinIntoString ("; ") + ")");
+        }
+
+        parts.add (count (check->audio.size(), "version can't play its audio as it was saved",
+                          "versions can't play their audio as they were saved")
+                   + ": " + names.joinIntoString (", ") + ".");
+    }
+
+    // Versions whose earlier versions can't be read, which the history and Restore need.
+    for (const auto& [id, parents] : check->unreadableParents)
+    {
+        juce::StringArray earlier;
+
+        for (const auto& parent : parents)
+            earlier.add (parent.substring (0, 7));
+
+        parts.add (describeVersion (*history, id) + " follows a version that can't be read from the Versions folder ("
+                   + earlier.joinIntoString (", ") + "): damaged, or not arrived from another computer.");
+    }
+
+    // The songs kept without a version that can't be read whole: Local History's, those left on branches.
+    for (const auto& damaged : check->damagedSongs)
+    {
+        juce::String branchName;
+
+        for (const auto& branch : history->getBranches())
+            if (branch.id == damaged.song.branch)
+                branchName = branch.name;
+
+        const auto mine = damaged.song.computer == makeUsableFileName (getThisComputer());
+        const auto what = damaged.song.kind == KeptSong::Kind::snapshot
+                              ? "Local History of " + describeSnapshotTime (damaged.song.time) + (mine ? "" : " on another computer")
+                              : "The song " + juce::String (mine ? "" : "another computer ")
+                                    + (damaged.song.kind == KeptSong::Kind::deleted
+                                           ? "left on a deleted branch"
+                                           : "left on " + (branchName.isNotEmpty() ? "'" + branchName + "'" : juce::String ("a branch")));
+        parts.add (
+            what + " can't be read whole (" + describeMissing (*song, damaged.missing.front())
+            + (damaged.missing.size() > 1 ? " and " + juce::String ((juce::int64) damaged.missing.size() - 1) + " more" : juce::String())
+            + ").");
+    }
+
     if (! check->lost.empty())
-        parts.add (count (check->lost.size(), "version", "versions")
-                   + " no branch holds: Recover Lost Versions makes a branch of each line.");
+        parts.add (count (check->lost.size(), "version", "versions") + " no branch holds: Recover Lost Versions lists them.");
 
     return parts.joinIntoString (" ");
 }
 
-int countLostVersions (const ProjectContext& context)
+std::vector<LostVersionsInfo> getLostVersions (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->getLastCheck().has_value() ? (int) history->getLastCheck()->lost.size() : 0;
+    std::vector<LostVersionsInfo> lost;
+
+    if (history == nullptr)
+        return lost;
+
+    for (const auto& line : history->getLostLines())
+        lost.push_back (
+            { line.key, line.branch, line.why, juce::Time (line.time), line.versions.size(), line.name, line.song.isNotEmpty() });
+
+    return lost;
 }
 
-int recoverLostVersions (ProjectContext& context)
+bool canRecoverLostVersions (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && ! history->isReading() && ! history->isSaving() && ! history->getLostLines().empty();
+}
+
+juce::String recoverLostVersions (ProjectContext& context, const juce::String& key)
 {
     auto* history = findHistory (context);
-    return history != nullptr ? history->recoverLostVersions() : 0;
+    return history != nullptr && canRecoverLostVersions (context) ? history->recoverLine (key) : juce::String();
 }
 
 juce::String getReadingProblem (const ProjectContext& context)
@@ -3069,19 +3177,14 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
     // Keeping the history whole.
     add ({ .id = "version.verify",
            .name = "Verify History",
-           .description = "Reads every piece of the project's history and checks it against its name, reads every version's song, "
-                          "and finds the versions no branch holds. The Versions view says what it found.",
-           .synonyms = { "fsck", "check", "integrity", "damaged", "corrupt", "repair" },
-           .perform = [&context] { verifyHistory (context); },
-           .isEnabled = [&context] { return canVerifyHistory (context); } });
-
-    add ({ .id = "version.recover",
-           .name = "Recover Lost Versions",
-           .description = "Makes a branch of each line of the versions Verify History found that no branch holds, named after "
-                          "the branch they were saved on.",
-           .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits", "lost commits" },
-           .perform = [&context] { recoverLostVersions (context); },
-           .isEnabled = [&context] { return countLostVersions (context) > 0; } });
+           .description = "Reads every piece of the project's history and checks it against its name, reads every version's song "
+                          "and the songs Local History and the branches keep, checks that every version's audio files are as "
+                          "it recorded them, and finds the versions no branch holds. The Versions view says what it found; "
+                          "while it runs, the command stops it.",
+           .synonyms = { "fsck", "check", "integrity", "damaged", "corrupt", "repair", "missing audio", "cancel" },
+           .perform = [&context] { verifyOrStopVerifying (context); },
+           .isEnabled = [&context] { return canVerifyHistory (context); },
+           .currentName = [&context] { return describeVerify (context); } });
 
     add ({ .id = "version.resetToReadable",
            .name = "Reset Branch to Last Readable Version",

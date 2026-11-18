@@ -19,6 +19,7 @@
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include <juce_cryptography/juce_cryptography.h>
@@ -336,6 +337,7 @@ TEST_CASE ("A pack cut off midway leaves the store readable, and a damaged piece
 TEST_CASE ("A version is written only if its pack reads back: a pack cut short under its own name is written again")
 {
     TemporaryFolder temporary;
+    const VersionsTime clock (juce::Time::currentTimeMillis()); // the same pieces at the same time: the same pack
     PiecesSong made;
     const auto packs = getVersionsFolder (temporary).getChildFile ("pieces");
     const auto pieces = phazite::splitSong (made.song->getState());
@@ -537,9 +539,10 @@ TEST_CASE ("A branch's log on this computer keeps each move of its last version,
 {
     TemporaryFolder temporary;
     phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
-    REQUIRE (store.logBranchMove ("branch", {}, "a", "branch"));
-    REQUIRE (store.logBranchMove ("branch", "a", "b", "commit"));
-    REQUIRE (store.logBranchMove ("branch", "b", "c", "merge"));
+    REQUIRE (store.logBranchMove ("branch", {}, "a", "branch", "Half time"));
+    REQUIRE (store.logBranchMove ("branch", "a", "b", "commit", "Half time"));
+    REQUIRE (store.logBranchMove ("branch", "b", "c", "merge", "Half time  idea"));
+    REQUIRE (store.logBranchMove ("branch", "c", {}, "delete", "Half time idea", "song"));
 
     // A line cut off midway by a crash.
     const auto log =
@@ -547,14 +550,41 @@ TEST_CASE ("A branch's log on this computer keeps each move of its last version,
     REQUIRE (log.appendText ("123 c d com", false, false));
 
     const auto moves = store.readBranchLog ("branch");
-    REQUIRE (moves.size() == 3);
+    REQUIRE (moves.size() == 4);
     CHECK (moves[0].from.isEmpty());
     CHECK (moves[0].to == "a");
     CHECK (moves[0].why == "branch");
+    CHECK (moves[0].name == "Half time");
+    CHECK (moves[0].song.isEmpty());
     CHECK (moves[1].from == "a");
     CHECK (moves[2].to == "c");
     CHECK (moves[2].why == "merge");
+    CHECK (moves[2].name == "Half time idea"); // made as a typed name is
     CHECK (moves[2].time > 0);
+    CHECK (moves[3].to.isEmpty());
+    CHECK (moves[3].why == "delete");
+    CHECK (moves[3].song == "song");
+
+    // A move logged after the line a crash cut off is a line of its own, read whole, not run into it.
+    REQUIRE (store.logBranchMove ("branch", "d", "e", "commit", "After the crash"));
+    const auto after = store.readBranchLog ("branch");
+    REQUIRE (after.size() == 5);
+    CHECK (after[4].from == "d");
+    CHECK (after[4].to == "e");
+    CHECK (after[4].name == "After the crash");
+
+    // A name anyone wrote into a log is made as a typed one is.
+    REQUIRE (log.appendText ("124 e f commit - Verse\tidea  2\n", false, false));
+    CHECK (store.readBranchLog ("branch").back().name == "Verse idea 2");
+
+    // Every computer's logs, read together, say whose and of which branch.
+    phazite::VersionStore elsewhere (getVersionsFolder (temporary), "elsewhere");
+    REQUIRE (elsewhere.logBranchMove ("other", {}, "x", "branch", "Theirs"));
+    const auto every = store.readEveryLog();
+    REQUIRE (every.size() == 7);
+    CHECK (std::count_if (every.begin(), every.end(), [] (const phazite::BranchMove& move)
+                          { return move.branch == "other" && move.computer == "elsewhere" && move.name == "Theirs"; })
+           == 1);
 }
 
 TEST_CASE ("The audio files a song plays are hashed once, and again once they change")
@@ -605,7 +635,7 @@ TEST_CASE ("The audio files a song plays are found in its clips and its devices'
 
 namespace
 {
-// A pack's bytes as PieceStore.h lays them out: where its index starts, and how many entries it has, each of 48 bytes.
+// A pack's bytes as PieceStore.h lays them out: where its index starts, and how many entries it has, each of 56 bytes.
 struct PackBytes
 {
     juce::MemoryBlock bytes;
@@ -615,7 +645,7 @@ struct PackBytes
     explicit PackBytes (const juce::File& file)
     {
         REQUIRE (file.loadFileAsData (bytes));
-        const auto* end = static_cast<const char*> (bytes.getData()) + bytes.getSize() - 16;
+        const auto* end = static_cast<const char*> (bytes.getData()) + bytes.getSize() - 32;
         count = juce::ByteOrder::littleEndianInt (end);
         indexStart = (size_t) juce::ByteOrder::littleEndianInt64 (end + 4);
     }
@@ -623,16 +653,19 @@ struct PackBytes
     char* findEntry (const juce::String& name)
     {
         for (juce::uint32 i = 0; i < count; ++i)
-            if (auto* entry = static_cast<char*> (bytes.getData()) + indexStart + (size_t) i * 48;
+            if (auto* entry = static_cast<char*> (bytes.getData()) + indexStart + (size_t) i * 56;
                 juce::String::toHexString (entry, 32, 0) == name)
                 return entry;
 
         return nullptr;
     }
 
+    // Its name: the SHA-256 of its index and its writer (the 16 bytes before the closing mark).
     juce::String getIndexName() const
     {
-        return juce::SHA256 (static_cast<const char*> (bytes.getData()) + indexStart, (size_t) count * 48).toHexString();
+        juce::MemoryBlock named (static_cast<const char*> (bytes.getData()) + indexStart, (size_t) count * 56);
+        named.append (static_cast<const char*> (bytes.getData()) + bytes.getSize() - 20, 16);
+        return juce::SHA256 (named.getData(), named.getSize()).toHexString();
     }
 };
 } // namespace
@@ -910,6 +943,7 @@ TEST_CASE ("Commits' messages edited on each computer are kept apart and read to
 TEST_CASE ("Local History is this computer's list of snapshots, oldest first, a line cut off midway left out")
 {
     TemporaryFolder temporary;
+    const VersionsTime clock (3000);
     phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
     CHECK (store.readSnapshots().empty());
 
@@ -921,4 +955,65 @@ TEST_CASE ("Local History is this computer's list of snapshots, oldest first, a 
     const auto file = store.getLocalFolder().getChildFile ("history");
     REQUIRE (file.appendText ("3000 main cc", false, false, nullptr));
     CHECK (store.readSnapshots() == snapshots);
+}
+
+TEST_CASE ("A join copies every piece of the packs it rewrites from a copy it read, never trusting one elsewhere it didn't")
+{
+    // A join whose delete another program stopped leaves its old pack A = {x} beside the joined J = {x, z}; x is damaged in
+    // J. The next join rewrites A (all of it in J too): x comes from A's good copy, not left to J's.
+    TemporaryFolder temporary;
+    const auto folder = temporary.folder.getChildFile ("pieces");
+    const auto makePiece = [] (const juce::String& text)
+    {
+        const juce::MemoryBlock bytes (text.toRawUTF8(), text.getNumBytesAsUTF8());
+        return std::pair { phazite::getPieceName (bytes), bytes };
+    };
+    const auto [x, xBytes] = makePiece ("<CLIP name=\"x\" text=\"" + juce::String::repeatedString ("x", 400) + "\"/>");
+    const auto [z, zBytes] = makePiece ("<CLIP name=\"z\" text=\"" + juce::String::repeatedString ("z", 400) + "\"/>");
+
+    {
+        phazite::PieceStore store (folder, phazite::getThisComputer());
+        REQUIRE (store.write ({ { x, xBytes } }));
+        store.closeFiles();
+    }
+
+    const auto packA = folder.findChildFiles (juce::File::findFiles, false, "*.pack")[0];
+
+    {
+        // J written by the same computer apart (as a join did), then x's bytes in it damaged.
+        const auto apart = temporary.folder.getChildFile ("apart");
+        phazite::PieceStore store (apart, phazite::getThisComputer());
+        phazite::setVersionsTimeForTests (juce::Time::currentTimeMillis() + 1000);
+        REQUIRE (store.write ({ { x, xBytes }, { z, zBytes } }));
+        phazite::setVersionsTimeForTests (0);
+        store.closeFiles();
+        const auto packJ = apart.findChildFiles (juce::File::findFiles, false, "*.pack")[0];
+        juce::MemoryBlock j, a;
+        REQUIRE (packJ.loadFileAsData (j));
+        REQUIRE (packA.loadFileAsData (a));
+
+        // x compressed, as A holds it between its mark and its index: found in J, a byte of it changed.
+        const auto* aBytes = static_cast<const char*> (a.getData());
+        const auto aIndexStart = (size_t) juce::ByteOrder::littleEndianInt64 (aBytes + a.getSize() - 28);
+        auto* jBytes = static_cast<char*> (j.getData());
+        const auto found = std::search (jBytes, jBytes + j.getSize(), aBytes + 4, aBytes + aIndexStart);
+        REQUIRE (found != jBytes + j.getSize());
+        found[(aIndexStart - 4) / 2] ^= 0x5a;
+        REQUIRE (folder.getChildFile (packJ.getFileName()).replaceWithData (j.getData(), j.getSize()));
+    }
+
+    phazite::PieceStore::smallPackForTests = 16; // neither small: A is rewritten as a pack J holds the same pieces of
+
+    {
+        phazite::PieceStore store (folder, phazite::getThisComputer());
+        REQUIRE (store.getNumOwnPacks() == 2);
+        CHECK (store.joinPacks());
+        store.closeFiles();
+    }
+
+    phazite::PieceStore::smallPackForTests = 0;
+    const phazite::PieceStore store (folder, phazite::getThisComputer());
+    CHECK (store.read (x).has_value());
+    CHECK (store.read (z).has_value());
+    store.closeFiles();
 }

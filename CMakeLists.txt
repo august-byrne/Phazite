@@ -513,6 +513,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/SongDiff.cpp
     src/model/versions/SongMerge.cpp
     src/model/versions/SongPieces.cpp
+    src/model/versions/StoreSweep.cpp
     src/model/versions/VersionHistory.cpp
     src/model/versions/VersionStore.cpp
     src/model/versions/VersionsModel.cpp
@@ -522,6 +523,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/internal/SongDiff.h
     src/model/versions/internal/SongMerge.h
     src/model/versions/internal/SongPieces.h
+    src/model/versions/internal/StoreSweep.h
     src/model/versions/internal/VersionHistory.h
     src/model/versions/internal/VersionStore.h
     # sandbox: what Phazite and the helpers that host plug-ins share, engine-neutral
@@ -1469,7 +1471,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsKeptWholeTests.cpp
         tests/VersionsMergeTests.cpp
         tests/VersionsMergeWaitingTests.cpp
+        tests/VersionsRecoveryTests.cpp
+        tests/VersionsSweepTests.cpp
         tests/VersionsTests.cpp
+        tests/VersionsTwoComputersTests.cpp
         tests/VinylTests.cpp
         tests/VocoderTests.cpp
         tests/VoiceStealTests.cpp
