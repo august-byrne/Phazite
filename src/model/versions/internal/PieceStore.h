@@ -124,7 +124,8 @@ public:
     static constexpr juce::int64 smallPack = 1024 * 1024;
     static constexpr int gatherFrom = 4;
     static std::atomic<juce::int64> smallPackForTests; // another smallPack while above 0
-    bool joinPacks (const std::function<bool()>& shouldStop = {}, const Pruning& = {}, juce::StringArray* leftOut = nullptr);
+    bool joinPacks (const std::function<bool()>& shouldStop, const Pruning&, juce::StringArray* leftOut = nullptr);
+    bool joinPacks (const std::function<bool()>& shouldStop = {}); // every piece kept
 
     // Whether a join would gather anything with nothing left out: packs of a class to join, small ones, or packs twice.
     bool needsGathering() const;

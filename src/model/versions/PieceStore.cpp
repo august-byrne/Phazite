@@ -792,6 +792,11 @@ bool PieceStore::needsGathering() const
     return ! chooseRewritten (now, copies, false, duplicated).empty();
 }
 
+bool PieceStore::joinPacks (const std::function<bool()>& shouldStop)
+{
+    return joinPacks (shouldStop, Pruning());
+}
+
 bool PieceStore::joinPacks (const std::function<bool()>& shouldStop, const Pruning& pruning, juce::StringArray* leftOut)
 {
     jassert (! isInHeldFolder (folder)); // a first save copies the Versions folder (WholeFile.h: holdFolder())
@@ -887,13 +892,11 @@ bool PieceStore::joinPacks (const std::function<bool()>& shouldStop, const Pruni
 
     for (const auto number : rewritten)
     {
-        const auto keepsSomething =
-            std::any_of (unreadable.begin(), unreadable.end(),
-                         [&copies, number] (const juce::String& name)
-                         {
-                             const auto& its = copies[name];
-                             return std::any_of (its.begin(), its.end(), [number] (const Location& copy) { return copy.pack == number; });
-                         });
+        bool keepsSomething = false;
+
+        for (const auto& name : unreadable)
+            for (const auto& copy : copies[name])
+                keepsSomething = keepsSomething || copy.pack == number;
 
         if (! keepsSomething && before[(size_t) number].file != joined && ! isOthersPack (before[(size_t) number].file))
             going.push_back (before[(size_t) number].file);

@@ -1507,7 +1507,7 @@ bool VersionHistory::checkHistory (std::function<void()> done)
                 tell (0.1f, 0.2f, (double) i, (double) kept.size());
                 std::vector<MissingPiece> missing;
 
-                if (const auto song = shared->readSong (kept[i].piece, nullptr, &missing); ! song.isValid() && missing.empty())
+                if (const auto read = shared->readSong (kept[i].piece, nullptr, &missing); ! read.isValid() && missing.empty())
                     missing.push_back ({ {}, kept[i].piece });
 
                 if (! missing.empty())
