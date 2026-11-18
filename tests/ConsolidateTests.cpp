@@ -225,6 +225,15 @@ TEST_CASE ("With a time range selected across tracks, Consolidate joins what lie
 
         auto joined = phazite::getClipNotes (model, clips[1]);
         std::sort (joined.begin(), joined.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
+
+        // What a failure says (known bug 204: twice in CI's release builds the joined clip held no notes, never here): the
+        // notes of the parts before and after, and the joined clip's children as the song holds them.
+        const auto joinedState = phazite::findClipState (model, clips[1]);
+        CAPTURE (phazite::getClipNotes (model, clips[0]).size());
+        CAPTURE (phazite::getClipNotes (model, clips[2]).size());
+        CAPTURE (joinedState.isValid());
+        CAPTURE (joinedState.getNumChildren());
+        CAPTURE (joinedState.toXmlString().toStdString());
         REQUIRE (joined.size() == 4);
 
         for (size_t i = 0; i < joined.size(); ++i)

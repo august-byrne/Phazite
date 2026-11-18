@@ -136,6 +136,14 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **207. `PerformanceGateTests`, "what an edit and a save allocate grows as the song does", failed once in CI's linux-tsan
+  job** (2026-11-18, the run of `367e9321`): a note added "with its new plan" allocated 867 times in the song of 16
+  tracks and 10,056 in the one of 64, where it measures about 28,000 and 119,000: in neither count was the plan
+  compiled inside the counted stretch (one `dispatchPendingMessages()` after the edit), and the two counts then hold
+  different leftovers, so their ratio (11.6, against a bound of 6) says nothing. So under the thread sanitizer the plan
+  is not always made by the time that call returns. To fix: the test waits for the plan it counts (the engine has
+  the song: the condition `tests/EnginePlayback.h`'s helpers wait for) inside the counted stretch, and requires that
+  a plan was made there.
 - **206. `MainWindowTests`, the case that compares every menu item with its command, failed once in CI's linux-clang
   job** (2026-11-18, the run of `50234b25`; the other eight jobs passed it): File > Clean Up Unused Audio... was
   disabled in the menu and its command enabled when the test asked a moment later (`tests/MainWindowTests.cpp`, the
@@ -146,7 +154,9 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   before it builds the menu.
 - **204. `ConsolidateTests`, "With a time range selected across tracks, Consolidate joins what lies in it on each...",
   failed once in CI's windows-profile job** (2026-11-18, the run of `4ff18a92`; the run before it passed
-  there, as did every other preset): the joined clip on the first track was where it should be, from beat 2 to 6, and
+  there, as did every other preset); and again in its windows-release job on `367e9321`, so it is the release
+  builds on CI's Windows runner alone; since then the test says, when it fails, how many notes the parts before and
+  after hold and what the joined clip holds in the song: the joined clip on the first track was where it should be, from beat 2 to 6, and
   held no notes (`joined.size() == 4` was 0). Not reproduced: 300 runs of the file in a windows-profile build of the
   same commit on this PC, 240 of them six at once, all passed. The path is on the message thread alone
   (`consolidateSelection()` joins MIDI at once: `consolidatePart()` reads the notes, `clearClipsIn()`,
