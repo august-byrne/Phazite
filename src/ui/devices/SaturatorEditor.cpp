@@ -463,10 +463,13 @@ public:
         if (e.mods.isPopupMenu())
             return;
 
-        // The edge pressed, and the other, which the drag may move with it: one undo step, named after the edge pressed.
+        // The edge pressed alone: taking the other too would begin its gesture, which on a track in Touch punches it in while
+        // the song plays, though it may never move. Of the other, its value as the press finds it.
         dragged = findEdge (e.position);
         const auto other = dragged == Saturator::bandLow ? Saturator::bandHigh : Saturator::bandLow;
-        drag.take ({ &parameters[(size_t) dragged], &parameters[(size_t) other] });
+        otherAtPress = parameters[(size_t) other].getBaseValue();
+        pushed = false;
+        drag.take ({ &parameters[(size_t) dragged] });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -479,18 +482,38 @@ public:
         // pushes To up ahead of it, back as From comes down again; after either, the knobs show what plays.
         const auto moved = (float) e.getDistanceFromDragStartX();
         const auto axis = getAxis();
-        const auto toRange = parameters[(size_t) Saturator::bandHigh].getRange();
+        auto& toEdge = parameters[(size_t) Saturator::bandHigh];
+        const auto toRange = toEdge.getRange();
 
         if (dragged == Saturator::bandLow)
         {
             drag.moveAlong (
                 0, moved, [&axis] (float hertz) { return axis.xFor (hertz); }, [&axis] (float x) { return (float) axis.frequencyAt (x); });
-            const auto from = parameters[(size_t) Saturator::bandLow].getBaseValue();
-            drag.set (1, juce::jlimit (toRange.start, toRange.end, std::max (drag.getStart (1), 2.0f * from)));
+
+            // To is written only as From pushes it or lets it back (while its lane plays, its value follows the lane, which
+            // the drag mustn't write into its step). Set outside a gesture of its own, the change joins From's step, which
+            // Escape takes back whole, and begins no recording of To.
+            const auto least = 2.0f * parameters[(size_t) Saturator::bandLow].getBaseValue();
+
+            if (least > otherAtPress)
+            {
+                if (const auto pushing = juce::jlimit (toRange.start, toRange.end, least);
+                    ! pushed || ! juce::exactlyEqual (pushing, pushedTo))
+                {
+                    toEdge.setValue (pushing);
+                    pushedTo = pushing;
+                    pushed = true;
+                }
+            }
+            else if (pushed)
+            {
+                toEdge.setValue (otherAtPress);
+                pushed = false;
+            }
         }
         else
         {
-            const auto least = 2.0f * drag.getStart (1);
+            const auto least = 2.0f * otherAtPress;
             const auto shown = juce::jlimit (toRange.start, toRange.end, std::max (drag.getStart (0), least));
             const auto to = juce::exactlyEqual (moved, 0.0f) ? shown : (float) axis.frequencyAt (axis.xFor (shown) + moved);
             drag.set (0, std::max (to, least));
@@ -522,6 +545,9 @@ private:
     graph::HandleDrag drag { *this }; // after the handles it moves
     graph::SpectrumTrace input, output;
     int dragged = Saturator::bandLow;
+    float otherAtPress = 0.0f; // the other edge's value as the press found it
+    bool pushed = false;       // From has pushed To in this drag, to pushedTo
+    float pushedTo = 0.0f;
     int hovered = nothing;
     DrawnNumbers drawn;
 

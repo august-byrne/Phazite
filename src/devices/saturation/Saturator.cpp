@@ -71,7 +71,8 @@ namespace
     constexpr double warmSeconds = 0.005;
     // A joining DC blocker's glide, from 200 Hz to the DC blocker's 10 Hz in 100 ms, slower as it goes lower (one over its
     // corner rising in a straight line), so that each octave takes as many of its own cycles: slowly enough that what it
-    // holds of a low tone follows it (in 30 ms a 100 Hz tone's difference between two shapes left a thump at -44 dBFS).
+    // holds of a low tone follows it (gliding in 30 ms, it left -42 dBFS under 30 Hz, against -48 in steady playing, as a 100 Hz
+    // tone went from Tube to Tape at a Colour of 50 %: SaturatorTests.cpp).
     constexpr double joinStartFrequency = 200.0, joinGlideSeconds = 0.1;
     constexpr double bandSettlingCycles = 1.6; // seven of a Butterworth pair's time constants: 61 dB down
     // An edge's glide: two octaves in about 13 ms, half as fast as Safe Bass's, so that a sound the band takes into the
@@ -342,6 +343,14 @@ void Saturator::Path::startJoining() noexcept
         channel.joining.reset();
 }
 
+void Saturator::Path::dropJoining (int from, int to) noexcept
+{
+    for (auto& channel : channels)
+        channel.offsets[(size_t) to] = channel.offsets[(size_t) from];
+
+    joins = false;
+}
+
 void Saturator::Path::save (OffsetStates& states) const noexcept
 {
     for (size_t c = 0; c < channels.size(); ++c)
@@ -540,6 +549,8 @@ void Saturator::reset()
     slotFade = 0.0f;
     slotWarmed = 0;
     dcShares.fill (0.0f);
+    joining = false;
+    joinCorner = (float) dcBlockerFrequency;
     bandShare = 0.0f;
     splitting = false;
     listenShare = 0.0f;
@@ -598,7 +609,8 @@ void Saturator::process (const ProcessContext& block)
     const auto usesDry = block.dry != nullptr && (values[mix] < 1.0f || lastMix < 1.0f);
     lastMix = values[mix];
 
-    // In stretches as long as the block it was prepared for, at most.
+    // In stretches as long as the block it was prepared for, at most, each ending where a fade to a shape or a Quality has
+    // finished (play()), so that a change waiting for it starts on the same sample whatever the blocks.
     for (int done = 0; done < block.numSamples;)
     {
         const auto length = std::min (capacity, block.numSamples - done);
@@ -611,12 +623,11 @@ void Saturator::process (const ProcessContext& block)
             dry[1] = numChannels > 1 ? block.dry[1] + done : nullptr;
         }
 
-        play (channels, dry, numChannels, length, values, usesDry);
-        done += length;
+        done += play (channels, dry, numChannels, length, values, usesDry);
     }
 }
 
-void Saturator::play (float* const* channels, float* const* dry, int numChannels, int length, std::span<const float> values, bool usesDry)
+int Saturator::play (float* const* channels, float* const* dry, int numChannels, int most, std::span<const float> values, bool usesDry)
 {
     const auto wantedShape = getShape (values[shape]);
     const auto targetBias = wantedShape == Shape::crush ? 0.0f : mostBias * std::clamp (values[colour], 0.0f, 1.0f);
@@ -693,6 +704,8 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
                 path.startSlot (other, wantedShape, bias.value);
                 path.startJoining();
             });
+        joining = true;
+        joinCorner = (float) joinStartFrequency;
     }
 
     // The band switched on: its filters start, and the sound fades to it.
@@ -724,7 +737,7 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
             path.startSplit (current());
     }
 
-    workOutControls (length, values);
+    const auto length = workOutControls (most, values);
 
     // What came in, for the one warming up.
     if (next >= 0)
@@ -759,9 +772,17 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
         }
     }
 
-    // What has finished fading (and a new shape's DC blocker joining, which needs the old shape played until then).
-    if (slotFading && slotFade >= 1.0f && ! paths[(size_t) active].joins && (next < 0 || ! paths[(size_t) next].joins))
+    // What has finished fading. A new shape's DC blocker joining the one playing's needs the old shape played until it has
+    // (Path::startJoining()), while either is heard; while neither is (two even shapes), the new shape takes the old one's
+    // as it is, settled on the sound, and the slots swap as the fade ends.
+    if (canSwapSlots (targetBias))
     {
+        if (joining)
+        {
+            forEachPlaying ([this] (Path& path) { path.dropJoining (slot, 1 - slot); });
+            joining = false;
+        }
+
         dcShares[(size_t) slot] = 0.0f;
         slot = 1 - slot;
         slotFading = false;
@@ -777,9 +798,26 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
 
     if (splitting && ! wantsBand && bandShare <= 0.0f)
         splitting = false;
+
+    return length;
 }
 
-void Saturator::workOutControls (int length, std::span<const float> values)
+float Saturator::getJoinCornerAfter (float corner) const noexcept
+{
+    const auto lower = 1.0f / (1.0f / corner + joinGlide);
+    return lower < (float) dcBlockerFrequency + 0.01f ? (float) dcBlockerFrequency : lower;
+}
+
+bool Saturator::canSwapSlots (float targetBias) const noexcept
+{
+    if (! slotFading || slotFade < 1.0f)
+        return false;
+
+    const auto heard = isLopsided (0, targetBias) || isLopsided (1, targetBias) || dcShares[0] > 0.0f || dcShares[1] > 0.0f;
+    return ! joining || ! heard;
+}
+
+int Saturator::workOutControls (int length, std::span<const float> values)
 {
     const auto wantedShape = getShape (values[shape]);
     const auto targetDecibels = values[drive];
@@ -842,6 +880,15 @@ void Saturator::workOutControls (int length, std::span<const float> values)
                     slotFade = std::min (1.0f, slotFade + shapeFadePerSample);
             }
 
+            // The joining DC blocker's glide, as each path plays it (playPath()): it has joined where it reached its corner.
+            if (joining)
+            {
+                if (joinCorner <= (float) dcBlockerFrequency)
+                    joining = false;
+                else
+                    joinCorner = getJoinCornerAfter (joinCorner);
+            }
+
             bandShare += std::clamp (wantedBand - bandShare, -fadePerSample, fadePerSample);
             listenShare += std::clamp (wantedListen - listenShare, -listenStep, listenStep);
 
@@ -891,8 +938,15 @@ void Saturator::workOutControls (int length, std::span<const float> values)
                 controls.back[index][at] = back;
                 controls.straightGain[index][at] = driveGain * middleSlopes[index] * back;
             }
+
+            // A fade that ends here ends the stretch, so that the slots (or the Qualities) swap on this sample, and a change
+            // waiting for them starts on the next, whatever the blocks.
+            if (canSwapSlots (targetBias) || (next >= 0 && qualityFade >= 1.0f))
+                return i + 1;
         }
     }
+
+    return length;
 }
 
 void Saturator::playPath (Path& path, float* const* channels, float* const* dry, int numChannels, int length, bool usesDry)
@@ -983,12 +1037,11 @@ void Saturator::playPath (Path& path, float* const* channels, float* const* dry,
             }
             else
             {
-                const auto lower = 1.0f / (1.0f / path.joinCorner + joinGlide);
-                path.setJoinCorner (lower < (float) dcBlockerFrequency + 0.01f ? (float) dcBlockerFrequency : lower);
+                path.setJoinCorner (getJoinCornerAfter (path.joinCorner));
             }
         }
 
-        const auto joining = path.joins;
+        const auto joins = path.joins;
 
         for (int k = 0; k < factor; ++k)
         {
@@ -1077,8 +1130,8 @@ void Saturator::playPath (Path& path, float* const* channels, float* const* dry,
                 {
                     // A shape joining: the one playing's DC blocker, and another on what it plays differently.
                     const auto otherY = playCurveOf (other, otherShape);
-                    const auto otherBlocked = joining ? playingBlocked + state.joining.process (otherY - playingY, path.joinFilter)
-                                                      : state.offsets[(size_t) other].process (otherY, path.offsetFilter);
+                    const auto otherBlocked = joins ? playingBlocked + state.joining.process (otherY - playingY, path.joinFilter)
+                                                    : state.offsets[(size_t) other].process (otherY, path.offsetFilter);
                     const auto otherPlayed = finish (other, otherY, otherBlocked);
                     played += fade * (otherPlayed - played);
                 }

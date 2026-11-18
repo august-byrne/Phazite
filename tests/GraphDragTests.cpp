@@ -467,6 +467,25 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
                 to (juce::roundToInt (editor.getEdgeX (true)) - 1, y);
             dragThenEscape (song, window, view, from, from - juce::Point<int> (30, 0));
             dragThenEscape (song, window, view, to, to - juce::Point<int> (40, 0));
+
+            // From dragged up far enough to push To ahead of it, then Escape: both as they were.
+            phazite::setValueSetByHand (songOf (song), { saturator, "bandHigh" }, 8000.0f);
+            juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+            songOf (song).getUndoManager().clearUndoHistory();
+            const auto beforePush = songText (song);
+            const juce::Point<int> pushing (juce::roundToInt (editor.getEdgeX (false)), y);
+            Mouse mouse (view);
+            mouse.press (pushing);
+            mouse.dragTo (pushing + juce::Point<int> (40, 0));
+            mouse.dragTo (pushing + juce::Point<int> (80, 0));
+            CHECK (valueOf (song, saturator, "bandHigh") > 8000.0f); // pushed
+            window.pressKey (escape);
+            CHECK (valueOf (song, saturator, "bandHigh") == 8000.0f);
+            CHECK (valueOf (song, saturator, "bandLow") == 3000.0f);
+            mouse.release();
+            CHECK (songText (song) == beforePush);
+            CHECK_FALSE (songOf (song).getUndoManager().canUndo());
+            CHECK_FALSE (songOf (song).getUndoManager().canRedo());
         }
 
         const auto compressor = song.addEffect (song.firstTrack, phazite::devices::Compressor::typeID);
@@ -1050,6 +1069,71 @@ TEST_CASE ("A graph's handle held still while the song plays grabs its parameter
     playback.play (0.5);
     CHECK (handle.getValue() > grabbed + 0.05f); // the lane again
     song.run ("transport.playStop");
+}
+
+TEST_CASE ("A drag of one edge of the saturator's band, in Touch while the song plays, grabs that edge alone: the other's lane plays on")
+{
+    using phazite::devices::Saturator;
+
+    struct Case
+    {
+        const char* dragged;
+        const char* laned;
+    };
+
+    // From dragged down (it never reaches To) with a lane on To; To dragged down with a lane on From.
+    for (const auto& [dragged, laned] : { Case { "bandLow", "bandHigh" }, Case { "bandHigh", "bandLow" } })
+    {
+        CAPTURE (dragged);
+        TestSong song;
+        song.setTempo (120.0);
+        phazite::test::EnginePlayback playback;
+        song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        song.addNote (song.addMidiClip (song.firstTrack, 0.0, 16.0), 60, 0.0, 16.0);
+        const auto saturator = song.addEffect (song.firstTrack, Saturator::typeID);
+        song.setParameter (saturator, "band", 1.0f);
+        phazite::setAutomationMode (song.context, song.firstTrack, phazite::AutomationMode::touch);
+
+        phazite::ui::SaturatorEditor editor (phazite::getDeviceHandle (song.context, saturator));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& view = editor.getBandView();
+        auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+        const auto y = view.getHeight() / 2;
+
+        const phazite::ParameterRef lane { saturator, laned };
+        const auto rising = std::string (laned) == "bandHigh" ? std::pair { 8000.0f, 12000.0f } : std::pair { 300.0f, 600.0f }; // in hertz
+        song.addAutomation (lane,
+                            { { phazite::BeatPosition(), rising.first }, { phazite::BeatPosition::fromBeats (16.0), rising.second } });
+        const auto pointsBefore = phazite::getAutomationPoints (song.context, lane);
+        const auto laneHandle = phazite::getParameter (song.context, lane);
+
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        ticker.tickNow();
+        const auto atPress = laneHandle.getValue();
+        const juce::Point<int> edge (juce::roundToInt (editor.getEdgeX (std::string (dragged) == "bandHigh")) - 1, y);
+        Mouse mouse (view);
+        mouse.press (edge);
+        mouse.dragTo (edge - juce::Point<int> (10, 0));
+        mouse.dragTo (edge - juce::Point<int> (20, 0));
+        playback.play (1.0);
+        CHECK (laneHandle.getValue() > atPress); // its lane plays on under the drag
+        mouse.release();
+        mouse.pause();
+        playback.play (0.5);
+        song.run ("transport.playStop");
+        playback.play (0.1);
+
+        // Its lane as it was: no pass written over it.
+        const auto pointsAfter = phazite::getAutomationPoints (song.context, lane);
+        REQUIRE (pointsAfter.size() == pointsBefore.size());
+
+        for (size_t i = 0; i < pointsAfter.size(); ++i)
+        {
+            CHECK (pointsAfter[i].beat.inBeats() == doctest::Approx (pointsBefore[i].beat.inBeats()));
+            CHECK (pointsAfter[i].position == doctest::Approx (pointsBefore[i].position));
+        }
+    }
 }
 
 TEST_CASE (

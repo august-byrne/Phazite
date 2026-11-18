@@ -69,7 +69,10 @@ A shape just chosen has no high-pass of its own settled on the sound. It takes t
 to it another, from rest, on what it plays differently from the shape playing (among that, at once, its own offset):
 that one starts at 200 Hz, where it takes the offset off within a few milliseconds, and glides down to 10 Hz over
 100 ms, ever more slowly, so that what it holds of a low tone follows it. There the two are one high-pass, and the old
-shape stops playing. (Started from rest under the sound, a new shape's high-pass thumped as it settled: at about -25
+shape stops playing. Between two even shapes (neither high-pass heard), the new shape takes the old one's high-pass as
+it is, settled on the sound, as the fade ends, and the old shape stops there: the two differ only by what a 10 Hz
+high-pass holds of their difference, a hundredth of it at 100 Hz, which matters only if the curve becomes lopsided
+later. (Started from rest under the sound, a new shape's high-pass thumped as it settled: at about -25
 dBFS on a 100 Hz sine at -6 dBFS, whether at 10 Hz or gliding down from 200 Hz in 30 ms.) A new Quality takes the
 high-passes of the one playing as they are when it has warmed up.
 
@@ -160,7 +163,9 @@ straight, the sound at 50 % is the sound at 100 %, to 60 dB under it.
   band lit between From and To as it plays; its two edges drag sideways from where they are drawn, the nearer one lit
   under the pointer, each drag one undo step that Escape takes back. To stays an octave above From: a drag of To stops
   there, and a drag of From pushes To up ahead of it (and lets it back as From comes down in the same drag), so that
-  after a drag the knobs show what plays. **From**, **To** and **Listen** under it.
+  after a drag the knobs show what plays. A drag grabs the edge dragged alone: on a track in Touch the other edge's lane
+  plays on, and a push of To is a change of its value in the drag's step, which records nothing in Touch. **From**,
+  **To** and **Listen** under it.
 - **Quality**, a choice, last.
 
 Mix is the knob on the device's row in the Devices view.

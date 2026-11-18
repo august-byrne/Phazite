@@ -504,6 +504,174 @@ TEST_CASE ("The saturator's latency is the same at every Quality, 7 samples, and
     }
 }
 
+TEST_CASE ("The saturator's copy for the mix comes as late as its sound while automation moves its Quality, and an impulse in the "
+           "middle of a Quality's crossfade comes out once, 7 samples late")
+{
+    // At a mix of 50 % (so that it delays the copy of what came in), the Quality automated from one to another a little after
+    // the start: an impulse in the middle of the crossfade, and one after it, in the sound and in the copy alike. Each comes
+    // out 7 samples late, as what a saturator set to either Quality all along plays of it, or a blend of the two: both ways
+    // are 7 samples late, so one impulse, not two a sample apart.
+    constexpr int blockSize = 64, change = 1024, length = 8192;
+    constexpr int inFade = change + 256 + 240; // past the new Quality's warm-up of 5 ms (256 samples at least), half way along
+                                               // its fade of 10 ms
+    constexpr int after = 6000;
+
+    struct Played
+    {
+        std::vector<float> wet, dry;
+    };
+
+    // An impulse through a saturator whose values are the first until the change, then the second.
+    const auto playImpulse = [] (const std::vector<float>& first, const std::vector<float>& second, int impulseAt)
+    {
+        Saturator saturator;
+        saturator.prepare (rate, blockSize);
+        juce::AudioBuffer<float> buffer (2, blockSize), dryBuffer (2, blockSize);
+        Played played;
+
+        for (int done = 0; done < length; done += blockSize)
+        {
+            for (int i = 0; i < blockSize; ++i)
+            {
+                const auto sample = done + i == impulseAt ? 0.01f : 0.0f;
+
+                for (int c = 0; c < 2; ++c)
+                {
+                    buffer.setSample (c, i, sample);
+                    dryBuffer.setSample (c, i, sample);
+                }
+            }
+
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            float* dryChannels[] = { dryBuffer.getWritePointer (0), dryBuffer.getWritePointer (1) };
+            devices::ProcessContext context;
+            context.channels = channels;
+            context.dry = dryChannels;
+            context.numChannels = 2;
+            context.numSamples = blockSize;
+            context.parameters = done < change ? first : second;
+            context.isPlaying = true;
+            context.songSample = done;
+            saturator.process (context);
+            played.wet.insert (played.wet.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
+            played.dry.insert (played.dry.end(), dryBuffer.getReadPointer (0), dryBuffer.getReadPointer (0) + blockSize);
+        }
+
+        return played;
+    };
+
+    for (const auto& [first, then] : { std::pair { 0.0f, 2.0f }, { 2.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, 1.0f } })
+    {
+        for (const auto impulseAt : { inFade, after })
+        {
+            CAPTURE (first);
+            CAPTURE (then);
+            CAPTURE (impulseAt);
+            const auto before = with ({ { "drive", -24.0f }, { "quality", first }, { "mix", 0.5f } });
+            const auto later = with ({ { "drive", -24.0f }, { "quality", then }, { "mix", 0.5f } });
+            const auto automated = playImpulse (before, later, impulseAt);
+            const auto steadyFirst = playImpulse (before, before, impulseAt), steadyThen = playImpulse (later, later, impulseAt);
+
+            for (const auto copy : { false, true })
+            {
+                CAPTURE (copy);
+                const auto& sound = copy ? automated.dry : automated.wet;
+                const auto& a = copy ? steadyFirst.dry : steadyFirst.wet;
+                const auto& b = copy ? steadyThen.dry : steadyThen.wet;
+
+                // Its centre 7 samples late.
+                auto weight = 0.0, moment = 0.0;
+
+                for (auto i = (size_t) impulseAt; i < sound.size(); ++i)
+                {
+                    weight += sound[i];
+                    moment += (double) i * sound[i];
+                }
+
+                CHECK (moment / weight - impulseAt == doctest::Approx (7.0).epsilon (0.1 / 7.0));
+
+                // What the two Qualities set by hand play of it, blended: the least-squares blend of the two leaves under
+                // -25 dB of it (-33 to -52 dB measured; the blend moves a little along the impulse's few dozen samples; an impulse a sample later in
+                // one of them would leave a few decibels).
+                auto aa = 0.0, ab = 0.0, bb = 0.0, ya = 0.0, yb = 0.0, yy = 0.0;
+
+                for (auto i = (size_t) impulseAt; i < sound.size(); ++i)
+                {
+                    aa += (double) a[i] * a[i];
+                    ab += (double) a[i] * b[i];
+                    bb += (double) b[i] * b[i];
+                    ya += (double) sound[i] * a[i];
+                    yb += (double) sound[i] * b[i];
+                    yy += (double) sound[i] * sound[i];
+                }
+
+                const auto determinant = aa * bb - ab * ab;
+                const auto [p, q] = std::abs (determinant) > 1.0e-30
+                                        ? std::pair { (ya * bb - yb * ab) / determinant, (yb * aa - ya * ab) / determinant }
+                                        : std::pair { ya / aa, 0.0 };
+                auto left = 0.0;
+
+                for (auto i = (size_t) impulseAt; i < sound.size(); ++i)
+                {
+                    const auto residual = sound[i] - p * a[i] - q * b[i];
+                    left += residual * residual;
+                }
+
+                CAPTURE (p);
+                CAPTURE (q);
+                const auto residual = toDecibels (std::sqrt (left / yy));
+                CHECK (residual < -25.0);
+            }
+        }
+    }
+}
+
+TEST_CASE ("The saturator plays the same samples in blocks of any size while its shape changes every 53 ms, even or lopsided")
+{
+    // Three changes of shape 2560 samples apart (where blocks of 32 and of 512 both start), the next coming while the last's
+    // DC blocker may still be joining: each change starts on the sample where the last one's fade ends, whatever the blocks.
+    constexpr int every = 2560, length = 5 * every;
+    juce::Random random (5);
+    std::vector<float> noise ((size_t) length);
+
+    for (auto& sample : noise)
+        sample = 0.5f * (random.nextFloat() - 0.5f) + 0.3f * (float) std::sin (twoPi * 60.0 * (double) (&sample - noise.data()) / rate);
+
+    struct Run
+    {
+        std::array<Shape, 4> shapes;
+        float colour;
+    };
+
+    for (const auto& [shapes, colour] : { Run { { Shape::soft, Shape::hard, Shape::soft, Shape::tape }, 0.0f },
+                                          Run { { Shape::tube, Shape::soft, Shape::tape, Shape::fold }, 0.5f },
+                                          Run { { Shape::soft, Shape::tube, Shape::hard, Shape::soft }, 0.0f } })
+    {
+        CAPTURE (colour);
+        const auto playIn = [&] (int blockSize)
+        {
+            Saturator saturator;
+            saturator.prepare (rate, blockSize);
+            return play (
+                       saturator, length, blockSize, [&] (int t) { return std::pair { noise[(size_t) t], -noise[(size_t) t] }; },
+                       [&] (int t)
+                       {
+                           const auto index = (size_t) std::min (3, t / every);
+                           return with ({ { "shape", (float) shapes[index] }, { "colour", colour }, { "drive", 12.0f } });
+                       })
+                .left;
+        };
+
+        const auto small = playIn (32), large = playIn (512);
+        auto worst = 0.0f;
+
+        for (size_t i = 0; i < small.size(); ++i)
+            worst = std::max (worst, std::abs (small[i] - large[i]));
+
+        CHECK (worst < 1.0e-5f);
+    }
+}
+
 TEST_CASE ("The saturator's switches and knobs, moved fast, make no click")
 {
     // Each shape to each other.
@@ -612,7 +780,7 @@ TEST_CASE ("The saturator's new shape is heard within 40 ms, lopsided or not, wi
     }
 }
 
-TEST_CASE ("The saturator's Colour, turned up fast from 0, leaves no swing under 20 Hz")
+TEST_CASE ("The saturator's Colour, turned up fast from 0, leaves what is under 20 Hz below -26 dBFS and gone within 300 ms")
 {
     // A 40 Hz sine at -3 dBFS, Colour from 0 to 100 % in 50 ms: the DC blocker, which the sound goes round while the curve is
     // even, has played all along, so it doesn't start from rest under the sound when the curve becomes lopsided (which made

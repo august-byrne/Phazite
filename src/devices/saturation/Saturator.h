@@ -233,9 +233,13 @@ private:
         // A shape starting in a slot beside the one playing, while the sound plays: its DC blocker is the one playing's,
         // settled on the sound, plus another, started from rest, on what the new shape plays differently (an offset
         // coming in at once among it). That one starts at 200 Hz, where it takes the offset off within a few
-        // milliseconds, and glides down to 10 Hz in 30 ms; there the two are added into the new shape's own.
+        // milliseconds, and glides down to 10 Hz in 100 ms; there the two are added into the new shape's own.
         void startJoining() noexcept;
         void setJoinCorner (float hertz) noexcept;
+
+        // Where neither is heard (two even shapes): the shape in a slot takes the DC blocker of the one in another as it is,
+        // without the joining one.
+        void dropJoining (int from, int to) noexcept;
 
         void save (OffsetStates&) const noexcept;
         void load (const OffsetStates&) noexcept;
@@ -265,6 +269,8 @@ private:
     int slotWarmed = 0;
     float slotFade = 0.0f;
     std::array<float, 2> dcShares {}; // how far the sound takes each slot's DC blocker's way rather than going round it
+    bool joining = false;             // a new shape's DC blocker joins the one playing's (Path::startJoining()), at joinCorner
+    float joinCorner = 10.0f;         // as every path glides it
 
     // Each slot's curve's slope at its middle, and how much steeper it is played at its working point: for the shape and
     // the working point they were worked out for.
@@ -292,8 +298,11 @@ private:
 
     static_assert (std::atomic<double>::is_always_lock_free);
 
-    void play (float* const* channels, float* const* dry, int numChannels, int length, std::span<const float> values, bool usesDry);
-    void workOutControls (int length, std::span<const float> values);
+    // Each plays or works out at most so many samples, stopping after one where a fade has finished; returns how many.
+    int play (float* const* channels, float* const* dry, int numChannels, int most, std::span<const float> values, bool usesDry);
+    int workOutControls (int length, std::span<const float> values);
+    float getJoinCornerAfter (float corner) const noexcept; // a joining DC blocker's corner a sample on
+    bool canSwapSlots (float targetBias) const noexcept;    // the fade to a new shape done, and its DC blocker joined or unheard
     void playPath (Path&, float* const* channels, float* const* dry, int numChannels, int length, bool usesDry);
     bool isLopsided (int index, float targetBias) const noexcept; // a slot's curve, which leaves an offset
     void updateSlopes (int index, float atBias) noexcept;
