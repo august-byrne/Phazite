@@ -791,8 +791,12 @@ TEST_CASE ("A plug-in's update shows in the changes, by the version that made it
     s.saveWithPluginStates();
     CHECK (describeChanges (s.context).contains (updated));
 
-    // And as the project opens again, the updated plug-in loading in it.
+    // And as the project opens again, once the updated plug-in has loaded in it and its settings are stored as a save stores
+    // them: a plug-in's stored settings count from its first word on, as any plug-in's, so the list read before that word
+    // (a release build on CI read it so) shows none of them yet.
     s.reopen();
+    s.waitForPlugins();
+    s.saveWithPluginStates();
     CHECK (describeChanges (s.context).contains (updated));
 }
 
