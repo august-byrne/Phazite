@@ -965,8 +965,14 @@ TEST_CASE ("The room's lines are as long as their losses are worked out for: it 
             sumTD += t * decibels;
         }
 
-        const auto slope = (n * sumTD - sumT * sumD) / (n * sumTT - sumT * sumT);
-        return -60.0 / slope;
+        // The fit's line through too few points, or one that doesn't fall, is no decay time: 0, which no check takes.
+        const auto spread = n * sumTT - sumT * sumT;
+
+        if (spread <= 0.0)
+            return 0.0;
+
+        const auto slope = (n * sumTD - sumT * sumD) / spread;
+        return slope < 0.0 ? -60.0 / slope : 0.0;
     };
 
     for (const auto rate : { 44100.0, 96000.0 })

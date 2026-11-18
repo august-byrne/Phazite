@@ -503,18 +503,18 @@ Compressor::Turned Compressor::route (bool curveOwns, float curveGainNow, float 
     Turned turned;
     const auto isLate = curveLate > 0.0f;
     const auto curve = isLate ? curveGainDelay.read (curveLate) : curveGainNow;
-    const auto makeup = isLate ? makeupDelay.read (curveLate) : makeupNow;
+    const auto lateMakeup = isLate ? makeupDelay.read (curveLate) : makeupNow;
     turned.amount = isLate ? reductionDelay.read (curveLate) : amountNow;
 
     if (ownedShare >= 1.0f)
     {
         turned.curve = curve;
-        turned.makeup = makeup;
+        turned.makeup = lateMakeup;
     }
     else if (ownedShare > 0.0f)
     {
         turned.curve = std::pow (curve, ownedShare);
-        turned.makeup = std::pow (makeup, ownedShare);
+        turned.makeup = std::pow (lateMakeup, ownedShare);
     }
 
     const auto duckShare = 1.0f - shares.read (driveLatency); // of the sample leaving the drive's delay

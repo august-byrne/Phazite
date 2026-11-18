@@ -2275,7 +2275,7 @@ std::vector<float> getWindowGains (const std::vector<float>& out, float amplitud
         squares += (double) out[i] * out[i];
 
         if (i >= (size_t) window)
-            squares -= (double) out[i - window] * out[i - window];
+            squares -= (double) out[i - (size_t) window] * out[i - (size_t) window];
 
         const auto rms = std::sqrt (std::max (0.0, squares) / window);
         gains[i] = (float) (20.0 * std::log10 (std::max (1.0e-9, rms) / (amplitude / std::sqrt (2.0))));
