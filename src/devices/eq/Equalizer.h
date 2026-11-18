@@ -16,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 
 namespace phazite::devices
 {
@@ -166,6 +167,7 @@ private:
     int fadeSamples = 441;                // a change of placement's crossfade
     float earRise = 0.0f, earFall = 0.0f; // how much of the way a dynamic band's level is left to go after a sample
     int samplesPerPeak = 44;              // a millisecond of them, for its ear's loudest
+    std::int64_t songPlace = 0;           // where the song is, as its milliseconds are counted from it (its steps' way)
     std::atomic<double> tailSeconds { 0.0 };
     float outputGain = 1.0f, outputFrom = 1.0f; // as the stretch under way ends, and as it started
     dsp::ControlGrid grid { stretch };          // the song's grid of them (dsp/ControlGrid.h)

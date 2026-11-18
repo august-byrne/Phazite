@@ -866,7 +866,7 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
                std::pair ("Clap", phazite::devices::DrumSampler::typeID), std::pair ("Open Hat", phazite::devices::DrumSampler::typeID),
                std::pair ("Perc", phazite::devices::DrumSampler::typeID), std::pair ("Rolling Bass", phazite::devices::FmSynth::typeID),
                std::pair ("Sub", phazite::devices::WavetableSynth::typeID), std::pair ("Sparkle", phazite::devices::FmSynth::typeID),
-               std::pair ("Square", phazite::devices::Synth::typeID), std::pair ("Wide Saw", phazite::devices::Sampler::typeID),
+               std::pair ("Square", phazite::devices::WavetableSynth::typeID), std::pair ("Wide Saw", phazite::devices::Sampler::typeID),
                std::pair ("Supersaw", phazite::devices::WavetableSynth::typeID) })
         {
             CAPTURE (name);

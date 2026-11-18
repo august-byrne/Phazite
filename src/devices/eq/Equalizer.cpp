@@ -297,6 +297,7 @@ void Equalizer::reset()
 
     outputGain = -1.0f;
     anyHearing = false;
+    songPlace = 0;
     tailSeconds.store (0.0, std::memory_order_relaxed);
     grid.reset();
 }
@@ -615,6 +616,9 @@ void Equalizer::process (const ProcessContext& block)
     // as a stretch starts.
     grid.startBlock (block.isPlaying, block.songSample);
 
+    if (block.isPlaying)
+        songPlace = block.songSample;
+
     for (int start = 0; start < block.numSamples;)
     {
         if (grid.startsStep())
@@ -656,15 +660,25 @@ void Equalizer::process (const ProcessContext& block)
         {
             float* channels[2] = { block.channels[0] + start, block.channels[numChannels - 1] + start };
 
-            // The dynamic bands hear the sound as it comes in, before any band.
+            // The dynamic bands hear the sound as it comes in, before any band. The milliseconds whose loudest each holds are
+            // counted from the song's place, as its steps are, so that after a jump (a loop going round, a start elsewhere, a
+            // wake from sleep) they fall where a render's do: counted from where each began to hear, their edges stayed apart
+            // from the render's for good, and so did the level held.
             if (anyHearing)
             {
                 for (int channel = 0; channel < numChannels; ++channel)
                     std::copy (channels[channel], channels[channel] + length, input[(size_t) channel].begin());
 
+                const auto intoMillisecond = (int) (((songPlace % samplesPerPeak) + samplesPerPeak) % samplesPerPeak);
+
                 for (auto& band : bands)
+                {
                     if (band.hearing)
+                    {
+                        band.peakSamples = intoMillisecond;
                         hear (band, numChannels, length);
+                    }
+                }
             }
 
             for (auto& band : bands)
@@ -682,6 +696,7 @@ void Equalizer::process (const ProcessContext& block)
 
         grid.advance (length);
         start += length;
+        songPlace += length;
     }
 
     // How far each band's Dynamic moves its gain now, for its editor.
