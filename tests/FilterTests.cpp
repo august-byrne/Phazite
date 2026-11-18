@@ -644,7 +644,7 @@ TEST_CASE ("The filter, Clean at 2x, plays exactly what it played before step S6
     {
         for (const auto slope : { 0.0f, 1.0f })
         {
-            for (const auto [driveDecibels, mixAmount] : { std::pair (0.0f, 1.0f), std::pair (12.0f, 1.0f), std::pair (24.0f, 0.5f) })
+            for (const auto& [driveDecibels, mixAmount] : { std::pair (0.0f, 1.0f), std::pair (12.0f, 1.0f), std::pair (24.0f, 0.5f) })
             {
                 CAPTURE (type);
                 CAPTURE (slope);

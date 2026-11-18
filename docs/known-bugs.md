@@ -156,6 +156,22 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **204. `ConsolidateTests`, "With a time range selected across tracks, Consolidate joins what lies in it on each...",
+  failed once in CI's windows-profile job** (2026-11-18, the run of `4ff18a92`; the run before it passed
+  there, as did every other preset): the joined clip on the first track was where it should be, from beat 2 to 6, and
+  held no notes (`joined.size() == 4` was 0). Not reproduced: 300 runs of the file in a windows-profile build of the
+  same commit on this PC, 240 of them six at once, all passed. The path is on the message thread alone
+  (`consolidateSelection()` joins MIDI at once: `consolidatePart()` reads the notes, `clearClipsIn()`,
+  `insertMidiClip()`, `setClipNotes()`), with nothing random and no thread in it, so what is left is something read
+  before it is set, which only an optimized build shows. To find it: when it fails again, the test should say how
+  many notes `consolidatePart()` read and whether the new clip was found; or run the file under `windows-asan`.
+- **205. `VersionsTests`, the plug-in update's case, failed once in CI's linux-clang job** (2026-11-18, the run of
+  `4ff18a92`): after the project opened again, its plug-ins loaded and their settings stored as a save stores them,
+  the changes didn't name the update ("updated 1.0 → 2.0", its last check). `39633f06` made that case wait for the
+  plug-in after the project opens again, for a failure of the same check in a release build; this is that failure
+  again, on another compiler, so the wait isn't the whole of it. To fix: find what `describeChanges()` reads of the
+  plug-in's stored settings there and whether `saveWithPluginStates()` can return before the reopened plug-in's
+  answer is in the song (the test should print the stored version when the check fails).
 - **200. `AppTests`, "A first save's versions are copied by their history's thread...", once couldn't write its 8 MiB file
   into an untitled project's `Versions/local`** (CI's windows-profile job, 2026-11-18, one run of six), and then hung to
   its time limit. The hang is fixed: the test held the history's writes by a hook, and a check that failed left them
