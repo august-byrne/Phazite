@@ -723,7 +723,7 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     const auto factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
 
     for (const auto* other : { "Chorus", "Compressor", "Delay", "Drum Sampler", "EQ", "Filter", "Flanger", "FM", "Limiter", "Multiband",
-                               "Phaser", "Sampler", "Saturator", "Stereo Expander" })
+                               "Phaser", "Sampler", "Saturator", "Stereo" })
         writeDevicePreset (factory.getChildFile (other).getChildFile ("Default").getChildFile (juce::String (other) + " One.phazitepreset"),
                            "phaziteEq", "EQ", false);
 

@@ -16,7 +16,7 @@ file that any project can take in.
 | Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17 |
 | An instrument first, then any number of effects, on every track | Built | No limit |
 | Effects moved by dragging | Built | Within a channel or a container; not from one channel to another |
-| A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and the Stereo Expander have no Mix |
+| A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and Stereo have no Mix |
 | A/B comparison of a device's settings | Planned | |
 | The Devices view, with its Instrument and Effects pages | Built | |
 | One of Phazite's devices in a window of its own | Built | Containers show in the Devices view only |
@@ -82,7 +82,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Flanger](devices/flanger.md) | Effect | A swept comb |
 | [Chorus](devices/chorus.md) | Effect | Swept copies of the sound, one to eight voices |
 | [Vocoder](devices/vocoder.md) | Effect | Makes a carrier speak with the voice on its track |
-| [Stereo Expander](devices/stereo-expander.md) | Effect | Width, bass in mono, polarity |
+| [Stereo](devices/stereo.md) | Effect | A channel's two sides: width, bass in mono, balance, mono, swap, polarity, a DC filter and gain |
 
 The synths and the Filter share one set of filter types, described on the [Filter](devices/filter.md)'s page. The
 Phaser, the Flanger and the Chorus share an LFO that follows the song's place, so that a sweep is the same each time a
@@ -169,7 +169,7 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 - **A picture of what the device does,** drawn as the sound plays, in the device's colour, which its knobs' arcs take
   too. The colour is by kind (`DeviceFamily` in `src/ui/theme/DesignTokens.h`): dynamics; tone (the EQ and the
   Filter); drive (the Saturator, the Exciter and the Vinyl); space (the Delay and the Reverb); motion (the Phaser, the
-  Flanger and the Chorus); the Stereo Expander's; the Vocoder's. Instruments take the accent.
+  Flanger and the Chorus); Stereo's; the Vocoder's. Instruments take the accent.
 - **Pictures are controls.** A handle on a picture is a second grip on a parameter that also has a knob, so that
   everything also works from the keyboard and for screen readers. A drag is one undo step. Every picture takes a
   handle the same way (`graph::HandleDrag`, `src/ui/devices/DeviceGraph.h`), as Ableton Live's and FabFilter's do: a
@@ -207,8 +207,9 @@ phase, and a change ramped so that a fast move does not click.
 - Most effects start at 100 %. The Delay and the Reverb start at 25 % and the Chorus at 50 %; a double-click on the
   knob goes back to the device's own default.
 - A return made with an effect has the effect at 100 %: the dry sound reaches the master through the track itself.
-- The Limiter, the Multiband and the Stereo Expander have no Mix: a limiter mixed with what came in would let peaks
-  past its ceiling, and the Multiband has a blend of its own before its master band.
+- The Limiter, the Multiband and Stereo have no Mix: a limiter mixed with what came in would let peaks past its
+  ceiling, the Multiband has a blend of its own before its master band, and Stereo changes nothing until a control is
+  turned.
 - A drag of the knob is one undo step ("Change Mix").
 
 ## Sidechain
@@ -435,9 +436,8 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
   [Sampler](devices/sampler.md), roadmap step 4.10.
 - **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
   (S6.7); the Chorus, the Flanger and the Phaser as the modes of one device, Motion (S6.10); the Exciter's band and
-  colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record (S6.11); the Stereo Expander as
-  Stereo (S6.12). Planned; until each is built, this page and the devices' pages describe the twenty devices as they
-  are.
+  colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record (S6.11). Planned; until each is
+  built, this page and the devices' pages describe the devices as they are. Stereo (S6.12) is built.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

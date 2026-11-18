@@ -221,7 +221,7 @@ const std::map<std::string, double> deviceBounds {
     { "phaziteFlanger",        0.6  }, // 0.296
     { "phaziteChorus",         0.44 }, // 0.218
     { "phaziteVocoder",        4.1  }, // 2.003
-    { "phaziteStereoExpander", 0.43 }, // 0.210
+    { "phaziteStereo", 0.43 }, // 0.210
 };
 // clang-format on
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's stereo expander (roadmap step 2.17, in place of the Utility): makes a sound wider or narrower without changing
-// how it sounds in mono. Width turns the side (what differs between the left and the right) down to mono or up to twice as
-// wide. Spread makes stereo from the middle, for a mono sound: it adds to the side a copy of the middle smeared over 20 ms
-// by velvet noise (Alary et al., 2017), which sounds wide, takes no delay and, since the left plus the right stays the
-// middle twice, never changes the mono sum, unlike a Haas delay's comb. Bass Mono keeps what is below a frequency in the
-// middle, so it stays solid on a club's speakers; the bass is never spread. Each side's polarity can flip, and a gain
+// Phazite's Stereo (roadmap steps 2.17 and S6.12): the one device for a channel's two sides. Width turns the side (what
+// differs between the left and the right) down to mono or up to twice as wide, without changing how it sounds in mono.
+// Spread makes stereo from the middle, for a mono sound: it adds to the side a copy of the middle smeared over 20 ms by
+// velvet noise (Alary et al., 2017), which sounds wide, takes no delay and, since the left plus the right stays the middle
+// twice, never changes the mono sum, unlike a Haas delay's comb. Bass Mono keeps what is below a frequency in the middle, so
+// it stays solid on a club's speakers; the bass is never spread. Each side's polarity can flip, the sides can swap, Mono
+// plays the middle on both, Balance fades the side it is turned away from, a DC filter takes off an offset, and a gain
 // follows. It changes nothing until turned, and has no mix. Its editor shows how alike the two sides are, coming in and
 // going out.
 #pragma once
@@ -13,6 +14,7 @@
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/Crossover.h"
+#include "devices/dsp/DcBlocker.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Filters.h"
 
@@ -20,27 +22,31 @@
 
 namespace phazite::devices
 {
-class StereoExpander final : public Processor
+class Stereo final : public Processor
 {
 public:
-    static constexpr const char* typeID = "phaziteStereoExpander";
+    static constexpr const char* typeID = "phaziteStereo";
 
     enum Parameter
     {
         width,
         spread,
+        balance,
+        mono,
+        swap,
         bassMono,
         bassMonoFrequency,
         invertLeft,
         invertRight,
+        dcFilter,
         gain
     };
 
     static const DeviceInfo info;
 
     // How alike the two sides are, from -1 (each the other upside down) through 0 (unrelated) to 1 (the same: mono),
-    // averaged over about half a second, coming in and going out, once a block (devices/core/LiveValue.h); noReading while
-    // the sound is quieter than -60 dB.
+    // averaged over about half a second, coming in and going out (after the balance, Mono and the gain), once a block
+    // (devices/core/LiveValue.h); noReading while the sound is quieter than -60 dB.
     static constexpr float noReading = 2.0f;
     const LiveValue& getInputCorrelation() const noexcept { return inputCorrelation; }
     const LiveValue& getOutputCorrelation() const noexcept { return outputCorrelation; }
@@ -73,6 +79,7 @@ private:
     float smoothing = 0.001f;     // of the way to new gains, per sample
     double averageWeight = 0.001; // of a new sample in the correlation's averages
     float leftGain = 1.0f, rightGain = 1.0f, levelGain = 1.0f, sideGain = 1.0f, spreadGain = 0.0f, bassAmount = 0.0f;
+    double swapAmount = 0.0, monoAmount = 0.0, leftBalance = 1.0, rightBalance = 1.0; // each lands on what it goes to
     bool isFirstBlock = true;
     float shownFrequency = 0.0f; // the bass mono's and the spread's high-pass frequency
 
@@ -82,6 +89,7 @@ private:
     dsp::DelayLine middleLine;             // what the velvet noise reads
     std::array<int, numTaps> tapDelays {}; // in samples
     std::array<float, numTaps> tapGains {};
+    std::array<dsp::DcBlocker, 2> dcBlockers {}; // one a side, playing only while the DC filter is on or fading out
     Correlation inputAverage, outputAverage;
     LiveValue inputCorrelation { noReading }, outputCorrelation { noReading };
 

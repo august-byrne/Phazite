@@ -38,7 +38,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -1369,19 +1369,19 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, stereo expander and limiter "
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, Stereo and limiter "
                "in a row, the filter swept")
     {
         TestSong song;
         const auto track = song.firstTrack;
         addTone (song, track);
 
-        phazite::DeviceID filter, phaser, flanger, chorus;
+        phazite::DeviceID filter, phaser, flanger, chorus, stereo;
 
         for (const auto* type :
              { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
                phazite::devices::Delay::typeID, phazite::devices::Phaser::typeID, phazite::devices::Flanger::typeID,
-               phazite::devices::Chorus::typeID, phazite::devices::StereoExpander::typeID, phazite::devices::Limiter::typeID })
+               phazite::devices::Chorus::typeID, phazite::devices::Stereo::typeID, phazite::devices::Limiter::typeID })
         {
             const auto device = song.addEffect (track, type);
 
@@ -1396,6 +1396,9 @@ TEST_SUITE ("realtime-audit")
 
             if (std::string_view (type) == phazite::devices::Chorus::typeID)
                 chorus = device;
+
+            if (std::string_view (type) == phazite::devices::Stereo::typeID)
+                stereo = device;
         }
 
         // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work, the
@@ -1419,8 +1422,16 @@ TEST_SUITE ("realtime-audit")
                                          { "safeBass", 150.0f } })
             song.setParameter (chorus, id, value);
 
+        // Stereo with its parts at work: spread, its bass in mono, balanced to one side, its sides swapped, its DC filter on.
+        for (const auto& [id, value] : { std::pair<const char*, float> { "spread", 0.5f },
+                                         { "balance", 0.3f },
+                                         { "swap", 1.0f },
+                                         { "bassMono", 1.0f },
+                                         { "dcFilter", 1.0f } })
+            song.setParameter (stereo, id, value);
+
         const auto m = playAndMeasure (song);
-        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, stereo expander and limiter in a row, the filter "
+        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, Stereo and limiter in a row, the filter "
                 "swept",
                 m);
         CHECK (m.peakLevel > 0.001f);

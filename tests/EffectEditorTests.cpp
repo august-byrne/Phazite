@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, the stereo expander's, the phaser's, the flanger's,
+// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, Stereo's, the phaser's, the flanger's,
 // the chorus's and the vocoder's editors (src/ui/devices/): a control for each parameter but the mix (the header's), what their
 // pictures show, and the drags on them, each one undo step.
 #include "GoldenFiles.h"
@@ -13,7 +13,7 @@
 #include "devices/motion/Phaser.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -39,7 +39,7 @@
 #include "ui/devices/PhaserEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SidechainMenus.h"
-#include "ui/devices/StereoExpanderEditor.h"
+#include "ui/devices/StereoEditor.h"
 #include "ui/devices/VinylEditor.h"
 #include "ui/devices/VocoderEditor.h"
 
@@ -380,15 +380,15 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
     CHECK (song.describeUndo() == juce::String ("Undo Change High Cut"));
 }
 
-TEST_CASE ("The stereo expander's editor shows its image and how alike its sides are as it plays")
+TEST_CASE ("Stereo's editor shows its image and how alike its sides are as it plays")
 {
-    Song song (phazite::devices::StereoExpander::typeID);
+    Song song (phazite::devices::Stereo::typeID);
     const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::StereoExpanderEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+    CHECK (dynamic_cast<phazite::ui::StereoEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
-    phazite::ui::StereoExpanderEditor editor (device);
+    phazite::ui::StereoEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, phazite::devices::StereoExpander::info);
+    checkEveryParameterButMixHasAControl (editor, phazite::devices::Stereo::info);
     phazite::test::checkChildrenApart (editor);
 
     // Mono noise through its scope, as the audio thread hands it over: the image fills with dots, and the sides are alike.
@@ -418,6 +418,35 @@ TEST_CASE ("The stereo expander's editor shows its image and how alike its sides
     scope->pushOutput (silence.data(), noise.data(), (int) noise.size());
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getDotsAcross() > 0.05f);
+}
+
+TEST_CASE ("Stereo's editor shows its picture and its four parts at once in the default dock, each control titled")
+{
+    Song song (phazite::devices::Stereo::typeID);
+    phazite::ui::StereoEditor editor (song.getDevice());
+    constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    CHECK_FALSE (editor.getLayout().usesPages());
+
+    for (int column = 0; column < 3; ++column)
+        CHECK_FALSE (editor.getLayout().usesTabs (column));
+
+    CHECK (editor.getImage().isShowing());
+
+    for (const auto& parameter : phazite::devices::Stereo::info.parameters)
+    {
+        CAPTURE (std::string (parameter.id));
+        auto* control = editor.findControl (parameter.id);
+        REQUIRE (control != nullptr);
+        CHECK (control->isShowing());
+        CHECK (control->getTitle().isNotEmpty());
+        CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+    }
+
+    // The new switches by the names the parts give them.
+    CHECK (editor.findControl ("swap")->getTitle() == "Swap Sides");
+    CHECK (editor.findControl ("dcFilter")->getTitle() == "DC Filter");
 }
 
 TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and its dot drags the frequency and feedback")

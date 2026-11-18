@@ -5,7 +5,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -148,13 +148,13 @@ TEST_CASE ("Consolidate renders a track's audio clips before its devices into on
     Song song;
     auto& model = song.getSong();
 
-    // A sine from the start for 1.5 s, and again from 2 s quieter, on Bass through an expander that turns it up 6 dB.
+    // A sine from the start for 1.5 s, and again from 2 s quieter, on Bass through Stereo, which turns it up 6 dB.
     const auto sound = phazite::test::writeSound (song.temp.folder.getChildFile ("Sine.wav"), 2.0);
     const auto loud = phazite::test::addAudioClip (model, song.bass, "Sine", sound, 0.0, 1.5);
     const auto quiet = phazite::test::addAudioClip (model, song.bass, "Sine", sound, 2.0, 1.5);
     phazite::setClipGain (model, quiet, -6.0f);
-    REQUIRE (phazite::insertDeviceState (
-                 model, song.bass, phazite::makeOwnDeviceState (model, phazite::devices::StereoExpander::typeID, { { "gain", 6.0f } }))
+    REQUIRE (phazite::insertDeviceState (model, song.bass,
+                                         phazite::makeOwnDeviceState (model, phazite::devices::Stereo::typeID, { { "gain", 6.0f } }))
                  .isValid());
     model.getUndoManager().clearUndoHistory();
 
@@ -177,7 +177,7 @@ TEST_CASE ("Consolidate renders a track's audio clips before its devices into on
     CHECK (file.getParentDirectory() == song.project->getAudioFolder());
     CHECK (file.getFileName() == "Bass (Consolidated).wav");
 
-    // What the clips played, with the second's gain, without the expander, which still plays after it; silence between.
+    // What the clips played, with the second's gain, without Stereo, which still plays after it; silence between.
     const auto sine = juce::Decibels::gainToDecibels (0.25 / std::sqrt (2.0));
     CHECK (juce::Decibels::gainToDecibels (getLevel (file, 0.1, 1.4)) == doctest::Approx (sine).epsilon (0.05));
     CHECK (getLevel (file, 1.55, 1.95) < 1.0e-4);

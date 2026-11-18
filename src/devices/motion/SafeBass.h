@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Safe Bass, the phaser's, the flanger's and the chorus's: what is below a frequency goes around the effect and back in
 // after it, as it was. The sound is split there by a Linkwitz-Riley crossover (dsp/Crossover.h, as the Multiband's bands
-// and the stereo expander's Bass Mono are): the effect hears only the band above it, which is 6 dB down at the frequency
+// and Stereo's Bass Mono are): the effect hears only the band above it, which is 6 dB down at the frequency
 // and falls 24 dB an octave below it, as the band below falls above it. The two bands add up to the sound through an
 // all-pass, as loud as it was at every frequency; so the sound its runner mixes back in (its mix: ProcessContext::dry) is
 // turned the same, the two bands added up, and stays in phase with them at any mix, as the Multiband turns the sound it

@@ -382,7 +382,7 @@ namespace Shell
 
 // Each kind of built-in device's colour (ui/devices/DeviceTint.h), so that each has a character of its own and its kind shows at
 // a glance: the dynamics warm, the EQ and the filter cyan, the saturator, the exciter and the vinyl red, the delay and the
-// reverb blue, the phaser and the flanger green, the stereo expander teal and the vocoder pink; instruments keep the accent.
+// reverb blue, the phaser and the flanger green, Stereo teal and the vocoder pink; instruments keep the accent.
 // Each is at least 3:1 against the surface in every theme, and apart from the modulation colour, which rings their knobs.
 enum class DeviceFamily
 {
@@ -392,7 +392,7 @@ enum class DeviceFamily
     drive,    // saturator, exciter, vinyl
     space,    // delay, reverb
     motion,   // phaser, flanger
-    stereo,   // stereo expander
+    stereo,   // Stereo
     voice     // vocoder
 };
 

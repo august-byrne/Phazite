@@ -38,7 +38,7 @@ model saves and automation and modulation move.
 | `delay/` | `Delay.h`: the delay. |
 | `reverb/` | `Reverb.h`: the reverb, a room's eight-line feedback delay network or Jon Dattorro's plate (JAES 1997), as its Mode says, the plate's decay from a table measured on it. |
 | `motion/` | `Chorus.h`, `Flanger.h`, `Phaser.h`: the effects that sweep; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
-| `stereo/` | `StereoExpander.h`: the stereo expander. |
+| `stereo/` | `Stereo.h`: Stereo, the device for a channel's two sides (width, bass in mono, balance, mono, swap, polarity, a DC filter and gain). |
 | `vinyl/` | `Vinyl.h`: what a record and its player do to a sound: its wow and flutter through one moving delay line, the groove's distortion of the loud highs, its lows in mono, its narrower sides and its band. `SurfaceNoise.h`: its surface noise, hiss and crackle, each click drawn from where the song is. |
 
 ## What the devices share

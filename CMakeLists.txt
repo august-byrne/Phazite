@@ -206,8 +206,8 @@ target_sources(phazite_core PRIVATE
     src/devices/saturation/Exciter.h
     src/devices/saturation/Saturator.cpp
     src/devices/saturation/Saturator.h
-    src/devices/stereo/StereoExpander.cpp
-    src/devices/stereo/StereoExpander.h
+    src/devices/stereo/Stereo.cpp
+    src/devices/stereo/Stereo.h
     src/devices/stretch/RubberBandLibrary.cpp
     src/devices/stretch/Stretch.cpp
     src/devices/stretch/Stretch.h
@@ -873,8 +873,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/SaturatorEditor.h
     src/ui/devices/SidechainMenus.cpp
     src/ui/devices/SidechainMenus.h
-    src/ui/devices/StereoExpanderEditor.cpp
-    src/ui/devices/StereoExpanderEditor.h
+    src/ui/devices/StereoEditor.cpp
+    src/ui/devices/StereoEditor.h
     src/ui/devices/SweepPicture.cpp
     src/ui/devices/SweepPicture.h
     src/ui/devices/SynthEditor.cpp
@@ -1427,7 +1427,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SpectralLoopTests.cpp
         tests/StartupSoundTests.cpp
         tests/StatusBarTests.cpp
-        tests/StereoExpanderTests.cpp
+        tests/StereoTests.cpp
         tests/StretchTests.cpp
         tests/SwapTests.cpp
         tests/SynthEditorTests.cpp

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
-// level, the filter's response and the synth's unison. The stereo expander's have a file of their own (StereoExpanderTests.cpp),
+// level, the filter's response and the synth's unison. Stereo's have a file of their own (StereoTests.cpp),
 // as the phaser's and the flanger's do (MotionEffectTests.cpp), and the multiband's (MultibandTests.cpp).
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
@@ -10,7 +10,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "model/devices/internal/Devices.h"
 
@@ -143,8 +143,8 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
 {
     std::set<std::string_view> types;
 
-    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info,
-                              &devices::StereoExpander::info, &devices::Multiband::info, &devices::Synth::info })
+    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info, &devices::Stereo::info,
+                              &devices::Multiband::info, &devices::Synth::info })
     {
         INFO (std::string (info->typeID));
         CHECK (devices::isValid (*info));
@@ -156,9 +156,9 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonOn].defaultValue == doctest::Approx (0.0f));
     CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (2.0f));
 
-    // The stereo expander changes nothing until turned, and has no mix; nor has the multiband, whose LMH Mix blends its bands
+    // Stereo changes nothing until turned, and has no mix; nor has the multiband, whose LMH Mix blends its bands
     // with the dry sound before its master band, so that the master still limits what comes out.
-    CHECK (devices::findParameter (devices::StereoExpander::info, devices::mixParameterID) < 0);
+    CHECK (devices::findParameter (devices::Stereo::info, devices::mixParameterID) < 0);
     CHECK (devices::findParameter (devices::Multiband::info, devices::mixParameterID) < 0);
 
     // The delay's parameters are named as its editor names them: the note value, and the time in milliseconds.

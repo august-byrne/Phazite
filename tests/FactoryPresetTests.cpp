@@ -28,7 +28,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -128,8 +128,8 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Flanger>();
     if (type == devices::Chorus::typeID)
         return std::make_unique<devices::Chorus>();
-    if (type == devices::StereoExpander::typeID)
-        return std::make_unique<devices::StereoExpander>();
+    if (type == devices::Stereo::typeID)
+        return std::make_unique<devices::Stereo>();
     if (type == devices::Vocoder::typeID)
         return std::make_unique<devices::Vocoder>();
 

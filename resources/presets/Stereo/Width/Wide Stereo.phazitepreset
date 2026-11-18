@@ -1,0 +1,21 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Stereo",
+    "instrument": false,
+    "type": "phaziteStereo",
+    "parameters": {
+      "width": 1.5,
+      "spread": 0.0,
+      "balance": 0.0,
+      "mono": 0,
+      "swap": 0,
+      "bassMono": 1,
+      "bassMonoFrequency": 120.0,
+      "invertLeft": 0,
+      "invertRight": 0,
+      "dcFilter": 0,
+      "gain": 0.0
+    }
+  }
+}

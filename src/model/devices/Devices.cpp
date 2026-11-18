@@ -15,7 +15,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -30,13 +30,13 @@ namespace phazite
 std::span<const devices::DeviceInfo* const> getOwnDevices()
 {
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
-    // motion, the voice, and the stereo expander last).
+    // motion, the voice, and Stereo last).
     static const devices::DeviceInfo* const own[] = {
         &devices::Synth::info,       &devices::WavetableSynth::info, &devices::FmSynth::info,      &devices::Sampler::info,
         &devices::DrumSampler::info, &devices::Equalizer::info,      &devices::FilterEffect::info, &devices::Compressor::info,
         &devices::Multiband::info,   &devices::Limiter::info,        &devices::Saturator::info,    &devices::Exciter::info,
         &devices::Vinyl::info,       &devices::Delay::info,          &devices::Reverb::info,       &devices::Phaser::info,
-        &devices::Flanger::info,     &devices::Chorus::info,         &devices::Vocoder::info,      &devices::StereoExpander::info,
+        &devices::Flanger::info,     &devices::Chorus::info,         &devices::Vocoder::info,      &devices::Stereo::info,
     };
     return own;
 }
@@ -75,7 +75,7 @@ namespace
         { &devices::Flanger::info, make<devices::Flanger> },
         { &devices::Chorus::info, make<devices::Chorus> },
         { &devices::Vocoder::info, make<devices::Vocoder> },
-        { &devices::StereoExpander::info, make<devices::StereoExpander> },
+        { &devices::Stereo::info, make<devices::Stereo> },
     };
 
     // The types tests register (registerDeviceType()), which the message thread adds to while another thread may look for one:

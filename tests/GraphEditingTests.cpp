@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The pictures in Phazite's device and modulator editors as controls (the owner, 2026-11-01: move "the key points around"
 // and "scroll on lines in order to bend them"): an envelope's points, an LFO's depth and rate, a compressor's curve, the
-// stereo expander's fan and a breakpoint envelope's points and lines. Each drag is one undo step.
+// Stereo's fan and a breakpoint envelope's points and lines. Each drag is one undo step.
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dynamics/Compressor.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
@@ -18,7 +18,7 @@
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/ModulatorEditor.h"
-#include "ui/devices/StereoExpanderEditor.h"
+#include "ui/devices/StereoEditor.h"
 #include "ui/devices/SynthParts.h"
 #include "ui/theme/DesignTokens.h"
 
@@ -229,11 +229,11 @@ TEST_CASE ("A compressor's curve is the multiband's: a point drags, a line bends
     CHECK (valueOf (song, device, "point2Y") == doctest::Approx (height));
 }
 
-TEST_CASE ("The stereo expander's fan follows a drag across its disc, and the wheel opens or closes it a step at a time")
+TEST_CASE ("Stereo's fan follows a drag across its disc, and the wheel opens or closes it a step at a time")
 {
     phazite::test::TestSong song;
-    const auto device = song.addEffect (song.firstTrack, phazite::devices::StereoExpander::typeID);
-    phazite::ui::StereoExpanderEditor editor (phazite::getDeviceHandle (song.context, device));
+    const auto device = song.addEffect (song.firstTrack, phazite::devices::Stereo::typeID);
+    phazite::ui::StereoEditor editor (phazite::getDeviceHandle (song.context, device));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     phazite::test::Mouse mouse (editor.getImage());
     const auto centre = editor.getDiscCentre();

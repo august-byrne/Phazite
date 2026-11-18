@@ -15,7 +15,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/wavetable/WavetableSynth.h"

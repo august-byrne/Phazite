@@ -17,7 +17,7 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -407,10 +407,10 @@ TEST_SUITE ("golden")
                      "on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's stereo expander on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Stereo on a beat and stabs")
     {
-        checkEffect (phazite::devices::StereoExpander::typeID, "effect-stereo-expander", { { "width", 2.0f } },
-                     "Phazite's stereo expander at twice the width, on a beat and chord stabs panned a little right.");
+        checkEffect (phazite::devices::Stereo::typeID, "effect-stereo", { { "width", 2.0f } },
+                     "Phazite's Stereo at twice the width, on a beat and chord stabs panned a little right.");
     }
 
     TEST_CASE ("Golden render: Phazite's vocoder on a beat and stabs")

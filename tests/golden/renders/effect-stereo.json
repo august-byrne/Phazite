@@ -1,5 +1,5 @@
 {
-  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's stereo expander at twice the width, on a beat and chord stabs panned a little right. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's Stereo at twice the width, on a beat and chord stabs panned a little right. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
   "sampleRate": 44100,
   "blockSamples": 4410,
   "channels": 2,

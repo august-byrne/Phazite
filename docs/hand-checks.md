@@ -253,6 +253,12 @@ the [changelog](changelog.md).
 | D17 | Delete an audio file that a version plays, then run Verify History; run it on a big project and choose Stop Verifying History, or save a version while it runs | Progress shows, then the version is named with the file that is missing; stopped, it says so and never says the history is whole | |
 | D18 | Open a project whose versions an earlier build saved | Its branches are listed and their versions can't be read (known bug 197); the song opens, Save Version works, and nothing in its `Versions` folder was deleted | |
 
+## What stage 6 built (from 2026-11-18)
+
+| # | Check | Proves | Checked on |
+|---|---|---|---|
+| E1 | On a wide pad or a drum loop, add Stereo. Turn Balance fully right, then double-click it. Switch Mono on and off, then Swap, while it plays. Load its preset Checks > DC Filter after a Saturator set to Tube | Balance: the left goes silent, the right is no louder, and a double-click reads Center. Mono: the image collapses to the middle, the bar under the picture reads +1, no click. Swap: left and right trade places, no click. DC Filter: switching it clicks nothing. The editor shows whole in the dock: Width over Bass, Sides over Output | |
+
 ## Performance on other machines
 
 Numbers and how to run the benchmarks are in [performance.md](performance.md).

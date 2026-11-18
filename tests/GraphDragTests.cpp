@@ -26,7 +26,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
@@ -58,7 +58,7 @@
 #include "ui/devices/PhaserEditor.h"
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SamplerEditor.h"
-#include "ui/devices/StereoExpanderEditor.h"
+#include "ui/devices/StereoEditor.h"
 #include "ui/devices/SynthEditor.h"
 #include "ui/devices/SynthParts.h"
 #include "ui/devices/VinylEditor.h"
@@ -421,7 +421,7 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
         }
     }
 
-    SUBCASE ("The delay, the vinyl, the stereo expander, the saturator, the vocoder, the compressor and the limiter")
+    SUBCASE ("The delay, the vinyl, Stereo, the saturator, the vocoder, the compressor and the limiter")
     {
         const auto delay = song.addEffect (song.firstTrack, phazite::devices::Delay::typeID);
         {
@@ -442,9 +442,9 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
             dragThenEscape (song, window, editor.getRecord(), centre, centre - juce::Point<int> (0, 40));
         }
 
-        const auto expander = song.addEffect (song.firstTrack, phazite::devices::StereoExpander::typeID);
+        const auto stereo = song.addEffect (song.firstTrack, phazite::devices::Stereo::typeID);
         {
-            phazite::ui::StereoExpanderEditor editor (phazite::getDeviceHandle (song.context, expander));
+            phazite::ui::StereoEditor editor (phazite::getDeviceHandle (song.context, stereo));
             TestWindow window (editor, editor.getWidth(), editor.getHeight());
             const auto centre = editor.getDiscCentre();
             dragThenEscape (song, window, editor.getImage(), (centre + juce::Point<float> (0.0f, -40.0f)).roundToInt(),
@@ -825,10 +825,10 @@ TEST_CASE ("A drag begun just after a turn of the same graph's wheel is a step o
         }
     }
 
-    SUBCASE ("The stereo expander: the wheel and the drag move the same width")
+    SUBCASE ("Stereo: the wheel and the drag move the same width")
     {
-        const auto device = song.addEffect (song.firstTrack, phazite::devices::StereoExpander::typeID);
-        phazite::ui::StereoExpanderEditor editor (phazite::getDeviceHandle (song.context, device));
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Stereo::typeID);
+        phazite::ui::StereoEditor editor (phazite::getDeviceHandle (song.context, device));
         TestWindow window (editor, editor.getWidth(), editor.getHeight());
         const auto centre = editor.getDiscCentre();
         const auto from = (centre + juce::Point<float> (40.0f, -40.0f)).roundToInt();

@@ -12,7 +12,7 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "ui/theme/LookAndFeel.h"
@@ -28,13 +28,13 @@ DeviceFamily getDeviceFamily (std::string_view typeID)
     };
 
     static const Entry entries[] = {
-        { devices::Compressor::typeID, DeviceFamily::dynamics },   { devices::Limiter::typeID, DeviceFamily::dynamics },
-        { devices::Multiband::typeID, DeviceFamily::dynamics },    { devices::Equalizer::typeID, DeviceFamily::tone },
-        { devices::FilterEffect::typeID, DeviceFamily::tone },     { devices::Saturator::typeID, DeviceFamily::drive },
-        { devices::Exciter::typeID, DeviceFamily::drive },         { devices::Delay::typeID, DeviceFamily::space },
-        { devices::Reverb::typeID, DeviceFamily::space },          { devices::Phaser::typeID, DeviceFamily::motion },
-        { devices::Flanger::typeID, DeviceFamily::motion },        { devices::Chorus::typeID, DeviceFamily::motion },
-        { devices::StereoExpander::typeID, DeviceFamily::stereo }, { devices::Vocoder::typeID, DeviceFamily::voice },
+        { devices::Compressor::typeID, DeviceFamily::dynamics }, { devices::Limiter::typeID, DeviceFamily::dynamics },
+        { devices::Multiband::typeID, DeviceFamily::dynamics },  { devices::Equalizer::typeID, DeviceFamily::tone },
+        { devices::FilterEffect::typeID, DeviceFamily::tone },   { devices::Saturator::typeID, DeviceFamily::drive },
+        { devices::Exciter::typeID, DeviceFamily::drive },       { devices::Delay::typeID, DeviceFamily::space },
+        { devices::Reverb::typeID, DeviceFamily::space },        { devices::Phaser::typeID, DeviceFamily::motion },
+        { devices::Flanger::typeID, DeviceFamily::motion },      { devices::Chorus::typeID, DeviceFamily::motion },
+        { devices::Stereo::typeID, DeviceFamily::stereo },       { devices::Vocoder::typeID, DeviceFamily::voice },
         { devices::Vinyl::typeID, DeviceFamily::drive },
     };
 

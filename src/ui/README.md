@@ -81,7 +81,7 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 
 The editors, one pair of files each: `ChorusEditor`, `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
 `ExciterEditor`, `FilterEditor`, `FlangerEditor`, `FmEditor`, `LimiterEditor`, `MultibandEditor`, `PhaserEditor`,
-`ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoExpanderEditor`, `SynthEditor`, `VinylEditor`,
+`ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoEditor`, `SynthEditor`, `VinylEditor`,
 `VocoderEditor`, `WavetableEditor`. Among them:
 
 | Editor | What it shows |

@@ -90,7 +90,7 @@ instruments hold their notes. The figure is the share of one core's time.
 | Vinyl: stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
 | Delay | 0.14 | 2026-11-16 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
-| Stereo Expander, spreading | 0.27 | 2026-11-16 |
+| Stereo, spreading | 0.27 | 2026-11-16 |
 | Phaser, six notches | 0.49 | 2026-11-16 |
 | Flanger | 0.20 | 2026-11-16 |
 | Chorus: three voices with Shimmer / eight voices spread | 0.36 / 0.71 | 2026-11-16 |
@@ -137,7 +137,7 @@ played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the medi
 |---|---|---|
 | Synth / Wavetable / FM | 0.02 / 0.02 / 0.01 | 2026-11-16 |
 | Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
-| EQ / Filter / Compressor / Limiter / Stereo Expander / Phaser / Vocoder | 0.00 | 2026-11-16 |
+| EQ / Filter / Compressor / Limiter / Stereo / Phaser / Vocoder | 0.00 | 2026-11-16 |
 | Multiband / Saturator / Exciter / Chorus | 0.01 | 2026-11-16 |
 | Vinyl | 0.02 | 2026-11-16 |
 | Delay | 0.32 | 2026-11-16 |

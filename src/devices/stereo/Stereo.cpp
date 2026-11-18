@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "StereoExpander.h"
+#include "Stereo.h"
 #include "devices/dsp/Math.h"
 #include "devices/dsp/Random.h"
 
@@ -16,6 +16,9 @@ namespace
     constexpr ParameterInfo parameters[] = {
         { .id = "width", .name = "Width", .maximum = 2.0f, .defaultValue = 1.0f, .unit = Unit::percent },
         { .id = "spread", .name = "Spread", .defaultValue = 0.0f, .unit = Unit::percent },
+        { .id = "balance", .name = "Balance", .minimum = -1.0f, .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::pan },
+        { .id = "mono", .name = "Mono", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
+        { .id = "swap", .name = "Swap Sides", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "bassMono", .name = "Bass Mono", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "bassMonoFrequency",
           .name = "Bass Mono Frequency",
@@ -26,6 +29,7 @@ namespace
           .scale = Scale::logarithmic },
         { .id = "invertLeft", .name = "Invert Left", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "invertRight", .name = "Invert Right", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
+        { .id = "dcFilter", .name = "DC Filter", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "gain", .name = "Gain", .minimum = -36.0f, .maximum = 36.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
     };
 
@@ -33,11 +37,31 @@ namespace
     constexpr double averageSeconds = 0.5;     // the correlation's averaging, as hardware meters take about 600 ms
     constexpr float quietest = 1.0e-6f;        // -60 dB, squared: below it, no correlation is shown
     constexpr std::uint32_t velvetSeed = 2017; // the velvet noise's pulses, the same every time
+    constexpr double landing = 1.0e-6;         // how near a glide comes before it lands on what it goes to
+    constexpr float quarterTurn = 1.57079633f; // of the balance's cosine, at its end
+
+    // A step of a glide that lands exactly on what it goes to, so that a switch that is on swaps or plays mono exactly,
+    // and a balance turned back to the centre leaves the sound as it was. In doubles: a float a step at a time from 0 to 1
+    // stops short, some 3e-5 under 1, where a step is less than half its last digit.
+    void glide (double& value, float target, float smoothing) noexcept
+    {
+        value += ((double) target - value) * smoothing;
+
+        if (std::abs ((double) target - value) < landing)
+            value = target;
+    }
+
+    // What the balance leaves of the side it is turned away from: the side turned toward stays as it is (1, exactly, at the
+    // centre), so that nothing is ever louder.
+    float getBalanceGain (float turnedAway) noexcept
+    {
+        return turnedAway > 0.0f ? std::max (0.0f, std::cos (quarterTurn * std::min (1.0f, turnedAway))) : 1.0f;
+    }
 } // namespace
 
-const DeviceInfo StereoExpander::info { .typeID = typeID, .name = "Stereo Expander", .kind = DeviceKind::effect, .parameters = parameters };
+const DeviceInfo Stereo::info { .typeID = typeID, .name = "Stereo", .kind = DeviceKind::effect, .parameters = parameters };
 
-float StereoExpander::Correlation::get() const noexcept
+float Stereo::Correlation::get() const noexcept
 {
     if (0.5 * (left + right) < quietest)
         return noReading;
@@ -46,7 +70,7 @@ float StereoExpander::Correlation::get() const noexcept
     return energy > 0.0 ? (float) std::clamp (product / energy, -1.0, 1.0) : 0.0f;
 }
 
-void StereoExpander::prepare (double newSampleRate, int)
+void Stereo::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
     smoothing = (float) (1.0 - std::exp (-1.0 / (smoothingSeconds * sampleRate)));
@@ -70,11 +94,14 @@ void StereoExpander::prepare (double newSampleRate, int)
     for (auto& tapGain : tapGains)
         tapGain = (float) (tapGain / std::sqrt (energy));
 
+    for (auto& blocker : dcBlockers)
+        blocker.prepare (sampleRate);
+
     shownFrequency = 0.0f;
     reset();
 }
 
-void StereoExpander::reset()
+void Stereo::reset()
 {
     sideSplit.reset();
     middlePhase.reset();
@@ -82,11 +109,14 @@ void StereoExpander::reset()
         filter.reset();
 
     middleLine.reset();
+    for (auto& blocker : dcBlockers)
+        blocker.reset();
+
     inputAverage = outputAverage = {};
     isFirstBlock = true;
 }
 
-void StereoExpander::setFrequency (float hertz) noexcept
+void Stereo::setFrequency (float hertz) noexcept
 {
     shownFrequency = hertz;
     sideSplit.setFrequency (hertz, sampleRate);
@@ -94,7 +124,7 @@ void StereoExpander::setFrequency (float hertz) noexcept
     highPass = dsp::makeFilter (dsp::FilterShape::highPass, hertz, sampleRate, 0.70710678);
 }
 
-void StereoExpander::process (const ProcessContext& block)
+void Stereo::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
     silenceWhatIsNotSound (block);
@@ -104,12 +134,17 @@ void StereoExpander::process (const ProcessContext& block)
     if (numChannels <= 0)
         return;
 
-    // Each side's polarity, first, so that what follows works on the sound put right; the gain, last.
+    // Each side's polarity, first, so that what follows works on the sound put right; then the swap, mid and side, Mono and
+    // the balance; the DC filter; the gain, last.
     const auto targetLeft = values[invertLeft] > 0.5f ? -1.0f : 1.0f;
     const auto targetRight = values[invertRight] > 0.5f ? -1.0f : 1.0f;
     const auto targetLevel = dsp::decibelsToGain (values[gain]);
     const auto targetSide = values[width], targetSpread = values[spread];
     const auto targetBass = values[bassMono] > 0.5f ? 1.0f : 0.0f;
+    const auto targetSwap = values[swap] > 0.5f ? 1.0f : 0.0f;
+    const auto targetMono = values[mono] > 0.5f ? 1.0f : 0.0f;
+    const auto targetLeftBalance = getBalanceGain (values[balance]);
+    const auto targetRightBalance = getBalanceGain (-values[balance]);
 
     if (isFirstBlock)
     {
@@ -119,6 +154,10 @@ void StereoExpander::process (const ProcessContext& block)
         sideGain = targetSide;
         spreadGain = targetSpread;
         bassAmount = targetBass;
+        swapAmount = targetSwap;
+        monoAmount = targetMono;
+        leftBalance = targetLeftBalance;
+        rightBalance = targetRightBalance;
         isFirstBlock = false;
     }
 
@@ -134,15 +173,18 @@ void StereoExpander::process (const ProcessContext& block)
     {
         leftGain += (targetLeft - leftGain) * smoothing;
         rightGain += (targetRight - rightGain) * smoothing;
-        levelGain += (targetLevel - levelGain) * smoothing;
         sideGain += (targetSide - sideGain) * smoothing;
         spreadGain += (targetSpread - spreadGain) * smoothing;
         bassAmount += (targetBass - bassAmount) * smoothing;
+        glide (swapAmount, targetSwap, smoothing);
+        glide (monoAmount, targetMono, smoothing);
+        glide (leftBalance, targetLeftBalance, smoothing);
+        glide (rightBalance, targetRightBalance, smoothing);
 
-        // A mono channel: the gain and the left's polarity only.
+        // A mono channel: the left's polarity, then the DC filter and the gain, below.
         if (right == nullptr)
         {
-            left[i] *= leftGain * levelGain;
+            left[i] *= leftGain;
             continue;
         }
 
@@ -150,6 +192,15 @@ void StereoExpander::process (const ProcessContext& block)
         inputAverage.add (l, r, averageWeight);
         l *= leftGain;
         r *= rightGain;
+
+        // The sides swapped, crossfaded as the switch turns, so that it never clicks; exactly each other's once it is on.
+        if (swapAmount > 0.0)
+        {
+            const auto swapped = (float) swapAmount, kept = (float) (1.0 - swapAmount);
+            const auto swappedLeft = l * kept + r * swapped;
+            r = r * kept + l * swapped;
+            l = swappedLeft;
+        }
 
         // Through mid and side.
         auto middle = 0.5f * (l + r), side = 0.5f * (l - r);
@@ -176,11 +227,33 @@ void StereoExpander::process (const ProcessContext& block)
         side += bassAmount * (highSide - side);
         middle += bassAmount * (phasedMiddle - middle);
 
-        l = (middle + side) * levelGain;
-        r = (middle - side) * levelGain;
-        left[i] = l;
-        right[i] = r;
-        outputAverage.add (l, r, averageWeight);
+        // Mono: what is left of the side turned down to nothing, both sides the middle.
+        if (monoAmount > 0.0)
+            side *= (float) (1.0 - monoAmount);
+
+        // The balance: the side turned away from fades.
+        left[i] = (middle + side) * (float) leftBalance;
+        right[i] = (middle - side) * (float) rightBalance;
+    }
+
+    // The DC filter, a side each, only while it is on or fading out (dsp/DcBlocker.h): it turns the phase of the lows, so
+    // that switched off, the sound passes as it was, bit for bit.
+    const auto filtered = values[dcFilter] > 0.5f;
+
+    for (size_t side = 0; side < (right != nullptr ? 2u : 1u); ++side)
+        dcBlockers[side].process (side == 0 ? left : right, block.numSamples, filtered, false);
+
+    // The gain, and how alike the sides are going out.
+    for (int i = 0; i < block.numSamples; ++i)
+    {
+        levelGain += (targetLevel - levelGain) * smoothing;
+        left[i] *= levelGain;
+
+        if (right != nullptr)
+        {
+            right[i] *= levelGain;
+            outputAverage.add (left[i], right[i], averageWeight);
+        }
     }
 
     inputCorrelation.set (inputAverage.get());

@@ -8,6 +8,12 @@ the step's last commit was made. From the first release on, entries are grouped 
 The full text of every step, as it was written when it was built, is in the
 [archived roadmap](archive/roadmap-2026-11-13.md); what comes next is in the [roadmap](roadmap.md).
 
+## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
+
+- **S6.12 Stereo:** the Stereo Expander becomes Stereo, the one device for a channel's two sides, adding Balance, a
+  Mono switch, Swap Sides and a DC filter to its width, spread, bass in mono, polarity flips and gain, each switched
+  without a click; its presets gain Swap Sides and DC Filter under Checks.
+
 ## Stage 4. Decided: the owner's decisions, built (from 2026-11-17)
 
 - **S4.1 The design note of the cut to versions:** [design/versions-cut.md](design/versions-cut.md) says what the

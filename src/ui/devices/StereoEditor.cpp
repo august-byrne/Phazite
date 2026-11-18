@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "StereoExpanderEditor.h"
+#include "StereoEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <cmath>
@@ -11,7 +11,7 @@ namespace phazite::ui
 {
 namespace
 {
-    using devices::StereoExpander;
+    using devices::Stereo;
 
     constexpr int maxDots = 1024;   // the newest pairs drawn, of each
     constexpr int meterHeight = 18; // the correlation's bar
@@ -20,8 +20,8 @@ namespace
     constexpr float quarterTurn = 0.78539816f;
 } // namespace
 
-class StereoExpanderEditor::Image : public juce::Component,
-                                    private DisplayTicker::Display
+class StereoEditor::Image : public juce::Component,
+                            private DisplayTicker::Display
 {
 public:
     explicit Image (const DeviceHandle& d)
@@ -135,7 +135,7 @@ private:
     graph::WheelGesture wheel { drag }; // and turns
     std::vector<float> lefts, rights;
     std::vector<Dot> outputs, inputs;
-    float correlation = StereoExpander::noReading, inputCorrelation = StereoExpander::noReading;
+    float correlation = Stereo::noReading, inputCorrelation = Stereo::noReading;
     DrawnNumbers drawn;
 
     // A pair as a dot: turned an eighth of a turn, so that mono stands up, the left alone lies along the L line (up and to
@@ -180,10 +180,10 @@ private:
                 pull (*tap, inputs);
         }
 
-        if (auto* expander = device.getProcessor<StereoExpander>())
+        if (auto* stereo = device.getProcessor<Stereo>())
         {
-            correlation = expander->getOutputCorrelation().get();
-            inputCorrelation = expander->getInputCorrelation().get();
+            correlation = stereo->getOutputCorrelation().get();
+            inputCorrelation = stereo->getInputCorrelation().get();
         }
 
         std::vector<float> numbers { width.getValue(), correlation, inputCorrelation, (float) outputs.size() };
@@ -280,46 +280,51 @@ private:
 };
 
 //==============================================================================
-StereoExpanderEditor::StereoExpanderEditor (const DeviceHandle& handle)
+StereoEditor::StereoEditor (const DeviceHandle& handle)
     : DeviceEditorBase (handle)
 {
     auto& shown = keep (std::make_unique<Image> (device));
     image = &shown;
 
+    // In the order the sound goes through them: four side by side are wider than the dock, so Bass under Width and Output
+    // under Sides.
     const auto widthPart = makeControlsPart ("Width", { "width", "spread" }, 2, ParameterControls::Size::large);
-    const auto rest = makeControlsPart ("Bass and Polarity", { "bassMono", "bassMonoFrequency", "gain", "invertLeft", "invertRight" }, 3,
-                                        ParameterControls::Size::compact, { "Bass Mono", "Frequency", "Gain", "Flip Left", "Flip Right" });
-    setParts ({ { { "Image", &shown, 240, 196, 120, true, 160 } }, { widthPart }, { rest } });
+    const auto bass =
+        makeControlsPart ("Bass", { "bassMono", "bassMonoFrequency" }, 2, ParameterControls::Size::compact, { "Bass Mono", "Frequency" });
+    const auto sides = makeControlsPart ("Sides", { "balance", "mono", "swap", "invertLeft", "invertRight" }, 3,
+                                         ParameterControls::Size::compact, { "Balance", "Mono", "Swap", "Flip Left", "Flip Right" });
+    const auto output = makeControlsPart ("Output", { "dcFilter", "gain" }, 2, ParameterControls::Size::compact, { "DC Filter", "Gain" });
+    setParts ({ { { "Image", &shown, 240, 196, 120, true, 160 } }, { widthPart, bass }, { sides, output } });
 }
 
-StereoExpanderEditor::~StereoExpanderEditor() = default;
+StereoEditor::~StereoEditor() = default;
 
-juce::Component& StereoExpanderEditor::getImage() const noexcept
+juce::Component& StereoEditor::getImage() const noexcept
 {
     return *image;
 }
 
-float StereoExpanderEditor::getShownCorrelation() const
+float StereoEditor::getShownCorrelation() const
 {
     return image->getCorrelation();
 }
 
-float StereoExpanderEditor::getShownInputCorrelation() const
+float StereoEditor::getShownInputCorrelation() const
 {
     return image->getInputCorrelation();
 }
 
-int StereoExpanderEditor::getNumDots() const
+int StereoEditor::getNumDots() const
 {
     return image->getNumDots();
 }
 
-float StereoExpanderEditor::getDotsAcross() const
+float StereoEditor::getDotsAcross() const
 {
     return image->getDotsAcross();
 }
 
-juce::Point<float> StereoExpanderEditor::getDiscCentre() const
+juce::Point<float> StereoEditor::getDiscCentre() const
 {
     return image->getDisc().first;
 }

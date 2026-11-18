@@ -37918,8 +37918,8 @@
     ]
   },
   {
-    "type": "phaziteStereoExpander",
-    "name": "Stereo Expander",
+    "type": "phaziteStereo",
+    "name": "Stereo",
     "kind": "effect",
     "parameters": [
       {
@@ -37934,6 +37934,30 @@
         "id": "spread",
         "name": "Spread",
         "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "balance",
+        "name": "Balance",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mono",
+        "name": "Mono",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "swap",
+        "name": "Swap Sides",
+        "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.0
@@ -37966,6 +37990,14 @@
       {
         "id": "invertRight",
         "name": "Invert Right",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "dcFilter",
+        "name": "DC Filter",
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,

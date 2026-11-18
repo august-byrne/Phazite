@@ -36,7 +36,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
-#include "devices/stereo/StereoExpander.h"
+#include "devices/stereo/Stereo.h"
 #include "devices/stretch/Stretch.h"
 #include "devices/synth/Synth.h"
 #include "devices/vinyl/Vinyl.h"
@@ -366,8 +366,7 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },
         { "Reverb, plate", maker<dev::Reverb>(), &dev::Reverb::info, 0,
           [] (std::vector<float>& v) { v[dev::Reverb::mode] = (float) dev::Reverb::plate; } },
-        { "Stereo Expander, spreading", maker<dev::StereoExpander>(), &dev::StereoExpander::info, 0,
-          [] (std::vector<float>& v) { v[dev::StereoExpander::spread] = 1.0f; } },
+        { "Stereo, spreading", maker<dev::Stereo>(), &dev::Stereo::info, 0, [] (std::vector<float>& v) { v[dev::Stereo::spread] = 1.0f; } },
         { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
           [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
         { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
@@ -442,7 +441,7 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
         { &dev::Vinyl::info, maker<dev::Vinyl>() },
         { &dev::Delay::info, maker<dev::Delay>() },
         { &dev::Reverb::info, maker<dev::Reverb>() },
-        { &dev::StereoExpander::info, maker<dev::StereoExpander>() },
+        { &dev::Stereo::info, maker<dev::Stereo>() },
         { &dev::Phaser::info, maker<dev::Phaser>() },
         { &dev::Flanger::info, maker<dev::Flanger>() },
         { &dev::Chorus::info, maker<dev::Chorus>() },
