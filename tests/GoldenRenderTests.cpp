@@ -13,7 +13,6 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/FactoryWavetables.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/mixer/MixerModel.h"
 
@@ -154,16 +153,16 @@ bool soundsLikeExodus (const Fingerprint& fingerprint, const juce::AudioBuffer<f
 }
 
 //==============================================================================
-// The wavetable song, at 120 BPM: Phazite's wavetable synth with its first oscillator on Saw Build, low in the table, and
+// The synth song, at 120 BPM: Phazite's synth with its first oscillator on Saw Build, low in the table, and
 // its second on Vowels an octave down, each in unison four times over and spread across the stereo field, its third
 // envelope lifting the first oscillator up its table at each note's start, through its filter: a chord from 0 to 1.5 s,
 // another from 1.5 to 3 s, then the release.
-void addWavetableSong (TestSong& song)
+void addSynthSong (TestSong& song)
 {
-    using phazite::devices::WavetableSynth;
+    using phazite::devices::Synth;
     song.setTempo (120.0);
     const auto track = song.firstTrack;
-    const auto synth = song.setInstrument (track, WavetableSynth::typeID);
+    const auto synth = song.setInstrument (track, Synth::typeID);
 
     const auto device = phazite::getDeviceHandle (song.context, synth);
     device.setFactoryWavetable (0, phazite::devices::findFactoryWavetable ("Saw Build"));
@@ -176,8 +175,8 @@ void addWavetableSong (TestSong& song)
     song.setParameter (synth, "osc2Level", 0.5f);
     song.setParameter (synth, "unisonVoices", 3.0f); // four
     song.setParameter (synth, "unisonDetune", 15.0f);
-    song.setParameter (synth, "mod2Source", (float) WavetableSynth::ModSource::envelope3);
-    song.setParameter (synth, "mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
+    song.setParameter (synth, "mod2Source", (float) Synth::ModSource::envelope3);
+    song.setParameter (synth, "mod2Target", (float) Synth::ModTarget::osc1Position);
     song.setParameter (synth, "mod2Amount", 0.6f);
 
     const auto clip = song.addMidiClip (track, 0.0, 6.0);
@@ -187,7 +186,7 @@ void addWavetableSong (TestSong& song)
 
 // Something on each side while the chords play, wider than the middle somewhere (its unison spreads it), and quiet once
 // they have rung out.
-bool soundsLikeTheWavetable (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+bool soundsLikeTheSynth (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
     REQUIRE (fingerprint.size() == 40);
     auto playing = true, wide = false;
@@ -232,28 +231,6 @@ juce::File writeDecay (const juce::File& file, double seconds, double frequency)
 }
 
 //==============================================================================
-// Phazite's synth as it is made: three chords of two beats each at 120 BPM, C, F and G major, then their release.
-void addSynthSong (TestSong& song)
-{
-    song.setTempo (120.0);
-    const auto track = song.firstTrack;
-    song.setInstrument (track, phazite::devices::Synth::typeID);
-    const auto clip = song.addMidiClip (track, 0.0, 6.0);
-    song.addChord (clip, { 48, 52, 55 }, 0.0, 2.0);
-    song.addChord (clip, { 53, 57, 60 }, 2.0, 2.0);
-    song.addChord (clip, { 55, 59, 62 }, 4.0, 2.0);
-}
-
-bool soundsLikeChords (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
-{
-    auto playing = true;
-
-    for (size_t block = 1; block < 29; ++block)
-        playing = isBetween (fingerprint, block, -40.0f, 0.0f, "the chords play") && playing;
-
-    return isLouder (fingerprint, 15, 39, 20.0f, "their release has rung out") && playing;
-}
-
 // Phazite's drum sampler as it is made, with its kit, for two bars at 120 BPM: a kick on the first and third beats, a snare
 // on the second and fourth, and a closed hi-hat, quieter, on every half beat.
 void addDrumSong (TestSong& song)
@@ -856,21 +833,15 @@ TEST_SUITE ("golden")
                                                                 exodusSeconds, soundsLikeExodus));
     }
 
-    TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")
+    TEST_CASE ("Golden render: two chords on Phazite's synth, in unison, an envelope sweeping each note's table")
     {
         TestSong song;
-        addWavetableSong (song);
+        addSynthSong (song);
         phazite::test::dispatchPendingMessages();
-        phazite::test::checkGoldenRender (song.context, golden ("wavetable",
-                                                                "two chords on Phazite's wavetable synth, its two oscillators in "
+        phazite::test::checkGoldenRender (song.context, golden ("synth",
+                                                                "two chords on Phazite's synth, its two oscillators in "
                                                                 "unison, an envelope sweeping each note's table.",
-                                                                4.0, soundsLikeTheWavetable));
-    }
-
-    TEST_CASE ("Golden render: three chords on Phazite's synth as it is made")
-    {
-        renders (addSynthSong,
-                 golden ("synth", "three chords on Phazite's synth as it is made, then their release.", 4.0, soundsLikeChords));
+                                                                4.0, soundsLikeTheSynth));
     }
 
     TEST_CASE ("Golden render: two bars of a beat on Phazite's drum sampler with its kit")

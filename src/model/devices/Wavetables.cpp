@@ -17,21 +17,21 @@ namespace phazite
 {
 namespace
 {
-    using devices::WavetableSynth;
+    using devices::Synth;
 
     juce::String getStepName (const juce::String& table, int osc)
     {
         return "Put " + table + " on Osc " + juce::String (osc + 1);
     }
 
-    // A wavetable synth's sounds in the song (none while nothing was ever set: its defaults), if the device is one and the
+    // A synth's sounds in the song (none while nothing was ever set: its defaults), if the device is one and the
     // oscillator is one of its oscillators.
     std::optional<juce::ValueTree> findOscillatorSounds (const Song& song, DeviceID id, int osc)
     {
         const auto device = findDeviceState (song, id);
 
-        if (! device.hasType (schema::DEVICE) || device[schema::deviceType].toString() != WavetableSynth::typeID
-            || ! juce::isPositiveAndBelow (osc, WavetableSynth::numOscillators))
+        if (! device.hasType (schema::DEVICE) || device[schema::deviceType].toString() != Synth::typeID
+            || ! juce::isPositiveAndBelow (osc, Synth::numOscillators))
             return {};
 
         return device.getChildWithName (schema::SOUNDS);
@@ -114,7 +114,7 @@ std::shared_ptr<const devices::Wavetable> readWavetable (const juce::File& file)
     return devices::Wavetable::fromSound (file.getFileNameWithoutExtension(), mono, findSerumFrameLength (file));
 }
 
-bool isWavetableSynth (const Song& song, DeviceID id)
+bool isSynth (const Song& song, DeviceID id)
 {
     return findOscillatorSounds (song, id, 0).has_value();
 }
@@ -149,7 +149,7 @@ std::shared_ptr<const devices::Wavetable> getWavetable (const Song& song, Device
     // What the engine plays, while it plays the song.
     if (const auto* session = findPlayingSession (song))
         if (const auto* node = session->getPlayer().findDevice ((std::int64_t) id.getRaw()))
-            if (const auto* synth = dynamic_cast<const WavetableSynth*> (&node->getRunner().getProcessor()))
+            if (const auto* synth = dynamic_cast<const Synth*> (&node->getRunner().getProcessor()))
                 return synth->getTable (osc);
 
     // Else what its sounds name: a file read once while it stays the same, or a factory table.
@@ -193,7 +193,7 @@ void setFactoryWavetable (Song& song, DeviceID id, int osc, int index)
 {
     const auto names = devices::getFactoryWavetableNames();
 
-    if (! isWavetableSynth (song, id) || ! juce::isPositiveAndBelow (osc, WavetableSynth::numOscillators)
+    if (! isSynth (song, id) || ! juce::isPositiveAndBelow (osc, Synth::numOscillators)
         || ! juce::isPositiveAndBelow (index, (int) names.size()))
         return;
 
@@ -209,7 +209,7 @@ void setFactoryWavetable (Song& song, DeviceID id, int osc, int index)
 
 bool setWavetableFile (Song& song, DeviceID id, int osc, const juce::File& file)
 {
-    if (! isWavetableSynth (song, id) || ! juce::isPositiveAndBelow (osc, WavetableSynth::numOscillators) || ! file.existsAsFile()
+    if (! isSynth (song, id) || ! juce::isPositiveAndBelow (osc, Synth::numOscillators) || ! file.existsAsFile()
         || getFileKind (file) != FileKind::audio)
         return false;
 
@@ -219,7 +219,7 @@ bool setWavetableFile (Song& song, DeviceID id, int osc, const juce::File& file)
     return true;
 }
 
-void loadOscillatorTable (WavetableSynth& synth, const Song& song, const juce::ValueTree& sounds, int osc)
+void loadOscillatorTable (Synth& synth, const Song& song, const juce::ValueTree& sounds, int osc)
 {
     // A file that is gone or can't be read leaves the oscillator on its factory table.
     if (const auto file = getTableFile (song, sounds, osc); file.existsAsFile())

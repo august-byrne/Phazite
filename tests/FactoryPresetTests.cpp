@@ -30,7 +30,6 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -91,8 +90,6 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
 
     if (type == devices::Synth::typeID)
         return std::make_unique<devices::Synth>();
-    if (type == devices::WavetableSynth::typeID)
-        return std::make_unique<devices::WavetableSynth>();
     if (type == devices::FmSynth::typeID)
         return std::make_unique<devices::FmSynth>();
     if (type == devices::Sampler::typeID)
@@ -141,8 +138,8 @@ std::unique_ptr<devices::Processor> makeLoaded (const devices::DeviceInfo& info,
     REQUIRE (processor != nullptr);
     processor->prepare (testRate, testBlockSize);
 
-    if (auto* wavetable = dynamic_cast<devices::WavetableSynth*> (processor.get()))
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+    if (auto* wavetable = dynamic_cast<devices::Synth*> (processor.get()))
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
             if (const auto name = sounds[phazite::schema::getOscillatorWavetable (osc)].toString(); name.isNotEmpty())
                 wavetable->setTable (osc, devices::getFactoryWavetable (devices::findFactoryWavetable (name.toStdString())));
 
@@ -361,13 +358,13 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
         // saves does.
         CHECK (values->getProperties().size() == (int) info->parameters.size());
 
-        // A wavetable synth's tables, a drum sampler's pads' sounds and a sampler's sound by their names; no sound files,
+        // A synth's tables, a drum sampler's pads' sounds and a sampler's sound by their names; no sound files,
         // which aren't in Phazite's repository.
         if (const auto* sounds = device[keys::sounds].getDynamicObject())
         {
             const auto isDrums = toString (info->typeID) == devices::DrumSampler::typeID;
             const auto isSampler = toString (info->typeID) == devices::Sampler::typeID;
-            CHECK ((isDrums || isSampler || toString (info->typeID) == devices::WavetableSynth::typeID));
+            CHECK ((isDrums || isSampler || toString (info->typeID) == devices::Synth::typeID));
 
             for (const auto& [property, name] : sounds->getProperties())
             {

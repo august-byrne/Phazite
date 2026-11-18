@@ -3,7 +3,7 @@
 *Design section 9.*
 
 A device is an instrument, which turns a track's notes into sound, or an effect, which changes the sound that comes
-into it. Phazite has seventeen devices of its own and hosts plug-ins as devices beside them. A container groups devices
+into it. Phazite has sixteen devices of its own and hosts plug-ins as devices beside them. A container groups devices
 into one device with parallel chains and eight macros, and a preset keeps a device, a container or a whole track in a
 file that any project can take in.
 
@@ -11,9 +11,9 @@ file that any project can take in.
 
 | Feature | State | Note |
 | --- | --- | --- |
-| Phazite's own devices: 5 instruments, 12 effects | Built | Each has a page of its own, below |
+| Phazite's own devices: 4 instruments, 12 effects | Built | Each has a page of its own, below |
 | Many recordings across the keys (pianos, strings), in the Sampler | Planned | Roadmap step 4.10; no Multisampler of its own |
-| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17; Motion (S6.10), Stereo (S6.12) and the Exciter in the Saturator (S6.6) are built |
+| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Built | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17 |
 | An instrument first, then any number of effects, on every track | Built | No limit |
 | Effects moved by dragging | Built | Within a channel or a container; not from one channel to another |
 | A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and Stereo have no Mix |
@@ -64,8 +64,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 
 | Device | Kind | What it is |
 | --- | --- | --- |
-| [Synth](devices/synth.md) | Instrument | A subtractive synth: two oscillators, a sub and noise, unison, a filter, two envelopes and an LFO |
-| [Wavetable](devices/wavetable.md) | Instrument | Two oscillators that morph through tables of waves, with warps, three envelopes, two LFOs and eight modulation slots |
+| [Synth](devices/synth.md) | Instrument | Two wavetable oscillators (a subtractive synth's waves at first), with warps, a sub and noise, unison, a filter, three envelopes, two LFOs and eight modulation slots |
 | [FM](devices/fm.md) | Instrument | Four operators in eight algorithms, for electric pianos, bells, basses and brass |
 | [Sampler](devices/sampler.md) | Instrument | One sound across the keys: held and looped, played through as a one-shot, or cut into slices |
 | [Drum Sampler](devices/drum-sampler.md) | Instrument | A pad on every note, 128 in all, each with up to four layers, an envelope, a filter and a choke group |
@@ -348,7 +347,7 @@ device cannot break a saved preset. Presets carry no format version.
 | Container | Its name and Mix, its chains with their devices, settings and ranges, its split and its kind, and its macros with what they modulate in it | The same |
 | Track | Its name, colour, volume and pan, its instrument, effects and containers, and its modulators and macros with what they modulate on it | Its clips, automation and sends, and where its sound goes |
 
-The sound files a device plays (a Drum Sampler's pads', a Sampler's sound, a Wavetable's tables) go with a preset: they
+The sound files a device plays (a Drum Sampler's pads', a Sampler's sound, a Synth's tables) go with a preset: they
 are copied into a folder beside it named after it ("Kit Sounds"), and the preset names each by its path from its own
 folder ("Kit Sounds/Boom.wav"), as a sampler's patch keeps its samples beside it. Copied with that folder, a preset
 works on any computer, and it holds no path of the computer it was saved on. A sound that can't be copied there (a
@@ -431,9 +430,6 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
 
 - **Instruments of many recordings** (pianos, guitars, strings) from SFZ files: Planned, as a part of the
   [Sampler](devices/sampler.md), roadmap step 4.10.
-- **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
-  (S6.7). Planned; until it is built, this page and the devices' pages describe the devices as they are. Stereo
-  (S6.12), Motion (S6.10), Age (S6.11) and the Exciter's band and colour in the Saturator (S6.6) are built.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

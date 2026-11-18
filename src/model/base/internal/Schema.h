@@ -994,7 +994,7 @@ inline const juce::Identifier& getPadSoundFile (int pad, int layer = 0)
     return names[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
 }
 
-// Phazite's wavetable synth (devices/wavetable/WavetableSynth.h) keeps in its DEVICE's SOUNDS what each of its two
+// Phazite's synth (devices/synth/Synth.h) keeps in its DEVICE's SOUNDS what each of its two
 // oscillators plays: "osc1Wavetable" and "osc2Wavetable" name one of its factory tables (devices/wavetable/
 // FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
 // "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the

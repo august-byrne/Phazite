@@ -69,11 +69,9 @@ instruments hold their notes. The figure is the share of one core's time.
 
 | Device, and what it plays | % of a core | From |
 |---|---|---|
-| Synth: 1 note / 8 notes / 16 notes with 7-voice unison | 0.16 / 0.99 / 2.05 | 2026-11-16 |
-| Synth, idle | 0.03 | 2026-11-16 |
-| Wavetable: 1 note / 8 notes / 8 notes with full unison | 0.19 / 1.38 / 4.00 | 2026-11-16 |
-| Wavetable: 8 notes, full unison, stacked and drifting | 4.02 | 2026-11-16 |
-| Wavetable, idle | 0.017 | 2026-11-16 |
+| Synth: 1 note / 8 notes / 8 notes with full unison | 0.19 / 1.38 / 4.00 | 2026-11-16 |
+| Synth: 8 notes, full unison, stacked and drifting | 4.02 | 2026-11-16 |
+| Synth, idle | 0.017 | 2026-11-16 |
 | Drum Sampler: 4 pads every 16th / idle | 0.384 / 0.004 | 2026-11-16 |
 | Sampler: 1 note / 8 notes / 16 notes filtered, looping | 0.095 / 4.54 / 11.9 | 2026-11-16 |
 | Sampler, idle | 0.03 | 2026-11-16 |
@@ -120,9 +118,8 @@ and silent (2026-11-16), so its stopped cost there is none.
 | Multiband | 492 | 2026-11-16 |
 | Age (then the Vinyl) | 531 | 2026-11-16 |
 
-The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.10 to 0.25 ms after it to -30 dB (2026-11-16:
-the Synth 0.04 / 0.10 ms, the Wavetable 0.06 / 0.15, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum
-Sampler's and the effects' times to sound are not recorded.
+The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.15 to 0.25 ms after it to -30 dB (2026-11-16:
+the Synth 0.06 / 0.15 ms, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum Sampler's and the effects' times to sound are not recorded.
 
 ### Benchmark: each device's reset, as Play and a jump reset every device in the block that starts or lands
 
@@ -134,7 +131,7 @@ played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the medi
 
 | Device | Its reset (% of a block of 128 at 48 kHz) | From |
 |---|---|---|
-| Synth / Wavetable / FM | 0.02 / 0.02 / 0.01 | 2026-11-16 |
+| Synth / FM | 0.02 / 0.01 | 2026-11-16 |
 | Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
 | EQ / Filter / Compressor / Limiter / Stereo / Phaser (now Motion's mode) / Vocoder | 0.00 | 2026-11-16 |
 | Multiband / Saturator / Chorus (now Motion's mode) | 0.01 | 2026-11-16 |
@@ -161,7 +158,7 @@ What the sampler does with a sound as it loads, on the message thread.
 
 ### Benchmark: a wavetable of 256 frames made
 
-What the wavetable synth does with a table as it loads one, on the message thread: 256 frames of 2048 samples, each
+What the synth does with a table as it loads one, on the message thread: 256 frames of 2048 samples, each
 a saw of all 1024 harmonics, read back as a table of 21 levels a frame, with what its warps leave off centre (each
 level's area across its cycle at 128 places and its means bent at 49 bends, both exactly from the frame's harmonics,
 `src/devices/wavetable/Wavetable.cpp`).
@@ -343,7 +340,7 @@ for the 20 empty tracks on four threads and 39.4 / 30.8 for the 20 tracks of syn
 ### Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, its plan and an edit
 
 The benchmark song (`tests/BenchmarkSong.h`) of 100 tracks, every one playing all the way through: an instrument on
-each, in turn a Synth, a Wavetable, an FM synth, a Drum Sampler and a Sampler, each with a part that suits it; an EQ
+each, in turn a Synth, an FM synth, a Drum Sampler and a Sampler, each with a part that suits it; an EQ
 and a compressor after it, a saturator on every third track and a Motion (a chorus) on every fifth; a send to a reverb from every
 track and to a delay from every other; buses of ten, each with a compressor; and automation on every fourth track's
 volume and every Synth's cutoff. Ten seconds of blocks at 48 kHz, played one after another on the test's thread as the

@@ -390,7 +390,7 @@ TEST_CASE ("A device's values written as another tool writes numbers open as the
     const auto keys = s.addTrack ("Keys");
     const auto synth = s.setInstrument (keys, phazite::devices::Synth::typeID);
     s.setParameter (synth, "subLevel", 1.0f);
-    s.setParameter (synth, "drift", 0.5f);
+    s.setParameter (synth, "unisonDrift", 0.5f);
     keepVersion (s.context, "First");
     REQUIRE (s.getProject().save().wasOk());
     auto written = phazite::findSong (s.context)->getState().createCopy();
@@ -412,9 +412,9 @@ TEST_CASE ("A device's values written as another tool writes numbers open as the
     auto values = findValues (written);
     REQUIRE (values.isValid());
     REQUIRE (values.hasProperty ("subLevel"));
-    REQUIRE (values.hasProperty ("drift"));
+    REQUIRE (values.hasProperty ("unisonDrift"));
     values.setProperty ("subLevel", "1.0", nullptr);
-    values.setProperty ("drift", "5e-1", nullptr);
+    values.setProperty ("unisonDrift", "5e-1", nullptr);
 
     s.openSong (written);
     REQUIRE (waitForVersionHistory (s.context));
@@ -433,7 +433,7 @@ TEST_CASE ("A project Phazite saved is the same, byte for byte, once opened and 
     const auto bass = s.addTrack ("Bass");
     const auto synth = s.setInstrument (bass, phazite::devices::Synth::typeID);
     s.setParameter (synth, "cutoff", 1234.5f);
-    s.setParameter (synth, "drift", 0.3f);
+    s.setParameter (synth, "unisonDrift", 0.3f);
     s.setVolume (bass, -4.7f);
     s.setPan (bass, 0.15f);
     s.setTempo (127.3);

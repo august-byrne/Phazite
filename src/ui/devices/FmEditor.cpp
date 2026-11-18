@@ -1603,7 +1603,7 @@ FmEditor::FmEditor (const DeviceHandle& handle)
                          ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Key", "Slope", "Envelope", "Velocity" });
     filter.titleSwitch = &makePartSwitch ("filterOn", *filter.content);
 
-    // The filter's envelope, as the synth's editor shows its own: its picture, whose points drag and whose stages bend, over
+    // The filter's envelope, as the sampler's editor shows its own: its picture, whose points drag and whose stages bend, over
     // its times, sustain and bends. It shows faint with the filter while that is off (refresh()).
     auto& filterEnvelopeView = keep (std::make_unique<EnvelopeView> (
         "Filter envelope", parameter (FmSynth::filterAttack), parameter (FmSynth::filterDecay), parameter (FmSynth::filterSustain),

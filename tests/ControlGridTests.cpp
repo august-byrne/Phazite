@@ -9,7 +9,6 @@
 #include "devices/fm/FmSynth.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/internal/Devices.h"
 
 #include <cstdint>
@@ -22,8 +21,7 @@ namespace devices = phazite::devices;
 namespace probe = phazite::test::probe;
 
 constexpr double rate = 44100.0;
-const char* const synths[] = { devices::Synth::typeID, devices::WavetableSynth::typeID, devices::FmSynth::typeID,
-                               devices::Sampler::typeID };
+const char* const synths[] = { devices::Synth::typeID, devices::FmSynth::typeID, devices::Sampler::typeID };
 
 // Notes that end well before the stretch does, their tails gone by its end: a chord, a note gliding in, a note on its own.
 std::vector<devices::NoteEvent> getNotes()

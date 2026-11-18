@@ -427,7 +427,7 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         std::vector<std::pair<juce::String, float>> values;
 
         if (release > 0.0f)
-            values.push_back ({ "release", release });
+            values.push_back ({ "env1Release", release }); // the synth's amp envelope's
 
         if (drive > 0.0f)
             values.push_back ({ "drive", drive });

@@ -125,7 +125,7 @@ download. Its installer is not signed yet (4.3 is in stage 8), which the release
 An audit of the device list came first (2026-11-17): twenty devices become sixteen, each generic and whole, by the
 merges in S6.6, S6.7 and S6.10, and S6.11 and S6.12 widen two more ([decisions.md](design/decisions.md), "Sound and
 devices"). The steps that change the list come first, since the listening sets, the presets and the editors follow it.
-Built, each in the [changelog](changelog.md): S6.3 (the Compressor), part A of S6.4 (the EQ), S6.5 (the Reverb's Hall), the Saturator's part of S6.6, part A of S6.7,
+Built, each in the [changelog](changelog.md): S6.3 (the Compressor), part A of S6.4 (the EQ), S6.5 (the Reverb's Hall), the Saturator's part of S6.6, the one synth of S6.7,
 S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 
 | Step | Size | What | Done when |
@@ -134,7 +134,7 @@ S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 | S6.2 | M | The devices' small bugs left by the audit | Each is fixed with a test, or in known-bugs.md |
 | S6.4 | L | What is left of it: the EQ's linear phase. Built: bands on the middle, a side, the left or the right, and dynamic bands | It has a DSP test |
 | S6.6 | M | What is left of it: the Filter at four and eight times the rate, and a filter that drives. Built: the Saturator, with the Exciter in it, and the Delay | Aliasing measures below the level set in the device's page |
-| S6.7 | XL | Synths: the Synth and the Wavetable become one synth, named Synth; then modulation depth, band-limited sync and warps | Every preset of the old Synth plays from the new one as it did, within the level its page sets; a swept sync shows no aliasing above the level set |
+| S6.7 | L | What is left of it: the Synth's modulation gliding between control steps, band-limited sync and warps, and the Driven filter for the instruments. Built: the Synth and the Wavetable as one synth | A swept sync shows no aliasing above the level set; a fast LFO on a resonant filter doesn't step |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
 

@@ -167,8 +167,8 @@ constexpr Exception exceptions[] = {
 // Parameters left at their defaults while an instrument's settings are drawn for the offset rule, each of which puts an
 // offset under the notes when it is turned: not as it should be (an instrument's output should have none; the suite's
 // report describes it). The rule is measured with each of them drawn too, and the test fails once that keeps the rule.
-// None now: the synth's Osc 2 Sync and the wavetable's Sync, Bend and Pulse Width warps, which were here, take away what
-// they leave off centre as they play (Synth.cpp's getSyncedMean(), Wavetable::getArea() and getBentMean()).
+// None now: the synth's Sync, Bend and Pulse Width warps, which were here, take away what they leave off centre as they
+// play (Wavetable::getArea() and getBentMean()).
 struct LeftAtDefault
 {
     std::string_view typeID, parameterID, why;
@@ -186,7 +186,7 @@ struct OnPurpose
 };
 
 const OnPurpose onPurpose[] = {
-    { "phaziteWavetable",
+    { "phaziteSynth",
       { { "osc1Warp", 7.0f },
         { "osc1WarpAmount", 1.0f },
         { "osc2On", 1.0f },
@@ -194,7 +194,7 @@ const OnPurpose onPurpose[] = {
         { "osc2Pitch", 0.0f },
         { "osc1Fine", 0.0f },
         { "osc2Fine", 0.0f } } },
-    { "phaziteWavetable",
+    { "phaziteSynth",
       { { "osc1Warp", 6.0f },
         { "osc1WarpAmount", 0.6f },
         { "osc2On", 1.0f },
@@ -202,7 +202,7 @@ const OnPurpose onPurpose[] = {
         { "osc2Pitch", 12.0f },
         { "osc1Fine", 0.0f },
         { "osc2Fine", 0.0f } } },
-    { "phaziteWavetable",
+    { "phaziteSynth",
       { { "osc2Warp", 7.0f },
         { "osc2WarpAmount", 0.8f },
         { "osc2On", 1.0f },
@@ -210,7 +210,13 @@ const OnPurpose onPurpose[] = {
         { "osc2Pitch", 12.0f },
         { "osc1Fine", 0.0f },
         { "osc2Fine", 0.0f } } },
-    { "phaziteSynth", { { "osc2Sync", 1.0f }, { "osc2Pitch", 5.0f }, { "drive", 18.0f }, { "filterOn", 1.0f } } },
+    { "phaziteSynth",
+      { { "osc1Warp", 1.0f },
+        { "osc1WarpAmount", 0.2f },
+        { "osc1Pitch", 0.0f },
+        { "osc1Fine", 0.0f },
+        { "drive", 18.0f },
+        { "filterOn", 1.0f } } },
 };
 
 // Devices measured once in each of their modes, each under a name of its own, with its mode's choice as if it were the

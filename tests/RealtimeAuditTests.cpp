@@ -40,7 +40,6 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/core/Recording.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -1333,8 +1332,10 @@ TEST_SUITE ("realtime-audit")
         const auto track = song.firstTrack;
         const auto synth = song.setInstrument (track, Synth::typeID);
         song.setParameter (synth, "noiseLevel", 0.2f);
-        song.setParameter (synth, "lfoDepth", 0.5f);
-        song.setParameter (synth, "release", 400.0f);
+        song.setParameter (synth, "mod2Source", (float) Synth::ModSource::lfo1);
+        song.setParameter (synth, "mod2Target", (float) Synth::ModTarget::cutoff);
+        song.setParameter (synth, "mod2Amount", 0.5f);
+        song.setParameter (synth, "env1Release", 400.0f);
 
         // More notes than voices, so some are stolen.
         using phazite::test::at, phazite::test::lasting;
@@ -1356,7 +1357,6 @@ TEST_SUITE ("realtime-audit")
         TestSong song;
         const auto track = song.firstTrack;
         const auto synth = song.setInstrument (track, Synth::typeID);
-        song.setParameter (synth, "unisonOn", 1.0f);
         song.setParameter (synth, "unisonVoices", 6.0f); // seven
         song.setParameter (synth, "unisonDetune", 40.0f);
         addChords (song, track);
@@ -1367,77 +1367,46 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's synth with every part a classic sound needs: osc 2 synced and swept, a square sub two "
-               "octaves down, drift, its filter driven and following velocity, its LFO on the pulse width coming in, a pitch "
-               "envelope, unison, and legato glides in mono")
+    TEST_CASE ("Real-time audit: Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope "
+               "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated")
     {
         using phazite::devices::Synth;
         TestSong song;
         const auto track = song.firstTrack;
-        const auto synth = song.setInstrument (track, Synth::typeID);
-
-        // Osc 2 a square (its width moving), synced and swept; a square sub two octaves down; drift; the filter driven and
-        // following velocity; the LFO on the pulse width (3), coming in; a pitch envelope; unison; mono, gliding legato (1).
-        const std::pair<const char*, float> settings[] = {
-            { "osc2Wave", 3.0f },  { "osc2Sync", 1.0f },  { "osc2Envelope", 24.0f }, { "subLevel", 0.5f },       { "subOctave", 1.0f },
-            { "subShape", 3.0f },  { "drift", 1.0f },     { "drive", 18.0f },        { "filterVelocity", 0.5f }, { "lfoOn", 1.0f },
-            { "lfoTarget", 3.0f }, { "lfoFade", 300.0f }, { "pitchAmount", 12.0f },  { "unisonOn", 1.0f },       { "voiceMode", 1.0f },
-            { "glide", 50.0f },    { "glideMode", 1.0f },
-        };
-
-        for (const auto& [id, value] : settings)
-            song.setParameter (synth, id, value);
-
-        addChords (song, track);
-
-        const auto m = playAndMeasure (song);
-        report ("Phazite's synth with osc 2 synced and swept, a square sub, drift, drive, its LFO on the pulse width, a pitch "
-                "envelope, unison and legato glides",
-                m);
-        CHECK (m.peakLevel > 0.01f);
-        checkSteadyPlaybackDoesNotAllocate (m);
-    }
-
-    TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope "
-               "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated")
-    {
-        using phazite::devices::WavetableSynth;
-        TestSong song;
-        const auto track = song.firstTrack;
-        const auto wavetable = song.setInstrument (track, WavetableSynth::typeID);
+        const auto wavetable = song.setInstrument (track, Synth::typeID);
         phazite::setFactoryWavetable (getSong (song), wavetable, 1, phazite::devices::findFactoryWavetable ("Vowels"));
 
         const auto set = [&song, wavetable] (const char* id, float value) { song.setParameter (wavetable, id, value); };
         set ("unisonVoices", 7.0f); // eight
         set ("unisonPosition", 0.5f);
-        set ("unisonStack", (float) WavetableSynth::Stack::twoOctaves);
+        set ("unisonStack", (float) Synth::Stack::twoOctaves);
         set ("unisonDrift", 25.0f);
-        set ("osc1Warp", (float) WavetableSynth::Warp::sync);
+        set ("osc1Warp", (float) Synth::Warp::sync);
         set ("osc1WarpAmount", 0.4f);
         set ("osc2On", 1.0f);
-        set ("osc2Warp", (float) WavetableSynth::Warp::fm);
+        set ("osc2Warp", (float) Synth::Warp::fm);
         set ("osc2WarpAmount", 0.3f);
         set ("subLevel", 0.3f);
         set ("noiseLevel", 0.1f);
         set ("drive", 6.0f);
-        set ("mod2Source", (float) WavetableSynth::ModSource::envelope3);
-        set ("mod2Target", (float) WavetableSynth::ModTarget::osc1Position);
+        set ("mod2Source", (float) Synth::ModSource::envelope3);
+        set ("mod2Target", (float) Synth::ModTarget::osc1Position);
         set ("mod2Amount", 1.0f);
-        set ("mod3Source", (float) WavetableSynth::ModSource::lfo1);
-        set ("mod3Target", (float) WavetableSynth::ModTarget::osc2Position);
+        set ("mod3Source", (float) Synth::ModSource::lfo1);
+        set ("mod3Target", (float) Synth::ModTarget::osc2Position);
         set ("mod3Amount", 0.5f);
 
-        // What it took from the synth (S6.7): each LFO's fade, legato glides, Drift on the cutoff, and LFO 2 moving slot 3's
+        // Each LFO's fade, legato glides, Drift on the cutoff, and LFO 2 moving slot 3's
         // amount; the fade and that slot's amount automated.
         set ("lfo1FadeIn", 120.0f);
         set ("lfo2Retrigger", 0.0f);
         set ("glide", 40.0f);
-        set ("glideMode", (float) WavetableSynth::GlideMode::legato);
-        set ("mod4Source", (float) WavetableSynth::ModSource::drift);
-        set ("mod4Target", (float) WavetableSynth::ModTarget::cutoff);
+        set ("glideMode", (float) Synth::GlideMode::legato);
+        set ("mod4Source", (float) Synth::ModSource::drift);
+        set ("mod4Target", (float) Synth::ModTarget::cutoff);
         set ("mod4Amount", 0.05f);
-        set ("mod5Source", (float) WavetableSynth::ModSource::lfo2);
-        set ("mod5Target", (float) WavetableSynth::ModTarget::slot3Amount);
+        set ("mod5Source", (float) Synth::ModSource::lfo2);
+        set ("mod5Target", (float) Synth::ModTarget::slot3Amount);
         sweepParameter (song, { wavetable, "lfo2FadeIn" }, 0.0f, 300.0f);
         sweepParameter (song, { wavetable, "mod5Amount" }, -1.0f, 1.0f);
 
@@ -1445,7 +1414,7 @@ TEST_SUITE ("realtime-audit")
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
-        report ("Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
+        report ("Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
                 "table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated",
                 m);
         CHECK (m.peakLevel > 0.01f);
@@ -1774,12 +1743,12 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart")
+    TEST_CASE ("Real-time audit: Phazite's synth's comb, swept by an envelope at each note, chords a sixteenth apart")
     {
-        using phazite::devices::WavetableSynth;
+        using phazite::devices::Synth;
         TestSong song;
         const auto track = song.firstTrack;
-        const auto wavetable = song.setInstrument (track, WavetableSynth::typeID);
+        const auto wavetable = song.setInstrument (track, Synth::typeID);
         song.setParameter (wavetable, "filterType", (float) phazite::devices::dsp::FilterMode::combPlus);
         song.setParameter (wavetable, "resonance", 0.8f);
         song.setParameter (wavetable, "unisonVoices", 3.0f); // four
@@ -1787,7 +1756,7 @@ TEST_SUITE ("realtime-audit")
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
-        report ("Phazite's wavetable synth's comb, swept by an envelope at each note, chords a sixteenth apart", m);
+        report ("Phazite's synth's comb, swept by an envelope at each note, chords a sixteenth apart", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -1817,12 +1786,12 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart")
+    TEST_CASE ("Real-time audit: Phazite's synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart")
     {
-        using phazite::devices::WavetableSynth;
+        using phazite::devices::Synth;
         TestSong song;
         const auto track = song.firstTrack;
-        const auto wavetable = song.setInstrument (track, WavetableSynth::typeID);
+        const auto wavetable = song.setInstrument (track, Synth::typeID);
         song.setParameter (wavetable, "filterType", (float) phazite::devices::dsp::FilterMode::sampleAndHold);
         song.setParameter (wavetable, "resonance", 0.8f);
         song.setParameter (wavetable, "unisonVoices", 3.0f); // four
@@ -1830,7 +1799,7 @@ TEST_SUITE ("realtime-audit")
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
-        report ("Phazite's wavetable synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart", m);
+        report ("Phazite's synth's sample and hold, swept by an envelope at each note, chords a sixteenth apart", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -2558,13 +2527,13 @@ TEST_SUITE ("realtime-audit")
     {
         // Sixteen notes held on each synth, then chords of eight on one sample a beat, each taking eight voices that fade out
         // in places of their own; thirty-two drum hits a sixteenth apart under a pad that cuts itself, then more, which take
-        // voices; and the sampler's sound, the wavetable's table and a pad's sound swapped while they play.
+        // voices; and the sampler's sound, the synth's table and a pad's sound swapped while they play.
         using namespace phazite::devices;
         TestSong song;
         auto& played = getSong (song);
         std::vector<phazite::DeviceID> synths;
 
-        for (const auto* typeID : { Synth::typeID, WavetableSynth::typeID, FmSynth::typeID, Sampler::typeID })
+        for (const auto* typeID : { Synth::typeID, FmSynth::typeID, Sampler::typeID })
         {
             const auto track = synths.empty() ? song.firstTrack : song.addTrack (typeID);
             synths.push_back (song.setInstrument (track, typeID));
@@ -2588,8 +2557,8 @@ TEST_SUITE ("realtime-audit")
         const auto m = playProjectAndMeasure (
             song.context,
             Playing { .edits = {
-                          { 30, "the sampler's sound swapped", [&] { phazite::setFactorySample (played, synths[3], 1); } },
-                          { 50, "the wavetable's table swapped", [&] { phazite::setFactoryWavetable (played, synths[1], 0, 3); } },
+                          { 30, "the sampler's sound swapped", [&] { phazite::setFactorySample (played, synths[2], 1); } },
+                          { 50, "the synth's table swapped", [&] { phazite::setFactoryWavetable (played, synths[0], 0, 3); } },
                           { 70, "a drum pad's sound swapped",
                             [&] { phazite::setDeviceSound (played, sampler, phazite::schema::getPadSound (49, 0), "909 Clap"); } },
                       } });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Oscillators for Phazite's devices: a band-limited one for the synth's voices, the wavetable synth's sub and the
-// vocoder's buzz, whose saw, pulse and triangle are read from band-limited tables as the wavetable synth's are
+// Oscillators for Phazite's devices: a band-limited one for the synth's sub and the vocoder's
+// buzz, whose saw, pulse and triangle are read from band-limited tables as the synth's wavetables are
 // (wavetable/Wavetable.h), so that high notes don't alias into harsh tones; and a low-frequency one for modulation.
 // Real-time safe, once made.
 #pragma once
@@ -28,7 +28,7 @@ inline float sineOfPhase (float phase) noexcept
 }
 
 // The correction for a unit step at phase 0 of a wave that moves dt per sample: subtracted from a falling step, added to
-// a rising one (the wavetable synth's hard sync smooths its jump back with it).
+// a rising one (the synth's hard sync smooths its jump back with it).
 inline float polyBlep (float t, float dt) noexcept
 {
     if (t < dt)

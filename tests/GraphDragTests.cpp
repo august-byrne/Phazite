@@ -20,6 +20,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
@@ -27,7 +28,6 @@
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/automation/AutomationModel.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
@@ -333,10 +333,10 @@ TEST_CASE ("A drag in a graph moves the value set by hand by the drag alone, wha
         CHECK (valueOf (song, synth, "cutoff") == doctest::Approx (cutoff).epsilon (0.002));
     }
 
-    SUBCASE ("A wavetable's position")
+    SUBCASE ("A synth oscillator's position in its table")
     {
-        using phazite::devices::WavetableSynth;
-        const auto synth = song.setInstrument (song.firstTrack, WavetableSynth::typeID);
+        using phazite::devices::Synth;
+        const auto synth = song.setInstrument (song.firstTrack, Synth::typeID);
         modulateAndPlay (song, playback, { synth, "osc1Position" }, 0.5f, true);
         const auto handle = phazite::getParameter (song.context, { synth, "osc1Position" });
         REQUIRE (std::abs (handle.getValue() - handle.getBaseValue()) > 0.05f);
@@ -519,13 +519,13 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
         }
     }
 
-    SUBCASE ("A synth's envelope, LFO and filter, a wavetable and a sampler")
+    SUBCASE ("A synth's envelope, filter and table, the FM synth's LFO, and a sampler")
     {
         using Point = phazite::ui::EnvelopeView::Point;
         const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
         {
             EditorScreen screen (song, synth);
-            auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (&screen.find ("Amp envelope"));
+            auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (&screen.find ("Envelope 1"));
             REQUIRE (envelope != nullptr);
             const auto corner = envelope->getPointPosition (Point::decay).roundToInt();
             dragThenEscape (song, *screen.window, *envelope, corner, corner + juce::Point<int> (20, 10));
@@ -533,24 +533,26 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
             const auto bend = envelope->getBendPosition (Point::attack)->roundToInt();
             dragThenEscape (song, *screen.window, *envelope, bend, bend - juce::Point<int> (0, 10));
 
-            const auto lfos = phazite::test::findAll<phazite::ui::LfoView> (*screen.editor);
-            REQUIRE (lfos.size() == 1);
-            const auto centre = lfos[0]->getLocalBounds().getCentre();
-            dragThenEscape (song, *screen.window, *lfos[0], centre, centre - juce::Point<int> (0, 20));
-
             const auto filters = phazite::test::findAll<phazite::ui::FilterView> (*screen.editor);
             REQUIRE (! filters.isEmpty());
             REQUIRE (filters[0]->isShowing());
             const auto dot = filters[0]->getDotPosition().roundToInt();
             dragThenEscape (song, *screen.window, *filters[0], dot, filters[0]->getLocalBounds().getCentre());
-        }
 
-        const auto wavetable = song.setInstrument (song.firstTrack, phazite::devices::WavetableSynth::typeID);
-        {
-            EditorScreen screen (song, wavetable);
             auto& table = screen.find ("Osc 1 Wavetable");
             const auto centre = table.getLocalBounds().getCentre();
             dragThenEscape (song, *screen.window, table, centre, centre + juce::Point<int> (30, 0));
+        }
+
+        // The FM synth's LFO, whose picture's drag sets its depth (the synth's LFOs have none: their slots have).
+        const auto fm = song.setInstrument (song.firstTrack, phazite::devices::FmSynth::typeID);
+        {
+            EditorScreen screen (song, fm);
+            const auto lfos = phazite::test::findAll<phazite::ui::LfoView> (*screen.editor);
+            REQUIRE (lfos.size() == 1);
+            REQUIRE (lfos[0]->isShowing());
+            const auto centre = lfos[0]->getLocalBounds().getCentre();
+            dragThenEscape (song, *screen.window, *lfos[0], centre, centre - juce::Point<int> (0, 20));
         }
 
         const auto sampler = song.setInstrument (song.firstTrack, phazite::devices::Sampler::typeID);

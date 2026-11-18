@@ -38,7 +38,6 @@
 #include "devices/stretch/Stretch.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/audio/AudioRegion.h"
 #include "engine/audio/Resampler.h"
 #include "engine/nodes/DeviceRunner.h"
@@ -282,21 +281,16 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
     const std::vector<DeviceCase> cases {
         { "Synth, 1 note", maker<dev::Synth>(), &dev::Synth::info, 1 },
         { "Synth, 8 notes", maker<dev::Synth>(), &dev::Synth::info, 8 },
-        { "Synth, 16 notes, 7-voice unison", maker<dev::Synth>(), &dev::Synth::info, 16,
+        { "Synth, 8 notes, full unison", maker<dev::Synth>(), &dev::Synth::info, 8,
           [&] (std::vector<float>& v) { v[dev::Synth::unisonVoices] = maxOf (dev::Synth::info, dev::Synth::unisonVoices); } },
-        { "Synth, idle", maker<dev::Synth>(), &dev::Synth::info, 0 },
-        { "Wavetable, 1 note", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 1 },
-        { "Wavetable, 8 notes", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8 },
-        { "Wavetable, 8 notes, full unison", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8, [&] (std::vector<float>& v)
-          { v[dev::WavetableSynth::unisonVoices] = maxOf (dev::WavetableSynth::info, dev::WavetableSynth::unisonVoices); } },
-        { "Wavetable, 8 notes, full unison, stacked and drifting", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8,
+        { "Synth, 8 notes, full unison, stacked and drifting", maker<dev::Synth>(), &dev::Synth::info, 8,
           [&] (std::vector<float>& v)
           {
-              v[dev::WavetableSynth::unisonVoices] = maxOf (dev::WavetableSynth::info, dev::WavetableSynth::unisonVoices);
-              v[dev::WavetableSynth::unisonStack] = (float) dev::WavetableSynth::Stack::twoOctaves;
-              v[dev::WavetableSynth::unisonDrift] = 25.0f;
+              v[dev::Synth::unisonVoices] = maxOf (dev::Synth::info, dev::Synth::unisonVoices);
+              v[dev::Synth::unisonStack] = (float) dev::Synth::Stack::twoOctaves;
+              v[dev::Synth::unisonDrift] = 25.0f;
           } },
-        { "Wavetable, idle", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 0 },
+        { "Synth, idle", maker<dev::Synth>(), &dev::Synth::info, 0 },
         { "Drum Sampler, 4 pads every 16th", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 4 },
         { "Drum Sampler, idle", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 0 },
         { "Sampler, 1 note, looping", maker<dev::Sampler>(), &dev::Sampler::info, 1,
@@ -450,7 +444,6 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
     // a share of a block's 2.67 ms. The median of 50.
     const std::vector<std::pair<const dev::DeviceInfo*, std::function<std::unique_ptr<dev::Processor>()>>> makers {
         { &dev::Synth::info, maker<dev::Synth>() },
-        { &dev::WavetableSynth::info, maker<dev::WavetableSynth>() },
         { &dev::FmSynth::info, maker<dev::FmSynth>() },
         { &dev::DrumSampler::info, maker<dev::DrumSampler>() },
         { &dev::Sampler::info, maker<dev::Sampler>() },

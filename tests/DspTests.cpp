@@ -1054,7 +1054,7 @@ TEST_CASE ("The synths' noise is as it always was at 48 kHz, where the presets a
 TEST_CASE (
     "An instrument's DC blocker takes an offset away, keeps 20 Hz, leaves nothing ringing after Stop, and comes and goes without a step")
 {
-    // devices/dsp/DcBlocker.h, on the synth's and the wavetable synth's sums. Stopping just after notes begin (PlaybackTests)
+    // devices/dsp/DcBlocker.h, on the synth's sum and Stereo's. Stopping just after notes begin (PlaybackTests)
     // left its ring, a third of a thousandth, sounding for a tenth of a second after the notes had faded out.
     dsp::DcBlocker blocker;
     blocker.prepare (testRate);

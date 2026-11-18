@@ -3,7 +3,7 @@
 // benchmark (Benchmarks.cpp), the speed gates (BenchmarkGates.cpp, PerformanceGateTests.cpp) and the long run
 // (LongRun.cpp). Built through the model as the UI builds a song (TestSong.h), its notes through TestClips.h for speed.
 // Every track plays all the way through, so that none sleeps:
-// - an instrument, in turn a Synth, a Wavetable, an FM synth, a Drum Sampler and a Sampler, each playing a part that
+// - an instrument, in turn a Synth, an FM synth, a Drum Sampler and a Sampler, each playing a part that
 //   suits it (chords on every beat, a bass line in eighths, a beat with sixteenth hats);
 // - an EQ and a compressor after it; every third track a saturator too, and every fifth a chorus;
 // - a send to a reverb on a return from every track, and to a delay on another from every other track;

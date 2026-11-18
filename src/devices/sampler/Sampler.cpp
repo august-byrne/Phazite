@@ -65,8 +65,9 @@ namespace
         return { .id = id, .name = name, .minimum = -1.0f, .maximum = 1.0f, .defaultValue = defaultValue, .unit = Unit::percent };
     }
 
-    // In the order of Sampler::Parameter. The IDs are saved in projects. The filter, its envelope and the LFO take the
-    // synth's values (devices/synth/Synth.h), so each is heard at once as it is switched on.
+    // In the order of Sampler::Parameter. The IDs are saved in projects. The filter's envelope takes the
+    // synths' values (the Synth's Envelope 2, the FM synth's filter envelope) and the LFO the FM synth's, so each is heard at
+    // once as it is switched on.
     constexpr ParameterInfo parameters[] = {
         makeChoice ("mode", "Mode", modes, 0.0f),
         { .id = "root", .name = "Root", .minimum = 0.0f, .maximum = 127.0f, .defaultValue = defaultRoot, .unit = Unit::note, .step = 1.0f },
@@ -452,7 +453,7 @@ void Sampler::letGoOf (int note)
 Sampler::Voice& Sampler::findVoice()
 {
     // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that fade
-    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synths' do: its tail rings
     // on untouched, and the new note plays the sound from its start.
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 

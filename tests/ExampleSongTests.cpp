@@ -7,7 +7,7 @@
 #include "RenderHarness.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "devices/wavetable/WavetableSynth.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -435,9 +435,9 @@ TEST_CASE ("Lo-fi Beat shows a container with macros, a wobbling e-piano, sample
     const auto piano = phazite::getInstrument (context, keys);
     REQUIRE (piano.has_value());
     CHECK (phazite::getParameter (context, { piano->id, "mod3Source" }).getValue()
-           == doctest::Approx ((float) phazite::devices::WavetableSynth::ModSource::lfo1));
+           == doctest::Approx ((float) phazite::devices::Synth::ModSource::lfo1));
     CHECK (phazite::getParameter (context, { piano->id, "mod3Target" }).getValue()
-           == doctest::Approx ((float) phazite::devices::WavetableSynth::ModTarget::pitch));
+           == doctest::Approx ((float) phazite::devices::Synth::ModTarget::pitch));
     CHECK (phazite::getParameter (context, { piano->id, "mod3Amount" }).getValue() > 0.0f);
 
     // An LFO pans the keys; the drums fade out at the end; the master's filter opens over the intro and closes at the end.

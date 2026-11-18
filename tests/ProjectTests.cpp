@@ -13,7 +13,6 @@
 #include "devices/fm/FmSynth.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
@@ -865,9 +864,9 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
              { std::pair ("Kick", phazite::devices::DrumSampler::typeID), std::pair ("Snare", phazite::devices::DrumSampler::typeID),
                std::pair ("Clap", phazite::devices::DrumSampler::typeID), std::pair ("Open Hat", phazite::devices::DrumSampler::typeID),
                std::pair ("Perc", phazite::devices::DrumSampler::typeID), std::pair ("Rolling Bass", phazite::devices::FmSynth::typeID),
-               std::pair ("Sub", phazite::devices::WavetableSynth::typeID), std::pair ("Sparkle", phazite::devices::FmSynth::typeID),
-               std::pair ("Square", phazite::devices::WavetableSynth::typeID), std::pair ("Wide Saw", phazite::devices::Sampler::typeID),
-               std::pair ("Supersaw", phazite::devices::WavetableSynth::typeID) })
+               std::pair ("Sub", phazite::devices::Synth::typeID), std::pair ("Sparkle", phazite::devices::FmSynth::typeID),
+               std::pair ("Square", phazite::devices::Synth::typeID), std::pair ("Wide Saw", phazite::devices::Sampler::typeID),
+               std::pair ("Supersaw", phazite::devices::Synth::typeID) })
         {
             CAPTURE (name);
             REQUIRE (tracks.contains (name));

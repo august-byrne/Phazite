@@ -67,9 +67,9 @@ namespace
         return frame / (double) (framesPerSweep - 1);
     }
 
-    // The synth's own four waves, each in the phase and polarity the synth's oscillators play it (devices/dsp/Oscillators.h:
-    // its sine, its triangle and saw, and its pulse at 50 %), so that they sum with each other, with the other oscillator and
-    // with the sub as the synth's always have: a sine from 0 rising; a triangle from its peak; a saw rising from its lowest
+    // The four classic waves, each in the phase and polarity the sub's oscillator plays it (devices/dsp/Oscillators.h: its
+    // sine, its triangle and saw, and its pulse at 50 %), so that they sum with each other, with the other oscillator and
+    // with the sub as an analog synth's oscillators do: a sine from 0 rising; a triangle from its peak; a saw rising from its lowest
     // (each harmonic -1/h in sine phase, where the other tables' saws fall); a square high for the first half of its cycle.
     std::shared_ptr<const Wavetable> makeBasicShapes()
     {

@@ -16,7 +16,7 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
-#include "devices/wavetable/WavetableSynth.h"
+#include "devices/synth/Synth.h"
 #include "internal/ExampleSongs.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/Outlines.h"
@@ -312,7 +312,7 @@ namespace
             return bus;
         }
 
-        // A device's type (devices' typeID), and a preset that comes with Phazite by its path in their folder ("Wavetable/Pluck/
+        // A device's type (devices' typeID), and a preset that comes with Phazite by its path in their folder ("Synth/Pluck/
         // House Stab"); a device stays as it is when its preset isn't there.
         DeviceID setInstrument (TrackID track, const char* typeID, const char* preset = nullptr)
         {
@@ -555,7 +555,7 @@ namespace
         TrackID addPart (PartStyle style, int fromBar, int toBar, const juce::String& name, const char* colour, const char* preset)
         {
             const auto track = addTrack (name, colour);
-            setInstrument (track, devices::WavetableSynth::typeID, preset);
+            setInstrument (track, devices::Synth::typeID, preset);
             const auto clip = addClip (track, bar (fromBar), bar (toBar) - bar (fromBar));
 
             if (! clip.isValid())
@@ -775,7 +775,7 @@ namespace
         song.setVolume (rollingBass, rollingBassLevel);
 
         const auto sub = song.addTrack ("Sub", "Blue");
-        song.setInstrument (sub, devices::WavetableSynth::typeID, "Wavetable/Bass/Slow Sweep Bass");
+        song.setInstrument (sub, devices::Synth::typeID, "Synth/Bass/Slow Sweep Bass");
         song.addEffect (sub, devices::Motion::typeID, "Motion/Ensemble/Deep Swirl");
         song.addEffect (sub, devices::Equalizer::typeID, "EQ/Mixing/Deep Sub Lift");
         song.addNotes (sub, notes, part ("Sub", up), 4);
@@ -815,7 +815,7 @@ namespace
         // fills the gaps between its notes; a wide saw beside it, each of its harmonics a band of its own, which gives the
         // arpeggio its width; and an octave under them a stack of drifting saws, squeezed, excited and squeezed again.
         const auto square = song.addTrack ("Square", "Bluish green");
-        song.setInstrument (square, devices::WavetableSynth::typeID, "Wavetable/Pluck/Square Pluck");
+        song.setInstrument (square, devices::Synth::typeID, "Synth/Pluck/Square Pluck");
         song.addEffect (square, devices::Reverb::typeID, "Reverb/Plates/Long Dark Plate");
         song.addNotes (square, notes, part ("Arp", up), 4);
         song.setVolume (square, squareLevel);
@@ -827,7 +827,7 @@ namespace
         song.setVolume (wideSaw, wideSawLevel);
 
         const auto supersaw = song.addTrack ("Supersaw", "Bluish green");
-        song.setInstrument (supersaw, devices::WavetableSynth::typeID, "Wavetable/Pluck/Octave Supersaw Pluck");
+        song.setInstrument (supersaw, devices::Synth::typeID, "Synth/Pluck/Octave Supersaw Pluck");
         song.addEffect (supersaw, devices::Limiter::typeID, "Limiter/Mixing/Dense Squeeze");
         song.addEffect (supersaw, devices::Saturator::typeID, "Saturator/Exciter/Saturated Highs");
         song.addEffect (supersaw, devices::Limiter::typeID, "Limiter/Mixing/Drum Bus Shaver");
@@ -1112,7 +1112,7 @@ namespace
         // House's bass between the kicks: the chord's root on each offbeat, its octave before the third beat, and a fifth
         // to lead into the next four bars, through both drops, ducking under the kick.
         const auto bass = song.addTrack ("Bass", "Blue");
-        song.setInstrument (bass, devices::WavetableSynth::typeID, "Wavetable/Bass/Pluck Bass");
+        song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/Pluck Bass");
         song.setVolume (bass, -4.0f);
         const auto bassline = song.addClip (bass, bar (16), bar (4));
         constexpr int roots[4] = { 33, 29, 36, 31 }; // A, F, C and G: the chords i, VI, III and VII
@@ -1132,7 +1132,7 @@ namespace
 
         // Chord stabs from the build-up to the outro: their filter opens through the build-up, closes in the breakdown and
         // opens again into the second drop (an automation lane), an LFO moves it, and they pump under the kick too.
-        const auto chords = song.addPart (PartStyle::offbeatStabs, 8, 56, "Chords", "Bluish green", "Wavetable/Pluck/House Stab");
+        const auto chords = song.addPart (PartStyle::offbeatStabs, 8, 56, "Chords", "Bluish green", "Synth/Pluck/House Stab");
 
         if (const auto synth = getInstrument (song.context, chords))
         {
@@ -1153,12 +1153,12 @@ namespace
         duckUnder (song.context, chords, beat);
 
         // A pad under the breakdown, its chords spread wide.
-        const auto pad = song.addPart (PartStyle::spreadChords, 32, 40, "Pad", "Orange", "Wavetable/Pad/Warm Pad");
+        const auto pad = song.addPart (PartStyle::spreadChords, 32, 40, "Pad", "Orange", "Synth/Pad/Warm Pad");
         song.setVolume (pad, -5.5f);
 
         // The lead's riff, four bars in A minor, through the first drop, and an octave up through the second.
         const auto lead = song.addTrack ("Lead", "Sky blue");
-        song.setInstrument (lead, devices::WavetableSynth::typeID, "Wavetable/Pluck/Bright Pluck");
+        song.setInstrument (lead, devices::Synth::typeID, "Synth/Pluck/Bright Pluck");
         constexpr int riffNotes[4][5] = { { 69, 72, 76, 74, 72 }, { 69, 72, 77, 76, 72 }, { 67, 72, 76, 74, 72 }, { 71, 74, 79, 76, 74 } };
 
         const auto addRiff = [&song, lead, &riffNotes] (double from, int transpose)
@@ -1185,7 +1185,7 @@ namespace
 
         // A noise riser held through the build-up and the breakdown's end, its volume rising each time (an automation lane).
         const auto riser = song.addTrack ("Riser", "Gray");
-        song.setInstrument (riser, devices::WavetableSynth::typeID, "Wavetable/FX/Noise Riser");
+        song.setInstrument (riser, devices::Synth::typeID, "Synth/FX/Noise Riser");
         song.note (song.addClip (riser, bar (8), bar (8)), 57, bar (8), bar (8), 100);
         song.note (song.addClip (riser, bar (36), bar (4)), 57, bar (36), bar (4), 100);
         const auto quiet = decibelsToFaderPosition (-27.0f), full = decibelsToFaderPosition (-3.0f);
@@ -1362,13 +1362,13 @@ namespace
         // The chord lane's ninths spread out on a soft e-piano, which wobbles as a tape does (its own LFO, slowly and
         // slightly, on its pitch), through a container of tape-like effects with two macros, and an LFO that pans it slowly
         // from side to side.
-        const auto keys = song.addPart (PartStyle::spreadChords, 0, 48, "Keys", "Orange", "Wavetable/Keys/Soft E-Piano");
+        const auto keys = song.addPart (PartStyle::spreadChords, 0, 48, "Keys", "Orange", "Synth/Keys/Soft E-Piano");
 
         if (const auto piano = getInstrument (song.context, keys))
         {
             // Its LFO, which the preset has on the Volume (Mod 3 to 6: Envelope 3's held level and LFO 1, each with the mod
             // wheel on its amount), on its pitch instead, slowly, at 0.07 of a semitone, the wheel still taking it to one.
-            using Synth = devices::WavetableSynth;
+            using Synth = devices::Synth;
             song.set (piano->id, "lfo1Rate", 0.6f);
             song.set (piano->id, "mod3Source", (float) Synth::ModSource::lfo1);
             song.set (piano->id, "mod3Target", (float) Synth::ModTarget::pitch);
@@ -1417,7 +1417,7 @@ namespace
         // A walking bass after the intro: each chord's root, its fifth and its octave, then a step up to the next bar's root
         // from a semitone under it.
         const auto bass = song.addTrack ("Bass", "Blue");
-        song.setInstrument (bass, devices::WavetableSynth::typeID, "Wavetable/Bass/Sub Bass");
+        song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/Sub Bass");
         const auto walk = song.addClip (bass, bar (4), bar (44));
 
         for (int each = 4; each < 48; ++each)
@@ -1435,7 +1435,7 @@ namespace
 
         // A melody in the B parts, through a dub delay, and its answer in the second A part.
         const auto melody = song.addTrack ("Melody", "Sky blue");
-        song.setInstrument (melody, devices::WavetableSynth::typeID, "Wavetable/Pluck/Lo-Fi Pluck");
+        song.setInstrument (melody, devices::Synth::typeID, "Synth/Pluck/Lo-Fi Pluck");
 
         struct Note
         {

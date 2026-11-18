@@ -202,8 +202,7 @@ private:
 // a device at its defaults does next to nothing (the Sampler without a sound, the EQ with its bands off).
 // clang-format off
 const std::map<std::string, double> deviceBounds {
-    { "phaziteSynth",          2.7  }, // 1.304
-    { "phaziteWavetable",      3.9  }, // 1.905
+    { "phaziteSynth",      3.9  }, // 1.905
     { "phaziteFM",            15.0  }, // 7.489
     { "phaziteSampler",        0.1  }, // 0.042
     { "phaziteDrums",          0.8  }, // 0.397

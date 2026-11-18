@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Twice the sample rate, a sample at a time, for a curve inside a device's per-sample loop (the wavetable synth's drive):
+// Twice the sample rate, a sample at a time, for a curve inside a device's per-sample loop (the synth's drive):
 // polyphase IIR half-band filters, two chains of all-pass sections that JUCE's FilterDesign designs as it does for
 // juce::dsp::Oversampling at its best quality, each sample in becoming two and every two going back as one. Where a
 // device works in blocks, juce::dsp::Oversampling does the same (the saturator's, the filter's). Real-time safe, once the

@@ -2,7 +2,7 @@
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/wavetable/WavetableSynth.h"
+#include "devices/synth/Synth.h"
 #include "internal/PlaybackHost.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
@@ -1852,7 +1852,7 @@ void SongPlayer::addFaderAutomation (engine::Plan::Strip& strip, const juce::Val
 
 void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& deviceState)
 {
-    // What a drum sampler's pads, a wavetable synth's oscillators and a sampler play: the song's SOUNDS name it as the
+    // What a drum sampler's pads, a synth's oscillators and a sampler play: the song's SOUNDS name it as the
     // plug-in's state does.
     const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
     auto& processor = node.getRunner().getProcessor();
@@ -1862,9 +1862,9 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
             loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
 
-    if (type == devices::WavetableSynth::typeID)
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
-            loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
+    if (type == devices::Synth::typeID)
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
+            loadOscillatorTable (static_cast<devices::Synth&> (processor), song, sounds, osc);
 
     if (type == devices::Sampler::typeID)
     {
@@ -1896,13 +1896,13 @@ void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& dev
         }
     }
 
-    if (type == devices::WavetableSynth::typeID)
+    if (type == devices::Synth::typeID)
     {
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
         {
             if (property == schema::getOscillatorWavetable (osc) || property == schema::getOscillatorWavetableFile (osc))
             {
-                loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
+                loadOscillatorTable (static_cast<devices::Synth&> (processor), song, sounds, osc);
                 return;
             }
         }

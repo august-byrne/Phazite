@@ -7,7 +7,6 @@
 #include "devices/fm/FmSynth.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/internal/Devices.h"
 
 #include <algorithm>
@@ -57,8 +56,7 @@ TEST_CASE ("Each synth fades out every voice that a chord takes on one sample, r
     auto together = held;
     together.insert (together.end(), chord.begin(), chord.end());
 
-    for (const auto* typeID :
-         { devices::Synth::typeID, devices::WavetableSynth::typeID, devices::FmSynth::typeID, devices::Sampler::typeID })
+    for (const auto* typeID : { devices::Synth::typeID, devices::FmSynth::typeID, devices::Sampler::typeID })
     {
         CAPTURE (std::string (typeID));
         const auto* info = phazite::findOwnDevice (typeID);

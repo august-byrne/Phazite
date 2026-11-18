@@ -13,7 +13,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Parameters.h"
@@ -31,7 +30,6 @@
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SynthEditor.h"
-#include "ui/devices/WavetableEditor.h"
 #include "ui/theme/DesignTokens.h"
 
 #include <string_view>
@@ -125,7 +123,7 @@ TEST_CASE ("Over the filter's dot the pointer grabs it and the dot lights up; el
 TEST_CASE (
     "Over a synth's filter's dot the pointer grabs it and the dot lights up; elsewhere it is the crosshair, where a press puts the dot")
 {
-    // The synth's, the wavetable synth's and the FM synth's filter views are the same (SynthParts.h).
+    // The synth's and the FM synth's filter views are the same (SynthParts.h).
     phazite::test::TestSong song;
     phazite::ui::SynthEditor editor (addDevice (song, phazite::devices::Synth::typeID, true));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
@@ -331,7 +329,7 @@ TEST_CASE ("Over the saturator's band the pointer moves sideways and the edge ne
 TEST_CASE ("Over a wavetable oscillator's table the pointer grabs it and the frame it plays lights up")
 {
     phazite::test::TestSong song;
-    phazite::ui::WavetableEditor editor (addDevice (song, phazite::devices::WavetableSynth::typeID, true));
+    phazite::ui::SynthEditor editor (addDevice (song, phazite::devices::Synth::typeID, true));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     auto& view = editor.getTableView (0);
     phazite::test::Mouse mouse (view);

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Synth.h"
 #include "devices/dsp/Math.h"
+#include "devices/dsp/NoteValues.h"
+#include "devices/wavetable/FactoryWavetables.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -11,13 +13,27 @@ namespace phazite::devices
 {
 namespace
 {
-    constexpr std::string_view waves[] = { "Sine", "Triangle", "Saw", "Square" };
-    constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" }; // the wavetable synth's sub's
+    constexpr std::string_view warps[] = { "None", "Sync", "Bend +", "Bend -", "Pulse Width", "Mirror", "FM", "Ring Mod" };
+    constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" };
+    constexpr std::string_view subShapes[] = { "Sine", "Triangle", "Saw", "Square" };
+    constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+    constexpr std::string_view unisonStacks[] = { "Off", "Octave", "Two Octaves", "Fifth", "Power Chord" };
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
-    constexpr std::string_view lfoTargets[] = { "Pitch", "Cutoff", "Level", "Pulse Width" };
+    constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1",  "LFO 2",
+                                                "Velocity", "Note",       "Mod Wheel",  "Random", "Drift" };
+    constexpr std::string_view modTargets[] = {
+        "None",          "Osc 1 Position", "Osc 1 Warp",   "Osc 1 Pitch",  "Osc 1 Level",  "Osc 2 Position", "Osc 2 Warp",   "Osc 2 Pitch",
+        "Osc 2 Level",   "Pitch",          "Sub Level",    "Noise Level",  "Cutoff",       "Resonance",      "Volume",       "Pan",
+        "Unison Detune", "Mod 1 Amount",   "Mod 2 Amount", "Mod 3 Amount", "Mod 4 Amount", "Mod 5 Amount",   "Mod 6 Amount", "Mod 7 Amount",
+        "Mod 8 Amount"
+    };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
     constexpr std::string_view glideModes[] = { "Always", "Legato" };
-    constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7" };
+    constexpr std::string_view phases[] = { "Reset", "Free" }; // the FM synth's
+
+    // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
+    constexpr auto& divisions = dsp::noteValueNames;
+    constexpr auto& divisionLengths = dsp::noteValueLengths;
 
     // An envelope's time, from minimum to 10 s, with 300 ms halfway along its knob.
     constexpr ParameterInfo makeTime (std::string_view id, std::string_view name, float minimum, float defaultValue)
@@ -43,9 +59,16 @@ namespace
                  .choices = choices };
     }
 
-    constexpr ParameterInfo makePercent (std::string_view id, std::string_view name, float defaultValue)
+    constexpr ParameterInfo makePercent (std::string_view id, std::string_view name, float defaultValue, float minimum = 0.0f)
     {
-        return { .id = id, .name = name, .defaultValue = defaultValue, .unit = Unit::percent };
+        return { .id = id, .name = name, .minimum = minimum, .defaultValue = defaultValue, .unit = Unit::percent };
+    }
+
+    // How an envelope's stage bends (dsp::Adsr::setCurves()): from -100 % (fast at first) through 0 (straight) to 100 % (slow at
+    // first), an analog envelope's curve at first.
+    constexpr ParameterInfo makeCurve (std::string_view id, std::string_view name, float defaultValue)
+    {
+        return makePercent (id, name, defaultValue, -1.0f);
     }
 
     constexpr ParameterInfo makeToggle (std::string_view id, std::string_view name, float defaultValue)
@@ -53,93 +76,127 @@ namespace
         return { .id = id, .name = name, .maximum = 1.0f, .defaultValue = defaultValue, .unit = Unit::toggle };
     }
 
-    // How an envelope's stage bends (dsp::Adsr::setCurves()): from -100 % (fast at first) through 0 (straight) to 100 % (slow at
-    // first), an analog envelope's curve at first.
-    constexpr ParameterInfo makeCurve (std::string_view id, std::string_view name, float defaultValue)
+    constexpr ParameterInfo makePitch (std::string_view id, std::string_view name)
     {
-        return { .id = id, .name = name, .minimum = -1.0f, .maximum = 1.0f, .defaultValue = defaultValue, .unit = Unit::percent };
+        return { .id = id, .name = name, .minimum = -36.0f, .maximum = 36.0f, .defaultValue = 0.0f, .unit = Unit::semitones };
     }
+
+    constexpr ParameterInfo makeFine (std::string_view id, std::string_view name)
+    {
+        return { .id = id, .name = name, .minimum = -100.0f, .maximum = 100.0f, .defaultValue = 0.0f, .unit = Unit::cents };
+    }
+
+    constexpr ParameterInfo makeRate (std::string_view id, std::string_view name, float defaultValue)
+    {
+        return { .id = id,
+                 .name = name,
+                 .minimum = 0.05f,
+                 .maximum = 20.0f,
+                 .defaultValue = defaultValue,
+                 .unit = Unit::hertz,
+                 .scale = Scale::logarithmic };
+    }
+
+    constexpr float sawPosition = 2.0f / 3.0f; // the saw in the first factory table, Basic Shapes
+    constexpr float quarterNote = dsp::quarterNoteValue;
 
     // In the order of Synth::Parameter. The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
-        makeChoice ("osc1Wave", "Osc 1 Wave", waves, 2.0f),
-        makeChoice ("osc2Wave", "Osc 2 Wave", waves, 2.0f),
-        { .id = "osc2Pitch", .name = "Osc 2 Pitch", .minimum = -24.0f, .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::semitones },
-        { .id = "osc2Detune", .name = "Osc 2 Detune", .minimum = -100.0f, .maximum = 100.0f, .defaultValue = 8.0f, .unit = Unit::cents },
-        makeToggle ("osc2Sync", "Osc 2 Sync", 0.0f),
-        { .id = "osc2Envelope",
-          .name = "Osc 2 Envelope",
-          .minimum = -48.0f,
-          .maximum = 48.0f,
-          .defaultValue = 0.0f,
-          .unit = Unit::semitones },
-        makePercent ("oscMix", "Osc Mix", 0.5f),
-        { .id = "pulseWidth", .name = "Pulse Width", .minimum = 0.05f, .maximum = 0.95f, .defaultValue = 0.5f, .unit = Unit::percent },
-        makePercent ("subLevel", "Sub", 0.0f),
+        makeToggle ("osc1On", "Osc 1 On", 1.0f),
+        makePercent ("osc1Position", "Osc 1 Position", sawPosition),
+        makePitch ("osc1Pitch", "Osc 1 Pitch"),
+        makeFine ("osc1Fine", "Osc 1 Fine"),
+        makePercent ("osc1Level", "Osc 1 Level", 0.75f),
+        makeChoice ("osc1Warp", "Osc 1 Warp", warps, 0.0f),
+        makePercent ("osc1WarpAmount", "Osc 1 Warp Amount", 0.0f),
+        makeToggle ("osc2On", "Osc 2 On", 0.0f),
+        makePercent ("osc2Position", "Osc 2 Position", sawPosition),
+        makePitch ("osc2Pitch", "Osc 2 Pitch"),
+        makeFine ("osc2Fine", "Osc 2 Fine"),
+        makePercent ("osc2Level", "Osc 2 Level", 0.75f),
+        makeChoice ("osc2Warp", "Osc 2 Warp", warps, 0.0f),
+        makePercent ("osc2WarpAmount", "Osc 2 Warp Amount", 0.0f),
+        makePercent ("subLevel", "Sub Level", 0.0f),
         makeChoice ("subOctave", "Sub Octave", subOctaves, 0.0f),
-        makeChoice ("subShape", "Sub Shape", waves, 0.0f), // a sine
-        makePercent ("noiseLevel", "Noise", 0.0f),
-        makePercent ("drift", "Drift", 0.0f),
-        makeChoice ("unisonVoices", "Unison", unisonCounts, 2.0f), // three, heard at once, as the unison is switched on
-        { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
-        { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
+        makeChoice ("subShape", "Sub Shape", subShapes, 0.0f),
+        makePercent ("noiseLevel", "Noise Level", 0.0f),
+        makeChoice ("unisonVoices", "Unison Voices", unisonCounts, 0.0f),
+        { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 20.0f, .unit = Unit::cents },
+        makePercent ("unisonSpread", "Unison Spread", 0.8f),
+        makePercent ("unisonPosition", "Unison Position Spread", 0.0f),
+        makeChoice ("unisonStack", "Unison Stack", unisonStacks, 0.0f),
+        { .id = "unisonDrift", .name = "Unison Drift", .maximum = 50.0f, .defaultValue = 0.0f, .unit = Unit::cents },
+        makeToggle ("filterOn", "Filter On", 1.0f),
         makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
         { .id = "cutoff",
-          .name = "Cutoff",
+          .name = "Filter Cutoff",
           .minimum = 20.0f,
           .maximum = 20000.0f,
-          .defaultValue = 3000.0f,
+          .defaultValue = 2500.0f,
           .unit = Unit::hertz,
           .scale = Scale::logarithmic },
-        makePercent ("resonance", "Resonance", 0.15f),
-        makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 0.0f), // 12 dB, the synth's gentler sound
-        { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels }, // the wavetable's
-        { .id = "filterEnvelope",
-          .name = "Filter Envelope",
-          .minimum = -48.0f,
-          .maximum = 48.0f,
-          .defaultValue = 24.0f,
-          .unit = Unit::semitones },
-        makePercent ("keyTracking", "Key Tracking", 0.5f),
-        makePercent ("filterVelocity", "Filter Velocity", 0.0f),
-        makeTime ("filterAttack", "Filter Attack", 0.0f, 1.0f),
-        makeTime ("filterDecay", "Filter Decay", 0.0f, 400.0f),
-        makePercent ("filterSustain", "Filter Sustain", 0.2f),
-        makeTime ("filterRelease", "Filter Release", 0.0f, 300.0f),
-        makeCurve ("filterAttackCurve", "Filter Attack Curve", dsp::Adsr::analogAttackCurve),
-        makeCurve ("filterDecayCurve", "Filter Decay Curve", dsp::Adsr::analogSettleCurve),
-        makeCurve ("filterReleaseCurve", "Filter Release Curve", dsp::Adsr::analogSettleCurve),
-        makeTime ("attack", "Attack", 0.5f, 2.0f), // never instant, so a note doesn't click
-        makeTime ("decay", "Decay", 0.0f, 300.0f),
-        makePercent ("sustain", "Sustain", 0.8f),
-        makeTime ("release", "Release", 0.5f, 200.0f),
-        makeCurve ("attackCurve", "Attack Curve", dsp::Adsr::analogAttackCurve),
-        makeCurve ("decayCurve", "Decay Curve", dsp::Adsr::analogSettleCurve),
-        makeCurve ("releaseCurve", "Release Curve", dsp::Adsr::analogSettleCurve),
-        makeChoice ("lfoShape", "LFO Shape", lfoShapes, 0.0f),
-        makeChoice ("lfoTarget", "LFO Target", lfoTargets, 0.0f),
-        { .id = "lfoRate",
-          .name = "LFO Rate",
-          .minimum = 0.05f,
-          .maximum = 20.0f,
-          .defaultValue = 5.0f,
-          .unit = Unit::hertz,
-          .scale = Scale::logarithmic },
-        makePercent ("lfoDepth", "LFO Depth", 0.25f), // heard at once, as the LFO is switched on
-        makeTime ("lfoFade", "LFO Fade In", 0.0f, 0.0f),
-        { .id = "pitchAmount", // the FM synth's pitch envelope
-          .name = "Pitch Amount",
-          .minimum = -48.0f,
-          .maximum = 48.0f,
-          .defaultValue = 0.0f,
-          .unit = Unit::semitones },
-        { .id = "pitchDecay",
-          .name = "Pitch Decay",
-          .minimum = 1.0f,
-          .maximum = 2000.0f,
-          .defaultValue = 60.0f,
-          .unit = Unit::milliseconds,
-          .midpoint = 100.0f },
+        makePercent ("resonance", "Filter Resonance", 0.1f),
+        makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f),
+        { .id = "drive", .name = "Filter Drive", .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
+        makePercent ("keyTracking", "Filter Key Tracking", 0.5f),
+        makeTime ("env1Attack", "Envelope 1 Attack", 0.5f, 2.0f), // never instant, so a note doesn't click
+        makeTime ("env1Decay", "Envelope 1 Decay", 0.0f, 300.0f),
+        makePercent ("env1Sustain", "Envelope 1 Sustain", 0.8f),
+        makeTime ("env1Release", "Envelope 1 Release", 0.5f, 200.0f),
+        makeCurve ("env1AttackCurve", "Envelope 1 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env1DecayCurve", "Envelope 1 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env1ReleaseCurve", "Envelope 1 Release Curve", dsp::Adsr::analogSettleCurve),
+        makeTime ("env2Attack", "Envelope 2 Attack", 0.0f, 1.0f),
+        makeTime ("env2Decay", "Envelope 2 Decay", 0.0f, 400.0f),
+        makePercent ("env2Sustain", "Envelope 2 Sustain", 0.2f),
+        makeTime ("env2Release", "Envelope 2 Release", 0.0f, 300.0f),
+        makeCurve ("env2AttackCurve", "Envelope 2 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env2DecayCurve", "Envelope 2 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env2ReleaseCurve", "Envelope 2 Release Curve", dsp::Adsr::analogSettleCurve),
+        makeTime ("env3Attack", "Envelope 3 Attack", 0.0f, 1.0f),
+        makeTime ("env3Decay", "Envelope 3 Decay", 0.0f, 800.0f),
+        makePercent ("env3Sustain", "Envelope 3 Sustain", 0.0f),
+        makeTime ("env3Release", "Envelope 3 Release", 0.0f, 300.0f),
+        makeCurve ("env3AttackCurve", "Envelope 3 Attack Curve", dsp::Adsr::analogAttackCurve),
+        makeCurve ("env3DecayCurve", "Envelope 3 Decay Curve", dsp::Adsr::analogSettleCurve),
+        makeCurve ("env3ReleaseCurve", "Envelope 3 Release Curve", dsp::Adsr::analogSettleCurve),
+        makeChoice ("lfo1Shape", "LFO 1 Shape", lfoShapes, 0.0f),
+        makeRate ("lfo1Rate", "LFO 1 Rate", 2.0f),
+        makeToggle ("lfo1Sync", "LFO 1 Sync", 0.0f),
+        makeChoice ("lfo1Division", "LFO 1 Division", divisions, quarterNote),
+        makeToggle ("lfo1Retrigger", "LFO 1 Retrigger", 1.0f),
+        makeTime ("lfo1FadeIn", "LFO 1 Fade In", 0.0f, 0.0f),
+        makeChoice ("lfo2Shape", "LFO 2 Shape", lfoShapes, 1.0f),
+        makeRate ("lfo2Rate", "LFO 2 Rate", 0.5f),
+        makeToggle ("lfo2Sync", "LFO 2 Sync", 0.0f),
+        makeChoice ("lfo2Division", "LFO 2 Division", divisions, quarterNote),
+        makeToggle ("lfo2Retrigger", "LFO 2 Retrigger", 0.0f),
+        makeTime ("lfo2FadeIn", "LFO 2 Fade In", 0.0f, 0.0f),
+        // A new synth's first slot opens its filter with each note, as a pluck does.
+        makeChoice ("mod1Source", "Mod 1 Source", modSources, (float) Synth::ModSource::envelope2),
+        makeChoice ("mod1Target", "Mod 1 Target", modTargets, (float) Synth::ModTarget::cutoff),
+        makePercent ("mod1Amount", "Mod 1 Amount", 0.25f, -1.0f),
+        makeChoice ("mod2Source", "Mod 2 Source", modSources, 0.0f),
+        makeChoice ("mod2Target", "Mod 2 Target", modTargets, 0.0f),
+        makePercent ("mod2Amount", "Mod 2 Amount", 0.0f, -1.0f),
+        makeChoice ("mod3Source", "Mod 3 Source", modSources, 0.0f),
+        makeChoice ("mod3Target", "Mod 3 Target", modTargets, 0.0f),
+        makePercent ("mod3Amount", "Mod 3 Amount", 0.0f, -1.0f),
+        makeChoice ("mod4Source", "Mod 4 Source", modSources, 0.0f),
+        makeChoice ("mod4Target", "Mod 4 Target", modTargets, 0.0f),
+        makePercent ("mod4Amount", "Mod 4 Amount", 0.0f, -1.0f),
+        makeChoice ("mod5Source", "Mod 5 Source", modSources, 0.0f),
+        makeChoice ("mod5Target", "Mod 5 Target", modTargets, 0.0f),
+        makePercent ("mod5Amount", "Mod 5 Amount", 0.0f, -1.0f),
+        makeChoice ("mod6Source", "Mod 6 Source", modSources, 0.0f),
+        makeChoice ("mod6Target", "Mod 6 Target", modTargets, 0.0f),
+        makePercent ("mod6Amount", "Mod 6 Amount", 0.0f, -1.0f),
+        makeChoice ("mod7Source", "Mod 7 Source", modSources, 0.0f),
+        makeChoice ("mod7Target", "Mod 7 Target", modTargets, 0.0f),
+        makePercent ("mod7Amount", "Mod 7 Amount", 0.0f, -1.0f),
+        makeChoice ("mod8Source", "Mod 8 Source", modSources, 0.0f),
+        makeChoice ("mod8Target", "Mod 8 Target", modTargets, 0.0f),
+        makePercent ("mod8Amount", "Mod 8 Amount", 0.0f, -1.0f),
         makeChoice ("voiceMode", "Voices", voiceModes, 0.0f),
         { .id = "glide",
           .name = "Glide",
@@ -149,58 +206,57 @@ namespace
           .unit = Unit::milliseconds,
           .midpoint = 200.0f },
         makeChoice ("glideMode", "Glide Mode", glideModes, 0.0f),
+        makeChoice ("phase", "Phase", phases, 0.0f),
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
-        makeToggle ("filterOn", "Filter On", 1.0f),
-        makeToggle ("filterEnvelopeOn", "Filter Envelope On", 1.0f),
-        makeToggle ("lfoOn", "LFO On", 0.0f),
-        makeToggle ("unisonOn", "Unison On", 0.0f),
     };
 
-    static_assert (std::size (parameters) == (size_t) Synth::unisonOn + 1);
+    static_assert (std::size (parameters) == (size_t) Synth::level + 1);
+    static_assert (Synth::getParameter (1, Synth::oscWarpAmount) == Synth::osc2WarpAmount);
+    static_assert (Synth::getEnvelopeParameter (2, Synth::envReleaseCurve) == Synth::env3ReleaseCurve);
+    static_assert (Synth::getLfoParameter (1, Synth::lfoFadeIn) == Synth::lfo2FadeIn);
+    static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
+    static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::slot8Amount + 1);
+    static_assert (Synth::getAmountTarget (Synth::numModSlots - 1) == Synth::ModTarget::slot8Amount);
+    static_assert (std::size (modSources) == (size_t) Synth::ModSource::drift + 1);
+    static_assert (std::size (glideModes) == (size_t) Synth::GlideMode::legato + 1);
+    static_assert (std::size (phases) == (size_t) Synth::Phase::free + 1);
+    static_assert (std::size (unisonStacks) == (size_t) Synth::Stack::powerChord + 1);
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
-    constexpr std::uint32_t noiseSeed = 0x51a7e5u, unisonSeed = 0x0715e5u, driftSeed = 0xd71f75u;
-    constexpr double lowestCutoff = 20.0; // where the filter's envelope, keys and LFO can take it, at the lowest
+    constexpr std::uint32_t noiseSeed = 0x7ab1e5u, unisonSeed = 0x0715e7u, lfoSeed = 0x1f0e5u, randomSeed = 0x2a7d0u;
+    constexpr std::uint32_t driftSeed = 0xd71f77u;
+    constexpr std::uint32_t wanderSeed = 0x3a9c51e7u; // the first slot's Drift: far from the unison drift's, whose seeds run on by voice
 
-    // Drift at full: how far each oscillator wanders (in cents) and the cutoff (in semitones), each toward a new place
-    // every so often, gliding there, as an analog voice's tuning and filter wander with its temperature.
-    constexpr float driftCents = 8.0f, driftSemitones = 2.0f;
+    // How far Osc Warp Amount takes the Sync warp's reading, by modulation: 2^(3 a) times the note's cycle, so a third past the
+    // knob's end, 16 times (four octaves, as far as a classic poly synth's sync sweep reaches); the knob's own 0 to 100 % is 1 to 8 times.
+    constexpr float maxSyncAmount = 4.0f / 3.0f;
+
+    // The unison's drift: each copy's pitch wanders toward a new place every so often, gliding there, at the pace of the
+    // Drift source (driftWanderSeconds), but each copy at a pace of its own, from half to twice that, so that no two move together,
+    // as ZynAddSubFX gives each copy of its unison its own vibrato rate. Zyn's copies swing faster (0.5 to 2 Hz), but at
+    // this pace a held note's beating already never repeats, as theirs doesn't.
     constexpr double driftWanderSeconds = 0.45, driftGlideSeconds = 0.3;
+    constexpr double centsToLog = 0.69314718055994531 / 1200.0; // a pitch in cents as the natural logarithm of its ratio
 
-    // The filter's drive fades in and out over this as it comes on or off (32 samples at 48 kHz).
+    // The filter's drive fades in and out over this as it comes on or off.
     constexpr double driveFadeSeconds = 32.0 / 48000.0;
 
-    float wrap (float phase) noexcept
-    {
-        return phase - std::floor (phase);
-    }
+    // A stack's steps, in semitones, in Synth::Stack's order.
+    constexpr float stackSteps[][Synth::maxStackSteps] = {
+        { 0.0f, 0.0f, 0.0f }, { 0.0f, 12.0f, 0.0f }, { 0.0f, 12.0f, 24.0f }, { 0.0f, 7.0f, 0.0f }, { 0.0f, 7.0f, 12.0f },
+    };
+    constexpr int stackLengths[] = { 1, 2, 3, 2, 3 };
 
-    // The mean of osc 2's wave over one of osc 1's cycles while it is synced to it, reading `ratio` of its own cycles: its
-    // whole cycles add nothing (each wave is centred over its cycle), the last, cut short at the fraction of the ratio, adds
-    // its wave's area from its start to there, as osc 2 plays it, band-limited (Oscillator::getArea()). Taken from what
-    // osc 2 plays, so that the synced wave is centred too: otherwise it carries an offset, up to most of the note's level
-    // where the ratio is just past a whole number.
-    float getSyncedMean (const dsp::Oscillator& osc, dsp::Waveform wave, float width, float ratio) noexcept
-    {
-        return ratio > 0.0f ? osc.getArea (wave, ratio - std::floor (ratio), width) / ratio : 0.0f;
-    }
+    static_assert (std::size (stackSteps) == std::size (unisonStacks) && std::size (stackLengths) == std::size (unisonStacks));
 
-    // Osc 2 hard-synced to osc 1: its wave read ratio times each of osc 1's cycles, starting again with each, the jump back
-    // to its start smoothed (PolyBLEP) as the wavetable synth's sync smooths it. t and dt are osc 1's phase and its step.
-    float readSynced (const dsp::Oscillator& osc, dsp::Waveform wave, float width, float t, float dt, float ratio) noexcept
-    {
-        auto value = osc.valueAt (wave, wrap (t * ratio), width);
+    // What 100 % of a modulation slot moves each destination by.
+    constexpr float pitchRange = 24.0f;   // semitones
+    constexpr float cutoffRange = 96.0f;  // semitones: eight octaves
+    constexpr float detuneRange = 100.0f; // cents
 
-        if (t < dt || t > 1.0f - dt)
-        {
-            const auto jump = osc.valueAt (wave, 0.0f, width) - osc.valueAt (wave, wrap (ratio), width);
-            value += 0.5f * jump * dsp::polyBlep (t, dt);
-        }
-
-        return value;
-    }
+    constexpr double lowestCutoff = 20.0; // where modulation can take the filter, at the lowest
 
     template <typename Enum>
     Enum choiceOf (float value)
@@ -208,32 +264,307 @@ namespace
         return static_cast<Enum> (std::lround (value));
     }
 
-    // Where a voice taken for another note fades out: a place that fades nothing now, or else the one nearest silence.
-    template <typename Voice>
-    Voice& findFadingPlace (std::span<Voice> places) noexcept
+    // How many times faster than the note a warp reads its wave at most, for the level that keeps it from aliasing.
+    float getWarpSpeed (Synth::Warp warp, float amount, float otherRatio) noexcept
     {
-        Voice* nearest = nullptr;
-
-        for (auto& place : places)
+        switch (warp)
         {
-            if (! place.amp.isActive())
-                return place;
-
-            if (nearest == nullptr || place.fade * place.amp.getLevel() < nearest->fade * nearest->amp.getLevel())
-                nearest = &place;
+            case Synth::Warp::sync:
+                return std::exp2 (3.0f * amount);
+            case Synth::Warp::bendUp:
+            case Synth::Warp::bendDown:
+                return 1.0f + 7.0f * amount;
+            case Synth::Warp::pulseWidth:
+                return 1.0f / (1.0f - 0.95f * amount);
+            case Synth::Warp::mirror:
+                return amount > 0.0f ? 2.0f : 1.0f;
+            case Synth::Warp::fm:
+                return std::min (32.0f, 1.0f + 6.2831853f * amount * otherRatio);
+            case Synth::Warp::none:
+            case Synth::Warp::ringMod:
+                break;
         }
 
-        return *nearest;
+        return 1.0f;
+    }
+
+    // A frame pair's wave at a place in its cycle, from 0 to 1.
+    float readAt (const Wavetable::Level& from, const Wavetable::Level& to, float morph, float place) noexcept
+    {
+        const auto scaled = place * (float) from.length;
+        const auto a = readCubic (from, scaled);
+        return morph > 0.0f ? a + morph * (readCubic (to, scaled) - a) : a;
+    }
+
+    float wrap (float place) noexcept
+    {
+        place -= std::floor (place);
+        return place < 1.0f ? place : 0.0f;
     }
 } // namespace
 
+// One oscillator's unison voice over a stretch, its warp chosen once rather than at each sample, as render() plays it sample
+// by sample. Not for FM, which reads the other oscillator's last sample.
+void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, int length) noexcept
+{
+    const auto& from = reader.from;
+    const auto& to = reader.to;
+    const auto morph = reader.morph, dt = reader.increment, amount = run.warpAmount;
+    auto t = reader.phase;
+    const auto advance = [&t, dt] { t = t + dt < 1.0f ? t + dt : t + dt - 1.0f; };
+
+    switch (run.warp)
+    {
+        case Warp::sync:
+        {
+            // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
+            const auto jump = readAt (from, to, morph, 0.0f) - readAt (from, to, morph, wrap (run.syncRatio));
+
+            for (int i = 0; i < length; ++i, advance())
+            {
+                out[i] = readAt (from, to, morph, wrap (t * run.syncRatio));
+
+                if (t < dt || t > 1.0f - dt)
+                    out[i] += 0.5f * jump * dsp::polyBlep (t, dt);
+            }
+
+            break;
+        }
+
+        case Warp::bendUp:
+        case Warp::bendDown:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, wrap (t * run.bend / (1.0f + (run.bend - 1.0f) * t)));
+
+            break;
+
+        case Warp::pulseWidth:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, t < run.pulseWidth ? wrap (t / run.pulseWidth) : 0.0f);
+
+            break;
+
+        case Warp::mirror:
+            for (int i = 0; i < length; ++i, advance())
+            {
+                // Read forward to the middle, then back: heard as much as the amount says.
+                out[i] = readAt (from, to, morph, t);
+
+                if (amount > 0.0f)
+                    out[i] += amount * (readAt (from, to, morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - out[i]);
+            }
+
+            break;
+
+        case Warp::fm: // render() plays it sample by sample
+        case Warp::none:
+        case Warp::ringMod:
+            for (int i = 0; i < length; ++i, advance())
+                out[i] = readAt (from, to, morph, t);
+
+            break;
+    }
+
+    // Without what its warp leaves off centre.
+    if (! juce::exactlyEqual (reader.offset, 0.0f))
+        for (int i = 0; i < length; ++i)
+            out[i] -= reader.offset;
+
+    reader.phase = t;
+}
+
 const DeviceInfo Synth::info { .typeID = typeID, .name = "Synth", .kind = DeviceKind::instrument, .parameters = parameters };
+
+std::span<const float> Synth::getStackSteps (Stack stack) noexcept
+{
+    const auto index = (size_t) std::clamp ((int) stack, 0, (int) std::size (stackSteps) - 1);
+    return { stackSteps[index], (size_t) stackLengths[index] };
+}
+
+namespace
+{
+    // What a block's parameters say, read once for all its voices.
+    struct Settings
+    {
+        std::array<bool, Synth::numOscillators> on {};
+        std::array<Synth::Warp, Synth::numOscillators> warp {};
+        std::array<float, Synth::numOscillators> position {}, pitch {}, level {}, warpAmount {};
+        float subLevel = 0.0f, noiseLevel = 0.0f;
+        int subOctaves = 1;
+        dsp::Waveform subWave = dsp::Waveform::sine;
+        int unison = 1;
+        float detune = 0.0f, positionSpread = 0.0f, drift = 0.0f;
+        std::array<float, Synth::maxUnison> places {}, lefts {}, rights {};
+        std::span<const float> stack; // the semitones above the note its copies take in turn (Synth::getStackSteps())
+        bool stereo = false;
+        bool filterOn = false, steep = true;
+        dsp::FilterMode filterMode = dsp::FilterMode::lowPass;
+        float cutoff = 20000.0f, resonance = 0.0f, driveGain = 1.0f, keyTracking = 0.0f;
+        std::array<dsp::LfoShape, 2> lfoShapes {};
+        std::array<bool, 2> lfoRetrigger {};
+        std::array<float, 2> lfoFades {}; // the samples over which each note's share of each LFO comes in; 0, at once
+        std::array<Synth::ModSource, Synth::numModSlots> sources {};
+        std::array<Synth::ModTarget, Synth::numModSlots> targets {};
+        std::array<float, Synth::numModSlots> amounts {};
+        bool movesAmounts = false;                       // a slot aims at another's amount
+        std::array<bool, Synth::numModSlots> wanders {}; // the slots that play the Drift source
+        float outputGain = 1.0f, bent = 0.0f;
+    };
+
+    bool isAmountTarget (Synth::ModTarget target) noexcept
+    {
+        return target >= Synth::ModTarget::slot1Amount && target <= Synth::ModTarget::slot8Amount;
+    }
+
+    Settings readSettings (std::span<const float> values, float bend, bool hasRight, double sampleRate)
+    {
+        Settings settings;
+
+        for (int osc = 0; osc < Synth::numOscillators; ++osc)
+        {
+            const auto value = [values, osc] (Synth::OscillatorField field) { return values[(size_t) Synth::getParameter (osc, field)]; };
+            settings.on[(size_t) osc] = value (Synth::oscOn) > 0.5f;
+            settings.warp[(size_t) osc] = choiceOf<Synth::Warp> (value (Synth::oscWarp));
+            settings.position[(size_t) osc] = value (Synth::oscPosition);
+            settings.pitch[(size_t) osc] = value (Synth::oscPitch) + 0.01f * value (Synth::oscFine);
+            settings.level[(size_t) osc] = value (Synth::oscLevel);
+            settings.warpAmount[(size_t) osc] = value (Synth::oscWarpAmount);
+        }
+
+        settings.subLevel = values[Synth::subLevel];
+        settings.subOctaves = choiceOf<int> (values[Synth::subOctave]) + 1;
+        settings.subWave = choiceOf<dsp::Waveform> (values[Synth::subShape]);
+        settings.noiseLevel = values[Synth::noiseLevel];
+
+        // Unison: each voice's place from one side to the other, which sets its detune and its level on each side, at a
+        // level that keeps the note as loud (each the square root of their number down).
+        settings.unison = std::clamp (choiceOf<int> (values[Synth::unisonVoices]) + 1, 1, Synth::maxUnison);
+        settings.detune = values[Synth::unisonDetune];
+        settings.positionSpread = values[Synth::unisonPosition];
+        settings.stack = Synth::getStackSteps (choiceOf<Synth::Stack> (values[Synth::unisonStack]));
+        settings.drift = values[Synth::unisonDrift];
+        settings.stereo = settings.unison > 1 && hasRight;
+        const auto norm = 1.0f / std::sqrt ((float) settings.unison);
+
+        for (int u = 0; u < settings.unison; ++u)
+        {
+            const auto place = settings.unison > 1 ? 2.0f * (float) u / (float) (settings.unison - 1) - 1.0f : 0.0f;
+            const auto angle = 0.78539816f * (1.0f + place * values[Synth::unisonSpread]); // 0 to pi/2
+            settings.places[(size_t) u] = place;
+            settings.lefts[(size_t) u] = settings.stereo ? norm * 1.41421356f * std::cos (angle) : norm;
+            settings.rights[(size_t) u] = settings.stereo ? norm * 1.41421356f * std::sin (angle) : norm;
+        }
+
+        settings.filterOn = values[Synth::filterOn] > 0.5f;
+        settings.filterMode = dsp::toFilterMode (values[Synth::filterType]);
+        settings.steep = dsp::isSteep (values[Synth::filterSlope]);
+        settings.cutoff = values[Synth::cutoff];
+        settings.resonance = values[Synth::resonance];
+        settings.driveGain = dsp::decibelsToGain (values[Synth::drive]);
+        settings.keyTracking = values[Synth::keyTracking];
+
+        for (int lfo = 0; lfo < 2; ++lfo)
+        {
+            settings.lfoShapes[(size_t) lfo] = choiceOf<dsp::LfoShape> (values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoShape)]);
+            settings.lfoRetrigger[(size_t) lfo] = values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoRetrigger)] > 0.5f;
+            settings.lfoFades[(size_t) lfo] =
+                (float) (values[(size_t) Synth::getLfoParameter (lfo, Synth::lfoFadeIn)] * 0.001 * sampleRate);
+        }
+
+        for (int slot = 0; slot < Synth::numModSlots; ++slot)
+        {
+            const auto source = choiceOf<Synth::ModSource> (values[(size_t) Synth::getModParameter (slot, Synth::modSource)]);
+            const auto target = choiceOf<Synth::ModTarget> (values[(size_t) Synth::getModParameter (slot, Synth::modTarget)]);
+            settings.sources[(size_t) slot] = source;
+            settings.targets[(size_t) slot] = target;
+            settings.amounts[(size_t) slot] = values[(size_t) Synth::getModParameter (slot, Synth::modAmount)];
+
+            if (source != Synth::ModSource::none && target != Synth::ModTarget::none)
+            {
+                settings.movesAmounts = settings.movesAmounts || isAmountTarget (target);
+                settings.wanders[(size_t) slot] = source == Synth::ModSource::drift;
+            }
+        }
+
+        settings.outputGain = dsp::decibelsToGain (values[Synth::level]);
+        settings.bent = bend * values[Synth::bendRange];
+        return settings;
+    }
+} // namespace
+
+//==============================================================================
+Synth::Synth()
+{
+    for (int osc = 0; osc < numOscillators; ++osc)
+    {
+        owned[(size_t) osc] = getFactoryWavetable (0);
+        stepTables[(size_t) osc] = owned[(size_t) osc].get(); // no audio thread yet
+        playedPositions[(size_t) osc].store (sawPosition, std::memory_order_relaxed);
+    }
+}
+
+Synth::~Synth() = default;
+
+void Synth::setTable (int osc, std::shared_ptr<const Wavetable> table)
+{
+    if (! juce::isPositiveAndBelow (osc, numOscillators))
+        return;
+
+    if (table == nullptr)
+        table = getFactoryWavetable (0);
+
+    freeRetired();
+
+    if (table == owned[(size_t) osc])
+        return;
+
+    // The one given before, if the audio thread never took it, goes at once: so that however many are given while the synth
+    // plays nothing (a muted track's), at most the one it took last and the newest wait. If it took it, it reads it until
+    // the step under way ends: until the count moves on, the next step taking the new one (a step counts before it takes).
+    if (pending[(size_t) osc].exchange (table.get()) == nullptr)
+        retired.push_back ({ std::move (owned[(size_t) osc]), stepsBegun.load() + 1 });
+
+    owned[(size_t) osc] = std::move (table);
+}
+
+std::shared_ptr<const Wavetable> Synth::getTable (int osc) const
+{
+    return juce::isPositiveAndBelow (osc, numOscillators) ? owned[(size_t) osc] : nullptr;
+}
+
+void Synth::freeRetired()
+{
+    const auto done = stepsBegun.load();
+    retired.erase (std::remove_if (retired.begin(), retired.end(), [done] (const Retired& old) { return done >= old.safeAfter; }),
+                   retired.end());
+}
+
+double Synth::getFilterMagnitude (std::span<const float> values, double cutoffHertz, double frequency, double rate)
+{
+    // As render() sets its voices' filters up, before modulation.
+    return dsp::getMagnitude (dsp::makeMultimode ({ .mode = dsp::toFilterMode (values[filterType]),
+                                                    .frequency = cutoffHertz,
+                                                    .resonance = values[resonance],
+                                                    .steep = dsp::isSteep (values[filterSlope]),
+                                                    .q = dsp::getSynthResonanceQ (values[resonance]) },
+                                                  rate),
+                              frequency, rate);
+}
+
+float Synth::getPlayedPosition (int osc) const noexcept
+{
+    return juce::isPositiveAndBelow (osc, numOscillators) ? playedPositions[(size_t) osc].load (std::memory_order_relaxed) : 0.0f;
+}
 
 void Synth::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
-    driftWanderSamples = std::max (1, (int) std::lround (driftWanderSeconds * sampleRate));
-    driftFollow = (float) (1.0 - std::exp (-controlStep / (driftGlideSeconds * sampleRate)));
+
+    // A harmonic may play up to where its alias, folded back from the sample rate, is above 20 kHz.
+    aliasLimit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
+    const auto controlRate = sampleRate / controlStep;
+    driftWanderSteps = (float) (driftWanderSeconds * controlRate);
+    driftFollow = (float) (1.0 - std::exp (-1.0 / (driftGlideSeconds * controlRate)));
     driveFadeStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
     for (auto& blocker : dcBlockers)
         blocker.prepare (sampleRate);
@@ -241,13 +572,20 @@ void Synth::prepare (double newSampleRate, int)
     for (auto& voice : voices)
     {
         voice.amp.prepare (sampleRate);
-        voice.filterEnvelope.prepare (sampleRate);
         voice.noise.prepare (sampleRate);
+        voice.envelope2.prepare (controlRate);
+        voice.envelope3.prepare (controlRate);
+
+        for (auto& lfo : voice.lfos)
+            lfo.prepare (controlRate);
+
         for (auto& filter : voice.filters)
             filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
     }
 
-    lfo.prepare (sampleRate);
+    for (auto& lfo : freeLfos)
+        lfo.prepare (controlRate);
+
     reset();
 }
 
@@ -257,37 +595,43 @@ void Synth::reset()
     {
         auto& voice = voices[index];
         voice.amp.reset();
-        voice.filterEnvelope.reset();
+        voice.envelope2.reset();
+        voice.envelope3.reset();
         voice.note = -1;
         voice.held = voice.sustained = false;
+        voice.stepPending = true;
         voice.fade = 1.0f;
         voice.fadeStep = 0.0f;
+        voice.controlAhead = 0;
+        voice.hasPlayed = false;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
-        voice.unisonPhases.setSeed (unisonSeed + (std::uint32_t) index);
+        voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
         voice.drifting.setSeed (driftSeed + (std::uint32_t) index);
-        voice.driftNow = voice.driftTo = {};
-        voice.driftSamplesLeft = 0;
-        voice.stepPending = true;
-        voice.pitchEnvelope = 0.0f;
+        // Each slot's Drift its own, the first slot's from the seed the one Drift had before each slot had its own.
+        for (size_t slot = 0; slot < voice.wanderings.size(); ++slot)
+            voice.wanderings[slot].setSeed (wanderSeed + (std::uint32_t) index + (std::uint32_t) slot * 0x9e3779b9u);
+
+        voice.slotWanders = {};
+
+        for (auto& oscillator : voice.oscillators)
+            oscillator.wanders = {};
 
         for (auto& filter : voice.filters)
             filter.reset();
-
-        for (auto& shaper : voice.drives)
-            shaper.reset();
-
-        voice.driveBlend = 0.0f;
-        voice.filterIsSet = false;
     }
+
+    for (size_t i = 0; i < freeLfos.size(); ++i)
+        freeLfos[i].reset (0.0f, lfoSeed + (std::uint32_t) i);
 
     for (auto& blocker : dcBlockers)
         blocker.reset();
 
-    lfo.reset();
-    grid.reset();
-    stepLfo.fill (0.0f);
+    freeLfoValues.fill (0.0f);
+    freeLfosAhead = 0;
+    noteRandom.setSeed (randomSeed);
     numHeld = 0;
     notesPlayed = 0;
+    grid.reset();
     lastNote = -1.0f;
     bend = modWheel = 0.0f;
     pedalDown = false;
@@ -300,19 +644,20 @@ double Synth::getTailSeconds() const
     return (double) tailSeconds.load (std::memory_order_relaxed);
 }
 
+//==============================================================================
 void Synth::releaseVoice (Voice& voice)
 {
     voice.held = voice.sustained = false;
     voice.amp.noteOff();
-    voice.filterEnvelope.noteOff();
+    voice.envelope2.noteOff();
+    voice.envelope3.noteOff();
 }
 
 void Synth::letGoOf (int note)
 {
-    // A key played again while its key or the pedal still holds its voice (two keyboards, or the song and a player, can
-    // send that) lets the voice go as its key coming up would, as JUCE's synthesiser and Serum 2 under the pedal do: it rings
-    // out over its release while the new note takes a voice of its own, and the key's first note-off lets go of that. So a
-    // key never holds two voices, which would double it, or pile up under the pedal and take the voices it holds for others.
+    // A key played again while its key or the pedal still holds its voice lets the voice go as its key coming up would: it
+    // rings out over its release while the new note takes a voice of its own, and the key's first note-off lets go of that,
+    // so that a key never holds two voices (Synth::letGoOf()).
     for (size_t i = 0; i < (size_t) maxVoices; ++i)
         if (auto& voice = voices[i]; voice.note == note && (voice.held || voice.sustained))
             releaseVoice (voice);
@@ -321,8 +666,8 @@ void Synth::letGoOf (int note)
 Synth::Voice& Synth::findVoice()
 {
     // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that
-    // fade out voices taken (stealVoice()). A key played again as it rings out takes one too, as LMMS's notes and most
-    // polyphonic synths' do: its tail rings on untouched, and the new note starts from its waves' starts and its envelopes'.
+    // fade out voices taken (stealVoice()). A key played again as it rings out takes one too, as in most polyphonic synths: its tail
+    // rings on untouched, and the new note starts from its waves' starts and its envelopes'.
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
     for (auto& voice : playing)
@@ -350,15 +695,129 @@ void Synth::stealVoice (Voice& voice)
     // What it played fades out from a copy of it, over a few milliseconds, while it starts the new note from silence:
     // no jump to the new note at the old one's level. The copy goes to a place that fades nothing, or else to the one
     // nearest silence, which is cut; it reuses that place's memory (every voice is prepared alike), so this doesn't allocate.
-    auto& fading = findFadingPlace (std::span<Voice> (voices).subspan ((size_t) maxVoices));
+    auto* nearest = &voices[(size_t) maxVoices];
+
+    for (auto i = (size_t) maxVoices; i < voices.size() && nearest->amp.isActive(); ++i)
+        if (const auto& place = voices[i];
+            ! place.amp.isActive() || place.fade * place.amp.getLevel() < nearest->fade * nearest->amp.getLevel())
+            nearest = &voices[i];
+
+    auto& fading = *nearest;
     fading = voice;
     fading.note = -1;
     fading.held = fading.sustained = false;
     fading.fadeStep = std::max (fading.fadeStep, (float) (1.0 / (stealFadeSeconds * sampleRate)));
     voice.amp.reset();
-    voice.filterEnvelope.reset();
+    voice.envelope2.reset();
+    voice.envelope3.reset();
     voice.fade = 1.0f;
     voice.fadeStep = 0.0f;
+}
+
+// A voice that was silent starts from scratch: while the phases reset, its waves too, the first unison voice of each oscillator
+// from the start of its wave, the others anywhere, so they don't start in phase and sweep; while they run free (Phase::free),
+// its waves go on from where they were when it last played, unless it never has. Its LFOs that start with the note from theirs.
+void Synth::startVoice (Voice& voice, bool resets)
+{
+    if (resets || ! voice.hasPlayed)
+    {
+        for (auto& oscillator : voice.oscillators)
+        {
+            for (size_t u = 0; u < oscillator.readers.size(); ++u)
+            {
+                oscillator.readers[u].phase = u == 0 ? 0.0f : voice.phases.nextUnipolar();
+                oscillator.readers[u].last = 0.0f;
+            }
+        }
+
+        voice.sub.setPhase (0.0f);
+    }
+
+    voice.hasPlayed = true;
+
+    for (auto& filter : voice.filters)
+        filter.reset();
+
+    for (auto& shaper : voice.drives)
+        shaper.reset();
+
+    voice.driveBlend = 0.0f;
+
+    for (size_t i = 0; i < voice.lfos.size(); ++i)
+        voice.lfos[i].reset (0.0f, lfoSeed + (std::uint32_t) (notesPlayed * 2 + i));
+}
+
+// Each note's unison voices from places of their own, part of the way to their next, each at its own pace: no two notes
+// beat alike, as ZynAddSubFX draws its unison again for every note. A voice starts about as far out as its wandering
+// keeps it (the mean of two places: gliding, it never gets all the way to one), so that a held note's unison is as wide
+// at its start as later.
+void Synth::startDrift (Voice& voice) noexcept
+{
+    for (auto& oscillator : voice.oscillators)
+    {
+        for (auto& wander : oscillator.wanders)
+        {
+            wander.now = 0.5f * (voice.drifting.nextBipolar() + voice.drifting.nextBipolar());
+            wander.to = voice.drifting.nextBipolar();
+            wander.pace = std::exp2 (voice.drifting.nextBipolar());
+            wander.stepsLeft = std::max (1, (int) (voice.drifting.nextUnipolar() * driftWanderSteps / wander.pace));
+        }
+    }
+}
+
+bool Synth::movesOn (int& ahead, bool whatever) noexcept
+{
+    if (! whatever && ahead > controlStep / 2)
+        return false;
+
+    ahead += controlStep;
+    return true;
+}
+
+void Synth::moveDrift (Voice& voice, int unison) noexcept
+{
+    for (auto& oscillator : voice.oscillators)
+    {
+        for (int u = 0; u < unison; ++u)
+        {
+            auto& wander = oscillator.wanders[(size_t) u];
+
+            if (--wander.stepsLeft <= 0)
+            {
+                wander.to = voice.drifting.nextBipolar();
+                wander.stepsLeft = std::max (1, (int) (driftWanderSteps / wander.pace));
+            }
+
+            wander.now += (wander.to - wander.now) * std::min (1.0f, driftFollow * wander.pace);
+        }
+    }
+}
+
+// The Drift source, one for each slot, as an analog voice's oscillators and cutoff each wander on their own:
+// each note from somewhere of its own, toward a new place every 0.45 s, gliding there with a time constant of 0.3 s; a control step at a time, as Envelopes 2
+// and 3 and the LFOs move (movesOn()).
+void Synth::startWander (Voice& voice) noexcept
+{
+    for (size_t slot = 0; slot < voice.slotWanders.size(); ++slot)
+    {
+        auto& wander = voice.slotWanders[slot];
+        wander.now = voice.wanderings[slot].nextBipolar();
+        wander.to = voice.wanderings[slot].nextBipolar();
+        wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+    }
+}
+
+void Synth::moveWander (Voice& voice, int slot) noexcept
+{
+    auto& wander = voice.slotWanders[(size_t) slot];
+
+    if (--wander.stepsLeft <= 0)
+    {
+        wander.to = voice.wanderings[(size_t) slot].nextBipolar();
+        wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+    }
+
+    wander.now += (wander.to - wander.now) * driftFollow;
 }
 
 bool Synth::isAnotherKeyHeld (int note) const noexcept
@@ -370,42 +829,14 @@ bool Synth::isAnotherKeyHeld (int note) const noexcept
     return false;
 }
 
-void Synth::startDrift (Voice& voice) noexcept
-{
-    // Each note from somewhere of its own, as an analog voice is never quite where the last note left it.
-    for (size_t i = 0; i < voice.driftNow.size(); ++i)
-    {
-        voice.driftNow[i] = voice.drifting.nextBipolar();
-        voice.driftTo[i] = voice.drifting.nextBipolar();
-    }
-
-    voice.driftSamplesLeft = driftWanderSamples;
-}
-
-void Synth::moveDrift (Voice& voice, int samples) noexcept
-{
-    // As far as the samples take it, so that it wanders at its pace at any rate, a control step cut short moving less.
-    if ((voice.driftSamplesLeft -= samples) <= 0)
-    {
-        for (auto& to : voice.driftTo)
-            to = voice.drifting.nextBipolar();
-
-        voice.driftSamplesLeft = driftWanderSamples;
-    }
-
-    const auto follow = samples == controlStep ? driftFollow : (float) (1.0 - std::exp (-samples / (driftGlideSeconds * sampleRate)));
-
-    for (size_t i = 0; i < voice.driftNow.size(); ++i)
-        voice.driftNow[i] += (voice.driftTo[i] - voice.driftNow[i]) * follow;
-}
-
 void Synth::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
 {
     const auto sensitivity = values[velocity];
     const auto gain = 1.0f - sensitivity + sensitivity * velocityValue * velocityValue;
     const auto glidesIn = portamento && lastNote >= 0.0f;
+    const auto resets = choiceOf<Phase> (values[phase]) == Phase::reset;
 
-    // Glide from the note before: always, or only for a note played over a held one (legato).
+    // Glide from the note before: always, or only for a note played over a held one (legato), as a TB-303 slides.
     const auto glides = values[glide] > 0.0f && lastNote >= 0.0f
                         && (choiceOf<GlideMode> (values[glideMode]) == GlideMode::always || isAnotherKeyHeld (note));
     const auto from = glidesIn || glides ? lastNote : (float) note;
@@ -442,15 +873,21 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
 
         if (! legato)
         {
-            voice.velocityGain = gain;
+            if (! voice.amp.isActive())
+                startVoice (voice, resets);
+
             voice.velocity = velocityValue;
+            voice.velocityGain = gain;
+            voice.random = noteRandom.nextUnipolar();
             voice.pitch = from;
-            voice.pitchEnvelope = 1.0f;
+            voice.started = ++notesPlayed;
             voice.age = 0;
-            voice.stepPending = true;
             voice.amp.noteOn();
-            voice.filterEnvelope.noteOn();
+            voice.envelope2.noteOn();
+            voice.envelope3.noteOn();
+            voice.stepPending = true;
             startDrift (voice);
+            startWander (voice);
         }
 
         voice.slidePerSample = slideFrom (voice.pitch);
@@ -463,42 +900,25 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
     if (voice.amp.isActive())
         stealVoice (voice);
 
-    // Every note from silence: the first oscillators from the start of their waves, as always; the unison's others anywhere,
-    // so they don't start in phase and sweep.
-    voice.osc1[0].setPhase (0.0f);
-    voice.osc2[0].setPhase (0.0f);
-
-    for (size_t u = 1; u < (size_t) maxUnison; ++u)
-    {
-        voice.osc1[u].setPhase (voice.unisonPhases.nextUnipolar());
-        voice.osc2[u].setPhase (voice.unisonPhases.nextUnipolar());
-    }
-
-    voice.sub.setPhase (0.0f);
-
-    for (auto& filter : voice.filters)
-        filter.reset();
-
-    for (auto& shaper : voice.drives)
-        shaper.reset();
-
-    voice.driveBlend = 0.0f;
-    voice.filterIsSet = false;
+    startVoice (voice, resets);
     voice.note = note;
     voice.held = true;
     voice.sustained = false;
-    voice.velocityGain = gain;
     voice.velocity = velocityValue;
+    voice.velocityGain = gain;
+    voice.random = noteRandom.nextUnipolar();
     voice.target = (float) note;
     voice.pitch = from;
-    voice.pitchEnvelope = 1.0f;
     voice.slidePerSample = slideFrom (from);
     voice.started = ++notesPlayed;
     voice.age = 0;
-    voice.stepPending = true;
     voice.amp.noteOn();
-    voice.filterEnvelope.noteOn();
+    voice.envelope2.noteOn();
+    voice.envelope3.noteOn();
+    voice.stepPending = true;
+    voice.controlAhead = 0;
     startDrift (voice);
+    startWander (voice);
 }
 
 void Synth::stopNote (int note, std::span<const float> values)
@@ -644,112 +1064,77 @@ void Synth::handle (const NoteEvent& event, std::span<const float> values)
     }
 }
 
-double Synth::getFilterMagnitude (std::span<const float> values, double cutoffHertz, double frequency, double rate)
+//==============================================================================
+namespace
 {
-    // As render() sets its voices' filters up.
-    const dsp::FilterSettings settings { .mode = dsp::toFilterMode (values[filterType]),
-                                         .frequency = cutoffHertz,
-                                         .resonance = values[resonance],
-                                         .steep = dsp::isSteep (values[filterSlope]),
-                                         .q = 0.5 * std::pow (50.0, (double) values[resonance]) };
-    return dsp::getMagnitude (dsp::makeMultimode (settings, rate), frequency, rate);
-}
+    // How much each modulation destination is moved, summed over the slots aimed at it.
+    using Moves = std::array<float, (size_t) Synth::ModTarget::unisonDetune + 1>;
+
+    float moveOf (const Moves& moves, Synth::ModTarget target) noexcept
+    {
+        return moves[(size_t) target];
+    }
+} // namespace
 
 void Synth::render (float* left, float* right, int numSamples, std::span<const float> values, bool playing, std::int64_t songSample)
 {
-    const auto wave1 = choiceOf<dsp::Waveform> (values[osc1Wave]), wave2 = choiceOf<dsp::Waveform> (values[osc2Wave]);
-    const auto mix2 = values[oscMix], width = values[pulseWidth], subGain = values[subLevel];
-    const auto noiseGain = values[noiseLevel];
-    const auto subWave = choiceOf<dsp::Waveform> (values[subShape]);
-    const auto subRatio = choiceOf<int> (values[subOctave]) == 1 ? 0.25 : 0.5;
-    const auto mode = dsp::toFilterMode (values[filterType]);
-    const auto steep = dsp::isSteep (values[filterSlope]);
-    const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // a 12 dB section's, the synth's own: 0.5, soft, to 25
-    const auto outputGain = dsp::decibelsToGain (values[level]);
-    const auto lfoAim = choiceOf<LfoTarget> (values[lfoTarget]);
-    // The parts switched off do nothing: the LFO (the mod wheel's depth too), the filter envelope (on the cutoff and on osc
-    // 2's pitch), the unison, the filter.
-    const auto depth = values[lfoOn] > 0.5f ? std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f) : 0.0f;
-    const auto envelopeOn = values[filterEnvelopeOn] > 0.5f;
-    const auto envelopeAmount = envelopeOn ? values[filterEnvelope] : 0.0f;
-    const auto osc2Sweep = envelopeOn ? values[osc2Envelope] : 0.0f;
-    const auto filtered = values[filterOn] > 0.5f;
-    const auto lfoWave = choiceOf<dsp::LfoShape> (values[lfoShape]);
-    const auto fadeSamples = (float) (values[lfoFade] * 0.001 * sampleRate);
+    const auto settings = readSettings (values, bend, right != nullptr, sampleRate);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
-    const auto bent = bend * values[bendRange];
-    const auto osc2Offset = values[osc2Pitch] + values[osc2Detune] * 0.01f;
-    const auto synced = values[osc2Sync] > 0.5f;
-    const auto pitchSweep = values[pitchAmount];
-    const auto pitchFallPerSample = 1.0 / (std::max (1.0f, values[pitchDecay]) * 0.001 * sampleRate);
-    const auto driftAmount = values[drift];
-    const auto drifting = driftAmount > 0.0f;
-    const auto velocityRange = values[filterVelocity] * dsp::filterVelocityRange;
-    const auto driveGain = dsp::decibelsToGain (values[drive]);
-    const auto driveWanted = filtered && driveGain > 1.0001f ? 1.0f : 0.0f;
     const auto nyquistLimit = 0.45 * sampleRate;
 
-    // Unison: each oscillator's detune (in semitones) and its place between the speakers, spread evenly from one side to
-    // the other, at a level that keeps the voice's loudness (each the square root of their number down).
-    const auto numUnison = values[unisonOn] > 0.5f ? std::clamp (choiceOf<int> (values[unisonVoices]) + 1, 1, maxUnison) : 1;
-    const auto stereo = numUnison > 1 && right != nullptr;
-    const auto unisonNorm = 1.0f / std::sqrt ((float) numUnison);
-    std::array<float, maxUnison> detunes {}, lefts {}, rights {};
-
-    // Each oscillator's pitch as a ratio of the voice's, worked out once a block rather than at each voice's every step
-    // (docs/archive/performance-audit.md, A4).
-    std::array<double, maxUnison> ratios1 {}, ratios2 {};
-    const auto osc2Ratio = std::exp2 ((double) osc2Offset / 12.0);
-
-    for (int u = 0; u < numUnison; ++u)
-    {
-        const auto place = numUnison > 1 ? 2.0f * (float) u / (float) (numUnison - 1) - 1.0f : 0.0f; // -1 to 1
-        const auto angle = 0.78539816f * (1.0f + place * values[unisonSpread]);                      // 0 to pi/2
-        detunes[(size_t) u] = place * values[unisonDetune] * 0.01f;
-        lefts[(size_t) u] = unisonNorm * 1.41421356f * std::cos (angle);
-        rights[(size_t) u] = unisonNorm * 1.41421356f * std::sin (angle);
-        ratios1[(size_t) u] = std::exp2 ((double) detunes[(size_t) u] / 12.0);
-        ratios2[(size_t) u] = ratios1[(size_t) u] * osc2Ratio;
-    }
+    // Each oscillator's pitch as a ratio of the other's, for the warps that follow it.
+    const std::array<float, numOscillators> otherRatios { std::exp2 ((settings.pitch[1] - settings.pitch[0]) / 12.0f),
+                                                          std::exp2 ((settings.pitch[0] - settings.pitch[1]) / 12.0f) };
 
     grid.startBlock (playing, songSample);
 
     for (int start = 0; start < numSamples;)
     {
         // Control steps on the song's own grid while it plays, a running count while it is stopped (dsp/ControlGrid.h), so
-        // that what plays doesn't depend on how the samples come, nor on how the passage was reached: a step a block's end or
-        // an event cuts short goes on in the next stretch, with the values it began with. The LFO's values for the step come
-        // as it begins.
+        // that the modulators and the glide move at their rate however the samples come and however the passage was reached:
+        // a step a block's end or an event cuts short goes on in the next stretch.
         const auto stretch = grid.next (numSamples - start);
         const auto newStep = stretch.newStep;
-        const auto at = stretch.at; // where in the step this stretch starts
-        const auto untilNextStep = stretch.untilNextStep;
         const auto length = stretch.length;
+        const auto untilNextStep = stretch.untilNextStep;
+        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-untilNextStep / glideSamples));
 
         if (newStep)
-            for (int i = 0; i < untilNextStep; ++i)
-                stepLfo[(size_t) i] = lfo.next (lfoWave);
+        {
+            // The step before is finished: what it read can go (setTable()), and this one takes the tables given since, if any
+            // were. Counted first, so that the message thread's count after it gave one is of a step that takes it.
+            stepsBegun.fetch_add (1);
 
-        // A step's glide and pitch envelope move as far as the step takes them; a voice that starts in the middle of one, as
-        // far as what is left of it.
-        const auto glideStep = glideSamples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-untilNextStep / glideSamples));
-        const auto pitchFall = ! juce::exactlyEqual (pitchSweep, 0.0f) ? (float) std::exp (-untilNextStep * pitchFallPerSample) : 0.0f;
+            for (size_t osc = 0; osc < stepTables.size(); ++osc)
+                if (const auto* given = pending[osc].exchange (nullptr); given != nullptr)
+                    stepTables[osc] = given;
+        }
+
+        // The LFOs that run free, a step each control step, kept up with the samples played where the grid cuts one short.
+        if (newStep && movesOn (freeLfosAhead))
+            for (size_t i = 0; i < freeLfos.size(); ++i)
+                freeLfoValues[i] = freeLfos[i].next (settings.lfoShapes[i]);
+
+        freeLfosAhead -= length;
 
         for (auto& voice : voices)
         {
             if (! voice.amp.isActive())
                 continue;
 
-            // Pitch and filter, once a step, and as the voice (re)starts.
+            const auto ageAtStretch = voice.age; // the samples since its note began, at this stretch's start
+            voice.age = std::min (voice.age + length, 1 << 30);
+
+            //==================================================================
+            // Once a control step, and when the voice (re)starts: the pitch, the modulation, the oscillators' frames and
+            // levels, the filter and gains. A stretch that goes on with a step keeps them.
             if (newStep || voice.stepPending)
             {
+                // Its own control-rate parts (Envelopes 2 and 3, its LFOs, its drift) move a step at each step and as it
+                // starts, kept up with the samples it plays where a step runs short (movesOn()).
+                const auto movesOnNow = movesOn (voice.controlAhead, voice.stepPending);
                 voice.stepPending = false;
-
-                // The LFO comes in over its fade after each note starts.
-                const auto fadeIn = fadeSamples > 0.0f ? std::min (1.0f, (float) voice.age / fadeSamples) : 1.0f;
-                voice.lfoDepth = depth * fadeIn;
-                const auto pitchMove = lfoAim == LfoTarget::pitch ? voice.lfoDepth * stepLfo[(size_t) at] : 0.0f;
-                const auto cutoffMove = lfoAim == LfoTarget::cutoff ? voice.lfoDepth * 24.0f * stepLfo[(size_t) at] : 0.0f;
+                voice.unison = settings.unison;
 
                 // A slide moves evenly until it gets there, a glide part of the way each step.
                 if (voice.slidePerSample > 0.0f)
@@ -764,148 +1149,414 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     voice.pitch += (voice.target - voice.pitch) * glideStep;
                 }
 
-                const auto sweep = pitchSweep * voice.pitchEnvelope;
-                voice.pitchEnvelope *= pitchFall;
-                const auto semitones = (double) (voice.pitch + bent + pitchMove + sweep);
-                const auto frequency = dsp::noteToFrequency (semitones);
-
-                // Each oscillator's own drift, and osc 2's sweep by the filter envelope, from where the envelope is now: at
-                // its top as a note with no attack starts.
-                if (drifting)
-                    moveDrift (voice, untilNextStep);
-
-                const auto envelopeLevel = voice.filterEnvelope.getLevel();
-
-                const auto frequency1 =
-                    drifting ? frequency * std::exp2 (driftAmount * driftCents / 1200.0f * voice.driftNow[0]) : frequency;
-                auto frequency2 = drifting ? frequency * std::exp2 (driftAmount * driftCents / 1200.0f * voice.driftNow[1]) : frequency;
-
-                if (! juce::exactlyEqual (osc2Sweep, 0.0f))
-                    frequency2 *= std::exp2 (osc2Sweep * envelopeLevel / 12.0f);
-
-                for (int u = 0; u < numUnison; ++u)
+                std::array<float, (size_t) ModSource::drift + 1> sources {};
+                if (movesOnNow)
                 {
-                    voice.osc1[(size_t) u].setFrequency (frequency1 * ratios1[(size_t) u], sampleRate);
-                    voice.osc2[(size_t) u].setFrequency (frequency2 * ratios2[(size_t) u], sampleRate);
+                    voice.envelope2Now = voice.envelope2.next();
+                    voice.envelope3Now = voice.envelope3.next();
+
+                    for (size_t i = 0; i < voice.lfos.size(); ++i)
+                        if (settings.lfoRetrigger[i])
+                            voice.lfosNow[i] = voice.lfos[i].next (settings.lfoShapes[i]);
+
+                    // Each slot's Drift, only while the slot plays it.
+                    for (int slot = 0; slot < numModSlots; ++slot)
+                        if (settings.wanders[(size_t) slot])
+                            moveWander (voice, slot);
                 }
 
-                voice.unison = numUnison;
-                voice.frequency1 = frequency1;
-                voice.frequency2 = frequency2;
+                sources[(size_t) ModSource::envelope2] = voice.envelope2Now;
+                sources[(size_t) ModSource::envelope3] = voice.envelope3Now;
 
-                // Synced, osc 2 plays this many of its cycles in each of osc 1's (for every unison voice alike).
-                voice.syncRatio = (float) (osc2Ratio * frequency2 / frequency1);
-                voice.sub.setFrequency (subRatio * frequency1, sampleRate);
-
-                auto moves = envelopeAmount * envelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
-
-                if (velocityRange > 0.0f)
-                    moves += velocityRange * (voice.velocity - 1.0f);
-
-                if (drifting)
-                    moves += driftAmount * driftSemitones * voice.driftNow[2];
-
-                const auto filterFrequency =
-                    std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
-
-                // The same filter on both sides; a comb's delay glides to its new length over the step. Made again only when
-                // its settings change: a held note's often don't.
-                const dsp::FilterSettings filterSettings { .mode = mode,
-                                                           .frequency = filterFrequency,
-                                                           .resonance = values[resonance],
-                                                           .steep = steep,
-                                                           .q = q };
-
-                if (! voice.filterIsSet || ! dsp::areSame (filterSettings, voice.filterSettings))
+                for (size_t i = 0; i < voice.lfos.size(); ++i)
                 {
-                    const auto coefficients = dsp::makeMultimode (filterSettings, sampleRate);
+                    sources[(size_t) ModSource::lfo1 + i] = settings.lfoRetrigger[i] ? voice.lfosNow[i] : freeLfoValues[i];
 
-                    // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
-                    for (auto& filter : voice.filters)
-                        filter.set (coefficients, untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
-
-                    voice.filterSettings = filterSettings;
-                    voice.filterIsSet = true;
-                }
-            }
-            else if (voice.unison != numUnison)
-            {
-                // More unison voices than the step set up (a change by hand between two of its stretches): those at the
-                // step's pitch too.
-                for (int u = 0; u < numUnison; ++u)
-                {
-                    voice.osc1[(size_t) u].setFrequency (voice.frequency1 * ratios1[(size_t) u], sampleRate);
-                    voice.osc2[(size_t) u].setFrequency (voice.frequency2 * ratios2[(size_t) u], sampleRate);
+                    // Each note's share of the LFO comes in from nothing over its fade, from the note's start (a legato note
+                    // in mono mode goes on with its voice's), whether the LFO starts with the note or runs on for every
+                    // note.
+                    if (const auto fade = settings.lfoFades[i]; fade > 0.0f)
+                        sources[(size_t) ModSource::lfo1 + i] *= std::min (1.0f, (float) ageAtStretch / fade);
                 }
 
-                voice.unison = numUnison;
-            }
-
-            voice.age = std::min (voice.age + length, 1 << 30);
-            const auto voiceDepth = voice.lfoDepth;
-            const auto widthMove = lfoAim == LfoTarget::pulseWidth ? voiceDepth * 0.45f : 0.0f;
-            const auto syncRatio = voice.syncRatio;
-
-            // Synced, osc 2's wave centred over each of osc 1's cycles (getSyncedMean()): worked out once a stretch, or each
-            // sample for a pulse whose width the LFO moves.
-            const auto meanMoves = synced && wave2 == dsp::Waveform::square && widthMove > 0.0f;
-            const auto stretchMean = synced && ! meanMoves ? getSyncedMean (voice.osc2[0], wave2, width, syncRatio) : 0.0f;
-
-            // One unison voice's two oscillators, osc 2 read in step with osc 1 while it is synced.
-            const auto play = [&voice, synced, mix2, wave1, wave2, syncRatio] (size_t u, float pulse, float mean)
-            {
-                auto& osc1 = voice.osc1[u];
-                auto& osc2 = voice.osc2[u];
-
-                if (! synced)
-                    return (1.0f - mix2) * osc1.next (wave1, pulse) + mix2 * osc2.next (wave2, pulse);
-
-                const auto t = osc1.getPhase(), dt = osc1.getIncrement();
-                const auto first = osc1.next (wave1, pulse);
-                return (1.0f - mix2) * first + mix2 * (readSynced (osc2, wave2, pulse, t, dt, syncRatio) - mean);
-            };
-
-            for (int i = 0; i < length; ++i)
-            {
-                // The oscillators (spread across the sides while unison is stereo), then the sub and the noise in the middle.
-                auto mono = 0.0f, soundLeft = 0.0f, soundRight = 0.0f;
-                const auto lfoNow = stepLfo[(size_t) (at + i)];
-                const auto pulse = widthMove > 0.0f ? width + widthMove * lfoNow : width;
-                const auto mean = meanMoves ? getSyncedMean (voice.osc2[0], wave2, pulse, syncRatio) : stretchMean;
-
-                if (numUnison == 1)
+                sources[(size_t) ModSource::velocity] = voice.velocity;
+                sources[(size_t) ModSource::note] = (voice.pitch - 60.0f) / 48.0f;
+                sources[(size_t) ModSource::modWheel] = modWheel;
+                sources[(size_t) ModSource::random] = voice.random;
+                // A slot's source, Drift being the slot's own wander.
+                const auto sourceOf = [&sources, &settings, &voice] (size_t slot)
                 {
-                    mono = play (0, pulse, mean);
-                }
-                else
+                    return settings.sources[slot] == ModSource::drift ? voice.slotWanders[slot].now
+                                                                      : sources[(size_t) settings.sources[slot]];
+                };
+
+                // The slots that aim at other slots' amounts first, each by its own amount as set, so that nothing loops:
+                // one that aims at its own does nothing, and an amount moved stays within its range.
+                auto amounts = settings.amounts;
+
+                if (settings.movesAmounts)
                 {
-                    for (int u = 0; u < numUnison; ++u)
+                    for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
                     {
-                        const auto sound = play ((size_t) u, pulse, mean);
-                        mono += sound * unisonNorm;
-                        soundLeft += sound * lefts[(size_t) u];
-                        soundRight += sound * rights[(size_t) u];
+                        const auto target = settings.targets[slot];
+                        const auto moved = (size_t) target - (size_t) ModTarget::slot1Amount;
+
+                        if (settings.sources[slot] != ModSource::none && isAmountTarget (target) && moved != slot)
+                            amounts[moved] += sourceOf (slot) * settings.amounts[slot];
+                    }
+
+                    for (auto& amount : amounts)
+                        amount = std::clamp (amount, -1.0f, 1.0f);
+                }
+
+                Moves moves {};
+
+                for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
+                    if (settings.sources[slot] != ModSource::none && settings.targets[slot] != ModTarget::none
+                        && ! isAmountTarget (settings.targets[slot]))
+                        moves[(size_t) settings.targets[slot]] += sourceOf (slot) * amounts[slot];
+
+                const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
+                const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
+
+                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/archive/performance-audit.md, A4):
+                // its place in the detune, and the step of the stack it takes in its turn.
+                std::array<double, maxUnison> unisonRatios {};
+                const auto stackLength = settings.stack.size();
+
+                for (int u = 0; u < settings.unison; ++u)
+                    unisonRatios[(size_t) u] = std::exp2 (
+                        ((double) (settings.places[(size_t) u] * detune) * 0.01 + (double) settings.stack[(size_t) u % stackLength])
+                        / 12.0);
+
+                // The unison's drift: each voice of each oscillator a little further on its own way.
+                const auto drifting = settings.drift > 0.0f;
+
+                if (drifting && movesOnNow)
+                    moveDrift (voice, settings.unison);
+
+                for (int osc = 0; osc < numOscillators; ++osc)
+                {
+                    auto& run = voice.oscillators[(size_t) osc];
+                    const auto* table = stepTables[(size_t) osc];
+                    run.on = settings.on[(size_t) osc] && table != nullptr;
+
+                    if (! run.on)
+                        continue;
+
+                    const auto targetOf = [osc] (ModTarget forFirst) { return (ModTarget) ((int) forFirst + osc * 4); };
+                    run.warp = settings.warp[(size_t) osc];
+                    run.position =
+                        std::clamp (settings.position[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Position)), 0.0f, 1.0f);
+                    // Sync's modulation reaches past the knob's end, to 16 times (maxSyncAmount).
+                    run.warpAmount = std::clamp (settings.warpAmount[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Warp)), 0.0f,
+                                                 run.warp == Warp::sync ? maxSyncAmount : 1.0f);
+                    run.level = std::clamp (settings.level[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Level)), 0.0f, 1.0f);
+                    run.syncRatio = std::exp2 (3.0f * run.warpAmount);
+                    run.bend = run.warp == Warp::bendUp ? 1.0f + 7.0f * run.warpAmount : 1.0f / (1.0f + 7.0f * run.warpAmount);
+                    run.pulseWidth = 1.0f - 0.95f * run.warpAmount;
+
+                    const auto semitones =
+                        (double) (basePitch + settings.pitch[(size_t) osc] + pitchRange * moveOf (moves, targetOf (ModTarget::osc1Pitch)));
+                    const auto speed = getWarpSpeed (run.warp, run.warpAmount, otherRatios[(size_t) osc]);
+
+                    // Each unison voice's pitch, then the level that its fastest allows: for each step of the stack its
+                    // own, so that the voices on the note keep the harmonics those above it can't play.
+                    const auto oscillatorIncrement = dsp::noteToFrequency (semitones) / sampleRate;
+                    std::array<double, maxStackSteps> fastest {};
+
+                    for (int u = 0; u < settings.unison; ++u)
+                    {
+                        auto ratio = unisonRatios[(size_t) u];
+
+                        if (drifting)
+                        {
+                            // As far off as its wander has taken it: a few cents, so e^x by its first terms is within a
+                            // hundredth of a cent.
+                            const auto x = (double) (settings.drift * run.wanders[(size_t) u].now) * centsToLog;
+                            ratio *= 1.0 + x + 0.5 * x * x;
+                        }
+
+                        const auto increment = std::min (0.49, oscillatorIncrement * ratio);
+                        run.readers[(size_t) u].increment = (float) increment;
+                        auto& ofStep = fastest[(size_t) u % stackLength];
+                        ofStep = std::max (ofStep, increment);
+                    }
+
+                    std::array<int, maxStackSteps> mipLevels {};
+
+                    for (size_t step = 0; step < stackLength; ++step)
+                        mipLevels[step] = Wavetable::chooseLevel (aliasLimit / std::max (1.0e-9, fastest[step] * (double) speed));
+
+                    const auto lastFrame = table->getNumFrames() - 1;
+                    const auto bendPlace = Wavetable::findBend (run.bend); // once an oscillator: its readers share its bend
+
+                    for (int u = 0; u < settings.unison; ++u)
+                    {
+                        auto& reader = run.readers[(size_t) u];
+                        const auto spread = settings.places[(size_t) u] * settings.positionSpread * 0.5f;
+                        const auto frame = std::clamp (run.position + spread, 0.0f, 1.0f) * (float) lastFrame;
+                        const auto firstFrame = std::min ((int) frame, lastFrame);
+                        const auto mipLevel = mipLevels[(size_t) u % stackLength];
+                        const auto nextFrame = std::min (firstFrame + 1, lastFrame);
+                        reader.from = table->getLevel (firstFrame, mipLevel);
+                        reader.to = table->getLevel (nextFrame, mipLevel);
+                        reader.morph = frame - (float) firstFrame;
+                        reader.left = settings.lefts[(size_t) u];
+                        reader.right = settings.rights[(size_t) u];
+
+                        // What its warp leaves off centre, which it takes away: every frame is centred over its whole cycle,
+                        // but sync reads a part of its last cycle, bend reads the cycle unevenly, and pulse width holds the
+                        // wave's start for the rest of the cycle (Wavetable::getArea(), getBentMean()).
+                        const auto morphed = [&] (auto&& of)
+                        { return (1.0f - reader.morph) * of (firstFrame) + reader.morph * of (nextFrame); };
+
+                        switch (run.warp)
+                        {
+                            case Warp::sync:
+                            {
+                                const auto cut = run.syncRatio - std::floor (run.syncRatio);
+                                reader.offset = morphed ([&] (int each) { return table->getArea (each, mipLevel, cut); }) / run.syncRatio;
+                                break;
+                            }
+
+                            case Warp::bendUp:
+                            case Warp::bendDown:
+                                reader.offset = morphed ([&] (int each) { return table->getBentMean (each, mipLevel, bendPlace); });
+                                break;
+
+                            case Warp::pulseWidth:
+                                reader.offset = (1.0f - run.pulseWidth) * readAt (reader.from, reader.to, reader.morph, 0.0f);
+                                break;
+
+                            case Warp::none:
+                            case Warp::mirror:
+                            case Warp::fm:
+                            case Warp::ringMod:
+                                reader.offset = 0.0f;
+                                break;
+                        }
                     }
                 }
 
-                if (subGain > 0.0f)
+                voice.subGain = std::clamp (settings.subLevel + moveOf (moves, ModTarget::subLevel), 0.0f, 1.0f);
+                voice.noiseGain = std::clamp (settings.noiseLevel + moveOf (moves, ModTarget::noiseLevel), 0.0f, 1.0f);
+
+                if (voice.subGain > 0.0f)
+                    voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
+
+                voice.filtering = settings.filterOn;
+
+                if (settings.filterOn)
                 {
-                    const auto sub = subGain * voice.sub.next (subWave);
-                    mono += sub;
-                    soundLeft += sub;
-                    soundRight += sub;
+                    // The same filter on both sides; a comb's delay glides to its new length over the step.
+                    const auto moved = settings.keyTracking * (voice.pitch - 60.0f) + cutoffRange * moveOf (moves, ModTarget::cutoff);
+                    const auto frequency =
+                        std::clamp ((double) settings.cutoff * std::exp2 ((double) moved / 12.0), lowestCutoff, nyquistLimit);
+                    const auto filterResonance = settings.resonance + moveOf (moves, ModTarget::resonance);
+                    const auto coefficients = dsp::makeMultimode ({ .mode = settings.filterMode,
+                                                                    .frequency = frequency,
+                                                                    .resonance = filterResonance,
+                                                                    .steep = settings.steep,
+                                                                    .q = dsp::getSynthResonanceQ (filterResonance) },
+                                                                  sampleRate);
+
+                    // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
+                    for (auto& side : voice.filters)
+                        side.set (coefficients, untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
+
+                    voice.driveGain = settings.driveGain;
+                    voice.cutoffNow = (float) frequency;
                 }
 
-                if (noiseGain > 0.0f)
+                const auto volume = std::clamp (1.0f + moveOf (moves, ModTarget::volume), 0.0f, 2.0f);
+                const auto angle = 0.78539816f * (1.0f + std::clamp (moveOf (moves, ModTarget::pan), -1.0f, 1.0f));
+                voice.gainLeft = volume * 1.41421356f * std::cos (angle);
+                voice.gainRight = volume * 1.41421356f * std::sin (angle);
+            }
+
+            voice.controlAhead -= length;
+
+            //==================================================================
+            // Each sample: as many unison voices as the step set readers for, spread across the sides if more than one.
+            auto& osc1Run = voice.oscillators[0];
+            auto& osc2Run = voice.oscillators[1];
+            const auto unison = voice.unison;
+            const auto stereo = unison > 1 && right != nullptr;
+
+            // Without FM, which reads the other oscillator sample by sample, each oscillator's unison voices play the stretch
+            // first (renderStep()), and are mixed after: the same sums, in the same order (docs/archive/performance-audit.md, A6).
+            const auto blockwise = ! ((osc1Run.on && osc1Run.warp == Warp::fm) || (osc2Run.on && osc2Run.warp == Warp::fm));
+            std::array<float, controlStep> stepLefts {}, stepRights {};
+
+            if (blockwise)
+            {
+                for (int u = 0; u < unison; ++u)
                 {
-                    const auto noise = noiseGain * voice.noise.next();
-                    mono += noise;
-                    soundLeft += noise;
-                    soundRight += noise;
+                    std::array<std::array<float, controlStep>, numOscillators> raws {};
+
+                    for (int osc = 0; osc < numOscillators; ++osc)
+                        if (auto& run = voice.oscillators[(size_t) osc]; run.on)
+                            renderStep (run, run.readers[(size_t) u], raws[(size_t) osc].data(), length);
+
+                    const auto& panned = osc1Run.on ? osc1Run.readers[(size_t) u] : osc2Run.readers[(size_t) u];
+
+                    for (int i = 0; i < length; ++i)
+                    {
+                        // Ring modulation: by the other oscillator as it is now.
+                        auto out1 = raws[0][(size_t) i], out2 = raws[1][(size_t) i];
+
+                        if (osc1Run.on && osc1Run.warp == Warp::ringMod && osc2Run.on)
+                            out1 *= 1.0f - osc1Run.warpAmount + osc1Run.warpAmount * raws[1][(size_t) i];
+
+                        if (osc2Run.on && osc2Run.warp == Warp::ringMod && osc1Run.on)
+                            out2 *= 1.0f - osc2Run.warpAmount + osc2Run.warpAmount * raws[0][(size_t) i];
+
+                        const auto sound = (osc1Run.on ? out1 * osc1Run.level : 0.0f) + (osc2Run.on ? out2 * osc2Run.level : 0.0f);
+                        stepLefts[(size_t) i] += sound * panned.left;
+                        stepRights[(size_t) i] += sound * panned.right;
+                    }
+
+                    if (length > 0)
+                    {
+                        osc1Run.readers[(size_t) u].last = raws[0][(size_t) length - 1];
+                        osc2Run.readers[(size_t) u].last = raws[1][(size_t) length - 1];
+                    }
+                }
+            }
+
+            for (int i = 0; i < length; ++i)
+            {
+                auto soundLeft = stepLefts[(size_t) i], soundRight = stepRights[(size_t) i];
+
+                for (int u = 0; u < unison && ! blockwise; ++u)
+                {
+                    std::array<float, numOscillators> raw {};
+
+                    for (int osc = 0; osc < numOscillators; ++osc)
+                    {
+                        auto& run = voice.oscillators[(size_t) osc];
+
+                        if (! run.on)
+                            continue;
+
+                        auto& reader = run.readers[(size_t) u];
+                        const auto& other = voice.oscillators[(size_t) (1 - osc)];
+                        const auto otherLast = other.on ? other.readers[(size_t) u].last : 0.0f;
+                        const auto t = reader.phase, dt = reader.increment, amount = run.warpAmount;
+                        auto place = t;
+
+                        switch (run.warp)
+                        {
+                            case Warp::sync:
+                                place = wrap (t * run.syncRatio);
+                                break;
+
+                            case Warp::bendUp:
+                            case Warp::bendDown:
+                                place = wrap (t * run.bend / (1.0f + (run.bend - 1.0f) * t));
+                                break;
+
+                            case Warp::pulseWidth:
+                                place = t < run.pulseWidth ? wrap (t / run.pulseWidth) : 0.0f;
+                                break;
+
+                            case Warp::fm:
+                                place = wrap (t + amount * otherLast);
+                                break;
+
+                            case Warp::none:
+                            case Warp::mirror:
+                            case Warp::ringMod:
+                                break;
+                        }
+
+                        auto value = readAt (reader.from, reader.to, reader.morph, place);
+
+                        if (run.warp == Warp::mirror && amount > 0.0f)
+                        {
+                            // Read forward to the middle, then back: heard as much as the amount says.
+                            const auto mirrored =
+                                readAt (reader.from, reader.to, reader.morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t));
+                            value += amount * (mirrored - value);
+                        }
+                        else if (run.warp == Warp::sync && (t < dt || t > 1.0f - dt))
+                        {
+                            // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
+                            const auto jump = readAt (reader.from, reader.to, reader.morph, 0.0f)
+                                              - readAt (reader.from, reader.to, reader.morph, wrap (run.syncRatio));
+                            value += 0.5f * jump * dsp::polyBlep (t, dt);
+                        }
+
+                        raw[(size_t) osc] = value - reader.offset;
+                        reader.phase = t + dt < 1.0f ? t + dt : t + dt - 1.0f;
+                    }
+
+                    // Ring modulation: by the other oscillator as it is now.
+                    auto out1 = raw[0], out2 = raw[1];
+
+                    if (osc1Run.on && osc1Run.warp == Warp::ringMod && osc2Run.on)
+                        out1 *= 1.0f - osc1Run.warpAmount + osc1Run.warpAmount * raw[1];
+
+                    if (osc2Run.on && osc2Run.warp == Warp::ringMod && osc1Run.on)
+                        out2 *= 1.0f - osc2Run.warpAmount + osc2Run.warpAmount * raw[0];
+
+                    osc1Run.readers[(size_t) u].last = raw[0];
+                    osc2Run.readers[(size_t) u].last = raw[1];
+
+                    const auto sound = (osc1Run.on ? out1 * osc1Run.level : 0.0f) + (osc2Run.on ? out2 * osc2Run.level : 0.0f);
+                    const auto& panned = osc1Run.on ? osc1Run.readers[(size_t) u] : osc2Run.readers[(size_t) u];
+                    soundLeft += sound * panned.left;
+                    soundRight += sound * panned.right;
                 }
 
-                voice.filterEnvelope.next();
-                auto gain = voice.amp.next() * voice.velocityGain * outputGain * voice.fade;
+                // Without unison, one sound in the middle.
+                if (! stereo)
+                    soundRight = soundLeft;
+
+                // The sub and the noise, in the middle.
+                auto centre = 0.0f;
+
+                if (voice.subGain > 0.0f)
+                    centre += voice.subGain * voice.sub.next (settings.subWave);
+
+                if (voice.noiseGain > 0.0f)
+                    centre += voice.noiseGain * voice.noise.next();
+
+                soundLeft += centre;
+                soundRight += centre;
+
+                // The filter, its drive saturating what goes in (its quiet parts keeping their level) at twice the rate so
+                // that it doesn't alias, faded in and out over driveFadeSeconds as it comes on or off: both sides through it
+                // while unison spreads the voice, otherwise one.
+                const auto channels = stereo ? 2 : 1;
+                std::array<float, 2> sides { soundLeft, soundRight };
+                const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
+                voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -driveFadeStep, driveFadeStep);
+
+                for (int channel = 0; channel < channels; ++channel)
+                {
+                    auto x = sides[(size_t) channel];
+
+                    if (voice.filtering)
+                    {
+                        if (voice.driveBlend > 0.0f)
+                        {
+                            const auto gain = std::max (1.0f, voice.driveGain);
+                            const auto driven = voice.drives[(size_t) channel].process (x * gain, dsp::SoftCurve {}) / gain;
+                            x += voice.driveBlend * (driven - x);
+                        }
+
+                        x = voice.filters[(size_t) channel].process (x);
+                    }
+
+                    sides[(size_t) channel] = x;
+                }
+
+                if (! stereo)
+                    sides[1] = sides[0];
+
+                const auto gain = voice.amp.next() * voice.velocityGain * settings.outputGain * voice.fade;
 
                 // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free.
                 if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
@@ -914,44 +1565,10 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     voice.fadeStep = 0.0f;
                     voice.amp.reset();
                 }
+                left[start + i] += sides[0] * gain * voice.gainLeft;
 
-                if (lfoAim == LfoTarget::level)
-                    gain *= 1.0f - voiceDepth * 0.5f * (1.0f + lfoNow);
-
-                // The filter, its drive saturating what goes in (its quiet parts keeping their level) at twice the rate so
-                // that it doesn't alias, faded in and out over driveFadeSeconds as it comes on or off, as the wavetable
-                // synth's.
-                voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -driveFadeStep, driveFadeStep);
-
-                const auto through = [&voice, filtered, driveGain] (size_t side, float x)
-                {
-                    if (! filtered)
-                        return x;
-
-                    if (voice.driveBlend > 0.0f)
-                    {
-                        const auto boost = std::max (1.0f, driveGain);
-                        const auto driven = voice.drives[side].process (x * boost, dsp::SoftCurve {}) / boost;
-                        x += voice.driveBlend * (driven - x);
-                    }
-
-                    return voice.filters[side].process (x);
-                };
-
-                if (! stereo)
-                {
-                    // One filter, the same sound on both sides, as before unison.
-                    const auto out = through (0, mono) * gain;
-                    left[start + i] += out;
-
-                    if (right != nullptr)
-                        right[start + i] += out;
-
-                    continue;
-                }
-
-                left[start + i] += through (0, soundLeft) * gain;
-                right[start + i] += through (1, soundRight) * gain;
+                if (right != nullptr)
+                    right[start + i] += sides[1] * gain * voice.gainRight;
             }
 
             if (! voice.amp.isActive())
@@ -986,17 +1603,38 @@ void Synth::process (const ProcessContext& block)
         shownMode = mode;
     }
 
-    for (auto& voice : voices)
+    const auto setEnvelope = [values] (dsp::Adsr& envelope, int number)
     {
-        voice.amp.setParameters (values[attack] * 0.001f, values[decay] * 0.001f, values[sustain], values[release] * 0.001f);
-        voice.amp.setCurves (values[attackCurve], values[decayCurve], values[releaseCurve]);
-        voice.filterEnvelope.setParameters (values[filterAttack] * 0.001f, values[filterDecay] * 0.001f, values[filterSustain],
-                                            values[filterRelease] * 0.001f);
-        voice.filterEnvelope.setCurves (values[filterAttackCurve], values[filterDecayCurve], values[filterReleaseCurve]);
+        const auto value = [values, number] (EnvelopeField field) { return values[(size_t) getEnvelopeParameter (number, field)]; };
+        envelope.setParameters (value (envAttack) * 0.001f, value (envDecay) * 0.001f, value (envSustain), value (envRelease) * 0.001f);
+        envelope.setCurves (value (envAttackCurve), value (envDecayCurve), value (envReleaseCurve));
+    };
+
+    // The LFOs' rates: in hertz, or a note value at the song's tempo, a bar's as long as its time signature makes it.
+    std::array<double, 2> rates {};
+
+    for (size_t i = 0; i < rates.size(); ++i)
+    {
+        const auto lfo = (int) i;
+        const auto synced = values[(size_t) getLfoParameter (lfo, lfoSync)] > 0.5f;
+        const auto division =
+            std::clamp (choiceOf<int> (values[(size_t) getLfoParameter (lfo, lfoDivision)]), 0, (int) std::size (divisionLengths) - 1);
+        rates[i] = synced ? block.tempo / 60.0 / divisionLengths[(size_t) division].inBeats (block.barLength)
+                          : (double) values[(size_t) getLfoParameter (lfo, lfoRate)];
+        freeLfos[i].setRate (rates[i]);
     }
 
-    lfo.setRate (values[lfoRate]);
-    tailSeconds.store (values[release] * 0.001f, std::memory_order_relaxed);
+    for (auto& voice : voices)
+    {
+        setEnvelope (voice.amp, 0);
+        setEnvelope (voice.envelope2, 1);
+        setEnvelope (voice.envelope3, 2);
+
+        for (size_t i = 0; i < voice.lfos.size(); ++i)
+            voice.lfos[i].setRate (rates[i]);
+    }
+
+    tailSeconds.store (values[env1Release] * 0.001f, std::memory_order_relaxed);
 
     auto* left = block.channels[0];
     auto* right = block.numChannels > 1 ? block.channels[1] : nullptr;
@@ -1021,31 +1659,56 @@ void Synth::process (const ProcessContext& block)
     while (next < block.events.size())
         handle (block.events[next++], values);
 
-    // Without what its drive leaves off centre, of a wave centred but lopsided (a synced one, unison's sum): on its sum, one
-    // blocker a side (dsp/DcBlocker.h), only while the drive is on or fading out. Clean, the synth's waves are centred as
-    // they are made (a synced one by getSyncedMean()), and its sum is left as it is, bit for bit, as the blocker would
-    // change its waveform: a slow tail after each note. Once playback has stopped and no note sounds in the block, what the
-    // blockers still ring with fades out, so that nothing sounds on after Stop.
-    const auto driven = values[filterOn] > 0.5f && dsp::decibelsToGain (values[drive]) > 1.0001f;
-    const auto wanted = driven || std::any_of (voices.begin(), voices.end(), [] (const Voice& each) { return each.driveBlend > 0.0f; });
+    // Without what ring modulation and FM leave off centre at whole ratios (the product of two waves at one pitch has a part
+    // at 0 Hz, as FM's sidebands do): on its sum, one blocker a side (dsp/DcBlocker.h), only while an oscillator that is on
+    // has one of those warps. Otherwise its waves are centred as they are made (the other warps by Wavetable::getArea() and
+    // getBentMean()), and its sum is left as it is, bit for bit, as the blocker would change its waveform: a slow tail after
+    // each note. Once playback has stopped and no note sounds in the block, what the blockers still ring with fades out, so
+    // that nothing sounds on after Stop.
+    auto wanted = false;
+
+    for (int osc = 0; osc < numOscillators; ++osc)
+    {
+        const auto warp = choiceOf<Warp> (values[(size_t) getParameter (osc, oscWarp)]);
+        wanted = wanted || (values[(size_t) getParameter (osc, oscOn)] > 0.5f && (warp == Warp::fm || warp == Warp::ringMod));
+    }
     const auto quiet = stoppedPlaying && ! soundedBefore && ! sounding();
 
     for (size_t side = 0; side < (right != nullptr ? 2u : 1u); ++side)
         dcBlockers[side].process (side == 0 ? left : right, block.numSamples, wanted, quiet);
 
-    activeVoices.store ((int) std::count_if (voices.begin(), voices.end(), [] (const Voice& each) { return each.amp.isActive(); }),
-                        std::memory_order_relaxed);
-
-    // For the editor: the newest voice, and the LFO.
+    // What the editor shows: where the newest note plays in each table, or without one where the knob is.
     const Voice* newest = nullptr;
+    auto active = 0;
 
     for (const auto& voice : voices)
-        if (voice.amp.isActive() && (newest == nullptr || voice.started > newest->started))
-            newest = &voice;
+    {
+        if (! voice.amp.isActive())
+            continue;
 
-    shown.amp.set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
-    shown.filterEnvelope.set (newest != nullptr ? newest->filterEnvelope.getLevel() : 0.0f);
-    shown.cutoff.set (newest != nullptr && newest->filterIsSet ? (float) newest->filterSettings.frequency : 0.0f);
-    shown.lfoPhase.set (lfo.getPhase());
+        ++active;
+
+        if (newest == nullptr || voice.started > newest->started)
+            newest = &voice;
+    }
+
+    for (int osc = 0; osc < numOscillators; ++osc)
+        playedPositions[(size_t) osc].store (newest != nullptr ? newest->oscillators[(size_t) osc].position
+                                                               : values[(size_t) getParameter (osc, oscPosition)],
+                                             std::memory_order_relaxed);
+
+    // The newest note's envelopes and cutoff, and where each LFO is: the newest note's, for one that starts again with each.
+    shown.envelopes[0].set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
+    shown.envelopes[1].set (newest != nullptr ? newest->envelope2.getLevel() : 0.0f);
+    shown.envelopes[2].set (newest != nullptr ? newest->envelope3.getLevel() : 0.0f);
+    shown.cutoff.set (newest != nullptr && newest->filtering ? newest->cutoffNow : 0.0f);
+
+    for (size_t i = 0; i < freeLfos.size(); ++i)
+    {
+        const auto retriggered = values[(size_t) getLfoParameter ((int) i, lfoRetrigger)] > 0.5f;
+        shown.lfoPhases[i].set (retriggered ? (newest != nullptr ? newest->lfos[i].getPhase() : -1.0f) : freeLfos[i].getPhase());
+    }
+
+    activeVoices.store (active, std::memory_order_relaxed);
 }
 } // namespace phazite::devices

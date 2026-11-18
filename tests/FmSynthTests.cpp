@@ -773,60 +773,83 @@ TEST_CASE ("The FM synth's Filter Velocity closes the cutoff for softer notes: a
     CHECK (cutoffAt (1.0f, 0.0f) == doctest::Approx (250.0f).epsilon (0.001));
 }
 
-TEST_CASE ("The FM synth's filter envelope and velocity are the synth's: the same names, ranges and units, and the same cutoff played")
+TEST_CASE ("The FM synth's filter envelope and velocity play as the Synth's Envelope 2 and Velocity on its cutoff")
 {
     using devices::Synth;
 
-    // Described alike, but for the envelope's amount, none in a new FM synth (its filter is off, and stays where it is set
-    // once on) and two octaves in a new synth.
-    for (const auto* id : { "filterEnvelope", "filterVelocity", "filterAttack", "filterDecay", "filterSustain", "filterRelease",
-                            "filterAttackCurve", "filterDecayCurve", "filterReleaseCurve", "cutoff", "keyTracking" })
+    // Its envelope's stages, its cutoff and its key tracking described as the Synth's Envelope 2 and filter are: the same
+    // ranges, units and steps, and the stages at the same values at first.
+    const std::pair<const char*, const char*> alike[] = { { "filterAttack", "env2Attack" },
+                                                          { "filterDecay", "env2Decay" },
+                                                          { "filterSustain", "env2Sustain" },
+                                                          { "filterRelease", "env2Release" },
+                                                          { "filterAttackCurve", "env2AttackCurve" },
+                                                          { "filterDecayCurve", "env2DecayCurve" },
+                                                          { "filterReleaseCurve", "env2ReleaseCurve" },
+                                                          { "cutoff", "cutoff" },
+                                                          { "keyTracking", "keyTracking" } };
+
+    for (const auto& [fmID, synthID] : alike)
     {
-        CAPTURE (id);
-        const auto fmIndex = devices::findParameter (FmSynth::info, id), synthIndex = devices::findParameter (Synth::info, id);
+        CAPTURE (fmID);
+        const auto fmIndex = devices::findParameter (FmSynth::info, fmID), synthIndex = devices::findParameter (Synth::info, synthID);
         REQUIRE (fmIndex >= 0);
         REQUIRE (synthIndex >= 0);
         const auto& ours = FmSynth::info.parameters[(size_t) fmIndex];
         const auto& theirs = Synth::info.parameters[(size_t) synthIndex];
-        CHECK (ours.name == theirs.name);
         CHECK (ours.minimum == theirs.minimum);
         CHECK (ours.maximum == theirs.maximum);
         CHECK (ours.unit == theirs.unit);
         CHECK (ours.midpoint == theirs.midpoint);
         CHECK (ours.scale == theirs.scale);
 
-        if (std::string_view (id) != "filterEnvelope" && std::string_view (id) != "cutoff")
+        if (std::string_view (fmID) != "cutoff")
             CHECK (ours.defaultValue == theirs.defaultValue);
     }
 
     CHECK (FmSynth::info.parameters[FmSynth::filterEnvelope].defaultValue == 0.0f);
 
-    // Played alike: each with the same filter settings, a note at velocity 0.6 held, then let go; the cutoff each plays,
-    // block by block.
+    // Played alike: a note at velocity 0.6 held, then let go; the cutoff each plays, block by block. The FM synth's envelope
+    // of 30 semitones is the Synth's Envelope 2 on its cutoff at 30/96, and its Filter Velocity of 0.4 is a Velocity slot on
+    // the cutoff at 0.2 with the cutoff set two octaves lower times 0.4 (4 x 0.4 octaves, which a note at full velocity takes
+    // back). The Synth's Envelope 2 gives each control step the value it has at the step's end, a step (16 samples) on
+    // from the FM synth's, so the Synth's note starts and ends a step later.
     auto fmValues = getFilteredValues();
     std::vector<float> synthValues;
 
     for (const auto& parameter : Synth::info.parameters)
         synthValues.push_back (parameter.defaultValue);
 
-    const auto set = [&fmValues, &synthValues] (const char* id, float value)
-    {
-        fmValues[(size_t) devices::findParameter (FmSynth::info, id)] = value;
-        synthValues[(size_t) devices::findParameter (Synth::info, id)] = value;
-    };
+    const auto setFm = [&fmValues] (const char* id, float value) { fmValues[(size_t) devices::findParameter (FmSynth::info, id)] = value; };
+    const auto setSynth = [&synthValues] (int index, float value) { synthValues[(size_t) index] = value; };
 
-    set ("cutoff", 700.0f);
-    set ("keyTracking", 0.3f);
-    set ("filterEnvelope", 30.0f);
-    set ("filterVelocity", 0.4f);
-    set ("filterAttack", 0.0f);
-    set ("filterDecay", 80.0f);
-    set ("filterSustain", 0.3f);
-    set ("filterRelease", 40.0f);
-    set ("filterAttackCurve", 0.2f);
-    set ("filterDecayCurve", -0.3f);
-    set ("filterReleaseCurve", -0.1f);
-    synthValues[Synth::release] = 1000.0f;
+    setFm ("cutoff", 700.0f);
+    setFm ("keyTracking", 0.3f);
+    setFm ("filterEnvelope", 30.0f);
+    setFm ("filterVelocity", 0.4f);
+    setFm ("filterAttack", 0.0f);
+    setFm ("filterDecay", 80.0f);
+    setFm ("filterSustain", 0.3f);
+    setFm ("filterRelease", 40.0f);
+    setFm ("filterAttackCurve", 0.2f);
+    setFm ("filterDecayCurve", -0.3f);
+    setFm ("filterReleaseCurve", -0.1f);
+    setSynth (Synth::cutoff, 700.0f * std::exp2 (-4.0f * 0.4f));
+    setSynth (Synth::keyTracking, 0.3f);
+    setSynth (Synth::env2Attack, 0.0f);
+    setSynth (Synth::env2Decay, 80.0f);
+    setSynth (Synth::env2Sustain, 0.3f);
+    setSynth (Synth::env2Release, 40.0f);
+    setSynth (Synth::env2AttackCurve, 0.2f);
+    setSynth (Synth::env2DecayCurve, -0.3f);
+    setSynth (Synth::env2ReleaseCurve, -0.1f);
+    setSynth (Synth::mod1Source, (float) Synth::ModSource::envelope2);
+    setSynth (Synth::mod1Target, (float) Synth::ModTarget::cutoff);
+    setSynth (Synth::mod1Amount, 30.0f / 96.0f);
+    setSynth (Synth::mod2Source, (float) Synth::ModSource::velocity);
+    setSynth (Synth::mod2Target, (float) Synth::ModTarget::cutoff);
+    setSynth (Synth::mod2Amount, 0.4f / 2.0f);
+    setSynth (Synth::env1Release, 1000.0f);
 
     auto fm = makeSynth();
     Synth synth;
@@ -835,11 +858,15 @@ TEST_CASE ("The FM synth's filter envelope and velocity are the synth's: the sam
     for (int block = 0; block < 40; ++block)
     {
         CAPTURE (block);
-        const auto events = block == 0    ? std::vector<NoteEvent> { noteOn (0, 67, 0.6f) }
-                            : block == 30 ? std::vector<NoteEvent> { noteOff (0, 67) }
-                                          : std::vector<NoteEvent> {};
-        play (*fm, fmValues, testBlockSize, events);
-        play (synth, synthValues, testBlockSize, events);
+        const auto events = [block] (int at)
+        {
+            return block == 0    ? std::vector<NoteEvent> { noteOn (at, 67, 0.6f) }
+                   : block == 30 ? std::vector<NoteEvent> { noteOff (at, 67) }
+                                 : std::vector<NoteEvent> {};
+        };
+
+        play (*fm, fmValues, testBlockSize, events (0));
+        play (synth, synthValues, testBlockSize, events (16));
         CHECK (fm->getShown().cutoff.get() == doctest::Approx (synth.getShown().cutoff.get()).epsilon (0.0001));
     }
 

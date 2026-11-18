@@ -11,12 +11,12 @@
 // operator from a place in its wave of its own (its Phase, as each of Ableton Operator's oscillators has one while it
 // retriggers: what the modulators make of a carrier depends on where each is in its cycle against the others), or running
 // free, a resonant filter of any of the types of dsp/MultimodeFilter.h, with an envelope of its own and velocity as the
-// synth's filter has them (Synth.h: the same names, ranges and meanings, so that the two read alike), one LFO (to the
+// sampler's filter has them (Sampler.h: the same names, ranges and meanings, so that the two read alike), one LFO (to the
 // pitch, the modulators' levels, the level or the cutoff), Timbre, which turns every modulator and every operator's
 // feedback up or down at once, Spread, which plays each note twice, detuned apart, on the left and on the right (as
 // Operator's Spread), and 16 voices, or one in mono mode, legato, with glide. In poly mode every note takes a voice of its
-// own, a key played again too: what still rings of it rings out over its release, untouched, as the synth's does
-// (Synth.h). A new synth plays a soft electric piano, two pairs built as the DX7's E.PIANO 1 is, so that it is finished from
+// own, a key played again too: what still rings of it rings out over its release, untouched, as the Synth's does
+// (devices/synth/Synth.h). A new synth plays a soft electric piano, two pairs built as the DX7's E.PIANO 1 is, so that it is finished from
 // the start.
 #pragma once
 
@@ -89,9 +89,9 @@ public:
         cutoff,
         resonance,
         filterSlope,
-        filterEnvelope, // how far its envelope opens the cutoff (or closes it, below 0), in semitones: the synth's
+        filterEnvelope, // how far its envelope opens the cutoff (or closes it, below 0), in semitones
         keyTracking,
-        filterVelocity, // how far a softer note's cutoff falls: at full, four octaves at velocity 0, as the synth's
+        filterVelocity, // how far a softer note's cutoff falls: at full, four octaves at velocity 0, as the sampler's
         filterAttack,   // the filter's envelope, its times shorter up the keys with the operators' (keyTime)
         filterDecay,
         filterSustain,

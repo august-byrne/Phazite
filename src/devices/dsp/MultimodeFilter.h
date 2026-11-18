@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The filter types of Phazite's filters, the synth's, the wavetable synth's and the Filter device's (roadmap steps 2.10,
+// The filter types of Phazite's filters, the synths', the sampler's and the Filter device's (roadmap steps 2.10,
 // 2.14 and 2.15), one channel of them, so that every device offers the same types, in the same order and by the same
 // names, and each sounds the same in all of them (docs/design.md, section 9):
 // - low-pass, high-pass, band-pass and notch at 12 or 24 dB per octave, as each device's Slope says (Filters.h);
@@ -9,7 +9,7 @@
 // - Phaser: six all-pass stages fed back, mixed with what goes in, whose three notches the cutoff moves;
 // - Sample & Hold: the sound held at twice the cutoff's rate, aliasing on purpose, as a lo-fi sampler does.
 // The resonance sharpens each: it narrows the formants, feeds the phaser back, and feeds the held sound back to ring at
-// the cutoff. A 12 dB section's Q comes from the resonance by getResonanceQ(), but in the synths, whose curve is their own
+// the cutoff. A 12 dB section's Q comes from the resonance by getResonanceQ(), but in the Synth, whose curve is its own
 // (getSynthResonanceQ()).
 #pragma once
 
@@ -63,9 +63,8 @@ inline double getResonanceQ (float resonance) noexcept
     return 0.70710678 * std::pow (2.0, 4.5 * (double) std::clamp (resonance, 0.0f, 1.0f));
 }
 
-// The synths' own curve for a 12 dB section's Q: from 0.5, softer than a Butterworth, rounding a sound's top as an analog
-// synth's filter does with its resonance down, to 25, near self-oscillation, as Synth.cpp has it (the wavetable synth's
-// since roadmap step S6.7 moved the synth's presets onto its engine).
+// The Synth's own curve for a 12 dB section's Q: from 0.5, softer than a Butterworth, rounding a sound's top as an analog
+// synth's filter does with its resonance down, to 25, near self-oscillation.
 inline double getSynthResonanceQ (float resonance) noexcept
 {
     return 0.5 * std::pow (50.0, (double) std::clamp (resonance, 0.0f, 1.0f));

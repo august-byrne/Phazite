@@ -14,7 +14,7 @@
 //   at once: Envelope (times, sustain and bends), Tone (wave, feedback and where in its wave it starts each note, faint
 //   while the phases run free), Pitch (Fixed and detune) and Scaling (velocity and key). An operator's column shows faint
 //   while it is off; the one under the pointer lights its box.
-// Then Pitch over Voice, the Filter, switched on at its title, with its envelope beside it as the synth's editor has it
+// Then Pitch over Voice, the Filter, switched on at its title, with its envelope beside it as the sampler's editor has it
 // (faint while the filter is off), and the LFO, switched on at its title. A dock narrower than them shows them in pages.
 #pragma once
 

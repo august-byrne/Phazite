@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tables that come with Phazite's wavetable synth (roadmap step 2.13), made from formulas the first time each is
+// The tables that come with Phazite's synth (roadmap step 2.13), made from formulas the first time each is
 // needed, so that Phazite ships no sound files (docs/design.md, section 9): basic shapes, pulse widths, harmonics built up
 // one by one, vowels, hard sync, FM, wavefolding, bit steps, a comb sweep, a talking bass and random spectra. Projects
 // keep an oscillator's factory table by its name.

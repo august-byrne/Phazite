@@ -62,7 +62,7 @@ public:
 
     Level getLevel (int frame, int level) const noexcept;
 
-    // What a warp that reads only a part of a frame's cycle, or reads it unevenly, leaves off centre (the wavetable synth's
+    // What a warp that reads only a part of a frame's cycle, or reads it unevenly, leaves off centre (the synth's
     // Sync and Bend): every frame is centred over its whole cycle, but not over a part of it. Worked out as the table is
     // made. Real-time safe.
     //

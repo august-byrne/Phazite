@@ -54,7 +54,7 @@ Phazite's own devices as songs hold them, and parameters as controls and automat
 |---|---|
 | `internal/Devices.h` | Phazite's own devices, each its engine-neutral DSP in `src/devices/`, which Phazite's engine plays, in the order menus list them; and other types registered to play as Phazite's own (the tests' stand-ins). |
 | `internal/DrumKit.h` | What the drum sampler's pads play (by their notes, each with up to four layers, and a pad on a track of its own, a mixer channel as FL Studio's FPC gives one): a factory sound by its name, or a sound file. |
-| `internal/Wavetables.h` | What the wavetable synth's oscillators play: a factory table by its name, or a sound file. |
+| `internal/Wavetables.h` | What the synth's oscillators play: a factory table by its name, or a sound file. |
 | `internal/SamplerSound.h` | The sampler's sound, with its root key found as it loads, and its slices moved, added and taken away by hand. |
 | `internal/DeviceFiles.h` | How the files of devices (the sounds and tables above) are kept by their paths in the project. |
 | `SwapModel.h`, `internal/Swap.h` | Swap: a drum pad's sound, or one of Phazite's own devices' presets, tried in place in the song, then kept as one undo step or put back. |

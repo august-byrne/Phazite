@@ -10,13 +10,13 @@
 //   parts, or only where the user put slices; slices put by hand stay whatever slices it, and those it found that were
 //   taken away stay away. Each slice is on a note of its own from note 36 up, played at its own pitch, with the fades,
 //   triggered or gated, to its end or on through the sound, each cutting off the one before unless choke is off.
-// A note can start at a random place in the sound (Start Random, as a wavetable synth's random phase: at full, anywhere in
+// A note can start at a random place in the sound (Start Random, as a synth's random phase: at full, anywhere in
 // it), so that no two notes of a steady sound are alike; the places come from a fixed seed, so it renders the same every
 // time. Then a resonant filter of any of the types of dsp/MultimodeFilter.h, which softer notes can close (Filter Velocity,
-// as the synth's), with an envelope of its own, one LFO, and 16 voices, or one in mono mode, legato, gliding between the
+// as the FM synth's), with an envelope of its own, one LFO, and 16 voices, or one in mono mode, legato, gliding between the
 // keys held without starting the sound again, as an 808 played as a bass line glides. In poly mode every note takes a voice
 // of its own, a key played again too: what still rings of it rings on, a release, a one-shot or a slice that choke leaves
-// playing, as the synth's does (Synth.h) and the drum sampler's pads do. The sound reads between its samples by a windowed
+// playing, as the synths' do (devices/synth/Synth.h) and the drum sampler's pads do. The sound reads between its samples by a windowed
 // sinc whose cutoff follows its pitch (dsp/SincReader.h), forward or reversed; a sound that is one seamless loop (a factory
 // sound made from its spectrum, FactorySamples.h) reads on from its end into its start. The model loads the sound, with
 // where its hits begin found as it loads (SampleAnalysis.h), and the sampler swaps it in without the audio thread ever

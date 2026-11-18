@@ -2,7 +2,7 @@
 // The engine's lock-free parts raced on real threads: the queue that live notes come through from any thread
 // (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h),
 // the transport the message thread asks for (Engine.h), a device's sample tap made as a display listens (SampleTap.h),
-// and the sounds the wavetable synth and the sampler let go of once the audio thread can't be reading them.
+// and the sounds the synth and the sampler let go of once the audio thread can't be reading them.
 // Each race runs a fixed count of operations, never for a time, and waits only for what the other threads do, so that it
 // says the same on one core as on many; ThreadSanitizer (linux-tsan) sees each access the threads share. What a thread
 // finds wrong it counts, and the test thread checks the counts once the threads have ended (doctest's checks are the test
@@ -10,7 +10,7 @@
 #include "TestHelpers.h"
 #include "devices/core/SampleTap.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/wavetable/WavetableSynth.h"
+#include "devices/synth/Synth.h"
 #include "engine/core/Engine.h"
 #include "engine/core/EventQueue.h"
 #include "engine/core/Handover.h"
@@ -919,7 +919,7 @@ std::vector<float> getDefaultValues (const phazite::devices::DeviceInfo& info)
 }
 } // namespace
 
-TEST_CASE ("The wavetable synth's tables swapped as it plays raced: none is let go of while a control step still reads it")
+TEST_CASE ("The synth's tables swapped as it plays raced: none is let go of while a control step still reads it")
 {
     namespace devices = phazite::devices;
     std::vector<std::shared_ptr<const devices::Wavetable>> tables;
@@ -934,9 +934,9 @@ TEST_CASE ("The wavetable synth's tables swapped as it plays raced: none is let 
         tables.push_back (devices::Wavetable::fromHarmonics ("Saw", { saw }));
     }
 
-    devices::WavetableSynth synth;
+    devices::Synth synth;
     synth.prepare (48000.0, 1);
-    const auto values = getDefaultValues (devices::WavetableSynth::info);
+    const auto values = getDefaultValues (devices::Synth::info);
 
     const auto raced = raceSoundSwaps (
         synth, tables, values, [&synth] (const auto& table) { synth.setTable (0, table); },

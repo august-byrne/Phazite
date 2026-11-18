@@ -25,7 +25,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/FactoryWavetables.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
@@ -115,15 +114,13 @@ std::unique_ptr<devices::Processor> makeInstrument (const Preset& preset)
     const auto type = toString (preset.info->typeID);
     std::unique_ptr<devices::Processor> made;
 
-    if (type == devices::Synth::typeID)
-        made = std::make_unique<devices::Synth>();
-    else if (type == devices::FmSynth::typeID)
+    if (type == devices::FmSynth::typeID)
         made = std::make_unique<devices::FmSynth>();
-    else if (type == devices::WavetableSynth::typeID)
+    else if (type == devices::Synth::typeID)
     {
-        auto synth = std::make_unique<devices::WavetableSynth>();
+        auto synth = std::make_unique<devices::Synth>();
 
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
             if (const auto name = preset.sounds[phazite::schema::getOscillatorWavetable (osc)].toString(); name.isNotEmpty())
                 synth->setTable (osc, devices::getFactoryWavetable (devices::findFactoryWavetable (name.toStdString())));
 

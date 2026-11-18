@@ -360,7 +360,7 @@
                  name="Low"
                  solo="1">
             <DEVICE id="47"
-                    type="phaziteWavetable">
+                    type="phaziteSynth">
               <SOUNDS osc1Wavetable="Pulse Width"
                       osc2WavetableFile="Audio/Wave.wav"/>
             </DEVICE>

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Device editors made of parts (src/ui/devices/DeviceEditorBase.h, DeviceLayout.h), as the synth's is: a control for each
-// parameter, named within its part, and columns that show one part at a time under tabs in a short dock.
+// The synth's editor (src/ui/devices/SynthEditor.h), driven as the user would: its tables drawn and named,
+// the table menu, a sound dropped on a table, a drag through a table, its controls in their groups (the unison's stack and
+// drift among them), how it fits a shorter Devices view, its filter's dot and an envelope as a note plays, and its pitch
+// knob taking a value typed.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -17,159 +19,354 @@
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/SynthEditor.h"
 
+#include <cmath>
+#include <vector>
+
 namespace
 {
 using phazite::devices::Synth;
+using phazite::ui::SynthEditor;
 
-// A synth as the song's first track's instrument, which the song's session plays.
-phazite::DeviceID addSynth (phazite::test::TestSong& song)
+// The synth on a project's first track, and its editor in a window.
+struct Screen
 {
-    auto& s = *phazite::findSong (song.context);
-    const auto id = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, Synth::typeID));
-    REQUIRE (id.isValid());
-    phazite::getSession (song.context)->update();
-    return id;
-}
-} // namespace
-
-TEST_CASE ("The synth's editor has a control for each parameter, in groups, and each control changes its parameter")
-{
-    phazite::test::TestSong song;
-    auto& s = *phazite::findSong (song.context);
-    const auto id = addSynth (song);
-
-    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
-    auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
-    REQUIRE (panel != nullptr);
-    phazite::test::TestWindow window (*panel, panel->getWidth(), panel->getHeight());
-    phazite::test::checkChildrenApart (*panel);
-
-    // Every parameter has its control: a list for a choice, a knob for the rest, titled with its whole name.
-    for (const auto& parameter : Synth::info.parameters)
+    Screen()
     {
-        CAPTURE (juce::String (parameter.id.data(), parameter.id.size()).toStdString());
-        auto* control = panel->findControl (parameter.id);
-        REQUIRE (control != nullptr);
-        CHECK (control->getTitle() == juce::String (parameter.name.data(), parameter.name.size()));
-        CHECK ((dynamic_cast<juce::ComboBox*> (control) != nullptr) == (parameter.unit == phazite::devices::Unit::choice));
+        auto& s = getSong();
+        synth = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, Synth::typeID));
+        REQUIRE (synth.isValid());
+        phazite::getSession (song.context)->update();
+        s.getUndoManager().clearUndoHistory();
+
+        editor = std::make_unique<SynthEditor> (phazite::makeDeviceHandle (s, synth));
+        window = std::make_unique<phazite::test::TestWindow> (*editor, editor->getWidth(), editor->getHeight());
     }
 
-    // Under "Filter Envelope", the filter's attack is just "Attack".
+    ~Screen()
+    {
+        window = nullptr;
+        editor = nullptr;
+    }
+
+    phazite::Song& getSong() const { return *phazite::findSong (song.context); }
+    float getValue (const char* id) const { return phazite::getValueSetByHand (getSong(), phazite::ParameterRef { synth, id }); }
+    juce::String describeUndo() const { return phazite::describeUndo (&getSong()); }
+
+    phazite::test::TemporaryFolder temp; // for sound files outside the project
+    phazite::test::TestSong song;
+    phazite::DeviceID synth;
+    std::unique_ptr<SynthEditor> editor;
+    std::unique_ptr<phazite::test::TestWindow> window;
+};
+} // namespace
+
+TEST_CASE ("The synth's editor draws each oscillator's table and names it")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    CHECK (dynamic_cast<SynthEditor*> (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (screen.getSong(), screen.synth)).get())
+           != nullptr);
+    phazite::test::checkChildrenApart (editor);
+
+    for (int osc = 0; osc < SynthEditor::numOscillators; ++osc)
+    {
+        CHECK (editor.getTableButton (osc).getButtonText() == juce::String ("Basic Shapes"));
+        CHECK (editor.getTableButton (osc).getTitle() == "Osc " + juce::String (osc + 1) + " Wavetable Choice");
+        CHECK (phazite::test::findComponentWithTitle (editor, "Osc " + juce::String (osc + 1) + " Wavetable") != nullptr);
+    }
+
+    // Every parameter has its control, titled with its whole name and named within its part: under "Envelope 2", its
+    // attack is "Attack".
+    for (const auto& parameter : Synth::info.parameters)
+    {
+        CAPTURE (std::string (parameter.id));
+        const auto* control = editor.findControl (parameter.id);
+        REQUIRE (control != nullptr);
+        CHECK (control->getTitle() == juce::String (parameter.name.data(), parameter.name.size()));
+    }
+
     juce::StringArray names;
 
-    for (auto* label : phazite::test::findAll<juce::Label> (*panel))
+    for (auto* label : phazite::test::findAll<juce::Label> (editor))
         names.add (label->getText());
 
-    CHECK (phazite::test::findComponentWithTitle (*panel, "Filter Envelope") != nullptr);
-    CHECK (names.contains ("Shape")); // the LFO's
-    CHECK_FALSE (names.contains ("Filter Attack"));
+    CHECK (phazite::test::findComponentWithTitle (editor, "Envelope 2") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (editor, "Mod 8 Source") != nullptr);
 
-    // A knob and a list each change their parameter, as an undo step the model names.
-    auto* cutoff = dynamic_cast<phazite::ui::Knob*> (panel->findControl ("cutoff"));
-    REQUIRE (cutoff != nullptr);
-    cutoff->setValue (800.0, juce::sendNotificationSync);
-    CHECK (phazite::getValueSetByHand (s, phazite::ParameterRef { id, "cutoff" }) == doctest::Approx (800.0f));
-    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Cutoff"));
-
-    auto* wave = dynamic_cast<juce::ComboBox*> (panel->findControl ("osc1Wave"));
-    REQUIRE (wave != nullptr);
-    CHECK (wave->getText() == juce::String ("Saw"));
-    wave->setSelectedItemIndex (3, juce::sendNotificationSync); // Square
-    CHECK (phazite::getValueSetByHand (s, phazite::ParameterRef { id, "osc1Wave" }) == doctest::Approx (3.0f));
-
-    // Undo shows on the panel.
-    phazite::undo (s);
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (wave->getText() == juce::String ("Saw"));
+    // As wide in a short dock as in a tall one: a shorter dock shows a part at a time under tabs.
+    CHECK (editor.getWidthForHeight (editor.getMinimumHeight()) == editor.getWidthForHeight (editor.getHeight()));
+    CHECK (editor.getMinimumHeight() <= 235); // the default dock's height in a 1280 x 800 window
+    CHECK (editor.getWidth() < 1100);
+    CHECK_FALSE (names.contains ("2 Attack"));
+    CHECK_FALSE (names.contains ("Envelope 2 Attack"));
 }
 
-TEST_CASE ("Narrower than its parts side by side, as the dock is, the synth's editor shows them in pages, each whole, without tabs")
+TEST_CASE ("The synth's table menu lists the factory tables and puts the one chosen on the oscillator")
 {
-    phazite::test::TestSong song;
-    auto& s = *phazite::findSong (song.context);
-    const auto id = addSynth (song);
+    Screen screen;
+    auto& editor = *screen.editor;
+    auto menu = editor.getTableMenu (0);
 
-    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
-    auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
-    REQUIRE (panel != nullptr);
-    const auto tall = panel->getHeight(), width = panel->getWidth();
+    const auto* basic = phazite::test::findMenuItem (menu, { "Basic Shapes" });
+    REQUIRE (basic != nullptr);
+    CHECK (basic->isTicked);
+    CHECK (phazite::test::findMenuItem (menu, { "Load Wavetable File..." }) != nullptr);
 
-    // As wide at any height: a shorter dock never makes it wider.
-    const auto low = panel->getMinimumHeight();
-    REQUIRE (low <= tall);
-    CHECK (panel->getWidthForHeight (low) == panel->getWidthForHeight (tall));
+    REQUIRE (phazite::test::runMenuItem (menu, { "Vowels" }));
+    CHECK (editor.getTableButton (0).getButtonText() == juce::String ("Vowels"));
+    CHECK (screen.describeUndo() == juce::String ("Undo Put Vowels on Osc 1"));
+    CHECK (phazite::test::findMenuItem (editor.getTableMenu (0), { "Vowels" })->isTicked);
 
-    // At its own size, as a window first shows it, a part to a column in rows: no pages, no tabs.
-    phazite::test::TestWindow window (*panel, width, tall);
-    auto& layout = panel->getLayout();
-    CHECK_FALSE (layout.usesPages());
+    // Undo shows on the editor.
+    phazite::undo (screen.getSong());
+    editor.refresh();
+    CHECK (editor.getTableButton (0).getButtonText() == juce::String ("Basic Shapes"));
+}
 
-    for (int column = 0; column < 7; ++column)
-        CHECK_FALSE (layout.usesTabs (column));
+TEST_CASE ("A sound dropped on a wavetable oscillator's drawing becomes its table")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Drops/Choir.wav"), 0.2);
 
-    // As wide and as tall as the dock at the default window: in pages, two columns to each, every page whole.
+    REQUIRE (editor.dropFile (1, sound));
+    phazite::test::waitForAudioWork(); // its sound copied into the project in the background (known bug 123)
+    editor.refresh();                  // as the devices view refreshes it once the song changed
+    CHECK (editor.getTableButton (1).getButtonText() == juce::String ("Choir"));
+    CHECK (screen.describeUndo() == juce::String ("Undo Put Choir on Osc 2"));
+
+    // Its menu shows the file, ticked, above the factory tables, none of them ticked.
+    const auto menu = editor.getTableMenu (1);
+    const auto* choir = phazite::test::findMenuItem (menu, { "Choir" });
+    REQUIRE (choir != nullptr);
+    CHECK (choir->isTicked);
+    CHECK_FALSE (choir->isEnabled);
+    CHECK_FALSE (phazite::test::findMenuItem (menu, { "Basic Shapes" })->isTicked);
+
+    // Not a sound: nothing changes.
+    const auto text = screen.temp.folder.getChildFile ("words.txt");
+    REQUIRE (text.replaceWithText ("words"));
+    CHECK_FALSE (editor.dropFile (0, text));
+    CHECK (editor.getTableButton (0).getButtonText() == juce::String ("Basic Shapes"));
+}
+
+TEST_CASE ("Dragging across a wavetable oscillator's drawing moves its position, as one undo step")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    auto& view = editor.getTableView (0);
+    const auto before = screen.getValue ("osc1Position");
+    phazite::test::Mouse mouse (view);
+    const auto centre = view.getLocalBounds().getCentre();
+
+    // To the left: down the table.
+    mouse.press (centre);
+    mouse.dragTo (centre.translated (-view.getWidth() / 4, 0));
+    mouse.release();
+    CHECK (screen.getValue ("osc1Position") == doctest::Approx (before - 0.25f).epsilon (0.02));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Osc 1 Position"));
+
+    phazite::undo (screen.getSong());
+    CHECK (screen.getValue ("osc1Position") == doctest::Approx (before));
+}
+
+TEST_CASE ("The synth's editor fits the dock: its parts in pages, the modulation a list down the side")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto fullHeight = editor.getHeight();
+    const auto shortest = editor.getMinimumHeight();
+    REQUIRE (shortest <= fullHeight);
+    CHECK (editor.getWidthForHeight (shortest) == editor.getWidthForHeight (fullHeight));
+
+    // As wide as its parts side by side, at its least height: every part showing; the modulation a list down the side, a part
+    // at a time.
+    editor.setSize (editor.getWidthForHeight (shortest), shortest);
+    phazite::test::checkChildrenApart (editor);
+    CHECK_FALSE (editor.getLayout().usesPages());
+    CHECK (editor.getTableView (0).isShowing());
+    CHECK (editor.getTableView (1).isShowing());
+    CHECK (editor.getLayout().usesTabs (6));
+
+    // As wide and as tall as the dock at the default window: four pages, the first with both oscillators, whole, the last the
+    // unison beside the modulation.
     constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
-    REQUIRE (panel->getMinimumHeightAtWidth (dockWidth) <= dockHeight);
-    window.setSize (dockWidth, dockHeight);
-    REQUIRE (layout.usesPages());
-    CHECK (layout.getNumPages() == 4);
-    CHECK (layout.getPageName (0) == juce::String::fromUTF8 ("Oscillators \xc2\xb7 Filter"));
-    CHECK (layout.getPageName (2) == juce::String::fromUTF8 ("LFO \xc2\xb7 Pitch"));
-    CHECK (layout.getPageName (3) == juce::String ("Unison"));
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    editor.setSize (dockWidth, dockHeight);
+    REQUIRE (editor.getLayout().getNumPages() == 4);
+    CHECK (editor.getLayout().getPageName (3).contains ("Unison"));
+    CHECK (editor.getLayout().getPageName (3).contains ("Modulation"));
+    CHECK (editor.getTableView (0).isShowing());
+    CHECK (editor.getTableView (1).isShowing());
+    CHECK (editor.getTableView (0).getHeight() > 0);
+    phazite::test::checkChildrenApart (editor);
 
-    for (int column = 0; column < 7; ++column)
-        CHECK_FALSE (layout.usesTabs (column));
+    editor.getLayout().showPage (1);
+    CHECK_FALSE (editor.getTableView (0).isShowing());
+    CHECK (editor.findControl ("cutoff")->isShowing());
+}
 
-    phazite::test::checkChildrenApart (*panel);
-    auto* voiceMode = panel->findControl ("voiceMode");
-    REQUIRE (voiceMode != nullptr);
-    CHECK_FALSE (voiceMode->isShowing());
+TEST_CASE ("The synth's editor shows the unison's stack and drift with its other controls, on one page of the dock")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
 
-    // The last page's tab shows the pitch envelope and how the synth plays, inside the editor.
-    juce::Button* tab = nullptr;
+    // In the dock at the default window: the sub, the noise and how it plays on the third page, and the unison's six controls
+    // on the fourth, beside the modulation, all whole, none under a tab.
+    constexpr int dockWidth = 552, dockHeight = 268;
+    editor.setSize (dockWidth, dockHeight);
+    REQUIRE (editor.getLayout().getNumPages() == 4);
+    CHECK (editor.getLayout().getPageName (2).contains ("Sub and Noise"));
+    CHECK (editor.getLayout().getPageName (3).contains ("Unison"));
 
-    for (auto* button : phazite::test::findAll<juce::Button> (*panel))
-        if (button->getTitle() == layout.getPageName (3))
-            tab = button;
+    for (int column = 0; column < 6; ++column)
+        CHECK_FALSE (editor.getLayout().usesTabs (column));
 
-    REQUIRE (tab != nullptr);
-    phazite::test::Mouse mouse (*tab);
-    mouse.click (tab->getLocalBounds().getCentre());
-    CHECK (layout.getShownPage() == 3);
-    CHECK (voiceMode->isShowing());
-    CHECK (panel->getLocalBounds().contains (panel->getLocalArea (voiceMode, voiceMode->getLocalBounds())));
-    phazite::test::checkChildrenApart (*panel);
+    const auto checkShowing = [&editor] (std::initializer_list<const char*> ids)
+    {
+        for (const auto* id : ids)
+        {
+            CAPTURE (id);
+            auto* control = editor.findControl (id);
+            REQUIRE (control != nullptr);
+            CHECK (control->isShowing());
+            CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+        }
+    };
 
-    // Narrower in a taller dock, its columns wrap into rows, every part showing.
-    CHECK (panel->getHeightForWidth (width / 2) > tall);
+    editor.getLayout().showPage (2);
+    phazite::test::checkChildrenApart (editor);
+    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level" });
+
+    editor.getLayout().showPage (3);
+    phazite::test::checkChildrenApart (editor);
+    checkShowing ({ "unisonVoices", "unisonDetune", "unisonSpread", "unisonStack", "unisonDrift", "unisonPosition" });
+
+    // Named within their part, as their neighbours are.
+    juce::StringArray names;
+
+    for (auto* label : phazite::test::findAll<juce::Label> (editor))
+        if (label->isShowing())
+            names.add (label->getText());
+
+    CHECK (names.contains ("Stack"));
+    CHECK (names.contains ("Drift"));
+    CHECK_FALSE (names.contains ("Unison Stack"));
+
+    // The stack is a list of its five ways, off at first, and the drift a knob in cents, at none: each changes its parameter
+    // as an undo step the model names.
+    auto* stack = dynamic_cast<juce::ComboBox*> (editor.findControl ("unisonStack"));
+    REQUIRE (stack != nullptr);
+    CHECK (stack->getTitle() == juce::String ("Unison Stack"));
+    CHECK (stack->getText() == juce::String ("Off"));
+    REQUIRE (stack->getNumItems() == 5);
+    CHECK (stack->getItemText (2) == juce::String ("Two Octaves"));
+    CHECK (stack->getItemText (4) == juce::String ("Power Chord"));
+    stack->setSelectedItemIndex ((int) Synth::Stack::twoOctaves, juce::sendNotificationSync);
+    CHECK (screen.getValue ("unisonStack") == doctest::Approx ((float) Synth::Stack::twoOctaves));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Unison Stack"));
+
+    auto* drift = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("unisonDrift"));
+    REQUIRE (drift != nullptr);
+    CHECK (drift->getTitle() == juce::String ("Unison Drift"));
+    CHECK (drift->getValue() == doctest::Approx (0.0));
+    CHECK (drift->getMaximum() == doctest::Approx (50.0));
+    drift->setValue (12.0, juce::sendNotificationSync);
+    CHECK (screen.getValue ("unisonDrift") == doctest::Approx (12.0f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Unison Drift"));
+
+    // Undo shows on the editor.
+    phazite::undo (screen.getSong());
+    phazite::undo (screen.getSong());
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (stack->getText() == juce::String ("Off"));
+}
+
+TEST_CASE (
+    "The synth's editor shows each LFO's fade after its retrigger, Glide Mode after Glide, Phase after it, and Drift and the slots' amounts in the matrix")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+
+    // Each LFO's fade a knob in milliseconds, named within its part; Glide Mode a list of its two ways.
+    for (const auto* id : { "lfo1FadeIn", "lfo2FadeIn" })
+    {
+        CAPTURE (id);
+        auto* fade = dynamic_cast<phazite::ui::Knob*> (editor.findControl (id));
+        REQUIRE (fade != nullptr);
+        CHECK (fade->getValue() == doctest::Approx (0.0));
+        CHECK (fade->getMaximum() == doctest::Approx (10000.0));
+    }
+
+    auto* fade = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("lfo1FadeIn"));
+    fade->setValue (250.0, juce::sendNotificationSync);
+    CHECK (screen.getValue ("lfo1FadeIn") == doctest::Approx (250.0f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change LFO 1 Fade In"));
+
+    auto* glideMode = dynamic_cast<juce::ComboBox*> (editor.findControl ("glideMode"));
+    REQUIRE (glideMode != nullptr);
+    REQUIRE (glideMode->getNumItems() == 2);
+    CHECK (glideMode->getText() == juce::String ("Always"));
+    CHECK (glideMode->getItemText (1) == juce::String ("Legato"));
+    glideMode->setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (screen.getValue ("glideMode") == doctest::Approx ((float) Synth::GlideMode::legato));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Glide Mode"));
+
+    // Phase a list of Reset and Free, as the FM synth's, at Reset, its tooltip saying what each does.
+    auto* phase = dynamic_cast<juce::ComboBox*> (editor.findControl ("phase"));
+    REQUIRE (phase != nullptr);
+    CHECK (phase->getTitle() == juce::String ("Phase"));
+    REQUIRE (phase->getNumItems() == 2);
+    CHECK (phase->getText() == juce::String ("Reset"));
+    CHECK (phase->getItemText (1) == juce::String ("Free"));
+    CHECK (phase->getTooltip().contains ("run on from where they were"));
+    phase->setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (screen.getValue ("phase") == doctest::Approx ((float) Synth::Phase::free));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Phase"));
+
+    // The matrix's sources end with Drift, its targets with the eight slots' amounts, of which a slot's own can't be chosen.
+    auto* source = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod2Source"));
+    REQUIRE (source != nullptr);
+    CHECK (source->getItemText (source->getNumItems() - 1) == juce::String ("Drift"));
+
+    for (int slot = 0; slot < Synth::numModSlots; ++slot)
+    {
+        CAPTURE (slot);
+        auto* target = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod" + std::to_string (slot + 1) + "Target"));
+        REQUIRE (target != nullptr);
+        REQUIRE (target->getNumItems() == (int) Synth::ModTarget::slot8Amount + 1);
+
+        for (int other = 0; other < Synth::numModSlots; ++other)
+        {
+            const auto item = (int) Synth::getAmountTarget (other);
+            CHECK (target->getItemText (item) == "Mod " + juce::String (other + 1) + " Amount");
+            CHECK (target->isItemEnabled (item + 1) == (other != slot));
+        }
+    }
+
+    auto* target = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod1Target"));
+    target->setSelectedItemIndex ((int) Synth::ModTarget::slot2Amount, juce::sendNotificationSync);
+    CHECK (screen.getValue ("mod1Target") == doctest::Approx ((float) Synth::ModTarget::slot2Amount));
 }
 
 TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonance, and shows a note's envelope as it plays")
 {
-    phazite::test::TestSong song;
-    auto& s = *phazite::findSong (song.context);
-    const auto id = addSynth (song);
-    s.getUndoManager().clearUndoHistory();
-
-    const auto device = phazite::makeDeviceHandle (s, id);
-    phazite::ui::SynthEditor editor (device);
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    const auto valueOf = [&s, id] (const char* parameter)
-    { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, parameter }); };
+    Screen screen;
+    auto& editor = *screen.editor;
 
     // The dot dragged to the middle: a lower cutoff, the resonance half way, one undo step.
     auto& filter = editor.getFilter();
-    const auto cutoffBefore = valueOf ("cutoff");
+    const auto cutoffBefore = screen.getValue ("cutoff");
     phazite::test::Mouse mouse (filter);
     mouse.press (filter.getDotPosition().roundToInt());
     mouse.dragTo (filter.getLocalBounds().getCentre());
     mouse.release();
-    CHECK (valueOf ("cutoff") < cutoffBefore);
-    CHECK (valueOf ("resonance") == doctest::Approx (0.5f).epsilon (0.1));
-    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Cutoff"));
+    CHECK (screen.getValue ("cutoff") < cutoffBefore);
+    CHECK (screen.getValue ("resonance") == doctest::Approx (0.5f).epsilon (0.1));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Filter Cutoff"));
 
-    // A note held: the amp envelope shows how far it has got, and the oscillators' wave is drawn.
-    auto* synth = device.getProcessor<Synth>();
+    // A note held: the amp's envelope shows how far it has got.
+    auto* synth = phazite::makeDeviceHandle (screen.getSong(), screen.synth).getProcessor<Synth>();
     REQUIRE (synth != nullptr);
     synth->prepare (48000.0, 4800);
     std::vector<float> values;
@@ -190,37 +387,31 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     synth->process (block);
 
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getAmpEnvelope().getShownLevel() > 0.1f);
-    CHECK (editor.getOscillators().isShowing());
+    CHECK (editor.getEnvelope (0).getShownLevel() > 0.1f);
 }
 
 TEST_CASE ("The synth's pitch knob takes a value typed at its value, exactly, and drags in whole semitones")
 {
     // The owner, 2026-11-09: "this is very important for things like pitch where a tiny bit off is totally wrong".
-    phazite::test::TestSong song;
-    auto& s = *phazite::findSong (song.context);
-    const auto id = addSynth (song);
-    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
-    auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
-    REQUIRE (panel != nullptr);
-    phazite::test::TestWindow window (*panel, panel->getWidth(), panel->getHeight());
-    auto* knob = dynamic_cast<phazite::ui::Knob*> (panel->findControl ("osc2Pitch"));
+    Screen screen;
+    auto& editor = *screen.editor;
+    auto& s = screen.getSong();
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("osc2Pitch"));
     REQUIRE (knob != nullptr);
     auto* readout = dynamic_cast<juce::Label*> (knob->getValueReadout());
     REQUIRE (readout != nullptr);
     REQUIRE (readout->isShowing());
-    const auto pitch = [&s, id] { return phazite::getValueSetByHand (s, { id, "osc2Pitch" }); };
+    const auto pitch = [&screen] { return screen.getValue ("osc2Pitch"); };
 
     // A click on its value, under it, opens the field there; "+7" and Enter set it to 7 semitones exactly, one undo step.
-    s.getUndoManager().clearUndoHistory();
-    phazite::test::Mouse mouse (*panel);
-    mouse.click (panel->getLocalArea (readout, readout->getLocalBounds()).getCentre());
+    phazite::test::Mouse mouse (editor);
+    mouse.click (editor.getLocalArea (readout, readout->getLocalBounds()).getCentre());
     REQUIRE (knob->getValueField() != nullptr);
 
     for (const auto typed : { '+', '7' })
-        window.pressKey (juce::KeyPress (typed, {}, (juce::juce_wchar) typed));
+        screen.window->pressKey (juce::KeyPress (typed, {}, (juce::juce_wchar) typed));
 
-    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    screen.window->pressKey (juce::KeyPress (juce::KeyPress::returnKey));
     CHECK (juce::exactlyEqual (pitch(), 7.0f));
     CHECK (s.getUndoManager().getUndoDescription() == juce::String ("Change Osc 2 Pitch"));
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
@@ -228,7 +419,7 @@ TEST_CASE ("The synth's pitch knob takes a value typed at its value, exactly, an
     phazite::test::dispatchPendingMessages();
 
     // Dragged, it stays on whole semitones.
-    const auto centre = panel->getLocalArea (knob, knob->getLocalBounds()).getCentre();
+    const auto centre = editor.getLocalArea (knob, knob->getLocalBounds()).getCentre();
     mouse.pause();
     mouse.press (centre);
     mouse.dragTo (centre + juce::Point<int> (0, -7));

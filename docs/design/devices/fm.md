@@ -151,8 +151,9 @@ the modulator's envelope, as a new synth's electric piano has it): a 12 dB high-
 put a few hertz from 0 Hz: a blocker that took them would take the lowest notes too.
 
 After the operators come the filter (`src/devices/dsp/MultimodeFilter.h`, with its own envelope, key tracking and
-velocity, named and ranged as the [Synth](synth.md)'s), and the output level. With Spread above 0 a voice plays two
-complete sets of operators, detuned apart, one on each side, at twice the work.
+velocity, named and ranged as the [Sampler](sampler.md)'s, its envelope's stages as the [Synth](synth.md)'s Envelope
+2's), and the output level. With Spread above 0 a voice plays two complete sets of operators, detuned apart, one on each
+side, at twice the work.
 
 Pitch, operator levels, the filter and the LFO are updated every 16 samples, on the song's own grid while it plays and
 on a running count while it is stopped, as the [Synth](synth.md)'s. An operator's level follows the

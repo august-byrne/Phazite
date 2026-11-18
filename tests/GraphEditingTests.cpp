@@ -8,6 +8,7 @@
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Oscillators.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "model/automation/AutomationModel.h"
@@ -52,10 +53,10 @@ TEST_CASE ("An envelope's points drag in its picture, each drag one undo step, a
     auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, synth));
     REQUIRE (editor != nullptr);
     phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
-    auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (phazite::test::findComponentWithTitle (*editor, "Amp envelope"));
+    auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (phazite::test::findComponentWithTitle (*editor, "Envelope 1"));
     REQUIRE (envelope != nullptr);
     REQUIRE (envelope->isShowing());
-    const auto decay = valueOf (song, synth, "decay"), sustain = valueOf (song, synth, "sustain");
+    const auto decay = valueOf (song, synth, "env1Decay"), sustain = valueOf (song, synth, "env1Sustain");
 
     // The corner where the decay ends, right and down: a longer decay and a lower sustain, as one step.
     phazite::test::Mouse mouse (*envelope);
@@ -63,22 +64,22 @@ TEST_CASE ("An envelope's points drag in its picture, each drag one undo step, a
     mouse.press (corner);
     mouse.dragTo (corner + juce::Point<int> (20, 10));
     mouse.release();
-    CHECK (valueOf (song, synth, "decay") > decay);
-    CHECK (valueOf (song, synth, "sustain") < sustain);
+    CHECK (valueOf (song, synth, "env1Decay") > decay);
+    CHECK (valueOf (song, synth, "env1Sustain") < sustain);
     CHECK (describeUndo (song).startsWith ("Undo Change"));
 
     undo (song);
-    CHECK (valueOf (song, synth, "decay") == doctest::Approx (decay));
-    CHECK (valueOf (song, synth, "sustain") == doctest::Approx (sustain));
+    CHECK (valueOf (song, synth, "env1Decay") == doctest::Approx (decay));
+    CHECK (valueOf (song, synth, "env1Sustain") == doctest::Approx (sustain));
 
     // Dragged again, then a double-click puts it back where it started, as a knob's does.
     mouse.press (corner);
     mouse.dragTo (corner + juce::Point<int> (30, -10));
     mouse.release();
-    REQUIRE (valueOf (song, synth, "decay") > decay);
+    REQUIRE (valueOf (song, synth, "env1Decay") > decay);
     mouse.doubleClick (envelope->getPointPosition (Point::decay).roundToInt());
-    CHECK (valueOf (song, synth, "decay") == doctest::Approx (decay));
-    CHECK (valueOf (song, synth, "sustain") == doctest::Approx (sustain));
+    CHECK (valueOf (song, synth, "env1Decay") == doctest::Approx (decay));
+    CHECK (valueOf (song, synth, "env1Sustain") == doctest::Approx (sustain));
 }
 
 TEST_CASE ("An envelope's stages bend by the handle in their middle, the wheel leaves them be, and a double-click puts a curve back")
@@ -89,12 +90,12 @@ TEST_CASE ("An envelope's stages bend by the handle in their middle, the wheel l
     auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, synth));
     REQUIRE (editor != nullptr);
     phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
-    auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (phazite::test::findComponentWithTitle (*editor, "Amp envelope"));
+    auto* envelope = dynamic_cast<phazite::ui::EnvelopeView*> (phazite::test::findComponentWithTitle (*editor, "Envelope 1"));
     REQUIRE (envelope != nullptr);
     REQUIRE (envelope->isShowing());
 
     // Each stage starts as an analog envelope's, which the synth played before its stages could bend.
-    const auto attackCurve = valueOf (song, synth, "attackCurve"), decayCurve = valueOf (song, synth, "decayCurve");
+    const auto attackCurve = valueOf (song, synth, "env1AttackCurve"), decayCurve = valueOf (song, synth, "env1DecayCurve");
     CHECK (attackCurve == doctest::Approx (phazite::devices::dsp::Adsr::analogAttackCurve));
     CHECK (decayCurve == doctest::Approx (phazite::devices::dsp::Adsr::analogSettleCurve));
 
@@ -105,10 +106,10 @@ TEST_CASE ("An envelope's stages bend by the handle in their middle, the wheel l
     mouse.press (handle);
     mouse.dragTo (handle - juce::Point<int> (0, 10));
     mouse.release();
-    CHECK (valueOf (song, synth, "attackCurve") < attackCurve - 0.05f);
+    CHECK (valueOf (song, synth, "env1AttackCurve") < attackCurve - 0.05f);
     CHECK (describeUndo (song).startsWith ("Undo Change"));
     undo (song);
-    CHECK (valueOf (song, synth, "attackCurve") == doctest::Approx (attackCurve));
+    CHECK (valueOf (song, synth, "env1AttackCurve") == doctest::Approx (attackCurve));
 
     // The decay's handle dragged up bends it up too, slower at first: its curve higher.
     REQUIRE (envelope->getBendPosition (Point::decay).has_value());
@@ -116,29 +117,29 @@ TEST_CASE ("An envelope's stages bend by the handle in their middle, the wheel l
     mouse.press (decayHandle);
     mouse.dragTo (decayHandle - juce::Point<int> (0, 10));
     mouse.release();
-    CHECK (valueOf (song, synth, "decayCurve") > decayCurve + 0.05f);
+    CHECK (valueOf (song, synth, "env1DecayCurve") > decayCurve + 0.05f);
 
     // The wheel over it bends nothing: it is the view's, to scroll it (no envelope editor found bends with it).
-    const auto bent = valueOf (song, synth, "decayCurve");
+    const auto bent = valueOf (song, synth, "env1DecayCurve");
     const auto overDecay = juce::Point<int> (
         (envelope->getPointPosition (Point::attack).roundToInt().x + envelope->getPointPosition (Point::decay).roundToInt().x) / 2,
         envelope->getHeight() / 2);
     mouse.wheel (overDecay, notchUp);
-    CHECK (valueOf (song, synth, "decayCurve") == doctest::Approx (bent));
+    CHECK (valueOf (song, synth, "env1DecayCurve") == doctest::Approx (bent));
 
     // A double-click on the decay puts its curve back.
     mouse.doubleClick (overDecay);
-    CHECK (valueOf (song, synth, "decayCurve") == doctest::Approx (decayCurve));
+    CHECK (valueOf (song, synth, "env1DecayCurve") == doctest::Approx (decayCurve));
 
     // A level stage has nothing to bend: a decay to a full sustain has no handle.
-    phazite::getParameter (song.context, { synth, "sustain" }).setValue (1.0f);
+    phazite::getParameter (song.context, { synth, "env1Sustain" }).setValue (1.0f);
     CHECK_FALSE (envelope->getBendPosition (Point::decay).has_value());
 }
 
 TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate with the wheel")
 {
     phazite::test::TestSong song;
-    const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    const auto synth = song.setInstrument (song.firstTrack, phazite::devices::FmSynth::typeID);
     auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, synth));
     REQUIRE (editor != nullptr);
     phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
@@ -149,7 +150,7 @@ TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate
     phazite::test::Mouse mouse (lfo);
     const auto centre = lfo.getLocalBounds().getCentre();
 
-    // Half the picture's height up: half the depth more, from the quarter a new synth's LFO has, ready for when it is
+    // Half the picture's height up: half the depth more, from the quarter a new FM synth's LFO has, ready for when it is
     // switched on.
     CHECK (valueOf (song, synth, "lfoDepth") == doctest::Approx (0.25f));
     mouse.press (centre);

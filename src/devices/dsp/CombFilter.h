@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A comb filter (roadmap step 2.14): "Comb +" and "Comb -" among the filter types of the synth, the wavetable synth and
+// A comb filter (roadmap step 2.14): "Comb +" and "Comb -" among the filter types of the synths, the sampler and
 // the Filter device, as Serum, Vital, Surge XT, Bitwig's Filter+, Massive X and Ableton's Auto Filter each have one
 // (docs/design.md, section 9). A delay of one period of its frequency, fed back into itself and added to what goes in.
 // Comb + lets through the frequency and its multiples (the harmonics of a note at that pitch) and cuts what lies halfway

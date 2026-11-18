@@ -16,7 +16,6 @@
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
-#include "devices/wavetable/WavetableSynth.h"
 
 #include <deque>
 #include <mutex>
@@ -29,11 +28,10 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
     // motion, the voice, and Stereo last).
     static const devices::DeviceInfo* const own[] = {
-        &devices::Synth::info,       &devices::WavetableSynth::info, &devices::FmSynth::info,      &devices::Sampler::info,
-        &devices::DrumSampler::info, &devices::Equalizer::info,      &devices::FilterEffect::info, &devices::Compressor::info,
-        &devices::Multiband::info,   &devices::Limiter::info,        &devices::Saturator::info,    &devices::Age::info,
-        &devices::Delay::info,       &devices::Reverb::info,         &devices::Motion::info,       &devices::Vocoder::info,
-        &devices::Stereo::info,
+        &devices::Synth::info,     &devices::FmSynth::info,      &devices::Sampler::info,    &devices::DrumSampler::info,
+        &devices::Equalizer::info, &devices::FilterEffect::info, &devices::Compressor::info, &devices::Multiband::info,
+        &devices::Limiter::info,   &devices::Saturator::info,    &devices::Age::info,        &devices::Delay::info,
+        &devices::Reverb::info,    &devices::Motion::info,       &devices::Vocoder::info,    &devices::Stereo::info,
     };
     return own;
 }
@@ -54,7 +52,6 @@ namespace
 
     const OwnDevice ownDevices[] = {
         { &devices::Synth::info, make<devices::Synth> },
-        { &devices::WavetableSynth::info, make<devices::WavetableSynth> },
         { &devices::FmSynth::info, make<devices::FmSynth> },
         { &devices::Sampler::info, make<devices::Sampler> },
         { &devices::DrumSampler::info, make<devices::DrumSampler> },

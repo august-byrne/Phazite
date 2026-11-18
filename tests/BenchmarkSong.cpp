@@ -12,7 +12,6 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -91,8 +90,7 @@ BenchmarkSong buildBenchmarkSong (TestSong& s, int numTracks, double lengthBeats
         Part part;
     };
 
-    const std::array<Instrument, 5> instruments { { { dev::Synth::typeID, Part::chords },
-                                                    { dev::WavetableSynth::typeID, Part::chords },
+    const std::array<Instrument, 4> instruments { { { dev::Synth::typeID, Part::chords },
                                                     { dev::FmSynth::typeID, Part::bass },
                                                     { dev::DrumSampler::typeID, Part::beat },
                                                     { dev::Sampler::typeID, Part::bass } } };

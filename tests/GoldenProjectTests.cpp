@@ -21,7 +21,6 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/Channel.h"
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/Outlines.h"
@@ -147,7 +146,7 @@ void addContainersAndDevices (phazite::Song& song, phazite::ProjectContext& cont
     phazite::getMix (context, layers).setValue (0.75f);
 
     const auto low = phazite::getChains (context, layers).front().id;
-    phazite::chooseChainInstrument (context, low, findType (context, WavetableSynth::typeID));
+    phazite::chooseChainInstrument (context, low, findType (context, Synth::typeID));
     phazite::renameChain (context, low, "Low");
     phazite::setChainKeys (context, low, { 24, 59 });
     phazite::setChainVelocities (context, low, { 20, 100 });
@@ -162,7 +161,7 @@ void addContainersAndDevices (phazite::Song& song, phazite::ProjectContext& cont
     phazite::getChainPan (context, high).setValue (0.25f);
     phazite::toggleChainMute (context, high);
 
-    // The wavetable synth: a factory table for its first oscillator and a sound file for its second.
+    // The synth: a factory table for its first oscillator and a sound file for its second.
     const auto wavetable = phazite::getChains (context, layers)[0].devices.front().id;
     phazite::setFactoryWavetable (song, wavetable, 0, 1);
     REQUIRE (phazite::setWavetableFile (song, wavetable, 1, phazite::test::writeSound (scratch.getChildFile ("Wave.wav"), 0.5, 110.0)));
@@ -181,7 +180,7 @@ void addContainersAndDevices (phazite::Song& song, phazite::ProjectContext& cont
     phazite::chooseChainInstrument (context, third, findType (context, Sampler::typeID));
     phazite::setFactorySample (song, phazite::getChains (context, layers)[2].devices.front().id, 1);
 
-    // The container's first macro, named and turned, on the wavetable synth's cutoff and the high chain's volume.
+    // The container's first macro, named and turned, on the synth's cutoff and the high chain's volume.
     const auto macros = phazite::getContainerMacros (context, layers);
     REQUIRE (macros.size() == 8);
     phazite::renameMacro (context, macros[0].id, "Brightness");

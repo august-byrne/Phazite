@@ -32,7 +32,7 @@ A plug-in's own window belongs to the plug-in, so you automate its parameters in
 ## Lanes
 
 A lane shows under its track in the playlist; the master's lanes show under a Master row after the tracks. Its header
-shows the control's name ("Volume", or "Synth: Cutoff" for a device's) and the track's write mode. In a lane without
+shows the control's name ("Volume", or "Synth: Filter Cutoff" for a device's) and the track's write mode. In a lane without
 automation the name is a button that shows another of the track's controls in the lane instead.
 
 **Automation never hides.** Every control with automation has a lane, so nothing plays from somewhere you can't see.

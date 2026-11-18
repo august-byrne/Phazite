@@ -2,7 +2,7 @@
 // The note values a rate in time with the song takes (an LFO's, a sweep's, a slice's), from a 32nd note to eight bars, and
 // their lengths: a note value's in beats (quarter notes, four to a whole note, whatever the time signature), T for a
 // triplet, D for dotted; and a bar's in the song's bars, each as long as its time signature makes it (three beats in 6/8:
-// ProcessContext::barLength). The wavetable synth's LFOs, the phaser, the flanger, the chorus and the sampler's slices
+// ProcessContext::barLength). The synth's LFOs, the phaser, the flanger, the chorus and the sampler's slices
 // share them, so their choices read alike (their saved values are positions in this list).
 #pragma once
 

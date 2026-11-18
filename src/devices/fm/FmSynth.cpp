@@ -221,8 +221,8 @@ namespace
         made[FmSynth::resonance] = makePercent ("resonance", "Resonance", 0.1f);
         made[FmSynth::filterSlope] = makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f);
 
-        // The filter's envelope and velocity as the synth's are (Synth.cpp), but for an amount of none at first: the filter
-        // stays where its cutoff is until its envelope is turned up.
+        // The filter's envelope as the Synth's Envelope 2 is and its velocity as the sampler's, but for an amount of none at
+        // first: the filter stays where its cutoff is until its envelope is turned up.
         made[FmSynth::filterEnvelope] = { .id = "filterEnvelope",
                                           .name = "Filter Envelope",
                                           .minimum = -48.0f,
@@ -536,7 +536,7 @@ void FmSynth::letGoOf (int note)
 FmSynth::Voice& FmSynth::findVoice()
 {
     // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the places that fade
-    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // out voices taken (stealVoice()). A key played again as it rings out takes one too, as the Synth's does: its tail rings
     // on untouched, and the new note starts as any does (its operators from their places in their waves, unless the phases
     // run free).
     const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
@@ -957,7 +957,7 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                 if (filtered)
                 {
                     // The cutoff by the key and the LFO, then by its envelope, as far as that has got, and by the note's velocity,
-                    // as the synth's filter moves (Synth.cpp); an amount and a velocity of none leave it as it was.
+                    // as the sampler's filter moves; an amount and a velocity of none leave it as it was.
                     auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
 
                     if (! juce::exactlyEqual (envelopeAmount, 0.0f))

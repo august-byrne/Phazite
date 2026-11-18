@@ -68,7 +68,7 @@ public:
     // presets; none while none is.
     std::optional<int> getSwap() const;
 
-    // The wavetable synth's oscillators (model/devices/internal/Wavetables.h): what each plays, its table for drawing, and
+    // The synth's oscillators (model/devices/internal/Wavetables.h): what each plays, its table for drawing, and
     // putting one of the factory tables (devices/wavetable/FactoryWavetables.h) or a sound file on one, as undo steps.
     // setWavetableFile() returns false for a file that isn't a sound.
     juce::String getWavetableName (int osc) const;

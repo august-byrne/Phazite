@@ -43,6 +43,10 @@ The full text of every step, as it was written when it was built, is in the
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias
   as little as the Synth's.
+- **S6.7 One synth:** the Synth and the Wavetable are one synth, the Synth, on the Wavetable's engine. The
+  subtractive synth, its editor and its tests are gone, its test cases moved over where the new synth's didn't hold
+  them, and its fifty presets live on as their measured copies among the Synth's 88. Phazite has four instruments:
+  Synth, FM, Sampler and Drum Sampler.
 - **S6.7 One synth, part B, phase 1:** the Synth's fifty presets have copies on the Wavetable's engine, converted by
   formulas and measured phrase by phrase against the Synth (35 alike in every measure, the others named with their
   causes), which the example songs now play; the Wavetable's Basic Shapes are the Synth's own waves, its 12 dB

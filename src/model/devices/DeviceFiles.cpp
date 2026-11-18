@@ -2,7 +2,7 @@
 #include "internal/DeviceFiles.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/sampler/Sampler.h"
-#include "devices/wavetable/WavetableSynth.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
@@ -18,7 +18,7 @@ namespace
         return song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File();
     }
 
-    // The properties of a device's sounds (Schema.h: SOUNDS) that name files: a drum sampler's pads' and a wavetable synth's
+    // The properties of a device's sounds (Schema.h: SOUNDS) that name files: a drum sampler's pads' and a synth's
     // oscillators', whose names differ; none for other elements.
     std::vector<juce::Identifier> getFileProperties (const juce::ValueTree& state)
     {
@@ -31,7 +31,7 @@ namespace
             for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
                 properties.push_back (schema::getPadSoundFile (pad, layer));
 
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
             properties.push_back (schema::getOscillatorWavetableFile (osc));
 
         properties.push_back (schema::samplerSampleFile);
@@ -55,9 +55,9 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& inf
         }
     }
 
-    if (info.typeID == std::string_view (devices::WavetableSynth::typeID))
+    if (info.typeID == std::string_view (devices::Synth::typeID))
     {
-        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        for (int osc = 0; osc < devices::Synth::numOscillators; ++osc)
         {
             properties.push_back (schema::getOscillatorWavetable (osc));
             properties.push_back (schema::getOscillatorWavetableFile (osc));

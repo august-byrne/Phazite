@@ -225,8 +225,6 @@ target_sources(phazite_core PRIVATE
     src/devices/wavetable/FactoryWavetables.h
     src/devices/wavetable/Wavetable.cpp
     src/devices/wavetable/Wavetable.h
-    src/devices/wavetable/WavetableSynth.cpp
-    src/devices/wavetable/WavetableSynth.h
     src/engine/audio/AudioFile.cpp
     src/engine/audio/AudioFile.h
     src/engine/audio/AudioRegion.cpp
@@ -883,8 +881,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/SynthParts.h
     src/ui/devices/VocoderEditor.cpp
     src/ui/devices/VocoderEditor.h
-    src/ui/devices/WavetableEditor.cpp
-    src/ui/devices/WavetableEditor.h
     src/ui/input/CommandBridge.cpp
     src/ui/input/CommandBridge.h
     src/ui/input/CommandUI.cpp
@@ -1431,8 +1427,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/StereoTests.cpp
         tests/StretchTests.cpp
         tests/SwapTests.cpp
-        tests/SynthConversion.cpp
         tests/SynthEditorTests.cpp
+        tests/SynthModelTests.cpp
         tests/SynthTests.cpp
         tests/TestAudioDevice.cpp
         tests/TestAudioDevice.h
@@ -1484,9 +1480,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/Vst3PluginTests.cpp
         tests/Vst3StateTests.cpp
         tests/WarpTests.cpp
-        tests/WavetableEditorTests.cpp
-        tests/WavetableModelTests.cpp
-        tests/WavetableTests.cpp
         tests/WelcomeTests.cpp
         tests/WholeFileTests.cpp
         tests/WindowKeysTests.cpp

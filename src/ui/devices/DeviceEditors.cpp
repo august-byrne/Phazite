@@ -16,7 +16,6 @@
 #include "StereoEditor.h"
 #include "SynthEditor.h"
 #include "VocoderEditor.h"
-#include "WavetableEditor.h"
 #include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -33,7 +32,6 @@
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -69,14 +67,11 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
     if (info->typeID == devices::Reverb::typeID)
         return std::make_unique<ReverbEditor> (device);
 
-    if (info->typeID == devices::Synth::typeID)
-        return std::make_unique<SynthEditor> (device);
-
     if (info->typeID == devices::DrumSampler::typeID)
         return std::make_unique<DrumSamplerEditor> (device);
 
-    if (info->typeID == devices::WavetableSynth::typeID)
-        return std::make_unique<WavetableEditor> (device);
+    if (info->typeID == devices::Synth::typeID)
+        return std::make_unique<SynthEditor> (device);
 
     if (info->typeID == devices::Sampler::typeID)
         return std::make_unique<SamplerEditor> (device);

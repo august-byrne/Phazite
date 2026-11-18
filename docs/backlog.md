@@ -34,7 +34,7 @@ and nothing is listed in both.
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | Modulation and expression in the Synth, the FM synth and the Sampler: more than one free-running LFO with one target, tempo sync, aftertouch, MPE | `src/devices/synth/Synth.cpp` | (XL) | 6 | devices-instruments 4 |
-| Hard sync and the wavetable's warps band-limited; oversampling for the oscillators that need it | `src/devices/wavetable/WavetableSynth.cpp` | (XL) | 6 | devices-instruments 6 |
+| Hard sync and the wavetable's warps band-limited; oversampling for the oscillators that need it | `src/devices/synth/Synth.cpp` | (XL) | 6 | devices-instruments 6 |
 | A filter with character: more than the one linear model, self-oscillation, and a Drive that drives instead of lowering the level | `src/devices/dsp/MultimodeFilter.cpp` | (L) | 6 | devices-instruments 7 |
 | Pitch, cutoff, table position and levels glide between control steps instead of stepping every 16 samples | `src/devices/synth/Synth.cpp` | — | 6 | devices-instruments 8 |
 | A wavetable made from a sound file in the background, not on the message thread: since tables keep 16 samples a cycle (S6.7), a file of 256 frames takes 2.7 times as long to make as it did (it was 84 ms in a release build) and 54 MB | `src/model/devices/Wavetables.cpp` | M | 6 | S6.7's part A |
@@ -183,7 +183,7 @@ and nothing is listed in both.
 | Drum pads sound on the press, not the release, and at more than one fixed velocity | `src/ui/devices/DrumSamplerEditor.cpp` | S | 6 | ui-device-editors 5 |
 | Automate and Modulate on switches, choices and graphs' handles | `src/ui/devices/ParameterControls.cpp` | M | 6 | ui-device-editors 10 |
 | Histories and analyzers that take more than one reading a tick, and show nothing stale as an editor comes back | `src/ui/devices/LevelHistoryView.cpp` | — | 6 | ui-device-editors 7 |
-| The wavetable's picture shows Warp, and controls show what the synth's own matrix does to them | `src/ui/devices/WavetableEditor.cpp` | — | 6 | ui-device-editors 12 |
+| The wavetable's picture shows Warp, and controls show what the synth's own matrix does to them | `src/ui/devices/SynthEditor.cpp` | — | 6 | ui-device-editors 12 |
 | The pages' bar overflows into a menu, and a part keeps its switch under tabs | `src/ui/devices/DeviceLayout.cpp` | — | 6 | ui-device-editors 14 |
 | The EQ's editor on the shared frame; no private timers, pixel sizes or alphas in single editors | `src/ui/devices/EqEditor.h` | — | 6 | ui-device-editors 15 |
 | Section titles in the editors written as the look says, in Title Case ([vscode-look.md](vscode-look.md)): the shared frame draws them in capitals | `src/ui/devices/DeviceLayout.cpp` | S | 6 | comparison with another DAW, 2026-11-17 |

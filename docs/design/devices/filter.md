@@ -3,9 +3,9 @@
 *Design section 9.*
 
 A resonant filter to sweep a sound open or closed, with a drive that saturates what goes into it. Besides the low-pass,
-high-pass, band-pass and notch it has two combs, a vowel, a phaser and a sample and hold. The [Synth](synth.md) and the
-[Wavetable](wavetable.md) synth use the same filter types, from the same code, so each type sounds the same in all
-three.
+high-pass, band-pass and notch it has two combs, a vowel, a phaser and a sample and hold. The [Synth](synth.md), the
+[FM](fm.md) synth and the [Sampler](sampler.md) use the same filter types, from the same code, so each type sounds the
+same in all four.
 
 ## Parameters
 

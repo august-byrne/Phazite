@@ -49,7 +49,7 @@ inline constexpr const char* trackPresetsFolder = "Tracks";
 // container's holds its devices and its macros with what they modulate in it.
 // A track's holds its name, color, volume and pan, its devices and containers, and its modulators and macros with what
 // they modulate on it: not its clips, automation, sends or what goes into it. The sound files a device plays (a drum
-// sampler's pads', a wavetable synth's tables, a sampler's sound) go with it, copied into a folder beside it named after it
+// sampler's pads', a synth's tables, a sampler's sound) go with it, copied into a folder beside it named after it
 // ("Kit Sounds", the one there that is the same taken as it is), and it names each by its path from its own folder ("Kit
 // Sounds/Boom.wav"): copied with that folder, a preset works on any computer, and it holds no path of this one's, the
 // user's name in it (known bug 107). One that can't be taken (internal/DeviceFiles.h: isSoundFileToTake()) is left out; one

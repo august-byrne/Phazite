@@ -26,7 +26,6 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
