@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the pictures of the effects that sweep share (the phaser's, the flanger's and the chorus's, devices/motion/): their
+// What the pictures of the effects that sweep share (Motion's three modes', the chorus's, the flanger's and the phaser's,
+// devices/motion/, MotionEditor.h): their
 // response over the spectrum of what they play (lit) and of what comes in (faint), drawn where their LFO has swept each side
 // now, and under it a strip of the LFO, one cycle of its sweep with a dot for each side's copy (the right a part of a cycle
 // ahead) and its rate, as Ableton's Phaser-Flanger shows its LFO, so that the sweep moves with the sound and a knob's turn

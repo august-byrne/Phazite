@@ -37,7 +37,7 @@ model saves and automation and modulation move.
 | `saturation/` | `Saturator.h`: the saturator. `Exciter.h`: the exciter, which adds the harmonics of the highs above a frequency to the sound, in phase with it. |
 | `delay/` | `Delay.h`: the delay. |
 | `reverb/` | `Reverb.h`: the reverb, a room's eight-line feedback delay network or Jon Dattorro's plate (JAES 1997), as its Mode says, the plate's decay from a table measured on it. |
-| `motion/` | `Chorus.h`, `Flanger.h`, `Phaser.h`: the effects that sweep; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
+| `motion/` | `Motion.h`: Motion, the effects that sweep as one device in three modes, its values mapped to its engines and a change of mode faded; `Chorus.h`, `Flanger.h`, `Phaser.h`: its engines, no devices of their own; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
 | `stereo/` | `Stereo.h`: Stereo, the device for a channel's two sides (width, bass in mono, balance, mono, swap, polarity, a DC filter and gain). |
 | `vinyl/` | `Vinyl.h`: what a record and its player do to a sound: its wow and flutter through one moving delay line, the groove's distortion of the loud highs, its lows in mono, its narrower sides and its band. `SurfaceNoise.h`: its surface noise, hiss and crackle, each click drawn from where the song is. |
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's flanger (roadmap step 2.17): the sound mixed with a copy of itself delayed by a few milliseconds, the delay swept
+// Phazite's flanger (roadmap step 2.17), which Motion's Flanger mode plays (Motion.h): the sound mixed with a copy of itself delayed by a few milliseconds, the delay swept
 // by an LFO, so that a comb of notches slides through it, the jet-plane whoosh of tape flanging. Delay is the longest the
 // copy lags (3 ms at first), and the LFO shortens it by up to five octaves as Depth says, in time with the song (two bars at
 // first) or in hertz, as a triangle or a sine, the right side a part of a cycle ahead (Stereo). Feedback rings the comb
@@ -26,8 +26,6 @@ namespace phazite::devices
 class Flanger final : public Processor
 {
 public:
-    static constexpr const char* typeID = "phaziteFlanger";
-
     enum Parameter
     {
         delay, // milliseconds: the longest the copy lags
@@ -42,6 +40,10 @@ public:
         mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
+    // Its values' layout, in the order and ranges Motion's values map to (Motion.h), for its runner and its tests, under a
+    // type ID of its own as an engine, which nothing lists, no song or preset holds and the model can't make: it is no
+    // device of its own.
+    static constexpr const char* typeID = "motionFlanger";
     static const DeviceInfo info;
 
     // How far the copy lags, in milliseconds, for the parameters' values and the LFO's value (-1 at the bottom of its sweep,

@@ -3,7 +3,7 @@
 *Design section 9.*
 
 A device is an instrument, which turns a track's notes into sound, or an effect, which changes the sound that comes
-into it. Phazite has twenty devices of its own and hosts plug-ins as devices beside them. A container groups devices
+into it. Phazite has eighteen devices of its own and hosts plug-ins as devices beside them. A container groups devices
 into one device with parallel chains and eight macros, and a preset keeps a device, a container or a whole track in a
 file that any project can take in.
 
@@ -11,9 +11,9 @@ file that any project can take in.
 
 | Feature | State | Note |
 | --- | --- | --- |
-| Phazite's own devices: 5 instruments, 15 effects | Built | Each has a page of its own, below |
+| Phazite's own devices: 5 instruments, 13 effects | Built | Each has a page of its own, below |
 | Many recordings across the keys (pianos, strings), in the Sampler | Planned | Roadmap step 4.10; no Multisampler of its own |
-| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17 |
+| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17; Motion (S6.10) and Stereo (S6.12) are built |
 | An instrument first, then any number of effects, on every track | Built | No limit |
 | Effects moved by dragging | Built | Within a channel or a container; not from one channel to another |
 | A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and Stereo have no Mix |
@@ -78,15 +78,12 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Vinyl](devices/vinyl.md) | Effect | What a record and its player do to a sound |
 | [Delay](devices/delay.md) | Effect | Echoes on a note value or a time, with ping-pong and cuts in the loop |
 | [Reverb](devices/reverb.md) | Effect | A room or a plate |
-| [Phaser](devices/phaser.md) | Effect | Notches swept by an LFO |
-| [Flanger](devices/flanger.md) | Effect | A swept comb |
-| [Chorus](devices/chorus.md) | Effect | Swept copies of the sound, one to eight voices |
+| [Motion](devices/motion.md) | Effect | Three modes swept by an LFO: Chorus, copies of the sound, one to eight voices; Flanger, a swept comb; Phaser, swept notches |
 | [Vocoder](devices/vocoder.md) | Effect | Makes a carrier speak with the voice on its track |
 | [Stereo](devices/stereo.md) | Effect | A channel's two sides: width, bass in mono, balance, mono, swap, polarity, a DC filter and gain |
 
-The synths and the Filter share one set of filter types, described on the [Filter](devices/filter.md)'s page. The
-Phaser, the Flanger and the Chorus share an LFO that follows the song's place, so that a sweep is the same each time a
-part plays.
+The synths and the Filter share one set of filter types, described on the [Filter](devices/filter.md)'s page.
+Motion's three modes share an LFO that follows the song's place, so that a sweep is the same each time a part plays.
 
 ## Devices on tracks and the master
 
@@ -162,14 +159,14 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 - in a narrower space its graphs narrow first; narrower still, the columns wrap into rows where the height allows, or
   else show in pages, as many columns on each as fit, under a bar of the pages' names;
 - a tab or a page chosen stays chosen;
-- a device with modes (the Compressor's Compress and Duck) has its modes as tabs along its top, each a page of parts.
+- a device with modes (the Compressor's Compress and Duck, Motion's Chorus, Flanger and Phaser) has its modes as tabs
+  along its top, each a page of parts, and keeps its size from mode to mode.
 
 ### What the editors share
 
 - **A picture of what the device does,** drawn as the sound plays, in the device's colour, which its knobs' arcs take
   too. The colour is by kind (`DeviceFamily` in `src/ui/theme/DesignTokens.h`): dynamics; tone (the EQ and the
-  Filter); drive (the Saturator, the Exciter and the Vinyl); space (the Delay and the Reverb); motion (the Phaser, the
-  Flanger and the Chorus); Stereo's; the Vocoder's. Instruments take the accent.
+  Filter); drive (the Saturator, the Exciter and the Vinyl); space (the Delay and the Reverb); motion (Motion); Stereo's; the Vocoder's. Instruments take the accent.
 - **Pictures are controls.** A handle on a picture is a second grip on a parameter that also has a knob, so that
   everything also works from the keyboard and for screen readers. A drag is one undo step. Every picture takes a
   handle the same way (`graph::HandleDrag`, `src/ui/devices/DeviceGraph.h`), as Ableton Live's and FabFilter's do: a
@@ -178,7 +175,7 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   handle taken at its edge doesn't jump to the pointer; an axis the pointer hasn't moved along keeps its value exactly,
   and a move under a pixel writes nothing. Escape takes the drag back, leaving nothing to redo; it reaches the drag
   through the window's keys while the mouse is down, so that a picture is no stop for the keyboard's focus and a click
-  on one leaves the keys where they were. A picture with one dot (the Filter's, the motion effects', the Exciter's)
+  on one leaves the keys where they were. A picture with one dot (the Filter's, Motion's, the Exciter's)
   puts the dot under the pointer when pressed away from it. Envelopes drag by their points, and each stage bends by a
   handle in its middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a
   device's page says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and
@@ -204,7 +201,7 @@ plug-in and a container alike. The engine applies it, not the device: a linear c
 the effect's, with the sound coming in delayed as much as the effect delays its own and turned as the effect turns its
 phase, and a change ramped so that a fast move does not click.
 
-- Most effects start at 100 %. The Delay and the Reverb start at 25 % and the Chorus at 50 %; a double-click on the
+- Most effects start at 100 %. The Delay and the Reverb start at 25 % and Motion at 50 %; a double-click on the
   knob goes back to the device's own default.
 - A return made with an effect has the effect at 100 %: the dry sound reaches the master through the track itself.
 - The Limiter, the Multiband and Stereo have no Mix: a limiter mixed with what came in would let peaks past its
@@ -435,9 +432,9 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
 - **Instruments of many recordings** (pianos, guitars, strings) from SFZ files: Planned, as a part of the
   [Sampler](devices/sampler.md), roadmap step 4.10.
 - **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
-  (S6.7); the Chorus, the Flanger and the Phaser as the modes of one device, Motion (S6.10); the Exciter's band and
-  colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record (S6.11). Planned; until each is
-  built, this page and the devices' pages describe the devices as they are. Stereo (S6.12) is built.
+  (S6.7); the Exciter's band and colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record
+  (S6.11). Planned; until each is built, this page and the devices' pages describe the devices as they are. Stereo
+  (S6.12) and Motion (S6.10) are built.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

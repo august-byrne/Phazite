@@ -20,9 +20,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
@@ -122,12 +120,8 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Vinyl>();
     if (type == devices::FilterEffect::typeID)
         return std::make_unique<devices::FilterEffect>();
-    if (type == devices::Phaser::typeID)
-        return std::make_unique<devices::Phaser>();
-    if (type == devices::Flanger::typeID)
-        return std::make_unique<devices::Flanger>();
-    if (type == devices::Chorus::typeID)
-        return std::make_unique<devices::Chorus>();
+    if (type == devices::Motion::typeID)
+        return std::make_unique<devices::Motion>();
     if (type == devices::Stereo::typeID)
         return std::make_unique<devices::Stereo>();
     if (type == devices::Vocoder::typeID)

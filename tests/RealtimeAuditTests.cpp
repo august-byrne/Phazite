@@ -30,9 +30,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
@@ -1369,48 +1367,50 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, Stereo and limiter "
-               "in a row, the filter swept")
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, Motion in each mode, Stereo and limiter in a row, "
+               "the filter swept and a Motion's mode automated")
     {
+        using phazite::devices::Motion;
         TestSong song;
         const auto track = song.firstTrack;
         addTone (song, track);
 
-        phazite::DeviceID filter, phaser, flanger, chorus, stereo;
+        phazite::DeviceID filter, stereo;
+        std::vector<phazite::DeviceID> motions;
 
-        for (const auto* type :
-             { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
-               phazite::devices::Delay::typeID, phazite::devices::Phaser::typeID, phazite::devices::Flanger::typeID,
-               phazite::devices::Chorus::typeID, phazite::devices::Stereo::typeID, phazite::devices::Limiter::typeID })
+        for (const auto* type : { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID,
+                                  phazite::devices::Multiband::typeID, phazite::devices::Delay::typeID, Motion::typeID, Motion::typeID,
+                                  Motion::typeID, phazite::devices::Stereo::typeID, phazite::devices::Limiter::typeID })
         {
             const auto device = song.addEffect (track, type);
 
             if (! filter.isValid())
                 filter = device;
 
-            if (std::string_view (type) == phazite::devices::Phaser::typeID)
-                phaser = device;
-
-            if (std::string_view (type) == phazite::devices::Flanger::typeID)
-                flanger = device;
-
-            if (std::string_view (type) == phazite::devices::Chorus::typeID)
-                chorus = device;
+            if (std::string_view (type) == Motion::typeID)
+                motions.push_back (device);
 
             if (std::string_view (type) == phazite::devices::Stereo::typeID)
                 stereo = device;
         }
 
-        // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work, the
-        // phaser and the flanger with Safe Bass on (their split, and the sound their runners mix back in turned with it, at
-        // half their mix), and the chorus with eight copies a side, each in its part of the sweep, with their shimmer, its
-        // feedback, High Cut and Safe Bass on.
+        REQUIRE (motions.size() == 3);
+        const auto phaser = motions[0], flanger = motions[1], chorus = motions[2];
+
+        // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work: a
+        // Motion as a phaser and one as a flanger, with Safe Bass on (their split, and the sound their runners mix back in
+        // turned with it, at a quarter of their mix: half the flanger's and the phaser's own), and one as a chorus with eight
+        // copies a side, each in its part of the sweep, with their shimmer, its feedback, High Cut and Safe Bass on, its mode
+        // moved by a lane from the chorus to the flanger, the phaser and back, a beat each, so that its modes fade into
+        // each other all the time.
         sweepCutoff (song, filter, 200.0f, 8000.0f);
+        song.setParameter (phaser, "mode", (float) Motion::Mode::phaser);
+        song.setParameter (flanger, "mode", (float) Motion::Mode::flanger);
 
         for (const auto device : { phaser, flanger })
         {
             song.setParameter (device, "safeBass", 120.0f);
-            song.setParameter (device, "mix", 0.5f);
+            song.setParameter (device, "mix", 0.25f);
         }
 
         for (const auto& [id, value] : { std::pair<const char*, float> { "voices", 7.0f },
@@ -1422,6 +1422,17 @@ TEST_SUITE ("realtime-audit")
                                          { "safeBass", 150.0f } })
             song.setParameter (chorus, id, value);
 
+        const phazite::ParameterRef mode { chorus, "mode" };
+        const auto range = phazite::getControlTravel (getSong (song), mode);
+        REQUIRE (range.has_value());
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            const auto position = phazite::toControlPosition (*range, (float) (beat % 3));
+            phazite::addPoint (getSong (song), mode, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+            phazite::addPoint (getSong (song), mode, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+        }
+
         // Stereo with its parts at work: spread, its bass in mono, balanced to one side, its sides swapped, its DC filter on.
         for (const auto& [id, value] : { std::pair<const char*, float> { "spread", 0.5f },
                                          { "balance", 0.3f },
@@ -1431,8 +1442,8 @@ TEST_SUITE ("realtime-audit")
             song.setParameter (stereo, id, value);
 
         const auto m = playAndMeasure (song);
-        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, Stereo and limiter in a row, the filter "
-                "swept",
+        report ("Phazite's filter, saturator, multiband, delay, Motion in each mode, Stereo and limiter in a row, the filter swept "
+                "and a Motion's mode automated",
                 m);
         CHECK (m.peakLevel > 0.001f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the limiter's ceiling
@@ -1534,7 +1545,7 @@ TEST_SUITE ("realtime-audit")
         for (const auto* type :
              { phazite::devices::Equalizer::typeID, phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID,
                phazite::devices::Compressor::typeID, phazite::devices::Multiband::typeID, phazite::devices::Delay::typeID,
-               phazite::devices::Reverb::typeID, phazite::devices::Phaser::typeID, phazite::devices::Limiter::typeID })
+               phazite::devices::Reverb::typeID, phazite::devices::Motion::typeID, phazite::devices::Limiter::typeID })
             listening.push_back (song.addEffect (track, type));
 
         const auto m = playAndMeasure (song,

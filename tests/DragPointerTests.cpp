@@ -8,9 +8,7 @@
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
@@ -24,14 +22,13 @@
 #include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
-#include "ui/devices/ChorusEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DrumSamplerEditor.h"
 #include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
-#include "ui/devices/FlangerEditor.h"
 #include "ui/devices/ModulatorEditor.h"
-#include "ui/devices/PhaserEditor.h"
+#include "ui/devices/MotionEditor.h"
+#include "ui/devices/ParameterControls.h"
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SynthEditor.h"
@@ -209,25 +206,20 @@ TEST_CASE ("Over the vinyl's record the pointer moves up and down, for the wow; 
     CHECK (record.getDescription().contains ("the low cut"));
 }
 
-TEST_CASE ("Over the chorus's, the flanger's and the phaser's dots the pointer grabs them and they light up; elsewhere, the crosshair")
+TEST_CASE ("Over the dots of Motion's chorus, flanger and phaser the pointer grabs them and they light up; elsewhere, the crosshair")
 {
     phazite::test::TestSong song;
+    phazite::ui::MotionEditor editor (addDevice (song, phazite::devices::Motion::typeID));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
 
+    for (const auto mode :
+         { phazite::devices::Motion::Mode::chorus, phazite::devices::Motion::Mode::flanger, phazite::devices::Motion::Mode::phaser })
     {
-        phazite::ui::ChorusEditor editor (addDevice (song, phazite::devices::Chorus::typeID));
-        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-        checkDot (editor.getPicture(), editor.getDotPosition());
-    }
-
-    {
-        phazite::ui::FlangerEditor editor (addDevice (song, phazite::devices::Flanger::typeID));
-        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-        checkDot (editor.getPicture(), editor.getDotPosition());
-    }
-
-    {
-        phazite::ui::PhaserEditor editor (addDevice (song, phazite::devices::Phaser::typeID));
-        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        CAPTURE ((int) mode);
+        auto& tab = editor.getModeTabs()->getTab ((int) mode);
+        phazite::test::Mouse mouse (tab);
+        mouse.click (tab.getLocalBounds().getCentre());
+        REQUIRE (editor.getShownMode() == (int) mode);
         checkDot (editor.getPicture(), editor.getDotPosition());
     }
 }

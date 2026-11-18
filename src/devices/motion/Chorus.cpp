@@ -19,7 +19,7 @@ namespace
 
     static_assert (std::size (voiceCounts) == (size_t) Chorus::mostVoices);
 
-    // The IDs are saved in projects.
+    // Its values, as Motion's map to them (Motion.h), which are what projects save.
     constexpr ParameterInfo parameters[] = {
         { .id = "voices",
           .name = "Voices",
@@ -29,11 +29,11 @@ namespace
           .choices = voiceCounts },
         { .id = "delay",
           .name = "Delay",
-          .minimum = 1.0f,
+          .minimum = 0.2f,
           .maximum = 25.0f,
           .defaultValue = 3.5f,
           .unit = Unit::milliseconds,
-          .midpoint = 6.0f },
+          .midpoint = 4.0f },
         { .id = "depth", .name = "Depth", .defaultValue = 0.5f, .unit = Unit::percent },
         { .id = "sync", .name = "Sync", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::toggle },
         { .id = "division",
@@ -53,7 +53,7 @@ namespace
         { .id = "shimmer", .name = "Shimmer", .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "voicePhase", .name = "Voice Phase", .defaultValue = 1.0f, .unit = Unit::percent },
         { .id = "spread", .name = "Spread", .defaultValue = 0.0f, .unit = Unit::percent },
-        { .id = "feedback", .name = "Feedback", .maximum = 0.9f, .defaultValue = 0.0f, .unit = Unit::percent },
+        { .id = "feedback", .name = "Feedback", .minimum = -0.9f, .maximum = 0.9f, .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "stereo", .name = "Stereo", .defaultValue = 1.0f, .unit = Unit::percent },
         { .id = "highCut",
           .name = "High Cut",
@@ -142,9 +142,11 @@ namespace
                                 0.70710678);
     }
 
+    // The copies sent back in, or with the sign turned, their average upside down: its gains below hang on its square, so
+    // the level is the same either way, the peaks moving to where the notches were.
     double getFeedback (std::span<const float> values)
     {
-        return std::clamp ((double) values[Chorus::feedback], 0.0, 0.9);
+        return std::clamp ((double) values[Chorus::feedback], -0.9, 0.9);
     }
 
     // Each copy's share of what comes out, of so many a side: as loud, with its copies together, as the sound that went in,
@@ -362,7 +364,7 @@ void Chorus::process (const ProcessContext& block)
     bassSplit.startBlock (values[safeBass]);
 
     // How long it rings: its longest copy, gone round as often as its feedback takes to fall by 60 dB.
-    const auto fedBack = getFeedback (values);
+    const auto fedBack = std::abs (getFeedback (values));
     const auto longest = (double) values[delay] * (1.0 + (double) values[depth]) * 0.001;
     const auto rounds = fedBack > 0.001 ? 3.0 / std::log10 (1.0 / fedBack) : 0.0;
     tailSeconds.store (longest * (1.0 + rounds) + 0.01, std::memory_order_relaxed);

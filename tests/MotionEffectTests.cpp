@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The phaser's, the flanger's and the chorus's DSP (src/devices/motion/): their notches where their responses say and as
+// The phaser's, the flanger's and the chorus's DSP (src/devices/motion/: Motion's engines, MotionTests.cpp): their notches where their responses say and as
 // deep, what they play matching those responses, their sweeps and the right side's lead, the chorus's three copies a side
 // as an ensemble, feedback that rings without running away, the flanger's sign and the chorus's voices turning without a
 // click, Safe Bass (the phaser's and the flanger's split, as their runners play them), and their LFOs in time with the song,
@@ -13,10 +13,12 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
+#include "devices/motion/Motion.h"
 #include "devices/motion/Phaser.h"
 #include "devices/motion/SafeBass.h"
 #include "engine/core/Engine.h"
 #include "engine/nodes/DeviceNode.h"
+#include "model/devices/internal/Devices.h"
 
 #include <array>
 #include <cmath>
@@ -170,19 +172,6 @@ bool isFiniteAndBelow (const juce::AudioBuffer<float>& sound, float limit)
     return true;
 }
 } // namespace
-
-TEST_CASE ("The phaser and the flanger describe themselves, with a mix, in time with the song at first")
-{
-    for (const auto* info : { &Phaser::info, &Flanger::info })
-    {
-        INFO (std::string (info->typeID));
-        CHECK (devices::isValid (*info));
-        CHECK (devices::findParameter (*info, devices::mixParameterID) >= 0);
-        CHECK (info->parameters[(size_t) devices::findParameter (*info, "sync")].defaultValue == doctest::Approx (1.0f));
-    }
-
-    CHECK (std::string_view (Phaser::typeID) != std::string_view (Flanger::typeID));
-}
 
 TEST_CASE ("The phaser's notches: as many as asked, as deep as nothing without feedback, closer together with less spacing")
 {
@@ -793,11 +782,9 @@ TEST_CASE ("The phaser's and the flanger's Safe Bass turn on, off and across the
 }
 
 //==============================================================================
-TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Juno-60's mode I, half and half with the sound")
+TEST_CASE ("The chorus has a copy a side at first, swept as the Juno-60's mode I, and half and half with the sound a comb")
 {
-    CHECK (devices::isValid (Chorus::info));
     auto values = getDefaults (Chorus::info);
-    CHECK (values[(size_t) devices::findParameter (Chorus::info, devices::mixParameterID)] == doctest::Approx (0.5f));
     CHECK (values[Chorus::sync] == doctest::Approx (0.0f)); // in hertz at first
     CHECK (Chorus::getNumVoices (values) == 1);
 
@@ -811,7 +798,6 @@ TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Ju
     CHECK (Chorus::getNumVoices (values) == 3);
     values[Chorus::voices] = Chorus::info.parameters[Chorus::voices].maximum;
     CHECK (Chorus::getNumVoices (values) == Chorus::mostVoices);
-    CHECK (std::string_view (Chorus::typeID) != std::string_view (Flanger::typeID));
 
     // Half and half with the sound, a copy 2.5 ms behind: notches at the odd multiples of half the delay's frequency (200 Hz,
     // 600 Hz...), as deep as nothing, and the sound as loud as it was between them.
@@ -1035,9 +1021,24 @@ TEST_CASE ("The sweeping effects and the EQ play what a render plays after a loo
     constexpr int songLength = 65536, settle = 16384, compared = 8192, block = 512;
     const auto song = probe::makeNoise (songLength, 41, 0.5f);
 
-    const auto makeDevice = [] (const devices::DeviceInfo& info)
+    // Motion's engines, which are no devices of their own, and the devices themselves.
+    const auto makeProcessor = [] (const devices::DeviceInfo& info) -> std::unique_ptr<devices::Processor>
     {
-        auto device = std::make_unique<probe::Device> (info);
+        if (&info == &Phaser::info)
+            return std::make_unique<Phaser>();
+
+        if (&info == &Flanger::info)
+            return std::make_unique<Flanger>();
+
+        if (&info == &Chorus::info)
+            return std::make_unique<Chorus>();
+
+        return phazite::createOwnDevice (info.typeID);
+    };
+
+    const auto makeDevice = [&makeProcessor] (const devices::DeviceInfo& info)
+    {
+        auto device = std::make_unique<probe::Device> (info, makeProcessor (info));
 
         if (device->has ("sync"))
             device->set ("sync", 1.0f);
@@ -1080,7 +1081,7 @@ TEST_CASE ("The sweeping effects and the EQ play what a render plays after a loo
         { "a wake from sleep", { { 0, 20011 }, { 24016, songLength } }, 24016 + settle },
     };
 
-    for (const auto* info : { &Phaser::info, &Flanger::info, &Chorus::info, &devices::Equalizer::info })
+    for (const auto* info : { &Phaser::info, &Flanger::info, &Chorus::info, &devices::Motion::info, &devices::Equalizer::info })
     {
         auto rendered = makeDevice (*info);
         const auto reference = rendered->played (song, block);

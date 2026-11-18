@@ -91,9 +91,9 @@ instruments hold their notes. The figure is the share of one core's time.
 | Delay | 0.14 | 2026-11-16 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
 | Stereo, spreading | 0.27 | 2026-11-16 |
-| Phaser, six notches | 0.49 | 2026-11-16 |
-| Flanger | 0.20 | 2026-11-16 |
-| Chorus: three voices with Shimmer / eight voices spread | 0.36 / 0.71 | 2026-11-16 |
+| Motion, phaser, six notches (then the Phaser) | 0.49 | 2026-11-16 |
+| Motion, flanger (then the Flanger) | 0.20 | 2026-11-16 |
+| Motion, chorus (then the Chorus): three voices with Shimmer / eight voices spread | 0.36 / 0.71 | 2026-11-16 |
 | Vocoder, 40 bands | 3.24 | 2026-11-16 |
 
 Three of these were higher in the run of 2026-11-16 than the audit's numbers that stood here before (the Compressor
@@ -137,8 +137,8 @@ played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the medi
 |---|---|---|
 | Synth / Wavetable / FM | 0.02 / 0.02 / 0.01 | 2026-11-16 |
 | Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
-| EQ / Filter / Compressor / Limiter / Stereo / Phaser / Vocoder | 0.00 | 2026-11-16 |
-| Multiband / Saturator / Exciter / Chorus | 0.01 | 2026-11-16 |
+| EQ / Filter / Compressor / Limiter / Stereo / Phaser (now Motion's mode) / Vocoder | 0.00 | 2026-11-16 |
+| Multiband / Saturator / Exciter / Chorus (now Motion's mode) | 0.01 | 2026-11-16 |
 | Vinyl | 0.02 | 2026-11-16 |
 | Delay | 0.32 | 2026-11-16 |
 | Reverb | 0.17 | 2026-11-16 |
@@ -261,7 +261,7 @@ The 1.39 % / 0.50 % that the audit recorded (sections 18 and 9) was measured wit
 stopped song's devices now work no block once their sound has ended, which `tests/PerformanceGateTests.cpp` counts for
 each of Phazite's devices (see the gates); after Stop, as a chord ends, each rested after (in the gate, at 48 kHz in
 blocks of 256, to a quarter of a second): the Delay 7.5 s (its echoes, then its tail), the Reverb 6.0 s (its decay to
-silence, then its tail), the FM synth 3.8 s, the Drum Sampler and the Vinyl 2.5 s (its noise's hold), the Phaser 0.8 s,
+silence, then its tail), the FM synth 3.8 s, the Drum Sampler and the Vinyl 2.5 s (its noise's hold), the Phaser (now Motion's mode) 0.8 s,
 and every other device 0.5 s. While the song plays, a device still waits for its tail after silence, so that one whose
 sound starts within it plays as a render does (`docs/design/engine.md`).
 
@@ -345,7 +345,7 @@ for the 20 empty tracks on four threads and 39.4 / 30.8 for the 20 tracks of syn
 
 The benchmark song (`tests/BenchmarkSong.h`) of 100 tracks, every one playing all the way through: an instrument on
 each, in turn a Synth, a Wavetable, an FM synth, a Drum Sampler and a Sampler, each with a part that suits it; an EQ
-and a compressor after it, a saturator on every third track and a chorus on every fifth; a send to a reverb from every
+and a compressor after it, a saturator on every third track and a Motion (a chorus) on every fifth; a send to a reverb from every
 track and to a delay from every other; buses of ten, each with a compressor; and automation on every fourth track's
 volume and every Synth's cutoff. Ten seconds of blocks at 48 kHz, played one after another on the test's thread as the
 audio device's thread plays them. The figure is each block's time as a share of the block's length, 2.67 ms at 128

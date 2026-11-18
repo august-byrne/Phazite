@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, Stereo's, the phaser's, the flanger's,
-// the chorus's and the vocoder's editors (src/ui/devices/): a control for each parameter but the mix (the header's), what their
-// pictures show, and the drags on them, each one undo step.
+// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, Stereo's and the vocoder's editors
+// (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
+// them, each one undo step. Motion's editor is in MotionTests.cpp.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
@@ -29,14 +26,11 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
-#include "ui/devices/ChorusEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
-#include "ui/devices/FlangerEditor.h"
-#include "ui/devices/PhaserEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/devices/StereoEditor.h"
@@ -447,232 +441,6 @@ TEST_CASE ("Stereo's editor shows its picture and its four parts at once in the 
     // The new switches by the names the parts give them.
     CHECK (editor.findControl ("swap")->getTitle() == "Swap Sides");
     CHECK (editor.findControl ("dcFilter")->getTitle() == "DC Filter");
-}
-
-TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and its dot drags the frequency and feedback")
-{
-    Song song (phazite::devices::Phaser::typeID);
-    const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::PhaserEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
-
-    phazite::ui::PhaserEditor editor (device);
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, phazite::devices::Phaser::info);
-    phazite::test::checkChildrenApart (editor);
-
-    // Before it plays, its LFO at the start of its cycle: the left at the bottom of its sweep (800 Hz, two octaves down at
-    // full depth, so 1.2 at 60 %), the right a quarter of a cycle ahead (Stereo at 50 %), in the middle.
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getShownCentre (0) == doctest::Approx (800.0 * std::exp2 (-1.2)).epsilon (0.001));
-    CHECK (editor.getShownCentre (1) == doctest::Approx (800.0).epsilon (0.001));
-
-    // The dot dragged left and up: a lower frequency and more feedback, one step named after the frequency.
-    auto& picture = editor.getPicture();
-    phazite::test::Mouse mouse (picture);
-    const auto dot = editor.getDotPosition().roundToInt();
-    mouse.press (dot);
-    mouse.dragTo (dot - juce::Point<int> (40, 0));
-    mouse.dragTo (dot - juce::Point<int> (60, 30));
-    mouse.release();
-    CHECK (song.valueOf ("frequency") < 600.0f);
-    CHECK (song.valueOf ("feedback") > 0.4f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Frequency"));
-    phazite::undo (*song.song);
-    CHECK (song.valueOf ("frequency") == doctest::Approx (800.0f));
-    CHECK (song.valueOf ("feedback") == doctest::Approx (0.3f));
-
-    // The wheel turns the depth.
-    mouse.pause();
-    mouse.wheel (picture.getLocalBounds().getCentre(), 0.5f);
-    CHECK (song.valueOf ("depth") > 0.6f);
-}
-
-TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its dot drags the delay and feedback")
-{
-    Song song (phazite::devices::Flanger::typeID);
-    const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::FlangerEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
-
-    phazite::ui::FlangerEditor editor (device);
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, phazite::devices::Flanger::info);
-    phazite::test::checkChildrenApart (editor);
-
-    // Its triangle at the start of its cycle: the left at the bottom of its sweep (3 ms, 3.5 octaves shorter at 70 %), the
-    // right a quarter of a cycle ahead, halfway.
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getShownDelay (0) == doctest::Approx (3.0 * std::exp2 (-3.5)).epsilon (0.001));
-    CHECK (editor.getShownDelay (1) == doctest::Approx (3.0 * std::exp2 (-1.75)).epsilon (0.001));
-
-    // The dot at the delay's frequency (333 Hz, for 3 ms) dragged right and up: a shorter delay, more feedback, one step.
-    auto& picture = editor.getPicture();
-    phazite::test::Mouse mouse (picture);
-    const auto dot = editor.getDotPosition().roundToInt();
-    mouse.press (dot);
-    mouse.dragTo (dot + juce::Point<int> (30, 0));
-    mouse.dragTo (dot + juce::Point<int> (50, -30));
-    mouse.release();
-    CHECK (song.valueOf ("delay") < 2.5f);
-    CHECK (song.valueOf ("feedback") > 0.4f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Delay"));
-
-    // Dragged to the bottom: the feedback's sign turned, as far as it goes.
-    mouse.pause();
-    mouse.press (editor.getDotPosition().roundToInt());
-    mouse.dragTo ({ editor.getDotPosition().roundToInt().x, picture.getHeight() });
-    mouse.release();
-    CHECK (song.valueOf ("feedback") == doctest::Approx (-1.0f));
-}
-
-TEST_CASE ("The chorus's editor shows how far each copy lags, three a side as an ensemble, and its dot drags the delay and depth")
-{
-    using phazite::devices::Chorus;
-    Song song (Chorus::typeID);
-    const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::ChorusEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
-
-    phazite::ui::ChorusEditor editor (device);
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, Chorus::info);
-    phazite::test::checkChildrenApart (editor);
-
-    // Its triangle at the start of its cycle: the left side's copy at the bottom of its sweep (3.5 ms, half of it shorter),
-    // the right side's half a cycle ahead, at the top.
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getShownVoices() == 1);
-    CHECK (editor.getShownDelay (0, 0) == doctest::Approx (1.75).epsilon (0.001));
-    CHECK (editor.getShownDelay (1, 0) == doctest::Approx (5.25).epsilon (0.001));
-
-    // As the string machines' ensemble, three copies a side, each a third of a cycle after the one before, with the fast
-    // sine on it.
-    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "voices" }, 2.0f);
-    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "shimmer" }, 1.0f);
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getShownVoices() == 3);
-    std::vector<float> values;
-
-    for (const auto& parameter : Chorus::info.parameters)
-        values.push_back (parameter.defaultValue);
-
-    values[Chorus::voices] = 2.0f;
-    values[Chorus::shimmer] = 1.0f;
-
-    for (int voice = 0; voice < 3; ++voice)
-        CHECK (editor.getShownDelay (0, voice) == doctest::Approx (Chorus::getVoiceDelay (values, voice / 3.0, voice)).epsilon (0.001));
-
-    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "voices" }, 0.0f);
-    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "shimmer" }, 0.0f);
-    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-
-    // The dot at the delay's frequency (286 Hz, for 3.5 ms) dragged right and up: a shorter delay, more depth, one step.
-    auto& picture = editor.getPicture();
-    phazite::test::Mouse mouse (picture);
-    const auto dot = editor.getDotPosition().roundToInt();
-    mouse.press (dot);
-    mouse.dragTo (dot + juce::Point<int> (30, 0));
-    mouse.dragTo (dot + juce::Point<int> (50, -30));
-    mouse.release();
-    CHECK (song.valueOf ("delay") < 3.0f);
-    CHECK (song.valueOf ("depth") > 0.6f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Delay"));
-
-    // The wheel turns the rate faster.
-    mouse.pause();
-    mouse.wheel (picture.getLocalBounds().getCentre(), 0.5f);
-    CHECK (song.valueOf ("rate") > 0.5f);
-}
-
-TEST_CASE ("The chorus's editor shows each voice in its part of the sweep, and Phase and Spread faint while it has one voice")
-{
-    using phazite::devices::Chorus;
-    Song song (Chorus::typeID);
-    const auto device = song.getDevice();
-    phazite::ui::ChorusEditor editor (device);
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
-    const auto set = [&song] (const char* id, float value)
-    { phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, id }, value); };
-
-    // A control for each of the voices' parameters, each with its title: the count a list, the others knobs.
-    for (const auto& [id, title] : { std::pair<const char*, const char*> { "voices", "Voices" },
-                                     { "voicePhase", "Voice Phase" },
-                                     { "spread", "Spread" },
-                                     { "shimmer", "Shimmer" } })
-    {
-        CAPTURE (id);
-        auto* control = editor.findControl (id);
-        REQUIRE (control != nullptr);
-        CHECK (control->isShowing());
-        CHECK (control->getTitle() == juce::String (title));
-    }
-
-    CHECK (dynamic_cast<juce::ComboBox*> (editor.findControl ("voices")) != nullptr);
-    CHECK (dynamic_cast<juce::Slider*> (editor.findControl ("spread")) != nullptr);
-
-    // One voice a side has no other to keep a phase from or to share the sweep with: those two faint, the others not.
-    ticker.tickNow();
-    CHECK (editor.findControl ("voicePhase")->getAlpha() < 0.9f);
-    CHECK (editor.findControl ("spread")->getAlpha() < 0.9f);
-    CHECK (editor.findControl ("shimmer")->getAlpha() == doctest::Approx (1.0f));
-    CHECK (editor.findControl ("voices")->getAlpha() == doctest::Approx (1.0f));
-
-    // Four voices a side: Phase and Spread lit, four copies shown each side, all on one line while they share the sweep.
-    set ("voices", 3.0f);
-    ticker.tickNow();
-    CHECK (editor.findControl ("voicePhase")->getAlpha() == doctest::Approx (1.0f));
-    CHECK (editor.findControl ("spread")->getAlpha() == doctest::Approx (1.0f));
-    CHECK (editor.getShownVoices() == 4);
-    CHECK (editor.getHeadPosition (0, 0).y == doctest::Approx (editor.getHeadPosition (0, 3).y));
-
-    // Spread gives each its part of the sweep: each copy shown within its own part, the later copies' longer, each on a line
-    // of its own under the one before, all within the picture.
-    set ("spread", 0.62f);
-    set ("delay", 8.2f);
-    set ("depth", 0.61f);
-    ticker.tickNow();
-    std::vector<float> values;
-
-    for (const auto& parameter : Chorus::info.parameters)
-        values.push_back (song.valueOf (std::string (parameter.id).c_str()));
-
-    for (int channel = 0; channel < 2; ++channel)
-    {
-        for (int voice = 0; voice < 4; ++voice)
-        {
-            CAPTURE (channel);
-            CAPTURE (voice);
-            const auto reach = Chorus::getVoiceReach (values, voice);
-            CHECK (editor.getShownDelay (channel, voice) >= reach.shortest - 0.001);
-            CHECK (editor.getShownDelay (channel, voice) <= reach.longest + 0.001);
-            CHECK (editor.getPicture().getLocalBounds().toFloat().contains (editor.getHeadPosition (channel, voice)));
-
-            if (voice > 0)
-            {
-                CHECK (editor.getHeadPosition (channel, voice).y > editor.getHeadPosition (channel, voice - 1).y + 1.0f);
-                CHECK (Chorus::getVoiceReach (values, voice).shortest > Chorus::getVoiceReach (values, voice - 1).shortest);
-            }
-        }
-    }
-
-    // Eight a side, the most: all shown, still within the picture; and the editor is as wide as with one, so that it fits
-    // the dock the same.
-    const auto width = editor.getWidth();
-    set ("voices", 7.0f);
-    ticker.tickNow();
-    CHECK (editor.getShownVoices() == Chorus::mostVoices);
-
-    for (int voice = 0; voice < Chorus::mostVoices; ++voice)
-        CHECK (editor.getPicture().getLocalBounds().toFloat().contains (editor.getHeadPosition (1, voice)));
-
-    CHECK (editor.getWidth() == width);
-    phazite::test::checkChildrenApart (editor);
-
-    // The picture repaints when a voice's control turns, without sound.
-    phazite::test::dispatchPendingMessages();
-    window.takeRepaintedArea();
-    set ("voicePhase", 0.3f);
-    ticker.tickNow();
-    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
 }
 
 TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its bands moves the formant as one undo step")

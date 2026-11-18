@@ -19,9 +19,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
@@ -40,7 +38,6 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
-#include "ui/devices/ChorusEditor.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
@@ -50,12 +47,11 @@
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
-#include "ui/devices/FlangerEditor.h"
 #include "ui/devices/LevelHistoryView.h"
 #include "ui/devices/LimiterEditor.h"
 #include "ui/devices/ModulatorEditor.h"
+#include "ui/devices/MotionEditor.h"
 #include "ui/devices/MultibandEditor.h"
-#include "ui/devices/PhaserEditor.h"
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SamplerEditor.h"
 #include "ui/devices/StereoEditor.h"
@@ -1202,25 +1198,26 @@ TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each
         CHECK (valueOf (song, sampler, "loopEnd") - valueOf (song, sampler, "loopStart") == doctest::Approx (0.25f).epsilon (0.01));
     }
 
-    SUBCASE ("The chorus's, the flanger's, the phaser's and the exciter's dots (GraphDot)")
+    SUBCASE ("The dots of Motion's chorus, flanger and phaser, and the exciter's (GraphDot)")
     {
+        using phazite::devices::Motion;
+
         struct Case
         {
             const char* typeID = nullptr;
             std::function<juce::Component&(juce::Component&)> graphOf {};
             std::function<juce::Point<float> (juce::Component&)> dotOf {};
+            int mode = -1; // Motion's, set before its editor is made
         };
 
+        const auto motionPicture = [] (juce::Component& e) -> juce::Component&
+        { return dynamic_cast<phazite::ui::MotionEditor&> (e).getPicture(); };
+        const auto motionDot = [] (juce::Component& e) { return dynamic_cast<phazite::ui::MotionEditor&> (e).getDotPosition(); };
+
         const Case cases[] = {
-            { phazite::devices::Chorus::typeID,
-              [] (juce::Component& e) -> juce::Component& { return dynamic_cast<phazite::ui::ChorusEditor&> (e).getPicture(); },
-              [] (juce::Component& e) { return dynamic_cast<phazite::ui::ChorusEditor&> (e).getDotPosition(); } },
-            { phazite::devices::Flanger::typeID,
-              [] (juce::Component& e) -> juce::Component& { return dynamic_cast<phazite::ui::FlangerEditor&> (e).getPicture(); },
-              [] (juce::Component& e) { return dynamic_cast<phazite::ui::FlangerEditor&> (e).getDotPosition(); } },
-            { phazite::devices::Phaser::typeID,
-              [] (juce::Component& e) -> juce::Component& { return dynamic_cast<phazite::ui::PhaserEditor&> (e).getPicture(); },
-              [] (juce::Component& e) { return dynamic_cast<phazite::ui::PhaserEditor&> (e).getDotPosition(); } },
+            { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::chorus },
+            { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::flanger },
+            { Motion::typeID, motionPicture, motionDot, (int) Motion::Mode::phaser },
             { phazite::devices::Exciter::typeID,
               [] (juce::Component& e) -> juce::Component& { return dynamic_cast<phazite::ui::ExciterEditor&> (e).getGraph(); },
               [] (juce::Component& e) { return dynamic_cast<phazite::ui::ExciterEditor&> (e).getDotPosition(); } },
@@ -1229,7 +1226,13 @@ TEST_CASE ("The compressor's ducking threshold, the sampler's loop band and each
         for (const auto& c : cases)
         {
             CAPTURE (c.typeID);
-            EditorScreen screen (song, song.addEffect (song.firstTrack, c.typeID));
+            CAPTURE (c.mode);
+            const auto device = song.addEffect (song.firstTrack, c.typeID);
+
+            if (c.mode >= 0)
+                phazite::setValueSetByHand (songOf (song), phazite::ParameterRef { device, "mode" }, (float) c.mode);
+
+            EditorScreen screen (song, device);
             auto& graph = c.graphOf (*screen.editor);
             REQUIRE (graph.isShowing());
             const auto dot = c.dotOf (*screen.editor);

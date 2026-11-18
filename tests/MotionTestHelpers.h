@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the motion effects' tests share (MotionEffectTests.cpp, ChorusTests.cpp): an effect played through its runner, as
+// What Motion's tests share (MotionTests.cpp, MotionEffectTests.cpp, ChorusTests.cpp): an effect played through its runner, as
 // Phazite's engine plays it (engine/nodes/DeviceRunner.h), with what came in mixed back in as its mix says; and a tone read
 // in what comes out: the sine at its frequency that fits each side best, the side's (half the left less the right), and
 // what of the tone isn't steady, which a sweep moves.

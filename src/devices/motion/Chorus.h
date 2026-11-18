@@ -12,7 +12,8 @@
 // the string machines' second LFO does: three copies with it are their ensemble, thicker and smoother. Delay is the middle
 // of the sweep and Depth how far it goes each way, as a part of the delay; the LFO in hertz (0.5 Hz at first) or in time
 // with the song, a triangle or a sine, as the phaser's and the flanger's (devices/dsp/SyncedLfo.h). Feedback sends the
-// copies back in, toward a flanger's ring, its peaks rising by as many decibels as what lies between them falls. High Cut
+// copies back in, toward a flanger's ring, its peaks rising by as many decibels as what lies between them falls; or, below
+// 0, upside down, its peaks where the notches were, as loud. Motion's Chorus mode plays it (Motion.h). High Cut
 // darkens the copies and what they feed back, as a bucket-brigade line does; Safe Bass leaves what is below a frequency as
 // it was, the copies hearing only what is above it, 24 dB an octave down below it (SafeBass.h), so that a bass's lows stay
 // in the middle and still. The mix is half and half at first, the sound and its copies as loud; more of it makes the
@@ -38,8 +39,6 @@ namespace phazite::devices
 class Chorus final : public Processor
 {
 public:
-    static constexpr const char* typeID = "phaziteChorus";
-
     enum Parameter
     {
         voices, // how many copies a side: 1 to 8
@@ -59,6 +58,10 @@ public:
         mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
+    // Its values' layout, in the order and ranges Motion's values map to (Motion.h), for its runner and its tests, under a
+    // type ID of its own as an engine, which nothing lists, no song or preset holds and the model can't make: it is no
+    // device of its own.
+    static constexpr const char* typeID = "motionChorus";
     static const DeviceInfo info;
 
     static constexpr int mostVoices = 8; // a side's copies, at most

@@ -37367,25 +37367,31 @@
     ]
   },
   {
-    "type": "phazitePhaser",
-    "name": "Phaser",
+    "type": "phaziteMotion",
+    "name": "Motion",
     "kind": "effect",
     "parameters": [
       {
-        "id": "notches",
-        "name": "Notches",
+        "id": "mode",
+        "name": "Mode",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 5.0,
-        "default": "2",
+        "maximum": 2.0,
+        "default": "Chorus",
         "choices": [
-          "1",
-          "2",
-          "3",
-          "4",
-          "5",
-          "6"
+          "Chorus",
+          "Flanger",
+          "Phaser"
         ]
+      },
+      {
+        "id": "delay",
+        "name": "Delay",
+        "unit": "milliseconds",
+        "minimum": 0.2,
+        "maximum": 25.0,
+        "default": 3.5,
+        "midpoint": 4.0
       },
       {
         "id": "frequency",
@@ -37402,7 +37408,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.600000023841858
+        "default": 0.5
       },
       {
         "id": "sync",
@@ -37410,7 +37416,7 @@
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 1.0
+        "default": 0.0
       },
       {
         "id": "division",
@@ -37446,127 +37452,6 @@
         "minimum": 0.05,
         "maximum": 20.0,
         "default": 0.5,
-        "scale": "logarithmic"
-      },
-      {
-        "id": "shape",
-        "name": "Shape",
-        "unit": "choice",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": "Sine",
-        "choices": [
-          "Sine",
-          "Triangle"
-        ]
-      },
-      {
-        "id": "feedback",
-        "name": "Feedback",
-        "unit": "percent",
-        "minimum": -0.85,
-        "maximum": 0.85,
-        "default": 0.300000011920929
-      },
-      {
-        "id": "spacing",
-        "name": "Spacing",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.5
-      },
-      {
-        "id": "stereo",
-        "name": "Stereo",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.5
-      },
-      {
-        "id": "safeBass",
-        "name": "Safe Bass",
-        "unit": "hertz",
-        "minimum": 20.0,
-        "maximum": 1000.0,
-        "default": 20.0,
-        "scale": "logarithmic"
-      },
-      {
-        "id": "mix",
-        "name": "Mix",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 1.0
-      }
-    ]
-  },
-  {
-    "type": "phaziteFlanger",
-    "name": "Flanger",
-    "kind": "effect",
-    "parameters": [
-      {
-        "id": "delay",
-        "name": "Delay",
-        "unit": "milliseconds",
-        "minimum": 0.2,
-        "maximum": 15.0,
-        "default": 3.0,
-        "midpoint": 2.0
-      },
-      {
-        "id": "depth",
-        "name": "Depth",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.699999988079071
-      },
-      {
-        "id": "sync",
-        "name": "Sync",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 1.0
-      },
-      {
-        "id": "division",
-        "name": "Division",
-        "unit": "choice",
-        "minimum": 0.0,
-        "maximum": 16.0,
-        "default": "2 bars",
-        "choices": [
-          "1/32",
-          "1/16T",
-          "1/16",
-          "1/16D",
-          "1/8T",
-          "1/8",
-          "1/8D",
-          "1/4T",
-          "1/4",
-          "1/4D",
-          "1/2T",
-          "1/2",
-          "1/2D",
-          "1 bar",
-          "2 bars",
-          "4 bars",
-          "8 bars"
-        ]
-      },
-      {
-        "id": "rate",
-        "name": "Rate",
-        "unit": "hertz",
-        "minimum": 0.05,
-        "maximum": 20.0,
-        "default": 0.25,
         "scale": "logarithmic"
       },
       {
@@ -37587,40 +37472,41 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.300000011920929
+        "default": 0.0
       },
       {
-        "id": "stereo",
-        "name": "Stereo",
+        "id": "notches",
+        "name": "Notches",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      },
+      {
+        "id": "spacing",
+        "name": "Spacing",
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.5
       },
       {
-        "id": "safeBass",
-        "name": "Safe Bass",
+        "id": "highCut",
+        "name": "High Cut",
         "unit": "hertz",
-        "minimum": 20.0,
-        "maximum": 1000.0,
-        "default": 20.0,
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 20000.0,
         "scale": "logarithmic"
       },
-      {
-        "id": "mix",
-        "name": "Mix",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 1.0
-      }
-    ]
-  },
-  {
-    "type": "phaziteChorus",
-    "name": "Chorus",
-    "kind": "effect",
-    "parameters": [
       {
         "id": "voices",
         "name": "Voices",
@@ -37640,87 +37526,6 @@
         ]
       },
       {
-        "id": "delay",
-        "name": "Delay",
-        "unit": "milliseconds",
-        "minimum": 1.0,
-        "maximum": 25.0,
-        "default": 3.5,
-        "midpoint": 6.0
-      },
-      {
-        "id": "depth",
-        "name": "Depth",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.5
-      },
-      {
-        "id": "sync",
-        "name": "Sync",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
-      },
-      {
-        "id": "division",
-        "name": "Division",
-        "unit": "choice",
-        "minimum": 0.0,
-        "maximum": 16.0,
-        "default": "1 bar",
-        "choices": [
-          "1/32",
-          "1/16T",
-          "1/16",
-          "1/16D",
-          "1/8T",
-          "1/8",
-          "1/8D",
-          "1/4T",
-          "1/4",
-          "1/4D",
-          "1/2T",
-          "1/2",
-          "1/2D",
-          "1 bar",
-          "2 bars",
-          "4 bars",
-          "8 bars"
-        ]
-      },
-      {
-        "id": "rate",
-        "name": "Rate",
-        "unit": "hertz",
-        "minimum": 0.05,
-        "maximum": 20.0,
-        "default": 0.5,
-        "scale": "logarithmic"
-      },
-      {
-        "id": "shape",
-        "name": "Shape",
-        "unit": "choice",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": "Triangle",
-        "choices": [
-          "Sine",
-          "Triangle"
-        ]
-      },
-      {
-        "id": "shimmer",
-        "name": "Shimmer",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
-      },
-      {
         "id": "voicePhase",
         "name": "Voice Phase",
         "unit": "percent",
@@ -37737,11 +37542,11 @@
         "default": 0.0
       },
       {
-        "id": "feedback",
-        "name": "Feedback",
+        "id": "shimmer",
+        "name": "Shimmer",
         "unit": "percent",
         "minimum": 0.0,
-        "maximum": 0.9,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -37751,15 +37556,6 @@
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 1.0
-      },
-      {
-        "id": "highCut",
-        "name": "High Cut",
-        "unit": "hertz",
-        "minimum": 1000.0,
-        "maximum": 20000.0,
-        "default": 20000.0,
-        "scale": "logarithmic"
       },
       {
         "id": "safeBass",

@@ -7,7 +7,7 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
@@ -109,7 +109,7 @@ BenchmarkSong buildBenchmarkSong (TestSong& s, int numTracks, double lengthBeats
             s.addEffect (track, dev::Saturator::typeID);
 
         if (i % 5 == 4)
-            s.addEffect (track, dev::Chorus::typeID);
+            s.addEffect (track, dev::Motion::typeID);
 
         built.tracks.push_back (track);
         built.instruments.push_back (device);

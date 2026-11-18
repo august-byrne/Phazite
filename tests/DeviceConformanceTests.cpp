@@ -134,11 +134,8 @@ constexpr Exception exceptions[] = {
     { "phaziteVinyl", Rule::latency, 12.0,
       "Its wow swings the sound's delay around the delay line's middle, which is its latency: over the sixth of a second "
       "measured, the record runs some samples early." },
-    { "phazitePhaser", Rule::latency, 2.5,
-      "Its all-pass stages turn the phase of what passes, which is its effect: the lows come out a sample or two late." },
-    { "phaziteChorus", Rule::latency, 0.5, "The swept copies it adds, some milliseconds late, pull the peak a part of a sample." },
-    { "phaziteFlanger", Rule::latency, anything,
-      "What comes out is the sound and a copy of it a few milliseconds later, as loud, and the copy is as like what came in." },
+    { "phaziteMotion", Rule::latency, 0.5,
+      "A chorus at first: the swept copies it adds, some milliseconds late, pull the peak a part of a sample." },
     { "phaziteVocoder", Rule::latency, anything,
       "What comes out is its carrier, a buzz at first, shaped by what came in, not what came in." },
     { "phaziteSaturator", Rule::mix, -45.0,

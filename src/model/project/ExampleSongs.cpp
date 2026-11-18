@@ -10,7 +10,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
@@ -778,7 +778,7 @@ namespace
 
         const auto sub = song.addTrack ("Sub", "Blue");
         song.setInstrument (sub, devices::WavetableSynth::typeID, "Wavetable/Bass/Slow Sweep Bass");
-        song.addEffect (sub, devices::Chorus::typeID, "Chorus/Ensemble/Deep Swirl");
+        song.addEffect (sub, devices::Motion::typeID, "Motion/Ensemble/Deep Swirl");
         song.addEffect (sub, devices::Equalizer::typeID, "EQ/Mixing/Deep Sub Lift");
         song.addNotes (sub, notes, part ("Sub", up), 4);
         song.setVolume (sub, subLevel);

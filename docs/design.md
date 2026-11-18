@@ -59,7 +59,7 @@ has a page with its parameters, how it works and its limits:
 | [Wavetable](design/devices/wavetable.md) | [Compressor](design/devices/compressor.md), [Multiband](design/devices/multiband.md), [Limiter](design/devices/limiter.md) |
 | [FM](design/devices/fm.md) | [Saturator](design/devices/saturator.md), [Exciter](design/devices/exciter.md), [Vinyl](design/devices/vinyl.md) |
 | [Sampler](design/devices/sampler.md) | [Delay](design/devices/delay.md), [Reverb](design/devices/reverb.md) |
-| [Drum Sampler](design/devices/drum-sampler.md) | [Phaser](design/devices/phaser.md), [Flanger](design/devices/flanger.md), [Chorus](design/devices/chorus.md) |
+| [Drum Sampler](design/devices/drum-sampler.md) | [Motion](design/devices/motion.md) (Chorus, Flanger, Phaser) |
 | | [Vocoder](design/devices/vocoder.md), [Stereo](design/devices/stereo.md) |
 
 The presets that come with Phazite: [presets.md](presets.md).

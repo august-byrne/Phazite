@@ -29,9 +29,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
@@ -367,20 +365,25 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Reverb, plate", maker<dev::Reverb>(), &dev::Reverb::info, 0,
           [] (std::vector<float>& v) { v[dev::Reverb::mode] = (float) dev::Reverb::plate; } },
         { "Stereo, spreading", maker<dev::Stereo>(), &dev::Stereo::info, 0, [] (std::vector<float>& v) { v[dev::Stereo::spread] = 1.0f; } },
-        { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
-          [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
-        { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
-        { "Chorus, three voices with shimmer", maker<dev::Chorus>(), &dev::Chorus::info, 0,
+        { "Motion, phaser, six notches", maker<dev::Motion>(), &dev::Motion::info, 0,
           [] (std::vector<float>& v)
           {
-              v[dev::Chorus::voices] = 2.0f;
-              v[dev::Chorus::shimmer] = 1.0f;
+              v[dev::Motion::mode] = (float) dev::Motion::Mode::phaser;
+              v[dev::Motion::notches] = 5.0f;
           } },
-        { "Chorus, eight voices spread", maker<dev::Chorus>(), &dev::Chorus::info, 0,
+        { "Motion, flanger", maker<dev::Motion>(), &dev::Motion::info, 0,
+          [] (std::vector<float>& v) { v[dev::Motion::mode] = (float) dev::Motion::Mode::flanger; } },
+        { "Motion, chorus, three voices with shimmer", maker<dev::Motion>(), &dev::Motion::info, 0,
           [] (std::vector<float>& v)
           {
-              v[dev::Chorus::voices] = 7.0f;
-              v[dev::Chorus::spread] = 0.6f;
+              v[dev::Motion::voices] = 2.0f;
+              v[dev::Motion::shimmer] = 1.0f;
+          } },
+        { "Motion, chorus, eight voices spread", maker<dev::Motion>(), &dev::Motion::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Motion::voices] = 7.0f;
+              v[dev::Motion::spread] = 0.6f;
           } },
         { "Vocoder, 40 bands", maker<dev::Vocoder>(), &dev::Vocoder::info, 0,
           [] (std::vector<float>& v) { v[dev::Vocoder::bands] = 5.0f; } },
@@ -442,9 +445,7 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
         { &dev::Delay::info, maker<dev::Delay>() },
         { &dev::Reverb::info, maker<dev::Reverb>() },
         { &dev::Stereo::info, maker<dev::Stereo>() },
-        { &dev::Phaser::info, maker<dev::Phaser>() },
-        { &dev::Flanger::info, maker<dev::Flanger>() },
-        { &dev::Chorus::info, maker<dev::Chorus>() },
+        { &dev::Motion::info, maker<dev::Motion>() },
         { &dev::Vocoder::info, maker<dev::Vocoder>() },
     };
 

@@ -14,12 +14,12 @@ namespace
 {
     constexpr std::string_view shapes[] = { "Sine", "Triangle" }; // as the phaser's
 
-    // The IDs are saved in projects.
+    // Its values, as Motion's map to them (Motion.h), which are what projects save.
     constexpr ParameterInfo parameters[] = {
         { .id = "delay",
           .name = "Delay",
           .minimum = 0.2f,
-          .maximum = 15.0f,
+          .maximum = 25.0f,
           .defaultValue = 3.0f,
           .unit = Unit::milliseconds,
           .midpoint = 2.0f },
@@ -51,9 +51,9 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
-    constexpr double leastLoss = 0.02;        // what the loop loses each time round at full feedback: 2 %
-    constexpr double signGlideSeconds = 0.01; // the feedback's sign, turning from one side to the other
-    constexpr double longestMilliseconds = 15.0;
+    constexpr double leastLoss = 0.02;           // what the loop loses each time round at full feedback: 2 %
+    constexpr double signGlideSeconds = 0.01;    // the feedback's sign, turning from one side to the other
+    constexpr double longestMilliseconds = 25.0; // Motion's longest Delay (Motion.h)
 
     // The comb, as the comb filter's makeComb() (devices/dsp/CombFilter.h) makes it, with the copy lagging so many
     // milliseconds and the feedback's sign as given (it glides): positive, the comb rings at multiples of 1 / the delay

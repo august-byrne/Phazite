@@ -226,7 +226,7 @@ Voice. A dock narrower than all of them shows them in pages, two or three whole 
 - Sixteen voices, fixed; oscillators always start each note at the start of their waves (no free-running phase); the
   noise is white only.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).
-- No effects of its own, a chorus included: the [Chorus](chorus.md) and Phazite's other devices follow it.
+- No effects of its own, a chorus included: [Motion](motion.md)'s Chorus and Phazite's other devices follow it.
 
 ## In the code
 

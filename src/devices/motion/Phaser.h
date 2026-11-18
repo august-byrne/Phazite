@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's phaser (roadmap step 2.17): the sound mixed half and half with itself through all-pass filters whose phase an
+// Phazite's phaser (roadmap step 2.17), which Motion's Phaser mode plays (Motion.h): the sound mixed half and half with itself through all-pass filters whose phase an
 // LFO sweeps, so that notches move up and down its spectrum, as the classic four-stage phasers do. Notches sets how many (two
 // all-pass stages each; 2, the classic, at first); the LFO sweeps them around a frequency, up to two octaves each way as
 // Depth says, in time with the song (a bar at first) or in hertz, as a sine or a triangle, the right side a part of a cycle
@@ -26,7 +26,6 @@ namespace phazite::devices
 class Phaser final : public Processor
 {
 public:
-    static constexpr const char* typeID = "phazitePhaser";
     static constexpr int maxNotches = 6;
 
     enum Parameter
@@ -45,6 +44,10 @@ public:
         mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
+    // Its values' layout, in the order and ranges Motion's values map to (Motion.h), for its runner and its tests, under a
+    // type ID of its own as an engine, which nothing lists, no song or preset holds and the model can't make: it is no
+    // device of its own.
+    static constexpr const char* typeID = "motionPhaser";
     static const DeviceInfo info;
 
     // Where its notches are swept to, in hertz, for the parameters' values and the LFO's value (-1 at the bottom of its sweep

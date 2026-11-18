@@ -35,7 +35,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | `HostedDevice.h` | The tests' audio device opened as the app opens one, for tests and benchmarks that process blocks themselves on a thread of their own; `playLiveNote()` plays a live note between two blocks and measures it by the engine's clock: where the engine plays it and when it sounds, and where it took it to have come against the wall clock read on both sides, which no load on the machine moves. |
 | `RealTimePlayback.h` | Playing in real time through the tests' audio device, for tests that need an audio device with inputs. |
 | `AudioThreadMonitor.h` | Counts allocations and frees on audio threads (one the test marks, and the engine's workers), for the real-time audit: in Windows Debug builds and Linux builds with glibc, with each one's call stack; under Linux's sanitizers, without. It also says which threads play audio (`isAudioThread()`: those, and a block of the tests' audio device), and which of its events JUCE made for an assertion's message (`ofAssertions()`). |
-| `MotionTestHelpers.h` | What the motion effects' tests share: an effect played through its runner, and a tone read in what comes out. |
+| `MotionTestHelpers.h` | What Motion's tests share (`MotionTests.cpp`, Motion itself; `MotionEffectTests.cpp` and `ChorusTests.cpp`, its engines' DSP): an effect played through its runner, and a tone read in what comes out. |
 | `SoundPackTestHelpers.h` | A small Phazite Sounds pack and a release that pins it. |
 | `HeldFile.h` | A file nobody else can read, write, replace or delete while one lives (on Windows held open with no sharing; elsewhere its permissions taken away), for tests of what fails when a file can't be reached. |
 

@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
-#include "ChorusEditor.h"
 #include "CompressorEditor.h"
 #include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
 #include "EqEditor.h"
 #include "ExciterEditor.h"
 #include "FilterEditor.h"
-#include "FlangerEditor.h"
 #include "FmEditor.h"
 #include "LimiterEditor.h"
+#include "MotionEditor.h"
 #include "MultibandEditor.h"
-#include "PhaserEditor.h"
 #include "ReverbEditor.h"
 #include "SamplerEditor.h"
 #include "SaturatorEditor.h"
@@ -28,9 +26,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Exciter.h"
@@ -111,14 +107,8 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
     if (info->typeID == devices::Multiband::typeID)
         return std::make_unique<MultibandEditor> (device);
 
-    if (info->typeID == devices::Phaser::typeID)
-        return std::make_unique<PhaserEditor> (device);
-
-    if (info->typeID == devices::Flanger::typeID)
-        return std::make_unique<FlangerEditor> (device);
-
-    if (info->typeID == devices::Chorus::typeID)
-        return std::make_unique<ChorusEditor> (device);
+    if (info->typeID == devices::Motion::typeID)
+        return std::make_unique<MotionEditor> (device);
 
     if (info->typeID == devices::Vocoder::typeID)
         return std::make_unique<VocoderEditor> (device);

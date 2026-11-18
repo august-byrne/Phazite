@@ -1,0 +1,29 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Motion",
+    "instrument": false,
+    "type": "phaziteMotion",
+    "parameters": {
+      "mode": "Chorus",
+      "delay": 14.0,
+      "frequency": 800.0,
+      "depth": 0.5,
+      "sync": 0,
+      "division": "1 bar",
+      "rate": 0.4,
+      "shape": "Sine",
+      "feedback": 0.0,
+      "notches": "2",
+      "spacing": 0.5,
+      "highCut": 9000.0,
+      "voices": "6",
+      "voicePhase": 1.0,
+      "spread": 0.5,
+      "shimmer": 0.2,
+      "stereo": 1.0,
+      "safeBass": 20.0,
+      "mix": 0.5
+    }
+  }
+}

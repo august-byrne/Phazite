@@ -191,6 +191,8 @@ target_sources(phazite_core PRIVATE
     src/devices/motion/Chorus.h
     src/devices/motion/Flanger.cpp
     src/devices/motion/Flanger.h
+    src/devices/motion/Motion.cpp
+    src/devices/motion/Motion.h
     src/devices/motion/Phaser.cpp
     src/devices/motion/Phaser.h
     src/devices/motion/SafeBass.h
@@ -817,8 +819,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ValueText.h
     src/ui/components/ViewTitle.cpp
     src/ui/components/ViewTitle.h
-    src/ui/devices/ChorusEditor.cpp
-    src/ui/devices/ChorusEditor.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
     src/ui/devices/DelayEditor.cpp
@@ -847,8 +847,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/ExciterEditor.h
     src/ui/devices/FilterEditor.cpp
     src/ui/devices/FilterEditor.h
-    src/ui/devices/FlangerEditor.cpp
-    src/ui/devices/FlangerEditor.h
     src/ui/devices/FmEditor.cpp
     src/ui/devices/FmEditor.h
     src/ui/devices/GraphDot.cpp
@@ -859,12 +857,12 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/LimiterEditor.h
     src/ui/devices/ModulatorEditor.cpp
     src/ui/devices/ModulatorEditor.h
+    src/ui/devices/MotionEditor.cpp
+    src/ui/devices/MotionEditor.h
     src/ui/devices/MultibandEditor.cpp
     src/ui/devices/MultibandEditor.h
     src/ui/devices/ParameterControls.cpp
     src/ui/devices/ParameterControls.h
-    src/ui/devices/PhaserEditor.cpp
-    src/ui/devices/PhaserEditor.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
     src/ui/devices/SamplerEditor.cpp
@@ -1345,6 +1343,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerViewTests.cpp
         tests/MotionEffectTests.cpp
         tests/MotionTestHelpers.h
+        tests/MotionTests.cpp
         tests/MultibandEditorTests.cpp
         tests/MultibandTests.cpp
         tests/NewProjectTests.cpp

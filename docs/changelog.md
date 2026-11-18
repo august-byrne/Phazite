@@ -10,6 +10,10 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)
 
+- **S6.10 Motion:** the Chorus, the Flanger and the Phaser become the three modes of one device, Motion, under three
+  tabs: one Mix that means the effect alone in every mode (half and half at 50 %), a 10 ms fade between modes, their
+  24 presets converted to play as they did, so that Swap tries a chorus, a flanger and a phaser on a sound in place,
+  and the chorus's Feedback below 0.
 - **S6.12 Stereo:** the Stereo Expander becomes Stereo, the one device for a channel's two sides, adding Balance, a
   Mono switch, Swap Sides and a DC filter to its width, spread, bass in mono, polarity flips and gain, each switched
   without a click; its presets gain Swap Sides and DC Filter under Checks.

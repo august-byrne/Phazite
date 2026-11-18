@@ -12,7 +12,7 @@
 #include "devices/dsp/NoteValues.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/motion/Chorus.h"
+#include "devices/motion/Motion.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
@@ -1298,14 +1298,14 @@ TEST_CASE ("In 6/8 the chorus's LFO in time with the song keeps to where the son
     song.setTimeSignature (6, 8);
     const auto track = song.firstTrack;
     song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 4.0, 440.0, 0.25f), 0.0);
-    const auto chorusID = song.addEffect (track, phazite::devices::Chorus::typeID);
+    const auto chorusID = song.addEffect (track, phazite::devices::Motion::typeID);
     song.setParameter (chorusID, "sync", 1.0f);
     song.setParameter (chorusID, "division", phazite::devices::dsp::quarterNoteValue);
     EnginePlayback playback;
     song.run ("transport.playStop");
     playback.play (0.1);
 
-    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Chorus>();
+    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Motion>();
     REQUIRE (chorus != nullptr);
     auto played = (int) std::lround (0.1 * EnginePlayback::sampleRate);
 
@@ -1314,7 +1314,7 @@ TEST_CASE ("In 6/8 the chorus's LFO in time with the song keeps to where the son
         playback.play (EnginePlayback::blockSize / EnginePlayback::sampleRate);
         played += EnginePlayback::blockSize;
         const auto expected = std::fmod (played / 24000.0, 1.0);
-        auto off = (double) chorus->getPhase().get() - expected;
+        auto off = (double) chorus->getChorus().getPhase().get() - expected;
         off -= std::round (off);
         CAPTURE (block);
         REQUIRE (std::abs (off) < 1.0e-4);
@@ -1336,14 +1336,14 @@ TEST_CASE ("A chorus's LFO a bar a cycle follows the song's bars: three quarter 
         nullptr);
     const auto track = song.firstTrack;
     song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 8.0, 440.0, 0.25f), 0.0);
-    const auto chorusID = song.addEffect (track, phazite::devices::Chorus::typeID);
+    const auto chorusID = song.addEffect (track, phazite::devices::Motion::typeID);
     song.setParameter (chorusID, "sync", 1.0f);
     song.setParameter (chorusID, "division", phazite::devices::dsp::barNoteValue);
     EnginePlayback playback;
     song.run ("transport.playStop");
     playback.play (0.1);
 
-    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Chorus>();
+    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Motion>();
     REQUIRE (chorus != nullptr);
     auto played = (int) std::lround (0.1 * EnginePlayback::sampleRate);
 
@@ -1358,7 +1358,7 @@ TEST_CASE ("A chorus's LFO a bar a cycle follows the song's bars: three quarter 
         if (std::abs (beat - 6.0) < 0.1)
             continue;
 
-        auto off = (double) chorus->getPhase().get() - (bars - std::floor (bars));
+        auto off = (double) chorus->getChorus().getPhase().get() - (bars - std::floor (bars));
         off -= std::round (off);
         CAPTURE (beat);
         REQUIRE (std::abs (off) < 1.0e-4);

@@ -328,7 +328,7 @@ TEST_CASE ("Exodus shows a song by someone else: its notes from a file, its part
     };
 
     CHECK (chainOf ("Rolling Bass") == "EQ");
-    CHECK (chainOf ("Sub") == "Chorus, EQ");
+    CHECK (chainOf ("Sub") == "Motion, EQ");
     CHECK (chainOf ("Sparkle") == "EQ, Reverb");
     CHECK (chainOf ("Bass + Sparkle") == "Reverb, Compressor");
     CHECK (chainOf ("Square") == "Reverb");

@@ -116,8 +116,8 @@ TEST_CASE ("An effect is replaced by another in its place, on its channel or in 
     const auto container = groupEqAndReverb (tracks);
     const auto inside = phazite::getContainerDevices (context, container);
     REQUIRE (inside.size() == 2);
-    phazite::replaceEffect (context, inside[0].id, tracks.find ("phazitePhaser"));
-    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Phaser", inside[1].name });
+    phazite::replaceEffect (context, inside[0].id, tracks.find ("phaziteMotion"));
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Motion", inside[1].name });
 
     // Never an instrument, nor by one.
     const auto instrument = phazite::getInstrument (context, tracks.a)->id;

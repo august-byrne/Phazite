@@ -258,6 +258,7 @@ the [changelog](changelog.md).
 | # | Check | Proves | Checked on |
 |---|---|---|---|
 | E1 | On a wide pad or a drum loop, add Stereo. Turn Balance fully right, then double-click it. Switch Mono on and off, then Swap, while it plays. Load its preset Checks > DC Filter after a Saturator set to Tube | Balance: the left goes silent, the right is no louder, and a double-click reads Center. Mono: the image collapses to the middle, the bar under the picture reads +1, no click. Swap: left and right trade places, no click. DC Filter: switching it clicks nothing. The editor shows whole in the dock: Width over Bass, Sides over Output | |
+| E2 | Add Motion to a track playing chords. Click its Chorus, Flanger and Phaser tabs while it plays. Open Presets > Swap and try a Chorus, an Ensemble, a Flanger (Jet Sweep) and a Phaser (Classic Phase) preset in place. In Flanger or Phaser, turn Mix to 50 %, then 100 %. In Chorus, turn Feedback below 0 | Each tab switches without a click, and its picture moves with the sound. Each preset sounds as its old device did. At 50 % the flanger or phaser is whole (sound and copy half and half); at 100 % only the copy plays, the notches gone to peaks, and one chorus voice is a vibrato. Feedback below 0 rings as loud, hollower | |
 
 ## Performance on other machines
 

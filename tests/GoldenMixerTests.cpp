@@ -6,14 +6,13 @@
 #include "TestSong.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/dsp/NoteValues.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
-#include "devices/motion/Chorus.h"
-#include "devices/motion/Flanger.h"
-#include "devices/motion/Phaser.h"
+#include "devices/motion/Motion.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
@@ -328,22 +327,42 @@ TEST_SUITE ("golden")
                      "Phazite's filter at 500 Hz, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's flanger on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Motion as a flanger on a beat and stabs")
     {
-        checkEffect (phazite::devices::Flanger::typeID, "effect-flanger", {},
-                     "Phazite's flanger as it is made, on a beat and chord stabs.");
+        // The flanger as it was made before it was Motion's mode: its delay swept down from 3 ms by 70 % in time with the
+        // song, two bars a sweep, the right side a quarter of a cycle ahead, fed back 30 %, at the default Mix.
+        using phazite::devices::Motion;
+        checkEffect (Motion::typeID, "effect-motion-flanger",
+                     { { "mode", (float) Motion::Mode::flanger },
+                       { "delay", 3.0f },
+                       { "depth", 0.7f },
+                       { "sync", 1.0f },
+                       { "division", (float) phazite::devices::dsp::twoBarsNoteValue },
+                       { "feedback", 0.3f },
+                       { "stereo", 0.5f } },
+                     "Phazite's Motion as a flanger, swept down from 3 ms in time with the song, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's chorus on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Motion as a chorus on a beat and stabs")
     {
         // The string machines' ensemble: three copies a side, a third of a cycle apart, with their shimmer.
-        checkEffect (phazite::devices::Chorus::typeID, "effect-chorus", { { "voices", 2.0f }, { "shimmer", 1.0f } },
-                     "Phazite's chorus in Ensemble, its three copies a side, on a beat and chord stabs.");
+        checkEffect (phazite::devices::Motion::typeID, "effect-motion-chorus", { { "voices", 2.0f }, { "shimmer", 1.0f } },
+                     "Phazite's Motion as a chorus in Ensemble, its three copies a side, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's phaser on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Motion as a phaser on a beat and stabs")
     {
-        checkEffect (phazite::devices::Phaser::typeID, "effect-phaser", {}, "Phazite's phaser as it is made, on a beat and chord stabs.");
+        // The phaser as it was made before it was Motion's mode: two notches swept around 800 Hz by 60 % in time with the
+        // song, a bar a sweep, by a sine, the right side a quarter of a cycle ahead, fed back 30 %, at the default Mix.
+        using phazite::devices::Motion;
+        checkEffect (Motion::typeID, "effect-motion-phaser",
+                     { { "mode", (float) Motion::Mode::phaser },
+                       { "depth", 0.6f },
+                       { "sync", 1.0f },
+                       { "shape", 0.0f },
+                       { "feedback", 0.3f / Motion::phaserFeedback },
+                       { "stereo", 0.5f } },
+                     "Phazite's Motion as a phaser, two notches swept around 800 Hz in time with the song, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's reverb on a beat and stabs")

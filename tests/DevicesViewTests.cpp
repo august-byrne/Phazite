@@ -15,12 +15,14 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/components/ModulatorDrag.h"
 #include "ui/components/PowerSwitch.h"
 #include "ui/devices/CompressorEditor.h"
@@ -1187,6 +1189,24 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
         REQUIRE (view != nullptr);
         view->setOpen (effects.back().id, true);
         checkWhole (type.c_str());
+
+        // A device with modes, each mode's page (Motion's Chorus, Flanger and Phaser; the Compressor's Compress and Duck).
+        const auto* info = phazite::findOwnDevice (type);
+        REQUIRE (info != nullptr);
+
+        if (const auto mode = phazite::devices::findParameter (*info, "mode"); mode >= 0)
+        {
+            const auto& choices = info->parameters[(size_t) mode];
+
+            for (auto choice = choices.minimum; choice <= choices.maximum; choice += 1.0f)
+            {
+                CAPTURE (choice);
+                phazite::setValueSetByHand (*phazite::findSong (context), phazite::ParameterRef { effects.back().id, "mode" }, choice);
+                juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+                checkWhole (type.c_str());
+            }
+        }
+
         phazite::removeDevice (context, effects.back().id);
     }
 

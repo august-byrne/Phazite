@@ -74,13 +74,13 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `SidechainMenus.*` | What a device's sidechain listens to, a track or a bus, picked inside the device under the word every DAW prints on its picker, Sidechain. |
 | `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a dot that a drag moves (through `HandleDrag`) and a press away from it puts under the pointer. |
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |
-| `SweepPicture.*` | The picture the phaser, the flanger and the chorus share, with their LFO. |
+| `SweepPicture.*` | The picture Motion's three modes share, with their LFO. |
 | `DeviceTint.*` | Each device's colour. |
 | `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it. |
 | `ModulatorEditor.*` | Modulators' editors. |
 
-The editors, one pair of files each: `ChorusEditor`, `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
-`ExciterEditor`, `FilterEditor`, `FlangerEditor`, `FmEditor`, `LimiterEditor`, `MultibandEditor`, `PhaserEditor`,
+The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
+`ExciterEditor`, `FilterEditor`, `FmEditor`, `LimiterEditor`, `MotionEditor` (three modes, each a picture of its own), `MultibandEditor`,
 `ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoEditor`, `SynthEditor`, `VinylEditor`,
 `VocoderEditor`, `WavetableEditor`. Among them:
 

@@ -722,8 +722,8 @@ TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying e
     phazite::test::TemporaryFolder temp;
     const auto factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
 
-    for (const auto* other : { "Chorus", "Compressor", "Delay", "Drum Sampler", "EQ", "Filter", "Flanger", "FM", "Limiter", "Multiband",
-                               "Phaser", "Sampler", "Saturator", "Stereo" })
+    for (const auto* other : { "Compressor", "Delay", "Drum Sampler", "EQ", "Filter", "FM", "Limiter", "Motion", "Multiband", "Sampler",
+                               "Saturator", "Stereo" })
         writeDevicePreset (factory.getChildFile (other).getChildFile ("Default").getChildFile (juce::String (other) + " One.phazitepreset"),
                            "phaziteEq", "EQ", false);
 

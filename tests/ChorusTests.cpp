@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The chorus's voices (src/devices/motion/Chorus.h): up to eight copies a side, together as loud as one; Voice Phase, which
-// at its most spreads the copies of both sides evenly round the LFO's cycle; Spread, which gives each copy a part of the
-// sweep to itself; Shimmer, the fast sine as an amount; that one voice ignores what only several use; the number of voices
-// changing without a click; feedback with many voices; the same sweep at every sample rate and block size; and Safe Bass's
-// split, as its runner plays it, with its mix. What the chorus had before its voices (its response, its sweep, its
-// feedback, its LFO in time) is in MotionEffectTests.cpp.
+// The chorus's voices (src/devices/motion/Chorus.h, the engine of Motion's Chorus mode): up to eight copies a side, together
+// as loud as one; Voice Phase, which at its most spreads the copies of both sides evenly round the LFO's cycle; Spread,
+// which gives each copy a part of the sweep to itself; Shimmer, the fast sine as an amount; that one voice ignores what only
+// several use; the number of voices changing without a click; feedback with many voices, and below 0; the same sweep at
+// every sample rate and block size; and Safe Bass's split, as its runner plays it, with its mix. What the chorus had before
+// its voices (its response, its sweep, its feedback, its LFO in time) is in MotionEffectTests.cpp.
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
 #include "devices/dsp/Filters.h"
 #include "devices/motion/Chorus.h"
+#include "devices/motion/Motion.h"
 
 #include <algorithm>
 #include <array>
@@ -134,9 +135,10 @@ float voicesFor (int count)
 
 TEST_CASE ("The chorus's voices: one a side at first, up to eight, described as choices of their number, the rest at rest")
 {
-    CHECK (devices::isValid (Chorus::info));
-    const auto values = getDefaults();
-    const auto& voices = Chorus::info.parameters[Chorus::voices];
+    // As Motion describes them (Motion.h), which maps its values to the chorus's.
+    using devices::Motion;
+    const auto values = Motion::getChorusValues (phazite::test::getDefaultValues (Motion::info));
+    const auto& voices = Motion::info.parameters[Motion::voices];
     CHECK (voices.id == "voices");
     CHECK (voices.unit == devices::Unit::choice);
     CHECK ((int) voices.choices.size() == Chorus::mostVoices);
@@ -149,15 +151,15 @@ TEST_CASE ("The chorus's voices: one a side at first, up to eight, described as 
     CHECK (values[Chorus::shimmer] == doctest::Approx (0.0f));
     CHECK (values[Chorus::voicePhase] == doctest::Approx (1.0f));
     CHECK (values[Chorus::spread] == doctest::Approx (0.0f));
-    CHECK (Chorus::info.parameters[Chorus::shimmer].id == "shimmer");
-    CHECK (Chorus::info.parameters[Chorus::voicePhase].id == "voicePhase");
-    CHECK (Chorus::info.parameters[Chorus::spread].id == "spread");
+    CHECK (Motion::info.parameters[Motion::shimmer].id == "shimmer");
+    CHECK (Motion::info.parameters[Motion::voicePhase].id == "voicePhase");
+    CHECK (Motion::info.parameters[Motion::spread].id == "spread");
 
-    for (const auto index : { Chorus::shimmer, Chorus::voicePhase, Chorus::spread })
+    for (const auto index : { Motion::shimmer, Motion::voicePhase, Motion::spread })
     {
-        CHECK (Chorus::info.parameters[index].unit == devices::Unit::percent);
-        CHECK (Chorus::info.parameters[index].minimum == doctest::Approx (0.0f));
-        CHECK (Chorus::info.parameters[index].maximum == doctest::Approx (1.0f));
+        CHECK (Motion::info.parameters[index].unit == devices::Unit::percent);
+        CHECK (Motion::info.parameters[index].minimum == doctest::Approx (0.0f));
+        CHECK (Motion::info.parameters[index].maximum == doctest::Approx (1.0f));
     }
 }
 
@@ -560,6 +562,81 @@ TEST_CASE ("The chorus's feedback stays within bounds with many voices, spread o
         const auto expected = Chorus::getMagnitude (values, copies, hertz, usualRate);
         CHECK (20.0 * std::log10 (played) == doctest::Approx (20.0 * std::log10 (expected)).epsilon (0.03));
     }
+}
+
+TEST_CASE ("The chorus's feedback below 0 stays within the bounds its feedback above 0 keeps, as loud, and plays what its response says")
+{
+    // At its most either way, swept fast and deep: on noise no louder with the sign turned, and its peaks no higher than a
+    // quarter over the other's. Its gains hang on the feedback's square, so where its comb's teeth are close together (a long
+    // delay) it is as loud either way; at a short one, the turned sign puts a notch where the copies line up with the
+    // sound, low down, in place of the peak there, and the noise is quieter.
+    Chorus chorus;
+    auto values = getDefaults();
+    values[Chorus::depth] = 1.0f;
+    values[Chorus::rate] = 20.0f;
+    values[Chorus::shimmer] = 1.0f;
+
+    for (const auto count : { 1, 3, 8 })
+    {
+        for (const auto spread : { 0.0f, 1.0f })
+        {
+            for (const auto delay : { 0.2f, 1.0f, 25.0f })
+            {
+                CAPTURE (count);
+                CAPTURE (spread);
+                CAPTURE (delay);
+                values[Chorus::voices] = voicesFor (count);
+                values[Chorus::spread] = spread;
+                values[Chorus::delay] = delay;
+                values[Chorus::feedback] = 0.9f;
+                chorus.prepare (usualRate, usualBlock);
+                const auto above = play (chorus, values, makeNoise (96000));
+                values[Chorus::feedback] = -0.9f;
+                chorus.prepare (usualRate, usualBlock);
+                const auto below = play (chorus, values, makeNoise (96000));
+                CHECK (isFiniteAndBelow (below, 8.0f));
+                CHECK (isFiniteAndBelow (below, 1.25f * above.getMagnitude (0, above.getNumSamples())));
+
+                for (int channel = 0; channel < 2; ++channel)
+                {
+                    CHECK (levelOf (below, channel) < levelOf (above, channel) + 1.0);
+
+                    if (delay > 20.0f)
+                        CHECK (std::abs (levelOf (below, channel) - levelOf (above, channel)) < 1.0);
+                }
+            }
+        }
+    }
+
+    // Standing still (no depth), eight copies fed back upside down and darkened play what the response says, which puts the
+    // peaks where the notches were: at 1 / the delay a notch, where feedback above 0 has a peak.
+    values = getDefaults();
+    values[Chorus::voices] = voicesFor (8);
+    values[Chorus::depth] = 0.0f;
+    values[Chorus::delay] = 2.5f;
+    values[Chorus::highCut] = 3000.0f;
+    values[Chorus::mix] = 1.0f;
+    const std::vector<double> copies (8, 2.5);
+
+    for (const auto hertz : { 100.0, 200.0, 400.0, 1500.0 })
+    {
+        CAPTURE (hertz);
+        values[Chorus::feedback] = -0.6f;
+        chorus.prepare (usualRate, usualBlock);
+        const auto out = play (chorus, values, makeSine (hertz, 48000));
+        const auto played = out.getRMSLevel (0, 24000, 24000) / (0.5 / std::sqrt (2.0));
+        const auto expected = Chorus::getMagnitude (values, copies, hertz, usualRate);
+        CHECK (20.0 * std::log10 (played) == doctest::Approx (20.0 * std::log10 (expected)).epsilon (0.03));
+    }
+
+    // The turned sign's peaks, half way between where the others are, as high as theirs.
+    values[Chorus::feedback] = -0.6f;
+    const auto below = Chorus::getMagnitude (values, copies, 400.0, usualRate);
+    const auto belowPeak = Chorus::getMagnitude (values, copies, 200.0, usualRate);
+    values[Chorus::feedback] = 0.6f;
+    const auto above = Chorus::getMagnitude (values, copies, 400.0, usualRate);
+    CHECK (below < 0.5 * above);
+    CHECK (belowPeak == doctest::Approx (above).epsilon (0.05));
 }
 
 TEST_CASE ("The chorus's voices sweep the same at every sample rate, from 44.1 to 192 kHz, and at any block size")

@@ -15,7 +15,7 @@ namespace
     constexpr std::string_view notchCounts[] = { "1", "2", "3", "4", "5", "6" };
     constexpr std::string_view shapes[] = { "Sine", "Triangle" };
 
-    // The IDs are saved in projects.
+    // Its values, as Motion's map to them (Motion.h), which are what projects save.
     constexpr ParameterInfo parameters[] = {
         { .id = "notches", .name = "Notches", .maximum = 5.0f, .defaultValue = 1.0f, .unit = Unit::choice, .choices = notchCounts },
         { .id = "frequency",
