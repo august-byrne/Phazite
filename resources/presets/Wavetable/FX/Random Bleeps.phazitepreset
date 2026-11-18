@@ -32,7 +32,7 @@
       "filterOn": 1,
       "filterType": "Band Pass",
       "cutoff": 2000.0,
-      "resonance": 0.3,
+      "resonance": 0.32779008,
       "filterSlope": "12 dB",
       "drive": 0.0,
       "keyTracking": 0.5,
@@ -96,6 +96,7 @@
       "voiceMode": "Poly",
       "glide": 0.0,
       "glideMode": "Always",
+      "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.6,
       "level": -2.5

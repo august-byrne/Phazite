@@ -31,6 +31,7 @@ namespace
     };
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
     constexpr std::string_view glideModes[] = { "Always", "Legato" }; // the synth's
+    constexpr std::string_view phases[] = { "Reset", "Free" };        // the FM synth's
 
     // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
     constexpr auto& divisions = dsp::noteValueNames;
@@ -207,6 +208,7 @@ namespace
           .unit = Unit::milliseconds,
           .midpoint = 200.0f },
         makeChoice ("glideMode", "Glide Mode", glideModes, 0.0f),
+        makeChoice ("phase", "Phase", phases, 0.0f),
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
@@ -221,12 +223,13 @@ namespace
     static_assert (Synth::getAmountTarget (Synth::numModSlots - 1) == Synth::ModTarget::slot8Amount);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::drift + 1);
     static_assert (std::size (glideModes) == (size_t) Synth::GlideMode::legato + 1);
+    static_assert (std::size (phases) == (size_t) Synth::Phase::free + 1);
     static_assert (std::size (unisonStacks) == (size_t) Synth::Stack::powerChord + 1);
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x7ab1e5u, unisonSeed = 0x0715e7u, lfoSeed = 0x1f0e5u, randomSeed = 0x2a7d0u;
     constexpr std::uint32_t driftSeed = 0xd71f77u;
-    constexpr std::uint32_t wanderSeed = 0x3a9c51e7u; // the Drift source's: far from the unison drift's, whose seeds run on by voice
+    constexpr std::uint32_t wanderSeed = 0x3a9c51e7u; // the first slot's Drift: far from the unison drift's, whose seeds run on by voice
 
     // How far Osc Warp Amount takes the Sync warp's reading, by modulation: 2^(3 a) times the note's cycle, so a third past the
     // knob's end, 16 times (four octaves, the synth's Osc 2 Envelope's reach); the knob's own 0 to 100 % is 1 to 8 times.
@@ -405,8 +408,8 @@ namespace
         std::array<Synth::ModSource, Synth::numModSlots> sources {};
         std::array<Synth::ModTarget, Synth::numModSlots> targets {};
         std::array<float, Synth::numModSlots> amounts {};
-        bool movesAmounts = false; // a slot aims at another's amount
-        bool wanders = false;      // a slot plays the Drift source
+        bool movesAmounts = false;                       // a slot aims at another's amount
+        std::array<bool, Synth::numModSlots> wanders {}; // the slots that play the Drift source
         float outputGain = 1.0f, bent = 0.0f;
     };
 
@@ -481,7 +484,7 @@ namespace
             if (source != Synth::ModSource::none && target != Synth::ModTarget::none)
             {
                 settings.movesAmounts = settings.movesAmounts || isAmountTarget (target);
-                settings.wanders = settings.wanders || source == Synth::ModSource::drift;
+                settings.wanders[(size_t) slot] = source == Synth::ModSource::drift;
             }
         }
 
@@ -545,7 +548,7 @@ double WavetableSynth::getFilterMagnitude (std::span<const float> values, double
                                                     .frequency = cutoffHertz,
                                                     .resonance = values[resonance],
                                                     .steep = dsp::isSteep (values[filterSlope]),
-                                                    .q = dsp::getResonanceQ (values[resonance]) },
+                                                    .q = dsp::getSynthResonanceQ (values[resonance]) },
                                                   rate),
                               frequency, rate);
 }
@@ -602,11 +605,15 @@ void WavetableSynth::reset()
         voice.fade = 1.0f;
         voice.fadeStep = 0.0f;
         voice.controlAhead = 0;
+        voice.hasPlayed = false;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
         voice.drifting.setSeed (driftSeed + (std::uint32_t) index);
-        voice.wandering.setSeed (wanderSeed + (std::uint32_t) index);
-        voice.wander = {};
+        // Each slot's Drift its own, the first slot's from the seed the one Drift had before each slot had its own.
+        for (size_t slot = 0; slot < voice.wanderings.size(); ++slot)
+            voice.wanderings[slot].setSeed (wanderSeed + (std::uint32_t) index + (std::uint32_t) slot * 0x9e3779b9u);
+
+        voice.slotWanders = {};
 
         for (auto& oscillator : voice.oscillators)
             oscillator.wanders = {};
@@ -709,20 +716,26 @@ void WavetableSynth::stealVoice (Voice& voice)
     voice.fadeStep = 0.0f;
 }
 
-// A voice that was silent starts its waves from scratch: the first unison voice of each oscillator from the start of its
-// wave, the others anywhere, so they don't start in phase and sweep; its LFOs that start with the note from theirs.
-void WavetableSynth::startVoice (Voice& voice)
+// A voice that was silent starts from scratch: while the phases reset, its waves too, the first unison voice of each oscillator
+// from the start of its wave, the others anywhere, so they don't start in phase and sweep; while they run free (Phase::free),
+// its waves go on from where they were when it last played, unless it never has. Its LFOs that start with the note from theirs.
+void WavetableSynth::startVoice (Voice& voice, bool resets)
 {
-    for (auto& oscillator : voice.oscillators)
+    if (resets || ! voice.hasPlayed)
     {
-        for (size_t u = 0; u < oscillator.readers.size(); ++u)
+        for (auto& oscillator : voice.oscillators)
         {
-            oscillator.readers[u].phase = u == 0 ? 0.0f : voice.phases.nextUnipolar();
-            oscillator.readers[u].last = 0.0f;
+            for (size_t u = 0; u < oscillator.readers.size(); ++u)
+            {
+                oscillator.readers[u].phase = u == 0 ? 0.0f : voice.phases.nextUnipolar();
+                oscillator.readers[u].last = 0.0f;
+            }
         }
+
+        voice.sub.setPhase (0.0f);
     }
 
-    voice.sub.setPhase (0.0f);
+    voice.hasPlayed = true;
 
     for (auto& filter : voice.filters)
         filter.reset();
@@ -782,23 +795,27 @@ void WavetableSynth::moveDrift (Voice& voice, int unison) noexcept
     }
 }
 
-// The Drift source, as the synth's drift moves its cutoff (Synth::startDrift(), moveDrift()): each note from somewhere of its
-// own, toward a new place every 0.45 s, gliding there with a time constant of 0.3 s; a control step at a time, as Envelopes 2
+// The Drift source, one for each slot, as the synth's drift moves each of its oscillators and its cutoff on its own
+// (Synth::startDrift(), moveDrift()): each note from somewhere of its own, toward a new place every 0.45 s, gliding there with a time constant of 0.3 s; a control step at a time, as Envelopes 2
 // and 3 and the LFOs move (movesOn()).
 void WavetableSynth::startWander (Voice& voice) noexcept
 {
-    voice.wander.now = voice.wandering.nextBipolar();
-    voice.wander.to = voice.wandering.nextBipolar();
-    voice.wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+    for (size_t slot = 0; slot < voice.slotWanders.size(); ++slot)
+    {
+        auto& wander = voice.slotWanders[slot];
+        wander.now = voice.wanderings[slot].nextBipolar();
+        wander.to = voice.wanderings[slot].nextBipolar();
+        wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
+    }
 }
 
-void WavetableSynth::moveWander (Voice& voice) noexcept
+void WavetableSynth::moveWander (Voice& voice, int slot) noexcept
 {
-    auto& wander = voice.wander;
+    auto& wander = voice.slotWanders[(size_t) slot];
 
     if (--wander.stepsLeft <= 0)
     {
-        wander.to = voice.wandering.nextBipolar();
+        wander.to = voice.wanderings[(size_t) slot].nextBipolar();
         wander.stepsLeft = std::max (1, juce::roundToInt (driftWanderSteps));
     }
 
@@ -819,6 +836,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     const auto sensitivity = values[velocity];
     const auto gain = 1.0f - sensitivity + sensitivity * velocityValue * velocityValue;
     const auto glidesIn = portamento && lastNote >= 0.0f;
+    const auto resets = choiceOf<Phase> (values[phase]) == Phase::reset;
 
     // Glide from the note before: always, or only for a note played over a held one (legato), as the synth's.
     const auto glides = values[glide] > 0.0f && lastNote >= 0.0f
@@ -858,7 +876,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
         if (! legato)
         {
             if (! voice.amp.isActive())
-                startVoice (voice);
+                startVoice (voice, resets);
 
             voice.velocity = velocityValue;
             voice.velocityGain = gain;
@@ -884,7 +902,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     if (voice.amp.isActive())
         stealVoice (voice);
 
-    startVoice (voice);
+    startVoice (voice, resets);
     voice.note = note;
     voice.held = true;
     voice.sustained = false;
@@ -1144,9 +1162,10 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         if (settings.lfoRetrigger[i])
                             voice.lfosNow[i] = voice.lfos[i].next (settings.lfoShapes[i]);
 
-                    // The Drift source, only while a slot plays it.
-                    if (settings.wanders)
-                        moveWander (voice);
+                    // Each slot's Drift, only while the slot plays it.
+                    for (int slot = 0; slot < numModSlots; ++slot)
+                        if (settings.wanders[(size_t) slot])
+                            moveWander (voice, slot);
                 }
 
                 sources[(size_t) ModSource::envelope2] = voice.envelope2Now;
@@ -1167,7 +1186,12 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 sources[(size_t) ModSource::note] = (voice.pitch - 60.0f) / 48.0f;
                 sources[(size_t) ModSource::modWheel] = modWheel;
                 sources[(size_t) ModSource::random] = voice.random;
-                sources[(size_t) ModSource::drift] = voice.wander.now;
+                // A slot's source, Drift being the slot's own wander.
+                const auto sourceOf = [&sources, &settings, &voice] (size_t slot)
+                {
+                    return settings.sources[slot] == ModSource::drift ? voice.slotWanders[slot].now
+                                                                      : sources[(size_t) settings.sources[slot]];
+                };
 
                 // The slots that aim at other slots' amounts first, each by its own amount as set, so that nothing loops:
                 // one that aims at its own does nothing, and an amount moved stays within its range.
@@ -1181,7 +1205,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         const auto moved = (size_t) target - (size_t) ModTarget::slot1Amount;
 
                         if (settings.sources[slot] != ModSource::none && isAmountTarget (target) && moved != slot)
-                            amounts[moved] += sources[(size_t) settings.sources[slot]] * settings.amounts[slot];
+                            amounts[moved] += sourceOf (slot) * settings.amounts[slot];
                     }
 
                     for (auto& amount : amounts)
@@ -1193,7 +1217,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 for (size_t slot = 0; slot < (size_t) numModSlots; ++slot)
                     if (settings.sources[slot] != ModSource::none && settings.targets[slot] != ModTarget::none
                         && ! isAmountTarget (settings.targets[slot]))
-                        moves[(size_t) settings.targets[slot]] += sources[(size_t) settings.sources[slot]] * amounts[slot];
+                        moves[(size_t) settings.targets[slot]] += sourceOf (slot) * amounts[slot];
 
                 const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
                 const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
@@ -1337,7 +1361,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                                                                     .frequency = frequency,
                                                                     .resonance = filterResonance,
                                                                     .steep = settings.steep,
-                                                                    .q = dsp::getResonanceQ (filterResonance) },
+                                                                    .q = dsp::getSynthResonanceQ (filterResonance) },
                                                                   sampleRate);
 
                     // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.

@@ -39,6 +39,11 @@ The full text of every step, as it was written when it was built, is in the
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias
   as little as the Synth's.
+- **S6.7 One synth, part B, phase 1:** the Synth's fifty presets have copies on the Wavetable's engine, converted by
+  formulas and measured phrase by phrase against the Synth (35 alike in every measure, the others named with their
+  causes), which the example songs now play; the Wavetable's Basic Shapes are the Synth's own waves, its 12 dB
+  resonance reaches the Synth's Q, its Phase lets oscillators run free, and its Drift wanders on its own for each
+  slot.
 - **S6.10 Motion:** the Chorus, the Flanger and the Phaser become the three modes of one device, Motion, under three
   tabs: one Mix that means the effect alone in every mode (half and half at 50 %), a 10 ms fade between modes, their
   24 presets converted to play as they did, so that Swap tries a chorus, a flanger and a phaser on a sound in place,

@@ -1710,6 +1710,18 @@
         ]
       },
       {
+        "id": "phase",
+        "name": "Phase",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Reset",
+        "choices": [
+          "Reset",
+          "Free"
+        ]
+      },
+      {
         "id": "bendRange",
         "name": "Bend Range",
         "unit": "semitones",

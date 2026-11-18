@@ -7,6 +7,7 @@
 // tables it no longer plays only once no control step reads them, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/dsp/MultimodeFilter.h"
+#include "devices/dsp/Oscillators.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/Wavetable.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -1891,7 +1892,7 @@ TEST_CASE ("The wavetable synth's Drift source lets each voice's cutoff wander o
 {
     // Drift on the cutoff at 2 semitones (as the synth's Drift at full), the keys not followed: the newest note's cutoff
     // wanders around 1 kHz, no further than 2 semitones either way; a second voice wanders a way of its own; and two renders
-    // are the same.
+    // are the same. The first slot's Drift wanders as the one Drift each voice had before every slot had its own.
     auto values = getPlainValues (0.0f);
     values[WavetableSynth::filterOn] = 1.0f;
     values[WavetableSynth::cutoff] = 1000.0f;
@@ -2092,4 +2093,206 @@ TEST_CASE ("The wavetable synth's LFO fade, legato glide, Drift and a slot on an
     const auto large = play (*makeSynth(), values, 24000, events, 512);
     CHECK (peakOf (small.left, 0, 24000) > 0.05f);
     CHECK (largestDifference (small, large) < 1.0e-4f);
+}
+
+TEST_CASE ("The wavetable synth's resonance makes a 12 dB section's Q as the synth's does, from 0.5 to 25")
+{
+    // Roadmap step S6.7: the synth's presets, moved onto the wavetable's engine, want its filter's whole reach: a 12 dB
+    // low-pass at no resonance rounds its cutoff off, a Q of 0.5 (6 dB down there, where a Butterworth's 0.71 is 3 dB down),
+    // and at full it rings at a Q of 25 (the Filter device's curve stops at 16).
+    std::vector<float> values;
+
+    for (const auto& parameter : WavetableSynth::info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    values[WavetableSynth::filterSlope] = 0.0f; // 12 dB
+    constexpr double rate = 48000.0, cutoff = 1000.0;
+    const auto atCutoff = [&] (float resonance)
+    {
+        values[WavetableSynth::resonance] = resonance;
+        return juce::Decibels::gainToDecibels (WavetableSynth::getFilterMagnitude (values, cutoff, cutoff, rate));
+    };
+
+    CHECK (atCutoff (0.0f) == doctest::Approx (juce::Decibels::gainToDecibels (0.5)).epsilon (0.02));
+    CHECK (atCutoff (1.0f) == doctest::Approx (juce::Decibels::gainToDecibels (25.0)).epsilon (0.02));
+
+    // And dsp::getSynthResonanceQ()'s curve between.
+    for (const auto resonance : { 0.1f, 0.35f, 0.6f, 0.9f })
+    {
+        CAPTURE (resonance);
+        CHECK (atCutoff (resonance)
+               == doctest::Approx (juce::Decibels::gainToDecibels (devices::dsp::getSynthResonanceQ (resonance))).epsilon (0.02));
+    }
+}
+
+TEST_CASE ("Basic Shapes' frames are the synth's own waves, in phase and polarity, and the Pulse Width table's frames its pulses")
+{
+    // Roadmap step S6.7: so that two oscillators an octave apart, or one and the sub, sum as the synth's always have (a saw
+    // under a pulse, as its Duo Lead and DCO Bass play them): Basic Shapes' sine, triangle, saw and square, and each of the
+    // Pulse Width table's pulses (from 50 % down to 2 %), against the synth's oscillator reading its own waves (Oscillators.h),
+    // each with all its harmonics: the same shape, not turned over nor moved along its cycle.
+    devices::dsp::Oscillator oscillator;
+    oscillator.setFrequency (20.0, testRate); // every harmonic
+
+    const auto compare = [&oscillator] (const Wavetable& table, int frame, devices::dsp::Waveform wave, float width)
+    {
+        const auto level = table.getLevel (frame, 0);
+        auto both = 0.0, tables = 0.0, synths = 0.0;
+
+        for (int i = 0; i < level.length; ++i)
+        {
+            const auto a = (double) level.samples[i];
+            const auto b = (double) oscillator.valueAt (wave, (float) i / (float) level.length, width);
+            both += a * b;
+            tables += a * a;
+            synths += b * b;
+        }
+
+        return both / std::sqrt (tables * synths);
+    };
+
+    const auto basic = devices::getFactoryWavetable (devices::findFactoryWavetable ("Basic Shapes"));
+    REQUIRE (basic->getNumFrames() == 4);
+
+    for (const auto wave :
+         { devices::dsp::Waveform::sine, devices::dsp::Waveform::triangle, devices::dsp::Waveform::saw, devices::dsp::Waveform::square })
+    {
+        CAPTURE ((int) wave);
+        CHECK (compare (*basic, (int) wave, wave, 0.5f) > 0.999);
+    }
+
+    const auto pulses = devices::getFactoryWavetable (devices::findFactoryWavetable ("Pulse Width"));
+
+    for (int frame = 0; frame < pulses->getNumFrames(); ++frame)
+    {
+        CAPTURE (frame);
+        const auto width = 0.5f - 0.48f * (float) frame / (float) (pulses->getNumFrames() - 1);
+        if (width >= 0.05f) // the synth's narrowest
+            CHECK (compare (*pulses, frame, devices::dsp::Waveform::square, width) > 0.999);
+    }
+}
+
+TEST_CASE ("The wavetable synth's Phase: Reset starts each note from its waves' starts, Free lets a voice's waves run on")
+{
+    // One voice played twice (the second note on the voice the first left), its first oscillator with the sub: on Reset, as
+    // before, both notes start alike; on Free, the second starts where the voice's waves were as the first ended. Free is the
+    // same every time, and in blocks of any size, in unison too.
+    auto values = getPlainValues (2.0f / 3.0f);
+    values[WavetableSynth::subLevel] = 0.5f;
+    values[WavetableSynth::env1Release] = 5.0f;
+    const auto noteLength = (int) testRate / 4, secondAt = (int) testRate / 2, compared = 2048;
+    const std::vector<NoteEvent> events { noteOn (0, 48), noteOff (noteLength, 48), noteOn (secondAt, 48),
+                                          noteOff (secondAt + noteLength, 48) };
+
+    const auto playWith = [&] (WavetableSynth::Phase phase, int blockSize)
+    {
+        auto synth = makeSynth();
+        auto with = values;
+        with[WavetableSynth::phase] = (float) phase;
+        return play (*synth, with, secondAt + noteLength + 4800, events, blockSize);
+    };
+
+    const auto startsAlike = [compared, secondAt] (const Played& played)
+    {
+        for (int i = 0; i < compared; ++i)
+            if (std::abs (played.left[(size_t) i] - played.left[(size_t) (secondAt + i)]) > 1.0e-6f)
+                return false;
+
+        return true;
+    };
+
+    const auto reset = playWith (WavetableSynth::Phase::reset, testBlockSize);
+    CHECK (startsAlike (reset));
+    CHECK (WavetableSynth::info.parameters[WavetableSynth::phase].defaultValue == doctest::Approx ((float) WavetableSynth::Phase::reset));
+
+    const auto free = playWith (WavetableSynth::Phase::free, testBlockSize);
+    CHECK_FALSE (startsAlike (free));
+
+    // Its first note starts as Reset's does: a voice that has never played starts from its waves' starts.
+    for (int i = 0; i < noteLength; ++i)
+        REQUIRE (free.left[(size_t) i] == doctest::Approx (reset.left[(size_t) i]).epsilon (1.0e-6));
+
+    values[WavetableSynth::unisonVoices] = 2.0f; // three
+    const auto inUnison = playWith (WavetableSynth::Phase::free, testBlockSize);
+
+    for (const auto blockSize : { 32, 512 })
+    {
+        CAPTURE (blockSize);
+        const auto again = playWith (WavetableSynth::Phase::free, blockSize);
+        auto largest = 0.0f;
+
+        for (size_t i = 0; i < inUnison.left.size(); ++i)
+            largest = std::max ({ largest, std::abs (again.left[i] - inUnison.left[i]), std::abs (again.right[i] - inUnison.right[i]) });
+
+        CHECK (largest < 1.0e-5f);
+    }
+
+    values[WavetableSynth::unisonVoices] = 0.0f;
+
+    // In Mono too: the one voice runs on.
+    values[WavetableSynth::voiceMode] = 1.0f;
+    CHECK (startsAlike (playWith (WavetableSynth::Phase::reset, testBlockSize)));
+    CHECK_FALSE (startsAlike (playWith (WavetableSynth::Phase::free, testBlockSize)));
+}
+
+TEST_CASE ("The wavetable synth's Drift wanders on its own for each slot: on each oscillator's pitch, they beat against each other")
+{
+    // Two sines on one note, each on its own oscillator, at one level. Drift on each one's pitch, from two slots (as the synth's
+    // Drift moves its two oscillators, each on its own): their pitches wander apart, and their sum beats, its level swinging far.
+    // The same Drift on both together (one slot on Pitch) moves them as one: their sum holds its level. Two renders agree, and
+    // so do blocks of 32 and 512 samples.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::osc2Position] = 0.0f;
+    values[WavetableSynth::osc2Level] = 1.0f;
+    values[WavetableSynth::level] = -6.0f;
+    constexpr int numSamples = 96000, frame = 480;
+
+    const auto swing = [] (const Played& played)
+    {
+        auto low = 0.0f, high = 0.0f;
+
+        for (int start = 4800; start + frame <= numSamples; start += frame)
+        {
+            auto energy = 0.0f;
+
+            for (int i = start; i < start + frame; ++i)
+                energy += played.left[(size_t) i] * played.left[(size_t) i];
+
+            const auto level = juce::Decibels::gainToDecibels (std::sqrt (energy / (float) frame), -100.0f);
+            low = start == 4800 ? level : std::min (low, level);
+            high = start == 4800 ? level : std::max (high, level);
+        }
+
+        return high - low;
+    };
+
+    // Together: one slot on both oscillators' pitch.
+    values[WavetableSynth::mod1Source] = (float) WavetableSynth::ModSource::drift;
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::pitch;
+    values[WavetableSynth::mod1Amount] = 1.0f / 24.0f;
+    const auto together = play (*makeSynth(), values, numSamples, { noteOn (0, 69) });
+    CHECK (swing (together) < 0.5f);
+
+    // Apart: a slot on each.
+    values[WavetableSynth::mod1Target] = (float) WavetableSynth::ModTarget::osc1Pitch;
+    values[WavetableSynth::mod2Source] = (float) WavetableSynth::ModSource::drift;
+    values[WavetableSynth::mod2Target] = (float) WavetableSynth::ModTarget::osc2Pitch;
+    values[WavetableSynth::mod2Amount] = 1.0f / 24.0f;
+    const auto apart = play (*makeSynth(), values, numSamples, { noteOn (0, 69) });
+    INFO ("together " << swing (together) << " dB, apart " << swing (apart) << " dB");
+    CHECK (swing (apart) > 6.0f);
+    CHECK (play (*makeSynth(), values, numSamples, { noteOn (0, 69) }).left == apart.left);
+
+    for (const auto blockSize : { 32, 512 })
+    {
+        CAPTURE (blockSize);
+        const auto again = play (*makeSynth(), values, numSamples, { noteOn (0, 69) }, blockSize);
+        auto largest = 0.0f;
+
+        for (size_t i = 0; i < apart.left.size(); ++i)
+            largest = std::max (largest, std::abs (again.left[i] - apart.left[i]));
+
+        CHECK (largest < 1.0e-5f);
+    }
 }

@@ -50,11 +50,6 @@ namespace
         return h % 2 == 1 ? 1.0 / h : 0.0;
     }
 
-    double triangle (int h)
-    {
-        return h % 2 == 1 ? ((h / 2) % 2 == 0 ? 1.0 : -1.0) / ((double) h * h) : 0.0;
-    }
-
     // A frame from its wave as a formula of the angle around its cycle, sampled finely.
     std::vector<float> sampleCycle (const std::function<double (double angle)>& wave)
     {
@@ -72,10 +67,19 @@ namespace
         return frame / (double) (framesPerSweep - 1);
     }
 
+    // The synth's own four waves, each in the phase and polarity the synth's oscillators play it (devices/dsp/Oscillators.h:
+    // its sine, its triangle and saw, and its pulse at 50 %), so that they sum with each other, with the other oscillator and
+    // with the sub as the synth's always have: a sine from 0 rising; a triangle from its peak; a saw rising from its lowest
+    // (each harmonic -1/h in sine phase, where the other tables' saws fall); a square high for the first half of its cycle.
     std::shared_ptr<const Wavetable> makeBasicShapes()
     {
-        return Wavetable::fromHarmonics ("Basic Shapes", { withAmplitudes ([] (int h) { return h == 1 ? 1.0 : 0.0; }),
-                                                           withAmplitudes (triangle), withAmplitudes (saw), withAmplitudes (square) });
+        Harmonics fromPeak ((size_t) Wavetable::maxHarmonics);
+
+        for (int h = 1; h <= Wavetable::maxHarmonics; ++h)
+            fromPeak[(size_t) h - 1] = h % 2 == 1 ? std::complex<float> ((float) (1.0 / ((double) h * h)), 0.0f) : 0.0f;
+
+        return Wavetable::fromHarmonics ("Basic Shapes", { withAmplitudes ([] (int h) { return h == 1 ? 1.0 : 0.0; }), fromPeak,
+                                                           withAmplitudes ([] (int h) { return -saw (h); }), withAmplitudes (square) });
     }
 
     // A square narrowing into a thin pulse.

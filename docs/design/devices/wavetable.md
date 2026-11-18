@@ -58,7 +58,7 @@ In the editor: Type, Cutoff, Resonance, Slope, Drive, Key; the switch is at the 
 | Filter On | Off, On | On | The filter's switch. Off, the oscillators go to the amp as they are. |
 | Filter Type | Low Pass, High Pass, Band Pass, Notch, Comb +, Comb -, Vowel, Phaser, Sample & Hold | Low Pass | The filter's type: those of the [Filter](filter.md) device. |
 | Filter Cutoff | 20 Hz to 20 kHz | 2.5 kHz | The filter's frequency before key tracking and modulation move it. |
-| Filter Resonance | 0 to 100 % | 10 % | Sharpens the filter at its cutoff (for each type, as on the [Filter](filter.md) page). |
+| Filter Resonance | 0 to 100 % | 10 % | Sharpens the filter at its cutoff (for each type, as on the [Filter](filter.md) page, but a 12 dB section's Q, as the [Synth](synth.md)'s: see "Filter" below). |
 | Filter Slope | 12 dB, 24 dB | 24 dB | The slope per octave of Low Pass, High Pass, Band Pass and Notch. |
 | Filter Drive | 0 to 24 dB | 0 dB | Saturates what goes into the filter. |
 | Filter Key Tracking | 0 to 100 % | 50 % | How far the cutoff follows the key, around middle C: at 100 %, a semitone for each semitone. |
@@ -101,7 +101,7 @@ Eight rows, each a slot: its source, its target and its amount.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
-| Mod 1 to 8 Source | None, Envelope 2, Envelope 3, LFO 1, LFO 2, Velocity, Note, Mod Wheel, Random, Drift | Envelope 2 for Mod 1, None for the others | What moves the target. Note is the key around middle C; Random is a value drawn for each note; Drift is a slow wander of each voice's own, from -1 to 1. |
+| Mod 1 to 8 Source | None, Envelope 2, Envelope 3, LFO 1, LFO 2, Velocity, Note, Mod Wheel, Random, Drift | Envelope 2 for Mod 1, None for the others | What moves the target. Note is the key around middle C; Random is a value drawn for each note; Drift is a slow wander of each voice's own for each slot, from -1 to 1. |
 | Mod 1 to 8 Target | None, Osc 1 Position, Osc 1 Warp, Osc 1 Pitch, Osc 1 Level, Osc 2 Position, Osc 2 Warp, Osc 2 Pitch, Osc 2 Level, Pitch, Sub Level, Noise Level, Cutoff, Resonance, Volume, Pan, Unison Detune, Mod 1 Amount to Mod 8 Amount | Cutoff for Mod 1, None for the others | What is moved. Pitch is both oscillators' and the sub's. Mod N Amount is another slot's amount: a slot's own is shown in its list but can't be chosen. |
 | Mod 1 to 8 Amount | -100 to +100 % | 25 % for Mod 1, 0 % for the others | How far. At 100 % a slot moves a position, a warp amount, a level, the resonance or another slot's amount across its whole range, a pitch by 24 semitones, the cutoff by eight octaves, the unison detune by 100 cents, the volume from silence to twice as loud and the pan all the way to a side. |
 
@@ -110,13 +110,14 @@ note.
 
 ### Voice
 
-In the editor: Mode, Glide, Glide Mode, Bend, Velocity, Level.
+In the editor: Mode, Glide, Glide Mode, Phase, Bend, Velocity, Level.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Voices | Poly, Mono | Poly | Sixteen voices, or one that plays legato. |
 | Glide | 0 ms to 2 s | 0 ms | How long a note takes to glide from the one before; 0 is none. |
 | Glide Mode | Always, Legato | Always | Whether every note glides, or only one played while another is held, as the [Synth](synth.md)'s. |
+| Phase | Reset, Free | Reset | Reset starts every oscillator (each unison copy and the sub) at the start of its wave at each note, so that a note sounds the same every time; Free lets each voice's oscillators run on from where they were when it last played, as an analog synth's do, in Poly and in Mono (a voice that has never played starts as on Reset), as the [FM](fm.md) synth's Phase. |
 | Bend Range | 0 to 24 semitones | 2 semitones | How far the pitch wheel bends, either way. |
 | Velocity | 0 to 100 % | 60 % | How much of the level depends on the note's velocity, which counts squared. |
 | Level | -36 to +6 dB | -6 dB | The synth's output level. |
@@ -135,7 +136,10 @@ takes about 212 KB, 2.6 times what four samples a cycle took: Basic Shapes 850 K
 a sound file of 256 frames 54 MB, which takes about 2.7 times as long to make.
 
 Thirteen tables come with the synth, made from formulas when first needed, so that no sound files ship: Basic Shapes
-(sine, triangle, saw, square), Pulse Width, Saw Build, Square Build, Vowels, Sync, FM, FM Hollow, Fold, Digital, Comb,
+(sine, triangle, saw, square, each the [Synth](synth.md)'s own wave in phase and polarity: a sine rising from 0, a triangle from
+its peak, a saw rising, a square high for the first half of its cycle, so that they sum with the other oscillator and the
+sub as the Synth's do; since roadmap step S6.7), Pulse Width (pulses high for the first part of their cycle, from 50 % down
+to 2 %, as the Synth's pulse), Saw Build, Square Build, Vowels, Sync, FM, FM Hollow, Fold, Digital, Comb,
 Growl and Spectra. A sound file becomes a table too. A WAV file whose `clm ` chunk gives its frames' length, as Serum
 writes it, is cut into frames of that length; any other sound is frames of 2048 samples when it is a whole number of
 them, one frame when it is shorter than two (a single cycle of any length), and otherwise its first frames of 2048, up
@@ -170,11 +174,14 @@ carries no constant offset.
 at equal power and, with Position Spread, spread across the table, each at a level that keeps the note as loud. The
 stack's steps are taken by the copies in turn, and each step reads the copy of the table its own pitch allows. With
 Drift, each copy's pitch wanders toward a new place every so often at a pace of its own, from half to twice the
-middle pace, drawn again each note. The first copy starts each note at the start of its wave, the others at places
+middle pace, drawn again each note. On Reset (Phase), the first copy starts each note at the start of its wave, the others at places
 drawn from a fixed seed.
 
 **Filter.** One of the nine types of `dsp::MultimodeFilter`, the code the [Filter](filter.md) device and the
-[Synth](synth.md) share. The cutoff a voice plays is Filter Cutoff moved by key tracking and the slots aimed at it,
+[Synth](synth.md) share. Resonance makes a 12 dB section's Q by the synth's own curve, from 0.5, softer than a
+Butterworth, to 25, as the [Synth](synth.md)'s does (`dsp::getSynthResonanceQ()`; since roadmap step S6.7, whose presets
+from the Synth needed its reach), where the Filter device's runs from 0.71 to 16: a 12 dB low-pass or high-pass and the
+band-pass and the notch at either slope; a 24 dB low-pass or high-pass, and the other types, take the resonance alike. The cutoff a voice plays is Filter Cutoff moved by key tracking and the slots aimed at it,
 kept between 20 Hz and 0.45 of the sample rate. Filter Drive soft-clips what goes into the filter at twice the sample
 rate through a per-voice oversampler, the curve played by its antiderivative so that what it adds doesn't fold back as
 aliasing; it fades in and out over two thirds of a millisecond, at any rate.
@@ -182,9 +189,11 @@ aliasing; it fades in and out over two thirds of a millisecond, at any rate.
 **Modulation.** The slots are worked out for each voice on its own, so an envelope sweeps every note's table from its
 start. Several slots on one target add up. Each LFO comes into each note over its Fade In, the note's share growing in a
 straight line from nothing, as the Synth's does, counted from the note's start (a legato note in Mono goes on with the
-voice's). Drift wanders as the Synth's Drift moves its cutoff: each note from a place of its own, toward a new one every
-0.45 s, gliding there with a time constant of 0.3 s, from a fixed seed for each voice, moved only while a slot plays it;
-a slot from Drift to Cutoff at 2.08 % (two semitones) is the Synth's Drift at full on its cutoff. A slot aimed at Mod N
+voice's). Drift wanders on its own for each slot that plays it, as the Synth's Drift moves each of its two oscillators and its
+cutoff on its own (since roadmap step S6.7): each note from a place of its own, toward a new one every 0.45 s, gliding
+there with a time constant of 0.3 s, from a fixed seed for each voice and slot, moved only while its slot plays it; slots
+from Drift to Osc 1 Pitch and Osc 2 Pitch at 0.33 % (8 cents) and to Cutoff at 2.08 % (two semitones) are the Synth's Drift
+at full: the two oscillators wander against each other, and beat. A slot aimed at Mod N
 Amount adds its source, times its own amount, to slot N's amount, so the mod wheel on an LFO slot's amount brings its
 vibrato in. So that nothing loops, those slots are worked out first, each by its own amount as set, which nothing moves;
 one aimed at its own amount does nothing; and an amount moved stays within -100 and +100 %. Envelopes 2 and 3, the LFOs, the slots, the pitch, the frames read and the
@@ -243,8 +252,7 @@ over Voice; Unison and Modulation.
 - Two oscillators and one filter; no third oscillator, no second filter, no filter routing.
 - The unison is shared: both oscillators have the same number of copies, detune, spread, stack and drift.
 - Eight slots and nine sources; no aftertouch or MPE; modulation is set in the Matrix's lists, not dragged onto the
-  knobs it moves. A slot that moves another's amount can't itself be moved, and one Drift for each voice moves every
-  slot that plays it alike (the Synth's oscillators and cutoff wander each their own way).
+  knobs it moves. A slot that moves another's amount can't itself be moved.
 - The LFOs' shapes are fixed; none can be drawn. No arpeggiator.
 - No oversampling of the oscillators and no quality setting: Sync's jump is smoothed by a two-point PolyBLEP only, and
   Bend, Pulse Width, Mirror and FM only read a copy with fewer harmonics, so warped sounds alias on high notes.

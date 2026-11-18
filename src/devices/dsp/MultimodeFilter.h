@@ -9,7 +9,8 @@
 // - Phaser: six all-pass stages fed back, mixed with what goes in, whose three notches the cutoff moves;
 // - Sample & Hold: the sound held at twice the cutoff's rate, aliasing on purpose, as a lo-fi sampler does.
 // The resonance sharpens each: it narrows the formants, feeds the phaser back, and feeds the held sound back to ring at
-// the cutoff. A 12 dB section's Q comes from the resonance by getResonanceQ(), but in the synth, whose curve is its own.
+// the cutoff. A 12 dB section's Q comes from the resonance by getResonanceQ(), but in the synths, whose curve is their own
+// (getSynthResonanceQ()).
 #pragma once
 
 #include "CombFilter.h"
@@ -60,6 +61,14 @@ inline bool isSteep (float slope) noexcept
 inline double getResonanceQ (float resonance) noexcept
 {
     return 0.70710678 * std::pow (2.0, 4.5 * (double) std::clamp (resonance, 0.0f, 1.0f));
+}
+
+// The synths' own curve for a 12 dB section's Q: from 0.5, softer than a Butterworth, rounding a sound's top as an analog
+// synth's filter does with its resonance down, to 25, near self-oscillation, as Synth.cpp has it (the wavetable synth's
+// since roadmap step S6.7 moved the synth's presets onto its engine).
+inline double getSynthResonanceQ (float resonance) noexcept
+{
+    return 0.5 * std::pow (50.0, (double) std::clamp (resonance, 0.0f, 1.0f));
 }
 
 // How far a softer note closes a synth's filter, in semitones, with its Filter Velocity at full: four octaves at velocity 0,

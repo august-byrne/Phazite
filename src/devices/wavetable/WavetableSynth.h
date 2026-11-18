@@ -12,9 +12,9 @@
 // each note, each note's share of them coming in over a fade as a Juno's LFO delay does; and eight modulation slots, each a
 // source moving a destination by an amount, for each voice on its own, so an envelope sweeps every note's table from its
 // start; a slot may move another's amount, as the mod wheel brings an LFO's vibrato in, and Drift, a slow wander of each
-// voice's own, lets its cutoff wander as an analog voice's does. 16 voices, or one in mono mode, legato, with glide (for
-// every note, or only those played over a held one, as the synth's); in poly mode
-// every note takes a voice of its own, a key played again too: what still rings of it rings out over its release,
+// voice's own for each slot that plays it, lets its oscillators and its cutoff wander apart as an analog voice's do. 16
+// voices, or one in mono mode, legato, with glide (for every note, or only those played over a held one, as the synth's);
+// in poly mode every note takes a voice of its own, a key played again too: what still rings of it rings out over its release,
 // untouched, as the synth's does (Synth.h). It has no effects of its own: Phazite's devices follow it. Its noise, unison
 // phases, drift and random values come from fixed seeds, so it renders the same every time.
 #pragma once
@@ -141,6 +141,7 @@ public:
         voiceMode,
         glide,
         glideMode, // a GlideMode
+        phase,     // a Phase
         bendRange,
         velocity,
         level
@@ -240,7 +241,8 @@ public:
         note, // the key, centred on middle C (60), an octave each side for each 0.25
         modWheel,
         random, // a value for each note, from 0 to 1
-        drift   // a slow wander of each voice's own, from -1 to 1, as the synth's Drift moves an analog voice's cutoff
+        drift   // a slow wander of each voice's own for each slot, from -1 to 1, as the synth's Drift moves an analog voice's
+                // oscillators and cutoff, each on its own
     };
 
     // What a slot moves: a part of the sound, or another slot's amount (slot1Amount to slot8Amount: "Mod 1 Amount" to "Mod 8
@@ -281,6 +283,15 @@ public:
     {
         always, // every note glides from the one before
         legato  // only a note played while another is held, as the synth's (Synth::GlideMode)
+    };
+
+    // Where a note starts in its waves, as the FM synth's Phase has it (FmSynth::Phase).
+    enum class Phase
+    {
+        reset, // every oscillator (each unison copy and the sub) from its place at the start of each note: a note sounds the
+               // same every time
+        free   // each voice's oscillators running on from where they were when it last played, a little different each time,
+               // as an analog synth's oscillators run on; a voice that has never played starts as it would reset
     };
 
     static const DeviceInfo info;
@@ -373,18 +384,19 @@ private:
         dsp::Oscillator sub;
         dsp::Noise noise;
         dsp::Random phases;
-        dsp::Random drifting;                           // where its unison's drift wanders, the same every time
-        dsp::Random wandering;                          // where the Drift source wanders, the same every time,
-        Wander wander;                                  // and where it is (its pace the middle one)
-        dsp::Adsr amp, envelope2, envelope3;            // the second and third at the control rate
-        std::array<dsp::Lfo, 2> lfos;                   // those that start again with each note, at the control rate
-        std::array<dsp::MultimodeFilter, 2> filters;    // each side
-        std::array<dsp::AntialiasedShaper, 2> drives;   // the filter's drive, each side, at twice the rate
-        float driveBlend = 0.0f;                        // how far the sound goes through them: fades as the drive comes on or off
-        bool filtering = false;                         // the filter is on
-        bool stepPending = true;                        // it (re)started since the last control step: its values are due
-        int controlAhead = 0;                           // how far its control-rate parts are ahead of the samples it played (movesOn())
-        float envelope2Now = 0.0f, envelope3Now = 0.0f; // their values as they last moved
+        dsp::Random drifting;                            // where its unison's drift wanders, the same every time
+        std::array<dsp::Random, numModSlots> wanderings; // where each slot's Drift source wanders, the same every time,
+        std::array<Wander, numModSlots> slotWanders;     // and where it is (its pace the middle one): each slot its own
+        dsp::Adsr amp, envelope2, envelope3;             // the second and third at the control rate
+        std::array<dsp::Lfo, 2> lfos;                    // those that start again with each note, at the control rate
+        std::array<dsp::MultimodeFilter, 2> filters;     // each side
+        std::array<dsp::AntialiasedShaper, 2> drives;    // the filter's drive, each side, at twice the rate
+        float driveBlend = 0.0f;                         // how far the sound goes through them: fades as the drive comes on or off
+        bool filtering = false;                          // the filter is on
+        bool stepPending = true;                         // it (re)started since the last control step: its values are due
+        bool hasPlayed = false;                          // it played a note since the synth was prepared or reset (Phase::free)
+        int controlAhead = 0;                            // how far its control-rate parts are ahead of the samples it played (movesOn())
+        float envelope2Now = 0.0f, envelope3Now = 0.0f;  // their values as they last moved
         std::array<float, 2> lfosNow {};
         float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
         int age = 0;                        // the samples since its note began (up to a limit)
@@ -454,11 +466,11 @@ private:
     void startNote (int note, float velocity, std::span<const float> parameters, bool portamento = false);
     void slideTo (int note, float seconds); // every sounding voice, evenly
     void stopNote (int note, std::span<const float> parameters);
-    void startVoice (Voice&);
+    void startVoice (Voice&, bool resets);           // its waves from their starts too while the phases reset (Phase)
     void startDrift (Voice&) noexcept;               // a note's drift, each unison voice from somewhere new
     void moveDrift (Voice&, int unison) noexcept;    // a control step on
-    void startWander (Voice&) noexcept;              // a note's Drift source, from somewhere new, as the synth's drift starts
-    void moveWander (Voice&) noexcept;               // a control step on
+    void startWander (Voice&) noexcept;              // a note's Drift sources, each from somewhere new, as the synth's drifts start
+    void moveWander (Voice&, int slot) noexcept;     // a slot's, a control step on
     bool isAnotherKeyHeld (int note) const noexcept; // a voice but one playing this note is held: a legato note glides
 
     // Whether the control-rate parts move on at a step that starts now, each move a whole control step's, so that they keep

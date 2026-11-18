@@ -233,7 +233,7 @@ TEST_CASE ("The wavetable synth's editor shows the unison's stack and drift with
 
     editor.getLayout().showPage (2);
     phazite::test::checkChildrenApart (editor);
-    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "bendRange", "velocity", "level" });
+    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level" });
 
     editor.getLayout().showPage (3);
     phazite::test::checkChildrenApart (editor);
@@ -280,7 +280,7 @@ TEST_CASE ("The wavetable synth's editor shows the unison's stack and drift with
 }
 
 TEST_CASE (
-    "The wavetable synth's editor shows each LFO's fade after its retrigger, Glide Mode after Glide, and Drift and the slots' amounts in the matrix")
+    "The wavetable synth's editor shows each LFO's fade after its retrigger, Glide Mode after Glide, Phase after it, and Drift and the slots' amounts in the matrix")
 {
     Screen screen;
     auto& editor = *screen.editor;
@@ -308,6 +308,18 @@ TEST_CASE (
     glideMode->setSelectedItemIndex (1, juce::sendNotificationSync);
     CHECK (screen.getValue ("glideMode") == doctest::Approx ((float) WavetableSynth::GlideMode::legato));
     CHECK (screen.describeUndo() == juce::String ("Undo Change Glide Mode"));
+
+    // Phase a list of Reset and Free, as the FM synth's, at Reset, its tooltip saying what each does.
+    auto* phase = dynamic_cast<juce::ComboBox*> (editor.findControl ("phase"));
+    REQUIRE (phase != nullptr);
+    CHECK (phase->getTitle() == juce::String ("Phase"));
+    REQUIRE (phase->getNumItems() == 2);
+    CHECK (phase->getText() == juce::String ("Reset"));
+    CHECK (phase->getItemText (1) == juce::String ("Free"));
+    CHECK (phase->getTooltip().contains ("run on from where they were"));
+    phase->setSelectedItemIndex (1, juce::sendNotificationSync);
+    CHECK (screen.getValue ("phase") == doctest::Approx ((float) WavetableSynth::Phase::free));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Phase"));
 
     // The matrix's sources end with Drift, its targets with the eight slots' amounts, of which a slot's own can't be chosen.
     auto* source = dynamic_cast<juce::ComboBox*> (editor.findControl ("mod2Source"));

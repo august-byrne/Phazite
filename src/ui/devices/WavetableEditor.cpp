@@ -509,13 +509,17 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
                 addControl (getParameterID (WavetableSynth::getModParameter (slot, field)), *control);
 
     modulation.push_back ({ "Matrix", &matrix, Matrix::getPreferredWidth(), Matrix::getPreferredHeight(), Matrix::getPreferredHeight() });
-    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "glideMode", "bendRange", "velocity", "level" }, 6,
+    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level" }, 7,
                                             ParameterControls::Size::compact,
-                                            { "Mode", "Glide", "Glide Mode", "Bend", "Velocity", "Level" }));
+                                            { "Mode", "Glide", "Glide Mode", "Phase", "Bend", "Velocity", "Level" }));
+
+    if (auto* phase = dynamic_cast<juce::SettableTooltipClient*> (findControl ("phase")))
+        phase->setTooltip ("Reset starts every oscillator at the start of its wave at each note, so that a note sounds the same every "
+                           "time; Free lets the oscillators run on from where they were");
 
     // A part to a column, as tall as the dock is short, so that only the list has tabs: in the dock, side by side on each
-    // page: the oscillators; the filter and the amp's envelope; the sub and noise over how it plays (a row of six, with its
-    // glide's mode, as wide as a page); then the unison and the rest of the modulation, the list down its side.
+    // page: the oscillators; the filter and the amp's envelope; the sub and noise over how it plays (a row of seven, with its
+    // glide's mode and its phase, as wide as a page); then the unison and the rest of the modulation, the list down its side.
     const auto amp = modulation.front(), voice = modulation.back();
     const std::vector<DeviceLayout::Part> rest (modulation.begin() + 1, modulation.end() - 1);
     setParts ({ { oscillatorParts[0] }, { oscillatorParts[1] }, { filter }, { amp }, { subAndNoise, voice }, { unison }, rest }, { 6 });

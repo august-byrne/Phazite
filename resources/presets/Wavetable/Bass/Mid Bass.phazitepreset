@@ -96,6 +96,7 @@
       "voiceMode": "Mono",
       "glide": 30.0,
       "glideMode": "Always",
+      "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.4,
       "level": -2.0

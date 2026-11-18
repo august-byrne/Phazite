@@ -1431,6 +1431,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/StereoTests.cpp
         tests/StretchTests.cpp
         tests/SwapTests.cpp
+        tests/SynthConversion.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
         tests/TestAudioDevice.cpp
