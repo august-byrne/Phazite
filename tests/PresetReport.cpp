@@ -3,7 +3,7 @@
 // checks them (docs/presets.md): each played as one note at its kind's pitch, at velocity 100 and again at 50 (for what
 // velocity does), measured for its level, loudness, attack, decay, release, brightness as it goes on, pitch and width; each
 // kit's pads one at a time; how far and how long each sidechain preset ducks a sound under each kit's kick; how much each
-// saturator preset colours a sine; how far each saturator preset with its band on lifts each octave of noise at three levels; what each vinyl
+// saturator preset colours a sine; how far each saturator preset with its band on lifts each octave of noise at three levels; what each Age
 // preset does to the pitch, the band and the sides, and its noise; and each EQ preset's response, band by band. It writes a
 // report and WAV files to listen to: the note, and a phrase of its kind of
 // sound (a bass line, a melody, chords, an arpeggio, a beat), and a pad pumping under each kick. ctest and CI skip it; run
@@ -12,6 +12,7 @@
 // with the environment variable PHAZITE_PRESET_REPORT naming the folder for report.md and the WAV files (else a temporary
 // folder, which it names).
 #include "TestHelpers.h"
+#include "devices/age/Age.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
 #include "devices/dsp/Random.h"
@@ -23,7 +24,6 @@
 #include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/LoudnessMeter.h"
@@ -711,39 +711,39 @@ std::array<float, std::size (bandOctaves)> measureLift (const Preset& preset, fl
 }
 
 //==============================================================================
-// The vinyl's presets, each measured while the song plays, at 120 BPM: how far a 1 kHz sine's pitch swings over 6 s (from
+// Age's presets, each measured while the song plays, at 120 BPM: how far a 1 kHz sine's pitch swings over 6 s (from
 // its 1st to its 99th percentile, in cents: its wow and its flutter together); what it does to pink noise in six bands (the
 // third octaves at 63, 125, 1000, 4000, 8000 and 16000 Hz, its noise off); how far it narrows the sides (a 1 kHz sine with
 // its sides out of step); the distortion of a sine at 1 and at 8 kHz at -12 dBFS (the second to the fifth harmonics under
 // 20 kHz, against the tone); and its noise on silence: the hiss's level and the crackles, how many a second and the loudest.
-struct VinylMeasures
+struct AgeMeasures
 {
     float swing = 0.0f, side = 0.0f, thd1k = 0.0f, thd8k = 0.0f, hiss = 0.0f, clicks = 0.0f, cracklePeak = 0.0f;
     std::array<float, 6> bands {};
 };
 
-constexpr double vinylBands[] = { 63.0, 125.0, 1000.0, 4000.0, 8000.0, 16000.0 };
+constexpr double ageBands[] = { 63.0, 125.0, 1000.0, 4000.0, 8000.0, 16000.0 };
 
 // A preset's values with its noise off, or with one of its noises alone.
-std::vector<float> vinylValues (const Preset& preset, bool hiss, bool crackle)
+std::vector<float> ageValues (const Preset& preset, bool hiss, bool crackle)
 {
     auto values = preset.values;
 
     if (! hiss)
-        values[devices::Vinyl::hiss] = devices::Vinyl::info.parameters[devices::Vinyl::hiss].minimum;
+        values[devices::Age::hiss] = devices::Age::info.parameters[devices::Age::hiss].minimum;
 
     if (! crackle)
-        values[devices::Vinyl::crackle] = devices::Vinyl::info.parameters[devices::Vinyl::crackle].minimum;
+        values[devices::Age::crackle] = devices::Age::info.parameters[devices::Age::crackle].minimum;
 
     return values;
 }
 
-// A sound through the vinyl, the song playing, and how many clicks it made.
-std::pair<Audio, int> playVinyl (const std::vector<float>& values, Audio audio)
+// A sound through Age, the song playing, and how many clicks it made.
+std::pair<Audio, int> playAge (const std::vector<float>& values, Audio audio)
 {
-    devices::Vinyl vinyl;
-    vinyl.prepare (rate, blockSize);
-    vinyl.getSurfaceNoise().takeClicks();
+    devices::Age age;
+    age.prepare (rate, blockSize);
+    age.getSurfaceNoise().takeClicks();
 
     for (int done = 0; done < audio.getNumSamples(); done += blockSize)
     {
@@ -755,10 +755,10 @@ std::pair<Audio, int> playVinyl (const std::vector<float>& values, Audio audio)
         context.parameters = values;
         context.isPlaying = true;
         context.beat = done * 2.0 / rate;
-        vinyl.process (context);
+        age.process (context);
     }
 
-    const auto clicks = vinyl.getSurfaceNoise().takeClicks();
+    const auto clicks = age.getSurfaceNoise().takeClicks();
     return { std::move (audio), clicks };
 }
 
@@ -807,14 +807,14 @@ float getHarmonicDistortion (const Audio& audio, double frequency)
     return toDecibels (std::sqrt (harmonics / energyAround (frequency)));
 }
 
-VinylMeasures measureVinyl (const Preset& preset)
+AgeMeasures measureAge (const Preset& preset)
 {
-    VinylMeasures measures;
-    const auto quiet = vinylValues (preset, false, false);
+    AgeMeasures measures;
+    const auto quiet = ageValues (preset, false, false);
 
     // The pitch: the sine's phase every millisecond, against a steady one, as cents from how fast it moves.
     {
-        const auto played = playVinyl (quiet, makeSine (1000.0, 0.25f, 6.5)).first;
+        const auto played = playAge (quiet, makeSine (1000.0, 0.25f, 6.5)).first;
         constexpr int window = 192, step = 48; // four of the tone's cycles, every millisecond
         std::vector<double> late;
         auto unwrapped = 0.0, last = 0.0;
@@ -862,8 +862,8 @@ VinylMeasures measureVinyl (const Preset& preset)
         }
 
         auto bandless = quiet;
-        bandless[devices::Vinyl::distortion] = 0.0f;
-        const auto played = playVinyl (bandless, noise).first;
+        bandless[devices::Age::distortion] = 0.0f;
+        const auto played = playAge (bandless, noise).first;
         constexpr int order = 16, size = 1 << order;
         const auto powers = [&] (const Audio& sound)
         {
@@ -875,12 +875,12 @@ VinylMeasures measureVinyl (const Preset& preset)
                     sound.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
 
             juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
-            std::array<double, std::size (vinylBands)> each {};
+            std::array<double, std::size (ageBands)> each {};
 
             for (size_t band = 0; band < each.size(); ++band)
             {
-                const auto from = (int) std::lround (vinylBands[band] / std::pow (2.0, 1.0 / 6.0) * size / rate);
-                const auto to = std::min (size / 2, (int) std::lround (vinylBands[band] * std::pow (2.0, 1.0 / 6.0) * size / rate));
+                const auto from = (int) std::lround (ageBands[band] / std::pow (2.0, 1.0 / 6.0) * size / rate);
+                const auto to = std::min (size / 2, (int) std::lround (ageBands[band] * std::pow (2.0, 1.0 / 6.0) * size / rate));
 
                 for (int bin = from; bin <= to; ++bin)
                     each[band] += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
@@ -897,7 +897,7 @@ VinylMeasures measureVinyl (const Preset& preset)
 
     // The sides: a 1 kHz sine out of step on the two, and what is left of it.
     {
-        const auto played = playVinyl (quiet, makeSine (1000.0, 0.25f, 1.5, true)).first;
+        const auto played = playAge (quiet, makeSine (1000.0, 0.25f, 1.5, true)).first;
         auto side = 0.0;
 
         for (int i = at (1.0); i < played.getNumSamples(); ++i)
@@ -910,14 +910,14 @@ VinylMeasures measureVinyl (const Preset& preset)
     }
 
     // The groove's distortion.
-    measures.thd1k = getHarmonicDistortion (playVinyl (quiet, makeSine (1000.0, 0.25f, 2.0)).first, 1000.0);
-    measures.thd8k = getHarmonicDistortion (playVinyl (quiet, makeSine (8000.0, 0.25f, 2.0)).first, 8000.0);
+    measures.thd1k = getHarmonicDistortion (playAge (quiet, makeSine (1000.0, 0.25f, 2.0)).first, 1000.0);
+    measures.thd8k = getHarmonicDistortion (playAge (quiet, makeSine (8000.0, 0.25f, 2.0)).first, 8000.0);
 
     // Its noise on silence: the hiss alone, then the crackle alone.
     {
         Audio silence (2, at (3.0));
         silence.clear();
-        const auto played = playVinyl (vinylValues (preset, true, false), silence).first;
+        const auto played = playAge (ageValues (preset, true, false), silence).first;
         auto energy = 0.0;
 
         for (int channel = 0; channel < 2; ++channel)
@@ -930,7 +930,7 @@ VinylMeasures measureVinyl (const Preset& preset)
     {
         Audio silence (2, at (10.0));
         silence.clear();
-        const auto [played, clicks] = playVinyl (vinylValues (preset, false, true), silence);
+        const auto [played, clicks] = playAge (ageValues (preset, false, true), silence);
         measures.clicks = (float) clicks / 10.0f;
         measures.cracklePeak =
             toDecibels (std::max (played.getMagnitude (0, 0, played.getNumSamples()), played.getMagnitude (1, 0, played.getNumSamples())));
@@ -1262,36 +1262,36 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
         }
     }
 
-    // The vinyl's presets, each on its test signals.
-    juce::StringArray vinylLines;
-    vinylLines.add ({});
-    vinylLines.add ("## Vinyl presets, what they do");
-    vinylLines.add ({});
-    vinylLines.add ("Each while the song plays: Swing = a 1 kHz sine's pitch from its 1st to its 99th percentile, in cents (its wow and "
-                    "flutter together); the band = pink noise's change in the third octaves at 63 Hz, 125 Hz, 1, 4, 8 and 16 kHz (its "
-                    "noise off), in dB; Side = a 1 kHz sine out of step on the two sides, in dB; THD = the 2nd to 5th harmonics of a "
-                    "sine at -12 dBFS, at 1 and 8 kHz, in dB; Hiss = on silence, RMS dBFS; Crackle = clicks a second, and the "
-                    "loudest's peak in dBFS.");
-    vinylLines.add ({});
-    vinylLines.add ("| Preset | Swing ct | 63 / 125 / 1k / 4k / 8k / 16k | Side | THD 1k / 8k | Hiss | Crackle |");
-    vinylLines.add ("|---|---|---|---|---|---|---|");
+    // Age's presets, each on its test signals.
+    juce::StringArray ageLines;
+    ageLines.add ({});
+    ageLines.add ("## Age presets, what they do");
+    ageLines.add ({});
+    ageLines.add ("Each while the song plays: Swing = a 1 kHz sine's pitch from its 1st to its 99th percentile, in cents (its wow and "
+                  "flutter together); the band = pink noise's change in the third octaves at 63 Hz, 125 Hz, 1, 4, 8 and 16 kHz (its "
+                  "noise off), in dB; Side = a 1 kHz sine out of step on the two sides, in dB; THD = the 2nd to 5th harmonics of a "
+                  "sine at -12 dBFS, at 1 and 8 kHz, in dB; Hiss = on silence, RMS dBFS; Crackle = clicks a second, and the "
+                  "loudest's peak in dBFS.");
+    ageLines.add ({});
+    ageLines.add ("| Preset | Swing ct | 63 / 125 / 1k / 4k / 8k / 16k | Side | THD 1k / 8k | Hiss | Crackle |");
+    ageLines.add ("|---|---|---|---|---|---|---|");
 
     for (const auto& file : files)
     {
         if (auto effect = readPreset (file, devices::DeviceKind::effect);
-            effect.has_value() && toString (effect->info->typeID) == devices::Vinyl::typeID
+            effect.has_value() && toString (effect->info->typeID) == devices::Age::typeID
             && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
         {
-            const auto measured = measureVinyl (*effect);
+            const auto measured = measureAge (*effect);
             juce::StringArray bands;
 
             for (const auto band : measured.bands)
                 bands.add (decibels (band));
 
-            vinylLines.add ("| " + effect->kind + " / " + effect->name + " | " + juce::String (measured.swing, 1) + " | "
-                            + bands.joinIntoString (" / ") + " | " + decibels (measured.side) + " | " + decibels (measured.thd1k) + " / "
-                            + decibels (measured.thd8k) + " | " + decibels (measured.hiss) + " | " + juce::String (measured.clicks, 1)
-                            + ", " + decibels (measured.cracklePeak) + " |");
+            ageLines.add ("| " + effect->kind + " / " + effect->name + " | " + juce::String (measured.swing, 1) + " | "
+                          + bands.joinIntoString (" / ") + " | " + decibels (measured.side) + " | " + decibels (measured.thd1k) + " / "
+                          + decibels (measured.thd8k) + " | " + decibels (measured.hiss) + " | " + juce::String (measured.clicks, 1) + ", "
+                          + decibels (measured.cracklePeak) + " |");
         }
     }
 
@@ -1331,7 +1331,7 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
     lines.addArray (pumpLines);
     lines.addArray (driveLines);
     lines.addArray (bandLines);
-    lines.addArray (vinylLines);
+    lines.addArray (ageLines);
     lines.addArray (eqLines);
     const auto report = folder.getChildFile ("report.md");
     REQUIRE (report.replaceWithText (lines.joinIntoString ("\n") + "\n"));

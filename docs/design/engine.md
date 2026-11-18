@@ -218,7 +218,7 @@ surroundings:
   song plays and by being switched on; a jump while the song is stopped resets nothing, so what rings on before it is
   waited for. While the song plays, every device
   waits for its tail, so that one whose sound starts within it plays as a render does (a render never sleeps, and a
-  reverb's sway runs on through silence). A muted track's devices sleep the same way. The vinyl, whose surface noise
+  reverb's sway runs on through silence). A muted track's devices sleep the same way. Age, whose noise
   plays with the song whatever comes in, sleeps only while the song is stopped, and wakes as it plays.
   `tests/PerformanceGateTests.cpp` counts the blocks each of Phazite's devices works once stopped, which are none once
   its sound has ended.

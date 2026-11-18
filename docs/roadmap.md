@@ -126,7 +126,7 @@ An audit of the device list came first (2026-11-17): twenty devices become sixte
 merges in S6.6, S6.7 and S6.10, and S6.11 and S6.12 widen two more ([decisions.md](design/decisions.md), "Sound and
 devices"). The steps that change the list come first, since the listening sets, the presets and the editors follow it.
 Built, each in the [changelog](changelog.md): S6.3 (the Compressor), the Saturator's part of S6.6, part A of S6.7,
-S6.10 (Motion) and S6.12 (Stereo).
+S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 
 | Step | Size | What | Done when |
 |---|---|---|---|
@@ -138,7 +138,6 @@ S6.10 (Motion) and S6.12 (Stereo).
 | S6.7 | XL | Synths: the Synth and the Wavetable become one synth, named Synth; then modulation depth, band-limited sync and warps | Every preset of the old Synth plays from the new one as it did, within the level its page sets; a swept sync shows no aliasing above the level set |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
-| S6.11 | L | Age: the Vinyl gains tape as a second medium (its wow and flutter, hiss, saturation and dropouts), each part with a switch, and is renamed | A tape and a record each sound as their medium by their tests and by ear; a part switched off costs nothing |
 
 ### Stage 7. Professional: what bands, vocalists and keyboard players need
 

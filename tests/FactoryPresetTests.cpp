@@ -10,6 +10,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UndoCheck.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
@@ -27,7 +28,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -113,8 +113,8 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Delay>();
     if (type == devices::Saturator::typeID)
         return std::make_unique<devices::Saturator>();
-    if (type == devices::Vinyl::typeID)
-        return std::make_unique<devices::Vinyl>();
+    if (type == devices::Age::typeID)
+        return std::make_unique<devices::Age>();
     if (type == devices::FilterEffect::typeID)
         return std::make_unique<devices::FilterEffect>();
     if (type == devices::Motion::typeID)

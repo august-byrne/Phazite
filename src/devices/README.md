@@ -39,7 +39,7 @@ model saves and automation and modulation move.
 | `reverb/` | `Reverb.h`: the reverb, a room's eight-line feedback delay network or Jon Dattorro's plate (JAES 1997), as its Mode says, the plate's decay from a table measured on it. |
 | `motion/` | `Motion.h`: Motion, the effects that sweep as one device in three modes, its values mapped to its engines and a change of mode faded; `Chorus.h`, `Flanger.h`, `Phaser.h`: its engines, no devices of their own; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
 | `stereo/` | `Stereo.h`: Stereo, the device for a channel's two sides (width, bass in mono, balance, mono, swap, polarity, a DC filter and gain). |
-| `vinyl/` | `Vinyl.h`: what a record and its player do to a sound: its wow and flutter through one moving delay line, the groove's distortion of the loud highs, its lows in mono, its narrower sides and its band. `SurfaceNoise.h`: its surface noise, hiss and crackle, each click drawn from where the song is. |
+| `age/` | `Age.h`: Age, what a medium does to a sound, a record or a tape, each part with a switch: its wow and flutter through one moving delay line, the drive (a record's groove distortion of the loud highs, a tape's saturation and head bump), its lows in mono, its narrower sides and its band. `SurfaceNoise.h`: a record's surface noise, hiss and crackle, each click drawn from where the song is. `TapeWear.h`: a tape's hiss and its dropouts, each drawn from where the song is. |
 
 ## What the devices share
 

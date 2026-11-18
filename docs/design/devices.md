@@ -48,14 +48,14 @@ notes and its parameters' values, and does four things for every device alike:
 - it reports the device's latency, which the engine makes up for on the other tracks ([engine.md](engine.md));
 - it lets the device sleep once what comes in and what it plays have been silent for a quarter of a second, for
   longer than its latency and for as long as the tail it reports (while the song is stopped, not the tail of one that has
-  heard nothing since it was reset; the vinyl only while it is stopped: [engine.md](engine.md)). A render never sleeps.
+  heard nothing since it was reset; Age only while it is stopped: [engine.md](engine.md)). A render never sleeps.
 
 Parameters move smoothly, so that turning a knob does not click. Automation, modulators and macros move a device's
 parameters ([automation-and-modulation.md](automation-and-modulation.md)). Each device has a guarded scenario in the
 real-time audit ([realtime-audit.md](../realtime-audit.md)): steady playback through it must not allocate.
 
 While Low Latency is on, a device that is on and delays its sound by more than 1 ms is left out of what plays, and the
-sound passes as it comes: the Limiter, the Multiband, the Vinyl, a Compressor set to Duck, and one set to
+sound passes as it comes: the Limiter, the Multiband, Age, a Compressor set to Duck, and one set to
 Compress with a Look-Ahead that, with its drive's 6 samples, makes it more than 1 ms late.
 
 ## Phazite's own devices
@@ -75,7 +75,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [Multiband](devices/multiband.md) | Effect | Three bands of dynamics and saturation, then a master band |
 | [Limiter](devices/limiter.md) | Effect | A look-ahead limiter that keeps true peaks under a ceiling |
 | [Saturator](devices/saturator.md) | Effect | Drive into one of six curves, Crush among them, with a colour, a tone tilt and a band, which makes it an exciter too |
-| [Vinyl](devices/vinyl.md) | Effect | What a record and its player do to a sound |
+| [Age](devices/age.md) | Effect | What a medium does to a sound, a record or a tape, each of its parts switched on or off |
 | [Delay](devices/delay.md) | Effect | Echoes on a note value or a time, with ping-pong and cuts in the loop |
 | [Reverb](devices/reverb.md) | Effect | A room or a plate |
 | [Motion](devices/motion.md) | Effect | Three modes swept by an LFO: Chorus, copies of the sound, one to eight voices; Flanger, a swept comb; Phaser, swept notches |
@@ -166,7 +166,7 @@ At the default window size (1280 by 800), every built-in device shows whole in t
 
 - **A picture of what the device does,** drawn as the sound plays, in the device's colour, which its knobs' arcs take
   too. The colour is by kind (`DeviceFamily` in `src/ui/theme/DesignTokens.h`): dynamics; tone (the EQ and the
-  Filter); drive (the Saturator and the Vinyl); space (the Delay and the Reverb); motion (Motion); Stereo's; the Vocoder's. Instruments take the accent.
+  Filter); drive (the Saturator and Age); space (the Delay and the Reverb); motion (Motion); Stereo's; the Vocoder's. Instruments take the accent.
 - **Pictures are controls.** A handle on a picture is a second grip on a parameter that also has a knob, so that
   everything also works from the keyboard and for screen readers. A drag is one undo step. Every picture takes a
   handle the same way (`graph::HandleDrag`, `src/ui/devices/DeviceGraph.h`), as Ableton Live's and FabFilter's do: a
@@ -432,9 +432,8 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
 - **Instruments of many recordings** (pianos, guitars, strings) from SFZ files: Planned, as a part of the
   [Sampler](devices/sampler.md), roadmap step 4.10.
 - **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
-  (S6.7); the Vinyl as Age, with tape beside the record (S6.11). Planned; until each is built, this page and the devices'
-  pages describe the devices as they are. Stereo (S6.12), Motion (S6.10) and the Exciter's band and colour in the Saturator
-  (S6.6) are built.
+  (S6.7). Planned; until it is built, this page and the devices' pages describe the devices as they are. Stereo
+  (S6.12), Motion (S6.10), Age (S6.11) and the Exciter's band and colour in the Saturator (S6.6) are built.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

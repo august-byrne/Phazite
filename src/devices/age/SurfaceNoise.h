@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A record's surface noise, for the vinyl effect (Vinyl.h): hiss, the groove's steady hush, and crackle, the dust's clicks and
+// A record's surface noise, for Age's record (Age.h): hiss, the groove's steady hush, and crackle, the dust's clicks and
 // pops at a density.
 //
 // - The hiss is the groove's hush as the playback curve leaves it: pink from 60 Hz to 2 kHz (as loud in each octave: alternate
@@ -16,7 +16,7 @@
 //   playback, a render and a freeze play the same crackles. Stopped, the song doesn't move, and nothing crackles. The hiss
 //   comes from seeds, the same after each reset.
 //
-// All of it is multiplied by a share that glides between 0 and 1 (the vinyl's: whether the record plays), and the hiss's
+// All of it is multiplied by a share that glides between 0 and 1 (Age's: whether the record plays), and the hiss's
 // level glides too, so that nothing clicks as they move. Real-time safe.
 #pragma once
 
@@ -46,7 +46,7 @@ public:
     // another goes there: the next stretch's start, a loop going round, the playhead moved.
     void setPosition (double beat, double beatsPerSample, double offset = 0.0) noexcept; // offset: beats added to where it is
 
-    // Moves on as far as some samples would, without playing them (while the vinyl rests).
+    // Moves on as far as some samples would, without playing them (while Age rests).
     void skip (int numSamples) noexcept { position += beatsPerSample * numSamples; }
 
     // The levels for what follows: the hiss's RMS and the largest click's peak, as gains (0 for none), and how many clicks

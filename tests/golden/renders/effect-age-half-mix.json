@@ -1,5 +1,5 @@
 {
-  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's vinyl half and half with the sound, its wow and groove distortion on and the lows mono under 150 Hz, on a beat and chord stabs. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's Age, a record half and half with the sound, its wow and groove distortion on and the lows mono under 150 Hz, on a beat and chord stabs. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
   "sampleRate": 44100,
   "blockSamples": 4410,
   "channels": 2,

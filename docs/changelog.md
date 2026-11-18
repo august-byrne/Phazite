@@ -32,6 +32,11 @@ The full text of every step, as it was written when it was built, is in the
   24 presets converted to play as they did, so that Swap tries a chorus, a flanger and a phaser on a sound in place,
   and the chorus's Feedback below 0. Its level holds through a change of mode, and the flanger's and the phaser's
   pictures draw what plays at the Mix set.
+- **S6.11 Age:** the Vinyl becomes Age, one device for what a physical medium does to a sound: its record plays as
+  before, and a tape sits beside it (a wow that drifts and a quicker flutter, a saturation that takes the highs first,
+  a head bump, a hiss of its own that is alike at every sample rate, and dropouts that fall where the song is); each
+  of its five parts has a switch; its editor has two tabs, the tape shown as two turning reels; five tape presets. The
+  Rate turned up fast under a deep wow no longer swings the pitch, on the record either.
 - **S6.12 Stereo:** the Stereo Expander becomes Stereo, the one device for a channel's two sides, adding Balance, a
   Mono switch, Swap Sides and a DC filter to its width, spread, bass in mono, polarity flips and gain, each switched
   without a click; its presets gain Swap Sides and DC Filter under Checks.

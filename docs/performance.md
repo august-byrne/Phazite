@@ -86,7 +86,7 @@ instruments hold their notes. The figure is the share of one core's time.
 | Multiband: sound in / silence in | 1.46 / 1.22 | 2026-11-16 |
 | Limiter | 0.35 | 2026-11-16 |
 | Saturator | 0.74 | 2026-11-16 |
-| Vinyl: stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
+| Age, a record (then the Vinyl): stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
 | Delay | 0.14 | 2026-11-16 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
 | Stereo, spreading | 0.27 | 2026-11-16 |
@@ -96,7 +96,7 @@ instruments hold their notes. The figure is the share of one core's time.
 | Vocoder, 40 bands | 3.24 | 2026-11-16 |
 
 Three of these were higher in the run of 2026-11-16 than the audit's numbers that stood here before (the Compressor
-0.35 against 0.19 of section 7, the Drum Sampler's beat 0.384 against 0.312 of section 18, the Vinyl with silence in
+0.35 against 0.19 of section 7, the Drum Sampler's beat 0.384 against 0.312 of section 18, the Vinyl (now Age) with silence in
 0.012 against 0.005 of section 19). None is a change of the known-bugs round: `main` and the branch, run side by side on
 2026-11-16 **while other agents' builds and benchmarks loaded the machine** (each three times):
 
@@ -104,10 +104,10 @@ Three of these were higher in the run of 2026-11-16 than the audit's numbers tha
 |---|---|---|
 | Compressor (Clean, Drive at 0: its drive doesn't run) | 0.338, 0.370, 0.403 | 0.348, 0.344, 0.369 |
 | Drum Sampler, 4 pads every 16th | 0.363, 0.610, 0.435 | 0.300, 0.359, 0.305 |
-| Vinyl, silence in, stopped | 0.013, 0.014, 0.021 | 0.011, 0.011, 0.011 |
+| Vinyl (now Age), silence in, stopped | 0.013, 0.014, 0.021 | 0.011, 0.011, 0.011 |
 
 The audit's numbers came from older builds of these devices. At its defaults the compressor's drive (at twice the rate)
-doesn't run at all, so the drive's cost is none of this. In the engine the Vinyl now sleeps while the song is stopped
+doesn't run at all, so the drive's cost is none of this. In the engine the Vinyl (now Age) sleeps while the song is stopped
 and silent (2026-11-16), so its stopped cost there is none.
 
 | Latency reported at 48 kHz | Samples | From |
@@ -117,7 +117,7 @@ and silent (2026-11-16), so its stopped cost there is none.
 | Filter | 6 | 2026-11-16 |
 | Compressor | 6 | 2026-11-16 |
 | Multiband | 492 | 2026-11-16 |
-| Vinyl | 531 | 2026-11-16 |
+| Age (then the Vinyl) | 531 | 2026-11-16 |
 
 The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.10 to 0.25 ms after it to -30 dB (2026-11-16:
 the Synth 0.04 / 0.10 ms, the Wavetable 0.06 / 0.15, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum
@@ -137,7 +137,7 @@ played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the medi
 | Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
 | EQ / Filter / Compressor / Limiter / Stereo / Phaser (now Motion's mode) / Vocoder | 0.00 | 2026-11-16 |
 | Multiband / Saturator / Chorus (now Motion's mode) | 0.01 | 2026-11-16 |
-| Vinyl | 0.02 | 2026-11-16 |
+| Age, a record (then the Vinyl) | 0.02 | 2026-11-16 |
 | Delay | 0.32 | 2026-11-16 |
 | Reverb | 0.17 | 2026-11-16 |
 
@@ -259,7 +259,7 @@ The 1.39 % / 0.50 % that the audit recorded (sections 18 and 9) was measured wit
 stopped song's devices now work no block once their sound has ended, which `tests/PerformanceGateTests.cpp` counts for
 each of Phazite's devices (see the gates); after Stop, as a chord ends, each rested after (in the gate, at 48 kHz in
 blocks of 256, to a quarter of a second): the Delay 7.5 s (its echoes, then its tail), the Reverb 6.0 s (its decay to
-silence, then its tail), the FM synth 3.8 s, the Drum Sampler and the Vinyl 2.5 s (its noise's hold), the Phaser (now Motion's mode) 0.8 s,
+silence, then its tail), the FM synth 3.8 s, the Drum Sampler and the Vinyl (now Age) 2.5 s (its noise's hold), the Phaser (now Motion's mode) 0.8 s,
 and every other device 0.5 s. While the song plays, a device still waits for its tail after silence, so that one whose
 sound starts within it plays as a render does (`docs/design/engine.md`).
 

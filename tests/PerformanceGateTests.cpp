@@ -1610,7 +1610,7 @@ TEST_CASE ("Performance gate: a stopped song's devices work no block once their 
     // project opened (stopped, a device that has heard nothing since it was reset has nothing to ring with). Counted here,
     // not timed: the blocks
     // each device works, which once it rests (engine/nodes/DeviceRunner.h) are none. Every one of Phazite's own devices
-    // rests; the vinyl, whose noise plays with the song, rests while it is stopped (devices::Processor::playsWithTheSong()).
+    // rests; Age, whose noise plays with the song, rests while it is stopped (devices::Processor::playsWithTheSong()).
     // A plug-in never does (it may play with nothing coming in), nor is it counted here.
     phazite::test::TestSong s;
 

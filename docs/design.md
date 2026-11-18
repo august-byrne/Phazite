@@ -57,7 +57,7 @@ has a page with its parameters, how it works and its limits:
 | --- | --- |
 | [Synth](design/devices/synth.md) | [EQ](design/devices/eq.md), [Filter](design/devices/filter.md) |
 | [Wavetable](design/devices/wavetable.md) | [Compressor](design/devices/compressor.md), [Multiband](design/devices/multiband.md), [Limiter](design/devices/limiter.md) |
-| [FM](design/devices/fm.md) | [Saturator](design/devices/saturator.md), [Vinyl](design/devices/vinyl.md) |
+| [FM](design/devices/fm.md) | [Saturator](design/devices/saturator.md), [Age](design/devices/age.md) |
 | [Sampler](design/devices/sampler.md) | [Delay](design/devices/delay.md), [Reverb](design/devices/reverb.md) |
 | [Drum Sampler](design/devices/drum-sampler.md) | [Motion](design/devices/motion.md) (Chorus, Flanger, Phaser) |
 | | [Vocoder](design/devices/vocoder.md), [Stereo](design/devices/stereo.md) |

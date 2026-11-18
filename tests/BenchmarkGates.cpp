@@ -213,7 +213,7 @@ const std::map<std::string, double> deviceBounds {
     { "phaziteMultiband",      5.0  }, // 2.458
     { "phaziteLimiter",        1.0  }, // 0.484
     { "phaziteSaturator",      2.4  }, // 1.155
-    { "phaziteVinyl",          4.1  }, // 2.040
+    { "phaziteAge",            4.1  }, // 2.040
     { "phaziteDelay",          0.43 }, // 0.213
     { "phaziteReverb",         2.6  }, // 1.282
     { "phaziteMotion",         0.44 }, // 0.218, the Chorus's: Motion is a chorus at first (not measured as Motion yet)

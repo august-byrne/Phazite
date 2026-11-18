@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceTint.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
@@ -10,7 +11,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -30,7 +30,7 @@ DeviceFamily getDeviceFamily (std::string_view typeID)
         { devices::FilterEffect::typeID, DeviceFamily::tone },   { devices::Saturator::typeID, DeviceFamily::drive },
         { devices::Delay::typeID, DeviceFamily::space },         { devices::Reverb::typeID, DeviceFamily::space },
         { devices::Motion::typeID, DeviceFamily::motion },       { devices::Stereo::typeID, DeviceFamily::stereo },
-        { devices::Vocoder::typeID, DeviceFamily::voice },       { devices::Vinyl::typeID, DeviceFamily::drive },
+        { devices::Vocoder::typeID, DeviceFamily::voice },       { devices::Age::typeID, DeviceFamily::drive },
     };
 
     for (const auto& entry : entries)

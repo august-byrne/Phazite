@@ -117,6 +117,12 @@ phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
+    src/devices/age/Age.cpp
+    src/devices/age/Age.h
+    src/devices/age/SurfaceNoise.cpp
+    src/devices/age/SurfaceNoise.h
+    src/devices/age/TapeWear.cpp
+    src/devices/age/TapeWear.h
     src/devices/core/AudioThreads.cpp
     src/devices/core/AudioThreads.h
     src/devices/core/Clock.h
@@ -213,10 +219,6 @@ target_sources(phazite_core PRIVATE
     src/devices/stretch/Stretch.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
-    src/devices/vinyl/SurfaceNoise.cpp
-    src/devices/vinyl/SurfaceNoise.h
-    src/devices/vinyl/Vinyl.cpp
-    src/devices/vinyl/Vinyl.h
     src/devices/vocoder/Vocoder.cpp
     src/devices/vocoder/Vocoder.h
     src/devices/wavetable/FactoryWavetables.cpp
@@ -819,6 +821,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ValueText.h
     src/ui/components/ViewTitle.cpp
     src/ui/components/ViewTitle.h
+    src/ui/devices/AgeEditor.cpp
+    src/ui/devices/AgeEditor.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
     src/ui/devices/DelayEditor.cpp
@@ -877,8 +881,6 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/SynthEditor.h
     src/ui/devices/SynthParts.cpp
     src/ui/devices/SynthParts.h
-    src/ui/devices/VinylEditor.cpp
-    src/ui/devices/VinylEditor.h
     src/ui/devices/VocoderEditor.cpp
     src/ui/devices/VocoderEditor.h
     src/ui/devices/WavetableEditor.cpp
@@ -1219,6 +1221,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/StallReport.h
         tests/AboutPanelTests.cpp
         tests/ActivityBarTests.cpp
+        tests/AgeTests.cpp
         tests/AntialiasingTests.cpp
         tests/AppInfoTests.cpp
         tests/AppScreen.h
@@ -1474,7 +1477,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsTests.cpp
         tests/VersionsTiedTests.cpp
         tests/VersionsTwoComputersTests.cpp
-        tests/VinylTests.cpp
         tests/VocoderTests.cpp
         tests/VoiceStealTests.cpp
         tests/Vst3PluginTests.cpp

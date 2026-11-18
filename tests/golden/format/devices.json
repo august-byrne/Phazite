@@ -37200,10 +37200,30 @@
     ]
   },
   {
-    "type": "phaziteVinyl",
-    "name": "Vinyl",
+    "type": "phaziteAge",
+    "name": "Age",
     "kind": "effect",
     "parameters": [
+      {
+        "id": "medium",
+        "name": "Medium",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Record",
+        "choices": [
+          "Record",
+          "Tape"
+        ]
+      },
+      {
+        "id": "wobble",
+        "name": "Wobble",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
       {
         "id": "wow",
         "name": "Wow",
@@ -37232,47 +37252,12 @@
         "midpoint": 2.5
       },
       {
-        "id": "lowCut",
-        "name": "Low Cut",
-        "unit": "hertz",
-        "minimum": 20.0,
-        "maximum": 1000.0,
-        "default": 30.0,
-        "scale": "logarithmic"
-      },
-      {
-        "id": "highCut",
-        "name": "High Cut",
-        "unit": "hertz",
-        "minimum": 1000.0,
-        "maximum": 20000.0,
-        "default": 14000.0,
-        "scale": "logarithmic"
-      },
-      {
-        "id": "distortion",
-        "name": "Distortion",
-        "unit": "percent",
+        "id": "noise",
+        "name": "Noise",
+        "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.150000005960464
-      },
-      {
-        "id": "width",
-        "name": "Width",
-        "unit": "percent",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.899999976158142
-      },
-      {
-        "id": "bassMono",
-        "name": "Bass Mono",
-        "unit": "hertz",
-        "minimum": 20.0,
-        "maximum": 500.0,
-        "default": 100.0,
-        "scale": "logarithmic"
+        "default": 1.0
       },
       {
         "id": "hiss",
@@ -37299,6 +37284,89 @@
         "minimum": 0.5,
         "maximum": 500.0,
         "default": 5.0,
+        "scale": "logarithmic"
+      },
+      {
+        "id": "dropouts",
+        "name": "Dropouts",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "drive",
+        "name": "Drive",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "distortion",
+        "name": "Distortion",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.150000005960464
+      },
+      {
+        "id": "headBump",
+        "name": "Head Bump",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "stereo",
+        "name": "Stereo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "width",
+        "name": "Width",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.899999976158142
+      },
+      {
+        "id": "bassMono",
+        "name": "Bass Mono",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 500.0,
+        "default": 100.0,
+        "scale": "logarithmic"
+      },
+      {
+        "id": "band",
+        "name": "Band",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowCut",
+        "name": "Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 30.0,
+        "scale": "logarithmic"
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 14000.0,
         "scale": "logarithmic"
       },
       {

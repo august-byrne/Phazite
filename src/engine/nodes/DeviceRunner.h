@@ -245,7 +245,7 @@ private:
     // the song plays, it waits for its tail all the same, so that a device whose sound starts within that tail plays it as a
     // render does (a render never sleeps): its inner motion, which runs on through silence (a reverb's lines' sway), would
     // stand still asleep, and a send to a reverb that begins a second in would sound otherwise live (the golden mix). One
-    // that plays with the song (devices::Processor::playsWithTheSong(): the vinyl's noise) sleeps only while it is stopped,
+    // that plays with the song (devices::Processor::playsWithTheSong(): Age's noise) sleeps only while it is stopped,
     // and wakes as it plays.
     static constexpr float silence = 1.0e-6f; // -120 dBFS
     static constexpr double sleepAfterSeconds = 0.25;

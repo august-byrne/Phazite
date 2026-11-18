@@ -79,9 +79,9 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it: by dragging, and by numbers (its corner's readout of a point and its line's ratio, Type Values..., the arrow keys). |
 | `ModulatorEditor.*` | Modulators' editors. |
 
-The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
+The editors, one pair of files each: `AgeEditor` (two media, each a page of its own), `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,
 `FilterEditor`, `FmEditor`, `LimiterEditor`, `MotionEditor` (three modes, each a picture of its own), `MultibandEditor`,
-`ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoEditor`, `SynthEditor`, `VinylEditor`,
+`ReverbEditor`, `SamplerEditor`, `SaturatorEditor`, `StereoEditor`, `SynthEditor`,
 `VocoderEditor`, `WavetableEditor`. Among them:
 
 | Editor | What it shows |
@@ -90,7 +90,7 @@ The editors, one pair of files each: `CompressorEditor`, `DelayEditor`, `DrumSam
 | `SamplerEditor.*` | The sampler's sound drawn with its markers, loop and slices; a sound dropped on it loads. |
 | `FmEditor.*` | The FM synth's algorithm drawn large with the harmonics its operators make, and the four operators side by side, a group of their controls at a time, with its filter's envelope beside its filter. |
 | `SaturatorEditor.*` | The curve as it plays (lopsided with Colour, in steps with Crush), lit as far as the sound reaches, beside the wave in and out; six shape buttons drawn with their curves; and the Band, switched at its title, over the spectrum in and out with the band lit between its edges, which drag, and Listen. |
-| `VinylEditor.*` | A record turning off its centre as far as the vinyl's wow swings it, with a speck where each crackle came, its pitch over the last seconds, and its band's ends to drag. |
+| `AgeEditor.*` | Two tabs, Record and Tape: a record turning off its centre as far as the wow swings it, with a speck where each crackle came, or a tape's two reels turning at the wow's rate, its line breaking where a dropout comes; its pitch over the last seconds, and its band's ends to drag beside the Band's switch; its parts each with a switch at its title. |
 | `MultibandEditor.*` | The multiband's parts on one page in the dock: the bands across the spectrum, their crossovers and levels dragged there, always with their knobs, and the band shown by its tab, its curve (`DynamicsCurve.*`) and controls, with Monitor and its Sidechain part beside it, or in its place by a switch and a tab where the dock is narrow. |
 | `CompressorEditor.*` | Three tabs along its top that are its modes, each on one page in the dock: Compress, its characters and curve (with Auto Makeup's switch) beside its history, its knobs and its sidechain, under tabs where the dock is short; Duck, its sidechain over its cuts and Listen beside its history, its graph (its threshold a line to drag) over its knobs; and Transient, its history (its gain a line about the middle) beside its punch and sustain over its speed, makeup and low cut. |
 

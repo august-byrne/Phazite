@@ -20,6 +20,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "app/ClipWaveforms.h"
+#include "devices/age/Age.h"
 #include "devices/core/Spectrum.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -36,7 +37,6 @@
 #include "devices/stereo/Stereo.h"
 #include "devices/stretch/Stretch.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/audio/AudioRegion.h"
@@ -134,7 +134,7 @@ struct DeviceCase
     int notes = 0;                                    // for an instrument: held from the start; drums hit again every 12 blocks
     std::function<void (std::vector<float>&)> set {}; // changes to the defaults
     bool silentInput = false;                         // for an effect: silence instead of noise
-    bool playing = false;                             // whether the song plays (the vinyl's noise only plays then)
+    bool playing = false;                             // whether the song plays (Age's noise only plays then)
 };
 
 template <typename Device>
@@ -354,18 +354,30 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
               v[dev::Saturator::shape] = (float) dev::Saturator::Shape::tube;
               v[dev::Saturator::colour] = 0.5f;
           } },
-        { "Vinyl", maker<dev::Vinyl>(), &dev::Vinyl::info },
-        { "Vinyl, playing, everything on", maker<dev::Vinyl>(), &dev::Vinyl::info, 0,
+        { "Age", maker<dev::Age>(), &dev::Age::info },
+        { "Age, playing, everything on", maker<dev::Age>(), &dev::Age::info, 0,
           [] (std::vector<float>& v)
           {
-              v[dev::Vinyl::wow] = 20.0f;
-              v[dev::Vinyl::flutter] = 8.0f;
-              v[dev::Vinyl::distortion] = 0.8f;
-              v[dev::Vinyl::crackle] = -18.0f;
-              v[dev::Vinyl::density] = 300.0f;
+              v[dev::Age::wow] = 20.0f;
+              v[dev::Age::flutter] = 8.0f;
+              v[dev::Age::distortion] = 0.8f;
+              v[dev::Age::crackle] = -18.0f;
+              v[dev::Age::density] = 300.0f;
           },
           false, true },
-        { "Vinyl, silence in, stopped", maker<dev::Vinyl>(), &dev::Vinyl::info, 0, {}, true },
+        { "Age, a tape, playing, everything on", maker<dev::Age>(), &dev::Age::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Age::medium] = 1.0f;
+              v[dev::Age::wow] = 20.0f;
+              v[dev::Age::flutter] = 8.0f;
+              v[dev::Age::distortion] = 0.8f;
+              v[dev::Age::headBump] = 4.0f;
+              v[dev::Age::hiss] = -50.0f;
+              v[dev::Age::dropouts] = 1.0f;
+          },
+          false, true },
+        { "Age, silence in, stopped", maker<dev::Age>(), &dev::Age::info, 0, {}, true },
         { "Delay", maker<dev::Delay>(), &dev::Delay::info },
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },
         { "Reverb, plate", maker<dev::Reverb>(), &dev::Reverb::info, 0,
@@ -446,7 +458,7 @@ TEST_CASE ("Benchmark: each device's reset, as Play and a jump reset every devic
         { &dev::Multiband::info, maker<dev::Multiband>() },
         { &dev::Limiter::info, maker<dev::Limiter>() },
         { &dev::Saturator::info, maker<dev::Saturator>() },
-        { &dev::Vinyl::info, maker<dev::Vinyl>() },
+        { &dev::Age::info, maker<dev::Age>() },
         { &dev::Delay::info, maker<dev::Delay>() },
         { &dev::Reverb::info, maker<dev::Reverb>() },
         { &dev::Stereo::info, maker<dev::Stereo>() },

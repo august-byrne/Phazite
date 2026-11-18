@@ -5,6 +5,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/filter/FilterEffect.h"
@@ -12,7 +13,6 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
@@ -21,6 +21,7 @@
 #include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/devices/AgeEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DrumSamplerEditor.h"
 #include "ui/devices/FilterEditor.h"
@@ -30,7 +31,6 @@
 #include "ui/devices/ReverbEditor.h"
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SynthEditor.h"
-#include "ui/devices/VinylEditor.h"
 #include "ui/devices/WavetableEditor.h"
 #include "ui/theme/DesignTokens.h"
 
@@ -162,10 +162,10 @@ TEST_CASE ("Over a step sequencer's steps the pointer is the crosshair, where a 
     CHECK (getChangedArea (before, snapshot (*steps)).isEmpty());
 }
 
-TEST_CASE ("Over the vinyl's record the pointer moves up and down, for the wow; over its band, sideways, the nearer end lit")
+TEST_CASE ("Over Age's record the pointer moves up and down, for the wow; over its band, sideways, the nearer end lit")
 {
     phazite::test::TestSong song;
-    phazite::ui::VinylEditor editor (addDevice (song, phazite::devices::Vinyl::typeID));
+    phazite::ui::AgeEditor editor (addDevice (song, phazite::devices::Age::typeID));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     auto& record = editor.getRecord();
     phazite::test::Mouse mouse (record);

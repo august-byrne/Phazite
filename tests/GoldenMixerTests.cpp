@@ -4,6 +4,7 @@
 // made through the model (TestSong.h). Most are renders of a change, whose check compares the song before and after it.
 #include "RenderHarness.h"
 #include "TestSong.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dsp/NoteValues.h"
@@ -17,7 +18,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/base/internal/Schema.h"
@@ -384,26 +384,42 @@ TEST_SUITE ("golden")
             "stabs: what the exciter did.");
     }
 
-    TEST_CASE ("Golden render: Phazite's vinyl on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Age, a record, on a beat and stabs")
     {
-        checkEffect (phazite::devices::Vinyl::typeID, "effect-vinyl",
-                     { { "wow", 15.0f },
-                       { "flutter", 4.0f },
-                       { "distortion", 0.6f },
-                       { "highCut", 5000.0f },
-                       { "crackle", -18.0f },
-                       { "density", 20.0f },
-                       { "hiss", -50.0f } },
-                     "Phazite's vinyl, a deep wow and some flutter, its groove distorting and its band to 5 kHz, crackling 20 times a "
-                     "second, on a beat and chord stabs.");
+        checkEffect (
+            phazite::devices::Age::typeID, "effect-age",
+            { { "wow", 15.0f },
+              { "flutter", 4.0f },
+              { "distortion", 0.6f },
+              { "highCut", 5000.0f },
+              { "crackle", -18.0f },
+              { "density", 20.0f },
+              { "hiss", -50.0f } },
+            "Phazite's Age, a record with a deep wow and some flutter, its groove distorting and its band to 5 kHz, crackling 20 times a "
+            "second, on a beat and chord stabs.");
     }
 
-    TEST_CASE ("Golden render: Phazite's vinyl at half mix, its Bass Mono on, on a beat and stabs")
+    TEST_CASE ("Golden render: Phazite's Age, a record at half mix, its Bass Mono on, on a beat and stabs")
     {
-        checkEffect (phazite::devices::Vinyl::typeID, "effect-vinyl-half-mix",
+        checkEffect (phazite::devices::Age::typeID, "effect-age-half-mix",
                      { { "wow", 8.0f }, { "distortion", 0.5f }, { "bassMono", 150.0f }, { "mix", 0.5f } },
-                     "Phazite's vinyl half and half with the sound, its wow and groove distortion on and the lows mono under "
+                     "Phazite's Age, a record half and half with the sound, its wow and groove distortion on and the lows mono under "
                      "150 Hz, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's Age, a tape, on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Age::typeID, "effect-age-tape",
+                     { { "medium", 1.0f },
+                       { "wow", 8.0f },
+                       { "flutter", 3.0f },
+                       { "distortion", 0.7f },
+                       { "headBump", 3.0f },
+                       { "hiss", -50.0f },
+                       { "dropouts", 0.6f },
+                       { "highCut", 9000.0f } },
+                     "Phazite's Age, a tape drifting and fluttering, driven, its head bump at 3 dB, hissing and dropping out, its band to "
+                     "9 kHz, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's compressor driven in Tube at half mix, on a beat and stabs")

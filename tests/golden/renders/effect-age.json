@@ -1,5 +1,5 @@
 {
-  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's vinyl, a deep wow and some flutter, its groove distorting and its band to 5 kHz, crackling 20 times a second, on a beat and chord stabs. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
+  "about": "Golden render (tests/GoldenMixerTests.cpp): Phazite's Age, a record with a deep wow and some flutter, its groove distorting and its band to 5 kHz, crackling 20 times a second, on a beat and chord stabs. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md).",
   "sampleRate": 44100,
   "blockSamples": 4410,
   "channels": 2,

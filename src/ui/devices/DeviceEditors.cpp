@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
+#include "AgeEditor.h"
 #include "CompressorEditor.h"
 #include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
@@ -14,9 +15,9 @@
 #include "SaturatorEditor.h"
 #include "StereoEditor.h"
 #include "SynthEditor.h"
-#include "VinylEditor.h"
 #include "VocoderEditor.h"
 #include "WavetableEditor.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -31,7 +32,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/mixer/MixerModel.h"
@@ -90,8 +90,8 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
     if (info->typeID == devices::Saturator::typeID)
         return std::make_unique<SaturatorEditor> (device);
 
-    if (info->typeID == devices::Vinyl::typeID)
-        return std::make_unique<VinylEditor> (device);
+    if (info->typeID == devices::Age::typeID)
+        return std::make_unique<AgeEditor> (device);
 
     if (info->typeID == devices::FilterEffect::typeID)
         return std::make_unique<FilterEditor> (device);

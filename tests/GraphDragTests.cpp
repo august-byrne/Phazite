@@ -11,6 +11,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "UndoCheck.h"
+#include "devices/age/Age.h"
 #include "devices/core/SampleTap.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
@@ -25,7 +26,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/automation/AutomationModel.h"
@@ -37,6 +37,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/devices/AgeEditor.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
@@ -56,7 +57,6 @@
 #include "ui/devices/StereoEditor.h"
 #include "ui/devices/SynthEditor.h"
 #include "ui/devices/SynthParts.h"
-#include "ui/devices/VinylEditor.h"
 #include "ui/input/WindowKeys.h"
 #include "ui/theme/DesignTokens.h"
 
@@ -279,9 +279,9 @@ TEST_CASE ("A press at a graph's handle's edge changes nothing, and a drag moves
                == doctest::Approx (predelay + 20.0 / (graph.getWidth() - 2.0) * shown * 1000.0).epsilon (0.002));
     }
 
-    SUBCASE ("The delay's and the vinyl's bands' ends")
+    SUBCASE ("The delay's and Age's bands' ends")
     {
-        for (const auto* typeID : { phazite::devices::Delay::typeID, phazite::devices::Vinyl::typeID })
+        for (const auto* typeID : { phazite::devices::Delay::typeID, phazite::devices::Age::typeID })
         {
             CAPTURE (typeID);
             const auto device = song.addEffect (song.firstTrack, typeID);
@@ -289,10 +289,10 @@ TEST_CASE ("A press at a graph's handle's edge changes nothing, and a drag moves
             const auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, device));
             TestWindow window (*editor, editor->getWidth(), editor->getHeight());
             auto* delay = dynamic_cast<phazite::ui::DelayEditor*> (editor.get());
-            auto* vinyl = dynamic_cast<phazite::ui::VinylEditor*> (editor.get());
-            REQUIRE ((isDelay ? delay != nullptr : vinyl != nullptr));
-            auto& graph = isDelay ? delay->getEchoes() : vinyl->getRecord();
-            const auto band = (isDelay ? delay->getBandArea() : vinyl->getBandArea()).toFloat();
+            auto* age = dynamic_cast<phazite::ui::AgeEditor*> (editor.get());
+            REQUIRE ((isDelay ? delay != nullptr : age != nullptr));
+            auto& graph = isDelay ? delay->getEchoes() : age->getRecord();
+            const auto band = (isDelay ? delay->getBandArea() : age->getBandArea()).toFloat();
             const phazite::ui::graph::FrequencyAxis frequencies { band };
             const auto highCut = valueOf (song, device, "highCut");
             const auto edge = juce::Point<float> (frequencies.xFor (highCut) - 3.0f, band.getCentreY()).roundToInt();
@@ -416,7 +416,7 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
         }
     }
 
-    SUBCASE ("The delay, the vinyl, Stereo, the saturator, the vocoder, the compressor and the limiter")
+    SUBCASE ("The delay, Age, Stereo, the saturator, the vocoder, the compressor and the limiter")
     {
         const auto delay = song.addEffect (song.firstTrack, phazite::devices::Delay::typeID);
         {
@@ -429,9 +429,9 @@ TEST_CASE ("Escape in the middle of a drag in a device's graph puts back what wa
             dragThenEscape (song, window, editor.getEchoes(), highEnd, highEnd - juce::Point<int> (30, 0));
         }
 
-        const auto vinyl = song.addEffect (song.firstTrack, phazite::devices::Vinyl::typeID);
+        const auto age = song.addEffect (song.firstTrack, phazite::devices::Age::typeID);
         {
-            phazite::ui::VinylEditor editor (phazite::getDeviceHandle (song.context, vinyl));
+            phazite::ui::AgeEditor editor (phazite::getDeviceHandle (song.context, age));
             TestWindow window (editor, editor.getWidth(), editor.getHeight());
             const auto centre = editor.getRecordCentre().roundToInt();
             dragThenEscape (song, window, editor.getRecord(), centre, centre - juce::Point<int> (0, 40));
@@ -726,7 +726,7 @@ TEST_CASE (
     CHECK (own.pull (pulledLeft.data(), pulledRight.data(), quarter + 100) == quarter);
     CHECK (pulledRight[1000] == -1000.0f);
 
-    // Or the two channels' average, for a display that wants one (the vinyl's pitch).
+    // Or the two channels' average, for a display that wants one (Age's pitch).
     own.push (lefts.data() + 10, rights.data(), 1);
     CHECK (own.pull (pulledLeft.data(), 10) == 1);
     CHECK (pulledLeft[0] == 5.0f);

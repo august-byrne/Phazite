@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ExampleSongs.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/DrumSynthesis.h"
@@ -16,7 +17,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "internal/ExampleSongs.h"
 #include "model/arrangement/AudioClipModel.h"
@@ -843,7 +843,7 @@ namespace
         if (const auto ducker = duckUnder (song.context, arpBus, kickTrack); ducker.isValid())
             song.loadPreset (ducker, "Compressor/Sidechain/Sidechain Deep Pump");
 
-        song.addEffect (arpBus, devices::Vinyl::typeID, "Vinyl/Records/Warped Record");
+        song.addEffect (arpBus, devices::Age::typeID, "Age/Records/Warped Record");
         song.setVolume (arpBus, arpBusLevel);
 
         // The chord lane: each of the sub's notes is its chord's root, in F major.

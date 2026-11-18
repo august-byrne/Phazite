@@ -125,17 +125,18 @@ struct Exception
 
 constexpr Exception exceptions[] = {
     // By design.
-    { "phaziteVinyl", Rule::nothing, anything,
-      "Its surface noise plays while the song does, sound or none coming in, until two seconds after the sound has stopped." },
+    { "phaziteAge", Rule::nothing, anything,
+      "Its noise (a record's surface, a tape's hiss) plays while the song does, sound or none coming in, until two seconds after "
+      "the sound has stopped." },
     { "phaziteFilter", Rule::latency, 2.0,
       "Its latency is its oversampling's 6 samples; its filter, a low pass at first, delays the lows it passes by its own phase "
       "besides, 1.6 samples at 96 kHz. Its copy for the mix, which the filter doesn't touch, is held to the latency by the mix rule." },
     { "phaziteMultiband", Rule::latency, 12.0,
       "Its crossovers turn the phase of what they split (the bands add up to an all-pass), which delays the lows 3 samples at "
       "48 kHz and 9 at 96 kHz more than the look-ahead and oversampling it reports." },
-    { "phaziteVinyl", Rule::latency, 12.0,
+    { "phaziteAge", Rule::latency, 12.0,
       "Its wow swings the sound's delay around the delay line's middle, which is its latency: over the sixth of a second "
-      "measured, the record runs some samples early." },
+      "measured, the record (or the tape) runs some samples early." },
     { "phaziteMotion", Rule::latency, 0.5, "The swept copies it adds, some milliseconds late, pull the peak a part of a sample.",
       "Motion (Chorus)" },
     { "phaziteMotion", Rule::latency, 0.5,
@@ -149,7 +150,7 @@ constexpr Exception exceptions[] = {
     { "phaziteSaturator", Rule::mix, -45.0,
       "It delays its copy for the mix itself, through the half-band filters its sound goes through (Processor::delaysDry()), so "
       "that the two meet in phase at any mix: 6.02 samples rather than the 6 it can report." },
-    { "phaziteVinyl", Rule::mix, -5.0,
+    { "phaziteAge", Rule::mix, -5.0,
       "Its copy for the mix takes the sound's linear way at every mix, so that the two meet in phase: the oversampling's half-band "
       "filters and the delay line read between samples, and Bass Mono's all-pass while it is on (as at its defaults, 100 Hz), which "
       "turns the lows' phase: what the rule measures, 5.25 dB under what came in. At no mix, what came in through that all-pass "
@@ -221,8 +222,8 @@ struct Variant
 };
 
 constexpr Variant variants[] = {
-    { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f },
-    { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
+    { "phaziteAge", "Age (Record)", "medium", 0.0f },     { "phaziteAge", "Age (Tape)", "medium", 1.0f },
+    { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f }, { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
     { "phaziteMotion", "Motion (Phaser)", "mode", 2.0f },
 };
 
@@ -1086,13 +1087,13 @@ TEST_CASE ("Nothing constant lies under an instrument's notes, at its defaults a
         });
 }
 
-TEST_CASE ("The vinyl at no mix keeps the level of what comes in at every frequency, with Bass Mono on and off")
+TEST_CASE ("Age at no mix keeps the level of what comes in at every frequency, with Bass Mono on and off")
 {
     // What the mix rule still holds it to (its exception): its copy for the mix, which takes the sound's linear way, turns the
     // phase of what came in and keeps its level: flat to a hundredth of a decibel to 5 kHz, and at the top within what its delay
     // line, read between samples as the sound's is, takes off: 0.04 dB at 10 kHz, 0.19 at 15 and 0.37 at 18 kHz at 44.1 kHz,
     // 0.03, 0.13 and 0.27 at 48 kHz. The half-band filters cost nothing in level, to a millionth of a decibel.
-    const auto* info = phazite::findOwnDevice ("phaziteVinyl");
+    const auto* info = phazite::findOwnDevice ("phaziteAge");
     REQUIRE (info != nullptr);
     const double frequencies[] = { 30.0, 100.0, 300.0, 1000.0, 5000.0, 10000.0, 15000.0, 18000.0 };
 
@@ -1120,13 +1121,13 @@ TEST_CASE ("The vinyl at no mix keeps the level of what comes in at every freque
     }
 }
 
-TEST_CASE ("Finding 5: the vinyl at no mix with Bass Mono on plays what came in through Bass Mono's all-pass, as late as its latency")
+TEST_CASE ("Finding 5: Age at no mix with Bass Mono on plays what came in through Bass Mono's all-pass, as late as its latency")
 {
     // Its mix rule's exception allowed anything. What the copy for the mix does at no mix is what it says: what came in
     // through the all-pass that Bass Mono turns the lows' phase with, as late as the latency, but for the half-band filters'
     // and the delay line's few hundredths of a decibel at the top. Measured as the mix rule measures, on noise below a
     // sixteenth of the rate, against the all-pass played here.
-    const auto* info = phazite::findOwnDevice ("phaziteVinyl");
+    const auto* info = phazite::findOwnDevice ("phaziteAge");
     REQUIRE (info != nullptr);
 
     for (const auto rate : { 44100.0, 48000.0, 96000.0 })

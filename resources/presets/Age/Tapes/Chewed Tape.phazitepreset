@@ -1,0 +1,30 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Age",
+    "instrument": false,
+    "type": "phaziteAge",
+    "parameters": {
+      "medium": "Tape",
+      "wobble": 1,
+      "wow": 18.0,
+      "wowRate": 0.4,
+      "flutter": 5.0,
+      "noise": 1,
+      "hiss": -48.0,
+      "crackle": -30.0,
+      "density": 5.0,
+      "dropouts": 0.7,
+      "drive": 1,
+      "distortion": 0.5,
+      "headBump": 1.5,
+      "stereo": 1,
+      "width": 0.75,
+      "bassMono": 100.0,
+      "band": 1,
+      "lowCut": 60.0,
+      "highCut": 7000.0,
+      "mix": 1.0
+    }
+  }
+}

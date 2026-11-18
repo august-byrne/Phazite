@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the vinyl's, the delay's, Stereo's and the vocoder's editors
+// The Filter's, the saturator's, Age's, the delay's, Stereo's and the vocoder's editors
 // (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
 // them, each one undo step. Motion's editor is in MotionTests.cpp.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/age/Age.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -25,6 +25,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/devices/AgeEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
@@ -32,7 +33,6 @@
 #include "ui/devices/SaturatorEditor.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/devices/StereoEditor.h"
-#include "ui/devices/VinylEditor.h"
 #include "ui/devices/VocoderEditor.h"
 
 namespace
@@ -324,22 +324,50 @@ TEST_CASE ("The saturator's editor switches its Band at its title, drags the ban
     CHECK_FALSE (saturator->isPlayingBand());
 }
 
-TEST_CASE ("The vinyl's editor turns its record as it plays, draws its pitch and its crackles, and drags for the wow and the band")
+TEST_CASE ("Age's editor shows the record or the tape under two tabs, switches each part, and drags for the wow and the band")
 {
-    using phazite::devices::Vinyl;
-    Song song (Vinyl::typeID);
+    using phazite::devices::Age;
+    Song song (Age::typeID);
     const auto device = song.getDevice();
-    CHECK (dynamic_cast<phazite::ui::VinylEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+    CHECK (dynamic_cast<phazite::ui::AgeEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
-    phazite::ui::VinylEditor editor (device);
+    phazite::ui::AgeEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    checkEveryParameterButMixHasAControl (editor, Vinyl::info);
+    checkEveryParameterButMixHasAControl (editor, Age::info);
     phazite::test::checkChildrenApart (editor);
-    phazite::test::checkChildrenApart (editor.getRecord());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    const auto size = editor.getBounds();
 
-    // A drag up the record: more wow, one step named after it.
+    // Two tabs, Record and Tape, the record's first.
+    auto* tabs = editor.getModeTabs();
+    REQUIRE (tabs != nullptr);
+    REQUIRE (tabs->getNumTabs() == 2);
+    CHECK (tabs->getTab (0).getButtonText() == juce::String ("Record"));
+    CHECK (tabs->getTab (1).getButtonText() == juce::String ("Tape"));
+    CHECK (tabs->getTab (0).getTooltip().startsWith ("Record: "));
+    CHECK (editor.getShownMode() == 0);
+    CHECK_FALSE (editor.showsTape());
+
+    const auto shows = [&editor] (const char* id)
+    {
+        const auto* control = editor.findControl (id);
+        return control != nullptr && control->isShowing();
+    };
+
+    for (const auto* id : { "wow", "wowRate", "flutter", "hiss", "crackle", "density", "distortion", "width", "bassMono", "lowCut",
+                            "highCut", "wobble", "noise", "drive", "stereo", "band" })
+    {
+        CAPTURE (id);
+        CHECK (shows (id));
+    }
+
+    CHECK_FALSE (shows ("dropouts"));
+    CHECK_FALSE (shows ("headBump"));
+
+    // The record: a drag up it, more wow, one step named after it.
     auto& record = editor.getRecord();
     CHECK (record.getTitle() == juce::String ("Record"));
+    phazite::test::checkChildrenApart (record);
     phazite::test::Mouse mouse (record);
     const auto centre = editor.getRecordCentre().roundToInt();
     CHECK (record.getLocalBounds().contains (centre));
@@ -369,21 +397,145 @@ TEST_CASE ("The vinyl's editor turns its record as it plays, draws its pitch and
     CHECK (song.valueOf ("lowCut") == doctest::Approx (30.0f));
     CHECK (song.describeUndo() == juce::String ("Undo Change High Cut"));
 
+    // Each part's switch: a click turns it off, as one undo step.
+    for (const auto* id : { "wobble", "noise", "drive", "stereo", "band" })
+    {
+        CAPTURE (id);
+        auto* control = dynamic_cast<juce::Button*> (editor.findControl (id));
+        REQUIRE (control != nullptr);
+        CHECK (control->getToggleState());
+        CHECK (control->isShowing());
+        phazite::test::Mouse click (*control);
+        click.click (control->getLocalBounds().getCentre());
+        CHECK (song.valueOf (id) == doctest::Approx (0.0f));
+        CHECK (song.describeUndo().startsWith ("Undo Change"));
+    }
+
+    // Each part shows faint while it is off: the band's knobs with it.
+    ticker.tickNow();
+    CHECK (editor.findControl ("lowCut")->getParentComponent()->getAlpha() < 1.0f);
+    CHECK (editor.findControl ("wow")->getParentComponent()->getAlpha() < 1.0f);
+
+    for (int i = 0; i < 5; ++i)
+        phazite::undo (*song.song);
+
+    ticker.tickNow();
+    CHECK (song.valueOf ("wobble") == doctest::Approx (1.0f));
+    CHECK (editor.findControl ("lowCut")->getParentComponent()->getAlpha() == doctest::Approx (1.0f));
+
+    // The Tape tab: the medium, as one undo step, and the tape's page: its reels in the record's place, its dropouts and
+    // its head bump, no crackle; the editor as large.
+    {
+        auto& tab = tabs->getTab (1);
+        phazite::test::Mouse click (tab);
+        click.click (tab.getLocalBounds().getCentre());
+    }
+
+    CHECK (song.valueOf ("medium") == doctest::Approx (1.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Medium"));
+    ticker.tickNow();
+    CHECK (editor.getShownMode() == 1);
+    CHECK (editor.showsTape());
+    CHECK (editor.getBounds() == size);
+    CHECK (record.isShowing());
+    CHECK (record.getTitle() == juce::String ("Tape"));
+
+    for (const auto* id : { "dropouts", "headBump", "hiss", "wow", "noise", "drive" })
+    {
+        CAPTURE (id);
+        CHECK (shows (id));
+    }
+
+    CHECK_FALSE (shows ("crackle"));
+    CHECK_FALSE (shows ("density"));
+    phazite::test::checkChildrenApart (editor);
+
+    // On the reels, a drag down is less wow; the wheel slows the drift.
+    mouse.pause();
+    const auto reels = editor.getRecordCentre().roundToInt();
+    CHECK (record.getLocalBounds().contains (reels));
+    mouse.press (reels);
+    mouse.dragTo (reels + juce::Point<int> (0, 10));
+    mouse.dragTo (reels + juce::Point<int> (0, 20));
+    mouse.release();
+    CHECK (song.valueOf ("wow") < 4.0f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Wow"));
+    const auto rateBefore = song.valueOf ("wowRate");
+    mouse.pause();
+    mouse.wheel (reels, -0.5f);
+    CHECK (song.valueOf ("wowRate") < rateBefore);
+
+    // As it plays, dropping out at its most: the reels turn, the pitch's history fills, and the tape's line breaks.
+    ticker.tickNow(); // the editor listens
+    auto* age = device.getProcessor<Age>();
+    REQUIRE (age != nullptr);
+    CHECK (age->getPitchTap().isListening());
+    age->prepare (48000.0, 480);
+    std::vector<float> values;
+
+    for (const auto& parameter : Age::info.parameters)
+        values.push_back (song.valueOf (parameter.id.data())); // the IDs are literals
+
+    values[Age::wow] = 20.0f;
+    values[Age::dropouts] = 1.0f;
+    juce::AudioBuffer<float> buffer (2, 480);
+    auto broke = false;
+
+    for (int block = 0; block < 400 && ! broke; ++block)
+    {
+        for (int i = 0; i < 480; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                buffer.setSample (channel, i, 0.25f * (float) std::sin ((block * 480 + i) * 0.05));
+
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.parameters = values;
+        context.isPlaying = true;
+        context.beat = block * 480 * 2.0 / 48000.0;
+        age->process (context);
+
+        if (block % 3 == 2)
+        {
+            ticker.tickNow();
+            broke = editor.isTapeBroken();
+        }
+    }
+
+    CHECK (broke);
+    CHECK (editor.getNumReadings() >= 40);
+    phazite::undo (*song.song); // the wheel's
+    phazite::undo (*song.song); // the drag's
+    phazite::undo (*song.song); // the medium's
+    ticker.tickNow();
+    CHECK (editor.getShownMode() == 0);
+    CHECK (record.getTitle() == juce::String ("Record"));
+}
+
+TEST_CASE ("Age's editor turns its record as it plays and draws its pitch and its crackles")
+{
+    using phazite::devices::Age;
+    Song song (Age::typeID);
+    const auto device = song.getDevice();
+    phazite::ui::AgeEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
     // As it plays, crackling densely: the record turns, its pitch's history fills, and a speck comes where it crackled.
     auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
     ticker.tickNow(); // the editor listens
-    auto* vinyl = device.getProcessor<Vinyl>();
-    REQUIRE (vinyl != nullptr);
-    CHECK (vinyl->getPitchTap().isListening());
-    vinyl->prepare (48000.0, 480);
+    auto* age = device.getProcessor<Age>();
+    REQUIRE (age != nullptr);
+    CHECK (age->getPitchTap().isListening());
+    age->prepare (48000.0, 480);
     std::vector<float> values;
 
-    for (const auto& parameter : Vinyl::info.parameters)
+    for (const auto& parameter : Age::info.parameters)
         values.push_back (song.valueOf (parameter.id.data())); // the IDs are literals
 
-    values[Vinyl::wow] = 20.0f;
-    values[Vinyl::crackle] = -12.0f;
-    values[Vinyl::density] = 200.0f;
+    values[Age::wow] = 20.0f;
+    values[Age::crackle] = -12.0f;
+    values[Age::density] = 200.0f;
     juce::AudioBuffer<float> buffer (2, 480);
 
     for (int block = 0; block < 50; ++block)
@@ -396,14 +548,46 @@ TEST_CASE ("The vinyl's editor turns its record as it plays, draws its pitch and
         context.parameters = values;
         context.isPlaying = true;
         context.beat = block * 480 * 2.0 / 48000.0;
-        vinyl->process (context);
+        age->process (context);
     }
 
     ticker.tickNow();
-    CHECK (editor.getShownTurn() == doctest::Approx (0.5 * values[Vinyl::wowRate]).epsilon (0.02)); // half a second's turn
+    CHECK (editor.getShownTurn() == doctest::Approx (0.5 * values[Age::wowRate]).epsilon (0.02)); // half a second's turn
     CHECK (std::abs (editor.getShownPitch()) <= 26.0f);
     CHECK (editor.getNumReadings() >= 40);
     CHECK (editor.getNumSpecks() > 0);
+}
+
+TEST_CASE ("Age's editor shows each medium's page whole in the default dock")
+{
+    Song song (phazite::devices::Age::typeID);
+    phazite::ui::AgeEditor editor (song.getDevice());
+    constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+
+    for (const auto medium : { 0, 1 })
+    {
+        CAPTURE (medium);
+        auto& tab = editor.getModeTabs()->getTab (medium);
+        phazite::test::Mouse click (tab);
+        click.click (tab.getLocalBounds().getCentre());
+        CHECK (editor.getShownMode() == medium);
+        CHECK (editor.getRecord().isShowing());
+        CHECK (editor.getLocalBounds().contains (editor.getLocalArea (&editor.getRecord(), editor.getRecord().getLocalBounds())));
+
+        for (const auto* id : { "wow", "hiss", "distortion", "width", "lowCut", "highCut", "wobble", "noise", "drive", "stereo", "band",
+                                medium == 0 ? "crackle" : "dropouts" })
+        {
+            CAPTURE (id);
+            auto* control = editor.findControl (id);
+            REQUIRE (control != nullptr);
+
+            // On its page, or under a tab of its column where the dock is short.
+            if (control->isShowing())
+                CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+        }
+    }
 }
 
 TEST_CASE ("The delay's editor drags its first echo for the time and feedback, and its band's ends for the cuts")

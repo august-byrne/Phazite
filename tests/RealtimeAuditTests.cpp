@@ -19,6 +19,7 @@
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/age/Age.h"
 #include "devices/core/AudioThreads.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
@@ -37,7 +38,6 @@
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/Stereo.h"
 #include "devices/synth/Synth.h"
-#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -1560,46 +1560,76 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's vinyl on the synth's chords, everything on, its band swept, with its editor listening")
+    TEST_CASE ("Real-time audit: Phazite's Age on the synth's chords, everything on, its medium and each part's switch automated, "
+               "its band swept, with its editor listening")
     {
-        using phazite::devices::Vinyl;
+        using phazite::devices::Age;
         TestSong song;
         const auto track = song.firstTrack;
         song.setInstrument (track, phazite::devices::Synth::typeID);
         addChords (song, track);
-        const auto vinyl = song.addEffect (track, Vinyl::typeID);
+        const auto age = song.addEffect (track, Age::typeID);
 
-        // A deep wow and flutter, the groove distorting, the lows in mono, hiss and dense crackle; its high cut swept by a lane,
-        // a cycle a beat, so that its band glides all the time.
+        // A deep wow and flutter, the drive, the lows in mono, hiss and dense crackle, dropouts and a head bump; its high cut
+        // swept by a lane, a cycle a beat, so that its band glides all the time.
         for (const auto& [id, value] : { std::pair<const char*, float> { "wow", 20.0f },
                                          { "flutter", 8.0f },
                                          { "distortion", 0.8f },
+                                         { "headBump", 4.0f },
                                          { "bassMono", 200.0f },
                                          { "hiss", -50.0f },
                                          { "crackle", -18.0f },
-                                         { "density", 300.0f } })
-            song.setParameter (vinyl, id, value);
+                                         { "density", 300.0f },
+                                         { "dropouts", 1.0f } })
+            song.setParameter (age, id, value);
 
-        sweepParameter (song, { vinyl, "highCut" }, 2000.0f, 16000.0f);
+        sweepParameter (song, { age, "highCut" }, 2000.0f, 16000.0f);
 
-        // As its open editor has it: its scope and its pitch tapped, its clicks counted.
-        const auto played = [&song, vinyl]() -> auto& { return dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()); };
+        // Its medium moved by a lane from the record to the tape and back, and each part switched off and on, each on beats of
+        // its own, so that the media and the parts fade in and out all along.
+        const auto steps = [&song, age] (const char* id, int every, float first = 1.0f)
+        {
+            const phazite::ParameterRef parameter { age, id };
+            const auto range = phazite::getControlTravel (getSong (song), parameter);
+            REQUIRE (range.has_value());
+
+            for (int beat = 0; beat < 8; ++beat)
+            {
+                const auto position = phazite::toControlPosition (*range, (beat / every) % 2 == 0 ? first : 1.0f - first);
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+            }
+        };
+
+        steps ("medium", 2, 0.0f); // the record first
+        steps ("wobble", 1);
+        steps ("noise", 3);
+        steps ("drive", 1);
+        steps ("stereo", 3);
+        steps ("band", 2);
+
+        // As its open editor has it: its scope and its pitch tapped, its clicks and dropouts counted.
+        const auto played = [&song, age]() -> auto& { return dynamic_cast<Age&> (getPlayed (song, age).getProcessor()); };
         std::vector<float> readings (4096);
 
         const auto m = playAndMeasure (
             song,
             [&]
             {
-                getPlayed (song, vinyl).getScope().setListening (true);
+                getPlayed (song, age).getScope().setListening (true);
                 played().getPitchTap().setListening (true);
                 played().getSurfaceNoise().takeClicks();
+                played().getTapeWear().takeDropouts();
             },
             [&]
             {
                 CHECK (played().getPitchTap().pull (readings.data(), (int) readings.size()) > 0);
-                CHECK (played().getSurfaceNoise().takeClicks() > 100); // it crackled all along
+                CHECK (played().getSurfaceNoise().takeClicks() > 10); // the record crackled
+                played().getTapeWear().takeDropouts();
             });
-        report ("Phazite's vinyl on the synth's chords, everything on, its high cut swept by a lane, its editor's displays listening", m);
+        report ("Phazite's Age on the synth's chords, everything on, its medium and each part's switch automated, its high cut swept "
+                "by a lane, its editor's displays listening",
+                m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -2322,11 +2352,11 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: edited while it plays: the vinyl's Mix moved through 100 % and back, and again after resting there")
+    TEST_CASE ("Real-time audit: edited while it plays: Age's Mix moved through 100 % and back, and again after resting there")
     {
         // Its copy for the mix goes on for a second after the Mix reaches 100 %, then rests; as the Mix leaves 100 % after a
-        // rest, the copy is made again in that block from what came in lately (Vinyl.h).
-        using phazite::devices::Vinyl;
+        // rest, the copy is made again in that block from what came in lately (Age.h).
+        using phazite::devices::Age;
         TestSong song;
         const auto keys = song.firstTrack;
         song.setInstrument (keys, phazite::devices::Synth::typeID);
@@ -2335,21 +2365,21 @@ TEST_SUITE ("realtime-audit")
         for (int beat = 0; beat < 16; ++beat)
             song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
 
-        const auto vinyl = song.addEffect (keys, Vinyl::typeID);
-        song.setParameter (vinyl, "bassMono", 100.0f);
+        const auto age = song.addEffect (keys, Age::typeID);
+        song.setParameter (age, "bassMono", 100.0f);
 
         const auto m = playProjectAndMeasure (
             song.context,
             Playing { .edits = {
-                          { 10, "the Mix at 50 %", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
-                          { 30, "the Mix at 100 %", [&] { song.setParameter (vinyl, "mix", 1.0f); } },
-                          { 60, "back to 50 % within the second: the copy went on", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
-                          { 80, "at 100 % again", [&] { song.setParameter (vinyl, "mix", 1.0f); } },
-                          { 300, "back to 50 % after resting there: the copy made again", [&] { song.setParameter (vinyl, "mix", 0.5f); } },
+                          { 10, "the Mix at 50 %", [&] { song.setParameter (age, "mix", 0.5f); } },
+                          { 30, "the Mix at 100 %", [&] { song.setParameter (age, "mix", 1.0f); } },
+                          { 60, "back to 50 % within the second: the copy went on", [&] { song.setParameter (age, "mix", 0.5f); } },
+                          { 80, "at 100 % again", [&] { song.setParameter (age, "mix", 1.0f); } },
+                          { 300, "back to 50 % after resting there: the copy made again", [&] { song.setParameter (age, "mix", 0.5f); } },
                       } });
-        report ("Edited while it plays: the vinyl's Mix through 100 % and back", m);
+        report ("Edited while it plays: Age's Mix through 100 % and back", m);
         CHECK (m.peakLevel > 0.01f); // it plays
-        CHECK (dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()).getDryRebuilds() >= 2);
+        CHECK (dynamic_cast<Age&> (getPlayed (song, age).getProcessor()).getDryRebuilds() >= 2);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
