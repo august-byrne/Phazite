@@ -1878,6 +1878,80 @@ TEST_CASE ("The EQ in Linear at a Mix of 50 % is an EQ of half the depth, which 
     }
 }
 
+TEST_CASE ("The EQ's curves at a Mix of 50 % are what is heard of each way through it, in Minimum and in Linear, within 0.2 dB")
+{
+    // Through the runner, which mixes what came in back in, against Eq::getHeardMagnitude(), which its editor draws: the middle
+    // and the side (an impulse alike on both sides, and one opposite), with a band on each and one on Stereo; then the left
+    // and the right (an impulse on one side, read on it). In Minimum what is heard is |(1 - m) + m H|, in Linear
+    // (1 - m) + m |H|. What the curves drew before, the bands' magnitude alone, is off by decibels.
+    const std::array<std::vector<float>, 2> setups { withBands ({ { 1, Eq::BandType::bell, 250.0f, -6.0f, 1.0f },
+                                                                  { 3, Eq::BandType::bell, 1000.0f, 12.0f, 2.0f, 1, Placement::mid },
+                                                                  { 5, Eq::BandType::lowCut, 600.0f, 0.0f, 2.0f, 1, Placement::side } }),
+                                                     withBands (
+                                                         { { 1, Eq::BandType::bell, 250.0f, -6.0f, 1.0f },
+                                                           { 3, Eq::BandType::bell, 3000.0f, -12.0f, 2.0f, 1, Placement::left },
+                                                           { 5, Eq::BandType::highShelf, 6000.0f, 6.0f, 1.0f, 1, Placement::right } }) };
+
+    for (const auto isLinear : { false, true })
+    {
+        for (size_t setup = 0; setup < setups.size(); ++setup)
+        {
+            CAPTURE (isLinear);
+            CAPTURE (setup);
+            auto values = setups[setup];
+            values[(size_t) Eq::mixParameter] = 0.5f;
+
+            if (isLinear)
+                values = inLinear (values);
+
+            // Each way, by what goes in and the side read: the middle, the side; or the left, the right.
+            struct Way
+            {
+                Placement way;
+                float left, right;
+                int read;
+            };
+
+            const std::array<Way, 2> ways =
+                setup == 0 ? std::array<Way, 2> { Way { Placement::mid, 1.0f, 1.0f, 0 }, Way { Placement::side, 1.0f, -1.0f, 0 } }
+                           : std::array<Way, 2> { Way { Placement::left, 1.0f, 0.0f, 0 }, Way { Placement::right, 0.0f, 1.0f, 1 } };
+
+            for (const auto& each : ways)
+            {
+                CAPTURE ((int) each.way);
+                probe::Device device (Eq::info);
+                device.setAll (values);
+                device.prepare (testRate, 512);
+                probe::Sound sound (2, 2 * linearLatency + 512);
+                sound.clear();
+                sound.setSample (0, 0, each.left);
+                sound.setSample (1, 0, each.right);
+                device.play (sound, 512);
+                std::vector<double> response;
+
+                for (int i = 0; i < sound.getNumSamples(); ++i)
+                    response.push_back (sound.getSample (each.read, i));
+
+                auto largestApart = 0.0, oldApart = 0.0;
+
+                for (const auto f : getFrequencies (6, 100.0, 16000.0))
+                {
+                    const auto measured = responseDecibels (response, f);
+                    largestApart = std::max (
+                        largestApart, std::abs (measured - probe::inDecibels (Eq::getHeardMagnitude (values, f, testRate, each.way))));
+                    oldApart =
+                        std::max (oldApart, std::abs (measured - probe::inDecibels (Eq::getMagnitude (values, f, testRate, each.way))));
+                }
+
+                MESSAGE (std::string (isLinear ? "Linear" : "Minimum") << ", way " << (int) each.way << ": at most " << largestApart
+                                                                       << " dB from the curve; the magnitude alone " << oldApart << " dB");
+                CHECK (largestApart < 0.2);
+                CHECK (oldApart > 1.0);
+            }
+        }
+    }
+}
+
 // How the window and the grid were chosen (devices/eq/LinearPhase.h, Design): each row's largest error where the curve is above
 // -60 dB, a low cut's level at 10 Hz, and the end tap's size against the middle tap's, for the rectangle, raised-cosine tapers
 // of the ends' last 2, 3 and 5 %, and Kaisers of several betas, on grids of 2 L and 4 L. Run with --no-skip to see the table

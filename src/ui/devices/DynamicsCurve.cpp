@@ -14,7 +14,12 @@ namespace
 {
     namespace curves = devices::curves;
 
-    constexpr float gridDecibels[] = { -18.0f, -12.0f, -9.0f, -6.0f, -3.0f, 3.0f, 6.0f, 9.0f }; // as Maximus's grid
+    // The display, in decibels, the same across and up: from -60 dB at the left and the bottom, where silence also sits, to
+    // the top of the curve's axis (+12 dB), a grid line every 6 dB, the 0 dB lines heavier, numbers every 12 dB. Its points
+    // are places on the curve's own axis (devices::curves::toAxis()), as the device plays and saves them; only where they
+    // show changes.
+    constexpr float lowestShown = -60.0f;
+    constexpr float gridStep = DynamicsCurve::gridDecibels, numberStep = DynamicsCurve::numberedDecibels;
     constexpr float snapDistance = 6.0f; // pixels from a grid line within which a dragged point snaps to it
     constexpr float tensionDrag = 2.0f;  // a drag the curve's height bends a line by this much of its range
     constexpr float fineTension = 0.2f;  // with Ctrl
@@ -45,6 +50,41 @@ namespace
     float toDecibels (float place)
     {
         return 20.0f * std::log10 (std::max (silentAmplitude, curves::fromAxis (place)));
+    }
+
+    // The top of the display: the curve's axis's top, in decibels (about +12).
+    float getHighestShown()
+    {
+        return 20.0f * std::log10 (curves::fromAxis (1.0f));
+    }
+
+    // A place on the curve's axis as a share of the display, from 0 (-60 dB and below, silence) to 1 (its top); and back.
+    float getShare (float place)
+    {
+        return juce::jlimit (0.0f, 1.0f, (toDecibels (place) - lowestShown) / (getHighestShown() - lowestShown));
+    }
+
+    float getPlace (float share)
+    {
+        if (share <= 0.0f)
+            return 0.0f;
+
+        if (share >= 1.0f)
+            return 1.0f;
+
+        return juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (lowestShown + share * (getHighestShown() - lowestShown)));
+    }
+
+    // The grid's lines, as shares of the display: every 6 dB from the bottom up, and the top.
+    std::vector<float> getGridShares()
+    {
+        std::vector<float> shares;
+
+        for (auto decibels = lowestShown; decibels < getHighestShown(); decibels += gridStep)
+            shares.push_back ((decibels - lowestShown) / (getHighestShown() - lowestShown));
+
+        shares.push_back (1.0f);
+        return shares;
     }
 
     juce::String formatLevel (float place)
@@ -112,25 +152,21 @@ namespace
     constexpr int keyRunMilliseconds = 500; // a run of arrow presses ends after this long without one, as a turn of the wheel
     constexpr float limitRatio = 20.0f, gateRatio = 10.0f;
 
-    // To the nearest of the grid's lines, the middle and the ends, within a few pixels of it.
+    // To the nearest of the grid's lines (the bottom one silence) and the top, within a few pixels of it, as a place.
     float snap (float place, float size)
     {
-        auto best = place, bestDistance = snapDistance / std::max (1.0f, size);
+        const auto share = getShare (place);
+        auto best = place;
+        auto bestDistance = snapDistance / std::max (1.0f, size);
 
-        const auto consider = [&] (float line)
+        for (const auto line : getGridShares())
         {
-            if (const auto distance = std::abs (line - place); distance <= bestDistance)
+            if (const auto distance = std::abs (line - share); distance <= bestDistance)
             {
-                best = line;
+                best = getPlace (line);
                 bestDistance = distance;
             }
-        };
-
-        for (const auto decibels : gridDecibels)
-            consider (curves::axisForDecibels (decibels));
-
-        for (const auto line : { 0.0f, 0.5f, 1.0f })
-            consider (line);
+        }
 
         return best;
     }
@@ -528,20 +564,25 @@ juce::Rectangle<float> DynamicsCurve::getArea() const
     return getLocalBounds().toFloat().reduced (GraphTint::handleRadius * 1.5f + 1.0f);
 }
 
+float DynamicsCurve::getShareForDecibels (float decibels)
+{
+    return juce::jlimit (0.0f, 1.0f, (decibels - lowestShown) / (getHighestShown() - lowestShown));
+}
+
 juce::Point<float> DynamicsCurve::getPosition (float across, float up) const
 {
     const auto area = getArea();
-    return { area.getX() + across * area.getWidth(), area.getBottom() - up * area.getHeight() };
+    return { area.getX() + getShare (across) * area.getWidth(), area.getBottom() - getShare (up) * area.getHeight() };
 }
 
 float DynamicsCurve::acrossAt (float x) const
 {
-    return juce::jlimit (0.0f, 1.0f, (x - getArea().getX()) / getArea().getWidth());
+    return getPlace ((x - getArea().getX()) / std::max (1.0f, getArea().getWidth()));
 }
 
 float DynamicsCurve::upAt (float y) const
 {
-    return juce::jlimit (0.0f, 1.0f, (getArea().getBottom() - y) / getArea().getHeight());
+    return getPlace ((getArea().getBottom() - y) / std::max (1.0f, getArea().getHeight()));
 }
 
 int DynamicsCurve::getCount() const
@@ -580,8 +621,13 @@ std::optional<juce::Point<float>> DynamicsCurve::getTensionPosition (int point) 
     if (point <= 0 || point >= getCount())
         return {};
 
-    const auto middle = 0.5f * (getValue (point - 1, curves::pointX) + getValue (point, curves::pointX));
-    return getPosition (middle, curves::getAt (std::span (values).subspan ((size_t) first, curves::parameterCount), middle));
+    // Half way across the line as it shows, on it.
+    const auto middleX = 0.5f * (getPointPosition (point - 1).x + getPointPosition (point).x);
+    const auto middle =
+        juce::jlimit (getValue (point - 1, curves::pointX),
+                      std::max (getValue (point - 1, curves::pointX), getValue (point, curves::pointX)), acrossAt (middleX));
+    return juce::Point<float> (
+        middleX, getPosition (0.0f, curves::getAt (std::span (values).subspan ((size_t) first, curves::parameterCount), middle)).y);
 }
 
 void DynamicsCurve::edited()
@@ -684,30 +730,45 @@ void DynamicsCurve::paint (juce::Graphics& g)
     const auto area = getArea();
     graph::paintBackground (g, p, getLocalBounds().toFloat());
 
-    // The grid at Maximus's levels, the 0 dB lines through the middle stronger, and level in equalling level out.
-    for (const auto decibels : gridDecibels)
+    // The grid, the same across and up: a line every 6 dB, the 0 dB lines stronger, and level in equalling level out; numbers
+    // every 12 dB, up the left and along the bottom.
+    g.setFont (juce::FontOptions (TextSize::small));
+    const auto highest = getHighestShown();
+
+    for (auto decibels = lowestShown + gridStep; decibels < highest - 0.5f * gridStep; decibels += gridStep)
     {
         const auto place = curves::axisForDecibels (decibels);
         const auto at = getPosition (place, place);
-        g.setColour (p.text.withAlpha (GraphTint::grid));
+        const auto isZero = std::abs (decibels) < 0.5f * gridStep;
+        g.setColour (p.text.withAlpha (isZero ? GraphTint::zeroLine : GraphTint::grid));
         g.drawVerticalLine (juce::roundToInt (at.x), area.getY(), area.getBottom());
         g.drawHorizontalLine (juce::roundToInt (at.y), area.getX(), area.getRight());
+
+        if (std::abs (std::remainder (decibels, numberStep)) < 0.5f)
+        {
+            const auto text = juce::String (juce::roundToInt (decibels));
+            const auto textWidth = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text) + 1.0f;
+            g.setColour (p.textMuted);
+            g.drawText (text, juce::Rectangle<float> (area.getX() + (float) Space::xs, at.y - TextSize::small, textWidth, TextSize::small),
+                        juce::Justification::centredLeft, false);
+            g.drawText (text,
+                        juce::Rectangle<float> (at.x + (float) Space::xs, area.getBottom() - TextSize::small - (float) Space::xs, textWidth,
+                                                TextSize::small),
+                        juce::Justification::centredLeft, false);
+        }
     }
 
-    const auto middle = getPosition (0.5f, 0.5f);
     g.setColour (p.text.withAlpha (GraphTint::zeroLine));
-    g.drawVerticalLine (juce::roundToInt (middle.x), area.getY(), area.getBottom());
-    g.drawHorizontalLine (juce::roundToInt (middle.y), area.getX(), area.getRight());
     g.drawLine ({ getPosition (0.0f, 0.0f), getPosition (1.0f, 1.0f) });
     g.setColour (p.textMuted);
-    g.setFont (juce::FontOptions (TextSize::small));
     g.drawText ("OUT", area.reduced (Space::xs).toNearestInt(), juce::Justification::topLeft);
     g.drawText ("IN", area.reduced (Space::xs).toNearestInt(), juce::Justification::bottomRight);
 
-    // The curve, over a wash of the area under it, lit up to the level its compressor hears now.
+    // The curve, over a wash of the area under it, lit up to the level its compressor hears now: at each pixel across, the
+    // level out for the level in there, as the device plays it.
     const auto curve = std::span (values).subspan ((size_t) first, curves::parameterCount);
-    const auto line = graph::makeCurve (
-        area, [this, area, curve] (float x) { return area.getBottom() - curves::getAt (curve, acrossAt (x)) * area.getHeight(); }, 1.0f);
+    const auto line =
+        graph::makeCurve (area, [this, curve] (float x) { return getPosition (0.0f, curves::getAt (curve, acrossAt (x))).y; }, 1.0f);
     auto wash = line;
     wash.lineTo (area.getBottomRight());
     wash.lineTo (area.getBottomLeft());
@@ -884,12 +945,12 @@ void DynamicsCurve::mouseDrag (const juce::MouseEvent& e)
         return;
 
     const auto area = getArea();
-    const auto up = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, area.getHeight());
     const auto i = dragged->index;
 
     if (! dragged->point)
     {
         // Up bends the line up; Ctrl in fine steps.
+        const auto up = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, area.getHeight());
         const auto fine = e.mods.isCtrlDown() ? fineTension : 1.0f;
         drag.set (0, juce::jlimit (-1.0f, 1.0f, drag.getStart (0) + tensionDrag * up * fine));
         edited();
@@ -898,16 +959,26 @@ void DynamicsCurve::mouseDrag (const juce::MouseEvent& e)
 
     const auto startAcross = drag.getStart (0), startUp = drag.getStart (1);
 
-    // Shift keeps it level, Ctrl keeps it where it is across; the first and last points stay at the curve's ends.
-    const auto along = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth());
+    // As far as the pointer has moved on the display, from where the point showed as it was taken: unmoved along an axis, its
+    // place there exactly. Shift keeps it level, Ctrl keeps it where it is across; the first and last points stay at the
+    // curve's ends.
+    const auto started = getPosition (startAcross, startUp);
+    const auto movedX = (float) e.getDistanceFromDragStartX(), movedY = (float) e.getDistanceFromDragStartY();
     const auto isEnd = i == 0 || i == getCount() - 1;
-    auto across = isEnd || e.mods.isCtrlDown() ? startAcross : startAcross + along;
-    auto height = e.mods.isShiftDown() ? startUp : startUp + up;
+    const auto movesAcross = ! (isEnd || e.mods.isCtrlDown() || juce::exactlyEqual (movedX, 0.0f));
+    const auto movesUp = ! (e.mods.isShiftDown() || juce::exactlyEqual (movedY, 0.0f));
+    auto across = movesAcross ? acrossAt (started.x + movedX) : startAcross;
+    auto height = movesUp ? upAt (started.y + movedY) : startUp;
 
+    // Snap takes it onto a grid line along the way it moves only: left where it is along the other, it keeps its place there
+    // exactly (a point under the display's lowest level, dragged straight up, keeps its level in).
     if (snaps)
     {
-        across = snap (across, area.getWidth());
-        height = snap (height, area.getHeight());
+        if (movesAcross)
+            across = snap (across, area.getWidth());
+
+        if (movesUp)
+            height = snap (height, area.getHeight());
     }
 
     const auto earliest = i > 0 ? getValue (i - 1, curves::pointX) : 0.0f;

@@ -111,7 +111,7 @@ void SweepPicture::paint (juce::Graphics& g)
     graph::paintFrequencyGrid (g, p, frequencies, true);
 
     // What comes in, faint; what goes out, lit.
-    const graph::LevelAxis spectrumLevels { area, -90.0f, 6.0f };
+    const auto spectrumLevels = graph::SpectrumTrace::getLevels (area);
     input.paint (g, frequencies, spectrumLevels, p.textMuted.withAlpha (GraphTint::spectrumFill),
                  p.textMuted.withAlpha (GraphTint::spectrumLine));
     output.paint (g, frequencies, spectrumLevels, tint.withAlpha (GraphTint::spectrumFill), tint.withAlpha (GraphTint::spectrumLine));
@@ -165,6 +165,16 @@ juce::String SweepPicture::getRateText() const
     }
 
     return juce::String (values[(size_t) rateIndex], 2) + " Hz";
+}
+
+void SweepPicture::shownAgain()
+{
+    // The spectra of the sound now, not of what played while nobody looked.
+    if (auto* scope = device.getScope())
+        scope->drain();
+
+    input.clear();
+    output.clear();
 }
 
 void SweepPicture::tick()

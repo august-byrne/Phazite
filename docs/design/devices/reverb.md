@@ -117,7 +117,8 @@ flow has a closed form: the energy going into the lines fades as e^(-st) for the
 each keeps on a pass (its loss and its damping at the pitch), times e^(s × its pass) and its all-pass's holding, is 1 (a
 renewal equation), found by halves in at most 768 line updates, 0.01 to 0.03 ms a pitch in a Debug build; it comes within a tenth of the hall's measured third-octave decays (at two dampings and both ends of Size, 300 Hz to
 3 kHz). The map works its 43 pitches out once when a value changes, not for each paint. Hits coming in drift into the map
-and fade. The map's top names the mode, and for a plate what a short Decay holds back ("Plate  Diffusion 58%").
+and fade: the loudest of what came in at each refresh, kept with its moment and drawn across the time it covers; shown
+again after it was hidden, the map has none from meanwhile. The map's top names the mode, and for a plate what a short Decay holds back ("Plate  Diffusion 58%").
 
 The map's edges drag, each as one undo step: the wedge's end (or a drag anywhere in the tail) for the Decay, the gap
 for the Pre-Delay, the slant's corner for the Damping, the floor for the Low Cut and the ceiling for the High Cut, each

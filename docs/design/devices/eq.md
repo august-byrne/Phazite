@@ -203,7 +203,7 @@ to the other.
 
 ## Its editor
 
-A graph from 20 Hz to 20 kHz and from -24 to +24 dB shows the EQ's curve, the selected band's own curve filled in its
+A graph from 20 Hz to 20 kHz and from -24 to +24 dB (the analyzer behind it from -90 to +6 dB) shows the EQ's curve, the selected band's own curve filled in its
 colour, the spectrum of what the EQ plays and, fainter behind it, the spectrum of what comes in. Each band has a dot:
 
 - drag a dot to move the band's frequency and, for a bell or a shelf, its gain, as one undo step: it moves as far as
@@ -217,6 +217,9 @@ Over a dot the pointer becomes a hand and the dot lights up. A band that isn't o
 its number in its dot (M, S, L or R). While any band that is on is on Mid or Side, the graph draws two curves in place of
 one, the middle's in the device's colour and the side's dashed in the analyzer's second colour (the faint trace's), and
 while any is on Left or Right, the left's and the right's alike; their names are along the graph's top at its right.
+The spectrum of what the EQ plays is then drawn as a trace for each of those ways, the middle's and the side's (or the
+left's and the right's), each in its curve's colour, faint as the spectra are; with every band on Stereo, one trace, the
+louder of the two sides, as before. The analyzer's levels go from -90 to +6 dB, as every device's do.
 
 A dynamic band's dot has a line from it up or down to where its gain goes at its whole Dynamic, with a hollow handle at
 the line's end that drags up and down for the Dynamic (one undo step; Escape takes it back; over it the pointer shows
@@ -230,7 +233,10 @@ Beside the graph are eight numbered buttons that select a band, and the selected
 Output knob. Under the Output, the Phase is two buttons, Minimum and Linear, with the latency in milliseconds beside them
 while the EQ plays Linear ("85 ms"), as the EQ reports it. The Threshold is faint while the Dynamic is 0, and both are off
 for a cut or a notch. These work from the keyboard and have screen-reader names. Mix is the knob on the device's row in the
-Devices view. The curves and the analyzer are the same in both phases.
+Devices view. The curves are what is heard, the Mix among them: with H a way's response (its bands' in their order, and
+the Output) and m the Mix, |(1 - m) + m H| in Minimum, where each band turns the phase, and (1 - m) + m |H| in Linear,
+whose kernels turn none, so that under 100 % a cut is filled in by what came in; the selected band's own curve is the band
+alone. The analyzer is the same in both phases.
 
 The EQ's editor is the one device editor not built on the shared frame (`DeviceEditorBase`): its graph narrows and
 shrinks to fit the dock, and it never wraps or turns into pages.
@@ -247,8 +253,9 @@ shrinks to fit the dock, and it never wraps or turns into pages.
 - Cuts are 12 to 48 dB per octave: no 6 or 96 dB slopes, and no tilt or band-pass shape.
 - No band solo (listening to one band alone) and no automatic gain.
 - Turning a band on or off, or changing its type or slope, takes effect at once, without a fade.
-- The analyzer has no settings (range, tilt, freeze), and shows both channels as one trace, each level the louder
-  channel's: no left, right, mid or side traces of their own.
+- The analyzer has no settings (range, tilt, freeze). With every band on Stereo it shows both channels as one trace,
+  each level the louder channel's; the left, right, mid and side traces show only while those curves do, and what
+  comes in is always one trace.
 - A dot has no fine drag.
 
 ## In the code

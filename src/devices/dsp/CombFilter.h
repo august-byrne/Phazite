@@ -12,6 +12,7 @@
 #pragma once
 
 #include <algorithm>
+#include <complex>
 #include <vector>
 
 namespace phazite::devices::dsp
@@ -29,8 +30,9 @@ struct CombCoefficients
 // with resonance from 0 (notches only) to 1 (ringing).
 CombCoefficients makeComb (bool negative, double frequency, double sampleRate, float resonance);
 
-// The comb's gain (not in decibels) at a frequency, for an editor's curve and tests.
+// The comb's gain (not in decibels) at a frequency, for an editor's curve and tests; and the same as a complex gain.
 double getMagnitude (const CombCoefficients&, double frequency, double sampleRate);
+std::complex<double> getResponse (const CombCoefficients&, double frequency, double sampleRate);
 
 // How long the comb rings after its input stops, in seconds, until it has fallen by 60 dB.
 double getRingSeconds (const CombCoefficients&, double sampleRate);

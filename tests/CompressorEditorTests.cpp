@@ -282,6 +282,36 @@ TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key
     CHECK_FALSE (compressor->isPlayingKey());
 }
 
+TEST_CASE (
+    "The compressor's editor hidden while a loud sound plays, shown again in silence, shows silence: its history empty, its meter at rest")
+{
+    Song song;
+    const auto device = song.getDevice();
+    auto* compressor = device.getProcessor<Compressor>();
+    REQUIRE (compressor != nullptr);
+    compressor->prepare (48000.0, 24000);
+    phazite::ui::CompressorEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    ticker.tickNow();
+
+    // A short loud hit between two ticks shows in the next reading, at its deepest.
+    play (*compressor, -6.0f, 480);
+    ticker.tickNow();
+    CHECK (editor.getHistory().getNewestReduction() > 1.0f);
+
+    // Hidden (its tab, another device), a loud sound plays; shown again in silence.
+    editor.setVisible (false);
+    ticker.tickNow();
+    play (*compressor, -3.0f, 24000);
+    editor.setVisible (true);
+    ticker.tickNow();
+    CHECK (editor.getHistory().getNumReadings() == 1);
+    CHECK (editor.getHistory().getNewestReduction() == doctest::Approx (0.0f));
+    CHECK (editor.getShownReduction() == doctest::Approx (0.0f));
+    CHECK (editor.getShownLevel() < -60.0f);
+}
+
 TEST_CASE ("The compressor's editor lights its curve up to the level it hears, and shows how far it turns the sound down or up")
 {
     Song song;
@@ -705,6 +735,54 @@ TEST_CASE ("Shaping transients, the compressor's history shows its gain up and d
     editor.refresh();
     CHECK (history.getNewestReduction() < -10.0f);
     CHECK (editor.getShownBoost() > 10.0f);
+}
+
+TEST_CASE ("The compressor's curve shows levels evenly in decibels, -60 to +12 dB both ways: a point at -30 dB is as easy to take")
+{
+    // On the old axis (the device's log1p one) -30 dB was 3 % of the way across and -18 dB 10 %: everything quiet squeezed into
+    // the corner. The display is now even in decibels, from -60 dB (where silence sits too) to the axis's top, +12 dB; the points
+    // are still the places the parameters hold.
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& curve = editor.getCurve();
+    const auto decibelsOf = [&song] (const char* id) { return juce::Decibels::gainToDecibels (curves::fromAxis (song.valueOf (id))); };
+    const auto bottomLeft = curve.getPosition (0.0f, 0.0f), topRight = curve.getPosition (1.0f, 1.0f);
+    const auto width = topRight.x - bottomLeft.x, height = bottomLeft.y - topRight.y;
+    const auto top = 20.0f * std::log10 (curves::fromAxis (1.0f));
+    const auto shareOf = [top] (float decibels) { return (decibels + 60.0f) / (top + 60.0f); };
+    CHECK (top == doctest::Approx (12.04f).epsilon (0.001));
+
+    REQUIRE (curve.setPointLevels (1, "-30, -30"));
+    editor.refresh();
+    const auto point = curve.getPointPosition (1);
+    CHECK ((point.x - bottomLeft.x) / width == doctest::Approx (shareOf (-30.0f)).epsilon (0.001));
+    CHECK ((bottomLeft.y - point.y) / height == doctest::Approx (shareOf (-30.0f)).epsilon (0.001));
+    CHECK (curve.getPosition (curves::axisForDecibels (0.0f), 0.0f).x - bottomLeft.x == doctest::Approx (shareOf (0.0f) * width));
+    CHECK (curve.getPosition (curves::axisForDecibels (-72.0f), 0.0f).x == doctest::Approx (bottomLeft.x)); // under -60: the edge
+
+    // A drag of it a tenth of the way across moves it a tenth of the scale in, through the same scale; Snap off, so that it lands where it is
+    // dragged; Shift keeps it level.
+    curve.snaps = false;
+    phazite::test::Mouse mouse (curve);
+    mouse.press (point.roundToInt(), juce::ModifierKeys::shiftModifier);
+    mouse.dragTo (point.roundToInt() + juce::Point<int> (juce::roundToInt (0.1f * width), 0));
+    mouse.release();
+    const auto moved = (float) juce::roundToInt (0.1f * width) / width * (top + 60.0f);
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-30.0f + moved).epsilon (0.01));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-30.0f).epsilon (1.0e-4));
+    phazite::undo (*song.song);
+    editor.refresh();
+
+    // Snap: dragged near the -24 dB line, it goes onto it, exactly.
+    curve.snaps = true;
+    mouse.pause();
+    const auto onLine = curve.getPosition (curves::axisForDecibels (-24.0f), curves::axisForDecibels (-30.0f));
+    mouse.press (curve.getPointPosition (1).roundToInt());
+    mouse.dragTo ((onLine + juce::Point<float> (2.0f, 0.0f)).roundToInt());
+    mouse.release();
+    CHECK (decibelsOf ("point2X") == doctest::Approx (-24.0f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point2Y") == doctest::Approx (-30.0f).epsilon (1.0e-4));
 }
 
 TEST_CASE ("The compressor's curve by numbers: its corner reads a point and its line's ratio, typed levels and the arrows move it")

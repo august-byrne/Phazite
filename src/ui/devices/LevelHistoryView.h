@@ -37,9 +37,20 @@ public:
     static constexpr double barsShown = 2.0;
 
     // A tick's reading, taken at a moment (milliseconds, by juce::Time::getMillisecondCounterHiRes()) with where the song was
-    // then (DeviceHandle::getSongTime()), in decibels: the loudest in, the loudest out, how far it was turned down (0 or
-    // more), and, while it listens to another track (setKey()), that track's loudest, as its detector hears it.
+    // then (DeviceHandle::getSongTime()), in decibels: the loudest in, the loudest out, how far it was turned down at its
+    // deepest (0 or more), and, while it listens to another track (setKey()), that track's loudest, as its detector hears it,
+    // each over the time since the reading before (the devices' meters give the most since they were last read), which it
+    // is drawn across: a tick that came late draws as wide as it lasted, and a short peak between two ticks shows.
     void push (double milliseconds, const SongTime&, float input, float output, float reduction, float key = -200.0f);
+
+    // Afresh: no readings and no lines, until the next push (an editor shown again: DisplayTicker::Display::shownAgain()), so
+    // that nothing is drawn across the time nobody looked.
+    void clear();
+
+    // Its readings, oldest first, and where each is drawn across: from the reading before it to its own moment (the first,
+    // at its moment alone), in its own coordinates.
+    int getNumReadings() const noexcept;
+    juce::Range<float> getReadingSpan (int index) const;
 
     // How long it shows across its width: two bars at the tempo where the playhead was at the newest reading.
     double getSpanMilliseconds() const noexcept { return span; }

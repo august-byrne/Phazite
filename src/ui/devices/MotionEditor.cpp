@@ -329,6 +329,9 @@ public:
 
     double getDelay (int channel) const { return Flanger::getSweptDelay (Motion::getFlangerValues (values), getLfoValue (channel)); }
 
+    // How strong its teeth are drawn: as deep as its notches are heard at the Mix (Motion::getFlangerNotchDepth()).
+    float getTeethStrength() const { return Motion::getFlangerNotchDepth (values); }
+
     juce::Point<float> getDotPosition() const override
     {
         return { getFrequencies().xFor (1000.0 / (double) values[Motion::delay]), feedbackAxis.yFor (values[Motion::feedback]) };
@@ -354,20 +357,25 @@ protected:
         g.setColour (p.text.withAlpha (GraphTint::zeroLine));
         g.drawHorizontalLine (juce::roundToInt (levels.yFor (0.0f)), area.getX(), area.getRight());
 
-        // The comb's teeth, where the left side has them now: a line down at each notch.
+        // The comb's teeth, where the left side has them now: a line down at each notch, as strong as the notches are deep as
+        // heard at the Mix (none at 100 %, the copy alone).
         const auto leftDelay = getDelay (0);
         const auto negative = engine[Flanger::feedback] < 0.0f;
         const auto spacing = 1000.0 / leftDelay; // hertz between notches
-        g.setColour (tint.withAlpha (GraphTint::grid * 1.5f));
 
-        for (int k = 0; k < mostTeeth; ++k)
+        if (const auto teeth = getTeethStrength(); teeth > 0.01f)
         {
-            const auto notch = negative ? (k + 1) * spacing : (k + 0.5) * spacing;
+            g.setColour (tint.withAlpha (GraphTint::grid * 1.5f * teeth));
 
-            if (notch > frequencies.high)
-                break;
+            for (int k = 0; k < mostTeeth; ++k)
+            {
+                const auto notch = negative ? (k + 1) * spacing : (k + 0.5) * spacing;
 
-            g.drawVerticalLine (juce::roundToInt (frequencies.xFor (notch)), area.getY(), area.getBottom());
+                if (notch > frequencies.high)
+                    break;
+
+                g.drawVerticalLine (juce::roundToInt (frequencies.xFor (notch)), area.getY(), area.getBottom());
+            }
         }
 
         // Each side's response, what Motion plays at its Mix: the right's faint, then the left's.
@@ -650,6 +658,11 @@ juce::Point<float> MotionEditor::getHeadPosition (int channel, int voice) const
 double MotionEditor::getShownCentre (int channel) const
 {
     return phaser->getCentre (channel);
+}
+
+float MotionEditor::getShownTeeth() const
+{
+    return flanger->getTeethStrength();
 }
 
 void MotionEditor::refresh()

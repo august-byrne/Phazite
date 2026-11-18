@@ -158,6 +158,16 @@ MultimodeCoefficients makeMultimode (const FilterSettings& settings, double samp
 
 double getMagnitude (const MultimodeCoefficients& c, double frequency, double sampleRate)
 {
+    return std::abs (getResponse (c, frequency, sampleRate));
+}
+
+bool hasResponse (FilterMode mode) noexcept
+{
+    return mode != FilterMode::sampleAndHold;
+}
+
+std::complex<double> getResponse (const MultimodeCoefficients& c, double frequency, double sampleRate)
+{
     switch (c.mode)
     {
         case FilterMode::lowPass:
@@ -165,17 +175,17 @@ double getMagnitude (const MultimodeCoefficients& c, double frequency, double sa
         case FilterMode::bandPass:
         case FilterMode::notch:
         {
-            auto magnitude = 1.0;
+            std::complex<double> response (1.0, 0.0);
 
             for (int s = 0; s < c.numSections; ++s)
-                magnitude *= getMagnitude (c.sections[(size_t) s], frequency, sampleRate);
+                response *= getResponse (c.sections[(size_t) s], frequency, sampleRate);
 
-            return magnitude;
+            return response;
         }
 
         case FilterMode::combPlus:
         case FilterMode::combMinus:
-            return getMagnitude (c.comb, frequency, sampleRate);
+            return getResponse (c.comb, frequency, sampleRate);
 
         case FilterMode::vowel:
         {
@@ -184,7 +194,7 @@ double getMagnitude (const MultimodeCoefficients& c, double frequency, double sa
             for (size_t s = 0; s < c.sections.size(); ++s)
                 sum += (double) c.gains[s] * getResponse (c.sections[s], frequency, sampleRate);
 
-            return (double) c.output * std::abs (sum);
+            return (double) c.output * sum;
         }
 
         case FilterMode::phaser:
@@ -195,7 +205,7 @@ double getMagnitude (const MultimodeCoefficients& c, double frequency, double sa
             for (const auto& section : c.sections)
                 stages *= getResponse (section, frequency, sampleRate);
 
-            return (double) c.output * std::abs (1.0 + stages / (1.0 - (double) c.feedback * stages));
+            return (double) c.output * (1.0 + stages / (1.0 - (double) c.feedback * stages));
         }
 
         case FilterMode::sampleAndHold:
@@ -306,6 +316,11 @@ DrivenCoefficients makeDriven (const FilterSettings& settings, double sampleRate
 
 double getMagnitude (const DrivenCoefficients& c, double frequency, double sampleRate)
 {
+    return std::abs (getResponse (c, frequency, sampleRate));
+}
+
+std::complex<double> getResponse (const DrivenCoefficients& c, double frequency, double sampleRate)
+{
     // The loop for a quiet sound: a state-variable section with the damping kSmall (a little above 0 where it sings, so that
     // its peak goes off any scale rather than to nothing).
     frequency = std::clamp (frequency, 0.0, 0.4999 * sampleRate);
@@ -313,7 +328,7 @@ double getMagnitude (const DrivenCoefficients& c, double frequency, double sampl
     const auto k = std::max ((double) c.kSmall, 1.0e-4);
     const auto denominator = s * s + k * s + 1.0;
     const auto loop = (double) c.mx + ((double) c.mv * s + (double) c.mlp + (double) c.md * k * s) / denominator;
-    return std::abs (loop) * (c.hasFront ? getMagnitude (c.front, frequency, sampleRate) : 1.0);
+    return loop * (c.hasFront ? getResponse (c.front, frequency, sampleRate) : std::complex<double> (1.0, 0.0));
 }
 
 //==============================================================================

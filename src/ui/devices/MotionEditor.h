@@ -11,7 +11,8 @@
 //   song, the note value). Then its Delay and Depth, large, the LFO, its Voices with their Phase, Spread and Shimmer (Phase
 //   and Spread faint while it has one voice a side, which has nothing to keep apart), its Feedback and High Cut, and Stereo
 //   and Safe Bass.
-// - Flanger: its comb, a tooth at each of its notches, sliding as the LFO sweeps the copy's delay; under it the strip of the
+// - Flanger: its comb, a tooth at each of its notches, as strong as the notches are deep as heard at the Mix (whole at 50 %,
+//   none at 100 %, where the copy plays alone), sliding as the LFO sweeps the copy's delay; under it the strip of the
 //   delay, how far the sweep reaches and where each side's copy lags now. A dot sits at the delay's frequency (the comb's
 //   first peak, or with the feedback below 0 its first notch), as high as the feedback (0 in the middle): a drag moves both,
 //   and the wheel turns the depth. Then its Delay and Depth, large, the LFO, its Feedback, and Stereo and Safe Bass.
@@ -47,6 +48,9 @@ public:
 
     // The phaser's picture: where it shows a side's notches swept to now, their centre, in hertz.
     double getShownCentre (int channel) const;
+
+    // The flanger's picture: how strong it draws its comb's teeth, from 0 to 1, as deep as the notches are heard at the Mix.
+    float getShownTeeth() const;
 
     // Shows what changed elsewhere: the controls that have nothing to act on faint. The ticker does it.
     void refresh();

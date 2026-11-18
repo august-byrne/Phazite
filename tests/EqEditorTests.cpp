@@ -14,6 +14,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
 
@@ -482,6 +483,155 @@ TEST_CASE ("An EQ band off Stereo shows its placement's letter in its dot, and t
 
     editor.refresh();
     CHECK (editor.getCurvesShown() == std::vector { Placement::left, Placement::right });
+}
+
+TEST_CASE ("The EQ's analyzer shows a trace for each way whose curve it draws, in its curve's colour, each of that way's sound alone")
+{
+    using Placement = Eq::Placement;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    auto* processor = phazite::makeDeviceHandle (s, eq).getProcessor<Eq>();
+    REQUIRE (processor != nullptr);
+    ticker.tickNow(); // it listens
+
+    // What the EQ plays, as the audio thread taps it, at its rate: a 1 kHz sine on each side, alike (the middle alone) or
+    // opposite (the side).
+    const auto rate = processor->getSampleRate();
+    const auto play = [&] (float left, float right)
+    {
+        std::vector<float> lefts (8192), rights (8192);
+
+        for (size_t i = 0; i < lefts.size(); ++i)
+        {
+            const auto sine = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * (double) i / rate);
+            lefts[i] = left * sine;
+            rights[i] = right * sine;
+        }
+
+        processor->getOutputTap().push (lefts.data(), rights.data(), (int) lefts.size());
+        ticker.tickNow();
+    };
+    const auto shows = [&editor] (Placement way) { return editor.getSpectrumLevel (way, 1000.0) > -20.0f; };
+    const auto showsNothing = [&editor] (Placement way) { return editor.getSpectrumLevel (way, 1000.0) < -80.0f; };
+
+    // A band on Side: the middle's and the side's curves, and a trace for each, in its curve's colour.
+    setValue (song, eq, "band3Placement", (float) Placement::side);
+    ticker.tickNow();
+    REQUIRE (editor.getCurvesShown() == std::vector { Placement::mid, Placement::side });
+
+    for (const auto way : { Placement::mid, Placement::side })
+        CHECK (editor.getSpectrumColour (way) == editor.getCurveColour (way));
+
+    CHECK (editor.getCurveColour (Placement::mid) != editor.getCurveColour (Placement::side));
+
+    // A sound in the middle alone shows in the middle's trace and not the side's; one on the side alone, the reverse.
+    play (1.0f, 1.0f);
+    CHECK (shows (Placement::mid));
+    CHECK (showsNothing (Placement::side));
+
+    editor.setVisible (false); // afresh, as when it shows again
+    ticker.tickNow();
+    editor.setVisible (true);
+    ticker.tickNow();
+    play (1.0f, -1.0f);
+    CHECK (shows (Placement::side));
+    CHECK (showsNothing (Placement::mid));
+
+    // A band on Left: the left's and the right's traces as well; a sound on the left alone in the left's.
+    setValue (song, eq, "band3Placement", (float) Placement::left);
+    ticker.tickNow();
+    REQUIRE (editor.getCurvesShown() == std::vector { Placement::left, Placement::right });
+    CHECK (editor.getSpectrumColour (Placement::left) == editor.getCurveColour (Placement::left));
+    CHECK (editor.getSpectrumColour (Placement::right) == editor.getCurveColour (Placement::right));
+    editor.setVisible (false);
+    ticker.tickNow();
+    editor.setVisible (true);
+    ticker.tickNow();
+    play (1.0f, 0.0f);
+    CHECK (shows (Placement::left));
+    CHECK (showsNothing (Placement::right));
+    play (0.0f, 1.0f);
+    CHECK (shows (Placement::right));
+
+    // Every band on Stereo: one trace, the louder of the two sides, in the device's colour.
+    setValue (song, eq, "band3Placement", (float) Placement::stereo);
+    ticker.tickNow();
+    REQUIRE (editor.getCurvesShown() == std::vector { Placement::stereo });
+    CHECK (shows (Placement::stereo));
+}
+
+TEST_CASE ("The EQ's analyzer, hidden while a loud sound plays and shown again in silence, shows the silence now")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    auto* processor = phazite::makeDeviceHandle (s, eq).getProcessor<Eq>();
+    REQUIRE (processor != nullptr);
+    ticker.tickNow();
+
+    std::vector<float> sine (8192);
+
+    for (size_t i = 0; i < sine.size(); ++i)
+        sine[i] = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * (double) i / processor->getSampleRate());
+
+    processor->getOutputTap().push (sine.data(), sine.data(), (int) sine.size());
+    ticker.tickNow();
+    CHECK (editor.getSpectrumLevel (Eq::Placement::stereo, 1000.0) > -20.0f);
+
+    editor.setVisible (false);
+    ticker.tickNow();
+    processor->getOutputTap().push (sine.data(), sine.data(), (int) sine.size());
+    editor.setVisible (true);
+    ticker.tickNow();
+    CHECK (editor.getSpectrumLevel (Eq::Placement::stereo, 1000.0) < -100.0f);
+}
+
+TEST_CASE ("The EQ's curves are what is heard at its Mix: a cut half filled in at 50 %, the middle's and the side's alike")
+{
+    using Placement = Eq::Placement;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    // A bell 12 dB down at 1 kHz on the side: the side's curve dips 12 dB at 100 %, and at 50 % to what is heard, -4.1 dB in
+    // Minimum (the dry sound half, the bell's phase none at its middle), the middle's flat.
+    setValue (song, eq, "band3Type", (float) Eq::BandType::bell);
+    setValue (song, eq, "band3Frequency", 1000.0f);
+    setValue (song, eq, "band3Gain", -12.0f);
+    setValue (song, eq, "band3Placement", (float) Placement::side);
+    editor.refresh();
+    CHECK (editor.getCurveDecibels (Placement::side, 1000.0) == doctest::Approx (-12.0f).epsilon (0.01));
+
+    setValue (song, eq, "mix", 0.5f);
+    editor.refresh();
+    const auto expected = (float) (20.0 * std::log10 (0.5 * (1.0 + std::pow (10.0, -12.0 / 20.0))));
+    CHECK (editor.getCurveDecibels (Placement::side, 1000.0) == doctest::Approx (expected).epsilon (0.01));
+    CHECK (editor.getCurveDecibels (Placement::mid, 1000.0) == doctest::Approx (0.0f).scale (1.0f).epsilon (0.01));
+
+    // Each point of each way as Eq::getHeardMagnitude() says, which a sine through it measures (EqualizerTests.cpp), in Linear too.
+    for (const auto phase : { 0.0f, 1.0f })
+    {
+        setValue (song, eq, "phase", phase);
+        editor.refresh();
+        std::vector<float> values;
+
+        for (const auto& parameter : Eq::info.parameters)
+            values.push_back (valueOf (s, eq, parameter.id.data()));
+
+        for (const auto way : { Placement::mid, Placement::side })
+            for (const auto hertz : { 300.0, 900.0, 1100.0, 5000.0 })
+                CHECK (editor.getCurveDecibels (way, hertz)
+                       == doctest::Approx (20.0 * std::log10 (Eq::getHeardMagnitude (values, hertz, 48000.0, way))).epsilon (0.01));
+    }
 }
 
 TEST_CASE ("A dynamic EQ band's handle drags its Dynamic as one undo step, and its mark and the curve follow its gain as it plays")

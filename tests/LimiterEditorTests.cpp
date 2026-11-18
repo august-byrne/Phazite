@@ -14,6 +14,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/LimiterEditor.h"
 
@@ -125,6 +126,71 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     mouse.pause();
     mouse.doubleClick ({ 40, y });
     CHECK (ceiling() == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("A dynamics history draws each reading across the time since the one before: a late tick as wide as it lasted")
+{
+    phazite::ui::LevelHistoryView history ("History", -48.0f, 24.0f);
+    phazite::test::TestWindow window (history, 400, 160);
+    const phazite::ui::LevelHistoryView::SongTime song {};
+
+    // Readings a tick apart (a 30th of a second), then one that came three ticks late, loud: it covers the whole time since
+    // the one before, three times as wide as a tick's.
+    constexpr double tick = 1000.0 / 30.0;
+    history.push (1000.0, song, -48.0f, -48.0f, 0.0f);
+    history.push (1000.0 + tick, song, -48.0f, -48.0f, 0.0f);
+    history.push (1000.0 + 2.0 * tick, song, -48.0f, -48.0f, 0.0f);
+    history.push (1000.0 + 5.0 * tick, song, -6.0f, -9.0f, 3.0f);
+    REQUIRE (history.getNumReadings() == 4);
+
+    const auto perMillisecond = (float) (history.getWidth() - 2) / (float) history.getSpanMilliseconds();
+    CHECK (history.getReadingSpan (2).getLength() == doctest::Approx (tick * perMillisecond).epsilon (0.001));
+    CHECK (history.getReadingSpan (3).getLength() == doctest::Approx (3.0 * tick * perMillisecond).epsilon (0.001));
+    CHECK (history.getReadingSpan (3).getStart() == doctest::Approx (history.getReadingSpan (2).getEnd()));
+    CHECK (history.getReadingSpan (3).getEnd() == doctest::Approx ((float) (history.getWidth() - 1)));
+
+    // Emptied, as an editor shown again empties it: nothing drawn until the next reading, which starts afresh.
+    history.clear();
+    CHECK (history.getNumReadings() == 0);
+    history.push (1000.0 + 60.0 * tick, song, -48.0f, -48.0f, 0.0f);
+    CHECK (history.getNumReadings() == 1);
+    CHECK (history.getReadingSpan (0).getLength() == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("The limiter's history shows a short hit between two ticks at its depth, and after it was hidden starts from the sound now")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    const auto device = phazite::makeDeviceHandle (s, id);
+    auto* limiter = device.getProcessor<Limiter>();
+    REQUIRE (limiter != nullptr);
+    limiter->prepare (48000.0, 48000);
+
+    phazite::ui::LimiterEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    ticker.tickNow();
+
+    // A hit 5 ms long, all of it between two ticks: the next reading is its deepest reduction.
+    playLoud (*limiter, 240);
+    ticker.tickNow();
+    auto& history = editor.getDisplay().getHistory();
+    CHECK (history.getNewestReduction() > 6.0f);
+
+    // Hidden (another device shown) while a loud sound plays, then shown again in silence: the history starts empty and its
+    // first reading is the silence now.
+    ticker.tickNow();
+    editor.setVisible (false);
+    ticker.tickNow();
+    playLoud (*limiter, 4800);
+    editor.setVisible (true);
+    ticker.tickNow();
+    CHECK (history.getNumReadings() == 1);
+    CHECK (history.getNewestReduction() == doctest::Approx (0.0f));
+    CHECK (history.getNewestInput() < -100.0f);
 }
 
 TEST_CASE (

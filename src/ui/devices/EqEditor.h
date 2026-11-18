@@ -7,8 +7,9 @@
 // too. A band that isn't on Stereo has its placement's letter in its dot, and while any band is on Mid or Side the curve is
 // two, the middle's and the side's (and the left's and the right's while any is on Left or Right). A dynamic band's dot has
 // a line to where its gain goes at its whole Dynamic, with a handle there that drags the Dynamic, and a mark on it where its
-// gain is now; the curves are drawn with the gains as they play now. Its Phase, Minimum or Linear, is two buttons beside the
-// output, with the latency Linear plays at beside them. Its mix is its row's in the Devices view.
+// gain is now; the curves are drawn with the gains as they play now, and with what came in mixed back in at the Mix: under
+// 100 % a cut is filled in, as it is heard. Its Phase, Minimum or Linear, is two buttons beside the output, with the latency
+// Linear plays at beside them. Its mix is its row's in the Devices view.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -78,6 +79,18 @@ public:
     // How many times the graph has worked its curves out: once for each change of what they show, not at each repaint.
     int getCurvesWorkedOut() const noexcept;
 
+    // A way's curve at a frequency, in decibels, as the graph draws it: what is heard, the Mix among it
+    // (devices::Equalizer::getHeardMagnitude()).
+    float getCurveDecibels (devices::Equalizer::Placement way, double frequency) const;
+
+    // The colour of a way's curve; and of the spectrum of what the EQ plays on that way, which the graph draws for each way
+    // whose curve it draws (the middle's and the side's, the left's and the right's, each in its curve's colour, or with every
+    // band on Stereo one trace, the louder of the two sides, in the device's colour), and its level at a frequency, tilted, in
+    // decibels (graph::SpectrumTrace).
+    juce::Colour getCurveColour (devices::Equalizer::Placement way) const;
+    juce::Colour getSpectrumColour (devices::Equalizer::Placement way) const;
+    float getSpectrumLevel (devices::Equalizer::Placement way, double frequency) const;
+
     // What shows beside the Phase: the latency the EQ reports while it plays Linear, in milliseconds ("85 ms"); nothing in
     // Minimum.
     juce::String getLatencyText() const { return latencyLabel.getText(); }
@@ -110,6 +123,7 @@ private:
     DrawnNumbers drawnGraph;            // what its graph shows
 
     void tick() override { refresh(); }
+    void shownAgain() override; // the spectra of the sound now, not of what played while nobody looked
     juce::Label& addLabel (const juce::String&);
     double getSampleRate() const; // the EQ's, for its curve near the top of the range
 };

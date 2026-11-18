@@ -22,6 +22,15 @@ public:
     // (LevelHistoryView::push()).
     void show (double milliseconds, const LevelHistoryView::SongTime&, float input, float reduction, float output);
 
+    // Afresh, its history empty and its meters at rest (its editor shown again).
+    void clear()
+    {
+        history.clear();
+        inputMeter.reset();
+        reductionMeter.reset();
+        outputMeter.reset();
+    }
+
     LevelHistoryView& getHistory() noexcept { return history; }
     const ValueMeter& getInputMeter() const noexcept { return inputMeter; }
     const ValueMeter& getReductionMeter() const noexcept { return reductionMeter; }
@@ -55,5 +64,6 @@ private:
     LimiterDisplay* display = nullptr;
 
     void tick() override { refresh(); }
+    void shownAgain() override; // its meters drained, its history empty
 };
 } // namespace phazite::ui

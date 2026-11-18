@@ -134,6 +134,10 @@ public:
     // tall frozen, and as much lower as the duck takes them down now.
     float getEchoLevel (int n, int side) const { return n == 0 ? 1.0f : getLevel (getPass (n, side)); }
 
+    // How lit the sound coming in is now, and an echo of a time ago at its level 1.
+    float getInputLight() const noexcept { return lit; }
+    float getLightAgo (double seconds) const { return getLight (seconds, 1.0f); }
+
     juce::String getReadout() const
     {
         const auto timeOf = [this] (int side)
@@ -438,7 +442,7 @@ private:
         {
             scope->setListening (true);
             const auto peak = juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels);
-            history.push (peak);
+            history.push (peak, juce::Time::getMillisecondCounterHiRes());
             lit = std::max (std::min (1.0f, peak * 2.0f), lit * litFall);
             lit = lit < 1.0e-3f ? 0.0f : lit; // out, rather than ever fainter
         }
@@ -459,15 +463,27 @@ private:
             repaint();
     }
 
-    // How bright an echo is now: what came in its time ago, taken down as it is drawn.
+    // How bright an echo is now: what came in its time ago (the peak taken over the time that covers that moment), taken
+    // down as it is drawn.
     float getLight (double seconds, float level) const
     {
-        const auto ticksAgo = juce::roundToInt (seconds * DisplayTicker::ticksPerSecond);
+        const auto newest = history.getTime (history.size() - 1);
+        const auto index = newest > 0.0 ? history.findAt (newest - seconds * 1000.0) : -1;
 
-        if (ticksAgo >= history.size())
+        if (index < 0)
             return 0.0f;
 
-        return std::min (1.0f, history.get (history.size() - 1 - ticksAgo) * 2.0f) * level;
+        return std::min (1.0f, history.get (index) * 2.0f) * level;
+    }
+
+    // Its editor shown again: what came in while nobody looked doesn't light the echoes.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        history.clear (0.0f);
+        lit = 0.0f;
     }
 
     void paintEchoes (juce::Graphics& g, const Palette& p, juce::Colour tint)
@@ -595,6 +611,16 @@ juce::Point<float> DelayEditor::getEchoPosition (int n, int side) const
 float DelayEditor::getEchoLevel (int n, int side) const
 {
     return echoes->getEchoLevel (n, side);
+}
+
+float DelayEditor::getInputLight() const
+{
+    return echoes->getInputLight();
+}
+
+float DelayEditor::getLightAgo (double seconds) const
+{
+    return echoes->getLightAgo (seconds);
 }
 
 juce::Rectangle<int> DelayEditor::getBandArea() const

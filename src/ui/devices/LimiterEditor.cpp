@@ -78,12 +78,7 @@ LimiterEditor::LimiterEditor (const DeviceHandle& handle)
     display = &shown;
 
     // The meters' first readings would show what played before the editor opened.
-    if (auto* limiter = device.getProcessor<Limiter>())
-    {
-        limiter->getInputMeter().take();
-        limiter->getReductionMeter().take();
-        limiter->getOutputMeter().take();
-    }
+    shownAgain();
 
     const auto gain = makeControlsPart ("Gain", { "gain" }, 1, ParameterControls::Size::large);
     const auto limit = makeControlsPart ("Limit", { "ceiling", "release" }, 2);
@@ -93,6 +88,19 @@ LimiterEditor::LimiterEditor (const DeviceHandle& handle)
 }
 
 LimiterEditor::~LimiterEditor() = default;
+
+void LimiterEditor::shownAgain()
+{
+    // What played while nobody looked isn't shown: the meters start from now, the history from its next reading.
+    if (auto* limiter = device.getProcessor<Limiter>())
+    {
+        limiter->getInputMeter().take();
+        limiter->getReductionMeter().take();
+        limiter->getOutputMeter().take();
+    }
+
+    display->clear();
+}
 
 void LimiterEditor::refresh()
 {

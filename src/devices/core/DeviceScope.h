@@ -55,6 +55,20 @@ public:
     MeterValue& getInputPeak() noexcept { return inputPeak; }
     MeterValue& getOutputPeak() noexcept { return outputPeak; }
 
+    // Message thread: drops what the taps hold unread and the peaks since the editor last looked, so that what it reads next
+    // is what comes now (an editor shown again: ui::DisplayTicker::Display::shownAgain()).
+    void drain() noexcept
+    {
+        if (ownedInput != nullptr)
+        {
+            ownedInput->drain();
+            ownedOutput->drain();
+        }
+
+        inputPeak.take();
+        outputPeak.take();
+    }
+
     // Audio thread: a block's sound, going in (an effect's) and coming out.
     void pushInput (const float* left, const float* right, int numSamples) noexcept { push (input, inputPeak, left, right, numSamples); }
 

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Stereo's editor (devices/stereo/Stereo.h), as iZotope's Imager shows a stereo image: a half disc of what it plays, each
 // moment a dot, mono standing straight up and the two sides out of step lying flat, over the faint dots of what comes in,
-// with the L and R lines that are safe to stay within, and a fan opened as wide as its width; under it, how alike the two
-// sides are, from -1 to +1, red below 0, where the mono sum loses sound, with a mark for what comes in. Then its parts, in
+// with the L and R lines that are safe to stay within, and a fan opened as wide as its width (a line straight up with Mono
+// on), each half as long as the Balance leaves of its side, the L and R changing places with Swap Sides; under it, how alike
+// the two sides are, from -1 to +1, red below 0, where the mono sum loses sound, with a mark for what comes in. Then its parts, in
 // the order the sound goes through them: Width (Width and Spread, large) over Bass (Bass Mono and its frequency), and Sides
 // (Balance, Mono, Swap and the two flips) over Output (the DC filter and the gain).
 #pragma once
@@ -31,6 +32,17 @@ public:
     // Where the half disc's centre is in the image, at its bottom: the fan opens from there, as wide as the pointer's angle
     // from straight up when it is dragged.
     juce::Point<float> getDiscCentre() const;
+
+    // The fan as drawn: how far each half opens from straight up (radians, 0 a line: Mono on), how long each half is as a
+    // share of the disc's radius (what the Balance leaves of that side, devices::Stereo::getBalanceGain()), and whether the L
+    // and R have changed places (Swap Sides).
+    struct Fan
+    {
+        float opening = 0.0f, leftLength = 1.0f, rightLength = 1.0f;
+        bool swapped = false;
+    };
+
+    Fan getShownFan() const;
 
 private:
     class Image;

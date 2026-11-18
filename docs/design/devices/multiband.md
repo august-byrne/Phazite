@@ -135,8 +135,9 @@ copy and paste (also to and from a Compressor), flip, smooth and reset, with Fre
 Two things share the Band part's space where the dock is narrow, and show beside it where there is room:
 
 - **Monitor**, by its switch, in place of the band's knobs: the selected band's last seconds, scrolling at a speed
-  to set, paused by a click. Its Traces menu picks what shows: In, Band In, Out, Heard (the key, in its track's
-  colour and named, while the band's Sidechain is on), Gain, All Gains and Pre/Post.
+  to set, paused by a click, on the curve's scale (-60 to +12 dB). Its Traces menu picks what shows: In, Band In, Out,
+  Heard (the key, in its track's colour and named, while the band's Sidechain is on), Gain, All Gains and Pre/Post.
+  Each column is drawn across the time it covers, so a late refresh draws as wide as it lasted.
 - **Sidechain**, by a tab after the bands', in place of the band: the picker of the track the key comes from, the
   key's Low Cut and High Cut, Listen, and a line saying which bands hear the key.
 
@@ -150,10 +151,11 @@ for the session, not to the project. Each edit of a parameter is one undo step.
 - The whole chain is not oversampled; only the saturations run at twice the rate, with no higher setting.
 - A new Multiband's limit at 0 dB is a compressor's curve with an attack, not a brick wall: fast peaks pass over it.
   The [Limiter](limiter.md) keeps a ceiling.
-- The curve is small in the dock and its axes crowd quiet levels together, so points far below 0 dB are hard to
-  drag to; their levels are typed or moved by the keyboard instead. No threshold or ratio is set as a number.
+- The curve is small in the dock, and shows nothing under -60 dB, where it puts silence: a point quieter than that is
+  typed or moved by the keyboard. No threshold or ratio is set as a number.
 - The bands' graph draws the bands as blocks, not the crossovers' slopes, and shows no gain reduction on the spectrum.
-- Monitor takes one reading at each refresh of the display.
+- Monitor takes the meters once at each refresh of the display: each column is the most they reached since the one
+  before, drawn across that time, so a short peak shows, but how it rose and fell within a refresh doesn't.
 - A drag of a band's level in the graph starts from the level as modulation plays it, and sets that as the value by
   hand.
 

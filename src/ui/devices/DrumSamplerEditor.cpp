@@ -1311,6 +1311,15 @@ juce::Component& DrumSamplerEditor::getLayerSlot (int layer) const
     return layersPart->getSlot (layer);
 }
 
+void DrumSamplerEditor::shownAgain()
+{
+    // The pads' meters hold the hardest hit since they were last read: read now, so that hits made while the editor was
+    // hidden don't light its pads as it comes back.
+    if (auto* drums = device.getProcessor<DrumSampler>())
+        for (int pad = 0; pad < DrumSampler::numPads; ++pad)
+            drums->getPadMeter (pad).take();
+}
+
 void DrumSamplerEditor::refresh()
 {
     // How hard each pad was hit since the last look, and how many of its layers play a sound.

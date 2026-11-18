@@ -46,6 +46,10 @@ public:
 
     bool isListening() const noexcept { return listening.load (std::memory_order_acquire); }
 
+    // Message thread, the reader: drops what it holds unread, so that the next pull starts from what comes now. A display
+    // shown again does it: what the tap held, from just after it was hidden, is long gone by.
+    void drain() noexcept { fifo.finishedRead (fifo.getNumReady()); }
+
     // Audio thread (pass the same channel twice for mono).
     void push (const float* left, const float* right, int numSamples) noexcept
     {
@@ -121,6 +125,13 @@ public:
     {
         const auto* shown = tap.load (std::memory_order_acquire);
         return shown != nullptr && shown->isListening();
+    }
+
+    // Message thread: as StereoTap's.
+    void drain() noexcept
+    {
+        if (owned != nullptr)
+            owned->drain();
     }
 
     // Audio thread (pass the same channel twice for mono).

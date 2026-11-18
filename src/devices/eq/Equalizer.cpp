@@ -251,6 +251,42 @@ double Equalizer::BandShape::getMagnitude (double frequency, double sampleRate) 
     return magnitude;
 }
 
+std::complex<double> Equalizer::BandShape::getResponse (double frequency, double sampleRate) const
+{
+    std::complex<double> response (1.0, 0.0);
+
+    for (int section = 0; section < numSections; ++section)
+        response *= dsp::getResponse (sections[(size_t) section], frequency, sampleRate);
+
+    return response;
+}
+
+std::complex<double> Equalizer::getResponse (std::span<const float> values, double frequency, double sampleRate, Placement way)
+{
+    std::complex<double> response ((double) dsp::decibelsToGain (values[outputParameter]), 0.0);
+
+    for (int band = 0; band < numBands; ++band)
+        if (actsOn ((Placement) toPlacement (values[(size_t) getParameterIndex (band, placement)]), way))
+            response *= getBandShape (values, band, sampleRate).getResponse (frequency, sampleRate);
+
+    return response;
+}
+
+double Equalizer::heard (std::complex<double> response, std::span<const float> values)
+{
+    const auto wet = (double) std::clamp (values[mixParameter], 0.0f, 1.0f);
+
+    if (values[phaseParameter] >= 0.5f)
+        return (1.0 - wet) + wet * std::abs (response);
+
+    return std::abs ((1.0 - wet) + wet * response);
+}
+
+double Equalizer::getHeardMagnitude (std::span<const float> values, double frequency, double sampleRate, Placement way)
+{
+    return heard (getResponse (values, frequency, sampleRate, way), values);
+}
+
 Equalizer::BandShape Equalizer::getBandShape (std::span<const float> values, int band, double sampleRate)
 {
     const auto at = [&values, band] (Field field) { return values[(size_t) getParameterIndex (band, field)]; };

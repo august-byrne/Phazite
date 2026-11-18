@@ -28,6 +28,9 @@ public:
         : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
           device (d),
           width (device.getParameter ("width")),
+          balance (device.getParameter ("balance")),
+          mono (device.getParameter ("mono")),
+          swap (device.getParameter ("swap")),
           lefts ((size_t) maxDots),
           rights ((size_t) maxDots)
     {
@@ -43,6 +46,16 @@ public:
     {
         if (auto* scope = device.getScope())
             scope->setListening (false);
+    }
+
+    // The fan as the device plays its values: open as wide as the Width (closed by Mono), each half as long as the Balance
+    // leaves of its side, and the sides' names swapped with Swap Sides.
+    StereoEditor::Fan getFan() const
+    {
+        const auto opening =
+            mono.getValue() > 0.5f ? 0.0f : juce::jlimit (0.0f, 1.0f, width.getValue() * 0.5f) * juce::MathConstants<float>::halfPi;
+        return { opening, Stereo::getBalanceGain (balance.getValue(), 0), Stereo::getBalanceGain (balance.getValue(), 1),
+                 swap.getValue() > 0.5f };
     }
 
     float getCorrelation() const noexcept { return correlation; }
@@ -130,7 +143,7 @@ private:
     };
 
     DeviceHandle device;
-    ParameterHandle width;
+    ParameterHandle width, balance, mono, swap;
     graph::HandleDrag drag { *this };   // after the handle it moves
     graph::WheelGesture wheel { drag }; // and turns
     std::vector<float> lefts, rights;
@@ -167,6 +180,16 @@ private:
         }
     }
 
+    // Shown again: the dots of the sound now, not of what played while nobody looked.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        outputs.clear();
+        inputs.clear();
+    }
+
     void tick() override
     {
         if (auto* scope = device.getScope())
@@ -186,7 +209,8 @@ private:
             inputCorrelation = stereo->getInputCorrelation().get();
         }
 
-        std::vector<float> numbers { width.getValue(), correlation, inputCorrelation, (float) outputs.size() };
+        std::vector<float> numbers { width.getValue(), balance.getValue(), mono.getValue(),       swap.getValue(),
+                                     correlation,      inputCorrelation,   (float) outputs.size() };
 
         for (const auto& dots : { &outputs, &inputs })
             for (const auto& dot : *dots)
@@ -211,19 +235,34 @@ private:
         for (const auto angle : { -quarterTurn, 0.0f, quarterTurn })
             g.drawLine ({ centre, centre.getPointOnCircumference (radius, angle) }, 1.0f);
 
+        // The sides' names, which change places while Swap Sides puts each side's sound on the other.
+        const auto fanShown = getFan();
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText ("L", juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre.getPointOnCircumference (radius + 2.0f, -quarterTurn)),
+        g.drawText (fanShown.swapped ? "R" : "L",
+                    juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre.getPointOnCircumference (radius + 2.0f, -quarterTurn)),
                     juce::Justification::centred, false);
-        g.drawText ("R", juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre.getPointOnCircumference (radius + 2.0f, quarterTurn)),
+        g.drawText (fanShown.swapped ? "L" : "R",
+                    juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre.getPointOnCircumference (radius + 2.0f, quarterTurn)),
                     juce::Justification::centred, false);
 
-        // The fan: as wide as the width sets it (closed in mono, the L and R lines at 100 %, flat at 200 %).
-        const auto opening = juce::jlimit (0.0f, 1.0f, width.getValue() * 0.5f) * juce::MathConstants<float>::halfPi;
-        juce::Path fan;
-        fan.addPieSegment (area.withSizeKeepingCentre (2.0f * radius, 2.0f * radius).withCentre (centre), -opening, opening, 0.0f);
+        // The fan: as wide as the width sets it (the L and R lines at 100 %, flat at 200 %), a line straight up with Mono on;
+        // each half as long as the Balance leaves of its side, the line as long as it leaves of the middle.
+        const auto circle = [&centre] (float length) { return juce::Rectangle<float> (2.0f * length, 2.0f * length).withCentre (centre); };
         g.setColour (tint.withAlpha (GraphTint::spectrumFill));
-        g.fillPath (fan);
+
+        if (fanShown.opening > 0.0f)
+        {
+            juce::Path fan;
+            fan.addPieSegment (circle (radius * fanShown.leftLength), -fanShown.opening, 0.0f, 0.0f);
+            fan.addPieSegment (circle (radius * fanShown.rightLength), 0.0f, fanShown.opening, 0.0f);
+            g.fillPath (fan);
+        }
+        else
+        {
+            const auto length = radius * 0.5f * (fanShown.leftLength + fanShown.rightLength);
+            g.drawLine ({ centre, centre.translated (0.0f, -length) }, GraphTint::curveWidth);
+        }
 
         // What comes in, faint, then what goes out, scaled so the loudest reaches the rim.
         auto loudest = 0.05f;
@@ -327,5 +366,10 @@ float StereoEditor::getDotsAcross() const
 juce::Point<float> StereoEditor::getDiscCentre() const
 {
     return image->getDisc().first;
+}
+
+StereoEditor::Fan StereoEditor::getShownFan() const
+{
+    return image->getFan();
 }
 } // namespace phazite::ui

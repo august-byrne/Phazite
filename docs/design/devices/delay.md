@@ -110,7 +110,9 @@ along (on the song's beats, or in milliseconds), each lower than the last by the
 Timeless. While the sides differ (Link off) or bounce (Ping-Pong), the left's echoes stand above the middle line and the
 right's hang below it, each at its own time; in ping-pong at the times they cross at. Frozen, every echo is as tall as the
 first and the readout says Frozen; ducked, they are as much lower as the duck takes them down now. What plays lights the
-first bar, then each echo in its turn.
+first bar, then each echo in its turn: the loudest of what came in at each refresh, kept with its moment, so that an echo
+lights from what came in its time ago however late a refresh came. Shown again after it was hidden, nothing that came in
+meanwhile lights it.
 
 A drag over the echoes moves the first echo from where its values are set by hand, as far as the pointer moves: across
 for the time, in proportion to how far along from the sound coming in it is taken (the nearest note value while Sync is

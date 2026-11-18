@@ -36,8 +36,13 @@ CombCoefficients makeComb (bool negative, double frequency, double sampleRate, f
 
 double getMagnitude (const CombCoefficients& c, double frequency, double sampleRate)
 {
+    return std::abs (getResponse (c, frequency, sampleRate));
+}
+
+std::complex<double> getResponse (const CombCoefficients& c, double frequency, double sampleRate)
+{
     const auto z = std::polar (1.0, -juce::MathConstants<double>::twoPi * frequency * (double) c.delay / sampleRate);
-    return std::abs ((double) c.output * (double) c.input * (1.0 + (double) c.sign * z) / (1.0 - (double) c.feedback * z));
+    return (double) c.output * (double) c.input * (1.0 + (double) c.sign * z) / (1.0 - (double) c.feedback * z);
 }
 
 double getRingSeconds (const CombCoefficients& c, double sampleRate)

@@ -156,13 +156,39 @@ bool FilterEffect::isDriven (std::span<const float> values) noexcept
 
 double FilterEffect::getMagnitude (std::span<const float> values, double frequency, double sampleRate)
 {
+    if (const auto response = getResponse (values, frequency, sampleRate))
+        return std::abs (*response);
+
+    return dsp::getMagnitude (makeCoefficients (values, values[cutoff], sampleRate), frequency, sampleRate);
+}
+
+std::optional<std::complex<double>> FilterEffect::getResponse (std::span<const float> values, double frequency, double sampleRate)
+{
+    // Driven: the loop at its rate, the sound in it times the drive's gain and the square root of that given back after it.
     if (isDriven (values))
     {
         const auto rate = sampleRate * (2 << getQualityIndex (values[quality]));
-        return dsp::getMagnitude (dsp::makeDriven (makeSettings (values, values[cutoff]), rate), frequency, rate);
+        const auto gain = std::sqrt ((double) dsp::decibelsToGain (values[drive]));
+        return gain * dsp::getResponse (dsp::makeDriven (makeSettings (values, values[cutoff]), rate), frequency, rate);
     }
 
-    return dsp::getMagnitude (makeCoefficients (values, values[cutoff], sampleRate), frequency, sampleRate);
+    const auto coefficients = makeCoefficients (values, values[cutoff], sampleRate);
+
+    if (! dsp::hasResponse (coefficients.mode))
+        return std::nullopt;
+
+    return dsp::getResponse (coefficients, frequency, sampleRate);
+}
+
+double FilterEffect::getHeardMagnitude (std::span<const float> values, double frequency, double sampleRate)
+{
+    const auto response = getResponse (values, frequency, sampleRate);
+
+    if (! response.has_value())
+        return getMagnitude (values, frequency, sampleRate);
+
+    const auto wet = (double) std::clamp (values[mix], 0.0f, 1.0f);
+    return std::abs ((1.0 - wet) + wet * *response);
 }
 
 int FilterEffect::getLatency()

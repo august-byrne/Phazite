@@ -69,6 +69,10 @@ public:
     bool isMonitorShowing() const;
     juce::String getMonitorKeyName() const;
 
+    // The loudest that Monitor shows of what came into the selected band, over every column it has taken, in decibels (-120
+    // for silence): each column the most its meters reached since the one before, drawn across that time.
+    float getMonitorLoudest() const;
+
     // The Sidechain part, and its tab, which shows it in place of the band where it can't show beside it (then hidden);
     // whether it shows. Its key's picker (nullptr without a context) and Listen.
     juce::Component& getSidechainPart() const noexcept;
@@ -107,5 +111,6 @@ private:
 
     juce::String describeListeners() const; // which bands hear the key
     void tick() override { refresh(); }
+    void shownAgain() override; // its meters and spectrum drained, Monitor and the spectrum afresh
 };
 } // namespace phazite::ui

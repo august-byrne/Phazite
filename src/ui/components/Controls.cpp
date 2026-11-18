@@ -332,7 +332,8 @@ void ValueSlider::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     // burst. JUCE workaround W55 (docs/juce-workarounds.md).
     if (! isEnabled() || ! isScrollWheelEnabled() || isTwoValue() || isThreeValue())
     {
-        juce::Component::mouseWheelMove (e, wheel); // to what is around it, as JUCE passes it on
+        // To what is around it, as JUCE passes it on: past the slider's own, which would turn it a notch at a time.
+        juce::Component::mouseWheelMove (e, wheel); // NOLINT(bugprone-parent-virtual-call)
         return;
     }
 
@@ -1363,6 +1364,15 @@ void ValueMeter::update (float reached)
     if (! juce::exactlyEqual (shown, value))
     {
         value = shown;
+        repaint();
+    }
+}
+
+void ValueMeter::reset()
+{
+    if (! juce::exactlyEqual (value, lowest))
+    {
+        value = lowest;
         repaint();
     }
 }

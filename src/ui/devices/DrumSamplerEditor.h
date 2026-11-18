@@ -98,5 +98,6 @@ private:
                                     const std::vector<juce::String>& names);
     void play (int pad);
     void tick() override { refresh(); }
+    void shownAgain() override; // what was hit while nobody looked isn't shown
 };
 } // namespace phazite::ui

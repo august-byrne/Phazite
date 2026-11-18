@@ -45,6 +45,10 @@ public:
     // How many times the map has worked the tail's shape out: once for each change of the values it shows, not at each repaint.
     int getShapesWorkedOut() const noexcept;
 
+    // The loudest of what came in that the map shows drifting in after the pre-delay, as a gain (0 for none): each peak taken
+    // with its moment, and afresh when the map shows again.
+    float getLoudestHit() const;
+
 private:
     class Graph;
     Graph* graph = nullptr;

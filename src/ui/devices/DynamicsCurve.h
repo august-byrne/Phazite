@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A dynamics device's curve (devices/dynamics/DynamicsCurve.h), as Maximus's envelope editor shows and edits it, for the
 // multiband's bands and the compressor (the owner, 2026-11-01: "i want this graph to also be used the same in the
-// compressor plugin"): level in across, level out up, over a grid at Maximus's levels with the 0 dB lines through the
-// middle and the line where level in equals level out. The area under the curve is shaded, and lit, as Maximus lights it,
+// compressor plugin"): level in across, level out up, each in decibels from -60 dB (at the left and the bottom, where silence
+// also sits) to +12 dB, evenly, so that a quiet point is as easy to see and take as a loud one, over a grid line every 6 dB
+// (numbered every 12), the 0 dB lines stronger, and the line where level in equals level out. Its points are places on the
+// device's own axis (devices::curves::toAxis()), as it plays and saves them: only where they show is in decibels, and a drag
+// or Snap (to the grid's lines) goes through the same mapping. The area under the curve is shaded, and lit, as Maximus lights it,
 // up to the level its compressor hears now, so that it moves with the sound. Its points are dots and the handles in the
 // middle of its lines hollow:
 //
@@ -77,6 +80,11 @@ public:
     // (none for the first point), in its own coordinates.
     juce::Point<float> getPosition (float across, float up) const;
     juce::Point<float> getPointPosition (int point) const;
+
+    // Where a level in decibels shows across or up its display, from 0 (-60 dB and below, silence) to 1 (its top, +12 dB), and
+    // the step of its grid's lines and of their numbers: what shares its scale (the Multiband's Monitor) takes them.
+    static float getShareForDecibels (float decibels);
+    static constexpr float gridDecibels = 6.0f, numberedDecibels = 12.0f;
     std::optional<juce::Point<float>> getTensionPosition (int point) const;
 
     int getCount() const;

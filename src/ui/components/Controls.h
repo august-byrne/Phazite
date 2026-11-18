@@ -415,6 +415,9 @@ public:
     void update (float reached);
     float getValue() const noexcept { return value; }
 
+    // At rest at once, without falling there: for a display shown again, which starts afresh.
+    void reset();
+
     void setMark (std::optional<float>); // none by default
 
     // What screen readers read: the value in decibels, a reduction as a negative number.

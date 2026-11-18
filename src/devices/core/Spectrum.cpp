@@ -36,6 +36,17 @@ void Spectrum::Analysis::prepare (int frameOrder, int paddingOrder, int hopsPerF
         window[(size_t) i] = 2.0f * (0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) frameSize));
 }
 
+void Spectrum::Analysis::clear()
+{
+    std::fill (history.begin(), history.end(), 0.0f);
+    std::fill (levels.begin(), levels.end(), floorDecibels);
+    std::fill (peaks.begin(), peaks.end(), floorDecibels);
+    writeIndex = 0;
+    sinceFrame = 0;
+    analyzed = false;
+    moving = true; // the next update shows it at rest, once
+}
+
 void Spectrum::Analysis::add (float sample)
 {
     history[(size_t) writeIndex] = sample;
@@ -162,6 +173,15 @@ void Spectrum::setSampleRate (double newSampleRate)
 double Spectrum::getLowsSpacing() const noexcept
 {
     return lows.getSpacing();
+}
+
+void Spectrum::clear()
+{
+    highs.clear();
+    lows.clear();
+    std::fill (recent.begin(), recent.end(), 0.0f);
+    newest = 0;
+    sinceTaken = 0;
 }
 
 void Spectrum::add (const float* samples, int numSamples)

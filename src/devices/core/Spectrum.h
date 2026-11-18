@@ -41,6 +41,10 @@ public:
     // Adds samples, the newest last, analyzing each resolution's frame as its samples come.
     void add (const float* samples, int numSamples);
 
+    // Afresh: what it has heard goes, and every level is at the floor, so that the next update shows what comes from now on
+    // (a display shown again, whose sound went on while nobody looked). Allocates nothing.
+    void clear();
+
     // Shows the frames analyzed since the last update: each level rises to the loudest of them, or falls by fallDecibels at
     // most. Returns whether any level moved; at rest, with nothing added, false.
     bool update (float fallDecibels);
@@ -68,6 +72,7 @@ private:
         bool analyzed = false, moving = true; // frames analyzed since the last update, and levels it moved
 
         void prepare (int frameOrder, int paddingOrder, int hopsPerFrame);
+        void clear();
         void add (float sample);
         void analyze();
         bool update (float fallDecibels);

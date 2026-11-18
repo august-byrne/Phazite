@@ -53,13 +53,19 @@ namespace
 
     // What the balance leaves of the side it is turned away from: the side turned toward stays as it is (1, exactly, at the
     // centre), so that nothing is ever louder.
-    float getBalanceGain (float turnedAway) noexcept
+    float getTurnedAwayGain (float turnedAway) noexcept
     {
         return turnedAway > 0.0f ? std::max (0.0f, std::cos (quarterTurn * std::min (1.0f, turnedAway))) : 1.0f;
     }
 } // namespace
 
 const DeviceInfo Stereo::info { .typeID = typeID, .name = "Stereo", .kind = DeviceKind::effect, .parameters = parameters };
+
+float Stereo::getBalanceGain (float turned, int side) noexcept
+{
+    // Turned right (above 0), the left fades; turned left, the right.
+    return getTurnedAwayGain (side == 0 ? turned : -turned);
+}
 
 float Stereo::Correlation::get() const noexcept
 {
@@ -143,8 +149,8 @@ void Stereo::process (const ProcessContext& block)
     const auto targetBass = values[bassMono] > 0.5f ? 1.0f : 0.0f;
     const auto targetSwap = values[swap] > 0.5f ? 1.0f : 0.0f;
     const auto targetMono = values[mono] > 0.5f ? 1.0f : 0.0f;
-    const auto targetLeftBalance = getBalanceGain (values[balance]);
-    const auto targetRightBalance = getBalanceGain (-values[balance]);
+    const auto targetLeftBalance = getBalanceGain (values[balance], 0);
+    const auto targetRightBalance = getBalanceGain (values[balance], 1);
 
     if (isFirstBlock)
     {

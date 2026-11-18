@@ -36,7 +36,7 @@ The base controls and what the left panel's views share.
 | `PeakBar.*` | The strip down a track header's right edge that shows how loud the track plays now. |
 | `PowerSwitch.*` | The one on/off switch, a track's look, for whatever switches on and off. |
 | `ScrollBarFade.*` | Shows an overlay scroll bar while the pointer is over what it scrolls, and fades it out after. |
-| `DisplayTicker.*` | The one timer that brings the displays up to date (meters, device editors), with what tells them whether to repaint (`ui::DrawnNumbers`). |
+| `DisplayTicker.*` | The one timer that brings the displays up to date (meters, device editors), with what tells them whether to repaint (`ui::DrawnNumbers`), and what starts a display afresh when it shows again (`Display::shownAgain()`). |
 | `ToolRow.*` | A row of a view's controls laid out from the left, which puts the least needed into its More menu where it is too narrow; each editor's tools show in its area's tab row this way. |
 | `ViewTitle.*` | The title along a left-panel view's top, with its actions (as VS Code's side bar). |
 | `SectionHeader.*` | A section's header that folds it: a group's row or a pane's, with its count's badge. |
@@ -71,7 +71,7 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `DeviceWindowContent.*` | An editor in a window of its own, out of the Devices view (`src/app/PluginWindow.h`): as wide as the window, its parts wrapping into rows, scrolling when the window is shorter. |
 | `ParameterControls.*` | A parameter's controls; `ParameterControls::showParameters()` shows a set of them. |
 | `DeviceGraph.*` | Graphs' axes, spectra and histories, and how every graph takes a handle (`HandleDrag`: from its value set by hand, as far as the pointer goes, Escape taking the drag back) and turns one with the wheel (`WheelGesture`). |
-| `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars. |
+| `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars, each reading drawn across the time it covers. |
 | `SidechainMenus.*` | What a device's sidechain listens to, a track or a bus, picked inside the device under the word every DAW prints on its picker, Sidechain. |
 | `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a dot that a drag moves (through `HandleDrag`) and a press away from it puts under the pointer. |
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |

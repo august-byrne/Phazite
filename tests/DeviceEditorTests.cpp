@@ -314,6 +314,7 @@ TEST_CASE ("A pinned column leads every page of a device's layout, without namin
 TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a part's switch shows its parameter's menu, a knob's "
            "but for Type a Value...; a left click still switches or chooses, one undo step")
 {
+    const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
     using phazite::devices::Compressor;
     using phazite::devices::Saturator;
     phazite::test::TestSong song;

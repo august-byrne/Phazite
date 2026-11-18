@@ -201,20 +201,6 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
         if (parameters[i].isValid())
             values[i] = parameters[i].getValue();
 
-    // The meters' first readings would show what played before the editor opened.
-    if (auto* compressor = device.getProcessor<Compressor>())
-    {
-        compressor->getLevelMeter().take();
-        compressor->getReductionMeter().take();
-        compressor->getBoostMeter().take();
-    }
-
-    if (auto* scope = device.getScope())
-    {
-        scope->getInputPeak().take();
-        scope->getOutputPeak().take();
-    }
-
     // What both pages show: its history, scrolling; each mode shows it its own way (modeShown()).
     auto& shownHistory = keep (std::make_unique<LevelHistoryView> ("Compressor history", historyLowest, meterRange));
     history = &shownHistory;
@@ -292,6 +278,9 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
                 { { sidechainPart }, { historyPart, duckKnobs } },
                 { { historyPart }, { punchAndSustain, transientKnobs } } },
               modeTips);
+
+    // The meters' first readings would show what played before the editor opened.
+    shownAgain();
     refresh();
 }
 
@@ -366,6 +355,26 @@ void CompressorEditor::showKey()
 
     if (keyPicker != nullptr)
         keyPicker->show (key);
+}
+
+void CompressorEditor::shownAgain()
+{
+    // What played while nobody looked (or before the editor opened) isn't shown: the meters and the peaks start from now, and
+    // the history from its next reading.
+    if (auto* compressor = device.getProcessor<Compressor>())
+    {
+        compressor->getLevelMeter().take();
+        compressor->getReductionMeter().take();
+        compressor->getBoostMeter().take();
+    }
+
+    if (auto* scope = device.getScope())
+        scope->drain();
+
+    shownLevel = silence;
+    shownReduction = 0.0f;
+    shownBoost = 0.0f;
+    history->clear();
 }
 
 void CompressorEditor::refresh()

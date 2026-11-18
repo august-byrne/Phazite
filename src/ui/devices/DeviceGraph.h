@@ -13,6 +13,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace phazite::ui::graph
@@ -66,13 +67,32 @@ juce::String formatDecibels (float decibels);
 // One trace for both channels, as Pro-Q's and Ableton's Spectrum's (L+R) are, but each channel analyzed apart and each level
 // the louder of the two (known bug 120): a sound in the middle reads as a sum's average does, at its level, and a sound panned
 // hard reads at its level too, where an average read it 6 dB low, and one out of phase between the channels shows, where an
-// average cancelled it to nothing.
+// average cancelled it to nothing. Or a trace of one way through the sound alone, as an EQ that plays a band on it shows its
+// curve's: the middle, (L + R) / 2, the side, (L - R) / 2, the left or the right, each analyzed from the same samples (a
+// tap gives both channels; the middle and the side are worked out from them as they are pulled), and only while asked for.
+//
+// Every analyzer's levels go from -90 dB at the bottom to +6 dB at the top (getLevels()): a sound can be over full scale
+// inside a chain.
 class SpectrumTrace
 {
 public:
     SpectrumTrace();
 
+    // What a trace can show: the louder of the two channels, the middle, the side, the left or the right.
+    enum class Channels
+    {
+        louder,
+        middle,
+        side,
+        left,
+        right
+    };
+
     void setSampleRate (double);
+
+    // The ways it analyzes, besides the louder of the two channels (which the left's and the right's give): asked for, the
+    // middle's and the side's start from silence; no longer asked for, they stop (made the first time, on the message thread).
+    void analyze (bool middleAndSide);
 
     // Takes the newest samples (each channel apart), analyzing them as they come; call at each refresh, then update(), which
     // shows them and returns whether the trace moved.
@@ -80,30 +100,53 @@ public:
     void pull (devices::SampleTap&);
     bool update();
 
-    void paint (juce::Graphics&, const FrequencyAxis&, const LevelAxis&, juce::Colour fill, juce::Colour line) const;
-    float getLevelAt (double frequency) const;         // tilted, in decibels
-    float getLevelOver (double from, double to) const; // the loudest between two frequencies, tilted at their middle
+    // Afresh: what it has analyzed goes, every level at the floor (a display shown again: DisplayTicker::Display::shownAgain()).
+    void clear();
+
+    void paint (juce::Graphics&, const FrequencyAxis&, const LevelAxis&, juce::Colour fill, juce::Colour line,
+                Channels = Channels::louder) const;
+    float getLevelAt (double frequency, Channels = Channels::louder) const;         // tilted, in decibels
+    float getLevelOver (double from, double to, Channels = Channels::louder) const; // the loudest between two, tilted at their middle
 
     static constexpr float tiltPerOctave = 4.5f;
     static constexpr float fallPerSecond = 40.0f; // decibels
 
+    // Every analyzer's levels up an area.
+    static constexpr float lowest = -90.0f, highest = 6.0f;
+    static LevelAxis getLevels (juce::Rectangle<float> area) { return { area, lowest, highest }; }
+
 private:
     devices::Spectrum left, right;
-    std::vector<float> lefts, rights;
+    std::unique_ptr<devices::Spectrum> middle, side; // while asked for
+    bool middleAndSideShown = false;
+    double sampleRate = 48000.0;
+    std::vector<float> lefts, rights, ways;
 
     void add (int numPulled);
+    float getRawLevelOver (double from, double to, Channels) const;
 };
 
 //==============================================================================
-// The last seconds of a value, one a refresh, for a display that scrolls, such as a limiter's history of levels.
+// The last readings of a value, for a display that scrolls: one a reading that comes at an even rate (Age's pitch), or one a
+// refresh with the moment it was taken, each the loudest of what came since the one before (a delay's peaks), so that what it
+// shows is where it was in time, however late a refresh came.
 class LevelHistory
 {
 public:
     explicit LevelHistory (int length, float initialValue);
 
     void push (float);
+    void push (float, double milliseconds); // by juce::Time::getMillisecondCounterHiRes()
     int size() const noexcept { return (int) values.size(); }
-    float get (int index) const noexcept; // from the oldest (0) to the newest (size() - 1)
+    float get (int index) const noexcept;      // from the oldest (0) to the newest (size() - 1)
+    double getTime (int index) const noexcept; // when it was pushed, the same way; 0 for none
+
+    // The reading that covers a moment: the oldest taken at it or after (each covers the time since the one before); -1 for
+    // a moment before them all or after the newest.
+    int findAt (double milliseconds) const noexcept;
+
+    // Afresh: every reading this value, none with a time (a display shown again).
+    void clear (float value);
 
     // Its values, oldest first, after the numbers there: what a display draws from (DrawnNumbers, DisplayTicker.h).
     void appendTo (std::vector<float>& numbers) const;
@@ -114,6 +157,7 @@ public:
 
 private:
     std::vector<float> values;
+    std::vector<double> times;
     int next = 0;
 };
 

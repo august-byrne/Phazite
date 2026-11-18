@@ -322,6 +322,13 @@ TEST_CASE ("Stereo's balance fades the side it is turned away from and leaves th
            < 0.01);
     CHECK (sameSamples (out, 1, plain, 1));
 
+    // Each side at what Stereo::getBalanceGain() says, which its editor's fan draws as the length of that side's half.
+    CHECK (std::abs (levelOf (out, 0) - levelOf (plain, 0)
+                     - juce::Decibels::gainToDecibels ((double) phazite::devices::Stereo::getBalanceGain (0.5f, 0)))
+           < 0.01);
+    CHECK (juce::exactlyEqual (phazite::devices::Stereo::getBalanceGain (0.5f, 1), 1.0f));
+    CHECK (phazite::devices::Stereo::getBalanceGain (-0.5f, 1) == doctest::Approx (std::cos (0.25 * juce::MathConstants<double>::pi)));
+
     // Back at the centre after it was turned: what it plays at its defaults, bit for bit, once it has glided back; that is,
     // what came in (the defaults' case above).
     const auto centred = getDefaults();

@@ -18,6 +18,7 @@
 
 #include <array>
 #include <atomic>
+#include <complex>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -121,9 +122,20 @@ public:
         std::array<dsp::FilterCoefficients, maxSections> sections {};
 
         double getMagnitude (double frequency, double sampleRate) const;
+        std::complex<double> getResponse (double frequency, double sampleRate) const; // as a complex gain
     };
 
     static BandShape getBandShape (std::span<const float> parameters, int band, double sampleRate);
+
+    // What is heard of a way through the EQ at a frequency, its Mix and its Phase among the values: its runner mixes what came
+    // in back in, as late as the EQ plays it. In Minimum, |(1 - m) + m H|, H the response of the bands on that way, in their
+    // order, and the output (getResponse()); in Linear, (1 - m) + m |H|, as its kernels turn no phase. For its editor's curves
+    // and tests; heard() gives the same from a response worked out by the caller.
+    static double getHeardMagnitude (std::span<const float> parameters, double frequency, double sampleRate,
+                                     Placement way = Placement::stereo);
+    static std::complex<double> getResponse (std::span<const float> parameters, double frequency, double sampleRate,
+                                             Placement way = Placement::stereo);
+    static double heard (std::complex<double> response, std::span<const float> parameters);
 
     // What it played, for its editor's analyzer (devices/core/SampleTap.h), and the rate it plays at (message thread).
     SampleTap& getOutputTap() noexcept { return outputTap; }

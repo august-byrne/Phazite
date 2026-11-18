@@ -94,6 +94,11 @@ public:
     static double getFlangerMagnitude (std::span<const float> parameters, double milliseconds, double frequency, double sampleRate);
     static double getPhaserMagnitude (std::span<const float> parameters, double centre, double frequency, double sampleRate);
 
+    // How deep the flanger's notches are as heard at the Mix, from 0 to 1: where the copy is opposite the sound its response
+    // is 0, so what is heard there is the dry copy alone, |1 - 2 m| of it (at any feedback, Safe Bass aside). Whole at 50 %,
+    // the sound and its copy cancelling; half at 25 and 75 %; none at 100 %, the copy alone, which has no notches.
+    static float getFlangerNotchDepth (std::span<const float> parameters) noexcept;
+
     // Its engines, for its editor's pictures (where each one's sweep is) and tests.
     const Chorus& getChorus() const noexcept { return chorus; }
     const Flanger& getFlanger() const noexcept { return flanger; }

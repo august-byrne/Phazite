@@ -1576,3 +1576,80 @@ TEST_CASE ("The Driven loop's two Newton steps solve it within a ten-thousandth 
             CHECK (worst < 1.0e-4 * loudest);
         }
 }
+
+TEST_CASE ("The filter's picture at a Mix of 50 % is what is heard: a sine through it within 0.2 dB, for every type with a response")
+{
+    // A quiet sine (-40 dBFS into the filter's loop, the drive's gain taken off what comes in, where the Driven filter's curve
+    // is straight) through the Filter on its runner, which mixes what came in back in, against
+    // FilterEffect::getHeardMagnitude(), which its editor draws: every type made of sections at both slopes, Clean and Driven
+    // (the Driven 12 dB louder for a drive of 24 dB, as half of it is given back), the combs, the vowel and the phaser. The
+    // response alone, what the picture drew before, is off by more than 0.2 dB at some frequency of each (a notch at 50 % is
+    // filled in to -6 dB, a peak loses most of its height).
+    constexpr double rate = 48000.0;
+    const std::array<double, 6> tones { 200.0, 700.0, 1000.0, 1400.0, 3000.0, 8000.0 };
+
+    struct Case
+    {
+        dsp::FilterMode mode;
+        float slope, character, drive;
+    };
+
+    std::vector<Case> cases;
+
+    for (const auto mode : { dsp::FilterMode::lowPass, dsp::FilterMode::highPass, dsp::FilterMode::bandPass, dsp::FilterMode::notch })
+        for (const auto slope : { 0.0f, 1.0f })
+            for (const auto character : { 0.0f, 1.0f })
+                cases.push_back ({ mode, slope, character, 0.0f });
+
+    cases.push_back ({ dsp::FilterMode::lowPass, 0.0f, 1.0f, 24.0f });
+    cases.push_back ({ dsp::FilterMode::bandPass, 1.0f, 0.0f, 12.0f });
+
+    for (const auto mode : { dsp::FilterMode::combPlus, dsp::FilterMode::combMinus, dsp::FilterMode::vowel, dsp::FilterMode::phaser })
+        cases.push_back ({ mode, 1.0f, 0.0f, 0.0f });
+
+    for (const auto& each : cases)
+    {
+        CAPTURE ((int) each.mode);
+        CAPTURE (each.slope);
+        CAPTURE (each.character);
+        CAPTURE (each.drive);
+        const auto values = with ({ { "filterType", (float) each.mode },
+                                    { "cutoff", 1000.0f },
+                                    { "resonance", 0.5f },
+                                    { "filterSlope", each.slope },
+                                    { "character", each.character },
+                                    { "drive", each.drive },
+                                    { "mix", 0.5f } });
+        REQUIRE (FilterEffect::getResponse (values, 1000.0, rate).has_value());
+
+        probe::Device device (FilterEffect::info);
+        device.setAll (values);
+        device.prepare (rate, testBlockSize);
+        const auto amplitude = 0.01f / dsp::decibelsToGain (each.drive);
+        const auto measured = probe::getResponse (
+            [&device] (const probe::Sound& sound)
+            {
+                device.reset();
+                return device.played (sound, testBlockSize);
+            },
+            tones, rate, amplitude, 9600, 9600);
+
+        auto oldOff = 0.0;
+
+        for (size_t i = 0; i < tones.size(); ++i)
+        {
+            CAPTURE (tones[i]);
+            const auto drawn = probe::inDecibels (FilterEffect::getHeardMagnitude (values, tones[i], rate));
+            CAPTURE (drawn);
+            CHECK (std::abs (measured[i] - drawn) < 0.2);
+            oldOff = std::max (oldOff, std::abs (measured[i] - probe::inDecibels (FilterEffect::getMagnitude (values, tones[i], rate))));
+        }
+
+        CHECK (oldOff > 0.2);
+    }
+
+    // Sample & Hold has no response: its picture stays the same at any Mix.
+    const auto held = with ({ { "filterType", (float) dsp::FilterMode::sampleAndHold }, { "mix", 0.5f } });
+    CHECK_FALSE (FilterEffect::getResponse (held, 1000.0, rate).has_value());
+    CHECK (FilterEffect::getHeardMagnitude (held, 1000.0, rate) == doctest::Approx (FilterEffect::getMagnitude (held, 1000.0, rate)));
+}

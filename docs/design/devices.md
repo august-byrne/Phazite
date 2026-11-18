@@ -194,6 +194,18 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   analyzed apart and each level the louder of the two, so that a sound in the middle reads as before, and one panned
   hard or out of phase between the channels reads at its level (an average read it 6 dB low, or cancelled it). What
   the device plays reaches them through taps that hold a quarter of a second at 192 kHz (`src/devices/core/SampleTap.h`).
+  Where an EQ draws a curve for the middle and the side, or the left and the right, its output's spectrum is a trace
+  for each, in its curve's colour, worked out from the same tap. Every analyzer's levels go from -90 to +6 dB, as a
+  sound can be over full scale inside a chain.
+- **Pictures draw what is heard,** the Mix among it where the device's runner mixes what came in back in (the Filter's
+  and the EQ's curves, Motion's flanger and phaser), and every parameter that changes the picture (Stereo's Mono,
+  Balance and Swap Sides as well as its Width).
+- **Histories take every reading, and nothing stale shows.** A device's meters give the most since they were last read,
+  so a history takes each refresh's reading with the time it covers and draws it across that time (the Compressor's,
+  the Limiter's, the Multiband's Monitor, the Delay's and the Reverb's peaks): a short peak between two refreshes shows,
+  and a late refresh draws as wide as it lasted. An editor shown again after it was hidden (another tab, page or device,
+  or a closed window) starts its displays afresh: its taps and meters drained, its histories empty, its spectra at rest
+  (`DisplayTicker::Display::shownAgain()`).
 - **Mix and the switch are not in the editor:** they are the device's line's in the column, so that a window of its
   own shows the editor and the line keeps them.
 - **What a sidechain listens to is chosen in the editor** (below).

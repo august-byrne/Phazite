@@ -478,7 +478,7 @@ TEST_CASE ("The multiband's curve draws its line, and lights the area under it u
         return image.getPixelAt (at.x, at.y);
     };
     const auto band = juce::Colour (phazite::ui::partColours[Multiband::low]);
-    const auto quiet = curves::axisForDecibels (-24.0f), loud = curves::axisForDecibels (4.5f); // between grid lines
+    const auto quiet = curves::axisForDecibels (-21.0f), loud = curves::axisForDecibels (4.5f); // between grid lines (every 6 dB)
 
     // The line, up the diagonal to 0 dB: in the band's colour over the grid's grey line (no line at all was drawn, and the
     // area under it a wedge from the first point to the last: 2026-11-01).
@@ -520,6 +520,58 @@ TEST_CASE ("The multiband's curve draws its line, and lights the area under it u
     editor.refresh();
     auto image = window.paintEverything();
     CHECK (pixelAt (image, quiet, 0.02f).getRed() > pixelAt (image, loud, 0.02f).getRed() + 40);
+}
+
+TEST_CASE ("The multiband's Monitor, hidden while a loud sound plays and shown again in silence, shows silence")
+{
+    Song song;
+    const auto device = song.getDevice();
+    auto* multiband = device.getProcessor<Multiband>();
+    REQUIRE (multiband != nullptr);
+    multiband->prepare (48000.0, 480);
+    phazite::ui::MultibandEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    std::vector<float> values;
+
+    for (const auto& parameter : Multiband::info.parameters)
+        values.push_back (song.valueOf (parameter.id));
+
+    // A loud 60 Hz tone, a block at a time, as the audio thread plays it.
+    const auto playLoud = [&] (int blocks)
+    {
+        juce::AudioBuffer<float> buffer (2, 480);
+
+        for (int block = 0, sample = 0; block < blocks; ++block)
+        {
+            for (int i = 0; i < buffer.getNumSamples(); ++i, ++sample)
+                for (int channel = 0; channel < 2; ++channel)
+                    buffer.setSample (channel, i, 0.7f * std::sin (juce::MathConstants<float>::twoPi * 60.0f * (float) sample / 48000.0f));
+
+            phazite::devices::ProcessContext context;
+            context.channels = buffer.getArrayOfWritePointers();
+            context.numChannels = 2;
+            context.numSamples = buffer.getNumSamples();
+            context.parameters = values;
+            multiband->process (context);
+        }
+    };
+
+    ticker.tickNow();
+    editor.selectBand (Multiband::master);
+
+    // Showing, a short loud hit between two ticks shows in the next column.
+    playLoud (2);
+    ticker.tickNow();
+    CHECK (editor.getMonitorLoudest() > -12.0f);
+
+    // Hidden, played to, shown again with nothing more: Monitor afresh, the silence now.
+    editor.setVisible (false);
+    ticker.tickNow();
+    playLoud (20);
+    editor.setVisible (true);
+    ticker.tickNow();
+    CHECK (editor.getMonitorLoudest() < -100.0f);
 }
 
 TEST_CASE ("The multiband's Sidechain part picks the key's track, which Monitor names while the band shown hears it")

@@ -44,7 +44,8 @@ down, and the loudest sample going out.
   what comes in (after the gain), pale; what goes out, in the device's colour; and how far the sound is turned down,
   in red, hanging from the top, the deepest dips numbered. The ceiling is a line across it: near it the pointer
   becomes an up-and-down arrow, the line lights up and the hint bar says what a drag does; a drag moves the Ceiling,
-  as one undo step.
+  as one undo step. Each reading is the most the meters reached since the one before, drawn across the time it
+  covers, so each hit's reduction shows however short; shown again after it was hidden, the history starts empty.
 - Beside it, three meters: **In**, **GR** (gain reduction, from the top) and **Out**, with the ceiling marked on In
   and Out.
 - **Gain**, as a large knob, then **Ceiling** and **Release**.
@@ -59,7 +60,9 @@ down, and the loudest sample going out.
   that looks more finely can read a true peak that much over the ceiling.
 - The gain change is not oversampled.
 - No switch to hear the limiting at unity gain.
-- The history takes one reading at each refresh of the display, so short peaks and the release's shape draw coarsely.
+- The history takes the meters once at each refresh of the display, the most they reached since the last: a short peak
+  shows at its depth, but the release's shape within a refresh draws coarsely. Shown again after it was hidden, its
+  meters and its history start from the sound now.
 - A drag of the ceiling's line starts from the Ceiling as modulation plays it, and sets that as the value by hand.
 
 ## In the code

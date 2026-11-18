@@ -187,6 +187,39 @@ TEST_CASE ("The Filter's Character is two buttons, Clean and Driven, a click pic
     CHECK (FilterEffect::getMagnitude (values, 1000.0, 48000.0) < 30.0);
 }
 
+TEST_CASE ("The Filter's curve is what is heard at its Mix: the cut filled in under 100 %, and Sample & Hold says its Mix instead")
+{
+    Song song (FilterEffect::typeID);
+    phazite::ui::FilterEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    const auto set = [&song] (const char* id, float value)
+    {
+        auto parameter = song.getDevice().getParameter (id);
+        parameter.setValue (value);
+    };
+
+    // A 24 dB low-pass at 1 kHz: three octaves above it, far down at 100 %; at 50 %, what came in fills it to half, -6 dB.
+    set ("cutoff", 1000.0f);
+    ticker.tickNow();
+    CHECK (editor.getCurveDecibels (8000.0) < -40.0f);
+    CHECK_FALSE (editor.getReadout().contains ("Mix"));
+
+    set ("mix", 0.5f);
+    ticker.tickNow();
+    CHECK (editor.getCurveDecibels (8000.0) == doctest::Approx (-6.0f).epsilon (0.02));
+    CHECK (std::abs (editor.getCurveDecibels (100.0)) < 0.1f); // the low-pass's phase there takes a little off
+    CHECK_FALSE (editor.getReadout().contains ("Mix"));
+
+    // Sample & Hold has no single response to draw at a Mix: its readout says it.
+    set ("filterType", (float) phazite::devices::dsp::FilterMode::sampleAndHold);
+    ticker.tickNow();
+    CHECK (editor.getReadout().contains ("Mix 50%"));
+    set ("mix", 1.0f);
+    ticker.tickNow();
+    CHECK_FALSE (editor.getReadout().contains ("Mix"));
+}
+
 TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their curves, and shows how far the sound reaches")
 {
     Song song (Saturator::typeID);
@@ -806,6 +839,121 @@ TEST_CASE ("Stereo's editor shows its image and how alike its sides are as it pl
     scope->pushOutput (silence.data(), noise.data(), (int) noise.size());
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getDotsAcross() > 0.05f);
+}
+
+TEST_CASE ("The Filter's spectrum and the delay's echoes, hidden while a loud sound plays and shown again in silence, show silence")
+{
+    const juce::SharedResourcePointer<phazite::ui::DisplayTicker> sharedTicker; // kept, as no editor holds it yet
+    auto& ticker = *sharedTicker;
+
+    // A loud sine, as the audio thread hands what a device plays to its scope, in and out, at the rate it plays at.
+    const auto playLoud = [] (phazite::devices::DeviceScope& scope)
+    {
+        std::vector<float> sine (4096);
+
+        for (size_t i = 0; i < sine.size(); ++i)
+            sine[i] = 0.7f * (float) std::sin (juce::MathConstants<double>::twoPi * 1000.0 * (double) i / scope.getSampleRate());
+
+        scope.pushInput (sine.data(), sine.data(), (int) sine.size());
+        scope.pushOutput (sine.data(), sine.data(), (int) sine.size());
+    };
+
+    {
+        Song song (FilterEffect::typeID);
+        phazite::ui::FilterEditor editor (song.getDevice());
+        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto* scope = song.getDevice().getScope();
+        REQUIRE (scope != nullptr);
+        ticker.tickNow(); // it listens
+
+        // Showing, the sine shows at its level.
+        playLoud (*scope);
+        ticker.tickNow();
+        CHECK (editor.getSpectrumLevel (1000.0) > -10.0f);
+
+        // Hidden, played to, shown again with nothing more: the spectrum of the silence now.
+        editor.setVisible (false);
+        ticker.tickNow();
+        playLoud (*scope);
+        editor.setVisible (true);
+        ticker.tickNow();
+        CHECK (editor.getSpectrumLevel (1000.0) < -100.0f);
+    }
+
+    {
+        Song song (Delay::typeID);
+        phazite::ui::DelayEditor editor (song.getDevice());
+        phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto* scope = song.getDevice().getScope();
+        REQUIRE (scope != nullptr);
+        ticker.tickNow();
+
+        playLoud (*scope);
+        ticker.tickNow();
+        CHECK (editor.getInputLight() > 0.5f);
+        CHECK (editor.getLightAgo (0.0) > 0.5f);
+
+        editor.setVisible (false);
+        ticker.tickNow();
+        playLoud (*scope);
+        editor.setVisible (true);
+        ticker.tickNow();
+        CHECK (editor.getInputLight() == doctest::Approx (0.0f));
+        CHECK (editor.getLightAgo (0.0) == doctest::Approx (0.0f));
+        CHECK (editor.getLightAgo (0.1) == doctest::Approx (0.0f));
+    }
+}
+
+TEST_CASE ("Stereo's fan opens by its Width, closes to a line with Mono, leans with the Balance, and swaps its L and R with Swap Sides")
+{
+    using phazite::devices::Stereo;
+    Song song (Stereo::typeID);
+    phazite::ui::StereoEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    const auto set = [&song] (const char* id, float value)
+    {
+        auto parameter = song.getDevice().getParameter (id);
+        parameter.setValue (value);
+    };
+    const auto quarter = juce::MathConstants<float>::halfPi * 0.5f;
+
+    // At its defaults: open to the L and R lines, both halves whole.
+    auto fan = editor.getShownFan();
+    CHECK (fan.opening == doctest::Approx (quarter));
+    CHECK (fan.leftLength == doctest::Approx (1.0f));
+    CHECK (fan.rightLength == doctest::Approx (1.0f));
+    CHECK_FALSE (fan.swapped);
+
+    // Mono on: a line, whatever the Width.
+    set ("width", 1.6f);
+    CHECK (editor.getShownFan().opening == doctest::Approx (0.8f * juce::MathConstants<float>::halfPi));
+    set ("mono", 1.0f);
+    ticker.tickNow();
+    CHECK (editor.getShownFan().opening == doctest::Approx (0.0f));
+    set ("mono", 0.0f);
+
+    // The Balance half right: the left half as long as what the device leaves of the left, cos (pi / 4); the right whole.
+    set ("balance", 0.5f);
+    fan = editor.getShownFan();
+    CHECK (fan.leftLength == doctest::Approx (Stereo::getBalanceGain (0.5f, 0)));
+    CHECK (fan.leftLength == doctest::Approx (std::cos (0.25 * juce::MathConstants<double>::pi)));
+    CHECK (fan.rightLength == doctest::Approx (1.0f));
+    set ("balance", -1.0f);
+    CHECK (editor.getShownFan().rightLength == doctest::Approx (0.0f).scale (1.0f));
+    CHECK (editor.getShownFan().leftLength == doctest::Approx (1.0f));
+
+    // Swap Sides: the L and R change places.
+    set ("swap", 1.0f);
+    CHECK (editor.getShownFan().swapped);
+
+    // Each change repaints the image, nothing else turned.
+    ticker.tickNow();
+    phazite::test::dispatchPendingMessages();
+    window.takeRepaintedArea();
+    set ("balance", 0.25f);
+    ticker.tickNow();
+    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
 }
 
 TEST_CASE ("Stereo's editor shows its picture and its four parts at once in the default dock, each control titled")

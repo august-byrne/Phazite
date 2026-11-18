@@ -7,6 +7,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <cmath>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -15,7 +16,6 @@ namespace
     using devices::Multiband;
 
     constexpr const char* bandNames[] = { "Low", "Mid", "High", "Master" };
-    constexpr float gridDecibels[] = { -18.0f, -12.0f, -9.0f, -6.0f, -3.0f, 3.0f, 6.0f, 9.0f };
     constexpr int historySize = 1024; // the monitor's columns, at most
 
     // Its layout puts all of it on one page in the default dock's 552 by 268 pixels (the owner, 2026-11-10): the bands' part
@@ -53,11 +53,6 @@ namespace
     std::string_view idOf (int band, Multiband::BandField field)
     {
         return idOf (Multiband::getBandParameter (band, field));
-    }
-
-    float axisOf (float decibels)
-    {
-        return devices::curves::axisForDecibels (decibels);
     }
 
     int getLabelHeight()
@@ -110,13 +105,8 @@ public:
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
 
         // Silence at first, so that a history that stays silent is the same all along and needn't repaint.
-        Column silence {};
-        silence.fill (-120.0f);
-
-        for (int band = 0; band < Multiband::numBands; ++band)
-            silence[(size_t) band * 4 + 3] = 0.0f; // no reduction
-
-        columns.assign (historySize, silence);
+        columns.assign (historySize, getSilence());
+        times.assign (historySize, 0.0);
     }
 
     // The traces Monitor shows, each by its switch.
@@ -134,23 +124,80 @@ public:
 
     std::array<bool, numTraces> traces { true, false, true, true, true, false, true };
     bool paused = false;
-    float speed = 0.5f; // from 0 (slowest) to 1
+    double pausedAt = -1.0, pausedFor = 0.0; // when the pause under way began (none: under 0), and how long it has been paused in all
+    float speed = 0.5f;                      // from 0 (slowest) to 1
 
-    // A column: each band's level in, out, heard and gain, then what came into the device, in decibels.
+    // A column: each band's level in, out, heard and gain, then what came into the device, in decibels, each the most since the
+    // column before (the meters' most since they were last read).
     using Column = std::array<float, 4 * Multiband::numBands + 1>;
 
-    void push (const Column& column)
+    // A tick's column, taken at a moment (by juce::Time::getMillisecondCounterHiRes()): drawn across the time since the one
+    // before, so that a tick that came late draws as wide as it lasted.
+    void push (const Column& column, double milliseconds)
     {
+        // While it is paused no time passes on the picture: its columns go on from where they stopped, the first one after as
+        // wide as a tick, not as the pause was long (what the meters gave meanwhile is thrown away).
         if (paused)
+        {
+            if (pausedAt < 0.0)
+                pausedAt = milliseconds;
+
             return;
+        }
+
+        if (pausedAt >= 0.0)
+            pausedFor += milliseconds - std::exchange (pausedAt, -1.0);
+
+        milliseconds -= pausedFor;
 
         // Repainted while what shows changes: a history all alike, silence, say, looks the same scrolled.
         sameInARow = column == columns[(size_t) newest] ? std::min (sameInARow + 1, historySize) : 0;
         newest = (newest + 1) % historySize;
         columns[(size_t) newest] = column;
+        times[(size_t) newest] = milliseconds;
 
         if (sameInARow < historySize)
             repaint();
+    }
+
+    // The loudest of a value of the columns taken, each with a time.
+    float getLoudest (size_t value) const
+    {
+        auto loudest = -120.0f;
+
+        for (size_t i = 0; i < columns.size(); ++i)
+            if (times[i] > 0.0)
+                loudest = std::max (loudest, columns[i][value]);
+
+        return loudest;
+    }
+
+    // Afresh: silence all along, no column with a time (its editor shown again), so that nothing is drawn across the time
+    // nobody looked.
+    void clear()
+    {
+        columns.assign (historySize, getSilence());
+        times.assign (historySize, 0.0);
+        sameInARow = historySize;
+        repaint();
+    }
+
+    // How long a pixel across is, in milliseconds: a tick's time over as many pixels as the speed gives it.
+    double getMillisecondsPerPixel() const { return 1000.0 / DisplayTicker::ticksPerSecond / (1.0 + 3.0 * (double) speed); }
+
+    // Where a column is drawn across: from the column before it to its own moment, in its own coordinates; empty for one never
+    // pushed.
+    juce::Range<float> getColumnSpan (int ago) const
+    {
+        const auto at = (size_t) ((newest - ago + historySize) % historySize);
+        const auto before = (size_t) ((newest - ago - 1 + 2 * historySize) % historySize);
+
+        if (times[at] <= 0.0)
+            return {};
+
+        const auto xFor = [this] (double milliseconds)
+        { return getArea().getRight() - (float) ((times[(size_t) newest] - milliseconds) / getMillisecondsPerPixel()); };
+        return { xFor (times[before] > 0.0 ? times[before] : times[at]), xFor (times[at]) };
     }
 
     // The track the selected band hears through its Key, which its heard trace shows in its colour and names; none while it
@@ -170,7 +217,7 @@ public:
     juce::Rectangle<float> getArea() const { return getLocalBounds().toFloat().reduced (1.0f); }
     float yForDecibels (float decibels) const
     {
-        return getArea().getBottom() - juce::jlimit (0.0f, 1.0f, axisOf (decibels)) * getArea().getHeight();
+        return getArea().getBottom() - DynamicsCurve::getShareForDecibels (decibels) * getArea().getHeight();
     }
 
     void paint (juce::Graphics& g) override
@@ -179,25 +226,24 @@ public:
         graph::paintBackground (g, p, getLocalBounds().toFloat());
         paintTraces (g, p);
 
-        // The levels' scale down the right, as on the curve.
+        // The levels' scale down the right, as on the curve: a line every 6 dB, the 0 dB line stronger, numbered every 12.
         const auto area = getArea();
         g.setFont (juce::FontOptions (TextSize::small));
 
-        for (const auto decibels : gridDecibels)
+        for (auto decibels = -42.0f; decibels < 12.0f; decibels += DynamicsCurve::gridDecibels)
         {
             const auto y = yForDecibels (decibels);
-            g.setColour (p.text.withAlpha (GraphTint::grid));
+            const auto isZero = std::abs (decibels) < 1.0f;
+            g.setColour (p.text.withAlpha (isZero ? GraphTint::zeroLine : GraphTint::grid));
             g.drawHorizontalLine (juce::roundToInt (y), area.getX(), area.getRight());
-            g.setColour (p.textMuted);
-            g.drawText (juce::String ((int) decibels), juce::Rectangle<float> (area.getRight() - 28.0f, y - 7.0f, 24.0f, 14.0f),
-                        juce::Justification::centredRight);
-        }
 
-        const auto zero = yForDecibels (0.0f);
-        g.setColour (p.text.withAlpha (GraphTint::zeroLine));
-        g.drawHorizontalLine (juce::roundToInt (zero), area.getX(), area.getRight());
-        g.setColour (p.textMuted);
-        g.drawText ("0", juce::Rectangle<float> (area.getRight() - 28.0f, zero - 7.0f, 24.0f, 14.0f), juce::Justification::centredRight);
+            if (std::abs (std::remainder (decibels, DynamicsCurve::numberedDecibels)) < 1.0f)
+            {
+                g.setColour (p.textMuted);
+                g.drawText (juce::String ((int) decibels), juce::Rectangle<float> (area.getRight() - 28.0f, y - 7.0f, 24.0f, 14.0f),
+                            juce::Justification::centredRight);
+            }
+        }
     }
 
     void mouseDown (const juce::MouseEvent&) override
@@ -209,38 +255,62 @@ public:
 private:
     MultibandEditor& editor;
     std::vector<Column> columns;
+    std::vector<double> times;                // each column's moment, 0 for none
     int newest = 0, sameInARow = historySize; // how many columns in a row came in alike: at first, all of them
     juce::String keyName;
     juce::Colour keyColour;
+
+    static Column getSilence()
+    {
+        Column silence {};
+        silence.fill (-120.0f);
+
+        for (int band = 0; band < Multiband::numBands; ++band)
+            silence[(size_t) band * 4 + 3] = 0.0f; // no reduction
+
+        return silence;
+    }
 
     void paintTraces (juce::Graphics& g, const Palette& p)
     {
         const auto area = getArea();
         const auto band = editor.selectedBand;
         const auto colour = getBandColour (band);
-        const auto step = 1.0f + 3.0f * speed; // pixels a column takes: faster, wider
-        const auto count = std::min (historySize, (int) (area.getWidth() / step) + 1);
 
-        // A trace's path, newest at the right, from a column's value.
+        // A trace's path, newest at the right, each column across the time it covers at its value, as far back as it shows.
         const auto trace = [&] (auto valueOf, bool filled)
         {
             juce::Path path;
+            auto started = false;
+            auto leftmost = area.getRight();
 
-            for (int i = 0; i < count; ++i)
+            for (int i = 0; i < historySize; ++i)
             {
+                const auto span = getColumnSpan (i);
+
+                if (span.isEmpty() && i > 0)
+                    break;
+
                 const auto& column = columns[(size_t) ((newest - i + historySize) % historySize)];
-                const auto x = area.getRight() - (float) i * step;
                 const auto y = yForDecibels (valueOf (column));
+                const auto right = span.isEmpty() ? area.getRight() : span.getEnd();
+                const auto left = std::max (area.getX(), span.isEmpty() ? right : span.getStart());
 
-                if (i == 0)
-                    path.startNewSubPath (x, filled ? area.getBottom() : y);
+                if (! started)
+                    path.startNewSubPath (right, filled ? area.getBottom() : y);
 
-                path.lineTo (x, y);
+                started = true;
+                path.lineTo (right, y);
+                path.lineTo (left, y);
+                leftmost = left;
+
+                if (left <= area.getX())
+                    break;
             }
 
-            if (filled)
+            if (filled && started)
             {
-                path.lineTo (area.getRight() - (float) (count - 1) * step, area.getBottom());
+                path.lineTo (leftmost, area.getBottom());
                 path.closeSubPath();
             }
 
@@ -530,7 +600,7 @@ public:
         }
 
         // What it plays, over them.
-        spectrum.paint (g, axis, { area, -90.0f, 6.0f }, p.text.withAlpha (GraphTint::spectrumFill),
+        spectrum.paint (g, axis, graph::SpectrumTrace::getLevels (area), p.text.withAlpha (GraphTint::spectrumFill),
                         p.text.withAlpha (GraphTint::spectrumLine));
 
         // The low cut's edge and the crossovers, which drags move: lit under the pointer, as wide as a lit line in the text
@@ -1271,7 +1341,22 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
         panel.addBand (band, shown);
     }
 
+    // The two parts side by side, each whole: in the default dock as narrow as they go, the bands' graph 200 pixels wide and
+    // the band's curve 116; wider, the graph and the curve grow, and Monitor and the Sidechain part come beside the band.
+    const auto knobsHeight = bandKnobs.getPreferredHeight();
+    setParts ({ { { "Bands", &bandsPart, bandsWidth, bandsGraphHeight + Space::xs + knobsHeight, bandsGraphLeast + Space::xs + knobsHeight,
+                    true, gridLeast } },
+                { { "Band", &panel, BandPanel::preferredWidth, BandPanel::getPreferredHeight(), BandPanel::getPreferredHeight(), true,
+                    BandPanel::leastWidth } } });
+    selectBand (selectedBand);
+
     // The meters' first readings would show what played before the editor opened.
+    shownAgain();
+}
+
+void MultibandEditor::shownAgain()
+{
+    // What played while nobody looked isn't shown: the meters and the spectrum start from now, Monitor from its next column.
     if (auto* multiband = device.getProcessor<Multiband>())
     {
         for (int band = 0; band < Multiband::numBands; ++band)
@@ -1285,14 +1370,18 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
         multiband->getMainInputMeter().take();
     }
 
-    // The two parts side by side, each whole: in the default dock as narrow as they go, the bands' graph 200 pixels wide and
-    // the band's curve 116; wider, the graph and the curve grow, and Monitor and the Sidechain part come beside the band.
-    const auto knobsHeight = bandKnobs.getPreferredHeight();
-    setParts ({ { { "Bands", &bandsPart, bandsWidth, bandsGraphHeight + Space::xs + knobsHeight, bandsGraphLeast + Space::xs + knobsHeight,
-                    true, gridLeast } },
-                { { "Band", &panel, BandPanel::preferredWidth, BandPanel::getPreferredHeight(), BandPanel::getPreferredHeight(), true,
-                    BandPanel::leastWidth } } });
-    selectBand (selectedBand);
+    if (auto* scope = device.getScope())
+        scope->drain();
+
+    shownHeard.fill (-120.0f);
+    analysis->clear();
+    bandsGraph->spectrum.clear();
+    bandsGraph->repaint();
+}
+
+float MultibandEditor::getMonitorLoudest() const
+{
+    return analysis->getLoudest ((size_t) selectedBand * 4);
 }
 
 MultibandEditor::~MultibandEditor()
@@ -1443,7 +1532,7 @@ void MultibandEditor::refresh()
         }
 
         column.back() = multiband->getMainInputMeter().take();
-        analysis->push (column);
+        analysis->push (column, juce::Time::getMillisecondCounterHiRes());
 
         if (sidechain->listen.getToggleState() && sidechain->listen.isShowing())
             multiband->listenToKey();

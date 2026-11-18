@@ -183,7 +183,10 @@ rate. Each reads Motion's values through the same mapping to its engine's that p
   Delay), as high as the Depth; the wheel turns the Rate (while Sync is on, the Division). Phase and Spread show faint
   while there is one voice a side, which has nothing to keep apart.
 - **Flanger:** the comb, a tooth at each notch, sliding as the LFO sweeps, and under it the strip of the delay: how far
-  the sweep reaches and where each side's copy lags now. A dot sits at the Delay's frequency, one over the Delay (the
+  the sweep reaches and where each side's copy lags now. The teeth are as strong as the notches are deep as heard: at
+  a notch the copy cancels the sound and the dry copy alone is heard, |1 - 2 m| of it, so the teeth are whole at 50 %,
+  half at 25 and 75 %, and gone at 100 %, where the copy plays alone and has no notches (the curve is flat there without
+  Feedback, and peaks with it). A dot sits at the Delay's frequency, one over the Delay (the
   comb's first peak, or its first notch while the Feedback is below 0), as high as the Feedback, with 0 in the middle;
   the wheel turns the Depth.
 - **Phaser:** the notches, moving as the LFO sweeps them, the left side's response glowing down to the bottom, so that

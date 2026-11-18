@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace phazite::ui::graph
 {
@@ -152,20 +153,75 @@ juce::String formatDecibels (float decibels)
 //==============================================================================
 SpectrumTrace::SpectrumTrace()
     : lefts (8192),
-      rights (8192)
+      rights (8192),
+      ways (8192)
 {
 }
 
-void SpectrumTrace::setSampleRate (double rate)
+void SpectrumTrace::setSampleRate (double newRate)
 {
-    left.setSampleRate (rate);
-    right.setSampleRate (rate);
+    sampleRate = newRate;
+    left.setSampleRate (newRate);
+    right.setSampleRate (newRate);
+
+    if (middle != nullptr)
+    {
+        middle->setSampleRate (newRate);
+        side->setSampleRate (newRate);
+    }
+}
+
+void SpectrumTrace::analyze (bool middleAndSide)
+{
+    if (middleAndSide == middleAndSideShown)
+        return;
+
+    middleAndSideShown = middleAndSide;
+
+    if (! middleAndSide)
+        return;
+
+    // From silence: what they heard before they stopped is long gone by.
+    if (middle == nullptr)
+    {
+        middle = std::make_unique<devices::Spectrum>();
+        side = std::make_unique<devices::Spectrum>();
+    }
+
+    for (auto* each : { middle.get(), side.get() })
+    {
+        each->setSampleRate (sampleRate);
+        each->clear();
+    }
 }
 
 void SpectrumTrace::add (int numPulled)
 {
     left.add (lefts.data(), numPulled);
     right.add (rights.data(), numPulled);
+
+    if (! middleAndSideShown)
+        return;
+
+    for (const auto& [shown, sign] : { std::pair { middle.get(), 1.0f }, std::pair { side.get(), -1.0f } })
+    {
+        for (int i = 0; i < numPulled; ++i)
+            ways[(size_t) i] = 0.5f * (lefts[(size_t) i] + sign * rights[(size_t) i]);
+
+        shown->add (ways.data(), numPulled);
+    }
+}
+
+void SpectrumTrace::clear()
+{
+    left.clear();
+    right.clear();
+
+    if (middle != nullptr)
+    {
+        middle->clear();
+        side->clear();
+    }
 }
 
 void SpectrumTrace::pull (devices::StereoTap& tap)
@@ -187,29 +243,81 @@ void SpectrumTrace::pull (devices::SampleTap& tap)
 bool SpectrumTrace::update()
 {
     const auto fall = fallPerSecond / (float) DisplayTicker::ticksPerSecond;
-    const auto leftMoved = left.update (fall);
-    return right.update (fall) || leftMoved;
+    auto moved = left.update (fall);
+    moved = right.update (fall) || moved;
+
+    if (middleAndSideShown)
+    {
+        moved = middle->update (fall) || moved;
+        moved = side->update (fall) || moved;
+    }
+
+    return moved;
 }
 
-float SpectrumTrace::getLevelAt (double frequency) const
+float SpectrumTrace::getRawLevelOver (double from, double to, Channels channels) const
 {
-    return std::max (left.getLevelAt (frequency), right.getLevelAt (frequency)) + tiltPerOctave * (float) std::log2 (frequency / 1000.0);
+    switch (channels)
+    {
+        case Channels::left:
+            return left.getLevelOver (from, to);
+        case Channels::right:
+            return right.getLevelOver (from, to);
+        case Channels::middle:
+            return middleAndSideShown ? middle->getLevelOver (from, to) : devices::Spectrum::floorDecibels;
+        case Channels::side:
+            return middleAndSideShown ? side->getLevelOver (from, to) : devices::Spectrum::floorDecibels;
+        case Channels::louder:
+            break;
+    }
+
+    return std::max (left.getLevelOver (from, to), right.getLevelOver (from, to));
 }
 
-float SpectrumTrace::getLevelOver (double from, double to) const
+float SpectrumTrace::getLevelAt (double frequency, Channels channels) const
 {
-    return std::max (left.getLevelOver (from, to), right.getLevelOver (from, to))
-           + tiltPerOctave * (float) std::log2 (std::sqrt (from * to) / 1000.0);
+    const auto at = [frequency] (const devices::Spectrum& spectrum) { return spectrum.getLevelAt (frequency); };
+    float level = devices::Spectrum::floorDecibels;
+
+    switch (channels)
+    {
+        case Channels::left:
+            level = at (left);
+            break;
+        case Channels::right:
+            level = at (right);
+            break;
+        case Channels::middle:
+            level = middleAndSideShown ? at (*middle) : level;
+            break;
+        case Channels::side:
+            level = middleAndSideShown ? at (*side) : level;
+            break;
+        case Channels::louder:
+            level = std::max (at (left), at (right));
+            break;
+    }
+
+    return level + tiltPerOctave * (float) std::log2 (frequency / 1000.0);
+}
+
+float SpectrumTrace::getLevelOver (double from, double to, Channels channels) const
+{
+    return getRawLevelOver (from, to, channels) + tiltPerOctave * (float) std::log2 (std::sqrt (from * to) / 1000.0);
 }
 
 void SpectrumTrace::paint (juce::Graphics& g, const FrequencyAxis& frequencies, const LevelAxis& levels, juce::Colour fill,
-                           juce::Colour line) const
+                           juce::Colour line, Channels channels) const
 {
     const auto& area = frequencies.area;
     constexpr float step = 2.0f; // pixels between the curve's points, each the loudest of the frequencies around it
     const auto curve = makeCurve (
-        area, [&] (float x)
-        { return levels.yFor (getLevelOver (frequencies.frequencyAt (x - 0.5f * step), frequencies.frequencyAt (x + 0.5f * step))); },
+        area,
+        [&] (float x)
+        {
+            return levels.yFor (
+                getLevelOver (frequencies.frequencyAt (x - 0.5f * step), frequencies.frequencyAt (x + 0.5f * step), channels));
+        },
         step);
 
     auto filled = curve;
@@ -225,19 +333,60 @@ void SpectrumTrace::paint (juce::Graphics& g, const FrequencyAxis& frequencies, 
 
 //==============================================================================
 LevelHistory::LevelHistory (int length, float initialValue)
-    : values ((size_t) std::max (2, length), initialValue)
+    : values ((size_t) std::max (2, length), initialValue),
+      times (values.size(), 0.0)
 {
 }
 
 void LevelHistory::push (float value)
 {
+    push (value, 0.0);
+}
+
+void LevelHistory::push (float value, double milliseconds)
+{
     values[(size_t) next] = value;
+    times[(size_t) next] = milliseconds;
     next = (next + 1) % (int) values.size();
 }
 
 float LevelHistory::get (int index) const noexcept
 {
     return values[(size_t) ((next + index) % (int) values.size())];
+}
+
+double LevelHistory::getTime (int index) const noexcept
+{
+    return times[(size_t) ((next + index) % (int) values.size())];
+}
+
+int LevelHistory::findAt (double milliseconds) const noexcept
+{
+    // From the newest back, to the oldest reading taken at the moment or after it whose one before was taken before it.
+    auto found = -1;
+
+    for (int index = size() - 1; index >= 0; --index)
+    {
+        const auto time = getTime (index);
+
+        if (time <= 0.0)
+            break;
+
+        if (time < milliseconds)
+            return found;
+
+        found = index;
+    }
+
+    // The oldest with a time covers its own moment alone: what came before it isn't known.
+    return found >= 0 && getTime (found) <= milliseconds ? found : -1;
+}
+
+void LevelHistory::clear (float value)
+{
+    std::fill (values.begin(), values.end(), value);
+    std::fill (times.begin(), times.end(), 0.0);
+    next = 0;
 }
 
 void LevelHistory::appendTo (std::vector<float>& numbers) const

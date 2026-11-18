@@ -92,5 +92,6 @@ private:
     void modeShown (int) override;
     void showKey(); // the key's track in the picker, and in the history while it ducks
     void tick() override { refresh(); }
+    void shownAgain() override; // its meters drained, its history empty
 };
 } // namespace phazite::ui

@@ -26,9 +26,16 @@ public:
         // Brings what it shows up to date, repainting what changed; called while its component shows.
         virtual void tick() = 0;
 
+        // Its component shows at a tick after it didn't at the one before (as it first shows, and again after another tab or
+        // page, another device or a closed window hid it): called before that tick, so that it starts afresh from what plays
+        // now, not from what played while nobody looked. Its taps and meters, which went on taking the sound meanwhile, are
+        // drained (devices::DeviceScope::drain(), MeterValue::take()), its histories emptied and its spectra at rest.
+        virtual void shownAgain() {}
+
     private:
         juce::Component& shownBy;
         juce::SharedResourcePointer<DisplayTicker> ticker;
+        bool showed = false; // at the last tick
 
         friend class DisplayTicker;
         JUCE_DECLARE_NON_COPYABLE (Display)

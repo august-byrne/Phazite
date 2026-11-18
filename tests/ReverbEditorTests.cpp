@@ -12,10 +12,41 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/ReverbEditor.h"
 
+#include <vector>
+
 using phazite::devices::Reverb;
+
+TEST_CASE ("The reverb's map, hidden while a loud sound comes in and shown again in silence, shows no hit from meanwhile")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    const auto device = phazite::makeDeviceHandle (s, id);
+    phazite::ui::ReverbEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    auto* scope = device.getScope();
+    REQUIRE (scope != nullptr);
+    ticker.tickNow(); // it listens
+
+    const std::vector<float> loud (480, 0.8f);
+    scope->pushInput (loud.data(), loud.data(), (int) loud.size());
+    ticker.tickNow();
+    CHECK (editor.getLoudestHit() == doctest::Approx (0.8f).epsilon (0.01));
+
+    editor.setVisible (false);
+    ticker.tickNow();
+    scope->pushInput (loud.data(), loud.data(), (int) loud.size());
+    editor.setVisible (true);
+    ticker.tickNow();
+    CHECK (editor.getLoudestHit() == doctest::Approx (0.0f));
+}
 
 TEST_CASE ("The reverb's editor shows a knob for each control, and its graph follows the decay")
 {

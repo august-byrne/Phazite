@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <iterator>
 #include <string_view>
 
@@ -110,6 +111,11 @@ MultimodeCoefficients makeMultimode (const FilterSettings&, double sampleRate);
 // reports 1.
 double getMagnitude (const MultimodeCoefficients&, double frequency, double sampleRate);
 
+// Whether a mode is a linear filter, with one response: all but Sample & Hold. And that response at a frequency, as a complex
+// gain (1 for Sample & Hold), for what a dry copy mixed with it gives (the Filter device's curve at its Mix).
+bool hasResponse (FilterMode) noexcept;
+std::complex<double> getResponse (const MultimodeCoefficients&, double frequency, double sampleRate);
+
 //==============================================================================
 // The Driven character of low-pass, high-pass, band-pass and notch (roadmap step S6.6), which the Filter device plays (and
 // the synths may take later): the same state-variable section, integrated with the trapezoidal rule, with a curve inside its
@@ -153,8 +159,9 @@ float getDrivenDamping (FilterMode, bool steep, float resonance) noexcept;
 float getDrivenLargeDamping (FilterMode, bool steep) noexcept;
 
 // The gain (not in decibels) of the Driven filter for a quiet sound, the curve straight, at a frequency: its peak goes off
-// any scale where it sings. For an editor's curve and tests.
+// any scale where it sings. For an editor's curve and tests. And the same as a complex gain.
 double getMagnitude (const DrivenCoefficients&, double frequency, double sampleRate);
+std::complex<double> getResponse (const DrivenCoefficients&, double frequency, double sampleRate);
 
 //==============================================================================
 // One channel, with what it holds of the sound.

@@ -51,6 +51,11 @@ public:
     const LiveValue& getInputCorrelation() const noexcept { return inputCorrelation; }
     const LiveValue& getOutputCorrelation() const noexcept { return outputCorrelation; }
 
+    // What the Balance, turned so far (-1 to 1), leaves of a side going out (0: the left, 1: the right), from 0 to 1: the side
+    // it is turned toward stays as it is, the other fades along a quarter of a cosine to nothing at the end. For its editor's
+    // picture too.
+    static float getBalanceGain (float turned, int side) noexcept;
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;

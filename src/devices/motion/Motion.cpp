@@ -192,6 +192,11 @@ double Motion::getPhaserMagnitude (std::span<const float> values, double centre,
     return mixWithDry (values, Phaser::getResponse (getPhaserValues (values), centre, frequency, sampleRate), frequency, sampleRate);
 }
 
+float Motion::getFlangerNotchDepth (std::span<const float> values) noexcept
+{
+    return 1.0f - std::abs (1.0f - 2.0f * std::clamp (values[mix], 0.0f, 1.0f));
+}
+
 Processor& Motion::getEngine (int which) noexcept
 {
     return which == (int) Mode::flanger  ? static_cast<Processor&> (flanger)

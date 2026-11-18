@@ -222,10 +222,19 @@ public:
             g.fillRect (band.reduced (0.0f, 0.5f));
         }
 
-        // What played, drifting in after the pre-delay and fading.
+        // What played, drifting in after the pre-delay and fading: each peak across the time it covers, since the one before,
+        // at its age when it was taken.
+        const auto newest = hits.getTime (hits.size() - 1);
+
         for (int i = 0; i < hits.size(); ++i)
         {
-            const auto age = (double) (hits.size() - 1 - i) / DisplayTicker::ticksPerSecond;
+            const auto taken = hits.getTime (i);
+
+            if (taken <= 0.0)
+                continue;
+
+            const auto age = (newest - taken) / 1000.0;
+            const auto before = i > 0 && hits.getTime (i - 1) > 0.0 ? hits.getTime (i - 1) : taken;
             const auto level = hits.get (i);
             const auto decay = decayed.middle;
 
@@ -233,9 +242,10 @@ public:
                 continue;
 
             const auto x = xFor (getPredelaySeconds() + age);
+            const auto end = xFor (getPredelaySeconds() + (newest - before) / 1000.0);
             const auto fade = (float) std::pow (10.0, -3.0 * age / decay);
             g.setColour (p.text.withAlpha (std::min (0.6f, level * fade)));
-            g.fillRect (juce::Rectangle<float> (x, area.getY(), 2.0f, area.getHeight()));
+            g.fillRect (juce::Rectangle<float> (x, area.getY(), std::max (2.0f, end - x), area.getHeight()));
         }
 
         // The edges that drag: the decay's end, the pre-delay's gap, the damping's corner, the low cut's floor and the high
@@ -410,7 +420,8 @@ private:
         if (auto* scope = device.getScope())
         {
             scope->setListening (true);
-            hits.push (juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels));
+            hits.push (juce::Decibels::decibelsToGain (scope->getInputPeak().take(), devices::DeviceScope::silentDecibels),
+                       juce::Time::getMillisecondCounterHiRes());
         }
 
         auto numbers = values;
@@ -419,6 +430,28 @@ private:
 
         if (drawn.changed (std::move (numbers)))
             repaint();
+    }
+
+    // Its editor shown again: what came in while nobody looked doesn't drift in.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        hits.clear (0.0f);
+    }
+
+public:
+    // The loudest of what came in that it shows drifting in, as a gain (0 for none).
+    float getLoudestHit() const
+    {
+        auto loudest = 0.0f;
+
+        for (int i = 0; i < hits.size(); ++i)
+            if (hits.getTime (i) > 0.0)
+                loudest = std::max (loudest, hits.get (i));
+
+        return loudest;
     }
 };
 
@@ -471,6 +504,11 @@ juce::String ReverbEditor::getModeText() const
 int ReverbEditor::getShapesWorkedOut() const noexcept
 {
     return graph->getShapesWorkedOut();
+}
+
+float ReverbEditor::getLoudestHit() const
+{
+    return graph->getLoudestHit();
 }
 
 std::int64_t ReverbEditor::getDecayLineUpdates() const

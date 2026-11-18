@@ -29,8 +29,10 @@
 
 #include <array>
 #include <atomic>
+#include <complex>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -69,9 +71,16 @@ public:
 
     static const DeviceInfo info;
 
-    // Its response at a frequency for the parameters' values (a gain, not in decibels): Driven's for a quiet sound, whose peak
-    // goes off any scale where it sings. For its editor and tests.
+    // Its response at a frequency for the parameters' values, the Mix left out (a gain, not in decibels): Driven's for a quiet
+    // sound, half the drive (in decibels) louder, as it plays one, and whose peak goes off any scale where it sings. And the
+    // same as a complex gain, for a type with one response (every type but Sample & Hold: none).
     static double getMagnitude (std::span<const float> parameters, double frequency, double sampleRate);
+    static std::optional<std::complex<double>> getResponse (std::span<const float> parameters, double frequency, double sampleRate);
+
+    // What is heard at a frequency, its Mix among the values: its runner mixes what came in back in with what it plays,
+    // through the same filters to its rate and back (delaysDry()), so that |(1 - m) + m H|, H its response. Sample & Hold,
+    // which has none, as getMagnitude() gives it. For its editor's curve and tests.
+    static double getHeardMagnitude (std::span<const float> parameters, double frequency, double sampleRate);
 
     // Whether the values play the Driven filter: Character on Driven, and a type that has it.
     static bool isDriven (std::span<const float> parameters) noexcept;

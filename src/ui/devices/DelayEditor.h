@@ -33,6 +33,11 @@ public:
     float getEchoLevel (int n, int side = 0) const;
     juce::Rectangle<int> getBandArea() const;
 
+    // How lit it draws the sound coming in now (0 to 1), and an echo of what came in a time ago, as if at full level: the peak
+    // of what came in over the time that covers that moment, each peak taken with its moment. Afresh when it shows again.
+    float getInputLight() const;
+    float getLightAgo (double seconds) const;
+
     // What its readout says: the times, the feedback, and Frozen while it is.
     juce::String getReadout() const;
 

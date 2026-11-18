@@ -44,8 +44,25 @@ void DisplayTicker::tickNow()
     const auto ticking = displays;
 
     for (auto* display : ticking)
-        if (std::find (displays.begin(), displays.end(), display) != displays.end() && display->shownBy.isShowing())
-            display->tick();
+    {
+        if (std::find (displays.begin(), displays.end(), display) == displays.end())
+            continue;
+
+        if (! display->shownBy.isShowing())
+        {
+            display->showed = false;
+            continue;
+        }
+
+        // Shown again since the last tick: afresh first, as nothing read its sound meanwhile.
+        if (! display->showed)
+        {
+            display->showed = true;
+            display->shownAgain();
+        }
+
+        display->tick();
+    }
 }
 
 //==============================================================================

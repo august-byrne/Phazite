@@ -151,11 +151,14 @@ Two columns, built on the frame every device editor shares ([devices.md](../devi
 
 - **Response**: the filter's response drawn over the spectrum of what it plays, with what comes in fainter behind it,
   so each type looks like itself: a slope, a peak, a notch, a comb's teeth, a vowel's formants or a phaser's notches.
-  Sample & Hold, which is not a linear filter, draws as a flat line. Driven draws its response to a quiet sound, the
-  curve straight, whose peak goes off the top where it sings. A dot sits at the cutoff, as high as the
-  resonance: dragging it moves both, as one undo step, and a press anywhere puts it under the pointer. The wheel over
-  the graph turns the drive, a decibel a notch. The graph names the type, "Driven" while it is, the cutoff and the
-  resonance, and the drive while there is any.
+  The curve is what is heard, the Mix among it: with H the filter's response and m the Mix, |(1 - m) + m H|, as the dry
+  copy meets the filtered sound in phase (above), so that under 100 % what came in fills the cut in (at 50 %, a notch is
+  -6 dB deep). Sample & Hold, which is not a linear filter and has no single response, draws as a flat line, and its
+  readout says the Mix while it is under 100 %. Driven draws its response to a quiet sound, the curve straight, half the
+  drive (in decibels) louder as it plays one, whose peak goes off the top where it sings. A dot sits at the cutoff, as
+  high as the resonance: dragging it moves both, as one undo step, and a press anywhere puts it under the pointer. The
+  wheel over the graph turns the drive, a decibel a notch. The graph names the type, "Driven" while it is, the cutoff and
+  the resonance, and the drive while there is any.
 - **Sweep** (Cutoff, large, and Resonance) over **Character** (Clean and Driven as two buttons, over Type, Slope and
   Drive) and **Quality**, a list.
 

@@ -86,7 +86,7 @@ public:
         graph::paintFrequencyGrid (g, p, frequencies, true);
 
         // What comes in, faint; what goes out, lit; then the response over them.
-        const graph::LevelAxis spectrumLevels { area, -90.0f, 6.0f };
+        const auto spectrumLevels = graph::SpectrumTrace::getLevels (area);
         input.paint (g, frequencies, spectrumLevels, p.textMuted.withAlpha (GraphTint::spectrumFill),
                      p.textMuted.withAlpha (GraphTint::spectrumLine));
         output.paint (g, frequencies, spectrumLevels, tint.withAlpha (GraphTint::spectrumFill), tint.withAlpha (GraphTint::spectrumLine));
@@ -94,27 +94,39 @@ public:
         g.setColour (p.text.withAlpha (GraphTint::zeroLine));
         g.drawHorizontalLine (juce::roundToInt (levels.yFor (0.0f)), area.getX(), area.getRight());
 
-        const auto rate = getSampleRate();
-        const auto curve =
-            graph::makeCurve (area,
-                              [&] (float x)
-                              {
-                                  const auto magnitude = FilterEffect::getMagnitude (values, frequencies.frequencyAt (x), rate);
-                                  return levels.yFor ((float) juce::Decibels::gainToDecibels (magnitude, (double) lowestGain - 1.0));
-                              });
+        // What is heard: the response with what came in mixed back in at the Mix (FilterEffect::getHeardMagnitude()).
+        const auto curve = graph::makeCurve (area, [&] (float x) { return levels.yFor (getCurveDecibels (frequencies.frequencyAt (x))); });
         g.setColour (tint);
         g.strokePath (curve, juce::PathStrokeType (GraphTint::curveWidth));
 
         // The dot: the cutoff, as high as the resonance.
         dot.paint (g, p, tint);
 
+        graph::paintReadouts (g, p, area, getReadout(),
+                              values[FilterEffect::drive] > 0.05f ? "Drive " + graph::formatDecibels (values[FilterEffect::drive])
+                                                                  : juce::String());
+    }
+
+    // The curve's level at a frequency, in decibels, as drawn (down to just under its bottom).
+    float getCurveDecibels (double frequency) const
+    {
+        const auto magnitude = FilterEffect::getHeardMagnitude (values, frequency, getSampleRate());
+        return (float) juce::Decibels::gainToDecibels (magnitude, (double) lowestGain - 1.0);
+    }
+
+    float getSpectrumLevel (double frequency) const { return output.getLevelAt (frequency); }
+
+    // The type, Driven, the cutoff and the resonance; and for a type whose curve can't show the Mix (Sample & Hold, which has
+    // no single response), the Mix under 100 %.
+    juce::String getReadout() const
+    {
         const auto type =
             juce::String (getInfo (FilterEffect::filterType).choices[(size_t) juce::roundToInt (values[FilterEffect::filterType])].data());
-        graph::paintReadouts (
-            g, p, area,
-            type + (FilterEffect::isDriven (values) ? "  Driven  " : "  ") + graph::formatFrequency (values[FilterEffect::cutoff])
-                + "  Res " + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%",
-            values[FilterEffect::drive] > 0.05f ? "Drive " + graph::formatDecibels (values[FilterEffect::drive]) : juce::String());
+        const auto mix = values[FilterEffect::mix];
+        const auto showsMix = mix < 0.995f && ! FilterEffect::getResponse (values, 1000.0, getSampleRate()).has_value();
+        return type + (FilterEffect::isDriven (values) ? "  Driven  " : "  ") + graph::formatFrequency (values[FilterEffect::cutoff])
+               + "  Res " + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%"
+               + (showsMix ? "  Mix " + juce::String (juce::roundToInt (mix * 100.0f)) + "%" : juce::String());
     }
 
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
@@ -147,6 +159,16 @@ private:
         for (size_t i = 0; i < parameters.size(); ++i)
             if (parameters[i].isValid())
                 values[i] = parameters[i].getValue();
+    }
+
+    // Shown again: the spectra of the sound now, not of what played while nobody looked.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        input.clear();
+        output.clear();
     }
 
     void tick() override
@@ -240,5 +262,20 @@ juce::Component& FilterEditor::getGraph() const noexcept
 juce::Point<float> FilterEditor::getDotPosition() const
 {
     return graph->getDotPosition();
+}
+
+float FilterEditor::getCurveDecibels (double frequency) const
+{
+    return graph->getCurveDecibels (frequency);
+}
+
+juce::String FilterEditor::getReadout() const
+{
+    return graph->getReadout();
+}
+
+float FilterEditor::getSpectrumLevel (double frequency) const
+{
+    return graph->getSpectrumLevel (frequency);
 }
 } // namespace phazite::ui

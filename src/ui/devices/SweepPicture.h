@@ -82,5 +82,6 @@ private:
     void paintLfo (juce::Graphics&, const Palette&, juce::Colour tint) const;
     juce::String getRateText() const;
     void tick() override;
+    void shownAgain() override;
 };
 } // namespace phazite::ui

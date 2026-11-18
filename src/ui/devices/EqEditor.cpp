@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <iterator>
 #include <optional>
 #include <tuple>
@@ -23,8 +24,7 @@ namespace
     using Placement = Eq::Placement;
 
     constexpr double lowestFrequency = 20.0, highestFrequency = 20000.0;
-    constexpr double gainRange = 24.0;      // the graph shows the bands' whole range, -24 to +24 dB
-    constexpr double analyzerFloor = -90.0; // the analyzer's bottom, in dB; its top is 0 dB
+    constexpr double gainRange = 24.0; // the graph shows the bands' whole range, -24 to +24 dB
     constexpr double defaultSampleRate = 48000.0;
     constexpr int bandsGroup = 1;              // the band buttons' radio group
     constexpr int graphWidth = 400;            // as wide at any height
@@ -121,6 +121,79 @@ namespace
         }
 
         return "";
+    }
+
+    // The colour of a way's curve: one curve (Stereo) in the text colour; the middle's and the left's in the device's colour,
+    // the side's and the right's in the analyzer's second trace's (the faint one's), dashed.
+    bool isSecond (Placement way)
+    {
+        return way == Placement::side || way == Placement::right;
+    }
+
+    juce::Colour getWayColour (Placement way, const Palette& palette, juce::Colour tint)
+    {
+        return way == Placement::stereo ? palette.text : isSecond (way) ? palette.textMuted : tint;
+    }
+
+    // What of the sound a way's spectrum shows: the louder of the two sides for the whole of it.
+    graph::SpectrumTrace::Channels getChannels (Placement way)
+    {
+        switch (way)
+        {
+            case Placement::mid:
+                return graph::SpectrumTrace::Channels::middle;
+            case Placement::side:
+                return graph::SpectrumTrace::Channels::side;
+            case Placement::left:
+                return graph::SpectrumTrace::Channels::left;
+            case Placement::right:
+                return graph::SpectrumTrace::Channels::right;
+            case Placement::stereo:
+                break;
+        }
+
+        return graph::SpectrumTrace::Channels::louder;
+    }
+
+    // Each band's sections, designed once for a curve of many points.
+    std::array<Eq::BandShape, Eq::numBands> getShapes (const std::vector<float>& shown, double sampleRate)
+    {
+        std::array<Eq::BandShape, Eq::numBands> shapes {};
+
+        for (int band = 0; band < Eq::numBands; ++band)
+            shapes[(size_t) band] = Eq::getBandShape (shown, band, sampleRate);
+
+        return shapes;
+    }
+
+    // What is heard of each way through the EQ at a frequency, by its placement's number: the output and each band on the ways
+    // it acts on, as complex gains in their order, then what came in mixed back in at the Mix, as its Phase plays it
+    // (Eq::heard()).
+    std::array<double, 5> getHeardByWay (const std::vector<float>& shown, const std::array<Eq::BandShape, Eq::numBands>& shapes,
+                                         double frequency, double sampleRate)
+    {
+        std::array<std::complex<double>, 5> through {};
+        through.fill (std::complex<double> ((double) devices::dsp::decibelsToGain (shown[(size_t) Eq::outputParameter]), 0.0));
+
+        for (int band = 0; band < Eq::numBands; ++band)
+        {
+            if (shapes[(size_t) band].numSections == 0)
+                continue;
+
+            const auto placement = BandValues (shown, band).placement;
+            const auto response = shapes[(size_t) band].getResponse (frequency, sampleRate);
+
+            for (size_t way = 0; way < through.size(); ++way)
+                if (Eq::actsOn (placement, (Placement) way))
+                    through[way] *= response;
+        }
+
+        std::array<double, 5> heard {};
+
+        for (size_t way = 0; way < through.size(); ++way)
+            heard[way] = Eq::heard (through[way], shown);
+
+        return heard;
     }
 
     const char* getWayName (Placement placement)
@@ -245,14 +318,21 @@ public:
 
         paintGrid (g, palette);
 
-        // Behind its curve, what comes in, faint, then what the EQ plays, in its colour, each tilted alike.
+        // Behind its curve, what comes in, faint, then what the EQ plays, in its colour, each tilted alike: one trace while it
+        // draws one curve, or a trace for each way whose curve it draws, the middle's and the side's, or the left's and the
+        // right's, each in its curve's colour.
         const graph::FrequencyAxis frequencies { getLocalBounds().toFloat(), lowestFrequency, highestFrequency };
-        const graph::LevelAxis levels { getLocalBounds().toFloat(), (float) analyzerFloor, 0.0f };
+        const auto levels = graph::SpectrumTrace::getLevels (getLocalBounds().toFloat());
         editor.input.paint (g, frequencies, levels, palette.textMuted.withAlpha (GraphTint::spectrumFill),
                             palette.textMuted.withAlpha (GraphTint::spectrumLine * 0.5f));
         const auto tint = getDeviceTint (*this);
-        editor.output.paint (g, frequencies, levels, tint.withAlpha (GraphTint::spectrumFill * 1.5f),
-                             tint.withAlpha (GraphTint::spectrumLine));
+
+        for (const auto way : getWays())
+        {
+            const auto colour = editor.getSpectrumColour (way);
+            editor.output.paint (g, frequencies, levels, colour.withAlpha (GraphTint::spectrumFill * 1.5f),
+                                 colour.withAlpha (GraphTint::spectrumLine), getChannels (way));
+        }
 
         // The selected band's own curve, filled to 0 dB, and the curve of every band together (or the curves of the ways through
         // it), worked out again only when they change (known bug 130): not at each of the analyzer's 30 repaints a second.
@@ -267,6 +347,14 @@ public:
 
     // How many times its curves were worked out, for the tests.
     int getCurvesWorkedOut() const noexcept { return curvesWorkedOut; }
+
+    // A way's curve at a frequency, in decibels, as drawn (kept to the graph's range).
+    float getCurveDecibels (Placement way, double frequency) const
+    {
+        const auto sampleRate = editor.getSampleRate();
+        const auto heard = getHeardByWay (editor.playing, getShapes (editor.playing, sampleRate), frequency, sampleRate);
+        return (float) juce::jlimit (-gainRange, gainRange, toDecibels (heard[(size_t) way]));
+    }
 
     // Over a dot, the pointer shows it can be grabbed, and the dot lights up; over a dynamic band's handle, that it moves up
     // and down, and the handle lights up.
@@ -461,7 +549,6 @@ private:
         ++curvesWorkedOut;
         const auto ways = getWays();
         const auto zero = yForGain (0.0);
-        const auto outputGain = (double) devices::dsp::decibelsToGain (shown[(size_t) Eq::outputParameter]);
         bandCurve.clear();
         bandCurve.startNewSubPath (0.0f, zero);
         curves.clear();
@@ -469,39 +556,21 @@ private:
         for (const auto way : ways)
             curves.emplace_back (way, juce::Path());
 
-        // Each band's sections designed once, then evaluated at each point.
-        std::array<Placement, Eq::numBands> placements {};
-        std::array<Eq::BandShape, Eq::numBands> shapes {};
-
-        for (int band = 0; band < Eq::numBands; ++band)
-        {
-            placements[(size_t) band] = BandValues (shown, band).placement;
-            shapes[(size_t) band] = Eq::getBandShape (shown, band, sampleRate);
-        }
+        // Each band's sections designed once, then evaluated at each point: the selected band alone, and what is heard of each
+        // way, the Mix among it.
+        const auto shapes = getShapes (shown, sampleRate);
+        const auto& selected = shapes[(size_t) editor.selectedBand];
 
         for (auto x = 0.0f; x <= width; x += 1.5f)
         {
             const auto frequency = frequencyFor (x);
-            std::array<double, 5> through {}; // each way's gain, by its placement's number
-            through.fill (outputGain);
-
-            // Each band's magnitude on its own placement, into each way it acts on.
-            for (int band = 0; band < Eq::numBands; ++band)
-            {
-                const auto placement = placements[(size_t) band];
-                const auto magnitude = shapes[(size_t) band].getMagnitude (frequency, sampleRate);
-
-                if (band == editor.selectedBand)
-                    bandCurve.lineTo (x, yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (magnitude))));
-
-                for (const auto way : ways)
-                    if (Eq::actsOn (placement, way))
-                        through[(size_t) way] *= magnitude;
-            }
+            bandCurve.lineTo (x,
+                              yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (selected.getMagnitude (frequency, sampleRate)))));
+            const auto heard = getHeardByWay (shown, shapes, frequency, sampleRate);
 
             for (auto& [way, curve] : curves)
             {
-                const auto y = yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (through[(size_t) way])));
+                const auto y = yForGain (juce::jlimit (-gainRange, gainRange, toDecibels (heard[(size_t) way])));
 
                 if (x <= 0.0f)
                     curve.startNewSubPath (x, y);
@@ -514,24 +583,19 @@ private:
         bandCurve.closeSubPath();
     }
 
-    // The colour of a way's curve: one curve in the text colour; the middle's and the left's in the device's colour, the side's
-    // and the right's in the analyzer's second trace's, dashed.
-    static bool isSecond (Placement way) { return way == Placement::side || way == Placement::right; }
-
     void paintCurves (juce::Graphics& g, const Palette& palette, juce::Colour tint)
     {
         const juce::PathStrokeType stroke (GraphTint::curveWidth);
 
         for (const auto& [way, curve] : curves)
         {
+            g.setColour (getWayColour (way, palette, tint));
+
             if (way == Placement::stereo)
             {
-                g.setColour (palette.text);
                 g.strokePath (curve, stroke);
                 continue;
             }
-
-            g.setColour (isSecond (way) ? palette.textMuted : tint);
 
             if (isSecond (way))
             {
@@ -869,6 +933,27 @@ int EqEditor::getCurvesWorkedOut() const noexcept
     return graph->getCurvesWorkedOut();
 }
 
+float EqEditor::getCurveDecibels (devices::Equalizer::Placement way, double frequency) const
+{
+    return graph->getCurveDecibels (way, frequency);
+}
+
+juce::Colour EqEditor::getCurveColour (devices::Equalizer::Placement way) const
+{
+    return getWayColour (way, getPalette (*graph), getDeviceTint (*graph));
+}
+
+juce::Colour EqEditor::getSpectrumColour (devices::Equalizer::Placement way) const
+{
+    // One trace, for the whole of it, in the device's colour, as it always was; a way's in its curve's.
+    return way == Placement::stereo ? getDeviceTint (*graph) : getCurveColour (way);
+}
+
+float EqEditor::getSpectrumLevel (devices::Equalizer::Placement way, double frequency) const
+{
+    return output.getLevelAt (frequency, getChannels (way));
+}
+
 double EqEditor::getSampleRate() const
 {
     if (auto* eq = device.getProcessor<Eq>(); eq != nullptr && eq->getSampleRate() > 0.0)
@@ -922,6 +1007,18 @@ void EqEditor::selectBand (int band)
     }
 
     refresh();
+}
+
+void EqEditor::shownAgain()
+{
+    if (auto* eq = device.getProcessor<Eq>())
+        eq->getOutputTap().drain();
+
+    if (auto* scope = device.getScope())
+        scope->drain();
+
+    input.clear();
+    output.clear();
 }
 
 void EqEditor::refresh()
@@ -991,7 +1088,10 @@ void EqEditor::refresh()
 
     if (eq != nullptr)
     {
+        // The middle's and the side's spectra too, while their curves show.
+        const auto ways = graph->getWays();
         output.setSampleRate (getSampleRate());
+        output.analyze (std::find (ways.begin(), ways.end(), Placement::mid) != ways.end());
         output.pull (eq->getOutputTap());
         spectraMoved = output.update();
     }

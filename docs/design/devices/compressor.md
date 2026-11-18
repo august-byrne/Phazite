@@ -242,6 +242,11 @@ page. Each page fits the default dock without scrolling or pages.
 - **Transient:** the history, its gain a line above and below the middle; and the knobs Punch and Sustain, large, over
   Speed, Out and Low Cut.
 
+The curve shows level in across and level out up, each in decibels from -60 dB (at the left and the bottom, where
+silence also sits) to +12 dB, evenly, over a grid line every 6 dB, numbered every 12, the 0 dB lines stronger, and the
+line where level in equals level out: a point at -30 dB is as easy to see and take as one at -6. This is the picture's
+scale only: the points are the places the parameters above hold, on the curve's own axis.
+
 The curve is edited by its points: drag a point (Shift keeps it level, Ctrl keeps it where it is across, and with
 Snap on it goes onto a grid line); drag the hollow handle in the middle of a line up or down to bend it (Ctrl in fine
 steps), and right-click it to straighten the line; right-click a point to type its levels, for its line's type or to delete it
@@ -273,6 +278,10 @@ bars: a pale trace, what goes out over it in the device's colour, and how far th
 hanging from the top, the deepest dips numbered (on Transient's page, how far it is turned up or down, as a line about
 the middle). On Duck's page, and on Compress's while a key is heard, the key shows as a line in its track's colour,
 named, in place of the red; and on Duck's the Threshold is a line across the history to drag up or down against the key's level, as one undo step.
+Each reading is the most the meters reached since the one before (the loudest in and out, the deepest it turned down),
+drawn across the time it covers, so a short hit between two refreshes shows and a late refresh draws as wide as it
+lasted. Shown again after it was hidden (another tab, page or device, or a closed window), the history starts empty
+and the meters from the sound now.
 
 Mix is the knob on the device's row in the Devices view.
 
@@ -293,7 +302,8 @@ Mix is the knob on the device's row in the Devices view.
 - The key has two cuts and no other filter, and no gain of its own.
 - The gain change itself is not oversampled, and the drive runs at twice the rate with no higher setting.
 - The characters are choices of detector, release and colour, not models of the circuits they are named after.
-- The history takes one reading at each refresh of the display, so a fast attack or release draws as a straight line.
+- The history takes the meters once at each refresh of the display, the most they reached since the last: a short peak
+  shows, but how a fast attack or release moves within a refresh doesn't.
 - A drag of the threshold's line starts from the Threshold as modulation plays it, and sets that as the value by
   hand.
 

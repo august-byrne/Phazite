@@ -215,19 +215,48 @@ float LevelHistoryView::getYForLevel (float decibels) const
 
 juce::Path LevelHistoryView::makeTrace (float Reading::* value, const std::function<float (float)>& yFor) const
 {
+    // Each reading across the time it covers, since the one before, at its level: a tick that came late as wide as it lasted.
     juce::Path trace;
 
     for (size_t i = 0; i < readings.size(); ++i)
     {
-        const juce::Point<float> point { getXForTime (readings[i].milliseconds), yFor (readings[i].*value) };
+        const auto y = yFor (readings[i].*value);
+        const auto across = getReadingSpan ((int) i);
 
         if (i == 0)
-            trace.startNewSubPath (point);
+            trace.startNewSubPath (across.getStart(), y);
         else
-            trace.lineTo (point);
+            trace.lineTo (across.getStart(), y);
+
+        trace.lineTo (across.getEnd(), y);
     }
 
     return trace;
+}
+
+int LevelHistoryView::getNumReadings() const noexcept
+{
+    return (int) readings.size();
+}
+
+juce::Range<float> LevelHistoryView::getReadingSpan (int index) const
+{
+    if (! juce::isPositiveAndBelow (index, (int) readings.size()))
+        return {};
+
+    const auto& reading = readings[(size_t) index];
+    const auto from = index > 0 ? readings[(size_t) index - 1].milliseconds : reading.milliseconds;
+    return { getXForTime (from), getXForTime (reading.milliseconds) };
+}
+
+void LevelHistoryView::clear()
+{
+    readings.clear();
+    lines.clear();
+    pushes = 0;
+
+    if (drawn.changed ({}))
+        repaint();
 }
 
 void LevelHistoryView::paint (juce::Graphics& g)

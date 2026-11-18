@@ -835,6 +835,92 @@ TEST_CASE ("Motion's Flanger and Phaser pictures draw what it plays at the Mix s
     }
 }
 
+TEST_CASE ("Motion's Flanger and Phaser pictures at a Mix of 50 and 100 % are what a sine through it measures; the flanger's teeth "
+           "as deep as its notches")
+{
+    // The sweep held still (Depth 0), a sine through Motion on its runner, read once it has settled, against the curve its
+    // picture draws there (Motion::getFlangerMagnitude(), getPhaserMagnitude()): at 50 % the engine's response, its notches
+    // whole; at 100 % the effect alone, which for the flanger is the copy alone, flat without feedback, with no notches.
+    constexpr int length = 24000, measured = 4800; // 100 ms: whole cycles of each tone
+    const auto levelOf = [] (const juce::AudioBuffer<float>& out)
+    {
+        auto energy = 0.0;
+
+        for (int i = length - measured; i < length; ++i)
+            energy += (double) out.getSample (0, i) * (double) out.getSample (0, i);
+
+        return std::sqrt (2.0 * energy / measured);
+    };
+
+    for (const auto mode : { Motion::Mode::flanger, Motion::Mode::phaser })
+    {
+        for (const auto feedback : { 0.0f, 0.5f })
+        {
+            for (const auto mix : { 0.5f, 1.0f })
+            {
+                CAPTURE ((int) mode);
+                CAPTURE (feedback);
+                CAPTURE (mix);
+                auto values = getMotionDefaults (mode);
+                values[Motion::depth] = 0.0f;
+                values[Motion::delay] = 2.0f; // the flanger's notches at 250, 750, 1250 Hz...
+                values[Motion::frequency] = 1000.0f;
+                values[Motion::feedback] = feedback;
+                values[Motion::mix] = mix;
+
+                for (const auto hertz : { 500.0, 750.0, 1000.0, 1250.0 })
+                {
+                    CAPTURE (hertz);
+                    juce::AudioBuffer<float> sine (2, length);
+
+                    for (int i = 0; i < length; ++i)
+                        for (int channel = 0; channel < 2; ++channel)
+                            sine.setSample (channel, i,
+                                            0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * i / usualRate));
+
+                    const auto out = playStereo (Motion::info, std::make_unique<Motion>(), values, sine, 480, false);
+                    const auto heard = phazite::test::inDecibels (levelOf (out) / 0.25);
+                    const auto drawn = phazite::test::inDecibels (
+                        mode == Motion::Mode::flanger
+                            ? Motion::getFlangerMagnitude (values, 2.0, hertz, usualRate)
+                            : Motion::getPhaserMagnitude (
+                                  values, devices::Phaser::getSweptCentre (Motion::getPhaserValues (values), 0.0f, usualRate), hertz,
+                                  usualRate));
+                    CAPTURE (heard);
+                    CAPTURE (drawn);
+
+                    // A notch heard whole is at the floor of both: deep enough is the same.
+                    if (drawn > -40.0)
+                        CHECK (std::abs (heard - drawn) < 0.3);
+                    else
+                        CHECK (heard < -30.0);
+                }
+            }
+        }
+    }
+
+    // The flanger's teeth, a line at each notch, as deep as the notches are heard: whole at 50 %, half at 25 and 75 %, none at
+    // 100 %, where a tone on a notch comes through at its level.
+    Song song;
+    phazite::ui::MotionEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    clickMode (editor, Motion::Mode::flanger);
+
+    for (const auto& [mix, teeth] : { std::pair (0.5f, 1.0f), std::pair (0.75f, 0.5f), std::pair (1.0f, 0.0f), std::pair (0.25f, 0.5f) })
+    {
+        CAPTURE (mix);
+        song.set ("mix", mix);
+        tick();
+        CHECK (editor.getShownTeeth() == doctest::Approx (teeth));
+    }
+
+    auto values = getMotionDefaults (Motion::Mode::flanger);
+    values[Motion::depth] = 0.0f;
+    values[Motion::delay] = 2.0f;
+    values[Motion::mix] = 1.0f;
+    CHECK (std::abs (phazite::test::inDecibels (Motion::getFlangerMagnitude (values, 2.0, 750.0, usualRate))) < 0.1);
+}
+
 TEST_CASE ("Motion: the tail it reports is the tail of the mode that plays")
 {
     Motion motion;

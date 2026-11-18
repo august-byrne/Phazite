@@ -142,6 +142,15 @@ private:
         }
     }
 
+    // Shown again: the sound now and how far it reaches now, not what played while nobody looked.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        reach = 0.0f;
+    }
+
     void tick() override
     {
         if (auto* scope = device.getScope())
@@ -437,7 +446,7 @@ public:
         g.fillRect (area.withX (lowX).withRight (std::max (lowX + 1.0f, highX)));
 
         // What comes in, faint; what goes out, in its colour.
-        const graph::LevelAxis levels { area, -90.0f, 6.0f };
+        const auto levels = graph::SpectrumTrace::getLevels (area);
         input.paint (g, axis, levels, p.textMuted.withAlpha (GraphTint::spectrumFill), p.textMuted.withAlpha (GraphTint::spectrumLine));
         output.paint (g, axis, levels, tint.withAlpha (GraphTint::spectrumFill), tint.withAlpha (GraphTint::spectrumLine));
 
@@ -574,6 +583,16 @@ private:
             hovered = edge;
             repaint();
         }
+    }
+
+    // Shown again: the spectra of the sound now, not of what played while nobody looked.
+    void shownAgain() override
+    {
+        if (auto* scope = device.getScope())
+            scope->drain();
+
+        input.clear();
+        output.clear();
     }
 
     void tick() override
