@@ -44,7 +44,11 @@ The full text of every step, as it was written when it was built, is in the
   and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the
   band is kept out. The Exciter goes, its eight presets converted to the Band and measured against it. Every
   Quality takes one latency, 7 samples, so that automation moves the Quality anywhere; a new shape is heard whole in
-  35 ms without a thump under it, and Colour leaving 0 no longer swings the lows. Left of S6.6: the Filter.
+  35 ms without a thump under it, and Colour leaving 0 no longer swings the lows.
+- **S6.7 The Synth's modulation glides:** pitch, levels, table position, the warps, volume and pan go in straight
+  lines across each 16-sample control step instead of stepping, so a fast LFO no longer buzzes under the note (the
+  buzz of a 25 Hz LFO on Volume falls from 47 to 87 dB under the note); a note with nothing moving plays bit for bit
+  as before. The cutoff, the resonance and the sub's pitch still step.
 - **S6.7 One synth, part A:** the Wavetable gains what only the Synth had, so that the two can become one: each
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias

@@ -19,7 +19,9 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -2797,4 +2799,278 @@ TEST_CASE ("The synth's Drift source wanders at the same pace at 96 kHz as at 48
     }
 
     CHECK (moved); // it wanders at all
+}
+
+namespace
+{
+// A preset that comes with Phazite (resources/presets/Synth): each parameter it names, a choice by its name, the others at
+// their defaults.
+std::vector<float> readSynthPreset (const char* path)
+{
+    auto values = getDefaults();
+    const auto file = phazite::test::getFactoryPresetsFolder().getChildFile ("Synth").getChildFile (path);
+    const auto json = juce::JSON::parse (file);
+    const auto* set = json["device"]["parameters"].getDynamicObject();
+    REQUIRE (set != nullptr);
+
+    for (const auto& property : set->getProperties())
+    {
+        const auto id = property.name.toString().toStdString();
+
+        for (size_t index = 0; index < Synth::info.parameters.size(); ++index)
+        {
+            const auto& parameter = Synth::info.parameters[index];
+
+            if (parameter.id != id)
+                continue;
+
+            if (property.value.isString())
+            {
+                const auto name = property.value.toString().toStdString();
+
+                for (size_t choice = 0; choice < parameter.choices.size(); ++choice)
+                    if (parameter.choices[choice] == name)
+                        values[index] = (float) choice;
+            }
+            else
+            {
+                values[index] = (float) (double) property.value;
+            }
+        }
+    }
+
+    return values;
+}
+
+// The samples' bits, both sides, as one number (FNV-1a).
+std::uint64_t hashOf (const Played& played)
+{
+    auto hash = (std::uint64_t) 14695981039346656037ull;
+
+    for (const auto* side : { &played.left, &played.right })
+    {
+        for (const auto sample : *side)
+        {
+            hash ^= (std::uint64_t) std::bit_cast<std::uint32_t> (sample);
+            hash *= (std::uint64_t) 1099511628211ull;
+        }
+    }
+
+    return hash;
+}
+
+// What the synth works out once a control step, moved by a 25 Hz LFO at full amount (the zipper's measure).
+enum class Moved
+{
+    volume,
+    pan,
+    pitch,
+    level,
+    position,
+    warp,
+    warpWithin // the warp's amount at half: from 0 to 100 %, never cut off at the end of its range
+};
+
+// A sine's note at 1 kHz (B5 tuned up by its Fine) at 44.1 kHz, with LFO 1 (a sine at 25 Hz) moving one thing at full
+// amount, or nothing: what the left side plays from a quarter of a second on, 2^17 samples.
+std::vector<float> playZipperNote (Moved moved, bool moving)
+{
+    constexpr double rate = 44100.0;
+    auto values = getPlainValues (0.0f);
+    values[Synth::osc1Fine] = (float) (1200.0 * std::log2 (1000.0 / noteFrequency (83)));
+    values[Synth::lfo1Shape] = 0.0f; // a sine
+    values[Synth::lfo1Rate] = 25.0f;
+    values[Synth::lfo1Sync] = 0.0f;
+    values[Synth::mod1Source] = moving ? (float) Synth::ModSource::lfo1 : 0.0f;
+    values[Synth::mod1Amount] = 1.0f;
+    Synth synth;
+    synth.prepare (rate, testBlockSize);
+
+    const auto target = [&]
+    {
+        switch (moved)
+        {
+            case Moved::volume:
+                return Synth::ModTarget::volume;
+            case Moved::pan:
+                return Synth::ModTarget::pan;
+            case Moved::pitch:
+                return Synth::ModTarget::pitch;
+            case Moved::level:
+                values[Synth::osc1Level] = 0.5f;
+                return Synth::ModTarget::osc1Level;
+            case Moved::position:
+            {
+                // Four frames, each the sine a quarter of a cycle on from the last: morphing between them moves only the
+                // fundamental, so that the note has no other harmonics.
+                std::vector<Wavetable::Harmonics> frames;
+
+                for (int quarter = 0; quarter < 4; ++quarter)
+                    frames.push_back ({ std::polar (1.0f, 1.5707963f * (float) quarter) });
+
+                synth.setTable (0, Wavetable::fromHarmonics ("Quarters", frames));
+                values[Synth::osc1Position] = 0.5f;
+                return Synth::ModTarget::osc1Position;
+            }
+            case Moved::warp:
+            case Moved::warpWithin:
+                values[Synth::osc1Warp] = (float) Synth::Warp::sync;
+                values[Synth::osc1WarpAmount] = 0.5f;
+                values[Synth::mod1Amount] = moved == Moved::warp ? 1.0f : 0.5f;
+                return Synth::ModTarget::osc1Warp;
+        }
+
+        return Synth::ModTarget::none;
+    }();
+
+    values[Synth::mod1Target] = (float) target;
+    const auto skip = (int) (0.25 * rate), length = 1 << 17;
+    const auto played = play (synth, values, skip + length, { noteOn (0, 83) });
+    return { played.left.begin() + skip, played.left.end() };
+}
+
+// The amplitudes of a sound's spectrum, through a 7-term Blackman-Harris window (its sidelobes far under anything measured
+// here), and the hertz between its bins.
+std::vector<double> getAmplitudes (const std::vector<float>& sound, double rate, double& binHertz)
+{
+    const auto order = juce::roundToInt (std::log2 ((double) sound.size()));
+    const auto size = (size_t) 1 << order;
+    constexpr double a[] = { 0.27105140069342, 0.43329793923448, 0.21812299954311, 0.06592544638803,
+                             0.01081174209837, 0.00077658482522, 0.00001388721735 };
+    std::vector<float> data (2 * size, 0.0f);
+    auto weights = 0.0;
+
+    for (size_t n = 0; n < size; ++n)
+    {
+        auto weight = 0.0;
+
+        for (size_t k = 0; k < std::size (a); ++k)
+            weight += (k % 2 == 0 ? 1.0 : -1.0) * a[k] * std::cos (twoPi * (double) k * (double) n / (double) size);
+
+        data[n] = (float) (weight * sound[n]);
+        weights += weight;
+    }
+
+    juce::dsp::FFT fft (order);
+    fft.performFrequencyOnlyForwardTransform (data.data());
+    std::vector<double> amplitudes (size / 2);
+
+    for (size_t bin = 0; bin < amplitudes.size(); ++bin)
+        amplitudes[bin] = 2.0 * (double) data[bin] / weights;
+
+    binHertz = rate / (double) size;
+    return amplitudes;
+}
+
+// The zipper: the loudest component from 50 Hz to 15 kHz that is off the grid of 25 Hz the note's harmonics and the LFO's
+// sidebands about them fall on (aliases folded back from 44.1 kHz included), in dB under the note as it plays unmoved. The
+// grid is the note's harmonics, at 1 kHz, but for the pitch moved, whose sidebands are about the mean of the frequencies it
+// moves through: so it is laid through the loudest component. The control steps' images fall between: at 44.1 kHz a step is
+// 2756.25 Hz, 110.25 times 25 Hz, so each of its first three multiples lands a quarter, a half or three quarters of the way
+// between two lines of the grid (the fourth, 11,025 Hz, falls on it, and the fifth a quarter off again).
+double measureZipper (Moved moved)
+{
+    constexpr double rate = 44100.0;
+    auto binHertz = 0.0;
+    const auto still = getAmplitudes (playZipperNote (moved, false), rate, binHertz);
+    const auto noteBin = (size_t) std::lround (1000.0 / binHertz);
+    const auto note = *std::max_element (still.begin() + (long) noteBin - 10, still.begin() + (long) noteBin + 10);
+    const auto amplitudes = getAmplitudes (playZipperNote (moved, true), rate, binHertz);
+
+    // Where the loudest component is, between its bins (a parabola through the decibels of the three about it).
+    const auto first = (size_t) (50.0 / binHertz), last = (size_t) (15000.0 / binHertz);
+    const auto peak =
+        (size_t) std::distance (amplitudes.begin(), std::max_element (amplitudes.begin() + (long) first, amplitudes.begin() + (long) last));
+    const auto a = std::log (amplitudes[peak - 1]), b = std::log (amplitudes[peak]), c = std::log (amplitudes[peak + 1]);
+    const auto peakHertz = ((double) peak + 0.5 * (a - c) / (a - 2.0 * b + c)) * binHertz;
+    const auto offGrid = [peakHertz] (double hertz)
+    {
+        const auto from = hertz - peakHertz;
+        return std::abs (from - 25.0 * std::round (from / 25.0)) > 2.6;
+    };
+
+    auto loudest = 0.0;
+
+    for (auto bin = first; bin <= last; ++bin)
+        if (offGrid ((double) bin * binHertz))
+            loudest = std::max (loudest, amplitudes[bin]);
+
+    return 20.0 * std::log10 (std::max (loudest, 1.0e-12) / note);
+}
+} // namespace
+
+TEST_CASE ("A synth note with nothing moving plays bit for bit what it played before its modulation glided")
+{
+    // Three presets that move nothing a control step glides (only their cutoffs move, which glided before), the defaults,
+    // and a warped patch held still, each played as a chord held for half a second and let go: the same samples as the synth
+    // played before what its modulation moves went in straight lines across each control step, as hashes of them taken
+    // then. A line from a value to itself adds nothing, bit for bit. Taken with MSVC: another compiler's maths library
+    // rounds its sines and powers its own way, so the hashes are this one's.
+    auto warped = getDefaults();
+    warped[Synth::osc1Warp] = (float) Synth::Warp::sync;
+    warped[Synth::osc1WarpAmount] = 0.4f;
+    warped[Synth::osc2On] = 1.0f;
+    warped[Synth::osc2Warp] = (float) Synth::Warp::bendUp;
+    warped[Synth::osc2WarpAmount] = 0.3f;
+    warped[Synth::unisonVoices] = 2.0f; // three
+    warped[Synth::subLevel] = 0.4f;
+    warped[Synth::noiseLevel] = 0.1f;
+
+    struct Patch
+    {
+        const char* name;
+        std::vector<float> values;
+        std::uint64_t hash; // of what it played before
+    };
+
+    const Patch patches[] = {
+        { "defaults", getDefaults(), 9658609827680199565ull },
+        { "Clean Sub", readSynthPreset ("Bass/Clean Sub.phazitepreset"), 9052229557940170989ull },
+        { "Hypersaw Lead", readSynthPreset ("Lead/Hypersaw Lead.phazitepreset"), 1978083405265364756ull },
+        { "Chord Stab", readSynthPreset ("Pluck/Chord Stab.phazitepreset"), 8649451123199612834ull },
+        { "warped", warped, 18421471570658054444ull },
+    };
+
+    for (const auto& [name, values, hash] : patches)
+    {
+        // In mono mode one note: the next would move its pitch, legato.
+        const auto mono = values[Synth::voiceMode] > 0.5f;
+        const auto played = play (*makeSynth(), values, 48000,
+                                  mono ? std::vector { noteOn (0, 48, 0.8f), noteOff (24000, 48) }
+                                       : std::vector { noteOn (0, 48, 0.8f), noteOn (0, 55, 0.8f), noteOn (100, 60, 0.8f),
+                                                       noteOff (24000, 48), noteOff (24000, 55), noteOff (24000, 60) });
+        INFO (std::string (name) << ": " << hashOf (played));
+        CHECK (peakOf (played.left, 0, played.left.size()) > 0.01f);
+#if JUCE_MSVC
+        CHECK (hashOf (played) == hash);
+#else
+        juce::ignoreUnused (hash);
+#endif
+    }
+}
+
+TEST_CASE ("What the synth's modulation moves glides across each control step: no zipper under the note")
+{
+    // A sine's note at 1 kHz with a 25 Hz LFO at full amount on each in turn: what the control steps left under it as they
+    // stepped was 47 to 12 dB under the note (Volume -46.7, Pan -49.5, Pitch -63.4, Level -45.0, Position -39.4, Sync's amount
+    // -11.6). Gliding, it is the line's own error, the LFO between two steps being a curve, and where the LFO is cut off at
+    // the end of its range (Level, Position, Warp), the corner a step's line cuts. Sync is the most sensitive to it: its
+    // place in the wave is the note's phase times its ratio, which a line between steps misses by a little at every curve of
+    // the ratio, even with the LFO at half, within the amount's range. Each held to what it measures less 6 dB.
+    struct Expected
+    {
+        Moved moved;
+        const char* name;
+        double measured; // dB under the note
+    };
+
+    for (const auto& [moved, name, measured] :
+         { Expected { Moved::volume, "Volume", -87.4 }, Expected { Moved::pan, "Pan", -90.2 }, Expected { Moved::pitch, "Pitch", -94.6 },
+           Expected { Moved::level, "Level", -77.2 }, Expected { Moved::position, "Position", -65.3 },
+           Expected { Moved::warp, "Sync's amount", -30.9 }, Expected { Moved::warpWithin, "Sync's amount, within its range", -40.3 } })
+    {
+        const auto zipper = measureZipper (moved);
+        MESSAGE (std::string (name) << ": " << zipper << " dB under the note");
+        CHECK (zipper < measured + 6.0);
+    }
 }

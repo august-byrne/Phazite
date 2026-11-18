@@ -33,6 +33,7 @@
 #include "devices/dsp/Random.h"
 #include "devices/wavetable/Wavetable.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -339,14 +340,56 @@ private:
     static constexpr int maxHeld = 16;          // keys mono mode remembers, to go back to
     static constexpr int numFading = maxVoices; // places to fade out voices taken for other notes: a chord's worth at once
 
-    // An oscillator's unison voice: where it is in its cycle, and what it reads this control step.
+    // A value that a control step works out, going there in a straight line, sample by sample, from where it was, over the
+    // step (and after a step of one sample, over the next one too), so that what a fast LFO or a short envelope moves glides
+    // rather than stepping 3,000 times a second. Its value k samples into the line is from + step * k, and `to` from its end
+    // on: a line from a value to itself adds nothing, bit for bit, and however blocks and events cut the step into stretches,
+    // it goes the same way. A line that starts with a note jumps to its first value.
+    struct Line
+    {
+        float from = 0.0f, to = 0.0f, step = 0.0f;
+        int done = 0, length = 0; // samples of the line played, of its length
+
+        // Its value `ahead` samples on from the last one played (1: the next sample's).
+        float at (int ahead) const noexcept
+        {
+            const auto k = done + ahead;
+            return k >= length ? to : from + step * (float) k;
+        }
+
+        float now() const noexcept { return at (0); }
+        bool isMoving() const noexcept { return done < length; }
+        void advance (int samples) noexcept { done = std::min (length, done + samples); }
+
+        void jump (float value) noexcept
+        {
+            from = to = value;
+            step = 0.0f;
+            done = length = 0;
+        }
+
+        void glide (float value, int samples) noexcept
+        {
+            from = now();
+            to = value;
+            step = (value - from) / (float) samples;
+            done = 0;
+            length = samples;
+        }
+    };
+
+    // An oscillator's unison voice: where it is in its cycle, and what it reads, each gliding to what the control step worked out.
     struct Reader
     {
-        float phase = 0.0f, increment = 0.0f;
+        float phase = 0.0f;
+        Line increment;                  // of its phase each sample
         float last = 0.0f;               // its wave's last sample, for the other oscillator's FM
-        Wavetable::Level from {}, to {}; // the frames each side of its position, at the level its pitch allows
+        Line frame;                      // where it reads its table: a frame, and how far toward the next
+        int firstFrame = -1;             // the frame pair it reads (place()); -1 to look it up again
+        int mipLevel = 0;                // the level its pitch allows, chosen once a control step
+        Wavetable::Level from {}, to {}; // the frames each side of its place, at that level
         float morph = 0.0f;              // from `from` toward `to`
-        float offset = 0.0f;             // what its warp leaves off centre this control step, which it takes away
+        Line offset;                     // what its warp leaves off centre, which it takes away
         float left = 1.0f, right = 1.0f;
     };
 
@@ -363,8 +406,12 @@ private:
     {
         bool on = false;
         Warp warp = Warp::none;
-        float warpAmount = 0.0f, level = 0.0f, position = 0.0f;
-        float syncRatio = 1.0f, bend = 1.0f, pulseWidth = 1.0f; // what its warp reads by, this control step
+        const Wavetable* table = nullptr; // what it reads this control step
+        float warpAmount = 0.0f, position = 0.0f;
+        float syncRatio = 1.0f, bend = 1.0f, pulseWidth = 1.0f; // what its warp reads by, as this control step worked it out
+        Line level;
+        Line shape; // what its warp's inner loop reads by: sync's ratio, bend's, the pulse width, or the mirror's, FM's or ring
+                    // modulation's amount
         std::array<Reader, maxUnison> readers {};
         std::array<Wander, maxUnison> wanders {};
     };
@@ -399,9 +446,10 @@ private:
         int controlAhead = 0;                            // how far its control-rate parts are ahead of the samples it played (movesOn())
         float envelope2Now = 0.0f, envelope3Now = 0.0f;  // their values as they last moved
         std::array<float, 2> lfosNow {};
-        float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
-        int age = 0;                        // the samples since its note began (up to a limit)
-        float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
+        float fade = 1.0f, fadeStep = 0.0f;           // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                                  // the samples since its note began (up to a limit)
+        Line subGain, noiseGain, gainLeft, gainRight; // gliding to what each control step works out
+        float driveGain = 1.0f;
         float cutoffNow = 0.0f; // its filter's frequency, as it was last set
     };
 
@@ -487,5 +535,9 @@ private:
     void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
     void freeRetired();
     static void renderStep (const OscillatorRun&, Reader&, float* out, int length) noexcept;
+
+    // A reader's frame pair and how far toward the second, for a place in its table: looked up again only where the place
+    // crosses into another frame, or its firstFrame was set to -1.
+    static void place (const Wavetable&, Reader&, float frame) noexcept;
 };
 } // namespace phazite::devices

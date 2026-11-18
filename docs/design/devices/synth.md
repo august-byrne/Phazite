@@ -229,6 +229,33 @@ the LFOs and both drifts move on only when that keeps them nearer the samples pl
 a comb's delay set at a step of one sample glides over the next step rather than jumping. The oscillators, the filter
 and Envelope 1 run at every sample.
 
+**Glides between steps.** What a step works out for the oscillators and the voice's gains goes there in a straight line,
+sample by sample, from where it was, over the step (after a step of one sample, over the next one too): each unison
+copy's increment (the pitch: vibrato, glide, bend, drift), each oscillator's level and the sub's and the noise's, what
+each oscillator's warp reads by (sync's ratio, bend's, the pulse width, the mirror's, FM's and ring modulation's amount)
+and what its warp leaves off centre, each oscillator's position as one number (a frame and how far toward the next: the
+frame pair is looked up again only where the line crosses into another frame), and the voice's volume and pan. A line's
+value k samples in is worked out from its start, not added up, so it doesn't depend on how blocks and events cut the
+step; a line from a value to itself adds nothing, so a note with nothing moving plays bit for bit as it did when these
+stepped. A note's first step, a unison copy or an oscillator that comes in and a warp chosen anew start at their values.
+The table's level (its band limit) is chosen once a step. A sine's note at 1 kHz at 44.1 kHz with a 25 Hz LFO at full
+amount leaves under it (`tests/SynthTests.cpp`, the loudest component off the note's and the LFO's grid, under the note):
+
+| The LFO on | Stepping | Gliding |
+|---|---|---|
+| Volume | -46.7 dB | -87.4 dB |
+| Pan | -49.5 dB | -90.2 dB |
+| Pitch | -63.4 dB | -94.6 dB |
+| Osc 1 Level | -45.0 dB | -77.2 dB |
+| Osc 1 Position (four frames) | -39.4 dB | -65.3 dB |
+| Osc 1 Warp Amount (Sync) | -11.6 dB | -30.9 dB |
+| Osc 1 Warp Amount (Sync), the LFO at half, within the range | | -40.3 dB |
+
+What is left is the line's own error (the LFO is a curve between two steps) and the corners where the LFO is cut off at
+the end of a range (Level, Position and the warp's amount reach theirs). Sync is the most sensitive to it: its place in
+the wave is the note's phase times its ratio, which a line between two steps misses a little wherever the ratio curves.
+Less would take a shorter step, or a curve through three steps, a step later.
+
 **Notes.** In Poly every note takes a voice of its own. A key played again while its last note rings out leaves that
 tail ringing and starts a new voice; played again while its key or the sustain pedal still holds a voice, that voice
 lets go first, so a key never holds two. With all 16 voices busy, a new note takes the voice that has been ringing out
@@ -296,8 +323,10 @@ over Voice; Unison and Modulation.
   Bend, Pulse Width, Mirror and FM only read a copy with fewer harmonics, so warped sounds alias on high notes.
 - A frame's copies keep 16 samples for each cycle of their highest harmonic (up to 8192 a copy), 2.6 times the memory
   four took: a sound file of 256 frames takes 54 MB, and about 2.7 times as long to make, on the message thread.
-- Position, pitch, levels and cutoff move in steps of 16 samples without interpolation, and Envelopes 2 and 3 and the
-  LFOs run at that rate: a fast sweep of a table or a resonant filter can be heard stepping.
+- The cutoff and the resonance move in steps of 16 samples (only a comb's delay glides), the sub's pitch too, and
+  Envelopes 2 and 3 and the LFOs run at that rate: a fast sweep of a resonant filter can be heard stepping. What the
+  oscillators and the voice's gains read glides in straight lines between the steps, which leaves a little of a fast
+  LFO's curve and corners (Glides between steps).
 - The filter is linear: it never self-oscillates, there is no ladder or diode model, and Filter Drive, before the
   filter, gives back the gain it adds, so a loud voice driven hard comes out quieter.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).

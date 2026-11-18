@@ -303,55 +303,99 @@ namespace
     }
 } // namespace
 
+void Synth::place (const Wavetable& table, Reader& reader, float frame) noexcept
+{
+    const auto lastFrame = table.getNumFrames() - 1;
+    const auto firstFrame = std::min ((int) frame, lastFrame);
+
+    if (firstFrame != reader.firstFrame)
+    {
+        reader.firstFrame = firstFrame;
+        reader.from = table.getLevel (firstFrame, reader.mipLevel);
+        reader.to = table.getLevel (std::min (firstFrame + 1, lastFrame), reader.mipLevel);
+    }
+
+    reader.morph = frame - (float) firstFrame;
+}
+
 // One oscillator's unison voice over a stretch, its warp chosen once rather than at each sample, as render() plays it sample
-// by sample. Not for FM, which reads the other oscillator's last sample.
+// by sample. Not for FM, which reads the other oscillator's last sample. Its increment, its place in the table, what its warp
+// reads by and what it leaves off centre each where their lines have got to at each sample.
 void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, int length) noexcept
 {
-    const auto& from = reader.from;
-    const auto& to = reader.to;
-    const auto morph = reader.morph, dt = reader.increment, amount = run.warpAmount;
+    const auto& table = *run.table;
+    const auto& shape = run.shape;
+    const auto frameMoves = reader.frame.isMoving();
     auto t = reader.phase;
-    const auto advance = [&t, dt] { t = t + dt < 1.0f ? t + dt : t + dt - 1.0f; };
+
+    if (! frameMoves)
+        place (table, reader, reader.frame.now());
+
+    // The next sample's increment, and its frame pair where the position's line has got to.
+    const auto next = [&] (int i) noexcept
+    {
+        if (frameMoves)
+            place (table, reader, reader.frame.at (i + 1));
+
+        return reader.increment.at (i + 1);
+    };
+
+    const auto advance = [&t] (float dt) noexcept { t = t + dt < 1.0f ? t + dt : t + dt - 1.0f; };
 
     switch (run.warp)
     {
         case Warp::sync:
-        {
-            // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
-            const auto jump = readAt (from, to, morph, 0.0f) - readAt (from, to, morph, wrap (run.syncRatio));
-
-            for (int i = 0; i < length; ++i, advance())
+            for (int i = 0; i < length; ++i)
             {
-                out[i] = readAt (from, to, morph, wrap (t * run.syncRatio));
+                const auto dt = next (i), ratio = shape.at (i + 1);
+                out[i] = readAt (reader.from, reader.to, reader.morph, wrap (t * ratio));
 
+                // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
                 if (t < dt || t > 1.0f - dt)
+                {
+                    const auto jump =
+                        readAt (reader.from, reader.to, reader.morph, 0.0f) - readAt (reader.from, reader.to, reader.morph, wrap (ratio));
                     out[i] += 0.5f * jump * dsp::polyBlep (t, dt);
+                }
+
+                advance (dt);
             }
 
             break;
-        }
 
         case Warp::bendUp:
         case Warp::bendDown:
-            for (int i = 0; i < length; ++i, advance())
-                out[i] = readAt (from, to, morph, wrap (t * run.bend / (1.0f + (run.bend - 1.0f) * t)));
+            for (int i = 0; i < length; ++i)
+            {
+                const auto dt = next (i), bent = shape.at (i + 1);
+                out[i] = readAt (reader.from, reader.to, reader.morph, wrap (t * bent / (1.0f + (bent - 1.0f) * t)));
+                advance (dt);
+            }
 
             break;
 
         case Warp::pulseWidth:
-            for (int i = 0; i < length; ++i, advance())
-                out[i] = readAt (from, to, morph, t < run.pulseWidth ? wrap (t / run.pulseWidth) : 0.0f);
+            for (int i = 0; i < length; ++i)
+            {
+                const auto dt = next (i), width = shape.at (i + 1);
+                out[i] = readAt (reader.from, reader.to, reader.morph, t < width ? wrap (t / width) : 0.0f);
+                advance (dt);
+            }
 
             break;
 
         case Warp::mirror:
-            for (int i = 0; i < length; ++i, advance())
+            for (int i = 0; i < length; ++i)
             {
                 // Read forward to the middle, then back: heard as much as the amount says.
-                out[i] = readAt (from, to, morph, t);
+                const auto dt = next (i), amount = shape.at (i + 1);
+                out[i] = readAt (reader.from, reader.to, reader.morph, t);
 
                 if (amount > 0.0f)
-                    out[i] += amount * (readAt (from, to, morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - out[i]);
+                    out[i] +=
+                        amount * (readAt (reader.from, reader.to, reader.morph, wrap (t < 0.5f ? 2.0f * t : 2.0f - 2.0f * t)) - out[i]);
+
+                advance (dt);
             }
 
             break;
@@ -359,18 +403,32 @@ void Synth::renderStep (const OscillatorRun& run, Reader& reader, float* out, in
         case Warp::fm: // render() plays it sample by sample
         case Warp::none:
         case Warp::ringMod:
-            for (int i = 0; i < length; ++i, advance())
-                out[i] = readAt (from, to, morph, t);
+            for (int i = 0; i < length; ++i)
+            {
+                const auto dt = next (i);
+                out[i] = readAt (reader.from, reader.to, reader.morph, t);
+                advance (dt);
+            }
 
             break;
     }
 
     // Without what its warp leaves off centre.
-    if (! juce::exactlyEqual (reader.offset, 0.0f))
+    if (reader.offset.isMoving())
+    {
         for (int i = 0; i < length; ++i)
-            out[i] -= reader.offset;
+            out[i] -= reader.offset.at (i + 1);
+    }
+    else if (const auto offset = reader.offset.now(); ! juce::exactlyEqual (offset, 0.0f))
+    {
+        for (int i = 0; i < length; ++i)
+            out[i] -= offset;
+    }
 
     reader.phase = t;
+    reader.increment.advance (length);
+    reader.frame.advance (length);
+    reader.offset.advance (length);
 }
 
 const DeviceInfo Synth::info { .typeID = typeID, .name = "Synth", .kind = DeviceKind::instrument, .parameters = parameters };
@@ -1133,6 +1191,20 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 // Its own control-rate parts (Envelopes 2 and 3, its LFOs, its drift) move a step at each step and as it
                 // starts, kept up with the samples it plays where a step runs short (movesOn()).
                 const auto movesOnNow = movesOn (voice.controlAhead, voice.stepPending);
+
+                // What the step works out goes there in a straight line over the step (Line); a note's first step starts at
+                // its values, as do unison voices and oscillators that come in and a warp chosen anew.
+                const auto starts = voice.stepPending;
+                const auto previousUnison = voice.unison;
+                const auto glideLength = untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep;
+                const auto setLine = [glideLength] (Line& line, float value, bool atOnce)
+                {
+                    if (atOnce)
+                        line.jump (value);
+                    else
+                        line.glide (value, glideLength);
+                };
+
                 voice.stepPending = false;
                 voice.unison = settings.unison;
 
@@ -1239,6 +1311,9 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 {
                     auto& run = voice.oscillators[(size_t) osc];
                     const auto* table = stepTables[(size_t) osc];
+                    const auto wasOn = run.on && ! starts;
+                    const auto wasWarp = run.warp;
+                    const auto* wasTable = run.table;
                     run.on = settings.on[(size_t) osc] && table != nullptr;
 
                     if (! run.on)
@@ -1246,15 +1321,44 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
                     const auto targetOf = [osc] (ModTarget forFirst) { return (ModTarget) ((int) forFirst + osc * 4); };
                     run.warp = settings.warp[(size_t) osc];
+                    run.table = table;
                     run.position =
                         std::clamp (settings.position[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Position)), 0.0f, 1.0f);
                     // Sync's modulation reaches past the knob's end, to 16 times (maxSyncAmount).
                     run.warpAmount = std::clamp (settings.warpAmount[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Warp)), 0.0f,
                                                  run.warp == Warp::sync ? maxSyncAmount : 1.0f);
-                    run.level = std::clamp (settings.level[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Level)), 0.0f, 1.0f);
                     run.syncRatio = std::exp2 (3.0f * run.warpAmount);
                     run.bend = run.warp == Warp::bendUp ? 1.0f + 7.0f * run.warpAmount : 1.0f / (1.0f + 7.0f * run.warpAmount);
                     run.pulseWidth = 1.0f - 0.95f * run.warpAmount;
+
+                    // Its level and what its warp reads by glide; a warp chosen anew starts at its value.
+                    setLine (run.level,
+                             std::clamp (settings.level[(size_t) osc] + moveOf (moves, targetOf (ModTarget::osc1Level)), 0.0f, 1.0f),
+                             ! wasOn);
+
+                    const auto shape = [&run]
+                    {
+                        switch (run.warp)
+                        {
+                            case Warp::sync:
+                                return run.syncRatio;
+                            case Warp::bendUp:
+                            case Warp::bendDown:
+                                return run.bend;
+                            case Warp::pulseWidth:
+                                return run.pulseWidth;
+                            case Warp::mirror:
+                            case Warp::fm:
+                            case Warp::ringMod:
+                                return run.warpAmount;
+                            case Warp::none:
+                                break;
+                        }
+
+                        return 0.0f;
+                    }();
+
+                    setLine (run.shape, shape, ! wasOn || wasWarp != run.warp);
 
                     const auto semitones =
                         (double) (basePitch + settings.pitch[(size_t) osc] + pitchRange * moveOf (moves, targetOf (ModTarget::osc1Pitch)));
@@ -1278,7 +1382,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         }
 
                         const auto increment = std::min (0.49, oscillatorIncrement * ratio);
-                        run.readers[(size_t) u].increment = (float) increment;
+                        setLine (run.readers[(size_t) u].increment, (float) increment, ! wasOn || u >= previousUnison);
                         auto& ofStep = fastest[(size_t) u % stackLength];
                         ofStep = std::max (ofStep, increment);
                     }
@@ -1294,55 +1398,65 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     for (int u = 0; u < settings.unison; ++u)
                     {
                         auto& reader = run.readers[(size_t) u];
+                        const auto fresh = ! wasOn || u >= previousUnison;
                         const auto spread = settings.places[(size_t) u] * settings.positionSpread * 0.5f;
                         const auto frame = std::clamp (run.position + spread, 0.0f, 1.0f) * (float) lastFrame;
                         const auto firstFrame = std::min ((int) frame, lastFrame);
                         const auto mipLevel = mipLevels[(size_t) u % stackLength];
                         const auto nextFrame = std::min (firstFrame + 1, lastFrame);
-                        reader.from = table->getLevel (firstFrame, mipLevel);
-                        reader.to = table->getLevel (nextFrame, mipLevel);
-                        reader.morph = frame - (float) firstFrame;
+                        const auto morph = frame - (float) firstFrame;
+
+                        // Its place glides as one number, frame and morph, its frame pair looked up again where it crosses
+                        // into another (place()), at the level chosen once a step; on another table, it starts there.
+                        setLine (reader.frame, frame, fresh || table != wasTable);
+                        reader.mipLevel = mipLevel;
+                        reader.firstFrame = -1;
                         reader.left = settings.lefts[(size_t) u];
                         reader.right = settings.rights[(size_t) u];
 
                         // What its warp leaves off centre, which it takes away: every frame is centred over its whole cycle,
                         // but sync reads a part of its last cycle, bend reads the cycle unevenly, and pulse width holds the
-                        // wave's start for the rest of the cycle (Wavetable::getArea(), getBentMean()).
-                        const auto morphed = [&] (auto&& of)
-                        { return (1.0f - reader.morph) * of (firstFrame) + reader.morph * of (nextFrame); };
+                        // wave's start for the rest of the cycle (Wavetable::getArea(), getBentMean()). Worked out where the
+                        // step takes its place, and glided to.
+                        const auto morphed = [&] (auto&& of) { return (1.0f - morph) * of (firstFrame) + morph * of (nextFrame); };
+                        auto offset = 0.0f;
 
                         switch (run.warp)
                         {
                             case Warp::sync:
                             {
                                 const auto cut = run.syncRatio - std::floor (run.syncRatio);
-                                reader.offset = morphed ([&] (int each) { return table->getArea (each, mipLevel, cut); }) / run.syncRatio;
+                                offset = morphed ([&] (int each) { return table->getArea (each, mipLevel, cut); }) / run.syncRatio;
                                 break;
                             }
 
                             case Warp::bendUp:
                             case Warp::bendDown:
-                                reader.offset = morphed ([&] (int each) { return table->getBentMean (each, mipLevel, bendPlace); });
+                                offset = morphed ([&] (int each) { return table->getBentMean (each, mipLevel, bendPlace); });
                                 break;
 
                             case Warp::pulseWidth:
-                                reader.offset = (1.0f - run.pulseWidth) * readAt (reader.from, reader.to, reader.morph, 0.0f);
+                                offset =
+                                    (1.0f - run.pulseWidth)
+                                    * readAt (table->getLevel (firstFrame, mipLevel), table->getLevel (nextFrame, mipLevel), morph, 0.0f);
                                 break;
 
                             case Warp::none:
                             case Warp::mirror:
                             case Warp::fm:
                             case Warp::ringMod:
-                                reader.offset = 0.0f;
                                 break;
                         }
+
+                        setLine (reader.offset, offset, fresh);
                     }
                 }
 
-                voice.subGain = std::clamp (settings.subLevel + moveOf (moves, ModTarget::subLevel), 0.0f, 1.0f);
-                voice.noiseGain = std::clamp (settings.noiseLevel + moveOf (moves, ModTarget::noiseLevel), 0.0f, 1.0f);
+                const auto subGain = std::clamp (settings.subLevel + moveOf (moves, ModTarget::subLevel), 0.0f, 1.0f);
+                setLine (voice.subGain, subGain, starts);
+                setLine (voice.noiseGain, std::clamp (settings.noiseLevel + moveOf (moves, ModTarget::noiseLevel), 0.0f, 1.0f), starts);
 
-                if (voice.subGain > 0.0f)
+                if (subGain > 0.0f || voice.subGain.now() > 0.0f)
                     voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
 
                 voice.filtering = settings.filterOn;
@@ -1371,8 +1485,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
                 const auto volume = std::clamp (1.0f + moveOf (moves, ModTarget::volume), 0.0f, 2.0f);
                 const auto angle = 0.78539816f * (1.0f + std::clamp (moveOf (moves, ModTarget::pan), -1.0f, 1.0f));
-                voice.gainLeft = volume * 1.41421356f * std::cos (angle);
-                voice.gainRight = volume * 1.41421356f * std::sin (angle);
+                setLine (voice.gainLeft, volume * 1.41421356f * std::cos (angle), starts);
+                setLine (voice.gainRight, volume * 1.41421356f * std::sin (angle), starts);
             }
 
             voice.controlAhead -= length;
@@ -1407,12 +1521,19 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         auto out1 = raws[0][(size_t) i], out2 = raws[1][(size_t) i];
 
                         if (osc1Run.on && osc1Run.warp == Warp::ringMod && osc2Run.on)
-                            out1 *= 1.0f - osc1Run.warpAmount + osc1Run.warpAmount * raws[1][(size_t) i];
+                        {
+                            const auto amount = osc1Run.shape.at (i + 1);
+                            out1 *= 1.0f - amount + amount * raws[1][(size_t) i];
+                        }
 
                         if (osc2Run.on && osc2Run.warp == Warp::ringMod && osc1Run.on)
-                            out2 *= 1.0f - osc2Run.warpAmount + osc2Run.warpAmount * raws[0][(size_t) i];
+                        {
+                            const auto amount = osc2Run.shape.at (i + 1);
+                            out2 *= 1.0f - amount + amount * raws[0][(size_t) i];
+                        }
 
-                        const auto sound = (osc1Run.on ? out1 * osc1Run.level : 0.0f) + (osc2Run.on ? out2 * osc2Run.level : 0.0f);
+                        const auto sound =
+                            (osc1Run.on ? out1 * osc1Run.level.at (i + 1) : 0.0f) + (osc2Run.on ? out2 * osc2Run.level.at (i + 1) : 0.0f);
                         stepLefts[(size_t) i] += sound * panned.left;
                         stepRights[(size_t) i] += sound * panned.right;
                     }
@@ -1443,26 +1564,29 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         auto& reader = run.readers[(size_t) u];
                         const auto& other = voice.oscillators[(size_t) (1 - osc)];
                         const auto otherLast = other.on ? other.readers[(size_t) u].last : 0.0f;
-                        const auto t = reader.phase, dt = reader.increment, amount = run.warpAmount;
-                        auto place = t;
+                        const auto t = reader.phase, dt = reader.increment.at (i + 1), amount = run.shape.at (i + 1);
+                        Synth::place (*run.table, reader, reader.frame.at (i + 1));
+                        auto at = t;
 
+                        // What its warp reads by, gliding: the shape's line is sync's ratio, bend's, the pulse width or the
+                        // amount.
                         switch (run.warp)
                         {
                             case Warp::sync:
-                                place = wrap (t * run.syncRatio);
+                                at = wrap (t * amount);
                                 break;
 
                             case Warp::bendUp:
                             case Warp::bendDown:
-                                place = wrap (t * run.bend / (1.0f + (run.bend - 1.0f) * t));
+                                at = wrap (t * amount / (1.0f + (amount - 1.0f) * t));
                                 break;
 
                             case Warp::pulseWidth:
-                                place = t < run.pulseWidth ? wrap (t / run.pulseWidth) : 0.0f;
+                                at = t < amount ? wrap (t / amount) : 0.0f;
                                 break;
 
                             case Warp::fm:
-                                place = wrap (t + amount * otherLast);
+                                at = wrap (t + amount * otherLast);
                                 break;
 
                             case Warp::none:
@@ -1471,7 +1595,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                                 break;
                         }
 
-                        auto value = readAt (reader.from, reader.to, reader.morph, place);
+                        auto value = readAt (reader.from, reader.to, reader.morph, at);
 
                         if (run.warp == Warp::mirror && amount > 0.0f)
                         {
@@ -1484,11 +1608,11 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                         {
                             // The jump back to the wave's start when the note's cycle ends, smoothed (PolyBLEP).
                             const auto jump = readAt (reader.from, reader.to, reader.morph, 0.0f)
-                                              - readAt (reader.from, reader.to, reader.morph, wrap (run.syncRatio));
+                                              - readAt (reader.from, reader.to, reader.morph, wrap (amount));
                             value += 0.5f * jump * dsp::polyBlep (t, dt);
                         }
 
-                        raw[(size_t) osc] = value - reader.offset;
+                        raw[(size_t) osc] = value - reader.offset.at (i + 1);
                         reader.phase = t + dt < 1.0f ? t + dt : t + dt - 1.0f;
                     }
 
@@ -1496,15 +1620,22 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     auto out1 = raw[0], out2 = raw[1];
 
                     if (osc1Run.on && osc1Run.warp == Warp::ringMod && osc2Run.on)
-                        out1 *= 1.0f - osc1Run.warpAmount + osc1Run.warpAmount * raw[1];
+                    {
+                        const auto amount = osc1Run.shape.at (i + 1);
+                        out1 *= 1.0f - amount + amount * raw[1];
+                    }
 
                     if (osc2Run.on && osc2Run.warp == Warp::ringMod && osc1Run.on)
-                        out2 *= 1.0f - osc2Run.warpAmount + osc2Run.warpAmount * raw[0];
+                    {
+                        const auto amount = osc2Run.shape.at (i + 1);
+                        out2 *= 1.0f - amount + amount * raw[0];
+                    }
 
                     osc1Run.readers[(size_t) u].last = raw[0];
                     osc2Run.readers[(size_t) u].last = raw[1];
 
-                    const auto sound = (osc1Run.on ? out1 * osc1Run.level : 0.0f) + (osc2Run.on ? out2 * osc2Run.level : 0.0f);
+                    const auto sound =
+                        (osc1Run.on ? out1 * osc1Run.level.at (i + 1) : 0.0f) + (osc2Run.on ? out2 * osc2Run.level.at (i + 1) : 0.0f);
                     const auto& panned = osc1Run.on ? osc1Run.readers[(size_t) u] : osc2Run.readers[(size_t) u];
                     soundLeft += sound * panned.left;
                     soundRight += sound * panned.right;
@@ -1517,11 +1648,11 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 // The sub and the noise, in the middle.
                 auto centre = 0.0f;
 
-                if (voice.subGain > 0.0f)
-                    centre += voice.subGain * voice.sub.next (settings.subWave);
+                if (const auto subGain = voice.subGain.at (i + 1); subGain > 0.0f)
+                    centre += subGain * voice.sub.next (settings.subWave);
 
-                if (voice.noiseGain > 0.0f)
-                    centre += voice.noiseGain * voice.noise.next();
+                if (const auto noiseGain = voice.noiseGain.at (i + 1); noiseGain > 0.0f)
+                    centre += noiseGain * voice.noise.next();
 
                 soundLeft += centre;
                 soundRight += centre;
@@ -1565,11 +1696,34 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     voice.fadeStep = 0.0f;
                     voice.amp.reset();
                 }
-                left[start + i] += sides[0] * gain * voice.gainLeft;
+                left[start + i] += sides[0] * gain * voice.gainLeft.at (i + 1);
 
                 if (right != nullptr)
-                    right[start + i] += sides[1] * gain * voice.gainRight;
+                    right[start + i] += sides[1] * gain * voice.gainRight.at (i + 1);
             }
+
+            // Its lines move on by the stretch (its readers' in renderStep(), unless FM played them sample by sample).
+            for (auto& run : voice.oscillators)
+            {
+                if (! run.on)
+                    continue;
+
+                run.level.advance (length);
+                run.shape.advance (length);
+
+                for (int u = 0; u < unison && ! blockwise; ++u)
+                {
+                    auto& reader = run.readers[(size_t) u];
+                    reader.increment.advance (length);
+                    reader.frame.advance (length);
+                    reader.offset.advance (length);
+                }
+            }
+
+            voice.subGain.advance (length);
+            voice.noiseGain.advance (length);
+            voice.gainLeft.advance (length);
+            voice.gainRight.advance (length);
 
             if (! voice.amp.isActive())
                 voice.note = -1;
