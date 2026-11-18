@@ -124,7 +124,8 @@ public:
     static constexpr juce::int64 smallPack = 1024 * 1024;
     static constexpr int gatherFrom = 4;
     static std::atomic<juce::int64> smallPackForTests; // another smallPack while above 0
-    bool joinPacks (const std::function<bool()>& shouldStop = {}, const Pruning& = {}, juce::StringArray* leftOut = nullptr);
+    bool joinPacks (const std::function<bool()>& shouldStop, const Pruning&, juce::StringArray* leftOut = nullptr);
+    bool joinPacks (const std::function<bool()>& shouldStop = {}); // every piece kept
 
     // Whether a join would gather anything with nothing left out: packs of a class to join, small ones, or packs twice.
     bool needsGathering() const;
@@ -143,6 +144,10 @@ public:
     // The packs its folder holds that it couldn't read (another program held one as it was read, one is damaged, or it is
     // of a layout this build doesn't read), whose pieces might be anything: those it hasn't read, as of now.
     juce::Array<juce::File> findUnreadPacks() const;
+
+    // The pack files that don't read whole as packs now, read again from the disk (Verify History's): one another program
+    // holds, one cut off, or one with a byte changed in its index or its trailer, whether this store read it before or not.
+    juce::Array<juce::File> findDamagedPacks() const;
 
     // Lets go of the packs it has open for reading, which it opens again as needed.
     void closeFiles() const;

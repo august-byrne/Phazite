@@ -712,7 +712,11 @@ TEST_CASE ("A branch isn't renamed while a commit writes its record, which would
 TEST_CASE ("A damaged pack another program holds isn't replaced, and the write says why; once it lets go, it is")
 {
     // The review of known bug 62: a pack whose pieces were all found damaged is written again under its own name, which
-    // a sync program or a virus scanner holding the old file keeps from happening.
+    // a sync program or a virus scanner holding the old file keeps from happening. A pack's name holds its writer and when
+    // its pieces were written, so the same name comes again only for the same pieces written by the same computer at the
+    // same time on the versions' clock: as here, the clock held, so that it means the same on every system (Windows'
+    // clock moves in steps of about 15 ms, Linux's every millisecond).
+    const phazite::test::VersionsTime clock (juce::Time::currentTimeMillis());
     TemporaryFolder temporary;
     const auto piece = toBlock ("<PIECE held=\"1\"/>");
     const auto name = phazite::getPieceName (piece);
@@ -727,6 +731,7 @@ TEST_CASE ("A damaged pack another program holds isn't replaced, and the write s
     damageFirstPiece (pack);
     phazite::PieceStore store (folder);
     REQUIRE_FALSE (store.read (name).has_value()); // forgotten
+    store.closeFiles();                            // the store's own open file would keep it from being held on Windows
 
     {
         const HeldFile held (pack);
@@ -741,8 +746,35 @@ TEST_CASE ("A damaged pack another program holds isn't replaced, and the write s
         }
     }
 
+    // Let go of: written (its stamp a millisecond on from the one that failed, so into a pack of its own beside it).
     REQUIRE (store.write ({ { name, piece } }));
     CHECK (store.read (name) == std::optional (piece));
+}
+
+TEST_CASE ("A piece whose only copy was found damaged is written again into a new pack once the clock has moved on")
+{
+    // What happens as a rule: the damaged pack stays (Verify History names it) and the piece reads from the new one.
+    phazite::test::VersionsTime clock (juce::Time::currentTimeMillis());
+    TemporaryFolder temporary;
+    const auto piece = toBlock ("<PIECE again=\"1\"/>");
+    const auto name = phazite::getPieceName (piece);
+    const auto folder = temporary.folder.getChildFile ("pieces");
+
+    {
+        phazite::PieceStore first (folder);
+        REQUIRE (first.write ({ { name, piece } }));
+    }
+
+    const auto pack = folder.findChildFiles (juce::File::findFiles, false, "*.pack")[0];
+    damageFirstPiece (pack);
+    phazite::PieceStore store (folder);
+    REQUIRE_FALSE (store.read (name).has_value());
+
+    clock.addDays (1.0);
+    REQUIRE (store.write ({ { name, piece } }));
+    CHECK (store.read (name) == std::optional (piece));
+    CHECK (pack.existsAsFile());
+    CHECK (folder.findChildFiles (juce::File::findFiles, false, "*.pack").size() == 2);
 }
 
 //==============================================================================

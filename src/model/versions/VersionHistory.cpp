@@ -1444,6 +1444,11 @@ bool VersionHistory::checkHistory (std::function<void()> done)
             Check check;
             const auto names = shared->getPieces().getNames();
             check.numPieces = names.size();
+
+            // Every pack file as it is on the disk now: one that doesn't read whole as a pack (held, cut off, a byte of its
+            // index or its trailer changed, or of a layout this build doesn't read) might hold anything.
+            for (const auto& pack : shared->getPieces().findDamagedPacks())
+                check.unreadPacks.add (pack.getFileName());
             check.numVersions = (int) known.size();
 
             // Let go of, at its next step, as the history goes; stopped there, as it is cancelled.
@@ -1507,7 +1512,7 @@ bool VersionHistory::checkHistory (std::function<void()> done)
                 tell (0.1f, 0.2f, (double) i, (double) kept.size());
                 std::vector<MissingPiece> missing;
 
-                if (const auto song = shared->readSong (kept[i].piece, nullptr, &missing); ! song.isValid() && missing.empty())
+                if (const auto read = shared->readSong (kept[i].piece, nullptr, &missing); ! read.isValid() && missing.empty())
                     missing.push_back ({ {}, kept[i].piece });
 
                 if (! missing.empty())
@@ -1559,18 +1564,23 @@ bool VersionHistory::checkHistory (std::function<void()> done)
                 if (exists
                     && std::any_of (recorded.begin(), recorded.end(), [size] (const Recorded& each) { return each.file.size == size; }))
                 {
-                    // Read a megabyte at a time (JUCE's SHA-256 asks for 64 bytes a call, and a file's stream doesn't buffer).
+                    // Read a megabyte at a time (JUCE's SHA-256 asks for 64 bytes a call, and a file's stream doesn't buffer);
+                    // nothing made on the stream before it opened (a buffer asks its source's length as it is made, which
+                    // a stream that didn't open asserts on: a file another program holds fails to open on Windows, one
+                    // without read permission on Linux and macOS).
                     juce::FileInputStream in (file);
-                    juce::BufferedInputStream buffered (in, 1 << 20);
-                    StoppableStream parts (buffered, stop,
-                                           [&] (int numRead)
-                                           {
-                                               bytesRead += numRead;
-                                               tell (0.2f, 1.0f, bytesRead, bytesToRead);
-                                           });
 
                     if (in.openedOk())
+                    {
+                        juce::BufferedInputStream buffered (in, 1 << 20);
+                        StoppableStream parts (buffered, stop,
+                                               [&] (int numRead)
+                                               {
+                                                   bytesRead += numRead;
+                                                   tell (0.2f, 1.0f, bytesRead, bytesToRead);
+                                               });
                         hash = juce::SHA256 (parts).toHexString();
+                    }
 
                     if (stop())
                         break; // its hash only of what was read before

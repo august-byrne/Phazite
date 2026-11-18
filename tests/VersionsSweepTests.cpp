@@ -619,6 +619,7 @@ TEST_CASE ("A pack another program holds open stays for the next sweep, every pi
             itsPack = pack;
 
     REQUIRE (itsPack.existsAsFile());
+    s.store->getPieces().closeFiles(); // the store's own open file would keep it from being held on Windows
 
     {
         // Another program (a sync program, a virus scanner) holds it as the sweep runs, so that it can't even be read: it

@@ -2394,11 +2394,22 @@ juce::String describeHistoryCheck (const ProjectContext& context)
     }
 
     if (check->damagedPieces.isEmpty() && check->damaged.empty() && check->audio.empty() && check->damagedSongs.empty()
-        && check->unreadableParents.empty())
+        && check->unreadableParents.empty() && check->unreadPacks.isEmpty())
         parts.add ("Verified " + count ((size_t) check->numVersions, "version", "versions") + ", "
                    + count ((size_t) check->numSongs, "song kept without a version", "songs kept without a version") + ", "
                    + count ((size_t) check->numPieces, "piece", "pieces") + " and "
                    + count ((size_t) check->numAudioFiles, "audio file", "audio files") + ": all whole.");
+
+    if (! check->unreadPacks.isEmpty())
+    {
+        juce::StringArray names;
+
+        for (const auto& pack : check->unreadPacks)
+            names.add (pack.substring (0, 7));
+
+        parts.add (count ((size_t) check->unreadPacks.size(), "pack", "packs") + " of the Versions folder can't be read ("
+                   + names.joinIntoString (", ") + "): damaged, held by another program, or written by another build of Phazite.");
+    }
 
     if (! check->damagedPieces.isEmpty())
         parts.add (count ((size_t) check->damagedPieces.size(), "piece is", "pieces are") + " damaged.");

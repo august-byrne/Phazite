@@ -245,7 +245,8 @@ Local History keeps the song as it was at times while it differed from its last 
   log hasn't arrived), "Found by Verify History". A click brings a line back as a branch at its last version, named
   after the branch it was on ("idea-3 (recovered)", "recovered" where no log names it), with the song left on it as the
   branch's, so that switching to it gives the song as it was left. Not an undo step.
-- **Verify History** (`version.verify`) reads every piece and checks it against its name; walks every version's song,
+- **Verify History** (`version.verify`) reads every piece and checks it against its name, and every pack file again as
+  a pack (one held, cut off, or with a byte of its index or trailer changed is named); walks every version's song,
   Local History's songs and the songs left on branches piece by piece; checks every version's audio files against its
   record (the file is there, of the recorded size, and of the recorded SHA-256), each file read once however many
   versions name it, in parts; and finds the versions no branch holds. It says which version misses which file ("Verse 2"
