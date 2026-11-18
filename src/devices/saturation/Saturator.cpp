@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace phazite::devices
 {
@@ -56,13 +57,23 @@ namespace
     constexpr double tiltFrequency = 1000.0;    // where the tone tilts around
     constexpr float tiltDecibels = 6.0f;        // how far the tone tilts each end, at its ends
     constexpr double dcBlockerFrequency = 10.0; // under what a lopsided curve leaves
-    constexpr double fadeSeconds = 0.01;        // a change of shape, of Quality or of the Band switch, and an edge's fade
+    constexpr double fadeSeconds = 0.01;        // a change of Quality or of the Band switch, and an edge's fade
+    constexpr double shapeFadeSeconds = 0.03;   // a change of shape: slow enough that two shapes that play a low tone
+                                                // differently fade without a thump under it (10 ms made one, a 100 Hz
+                                                // tone's difference spread down under 30 Hz), and heard whole in 35 ms
     constexpr double dcFadeSeconds = 0.005;     // the DC blocker coming in or going
     constexpr double listenFadeSeconds = 0.005; // between the sound and the band alone, as Listen turns on or off
 
     // How long a shape or a Quality plays unheard, from silence, before it is faded to: long enough for the curve's averaging
-    // and the filters to settle, and for the DC blocker to settle on a lopsided curve's offset.
-    constexpr double quickWarmSeconds = 0.005, slowWarmSeconds = 0.15;
+    // and the filters to the curve's rate to settle. Neither starts a DC blocker from rest under the sound: a shape takes
+    // the one playing's (Path::startJoining()), and a Quality the one playing's when it has warmed up. The band's
+    // crossovers, started from rest on a new Quality, take as long as their lowest takes (bandSettlingCycles of it).
+    constexpr double warmSeconds = 0.005;
+    // A joining DC blocker's glide, from 200 Hz to the DC blocker's 10 Hz in 100 ms, slower as it goes lower (one over its
+    // corner rising in a straight line), so that each octave takes as many of its own cycles: slowly enough that what it
+    // holds of a low tone follows it (in 30 ms a 100 Hz tone's difference between two shapes left a thump at -44 dBFS).
+    constexpr double joinStartFrequency = 200.0, joinGlideSeconds = 0.1;
+    constexpr double bandSettlingCycles = 1.6; // seven of a Butterworth pair's time constants: 61 dB down
     // An edge's glide: two octaves in about 13 ms, half as fast as Safe Bass's, so that a sound the band takes into the
     // curve or out of it as it moves goes from one way to the other no faster than a fade.
     constexpr double octavesPerSecond = 150.0;
@@ -170,39 +181,43 @@ Saturator::Band Saturator::getBand (std::span<const float> values) noexcept
     return shown;
 }
 
-int Saturator::getLatencyOf (Quality which)
+namespace
 {
-    // The filters to the curve's rate and back, whole samples late, and the curve's averaging and levelling filter, 4 samples
-    // at its rate, made a whole number of the sound's samples (at 8 times the rate, half of one: 4 more make it whole).
-    static const std::array<int, numQualities> latencies = []
+    // How late a Quality's way comes, in the sound's samples, at any rate: the filters to the curve's rate and back, whole
+    // samples late, and the curve's averaging and levelling filter, 4 samples at its rate, made a whole number of the
+    // sound's samples (at 8 times the rate, half of one: 4 more make it whole).
+    int getOwnLatency (int q)
     {
-        std::array<int, numQualities> found {};
-
-        for (int q = 0; q < numQualities; ++q)
+        static const std::array<int, 3> latencies = []
         {
-            juce::dsp::Oversampling<float> filters (2, (size_t) q + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true,
-                                                    true);
-            filters.initProcessing (1);
-            const auto factor = 2 << q;
-            const auto padding = (factor - dsp::AntialiasedCurve::delay % factor) % factor;
-            found[(size_t) q] = (int) std::lround (filters.getLatencyInSamples()) + (dsp::AntialiasedCurve::delay + padding) / factor;
-        }
+            std::array<int, 3> found {};
 
-        return found;
-    }();
+            for (int each = 0; each < (int) found.size(); ++each)
+            {
+                juce::dsp::Oversampling<float> filters (2, (size_t) each + 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+                                                        true, true);
+                filters.initProcessing (1);
+                const auto factor = 2 << each;
+                const auto padding = (factor - dsp::AntialiasedCurve::delay % factor) % factor;
+                found[(size_t) each] =
+                    (int) std::lround (filters.getLatencyInSamples()) + (dsp::AntialiasedCurve::delay + padding) / factor;
+            }
 
-    return latencies[(size_t) juce::jlimit (0, numQualities - 1, (int) which)];
-}
+            return found;
+        }();
 
-int Saturator::getLatencySamplesFor (std::span<const float> values) const
+        return latencies[(size_t) q];
+    }
+} // namespace
+
+int Saturator::getLatency()
 {
-    return values.size() > (size_t) quality ? getLatencyOf ((Quality) getQualityIndex (values[(size_t) quality]))
-                                            : getLatencyOf (Quality::twice);
-}
+    auto latest = 0;
 
-void Saturator::takeValuesBeforePrepare (std::span<const float> values)
-{
-    preparedQuality = values.size() > (size_t) quality ? (Quality) getQualityIndex (values[(size_t) quality]) : Quality::twice;
+    for (int q = 0; q < numQualities; ++q)
+        latest = std::max (latest, getOwnLatency (q));
+
+    return latest;
 }
 
 void Saturator::Glide::moveTo (float target, float step, float closeEnough) noexcept
@@ -216,7 +231,14 @@ void Saturator::Glide::moveTo (float target, float step, float closeEnough) noex
 
 float Saturator::getEased (float along) noexcept
 {
-    return 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * std::clamp (along, 0.0f, 1.0f));
+    // At either end, as it is: most of the time nothing fades.
+    if (along <= 0.0f)
+        return 0.0f;
+
+    if (along >= 1.0f)
+        return 1.0f;
+
+    return 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * along);
 }
 
 void Saturator::Controls::allocate (int length)
@@ -280,7 +302,10 @@ void Saturator::Path::reset() noexcept
         for (auto* crossover : { &channel.low, &channel.high, &channel.dryLow, &channel.dryHigh })
             crossover->reset();
 
-        for (auto* filter : { &channel.bentHighPass, &channel.lowTilt, &channel.highTilt, &channel.dcBlockers[0], &channel.dcBlockers[1] })
+        for (auto* filter : { &channel.bentHighPass, &channel.lowTilt, &channel.highTilt })
+            filter->reset();
+
+        for (auto* filter : { &channel.offsets[0], &channel.offsets[1], &channel.joining })
             filter->reset();
 
         channel.padded.fill (0.0f);
@@ -299,6 +324,48 @@ void Saturator::Path::reset() noexcept
     lastTilt = -2.0f;
     lastBias = 0.0f;
     dryInStep = false;
+    joins = false;
+}
+
+void Saturator::Path::setJoinCorner (float hertz) noexcept
+{
+    joinCorner = hertz;
+    joinFilter = dsp::makeFilter (dsp::FilterShape::highPass, hertz, rate, butterworthQ);
+}
+
+void Saturator::Path::startJoining() noexcept
+{
+    joins = true;
+    setJoinCorner ((float) joinStartFrequency);
+
+    for (auto& channel : channels)
+        channel.joining.reset();
+}
+
+void Saturator::Path::save (OffsetStates& states) const noexcept
+{
+    for (size_t c = 0; c < channels.size(); ++c)
+    {
+        states.offsets[c] = channels[c].offsets;
+        states.joining[c] = channels[c].joining;
+    }
+
+    states.joinCorner = joinCorner;
+    states.joins = joins;
+}
+
+void Saturator::Path::load (const OffsetStates& states) noexcept
+{
+    for (size_t c = 0; c < channels.size(); ++c)
+    {
+        channels[c].offsets = states.offsets[c];
+        channels[c].joining = states.joining[c];
+    }
+
+    joins = states.joins;
+
+    if (joins)
+        setJoinCorner (states.joinCorner);
 }
 
 void Saturator::Path::startSlot (int index, Shape slotShape, float pointValue) noexcept
@@ -312,7 +379,7 @@ void Saturator::Path::startSlot (int index, Shape slotShape, float pointValue) n
     for (auto& channel : channels)
     {
         channel.curves[s].reset();
-        channel.dcBlockers[s].reset();
+        channel.offsets[s].reset();
     }
 
     // Off its middle, the curve and the one beside it that plays its working point alone start as if they had rested there,
@@ -414,8 +481,10 @@ void Saturator::prepare (double newSampleRate, int maximumBlockSize)
         path.factor = 2 << q;
         path.rate = sampleRate * path.factor;
         path.padding = (path.factor - dsp::AntialiasedCurve::delay % path.factor) % path.factor;
-        path.ownLatency = getLatencyOf ((Quality) q);
-        path.dcBlocker = dsp::makeFilter (dsp::FilterShape::highPass, dcBlockerFrequency, path.rate, butterworthQ);
+        path.ownLatency = getOwnLatency (q);
+
+        path.offsetFilter = dsp::makeFilter (dsp::FilterShape::highPass, dcBlockerFrequency, path.rate, butterworthQ);
+        path.setJoinCorner ((float) dcBlockerFrequency);
 
         for (auto* filters : { &path.filters, &path.dryFilters })
         {
@@ -425,8 +494,8 @@ void Saturator::prepare (double newSampleRate, int maximumBlockSize)
         }
     }
 
-    // The latency is the Quality's set by hand; one that comes sooner waits for it.
-    latency = getLatencyOf (preparedQuality);
+    // Every Quality as late as the latest, which the others wait for (DelayLine late, sized for it).
+    latency = getLatency();
 
     for (auto& path : paths)
     {
@@ -442,11 +511,12 @@ void Saturator::prepare (double newSampleRate, int maximumBlockSize)
     smoothing = (float) (1.0 - std::exp (-1.0 / (glideSeconds * sampleRate)));
     fadePerSample = (float) (1.0 / (fadeSeconds * sampleRate));
     edgeFadePerSample = fadePerSample;
+    shapeFadePerSample = (float) (1.0 / (shapeFadeSeconds * sampleRate));
     octavesPerSample = (float) (octavesPerSecond / sampleRate);
     listenStep = (float) (1.0 / (listenFadeSeconds * sampleRate));
     dcStep = (float) (1.0 / (dcFadeSeconds * sampleRate));
-    quickWarmUp = std::max (256, (int) std::lround (quickWarmSeconds * sampleRate));
-    slowWarmUp = (int) std::lround (slowWarmSeconds * sampleRate);
+    joinGlide = (float) ((1.0 / dcBlockerFrequency - 1.0 / joinStartFrequency) / (joinGlideSeconds * sampleRate));
+    warmUp = std::max (256, (int) std::lround (warmSeconds * sampleRate));
     low.off = 5.0f;
     high.off = (float) (highOffRatio * sampleRate);
 
@@ -462,7 +532,7 @@ void Saturator::reset()
     for (auto& path : paths)
         path.reset();
 
-    active = (int) preparedQuality;
+    active = 0;
     next = -1;
     warmed = 0;
     qualityFade = 0.0f;
@@ -477,20 +547,40 @@ void Saturator::reset()
     isFirstBlock = true;
 }
 
-int Saturator::getPlayable (int wanted) const noexcept
-{
-    // A Quality that comes later than the latency set by hand can't play in time: the best below it that can, or the one set.
-    for (auto q = wanted; q >= 0; --q)
-        if (paths[(size_t) q].ownLatency <= latency)
-            return q;
-
-    return (int) preparedQuality;
-}
-
 bool Saturator::isLopsided (int index, float targetBias) const noexcept
 {
     const auto slotShape = slotShapes[(size_t) index];
     return slotShape == Shape::tube || (slotShape != Shape::crush && (bias.value > 0.0f || targetBias > 0.0f));
+}
+
+void Saturator::updateSlopes (int index, float atBias) noexcept
+{
+    const auto s = (size_t) index;
+    const auto slotShape = slotShapes[s];
+
+    if (slotShape == slopedShapes[s] && juce::exactlyEqual (atBias, slopedAt[s]))
+        return;
+
+    if (slotShape != slopedShapes[s])
+        middleSlopes[s] = slotShape == Shape::crush ? 1.0f : getSlope (slotShape, 0.0f);
+
+    slopedShapes[s] = slotShape;
+    slopedAt[s] = atBias;
+    steepnesses[s] = getSteepness (slotShape, atBias);
+}
+
+int Saturator::getBandSettling() const noexcept
+{
+    if (! splitting)
+        return 0;
+
+    auto lowest = std::numeric_limits<float>::max();
+
+    for (const auto* edge : { &low, &high })
+        if (edge->on || edge->amount > 0.0f)
+            lowest = std::min (lowest, std::max (edge->frequency, lowestFrom)); // one fading out of hearing as From's lowest
+
+    return lowest < std::numeric_limits<float>::max() ? (int) std::lround (bandSettlingCycles / lowest * sampleRate) : 0;
 }
 
 void Saturator::process (const ProcessContext& block)
@@ -560,7 +650,7 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
         listenShare = 0.0f;
         low.snap();
         high.snap();
-        active = getPlayable (getQualityIndex (values[quality]));
+        active = getQualityIndex (values[quality]);
         auto& path = paths[(size_t) active];
         path.reset();
         path.startSlot (slot, wantedShape, bias.value);
@@ -587,8 +677,8 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
             action (paths[(size_t) next]);
     };
 
-    // Another shape: it starts in the other slot, plays unheard while it settles (its DC blocker, on a lopsided curve), and
-    // the sound fades to it.
+    // Another shape: it starts in the other slot, its DC blocker joining the one playing's (Path::startJoining()), plays
+    // unheard while its curve settles, and the sound fades to it.
     if (! slotFading && wantedShape != slotShapes[(size_t) slot])
     {
         const auto other = 1 - slot;
@@ -596,10 +686,13 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
         slotFading = true;
         slotFade = 0.0f;
         slotWarmed = 0;
-        const auto lopsided = isLopsided (other, targetBias);
-        slotWarmUp = lopsided ? slowWarmUp : quickWarmUp;
-        dcShares[(size_t) other] = lopsided ? 1.0f : 0.0f;
-        forEachPlaying ([&] (Path& path) { path.startSlot (other, wantedShape, bias.value); });
+        dcShares[(size_t) other] = isLopsided (other, targetBias) ? 1.0f : 0.0f;
+        forEachPlaying (
+            [&] (Path& path)
+            {
+                path.startSlot (other, wantedShape, bias.value);
+                path.startJoining();
+            });
     }
 
     // The band switched on: its filters start, and the sound fades to it.
@@ -609,14 +702,14 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
         forEachPlaying ([&] (Path& path) { path.startSplit (current()); });
     }
 
-    // Another Quality: it starts beside the one playing, plays unheard while its filters settle, and the sound fades to it.
-    if (const auto wanted = getPlayable (getQualityIndex (values[quality])); next < 0 && wanted != active)
+    // Another Quality: it starts beside the one playing, plays unheard while its filters settle (the band's, from rest, as
+    // long as the lowest takes), takes the DC blockers of the one playing as they are then, and the sound fades to it.
+    if (const auto wanted = getQualityIndex (values[quality]); next < 0 && wanted != active)
     {
         next = wanted;
         warmed = 0;
         qualityFade = 0.0f;
-        qualityWarmUp =
-            splitting || isLopsided (slot, targetBias) || (slotFading && isLopsided (1 - slot, targetBias)) ? slowWarmUp : quickWarmUp;
+        qualityWarmUp = std::max (warmUp, getBandSettling());
         auto& path = paths[(size_t) next];
         path.reset();
         path.startSlot (slot, slotShapes[(size_t) slot], bias.value);
@@ -666,8 +759,8 @@ void Saturator::play (float* const* channels, float* const* dry, int numChannels
         }
     }
 
-    // What has finished fading.
-    if (slotFading && slotFade >= 1.0f)
+    // What has finished fading (and a new shape's DC blocker joining, which needs the old shape played until then).
+    if (slotFading && slotFade >= 1.0f && ! paths[(size_t) active].joins && (next < 0 || ! paths[(size_t) next].joins))
     {
         dcShares[(size_t) slot] = 0.0f;
         slot = 1 - slot;
@@ -698,12 +791,7 @@ void Saturator::workOutControls (int length, std::span<const float> values)
     const auto wantedListen = isPlayingBand() ? 1.0f : 0.0f;
     const std::array<bool, 2> lopsided { isLopsided (0, targetBias), isLopsided (1, targetBias) };
     numSteps = 0;
-
-    std::array<float, 2> steepness { 1.0f, 1.0f }, middleSlopes { 1.0f, 1.0f }, slopedAt { -1.0f, -1.0f };
-
-    for (int s = 0; s < 2; ++s)
-        if (slotShapes[(size_t) s] != Shape::crush)
-            middleSlopes[(size_t) s] = getSlope (slotShapes[(size_t) s], 0.0f);
+    handOverAt = -1;
 
     for (int i = 0; i < length; ++i)
     {
@@ -748,10 +836,10 @@ void Saturator::workOutControls (int length, std::span<const float> values)
 
             if (slotFading)
             {
-                if (slotWarmed < slotWarmUp)
+                if (slotWarmed < warmUp)
                     ++slotWarmed;
                 else
-                    slotFade = std::min (1.0f, slotFade + fadePerSample);
+                    slotFade = std::min (1.0f, slotFade + shapeFadePerSample);
             }
 
             bandShare += std::clamp (wantedBand - bandShare, -fadePerSample, fadePerSample);
@@ -760,7 +848,10 @@ void Saturator::workOutControls (int length, std::span<const float> values)
             if (next >= 0)
             {
                 if (warmed < qualityWarmUp)
-                    ++warmed;
+                {
+                    if (++warmed == qualityWarmUp)
+                        handOverAt = i;
+                }
                 else
                     qualityFade = std::min (1.0f, qualityFade + fadePerSample);
             }
@@ -775,6 +866,9 @@ void Saturator::workOutControls (int length, std::span<const float> values)
             controls.highShare[at] = getEased (high.amount);
             controls.listen[at] = getEased (listenShare);
             controls.qualityFade[at] = next >= 0 ? getEased (qualityFade) : 0.0f;
+
+            // Auto Gain takes the drive back off: quiet parts, which the curve leaves straight, keep their level.
+            const auto back = 1.0f - autoShare.value + autoShare.value / driveGain;
 
             for (int s = 0; s < 2; ++s)
             {
@@ -791,15 +885,9 @@ void Saturator::workOutControls (int length, std::span<const float> values)
                     continue;
                 }
 
-                if (! juce::exactlyEqual (slopedAt[index], bias.value))
-                {
-                    slopedAt[index] = bias.value;
-                    steepness[index] = getSteepness (slotShapes[index], bias.value);
-                }
-
-                // Auto Gain takes the drive back off: quiet parts, which the curve leaves straight, keep their level.
-                const auto back = 1.0f - autoShare.value + autoShare.value / driveGain;
-                controls.steepness[index][at] = steepness[index];
+                // Worked out again only as the working point or the shape moves.
+                updateSlopes (s, bias.value);
+                controls.steepness[index][at] = steepnesses[index];
                 controls.back[index][at] = back;
                 controls.straightGain[index][at] = driveGain * middleSlopes[index] * back;
             }
@@ -866,6 +954,42 @@ void Saturator::playPath (Path& path, float* const* channels, float* const* dry,
             path.restedFor.fill (0);
         }
 
+        // A Quality warmed up beside the one playing takes its DC blockers as they are here, settled on the sound.
+        if (i == handOverAt)
+        {
+            if (&path == &paths[(size_t) active])
+                path.save (handedOver);
+            else
+                path.load (handedOver);
+        }
+
+        // A shape's DC blocker joining the one playing glides down to its corner; there the two become the new shape's own.
+        if (path.joins)
+        {
+            if (! both)
+            {
+                path.joins = false;
+            }
+            else if (path.joinCorner <= (float) dcBlockerFrequency)
+            {
+                // The same filter now, and a linear one: the sum of what the two hold is what one fed the sum holds.
+                for (auto& channel : path.channels)
+                {
+                    channel.offsets[(size_t) other].ic1 = channel.offsets[(size_t) playing].ic1 + channel.joining.ic1;
+                    channel.offsets[(size_t) other].ic2 = channel.offsets[(size_t) playing].ic2 + channel.joining.ic2;
+                }
+
+                path.joins = false;
+            }
+            else
+            {
+                const auto lower = 1.0f / (1.0f / path.joinCorner + joinGlide);
+                path.setJoinCorner (lower < (float) dcBlockerFrequency + 0.01f ? (float) dcBlockerFrequency : lower);
+            }
+        }
+
+        const auto joining = path.joins;
+
         for (int k = 0; k < factor; ++k)
         {
             const auto j = (size_t) (i * factor + k);
@@ -918,36 +1042,44 @@ void Saturator::playPath (Path& path, float* const* channels, float* const* dry,
                 }
 
                 // Into the curve, around its working point, or rounded to Crush's steps; its offset taken off where it is
-                // lopsided; the drive taken back off as Auto Gain says; faded from one shape to another.
-                const auto playSlot = [&] (int s, Shape slotShape)
+                // lopsided; the drive taken back off as Auto Gain says; faded from one shape to another. The DC blocker
+                // plays all along, so that it has settled on the sound when the curve becomes lopsided and the sound fades
+                // to its way; while the curve is even, the sound goes round it, as it came.
+                const auto playCurveOf = [&] (int s, Shape slotShape)
                 {
                     const auto index = (size_t) s;
                     auto& curve = state.curves[index];
-                    float y;
 
                     if (slotShape == Shape::crush)
                     {
                         const auto step = gain / crushLevels;
-                        y = playShape (slotShape, curve, into / step) * step;
-                    }
-                    else
-                    {
-                        y = (playShape (slotShape, curve, into * gain + point) - path.pointLevels[index]) * controls.steepness[index][at];
+                        return playShape (slotShape, curve, into / step) * step;
                     }
 
+                    return (playShape (slotShape, curve, into * gain + point) - path.pointLevels[index]) * controls.steepness[index][at];
+                };
+
+                const auto finish = [&] (int s, float y, float blockedY)
+                {
+                    const auto index = (size_t) s;
+
                     if (const auto blocked = controls.dcShare[index][at]; blocked > 0.0f)
-                        y += blocked * (state.dcBlockers[index].process (y, path.dcBlocker) - y);
-                    else
-                        state.dcBlockers[index].reset();
+                        y += blocked * (blockedY - y);
 
                     return y * controls.back[index][at];
                 };
 
-                auto played = playSlot (playing, playingShape);
+                const auto playingY = playCurveOf (playing, playingShape);
+                const auto playingBlocked = state.offsets[(size_t) playing].process (playingY, path.offsetFilter);
+                auto played = finish (playing, playingY, playingBlocked);
 
                 if (both)
                 {
-                    const auto otherPlayed = playSlot (other, otherShape);
+                    // A shape joining: the one playing's DC blocker, and another on what it plays differently.
+                    const auto otherY = playCurveOf (other, otherShape);
+                    const auto otherBlocked = joining ? playingBlocked + state.joining.process (otherY - playingY, path.joinFilter)
+                                                      : state.offsets[(size_t) other].process (otherY, path.offsetFilter);
+                    const auto otherPlayed = finish (other, otherY, otherBlocked);
                     played += fade * (otherPlayed - played);
                 }
 

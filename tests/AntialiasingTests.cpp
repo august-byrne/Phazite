@@ -334,7 +334,7 @@ TEST_CASE ("The saturator, driven hard, keeps its aliases down, the more the hig
     // How far under the tone its loudest alias stays at each Quality, at the worst of a 5 and a 12 kHz tone driven 24 dB into
     // Hard, Fold and Tube, at 44.1 and 48 kHz (docs/design/devices/saturator.md gives these figures). Each Quality holds to
     // its figure, less 3 dB, and does better than the one below it.
-    constexpr double figures[] = { 15.4, 36.9, 61.7 }; // measured 2026-11-18
+    constexpr double figures[] = { 15.4, 36.9, 61.8 }; // measured 2026-11-18: 15.41, 36.91, 61.76
     double previous = 0.0;
 
     for (int quality = 0; quality < 3; ++quality)
@@ -354,7 +354,6 @@ TEST_CASE ("The saturator, driven hard, keeps its aliases down, the more the hig
                     set (values, devices::Saturator::info, "quality", (float) quality);
                     const auto frequency = onBin (hertz, rate);
                     devices::Saturator saturator;
-                    saturator.takeValuesBeforePrepare (values);
                     const auto played = play (saturator, values, rate, fftSize + 4800,
                                               [&] (int t) { return 0.5f * (float) std::sin (twoPi * frequency * t / rate); });
                     const auto under = getAliasesUnder (played.data() + 4800, frequency, rate);
@@ -375,6 +374,31 @@ TEST_CASE ("The saturator, driven hard, keeps its aliases down, the more the hig
         previous = worst;
     }
 
+    // At the default Quality, 2x, a tone lower in the band, 2.5 kHz driven 24 dB into each, keeps its aliases much further
+    // down: held to the figure it measures, less 3 dB.
+    {
+        constexpr double figure = 50.2; // measured 2026-11-18: 50.21, the worst of the six
+        auto worst = 1000.0;
+
+        for (const auto rate : { 44100.0, 48000.0 })
+        {
+            for (const auto shape : { devices::Saturator::Shape::hard, devices::Saturator::Shape::fold, devices::Saturator::Shape::tube })
+            {
+                auto values = getDefaults (devices::Saturator::info);
+                set (values, devices::Saturator::info, "drive", 24.0f);
+                set (values, devices::Saturator::info, "shape", (float) shape);
+                const auto frequency = onBin (2500.0, rate);
+                devices::Saturator saturator;
+                const auto played = play (saturator, values, rate, fftSize + 4800,
+                                          [&] (int t) { return 0.5f * (float) std::sin (twoPi * frequency * t / rate); });
+                worst = std::min (worst, getAliasesUnder (played.data() + 4800, frequency, rate));
+            }
+        }
+
+        MESSAGE ("Quality 2x, 2.5 kHz: aliases at least " << worst << " dB under the tone");
+        CHECK (worst > figure - 3.0);
+    }
+
     // A quiet tone, which the curve leaves straight: as loud out as in, at 15 and 20 kHz too (the averaging alone dulled 20
     // kHz by 2.4 dB at twice 44.1 kHz).
     for (const auto rate : { 44100.0, 48000.0 })
@@ -391,6 +415,67 @@ TEST_CASE ("The saturator, driven hard, keeps its aliases down, the more the hig
             CAPTURE (hertz);
             CHECK (std::abs (juce::Decibels::gainToDecibels (getLevel (played.data() + 4800, 4800, hertz, rate) / 0.001)) < 0.35);
         }
+    }
+}
+
+TEST_CASE ("The saturator's Quality, automated from 2x to 8x and back while it plays, keeps its aliases down as when set by hand")
+{
+    // A 12 kHz tone at 44.1 kHz driven 24 dB into Fold, the worst case of 2x and 4x: in each stretch the aliases are as far
+    // under the tone as on a saturator set to that Quality from the start. All three Qualities come equally late, so that
+    // automation can reach each from any.
+    constexpr double rate = 44100.0;
+    constexpr int stretch = fftSize + 9600, settle = 9600, blockSize = 480;
+    const auto frequency = onBin (12000.0, rate);
+    const auto tone = [&] (int t) { return 0.5f * (float) std::sin (twoPi * frequency * t / rate); };
+    const auto at = [] (float quality)
+    {
+        auto values = getDefaults (devices::Saturator::info);
+        set (values, devices::Saturator::info, "drive", 24.0f);
+        set (values, devices::Saturator::info, "shape", (float) devices::Saturator::Shape::fold);
+        set (values, devices::Saturator::info, "quality", quality);
+        return values;
+    };
+
+    const auto twice = at (0.0f), eightTimes = at (2.0f);
+    devices::Saturator setTwice, setEightTimes;
+    const auto byHandTwice = getAliasesUnder (play (setTwice, twice, rate, settle + fftSize, tone).data() + settle, frequency, rate);
+    const auto byHandEightTimes =
+        getAliasesUnder (play (setEightTimes, eightTimes, rate, settle + fftSize, tone).data() + settle, frequency, rate);
+    REQUIRE (byHandEightTimes > byHandTwice + 20.0);
+
+    // 2x, then 8x, then 2x again, each a stretch long, the values changing as a block starts.
+    devices::Saturator saturator;
+    saturator.prepare (rate, blockSize);
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::vector<float> played;
+
+    for (int done = 0; done < 3 * stretch; done += blockSize)
+    {
+        for (int i = 0; i < blockSize; ++i)
+        {
+            buffer.setSample (0, i, tone (done + i));
+            buffer.setSample (1, i, tone (done + i));
+        }
+
+        const auto& values = (done / stretch) == 1 ? eightTimes : twice;
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = blockSize;
+        context.parameters = values;
+        saturator.process (context);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
+    }
+
+    for (int part = 0; part < 3; ++part)
+    {
+        const auto under = getAliasesUnder (played.data() + part * stretch + settle, frequency, rate);
+        const auto byHand = part == 1 ? byHandEightTimes : byHandTwice;
+        CAPTURE (part);
+        CAPTURE (under);
+        CAPTURE (byHand);
+        CHECK (std::abs (under - byHand) < 1.0);
     }
 }
 

@@ -58,22 +58,35 @@ second copy of the curve, fed the working point alone, plays beside it while it 
 late and as smooth as the sound.
 
 A lopsided curve (Tube, or any curve with Colour above 0) leaves an offset, which a 10 Hz high-pass takes off after the
-curve. It comes in and goes over 5 ms as the curve becomes lopsided or even, without a click.
+curve. The high-pass plays all the time, on what the curve plays; while the curve is even the sound goes round it, as it
+came, and as the curve becomes lopsided the sound fades to its way over 5 ms (and back as it becomes even). So when
+Colour leaves 0 the high-pass has long settled on the sound and doesn't swing; what is left under 20 Hz is the offset
+itself coming in as Colour turns, which the high-pass takes off over its own time (Colour from 0 to 100 % in 50 ms on a
+40 Hz sine at -3 dBFS: one lobe at -29 dBFS, gone in a quarter of a second, where a high-pass started from rest under
+the bass swung at about a third of its level).
+
+A shape just chosen has no high-pass of its own settled on the sound. It takes the one playing's, which has, and adds
+to it another, from rest, on what it plays differently from the shape playing (among that, at once, its own offset):
+that one starts at 200 Hz, where it takes the offset off within a few milliseconds, and glides down to 10 Hz over
+100 ms, ever more slowly, so that what it holds of a low tone follows it. There the two are one high-pass, and the old
+shape stops playing. (Started from rest under the sound, a new shape's high-pass thumped as it settled: at about -25
+dBFS on a 100 Hz sine at -6 dBFS, whether at 10 Hz or gliding down from 200 Hz in 30 ms.) A new Quality takes the
+high-passes of the one playing as they are when it has warmed up.
 
 ### Quality and latency
 
 The sound is taken to 2, 4 or 8 times its rate through polyphase IIR half-band filters (`juce::dsp::Oversampling`, one
 stage for each doubling, with a whole latency), driven into the curve, tilted, and brought back down. Every Quality's
 filters are made ready when the device is prepared, so that a change of Quality while the song plays allocates nothing:
-the new one plays unheard beside the one playing while its filters settle (5 ms, or 150 ms where a lopsided curve's
-offset filter or the band's filters must settle), and the sound then fades from one to the other over 10 ms.
+the new one plays unheard beside the one playing while its filters settle (5 ms; with the Band on, as long as its
+lowest crossover, started from rest, takes to settle, 1.6 cycles of it: 16 ms with From at 100 Hz, 80 ms at its lowest
+crossover), and the sound then fades from one to the other over 10 ms, whether the Quality was changed by hand or by
+automation.
 
 The filters and the curve delay the sound by 6 samples at 2x and 7 at 4x and 8x, at any rate (the curve's 4 samples at
-8 times the rate are half of one, and 4 more make it whole). The latency follows the Quality set by hand, as the
-Compressor's follows its mode: automation that moves the Quality while the song plays changes how the curve plays,
-never how late the sound comes. A Quality that comes sooner than the one set waits for it; one that would come later
-than the latency set by hand plays as the best Quality below it that comes in time, so a saturator set to 2x stays at
-2x whatever its automation asks (4x and 8x come a sample later).
+8 times the rate are half of one, and 4 more make it whole). Every Quality takes 7: 2x waits a sample more, and its
+copy for the mix with it. So the saturator reports one latency, whatever its Quality, and automation moves the Quality
+anywhere while the song plays.
 
 How far each Quality keeps its aliases down, measured on a 5 kHz and a 12 kHz sine driven 24 dB into Hard, Fold and
 Tube, at 44.1 and 48 kHz (`tests/AntialiasingTests.cpp`), the loudest alias under the tone at the worst of those:
@@ -84,7 +97,9 @@ Tube, at 44.1 and 48 kHz (`tests/AntialiasingTests.cpp`), the loudest alias unde
 | 4x | 36.9 dB | 12 kHz into Fold at 44.1 kHz; 62 to 80 dB on the 5 kHz tone |
 | 8x | 61.8 dB | 5 kHz into Tube at 48 kHz; 62 to 74 dB on the 12 kHz tone |
 
-The test holds each Quality to its figure less 3 dB, and each to doing better than the one below it.
+The test holds each Quality to its figure less 3 dB, and each to doing better than the one below it; and 2x, on a 2.5 kHz
+tone driven the same way, to the 50.2 dB it reaches there, less 3 dB. A Quality automated while the song plays keeps its
+aliases down as the same Quality set by hand.
 
 ### The Band
 
@@ -118,9 +133,10 @@ While Band is on, the sound is split at From and To and only the band between th
 
 Drive (in decibels), Auto Gain, Colour, Output and Tone glide to their new values through two smoothing steps of 10 ms,
 so that a glide starts and ends without a corner. A change of shape starts the new curve beside the one playing,
-unheard while it settles (5 ms, or 150 ms for a lopsided curve, whose offset filter must settle), and the sound then fades
-from one to the other over 10 ms. Every fade (shape, Quality, Band, Listen, an edge, the offset filter) follows half a
-cosine, so that it starts and ends smoothly.
+unheard while it settles (5 ms; its offset filter joins the one playing's, as [Colour](#colour) says), and the sound then
+fades from one to the other over 30 ms: the new shape is heard whole 35 ms after the click. (Over 10 ms, two shapes that
+play a low tone differently made a thump: the fade spread their difference down under 30 Hz.) Every fade (shape,
+Quality, Band, Listen, an edge, the offset filter) follows half a cosine, so that it starts and ends smoothly.
 
 ### The copy for the mix
 
@@ -141,8 +157,10 @@ straight, the sound at 50 % is the sound at 100 %, to 60 dB under it.
 - **Drive**, as a large knob; then **Colour**, **Tone**, **Output** and **Auto Gain**.
 - **Band:** its switch at the right end of the part's title, as a synth's parts have theirs; while it is off the part
   shows faint. A picture of the spectrum of what comes in, pale, and of what goes out, in the device's colour, with the
-  band lit between From and To as it plays; its two edges drag sideways from where they are, the nearer one lit under
-  the pointer, each drag one undo step that Escape takes back. **From**, **To** and **Listen** under it.
+  band lit between From and To as it plays; its two edges drag sideways from where they are drawn, the nearer one lit
+  under the pointer, each drag one undo step that Escape takes back. To stays an octave above From: a drag of To stops
+  there, and a drag of From pushes To up ahead of it (and lets it back as From comes down in the same drag), so that
+  after a drag the knobs show what plays. **From**, **To** and **Listen** under it.
 - **Quality**, a choice, last.
 
 Mix is the knob on the device's row in the Devices view.
@@ -154,25 +172,32 @@ and the Exciter's eight, converted, in its Exciter kind ([presets.md](../../pres
 Crush, the Band and Quality came play as they did: those parameters' defaults change nothing (a test played each against
 the saturator as it was, to 129 dB under its peak).
 
-The Exciter's presets became these (Band on, Soft, Auto Gain on, Tone 0, Quality 2x, Mix as it was). Each was played
-through both devices on one signal (pink noise at -18 dB RMS with sines at 2 and 6 kHz at -12 dB, stereo, 4 s) and compared
-in third-octave bands from 100 Hz to 16 kHz; the Drive, and From by up to a third of an octave, were tuned until the bands
+The Exciter's presets became these (Band on, Soft, Auto Gain on, Quality 2x, Mix as it was). Each was played through both
+devices on one signal (pink noise at -18 dB RMS with sines at 2 and 6 kHz at -12 dB, stereo, 4 s) and compared in
+third-octave bands from 100 Hz to 16 kHz; the Drive, and From by up to a third of an octave, were tuned until the bands
 met, and the worst band's difference is the last column. The Exciter's band fell 48 dB an octave and this one falls 24, so
-the bands beside From are where they differ: From moved a third of an octave up for most of them. Where tuning the Drive
-changed the worst band by little, the Drive nearer the start was kept.
+the bands beside From are where they differ: From moved a third of an octave up for most of them.
 
-| Preset | The Exciter's Frequency, Drive, Colour, Amount, High Cut | From, To | Output | Drive: from the rule, tuned | Worst band: at the rule's settings, tuned |
+| Preset | The Exciter's Frequency, Drive, Colour, Amount, High Cut | From, To | Output | Drive: from the rule, tuned, shipped | Worst band: at the rule's settings, tuned |
 | --- | --- | --- | --- | --- | --- |
-| Saturated Highs | 2.1 kHz, 16 dB, 35 %, 180 %, off | 2646 Hz, none | +8.75 dB (measured at +8.94) | 14.08, 11.33 dB | 4.19, 2.24 dB at 3.2 kHz |
-| Gentle Sheen | 10 kHz, 8 dB, 75 %, 25 %, off | 10 kHz, none | +1.94 dB | 1.01, kept | 0.46 dB at 10.2 kHz |
-| Acoustic Presence | 3 kHz, 10 dB, 70 %, 40 %, 12 kHz | 3780 Hz, 12 kHz | +2.92 dB | 4.56, -4.19 dB | 2.55, 0.92 dB at 12.8 kHz |
-| Drum Bus Snap | 5 kHz, 14 dB, 50 %, 40 %, off | 6300 Hz, none | +2.92 dB | 8.56, 10.06 dB | 0.91, 0.28 dB at 5.1 kHz |
-| Snare Crack | 3 kHz, 20 dB, 30 %, 60 %, 14 kHz | 3780 Hz, 14 kHz | +4.08 dB | 15.74, 12.99 dB | 2.80, 1.67 dB at 12.8 kHz |
-| Synth Bite | 2.5 kHz, 20 dB, 35 %, 60 %, 16 kHz | 3150 Hz, 16 kHz | +4.08 dB | 15.74, 13.24 dB | 2.39, 1.82 dB at 16.1 kHz |
-| Top End Restore | 3.5 kHz, 24 dB, 50 %, 80 %, off | 4410 Hz, none | +5.11 dB | 20.48, 17.73 dB | 3.09, 2.51 dB at 5.1 kHz |
-| Vocal Air | 8 kHz, 10 dB, 60 %, 50 %, off | 10 kHz (From's highest), none | +3.52 dB | 5.23, -3.52 dB | 0.88, 0.34 dB at 12.8 kHz |
+| Saturated Highs | 2.1 kHz, 16 dB, 35 %, 180 %, off | 2646 Hz, none | +8.75 dB (measured at +8.94) | 14.08, 11.33, 11.33 dB | 4.19, 2.24 dB at 3.2 kHz |
+| Gentle Sheen | 10 kHz, 8 dB, 75 %, 25 %, off | 10 kHz, none | +1.94 dB | 1.01, kept, 1.01 dB | 0.46 dB at 10.2 kHz |
+| Acoustic Presence | 3 kHz, 10 dB, 70 %, 40 %, 12 kHz | 3780 Hz, 12 kHz | +2.92 dB | 4.56, -4.19, 4.56 dB (Tone -10 %) | 2.55, 0.92 dB at 12.8 kHz |
+| Drum Bus Snap | 5 kHz, 14 dB, 50 %, 40 %, off | 6300 Hz, none | +2.92 dB | 8.56, 10.06, 10.06 dB | 0.91, 0.28 dB at 5.1 kHz |
+| Snare Crack | 3 kHz, 20 dB, 30 %, 60 %, 14 kHz | 3780 Hz, 14 kHz | +4.08 dB | 15.74, 12.99, 15.74 dB | 2.80, 1.67 dB at 12.8 kHz |
+| Synth Bite | 2.5 kHz, 20 dB, 35 %, 60 %, 16 kHz | 3150 Hz, 16 kHz | +4.08 dB | 15.74, 13.24, 15.74 dB | 2.39, 1.82 dB at 16.1 kHz |
+| Top End Restore | 3.5 kHz, 24 dB, 50 %, 80 %, off | 4410 Hz, none | +5.11 dB | 20.48, 17.73, 17.73 dB | 3.09, 2.51 dB at 5.1 kHz |
+| Vocal Air | 8 kHz, 10 dB, 60 %, 50 %, off | 10 kHz (From's highest), none | +3.52 dB | 5.23, -3.52, 5.23 dB | 0.88, 0.34 dB at 12.8 kHz |
 
 Two stay over 2 dB in one band beside From: Saturated Highs by 0.24 dB and Top End Restore by 0.51 dB. Saturated Highs ships with its Output 0.19 dB under the rule's lift, so that on the presets test's loud beat it peaks under 6 dB over full scale (at +8.94 dB it reached 6.05).
+
+Four ship with the rule's Drive rather than the tuned one: tuned down to match a band's level, Vocal Air and Acoustic
+Presence lifted their band with next to no harmonics. At the rule's Drive, a sine in the band at -12 dBFS gains its second
+harmonic 8.5 dB louder in both (and Acoustic Presence its third 16 dB louder), and Snare Crack's and Synth Bite's third
+come 4 dB louder; on the signal above, each third-octave band from 1 kHz up moved by at most 0.9 dB against the tuned
+version, but the 12.7 kHz band of Acoustic Presence, 1.2 dB up with the harmonics of the 6 kHz sine above its To (To
+limits what goes into the curve, not what it makes; the Exciter's High Cut came after its curve), which its Tone at
+-10 % brings to 0.8 dB. Snare Crack's and Synth Bite's top bands came out lower (0.4 to 0.9 dB), so their Tone stays 0.
 
 ## Limits
 
@@ -182,7 +207,12 @@ Two stay over 2 dB in one band beside From: Saturated Highs by 0.24 dB and Top E
 - The difference tones two tones in the band make under it are taken off 12 dB an octave, not kept out: the Exciter's
   filter after its curve fell 48 dB an octave, at 2 ms of latency.
 - At 2x a loud tone high in the band, driven hard into Fold, aliases 15 dB under itself; 4x or 8x are for that.
-- A Quality set to 2x by hand can't be raised by automation, since 4x and 8x come a sample later than its latency.
+- With Band on, a shape whose slope at its middle isn't 1 plays the band that much louder or quieter than the rest even
+  undriven: Fold's middle is steeper by pi / 2, so its band comes out 3.9 dB over the rest.
+- To limits what goes into the curve, not the harmonics the curve makes of it, which reach above To; Tone below 0 is the
+  way to darken them.
+- A To set (typed or automated) under an octave above From plays an octave above From, while its knob shows the value
+  set; a drag in the picture moves both to what plays.
 - Auto Gain only undoes the Drive; it does not match the loudness of what comes out to what went in.
 - A drag on the curve starts from the Drive as modulation plays it, and sets that as the value by hand.
 

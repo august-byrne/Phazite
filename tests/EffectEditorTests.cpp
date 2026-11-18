@@ -236,6 +236,67 @@ TEST_CASE ("The saturator's editor switches its Band at its title, drags the ban
     CHECK (song.valueOf ("bandHigh") < 15000.0f);
     CHECK (song.valueOf ("bandLow") == doctest::Approx (3000.0f));
     CHECK (song.describeUndo() == juce::String ("Undo Change To"));
+    phazite::undo (*song.song);
+
+    // To set under an octave above From plays an octave above it, where its edge is drawn: a drag of that edge starts there,
+    // not from the knob's value, and stops an octave above From; after it, To's knob shows what plays.
+    const auto setByHand = [&] (const char* id, float value)
+    {
+        phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, id }, value);
+        ticker.tickNow();
+    };
+
+    setByHand ("bandHigh", 300.0f);
+    const auto drawnTo = editor.getEdgeX (true);
+    CHECK (drawnTo > editor.getEdgeX (false) + 10.0f); // 6 kHz, an octave above From
+    const juce::Point<int> toEdge (juce::roundToInt (drawnTo) - 1, y);
+    mouse.pause();
+    mouse.press (toEdge);
+    mouse.dragTo (toEdge + juce::Point<int> (5, 0));
+    mouse.dragTo (toEdge + juce::Point<int> (10, 0));
+    mouse.release();
+    CHECK (song.valueOf ("bandHigh") > 6000.0f);
+    CHECK (song.valueOf ("bandHigh") < 12000.0f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change To"));
+    ticker.tickNow();
+    CHECK (editor.getEdgeX (true) == doctest::Approx (drawnTo + 10.0f).epsilon (0.02));
+
+    mouse.pause();
+    const juce::Point<int> raisedTo (juce::roundToInt (editor.getEdgeX (true)) - 1, y);
+    mouse.press (raisedTo);
+    mouse.dragTo (raisedTo - juce::Point<int> (100, 0));
+    mouse.dragTo (raisedTo - juce::Point<int> (200, 0));
+    mouse.release();
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (6000.0f));
+
+    // A drag of From up pushes To ahead of it, an octave above, in the same undo step; brought back down in the same drag,
+    // From lets To back to where it was.
+    setByHand ("bandHigh", 8000.0f);
+    const juce::Point<int> fromEdge (juce::roundToInt (editor.getEdgeX (false)), y);
+    mouse.pause();
+    mouse.press (fromEdge);
+    mouse.dragTo (fromEdge + juce::Point<int> (40, 0));
+    mouse.dragTo (fromEdge + juce::Point<int> (80, 0));
+    CHECK (song.valueOf ("bandLow") > 4000.0f);
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (2.0f * song.valueOf ("bandLow")));
+    mouse.dragTo (fromEdge + juce::Point<int> (4, 0));
+    mouse.release();
+    CHECK (song.valueOf ("bandLow") < 4000.0f);
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (8000.0f));
+
+    mouse.pause();
+    const juce::Point<int> movedFrom (juce::roundToInt (editor.getEdgeX (false)), y);
+    mouse.press (movedFrom);
+    mouse.dragTo (movedFrom + juce::Point<int> (40, 0));
+    mouse.dragTo (movedFrom + juce::Point<int> (80, 0));
+    mouse.release();
+    const auto pushedFrom = song.valueOf ("bandLow");
+    CHECK (pushedFrom > 4000.0f);
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (2.0f * pushedFrom));
+    CHECK (song.describeUndo() == juce::String ("Undo Change From"));
+    phazite::undo (*song.song); // both, as one step
+    CHECK (song.valueOf ("bandLow") < 4000.0f);
+    CHECK (song.valueOf ("bandHigh") == doctest::Approx (8000.0f));
 
     // Its picture listens to what goes in and out.
     REQUIRE (device.getScope() != nullptr);

@@ -87,8 +87,9 @@ public:
 
     static Band getBand (std::span<const float> values) noexcept;
 
-    // How late the sound comes at a Quality, in samples, at any rate.
-    static int getLatencyOf (Quality);
+    // How late the sound comes, in samples, at any rate and every Quality: the latest Quality's, which the others wait for, so
+    // that automation can move the Quality anywhere while the song plays.
+    static int getLatency();
 
     // Message thread: plays the band alone, as it goes out, instead of the sound, for the next half second by the clock; its
     // editor asks again each time it refreshes, so that the sound comes back when the editor no longer shows (as the
@@ -103,12 +104,8 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
 
-    // Its latency follows the Quality set by hand, as the compressor's follows its mode: automation that moves the Quality
-    // while the song plays changes how the curve plays, never how late the sound comes.
     int getLatencySamples() const override { return latency; }
     bool delaysDry() const noexcept override { return true; }
-    int getLatencySamplesFor (std::span<const float> valuesSetByHand) const override;
-    void takeValuesBeforePrepare (std::span<const float> valuesSetByHand) override;
 
 private:
     static constexpr int numQualities = 3;
@@ -162,6 +159,35 @@ private:
         void move (float fade, float octaves) noexcept; // a sample on
     };
 
+    // A DC blocker: dsp::Filter's state-variable section, the same sums in the same order (so the same samples), with its
+    // state open, so that one can be handed from one Quality's way to another's, and two added into one. Its state is the
+    // analog filter's (its low-pass and band-pass outputs), so it means the same at any rate.
+    struct OffsetFilter
+    {
+        float ic1 = 0.0f, ic2 = 0.0f;
+
+        void reset() noexcept { ic1 = ic2 = 0.0f; }
+
+        float process (float input, const dsp::FilterCoefficients& c) noexcept
+        {
+            const auto v3 = input - ic2;
+            const auto v1 = c.a1 * ic1 + c.a2 * v3;
+            const auto v2 = ic2 + c.a2 * ic1 + c.a3 * v3;
+            ic1 = 2.0f * v1 - ic1;
+            ic2 = 2.0f * v2 - ic2;
+            return c.m0 * input + c.m1 * v1 + c.m2 * v2;
+        }
+    };
+
+    // Every channel's DC blockers, as one Quality's way hands them to another's.
+    struct OffsetStates
+    {
+        std::array<std::array<OffsetFilter, 2>, 2> offsets {}; // each channel's, each slot's
+        std::array<OffsetFilter, 2> joining {};                // each channel's
+        float joinCorner = 10.0f;
+        bool joins = false;
+    };
+
     // One Quality's way through: its filters to the curve's rate and back, the curves and the band's filters there, and
     // the same for the copy of what came in, for the mix.
     struct Path
@@ -173,7 +199,8 @@ private:
         struct Channel
         {
             std::array<dsp::AntialiasedCurve, 2> curves; // a shape in each slot
-            std::array<dsp::Filter, 2> dcBlockers {};    // what each takes an offset off with
+            std::array<OffsetFilter, 2> offsets {};      // what each takes an offset off with
+            OffsetFilter joining;                        // what a shape coming in plays besides the one playing (startJoining())
             dsp::AntialiasedCurve straight, outside;     // the band as a straight line would play it, and what is outside it
             dsp::Crossover low, high;                    // at From and To
             dsp::Filter bentHighPass, lowTilt, highTilt;
@@ -192,25 +219,39 @@ private:
         std::array<int, 2> restedFor {};             // how many samples the working point has stayed where it is
         float lastBias = 0.0f;                       // the working point they last played
         unsigned paddedAt = 0;
-        dsp::FilterCoefficients highPass, lowTilt, highTilt, dcBlocker;
+        dsp::FilterCoefficients highPass, lowTilt, highTilt, offsetFilter, joinFilter;
+        float joinCorner = 10.0f; // in hertz, gliding down to the DC blocker's
+        bool joins = false;       // a shape coming in takes the DC blocker of the one playing, and its own difference
         float lastLow = -1.0f, lastHigh = -1.0f, lastTilt = -2.0f;
         bool dryInStep = false; // the copy went through its filters in the last stretch
 
         void reset() noexcept;
+
+        // A shape starting in a slot, around a working point: its curves from rest, and its DC blocker from rest too.
         void startSlot (int index, Shape, float pointValue) noexcept;
+
+        // A shape starting in a slot beside the one playing, while the sound plays: its DC blocker is the one playing's,
+        // settled on the sound, plus another, started from rest, on what the new shape plays differently (an offset
+        // coming in at once among it). That one starts at 200 Hz, where it takes the offset off within a few
+        // milliseconds, and glides down to 10 Hz in 30 ms; there the two are added into the new shape's own.
+        void startJoining() noexcept;
+        void setJoinCorner (float hertz) noexcept;
+
+        void save (OffsetStates&) const noexcept;
+        void load (const OffsetStates&) noexcept;
         void startSplit (const Step&) noexcept;
         void setStep (const Step&) noexcept;
         void setTilt (float) noexcept;
     };
 
     double sampleRate = 44100.0;
-    int capacity = 1; // the longest stretch it plays at once
-    int latency = 0;  // the latency of the Quality set by hand
-    Quality preparedQuality = Quality::twice;
+    int capacity = 1;         // the longest stretch it plays at once
+    int latency = 0;          // the latest Quality's, which every Quality takes
     float smoothing = 0.001f; // of the way to new gains, per sample, at each of a glide's two steps
     float fadePerSample = 0.01f, edgeFadePerSample = 0.01f, octavesPerSample = 0.006f, listenStep = 0.01f, dcStep = 0.01f;
-    int quickWarmUp = 1, slowWarmUp = 1; // samples a shape or a Quality plays unheard before it is faded to: an even curve's,
-                                         // and one whose offset its DC blocker must settle on
+    float shapeFadePerSample = 0.01f;
+    float joinGlide = 0.001f; // how far one over a joining DC blocker's corner rises each sample, gliding it down
+    int warmUp = 1;           // samples a shape or a Quality plays unheard before it is faded to
     bool isFirstBlock = true;
     float lastMix = 1.0f; // the mix in its last block
 
@@ -221,9 +262,14 @@ private:
     std::array<Shape, 2> slotShapes { Shape::soft, Shape::soft };
     int slot = 0;            // the slot that plays; the other warms up, then fades in
     bool slotFading = false; // the other slot plays beside it
-    int slotWarmed = 0, slotWarmUp = 1;
+    int slotWarmed = 0;
     float slotFade = 0.0f;
-    std::array<float, 2> dcShares {}; // how far each slot's DC blocker is in
+    std::array<float, 2> dcShares {}; // how far the sound takes each slot's DC blocker's way rather than going round it
+
+    // Each slot's curve's slope at its middle, and how much steeper it is played at its working point: for the shape and
+    // the working point they were worked out for.
+    std::array<Shape, 2> slopedShapes { Shape::crush, Shape::crush };
+    std::array<float, 2> slopedAt { -1.0f, -1.0f }, middleSlopes { 1.0f, 1.0f }, steepnesses { 1.0f, 1.0f };
 
     float bandShare = 0.0f; // how far the sound goes the band's way, 0 to 1
     bool splitting = false; // the band's filters play
@@ -233,8 +279,11 @@ private:
 
     std::array<Path, numQualities> paths;
     int active = 0, next = -1;         // the Quality that plays, and one warming up or faded to
-    int warmed = 0, qualityWarmUp = 1; // samples the next has played, and how many it plays unheard
+    int warmed = 0, qualityWarmUp = 1; // samples the next has played, and how many it plays unheard: more where the band's
+                                       // filters, which it starts from rest, take longer to settle
     float qualityFade = 0.0f;
+    int handOverAt = -1;     // the sample of a stretch where the next Quality, warmed up, takes the DC blockers of the one playing
+    OffsetStates handedOver; // as the one playing had them there
 
     Controls controls;
     std::vector<Step> steps;
@@ -246,7 +295,8 @@ private:
     void play (float* const* channels, float* const* dry, int numChannels, int length, std::span<const float> values, bool usesDry);
     void workOutControls (int length, std::span<const float> values);
     void playPath (Path&, float* const* channels, float* const* dry, int numChannels, int length, bool usesDry);
-    int getPlayable (int wanted) const noexcept;
     bool isLopsided (int index, float targetBias) const noexcept; // a slot's curve, which leaves an offset
+    void updateSlopes (int index, float atBias) noexcept;
+    int getBandSettling() const noexcept; // samples the band's filters take to settle from rest, as they are
 };
 } // namespace phazite::devices

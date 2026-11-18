@@ -5,10 +5,10 @@
     "instrument": false,
     "type": "phaziteSaturator",
     "parameters": {
-      "drive": -4.19,
+      "drive": 4.56,
       "shape": "Soft",
       "colour": 0.7,
-      "tone": 0.0,
+      "tone": -0.1,
       "output": 2.92,
       "autoGain": 1,
       "band": 1,

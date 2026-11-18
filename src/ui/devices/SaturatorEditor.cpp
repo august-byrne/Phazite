@@ -381,7 +381,8 @@ private:
 //==============================================================================
 // The Band: the spectrum of what comes in (pale) and of what goes out (in the device's colour), with the band lit between
 // From and To as it plays (To an octave above From at least), its edges drawn as bars. A press takes the nearer edge, which
-// the drag moves sideways from where it is set by hand, as one undo step (graph::HandleDrag): Escape takes it back.
+// the drag moves sideways from where it is drawn, as one undo step (graph::HandleDrag): Escape takes it back. From pushes
+// To up ahead of it, so that the knobs show what plays.
 class SaturatorEditor::BandView : public juce::Component,
                                   private DisplayTicker::Display
 {
@@ -462,8 +463,10 @@ public:
         if (e.mods.isPopupMenu())
             return;
 
+        // The edge pressed, and the other, which the drag may move with it: one undo step, named after the edge pressed.
         dragged = findEdge (e.position);
-        drag.take ({ &parameters[(size_t) dragged] });
+        const auto other = dragged == Saturator::bandLow ? Saturator::bandHigh : Saturator::bandLow;
+        drag.take ({ &parameters[(size_t) dragged], &parameters[(size_t) other] });
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -471,9 +474,28 @@ public:
         if (! drag.isTaken())
             return;
 
-        drag.moveAlong (
-            0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getAxis().xFor (hertz); },
-            [this] (float x) { return (float) getAxis().frequencyAt (x); });
+        // To stays an octave above From, as the saturator plays it: so a drag of To starts from where its edge is drawn
+        // (above its knob's value, if that is set under the octave) and stops an octave above From, and a drag of From
+        // pushes To up ahead of it, back as From comes down again; after either, the knobs show what plays.
+        const auto moved = (float) e.getDistanceFromDragStartX();
+        const auto axis = getAxis();
+        const auto toRange = parameters[(size_t) Saturator::bandHigh].getRange();
+
+        if (dragged == Saturator::bandLow)
+        {
+            drag.moveAlong (
+                0, moved, [&axis] (float hertz) { return axis.xFor (hertz); }, [&axis] (float x) { return (float) axis.frequencyAt (x); });
+            const auto from = parameters[(size_t) Saturator::bandLow].getBaseValue();
+            drag.set (1, juce::jlimit (toRange.start, toRange.end, std::max (drag.getStart (1), 2.0f * from)));
+        }
+        else
+        {
+            const auto least = 2.0f * drag.getStart (1);
+            const auto shown = juce::jlimit (toRange.start, toRange.end, std::max (drag.getStart (0), least));
+            const auto to = juce::exactlyEqual (moved, 0.0f) ? shown : (float) axis.frequencyAt (axis.xFor (shown) + moved);
+            drag.set (0, std::max (to, least));
+        }
+
         readValues();
         repaint();
     }
@@ -614,6 +636,9 @@ SaturatorEditor::SaturatorEditor (const DeviceHandle& handle)
     auto& view = keep (std::make_unique<BandView> (device));
     bandView = &view;
     auto& edges = makeControls ({ "bandLow", "bandHigh" }, 2);
+
+    if (auto* to = dynamic_cast<juce::SettableTooltipClient*> (edges.findControl ("bandHigh")))
+        to->setTooltip (to->getTooltip() + ". It plays an octave above From at least, whatever it is set to");
     auto& part = keep (std::make_unique<BandPart> (view, edges));
     bandPart = &part;
     constexpr int pictureHeight = 90, pictureLeast = 48;

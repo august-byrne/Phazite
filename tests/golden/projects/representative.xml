@@ -609,8 +609,8 @@
              monitoring="never"
              name="Voice">
         <CLIP file="Audio/Voice Take 1.wav"
-              fileEnd="1.015458"
-              fileStart="0.01545833"
+              fileEnd="1.015479"
+              fileStart="0.01547917"
               id="107"
               kind="audio"
               name="Voice"

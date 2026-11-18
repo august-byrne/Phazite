@@ -86,7 +86,6 @@ instruments hold their notes. The figure is the share of one core's time.
 | Multiband: sound in / silence in | 1.46 / 1.22 | 2026-11-16 |
 | Limiter | 0.35 | 2026-11-16 |
 | Saturator | 0.74 | 2026-11-16 |
-| Exciter (now the Saturator's Band): its band from 5 kHz / from 1 kHz | 2.48 / 2.55 | 2026-11-16 |
 | Vinyl: stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
 | Delay | 0.14 | 2026-11-16 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
@@ -114,10 +113,9 @@ and silent (2026-11-16), so its stopped cost there is none.
 | Latency reported at 48 kHz | Samples | From |
 |---|---|---|
 | Limiter | 101 | 2026-11-16 |
-| Saturator | 6 | 2026-11-16 |
+| Saturator, at every Quality | 7 | 2026-11-18 |
 | Filter | 6 | 2026-11-16 |
 | Compressor | 6 | 2026-11-16 |
-| Exciter (now the Saturator's Band) | 157 | 2026-11-16 |
 | Multiband | 492 | 2026-11-16 |
 | Vinyl | 531 | 2026-11-16 |
 
@@ -138,7 +136,7 @@ played a while (8 notes held, or noise in), at 48 kHz in blocks of 128; the medi
 | Synth / Wavetable / FM | 0.02 / 0.02 / 0.01 | 2026-11-16 |
 | Drum Sampler / Sampler | 0.01 / 0.01 | 2026-11-16 |
 | EQ / Filter / Compressor / Limiter / Stereo / Phaser (now Motion's mode) / Vocoder | 0.00 | 2026-11-16 |
-| Multiband / Saturator / Exciter (now the Saturator's Band) / Chorus (now Motion's mode) | 0.01 | 2026-11-16 |
+| Multiband / Saturator / Chorus (now Motion's mode) | 0.01 | 2026-11-16 |
 | Vinyl | 0.02 | 2026-11-16 |
 | Delay | 0.32 | 2026-11-16 |
 | Reverb | 0.17 | 2026-11-16 |

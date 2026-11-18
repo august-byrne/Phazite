@@ -5,7 +5,7 @@
     "instrument": false,
     "type": "phaziteSaturator",
     "parameters": {
-      "drive": 12.99,
+      "drive": 15.74,
       "shape": "Soft",
       "colour": 0.3,
       "tone": 0.0,

@@ -662,7 +662,6 @@ std::array<float, std::size (bandOctaves)> measureLift (const Preset& preset, fl
     audio.makeCopyOf (dry);
 
     devices::Saturator saturator;
-    saturator.takeValuesBeforePrepare (preset.values);
     saturator.prepare (rate, blockSize);
 
     for (int done = 0; done < numSamples; done += blockSize)

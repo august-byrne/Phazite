@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The saturator as DSP (src/devices/saturation/Saturator.h), measured: its curves and their level, Colour's even harmonics
-// that keep a quiet sound's level and leave no offset, Crush's steps, each Quality's latency, the Band (a split that sums
-// flat, harmonics above the band and nothing under it, Output lifting the band alone, a copy for the mix in phase with it),
-// Listen, switches and knobs that move without a click, and the same samples in blocks of any size. Its aliases, at each
-// Quality, are measured with the others' in AntialiasingTests.cpp.
+// that keep a quiet sound's level and leave no offset, Crush's steps, one latency for every Quality, the Band (a split that
+// sums flat, harmonics above the band and nothing under it, Output lifting the band alone, a copy for the mix in phase with
+// it), Listen, switches and knobs that move without a click, a new shape heard soon and without a thump, Colour turned up
+// without a swing, and the same samples in blocks of any size. Its aliases, at each Quality, set by hand or automated, are
+// measured with the others' in AntialiasingTests.cpp.
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
 #include "devices/saturation/Saturator.h"
@@ -13,7 +14,6 @@
 #include <cmath>
 #include <functional>
 #include <memory>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -100,12 +100,11 @@ Stereo play (Saturator& saturator, int numSamples, int blockSize, const Input& i
     return played;
 }
 
-// The same for a mono sound and values that stay, on a new saturator, its Quality set by hand: its left channel.
+// The same for a mono sound and values that stay, on a new saturator: its left channel.
 std::vector<float> play (const std::vector<float>& values, int numSamples, const std::function<float (int)>& input, int blockSize = 480,
                          double sampleRate = rate)
 {
     Saturator saturator;
-    saturator.takeValuesBeforePrepare (values);
     saturator.prepare (sampleRate, blockSize);
     return play (
                saturator, numSamples, blockSize,
@@ -194,7 +193,6 @@ void checkChangesWithoutClick (const char* what, const std::vector<float>& first
                                   getRoughness (steady (second), (size_t) every, (size_t) (2 * every)));
 
     Saturator saturator;
-    saturator.takeValuesBeforePrepare (first);
     saturator.prepare (rate, blockSize);
     const auto changing = play (
         saturator, length, blockSize,
@@ -209,6 +207,45 @@ void checkChangesWithoutClick (const char* what, const std::vector<float>& first
     CAPTURE (rough);
     CAPTURE (smooth);
     CHECK (rough <= smooth * allowance + 1.0e-5f);
+}
+
+// A sound through a Butterworth low-pass of an even order (sections of two), in double precision: what is under a frequency.
+std::vector<double> getLowPassed (const std::vector<float>& sound, double frequency, int sections, double sampleRate = rate)
+{
+    std::vector<double> passed (sound.begin(), sound.end());
+
+    for (int k = 1; k <= sections; ++k)
+    {
+        // Each section's Q, from the poles of the whole (RBJ's biquad).
+        const auto q = 1.0 / (2.0 * std::cos ((2 * k - 1) * juce::MathConstants<double>::pi / (4.0 * sections)));
+        const auto w = twoPi * frequency / sampleRate, alpha = std::sin (w) / (2.0 * q), cosine = std::cos (w);
+        const auto a0 = 1.0 + alpha;
+        const auto b0 = (1.0 - cosine) / 2.0 / a0, b1 = (1.0 - cosine) / a0, b2 = b0;
+        const auto a1 = -2.0 * cosine / a0, a2 = (1.0 - alpha) / a0;
+        auto x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+
+        for (auto& sample : passed)
+        {
+            const auto y = b0 * sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1;
+            x1 = sample;
+            y2 = y1;
+            y1 = y;
+            sample = y;
+        }
+    }
+
+    return passed;
+}
+
+double getPeak (const std::vector<double>& sound, size_t from, size_t to)
+{
+    auto peak = 0.0;
+
+    for (auto i = from; i < std::min (to, sound.size()); ++i)
+        peak = std::max (peak, std::abs (sound[i]));
+
+    return peak;
 }
 
 // The number of levels a sound stays on for a while: the steps a slow ramp is rounded to.
@@ -406,23 +443,22 @@ TEST_CASE ("The saturator's Crush rounds the sound to as many steps as its drive
     CHECK (toDecibels (getLevel (louder, 24000, 19200, 500.0) / 0.25) == doctest::Approx (6.0).epsilon (0.05));
 }
 
-TEST_CASE ("The saturator's latency is each Quality's, and what the sound takes; automation of Quality keeps it")
+TEST_CASE ("The saturator's latency is the same at every Quality, 7 samples, and what the sound takes; automation moves the Quality "
+           "anywhere")
 {
-    std::set<int> found;
-
+    // An impulse through it, undriven, at each Quality and rate: the centre of what comes out is 7 samples late, which it
+    // reports, whatever its values (no setting changes it).
     for (const auto quality : { 0.0f, 1.0f, 2.0f })
     {
         for (const auto sampleRate : { 44100.0, 48000.0, 96000.0 })
         {
-            // An impulse through it, undriven: the centre of what comes out is as late as it says.
             const auto values = with ({ { "drive", -24.0f }, { "quality", quality } });
             Saturator saturator;
-            saturator.takeValuesBeforePrepare (values);
             saturator.prepare (sampleRate, 512);
             const auto latency = saturator.getLatencySamples();
-            CHECK (latency == saturator.getLatencySamplesFor (values));
-            CHECK (latency == Saturator::getLatencyOf ((Saturator::Quality) (int) quality));
-            found.insert (latency);
+            CHECK (latency == 7);
+            CHECK (latency == Saturator::getLatency());
+            CHECK (saturator.getLatencySamplesFor (values) == -1);
 
             const auto played = play (
                 saturator, 4096, 512, [] (int t) { return std::pair { t == 100 ? 0.01f : 0.0f, t == 100 ? 0.01f : 0.0f }; },
@@ -437,36 +473,34 @@ TEST_CASE ("The saturator's latency is each Quality's, and what the sound takes;
 
             CAPTURE (quality);
             CAPTURE (sampleRate);
-            MESSAGE ("Quality " << quality << ": " << latency << " samples");
-            CHECK (moment / weight - 100.0 == doctest::Approx ((double) latency).epsilon (0.1 / latency));
+            CHECK (moment / weight - 100.0 == doctest::Approx (7.0).epsilon (0.1 / 7.0));
         }
     }
 
-    // Set by hand to the best, automation that moves it to another plays it as late, and the reverse plays the one set.
-    const auto best = with ({ { "drive", -24.0f }, { "quality", 2.0f } });
-    Saturator saturator;
-    saturator.takeValuesBeforePrepare (best);
-    saturator.prepare (rate, 256);
-    const auto latency = saturator.getLatencySamples();
-
-    for (const auto quality : { 0.0f, 1.0f })
+    // Automation that moves the Quality from any to any plays it as late.
+    for (const auto first : { 0.0f, 1.0f, 2.0f })
     {
-        saturator.reset();
-        auto values = best;
-        values[Saturator::quality] = quality;
-        const auto played = play (
-            saturator, 8192, 256, [] (int t) { return std::pair { t == 5000 ? 0.01f : 0.0f, 0.0f }; },
-            [&] (int t) { return t < 1024 ? best : values; });
-        auto weight = 0.0, moment = 0.0;
-
-        for (size_t i = 4096; i < played.left.size(); ++i)
+        for (const auto then : { 0.0f, 1.0f, 2.0f })
         {
-            weight += played.left[i];
-            moment += (double) i * played.left[i];
-        }
+            const auto before = with ({ { "drive", -24.0f }, { "quality", first } });
+            const auto after = with ({ { "drive", -24.0f }, { "quality", then } });
+            Saturator saturator;
+            saturator.prepare (rate, 256);
+            const auto played = play (
+                saturator, 8192, 256, [] (int t) { return std::pair { t == 5000 ? 0.01f : 0.0f, 0.0f }; },
+                [&] (int t) { return t < 1024 ? before : after; });
+            auto weight = 0.0, moment = 0.0;
 
-        CAPTURE (quality);
-        CHECK (moment / weight - 5000.0 == doctest::Approx ((double) latency).epsilon (0.1 / latency));
+            for (size_t i = 4096; i < played.left.size(); ++i)
+            {
+                weight += played.left[i];
+                moment += (double) i * played.left[i];
+            }
+
+            CAPTURE (first);
+            CAPTURE (then);
+            CHECK (moment / weight - 5000.0 == doctest::Approx (7.0).epsilon (0.1 / 7.0));
+        }
     }
 }
 
@@ -501,37 +535,156 @@ TEST_CASE ("The saturator's switches and knobs, moved fast, make no click")
                               with ({ { "band", 1.0f }, { "bandLow", 20.0f }, { "bandHigh", 20000.0f } }));
 }
 
-TEST_CASE ("The saturator's Band, with the curve left straight, changes nothing but the sound's phase: flat within 0.1 dB")
+TEST_CASE ("The saturator's new shape is heard within 40 ms, lopsided or not, without a thump under it")
 {
-    // Quiet tones from 20 Hz to 20 kHz, with the band on and off: as loud either way, whatever its edges.
+    // A 100 Hz sine at -6 dBFS, the shape changed at a second in: within 40 ms of the change the sound is the new shape's (as a
+    // saturator playing it all along plays it), and what is under 30 Hz around the change stays within 3 dB of what it is in
+    // steady playing of either shape (the 100 Hz tone's own leak through the measuring filter). A lopsided shape started its
+    // DC blocker from rest under the sound, and was kept unheard for 150 ms while it settled; started at 200 Hz and glided
+    // down to 10 Hz in 30 ms, it thumped at -25 dBFS (what it held of the tone couldn't follow the glide); faded in over 10 ms,
+    // two shapes that play the tone differently thumped at -36 dBFS.
+    constexpr int blockSize = 64, change = 48000, length = change + 24000, soon = change + 1920; // 40 ms after the change
+    const auto tone = sine (100.0, 0.5f);
+
+    struct Change
+    {
+        Shape from, to;
+        float colour, quality = 0.0f, nextQuality = 0.0f;
+    };
+
+    // Shapes, and (a lopsided one playing) a Quality, whose new way takes the DC blockers of the one playing.
+    for (const auto& [from, to, colour, quality, nextQuality] :
+         { Change { Shape::soft, Shape::tube, 0.0f }, Change { Shape::soft, Shape::hard, 0.5f }, Change { Shape::tube, Shape::tape, 0.5f },
+           Change { Shape::tube, Shape::soft, 0.0f }, Change { Shape::tube, Shape::tube, 0.5f, 0.0f, 2.0f } })
+    {
+        CAPTURE ((int) from);
+        CAPTURE ((int) to);
+        CAPTURE (colour);
+        CAPTURE (nextQuality);
+        const auto first = with ({ { "shape", (float) from }, { "colour", colour }, { "quality", quality } });
+        const auto second = with ({ { "shape", (float) to }, { "colour", colour }, { "quality", nextQuality } });
+        const auto steadyFirst = play (first, length, tone, blockSize), steadySecond = play (second, length, tone, blockSize);
+
+        Saturator saturator;
+        saturator.prepare (rate, blockSize);
+        const auto changing = play (
+                                  saturator, length, blockSize,
+                                  [&] (int t)
+                                  {
+                                      const auto sample = tone (t);
+                                      return std::pair { sample, sample };
+                                  },
+                                  [&] (int t) { return t < change ? first : second; })
+                                  .left;
+
+        // Heard: from 40 ms on, what is left of the old shape (the share of what tells the two apart that is still there) is
+        // under 2 %. (What the new shape's DC blocker still takes off a little higher than its 10 Hz, as it glides down, turns
+        // the lowest of that difference a little, across it, not along it.)
+        std::vector<float> left (changing.size()), apart (changing.size());
+        auto along = 0.0, whole = 0.0;
+
+        for (size_t i = 0; i < changing.size(); ++i)
+        {
+            left[i] = changing[i] - steadySecond[i];
+            apart[i] = steadyFirst[i] - steadySecond[i];
+
+            if (i >= (size_t) soon && i < (size_t) soon + 960)
+            {
+                along += (double) left[i] * apart[i];
+                whole += (double) apart[i] * apart[i];
+            }
+        }
+
+        if (from != to) // two Qualities play a low tone alike
+        {
+            const auto oldShare = along / whole;
+            CAPTURE (oldShare);
+            CHECK (std::abs (oldShare) < 0.02);
+        }
+
+        // No thump: under 30 Hz, around the change, as in steady playing.
+        const auto under = [&] (const std::vector<float>& sound)
+        { return getPeak (getLowPassed (sound, 30.0, 2), (size_t) change, (size_t) change + 12000); };
+        const auto steady = std::max (under (steadyFirst), under (steadySecond)), around = under (changing);
+        CAPTURE (toDecibels (steady));
+        CAPTURE (toDecibels (around));
+        CHECK (around < steady * juce::Decibels::decibelsToGain (3.0));
+    }
+}
+
+TEST_CASE ("The saturator's Colour, turned up fast from 0, leaves no swing under 20 Hz")
+{
+    // A 40 Hz sine at -3 dBFS, Colour from 0 to 100 % in 50 ms: the DC blocker, which the sound goes round while the curve is
+    // even, has played all along, so it doesn't start from rest under the sound when the curve becomes lopsided (which made
+    // a swing at about 10 Hz, about a third of the bass's level). What is left under 20 Hz, against a saturator at 100 %
+    // all along, is the offset itself coming in as Colour turns (about a fifth of full scale here), which a 10 Hz high-pass
+    // takes off over its own time: one lobe of -29 dBFS, gone in a quarter of a second.
+    constexpr int blockSize = 64, start = 48000, sweep = 2400, length = start + 48000;
+    const auto tone = sine (40.0, juce::Decibels::decibelsToGain (-3.0f));
+    Saturator saturator;
+    saturator.prepare (rate, blockSize);
+    const auto played = play (
+                            saturator, length, blockSize,
+                            [&] (int t)
+                            {
+                                const auto sample = tone (t);
+                                return std::pair { sample, sample };
+                            },
+                            [&] (int t) { return with ({ { "colour", std::clamp ((float) (t - start) / (float) sweep, 0.0f, 1.0f) } }); })
+                            .left;
+    const auto steady = play (with ({ { "colour", 1.0f } }), length, tone, blockSize);
+    std::vector<float> difference (played.size());
+
+    for (size_t i = 0; i < played.size(); ++i)
+        difference[i] = played[i] - steady[i];
+
+    const auto under = getLowPassed (difference, 20.0, 4);
+    const auto swing = toDecibels (getPeak (under, (size_t) start, (size_t) length));
+    CAPTURE (swing);
+    CHECK (swing < -26.0);
+    CHECK (toDecibels (getPeak (under, (size_t) start + 14400, (size_t) length)) < -70.0); // gone 300 ms on: no ring
+}
+
+TEST_CASE ("The saturator's Band, with the curve left straight, changes nothing but the sound's phase: flat within 0.1 dB at every "
+           "Quality")
+{
+    // Quiet tones from 20 Hz to 20 kHz, with the band on and off: as loud either way, whatever its edges and its Quality.
     struct Edges
     {
         float from, to;
     };
 
-    for (const auto sampleRate : { 44100.0, 48000.0 })
-    {
-        for (const auto& edges :
-             { Edges { 3000.0f, 20000.0f }, Edges { 300.0f, 3000.0f }, Edges { 20.0f, 1000.0f }, Edges { 80.0f, 200.0f } })
+    for (const auto quality : { 0.0f, 1.0f, 2.0f })
+        for (const auto sampleRate : { 44100.0, 48000.0 })
         {
-            for (const auto hertz : { 20.0, 40.0, 100.0, 200.0, 300.0, 600.0, 1000.0, 2000.0, 3000.0, 5000.0, 10000.0, 15000.0, 20000.0 })
+            for (const auto& edges :
+                 { Edges { 3000.0f, 20000.0f }, Edges { 300.0f, 3000.0f }, Edges { 20.0f, 1000.0f }, Edges { 80.0f, 200.0f } })
             {
-                const auto length = (int) (sampleRate * 0.25) + (int) (4.0 * sampleRate / hertz);
-                const auto count = (int) (std::floor (0.2 * hertz) * sampleRate / hertz); // whole cycles
-                const auto off = play (with ({ { "drive", -24.0f } }), length, sine (hertz, 0.01f, sampleRate), 480, sampleRate);
-                const auto on = play (with ({ { "drive", -24.0f }, { "band", 1.0f }, { "bandLow", edges.from }, { "bandHigh", edges.to } }),
-                                      length, sine (hertz, 0.01f, sampleRate), 480, sampleRate);
-                CAPTURE (sampleRate);
-                CAPTURE (edges.from);
-                CAPTURE (edges.to);
-                CAPTURE (hertz);
-                const auto from = length - count;
-                CHECK (
-                    std::abs (toDecibels (getLevel (on, from, count, hertz, sampleRate) / getLevel (off, from, count, hertz, sampleRate)))
-                    < 0.1);
+                for (const auto hertz :
+                     { 20.0, 40.0, 100.0, 200.0, 300.0, 600.0, 1000.0, 2000.0, 3000.0, 5000.0, 10000.0, 15000.0, 20000.0 })
+                {
+                    const auto length = (int) (sampleRate * 0.25) + (int) (4.0 * sampleRate / hertz);
+                    const auto count = (int) (std::floor (0.2 * hertz) * sampleRate / hertz); // whole cycles
+                    const auto off = play (with ({ { "drive", -24.0f }, { "quality", quality } }), length, sine (hertz, 0.01f, sampleRate),
+                                           480, sampleRate);
+                    const auto on = play (with ({ { "drive", -24.0f },
+                                                  { "quality", quality },
+                                                  { "band", 1.0f },
+                                                  { "bandLow", edges.from },
+                                                  { "bandHigh", edges.to } }),
+                                          length, sine (hertz, 0.01f, sampleRate), 480, sampleRate);
+                    CAPTURE (quality);
+                    CAPTURE (sampleRate);
+                    CAPTURE (edges.from);
+                    CAPTURE (edges.to);
+                    CAPTURE (hertz);
+                    const auto from = length - count;
+                    CHECK (std::abs (
+                               toDecibels (getLevel (on, from, count, hertz, sampleRate) / getLevel (off, from, count, hertz, sampleRate)))
+                           < 0.1);
+                }
             }
         }
-    }
 }
 
 TEST_CASE ("The saturator's Band, driven hard, adds harmonics above it and nothing under From; Output lifts the band alone")
@@ -603,7 +756,6 @@ TEST_CASE ("The saturator's copy for the mix meets its sound in phase with the B
                                   { "quality", quality },
                                   { "mix", mixed } });
             auto saturator = std::make_unique<Saturator>();
-            saturator->takeValuesBeforePrepare (values);
             return phazite::test::playThroughRunner (Saturator::info, std::move (saturator), values, noise, rate, 480);
         };
 
@@ -626,7 +778,6 @@ TEST_CASE ("The saturator's Listen plays the band alone, as it goes out, whateve
     constexpr int blockSize = 64;
     Saturator saturator;
     const auto values = with ({ { "band", 1.0f }, { "bandLow", 2000.0f }, { "drive", -24.0f }, { "output", 6.0f } });
-    saturator.takeValuesBeforePrepare (values);
     saturator.prepare (rate, blockSize);
     const auto both = [] (int t)
     { return (float) (0.25 * std::sin (twoPi * 200.0 * t / rate) + 0.01 * std::sin (twoPi * 8000.0 * t / rate)); };
@@ -693,7 +844,6 @@ TEST_CASE ("The saturator plays the same samples in blocks of any size, with its
     const auto playIn = [&] (int blockSize, int preparedFor)
     {
         Saturator saturator;
-        saturator.takeValuesBeforePrepare (first);
         saturator.prepare (rate, preparedFor);
         return play (
                    saturator, length, blockSize, [&] (int t) { return std::pair { noise[(size_t) t], -noise[(size_t) t] }; },
