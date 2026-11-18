@@ -136,6 +136,17 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
+- **200. `AppTests`, "A first save's versions are copied by their history's thread...", once couldn't write its 8 MiB file
+  into an untitled project's `Versions/local`** (CI's windows-profile job, 2026-11-18, one run of six), and then hung to
+  its time limit. The hang is fixed: the test held the history's writes by a hook, and a check that failed left them
+  held while the project waited for them; the tests that hold writes now let go of them before the project goes. Why
+  the write failed is unknown. Ruled out: the versions write nothing in `Versions/local/` itself (only in
+  `local/<computer>/`, and nothing at a new project's first open); the sweep and the stamps' floor are done before the
+  history has read; `removeLeftovers()` deletes only `joining-*` in `pieces/`; the readers only read, and list only
+  folders in `local/`; no first save's copy held the folder yet; the test's hook isn't on JUCE's `replaceWithData()`.
+  Left: `replaceWithData()` renames a temporary file over the target in five tries over about half a second, which a
+  scanner reading a new large file on a runner can outlast. The test now writes the file in place and says the
+  system's error if it fails again: read that message then.
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
   crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
   its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter
