@@ -1687,6 +1687,40 @@ TEST_CASE ("A send's lane stays in time with the sound it sends through a device
     CHECK (phazite::test::getDifference (renderOwn (song, 1.5), jumped, 48000.0).peakDb <= -100.0f); // none
 }
 
+TEST_CASE ("A device after one with latency is given the song's place of the sound it plays")
+{
+    // What a device counts from the song's place (an LFO in time with the song, its grid of control steps, a noise that
+    // starts with the song) must meet the sound that belongs there, whatever latency stands before it: its place is the
+    // song's less how late the sound comes into it, as its automation's is. Test Place plays the place it is given; behind a
+    // device 1,000 samples late it plays, in a render, the same as behind none, where it played 1,000 samples ahead.
+    const auto rendered = [] (float latencySamples)
+    {
+        TestSong song;
+        auto& state = *phazite::findSong (song.context);
+        const auto track = addToneTrack (song, song.firstTrack, "Tone");
+
+        {
+            const phazite::UndoStep step (state, "Add Devices");
+            const auto latency = phazite::test::addTestDevice (state, track, phazite::test::TestLatency::typeID);
+            phazite::setValueSetByHand (state, phazite::ParameterRef { latency, "samples" }, latencySamples);
+            phazite::test::addTestDevice (state, track, phazite::test::TestPlace::typeID);
+        }
+
+        return renderOwn (song, 1.0);
+    };
+
+    const auto direct = rendered (0.0f), late = rendered (1000.0f);
+    REQUIRE (direct.getNumSamples() > 40000);
+    REQUIRE (std::abs (direct.getSample (0, 40000)) > 1.0e-3f); // it plays its place, which the fader passes on
+
+    for (const auto at : { 100, 4800, 20000, 40000 })
+    {
+        CAPTURE (at);
+        CHECK (late.getSample (0, at) == doctest::Approx (direct.getSample (0, at)).epsilon (1.0e-6));
+        CHECK (direct.getSample (0, at + 64) > direct.getSample (0, at)); // and its place moves on with the song
+    }
+}
+
 TEST_CASE ("A send's lane plays on as its track is frozen, and on the track that Bounce in Place makes")
 {
     // A freeze renders the track before its fader: its fader and its sends play on live, and so do their lanes. Bounce in

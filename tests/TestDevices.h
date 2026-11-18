@@ -244,6 +244,27 @@ struct TestLatency final : devices::Processor
     std::array<devices::dsp::DelayLine, 2> lines;
 };
 
+// Puts out, in place of what comes in, where it is told the song is at each sample (its place in samples, over 65,536, so
+// that a float holds it exactly) while the song plays, and silence while it is stopped: a render shows which place a device
+// is given for the sound it plays. It never sleeps.
+struct TestPlace final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestPlace";
+    static constexpr devices::DeviceInfo info { .typeID = typeID, .name = "Test Place", .kind = devices::DeviceKind::effect };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const devices::ProcessContext& block) override
+    {
+        for (int channel = 0; channel < std::min (2, block.numChannels); ++channel)
+            for (int i = 0; i < block.numSamples; ++i)
+                block.channels[channel][i] = block.isPlaying ? (float) (block.songSample + i) / 65536.0f : 0.0f;
+    }
+
+    bool sleepsOnSilence() const noexcept override { return false; }
+};
+
 // Puts out its sidechain's sound in place of what comes in (silence without one), so a render shows what reaches it.
 struct TestSidechain final : devices::Processor
 {
@@ -309,6 +330,7 @@ inline void registerTestDevices()
         add (TestSidechain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestSidechain>(); });
         add (TestBusy::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestBusy>(); });
         add (TestLatency::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestLatency>(); });
+        add (TestPlace::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestPlace>(); });
         return true;
     }();
 }

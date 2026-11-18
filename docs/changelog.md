@@ -36,6 +36,9 @@ The full text of every step, as it was written when it was built, is in the
   as in a render (the engine wakes a sleeping device that asks for it when its values change and it would sound for
   them; a modulated Clean filter still sleeps), and the Delay's Repitch glide ends exactly at the time set (its time
   is read in a double: a float stopped it 37 samples short at 2 s and 96 kHz). Known bugs 203 and 202.
+- **A device after latency is given the place of its sound:** the song's place a device counts from (a synced LFO, a
+  grid of control steps, Age's crackle) is the song's less the latency of what stands before it, as its automation
+  already was, so that a latency added before a device no longer moves what it plays against its sound.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

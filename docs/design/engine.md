@@ -172,6 +172,10 @@ r8brain-free-src and Phazite's devices only.
   ([automation-and-modulation.md](automation-and-modulation.md)).
 - **Delay compensation** lines up every path to the master, the sends' and the sidechains' too. The Low Latency
   switch leaves it off for what is played live ([performance.md](performance.md)).
+  A device that sound comes into late (through devices before it, or the strips a bus adds up) is given the song's
+  place less that latency, for its automation and for what it counts from the place itself (an LFO in time with the
+  song, its grid of control steps, a noise that starts with the song), so that each meets the sound that belongs
+  there; a strip's modulators are not moved so.
 - **Worker threads** help play each block, each strip a task, at the audio thread's priority.
 - **Audio files** are read ahead of where they play by a reading thread, so the audio thread never waits for the
   disk: ahead of where they play, of where playback will start and of the loop's start, a version's bounce compared

@@ -1390,9 +1390,29 @@ DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip&
     block.beatsPerSample = span.beatsPerSample;
     block.barsPerSample = span.barsPerSample;
     block.sample = span.gridSample;
-    block.automationBeat = transport.playing && device.latency > 0 && ! device.automation.empty()
-                               ? span.plan->tempo.toBeats ((double) (transport.sample - device.latency))
-                               : span.beat;
+    block.automationBeat = span.beat;
+
+    // Where the song is for a device that sound comes into late (through devices before it, or, on a sum, through the strips
+    // it adds up): the song's place less that latency, for its automation and for everything it counts from the song's
+    // place itself (an LFO in time with the song, its grid of control steps, a noise that starts with the song), so that
+    // each meets the sound that belongs there whatever stands before the device. Without it, a latency added before a
+    // device moved what it played against its sound (until 2026-11-18 only its automation was moved).
+    if (transport.playing && device.latency > 0)
+    {
+        const auto& tempo = span.plan->tempo;
+        const auto sample = transport.sample - device.latency;
+        const auto beat = tempo.toBeats ((double) sample);
+        const auto timeSignature = tempo.getTimeSignatureAt (beat);
+        block.songSample = sample;
+        block.beat = beat;
+        block.automationBeat = beat;
+        block.tempo = tempo.getTempoAt (beat);
+        block.bars = tempo.getBarsAt (beat);
+        block.barStart = tempo.getBarStart (beat);
+        block.timeSignatureNumerator = timeSignature.numerator;
+        block.timeSignatureDenominator = timeSignature.denominator;
+        block.barLength = timeSignature.getBarLength();
+    }
 
     // What modulates it: its strip's modulators, on the block's control points.
     if (auto* modulation = device.modulation.get())
