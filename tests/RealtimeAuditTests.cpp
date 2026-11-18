@@ -1634,6 +1634,58 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's delay on the synth's chords, everything on, its times, Freeze, Character and Transition "
+               "automated")
+    {
+        using phazite::devices::Delay;
+        TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        addChords (song, track);
+        const auto delay = song.addEffect (track, Delay::typeID);
+
+        // Each side its own time, bouncing, a feedback over 100 %, the modulation and the duck at work; both times swept by
+        // lanes, a cycle a beat, so that they glide or fade all the time.
+        for (const auto& [id, value] : { std::pair<const char*, float> { "link", 0.0f },
+                                         { "pingPong", 1.0f },
+                                         { "feedback", 1.05f },
+                                         { "modDepth", 0.6f },
+                                         { "modRate", 3.0f },
+                                         { "duck", 0.6f } })
+            song.setParameter (delay, id, value);
+
+        sweepParameter (song, { delay, "time" }, 80.0f, 400.0f);
+        sweepParameter (song, { delay, "timeRight" }, 120.0f, 600.0f);
+
+        // Sync, the Freeze, the Character and the Transition switched by lanes, each on beats of its own, so that the times
+        // move between note values and milliseconds and the switches crossfade all along.
+        const auto steps = [&song, delay] (const char* id, int every)
+        {
+            const phazite::ParameterRef parameter { delay, id };
+            const auto range = phazite::getControlTravel (getSong (song), parameter);
+            REQUIRE (range.has_value());
+
+            for (int beat = 0; beat < 8; ++beat)
+            {
+                const auto position = phazite::toControlPosition (*range, (beat / every) % 2 == 0 ? 0.0f : 1.0f);
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+                phazite::addPoint (getSong (song), parameter, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+            }
+        };
+
+        steps ("sync", 4);
+        steps ("freeze", 3);
+        steps ("character", 2);
+        steps ("transition", 1);
+
+        const auto m = playAndMeasure (song, [&song, delay] { getPlayed (song, delay).getScope().setListening (true); });
+        report ("Phazite's delay on the synth's chords, everything on, its times swept by lanes, Sync, Freeze, Character and "
+                "Transition automated, its editor's display listening",
+                m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's effects with their editors' displays listening, what goes in and out of each tapped")
     {
         // Each device's scope (devices/core/DeviceScope.h) taking its sound in and out, and its peaks, as open editors have it.

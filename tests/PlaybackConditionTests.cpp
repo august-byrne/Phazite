@@ -647,7 +647,7 @@ TEST_CASE ("At every condition a song played live sounds as its render does")
             const auto echoes = song.addTrack ("Echoes");
             song.addAudioClip (echoes, phazite::test::writeHit (song.getSoundsFolder().getChildFile ("Hit.wav")), 4.0);
             const auto delay = song.addEffect (echoes, dev::Delay::typeID);
-            song.setParameter (delay, "time", 11.0f); // 1/2
+            song.setParameter (delay, "note", 11.0f); // 1/2
             song.setParameter (delay, "feedback", 0.5f);
             song.setParameter (delay, "mix", 0.5f);
 

@@ -990,7 +990,7 @@ TEST_CASE ("The delay's first echo moves from its time set by hand as far as the
     pressAndLetGo (song, echoes, onEcho);
 
     // Synced, a dotted eighth: dragged a pixel at a time as far right as the echoes are apart, twice as long, a dotted quarter.
-    REQUIRE (valueOf (song, delay, "time") == 6.0f); // 1/8D
+    REQUIRE (valueOf (song, delay, "note") == 6.0f); // 1/8D
     const auto feedback = valueOf (song, delay, "feedback");
     Mouse mouse (echoes);
     mouse.press (onEcho);
@@ -998,7 +998,7 @@ TEST_CASE ("The delay's first echo moves from its time set by hand as far as the
     for (int x = 1; x <= juce::roundToInt (step); ++x)
         mouse.dragTo (onEcho + juce::Point<int> (x, 0));
 
-    CHECK (valueOf (song, delay, "time") == 9.0f); // 1/4D, not one note value more for each event
+    CHECK (valueOf (song, delay, "note") == 9.0f); // 1/4D, not one note value more for each event
     CHECK (valueOf (song, delay, "feedback") == feedback);
     mouse.release();
     mouse.pause();
@@ -1006,7 +1006,7 @@ TEST_CASE ("The delay's first echo moves from its time set by hand as far as the
 
     // Free: 10 pixels right of a step's worth, the time in proportion, from 375 ms; 20 up, the feedback up as far.
     phazite::getParameter (song.context, { delay, "sync" }).setValue (0.0f);
-    const auto milliseconds = valueOf (song, delay, "milliseconds");
+    const auto milliseconds = valueOf (song, delay, "time");
     mouse.press (onEcho);
 
     for (int x = 1; x <= 10; ++x)
@@ -1014,7 +1014,7 @@ TEST_CASE ("The delay's first echo moves from its time set by hand as far as the
 
     mouse.release();
     mouse.pause();
-    CHECK (valueOf (song, delay, "milliseconds") == doctest::Approx (milliseconds * (step + 10.0f) / step).epsilon (0.002));
+    CHECK (valueOf (song, delay, "time") == doctest::Approx (milliseconds * (step + 10.0f) / step).epsilon (0.002));
     CHECK (valueOf (song, delay, "feedback") > feedback);
     CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Time"));
 }
@@ -1027,8 +1027,8 @@ TEST_CASE ("The delay's first echo dragged while an LFO moves its time moves the
     const auto delay = song.addEffect (song.firstTrack, Delay::typeID);
     song.setParameter (delay, "sync", 0.0f);
     song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID); // a sound into it, so that it doesn't sleep
-    modulateAndPlay (song, playback, { delay, "milliseconds" }, 0.25f, true);
-    const auto handle = phazite::getParameter (song.context, { delay, "milliseconds" });
+    modulateAndPlay (song, playback, { delay, "time" }, 0.25f, true);
+    const auto handle = phazite::getParameter (song.context, { delay, "time" });
     REQUIRE (std::abs (handle.getValue() - handle.getBaseValue()) > 50.0f);
     const auto before = handle.getBaseValue();
 
@@ -1036,7 +1036,7 @@ TEST_CASE ("The delay's first echo dragged while an LFO moves its time moves the
     TestWindow window (editor, editor.getWidth(), editor.getHeight());
     const auto step = editor.getEchoPosition (1).x - editor.getEchoPosition (0).x;
     dragBy (editor.getEchoes(), (editor.getEchoPosition (1) - juce::Point<float> (0.0f, 10.0f)).roundToInt(), { 10, 0 });
-    CHECK (valueOf (song, delay, "milliseconds") == doctest::Approx (before * (step + 10.0f) / step).epsilon (0.002));
+    CHECK (valueOf (song, delay, "time") == doctest::Approx (before * (step + 10.0f) / step).epsilon (0.002));
 }
 
 TEST_CASE ("A graph's handle held still while the song plays grabs its parameter in Touch, as a knob held still does")

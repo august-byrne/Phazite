@@ -42,7 +42,7 @@ void addEchoSong (TestSong& song, bool secondHit)
         song.addAudioClip (track, hit, 5.0);
 
     const auto delay = song.addEffect (track, phazite::devices::Delay::typeID);
-    song.setParameter (delay, "time", 9.0f); // 1/4D
+    song.setParameter (delay, "note", 9.0f); // 1/4D
     song.setParameter (delay, "feedback", 0.6f);
     song.setParameter (delay, "mix", 0.5f);
     phazite::test::dispatchPendingMessages();

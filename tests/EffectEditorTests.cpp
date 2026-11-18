@@ -606,15 +606,15 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
     auto& echoes = editor.getEchoes();
     phazite::test::Mouse mouse (echoes);
     const auto first = editor.getEchoPosition (1).roundToInt(), second = editor.getEchoPosition (2).roundToInt();
-    const auto timeBefore = song.valueOf ("time");
+    const auto timeBefore = song.valueOf ("note");
     mouse.press (first - juce::Point<int> (0, 10));
     mouse.dragTo (second - juce::Point<int> (0, 60));
     mouse.release();
-    CHECK (song.valueOf ("time") > timeBefore);
+    CHECK (song.valueOf ("note") > timeBefore);
     CHECK (song.valueOf ("feedback") > 0.35f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Note")); // the time as a note value, while synced
     phazite::undo (*song.song);
-    CHECK (song.valueOf ("time") == doctest::Approx (timeBefore));
+    CHECK (song.valueOf ("note") == doctest::Approx (timeBefore));
     CHECK (song.valueOf ("feedback") == doctest::Approx (0.35f));
 
     // The band's high end dragged left: a lower high cut.
@@ -627,6 +627,110 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
     CHECK (song.valueOf ("highCut") < 8000.0f);
     CHECK (song.valueOf ("lowCut") == doctest::Approx (100.0f));
     CHECK (song.describeUndo() == juce::String ("Undo Change High Cut"));
+}
+
+TEST_CASE ("The delay's editor draws each side's echoes at its own time and drags the right's, and draws it frozen and ducked")
+{
+    Song song (Delay::typeID);
+    const auto device = song.getDevice();
+    phazite::ui::DelayEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    const auto set = [&device] (const char* id, float value) { device.getParameter (id).setValue (value); };
+
+    // Linked, the right's time is the left's, and faint.
+    ticker.tickNow();
+    REQUIRE (editor.findControl ("timeRight") != nullptr);
+    CHECK (editor.findControl ("timeRight")->getAlpha() < 1.0f);
+
+    // Link off, 100 ms on the left and 200 on the right: the right's first echo twice as far along as the left's, below the
+    // middle line where the left's stands on it; its time no longer faint.
+    set ("sync", 0.0f);
+    set ("time", 100.0f);
+    set ("link", 0.0f);
+    set ("timeRight", 200.0f);
+    ticker.tickNow();
+    CHECK (editor.findControl ("timeRight")->getAlpha() == doctest::Approx (1.0f));
+    const auto origin = editor.getEchoPosition (0);
+    const auto leftFirst = editor.getEchoPosition (1, 0), rightFirst = editor.getEchoPosition (1, 1);
+    CHECK (rightFirst.x - origin.x == doctest::Approx (2.0f * (leftFirst.x - origin.x)).epsilon (0.001));
+    CHECK (editor.getReadout().startsWith ("L 100 ms  R 200 ms"));
+
+    // A drag under the middle line on the right's first echo moves its time, as one step named after it, and not the left's.
+    auto& echoes = editor.getEchoes();
+    phazite::test::Mouse mouse (echoes);
+    const auto onRight = (rightFirst + juce::Point<float> (0.0f, 10.0f)).roundToInt();
+    mouse.press (onRight);
+    mouse.dragTo (onRight + juce::Point<int> (20, 0));
+    mouse.release();
+    CHECK (song.valueOf ("timeRight") > 200.0f);
+    CHECK (song.valueOf ("time") == doctest::Approx (100.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Time Right"));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("timeRight") == doctest::Approx (200.0f));
+
+    // A drag far up on the left's echoes stops the feedback at 100 %, where the echoes would start to swell: past it is the
+    // knob's, or a value typed, not a drag's by accident.
+    mouse.pause();
+    const auto onLeft = (leftFirst - juce::Point<float> (0.0f, 10.0f)).roundToInt();
+    mouse.press (onLeft);
+    mouse.dragTo (onLeft - juce::Point<int> (0, 400));
+    mouse.release();
+    CHECK (song.valueOf ("feedback") == doctest::Approx (1.0f));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("feedback") == doctest::Approx (0.35f));
+
+    // The picture repaints for what it draws, and not for what it doesn't: the character, the modulation, the transition.
+    const auto echoesArea = window.getLocalArea (&echoes, echoes.getLocalBounds());
+    ticker.tickNow();
+    window.takeRepaintedArea();
+
+    for (const auto& [id, value] : { std::pair { "character", 1.0f }, { "modRate", 2.0f }, { "modDepth", 0.5f }, { "transition", 1.0f } })
+        set (id, value);
+
+    ticker.tickNow();
+    CHECK_FALSE (window.takeRepaintedArea().intersectsRectangle (echoesArea));
+
+    // Frozen: every echo as tall as the first, and the word Frozen.
+    set ("freeze", 1.0f);
+    ticker.tickNow();
+    CHECK (window.takeRepaintedArea().intersectsRectangle (echoesArea));
+
+    for (int n = 1; n <= 4; ++n)
+        CHECK (editor.getEchoLevel (n) == doctest::Approx (1.0f));
+
+    CHECK (editor.getReadout().endsWith ("Frozen"));
+    set ("freeze", 0.0f);
+    CHECK (editor.getEchoLevel (2) == doctest::Approx (0.35f));
+
+    // Ducked while a loud sound plays through it: its echoes drawn as much lower as the duck takes them down, 24 dB.
+    set ("duck", 1.0f);
+    auto* delay = device.getProcessor<Delay>();
+    REQUIRE (delay != nullptr);
+    delay->prepare (48000.0, 480);
+    std::vector<float> values;
+
+    for (const auto& parameter : Delay::info.parameters)
+        values.push_back (song.valueOf (parameter.id.data())); // the IDs are literals
+
+    juce::AudioBuffer<float> buffer (2, 480);
+
+    for (int block = 0; block < 20; ++block)
+    {
+        for (int i = 0; i < 480; ++i)
+            for (int channel = 0; channel < 2; ++channel)
+                buffer.setSample (channel, i, 0.5f * (float) std::sin ((block * 480 + i) * 0.1));
+
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.parameters = values;
+        delay->process (context);
+    }
+
+    ticker.tickNow();
+    CHECK (editor.getEchoLevel (2) == doctest::Approx (0.35f * juce::Decibels::decibelsToGain (-24.0f)).epsilon (0.05));
 }
 
 TEST_CASE ("Stereo's editor shows its image and how alike its sides are as it plays")

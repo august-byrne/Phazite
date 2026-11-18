@@ -134,7 +134,7 @@ S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 | S6.2 | M | The devices' small bugs left by the audit | Each is fixed with a test, or in known-bugs.md |
 | S6.4 | L | EQ: mid and side, dynamic bands (which de-ess too), linear phase | Each has a DSP test |
 | S6.5 | L | Reverb: a longer network for Room | A long decay has no audible ringing, by its test and by ear |
-| S6.6 | L | What is left of it: the Filter at four and eight times the rate, and a filter that drives. Delay: a clean feedback path, a time for each side, modulation, ducking and freeze. Built: the Saturator, with the Exciter in it | Aliasing measures below the level set in the device's page |
+| S6.6 | M | What is left of it: the Filter at four and eight times the rate, and a filter that drives. Built: the Saturator, with the Exciter in it, and the Delay | Aliasing measures below the level set in the device's page |
 | S6.7 | XL | Synths: the Synth and the Wavetable become one synth, named Synth; then modulation depth, band-limited sync and warps | Every preset of the old Synth plays from the new one as it did, within the level its page sets; a swept sync shows no aliasing above the level set |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |

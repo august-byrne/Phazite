@@ -608,7 +608,7 @@ TEST_CASE ("A delay stays awake through the silence between its echoes: played l
         engine::DeviceRunner runner (Delay::info, std::make_unique<Delay>());
         runner.prepare (sampleRate, block);
         auto values = getDefaults (Delay::info);
-        values[Delay::time] = 8.0f; // 1/4
+        values[Delay::note] = 8.0f; // 1/4
         values[Delay::feedback] = 0.5f;
         values[Delay::mix] = 1.0f;
 

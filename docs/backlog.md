@@ -43,7 +43,7 @@ and nothing is listed in both.
 | Compressor: stereo link options (unlinked, mid and side), an automatic release, a knee as a number | `src/devices/dynamics/Compressor.cpp` | M | 6 | devices-effects 4; the rest of that row was built in S6.3 |
 | Reverb: a Room network long enough for its range of decay times | `src/devices/reverb/Reverb.cpp` | L | 6 | devices-effects 5 |
 | EQ: mid/side, dynamic bands, a linear-phase mode, more than eight bands | `src/devices/eq/Equalizer.cpp` | L | 6 | devices-effects 7 |
-| Delay: a feedback path that can be clean, and more than the basic echo | `src/devices/delay/Delay.cpp` | M | 6 | devices-effects 8 |
+| Delay: reverse, diffusion, a width, a bucket-brigade character, the Tape loop's curve anti-aliased | `src/devices/delay/Delay.cpp` | M | — | devices-effects 8; the rest of that row was built in S6.6 |
 | Oversampling by choice, 4x and 8x, for the Saturator and the Filter | `src/devices/saturation/Saturator.cpp` | (L) | 6 | devices-effects 15 |
 | Stretch modes: a formant switch, re-pitch, and a mode that slices drums at their hits | `src/devices/stretch/Stretch.cpp` | (L) | 5 | devices-effects 6, recording audit |
 | Multiband: its attack, release and curve worked out once a block for each band, not for every sample | `src/devices/dynamics/Multiband.cpp` | — | 6 | devices-effects 13, performance audit |

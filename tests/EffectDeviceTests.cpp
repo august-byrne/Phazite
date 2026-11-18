@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the filter's response and the
-// synth's unison. Stereo's have a file of their own (StereoTests.cpp), as the phaser's and the flanger's do
+// The devices of roadmap step 2.10, as DSP (src/devices/): the filter's response and the synth's unison. The delay's
+// have a file of their own (DelayTests.cpp), as Stereo's do (StereoTests.cpp), the phaser's and the flanger's
 // (MotionEffectTests.cpp), the multiband's (MultibandTests.cpp) and the saturator's (SaturatorTests.cpp).
 #include "MotionTestHelpers.h"
 #include "TestHelpers.h"
-#include "devices/delay/Delay.h"
 #include "devices/dsp/Filters.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Multiband.h"
@@ -143,8 +142,8 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
 {
     std::set<std::string_view> types;
 
-    for (const auto* info : { &devices::Delay::info, &devices::Saturator::info, &devices::FilterEffect::info, &devices::Stereo::info,
-                              &devices::Multiband::info, &devices::Synth::info })
+    for (const auto* info : { &devices::Saturator::info, &devices::FilterEffect::info, &devices::Stereo::info, &devices::Multiband::info,
+                              &devices::Synth::info })
     {
         INFO (std::string (info->typeID));
         CHECK (devices::isValid (*info));
@@ -160,96 +159,6 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
     // with the dry sound before its master band, so that the master still limits what comes out.
     CHECK (devices::findParameter (devices::Stereo::info, devices::mixParameterID) < 0);
     CHECK (devices::findParameter (devices::Multiband::info, devices::mixParameterID) < 0);
-
-    // The delay's parameters are named as its editor names them: the note value, and the time in milliseconds.
-    CHECK (devices::Delay::info.parameters[(size_t) devices::findParameter (devices::Delay::info, "time")].name == "Note");
-    CHECK (devices::Delay::info.parameters[(size_t) devices::findParameter (devices::Delay::info, "milliseconds")].name == "Time");
-}
-
-TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, and bouncing in ping-pong")
-{
-    auto values = getDefaults (devices::Delay::info);
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.375)); // a dotted eighth
-    set (values, devices::Delay::info, "time", 8.0f);                                        // a quarter
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.5));
-    CHECK (devices::Delay::getDelaySeconds (values, 90.0, 4.0) == doctest::Approx (60.0 / 90.0));
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 3.0) == doctest::Approx (0.5)); // a note value in any time signature
-    set (values, devices::Delay::info, "time",
-         13.0f); // a bar, the song's: three quarter notes in 6/8; at 30 BPM in 4/4, 8 s, but at most 5
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 3.0) == doctest::Approx (1.5));
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (2.0));
-    CHECK (devices::Delay::getDelaySeconds (values, 30.0, 4.0) == doctest::Approx (devices::Delay::maximumSeconds));
-    set (values, devices::Delay::info, "sync", 0.0f);
-    set (values, devices::Delay::info, "milliseconds", 250.0f);
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.25));
-
-    // An impulse with a quarter-note echo at 120 BPM: the first echo half a second later, the second smaller.
-    values = getDefaults (devices::Delay::info);
-    set (values, devices::Delay::info, "time", 8.0f);
-    devices::Delay delay;
-    delay.prepare (testRate, testBlockSize);
-    const auto impulse = [] (int t) { return std::pair { t == 0 ? 1.0f : 0.0f, t == 0 ? 1.0f : 0.0f }; };
-    const auto out = play (delay, values, 60000, impulse);
-
-    CHECK (getPeak (out.left, 0, 23900) < 1.0e-4f);
-    const auto first = getPeak (out.left, 23900, 24500), second = getPeak (out.left, 47900, 48500);
-    CHECK (first > 0.05f);
-    CHECK (second > 0.01f);
-    CHECK (second < first * 0.5f);
-    CHECK (delay.getTailSeconds() > 1.0);
-
-    // Ping-pong: the first echo on the left, the next on the right.
-    set (values, devices::Delay::info, "pingPong", 1.0f);
-    delay.reset();
-    const auto bounced = play (delay, values, 60000, impulse);
-    CHECK (getPeak (bounced.left, 23900, 24500) > 0.02f);
-    CHECK (getPeak (bounced.right, 23900, 24500) < 1.0e-3f);
-    CHECK (getPeak (bounced.right, 47900, 48500) > 0.005f);
-}
-
-TEST_CASE ("The delay's echo comes exactly as late as its time says, however short")
-{
-    // It read its line before it pushed the new sample, and took nothing off for it: each echo a sample late, 2 % long at
-    // 1 ms, which detuned a comb made with it. The echo is what came in through its band, exactly as late (whole
-    // samples at these rates).
-    for (const auto rate : { 48000.0, 96000.0 })
-    {
-        for (const auto milliseconds : { 1.0f, 2.5f, 10.0f })
-        {
-            auto values = getDefaults (devices::Delay::info);
-            set (values, devices::Delay::info, "sync", 0.0f);
-            set (values, devices::Delay::info, "milliseconds", milliseconds);
-            set (values, devices::Delay::info, "feedback", 0.0f);
-            set (values, devices::Delay::info, "lowCut", 20.0f);
-            set (values, devices::Delay::info, "highCut", 20000.0f);
-            devices::Delay delay;
-            delay.prepare (rate, testBlockSize);
-            juce::Random random (7);
-            std::vector<float> noise (4800);
-
-            for (auto& sample : noise)
-                sample = random.nextFloat() - 0.5f;
-
-            const auto out =
-                play (delay, values, (int) noise.size(), [&noise] (int t) { return std::pair { noise[(size_t) t], noise[(size_t) t] }; });
-
-            // What came in, as late as set, through the band.
-            const auto late = (int) std::lround (milliseconds * 0.001 * rate);
-            const auto lowCut = devices::dsp::makeFilter (devices::dsp::FilterShape::highPass, 20.0, rate, 0.70710678);
-            const auto highCut = devices::dsp::makeFilter (devices::dsp::FilterShape::lowPass, 20000.0, rate, 0.70710678);
-            devices::dsp::Filter low, high;
-            auto largest = 0.0f;
-
-            for (size_t i = 0; i < noise.size(); ++i)
-            {
-                const auto in = i >= (size_t) late ? noise[i - (size_t) late] : 0.0f;
-                largest = std::max (largest, std::abs (out.left[i] - high.process (low.process (in, lowCut), highCut)));
-            }
-
-            INFO (milliseconds << " ms at " << rate << " Hz: the echo differs by " << toDecibels (largest / 0.5f) << " dB");
-            CHECK (largest < 1.0e-5f);
-        }
-    }
 }
 
 TEST_CASE ("The filter: open at first, and low-pass, high-pass and band-pass shapes that fall as steeply as their slope")

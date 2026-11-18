@@ -1270,6 +1270,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ControlGridTests.cpp
         tests/ControlsTests.cpp
         tests/DawProjectTests.cpp
+        tests/DelayTests.cpp
         tests/DesignTokenTests.cpp
         tests/DeviceConformanceTests.cpp
         tests/DeviceEditorTests.cpp

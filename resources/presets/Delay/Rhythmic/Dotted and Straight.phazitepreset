@@ -1,0 +1,27 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Delay",
+    "instrument": false,
+    "type": "phaziteDelay",
+    "parameters": {
+      "sync": 1,
+      "note": "1/8D",
+      "time": 375.0,
+      "link": 0,
+      "noteRight": "1/4",
+      "timeRight": 375.0,
+      "feedback": 0.4,
+      "pingPong": 0,
+      "character": "Tape",
+      "modRate": 0.5,
+      "modDepth": 0.0,
+      "duck": 0.0,
+      "freeze": 0,
+      "transition": "Repitch",
+      "lowCut": 200.0,
+      "highCut": 7000.0,
+      "mix": 0.22
+    }
+  }
+}

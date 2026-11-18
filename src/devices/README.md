@@ -35,7 +35,7 @@ model saves and automation and modulation move.
 | `filter/` | `FilterEffect.h`: the Filter device, with a drive. |
 | `dynamics/` | `Compressor.h`: the compressor, in its Compress (keyed or not, with a look-ahead, automatic makeup and a hold), Duck and Transient modes. `Limiter.h`: the limiter, which looks ahead and listens for true peaks. `Multiband.h`: the multiband, in the layout of FL Studio's Maximus. `DynamicsCurve.h`: a dynamics curve, through up to eight points, which the compressor and the multiband share. `TruePeak.h`: true peaks as ITU-R BS.1770 finds them, for the limiter and the loudness meter. |
 | `saturation/` | `Saturator.h`: the saturator: six curves (Crush among them), a colour, a band that only it drives (which makes it an exciter too), at 2, 4 or 8 times the rate. |
-| `delay/` | `Delay.h`: the delay. |
+| `delay/` | `Delay.h`: the delay: a time for each side, a Tape or Clean loop with a feedback to 110 %, modulation, ducking, a freeze, and a change of time that glides or fades. |
 | `reverb/` | `Reverb.h`: the reverb, a room's eight-line feedback delay network or Jon Dattorro's plate (JAES 1997), as its Mode says, the plate's decay from a table measured on it. |
 | `motion/` | `Motion.h`: Motion, the effects that sweep as one device in three modes, its values mapped to its engines and a change of mode faded; `Chorus.h`, `Flanger.h`, `Phaser.h`: its engines, no devices of their own; `SafeBass.h`: Safe Bass, which they share, the lows going around the effect. |
 | `stereo/` | `Stereo.h`: Stereo, the device for a channel's two sides (width, bass in mono, balance, mono, swap, polarity, a DC filter and gain). |

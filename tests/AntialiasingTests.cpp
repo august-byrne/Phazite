@@ -587,7 +587,7 @@ TEST_CASE ("The delay's echoes keep their treble at a delay between samples")
     constexpr double rate = 44100.0;
     auto values = getDefaults (devices::Delay::info);
     set (values, devices::Delay::info, "sync", 0.0f);
-    set (values, devices::Delay::info, "milliseconds", 44.0f);
+    set (values, devices::Delay::info, "time", 44.0f);
     set (values, devices::Delay::info, "feedback", 0.8f);
     set (values, devices::Delay::info, "lowCut", 20.0f);
     set (values, devices::Delay::info, "highCut", 20000.0f);

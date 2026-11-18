@@ -16,13 +16,16 @@ The full text of every step, as it was written when it was built, is in the
   whatever the level (Punch, Sustain, Speed; two presets); the curve's points, the Multiband's too, are read, typed
   and moved by number; a change of mode turns what is on its way by the mode it was meant for; and a drag of a knob
   that a device's latency follows remakes the device once, as the drag ends.
+- **S6.6 The Delay:** a time for each side (Link), a Clean loop beside the Tape one and a Feedback to 110 % whose
+  echoes swell until the loop holds them, modulation of the times, a duck that lets the tail come back, a freeze that
+  holds exactly what was heard, and a Transition that glides (Repitch) or fades at equal power (Fade); at its defaults
+  it plays as before, sample for sample, and seven presets join its six. Left of S6.6: the Filter.
 - **S6.6 The Saturator takes the Exciter in:** the Saturator gains a Colour (the curve's working point, for even
   harmonics from any shape), a Crush shape (fewer bits the harder it is driven), a Quality of 2x, 4x or 8x the rate,
   and a Band with Listen: only the band between From and To goes into the curve, and what the curve adds under the
   band is kept out. The Exciter goes, its eight presets converted to the Band and measured against it. Every
   Quality takes one latency, 7 samples, so that automation moves the Quality anywhere; a new shape is heard whole in
-  35 ms without a thump under it, and Colour leaving 0 no longer swings the lows. Left of S6.6: the Filter and the
-  Delay.
+  35 ms without a thump under it, and Colour leaving 0 no longer swings the lows. Left of S6.6: the Filter.
 - **S6.7 One synth, part A:** the Wavetable gains what only the Synth had, so that the two can become one: each
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias

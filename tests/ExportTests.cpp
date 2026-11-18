@@ -201,7 +201,7 @@ TEST_CASE ("An export plays a delay's echoes out past the song's end, through th
     song.addAudioClip (song.firstTrack, phazite::test::writeClicks (song.getSoundsFolder(), 1, 120.0), 3.0);
     const auto delay = song.addEffect (song.firstTrack, phazite::devices::Delay::typeID);
     song.setParameter (delay, "sync", 0.0f);
-    song.setParameter (delay, "milliseconds", 1000.0f);
+    song.setParameter (delay, "time", 1000.0f);
     song.setParameter (delay, "feedback", 0.3f);
     song.setParameter (delay, "mix", 1.0f);
     phazite::test::dispatchPendingMessages();

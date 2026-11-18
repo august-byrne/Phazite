@@ -2980,7 +2980,7 @@ TEST_CASE ("In 6/8 the delay's 1 bar echoes a bar of the song's later: three qua
     song.addAudioClip (track, phazite::test::writeClicks (song.getSoundsFolder(), 1, 120.0), 0.0);
     song.addMidiClip (song.addTrack ("Long"), 0.0, 12.0); // the song goes on past the echo
     const auto delay = song.addEffect (track, phazite::devices::Delay::typeID);
-    song.setParameter (delay, "time", 13.0f); // 1 bar
+    song.setParameter (delay, "note", 13.0f); // 1 bar
     song.setParameter (delay, "feedback", 0.0f);
     song.setParameter (delay, "mix", 1.0f);
 

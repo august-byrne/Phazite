@@ -37393,7 +37393,7 @@
         "default": 1.0
       },
       {
-        "id": "time",
+        "id": "note",
         "name": "Note",
         "unit": "choice",
         "minimum": 0.0,
@@ -37417,8 +37417,49 @@
         ]
       },
       {
-        "id": "milliseconds",
+        "id": "time",
         "name": "Time",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 2000.0,
+        "default": 375.0,
+        "midpoint": 250.0
+      },
+      {
+        "id": "link",
+        "name": "Link",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "noteRight",
+        "name": "Note Right",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 13.0,
+        "default": "1/8D",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar"
+        ]
+      },
+      {
+        "id": "timeRight",
+        "name": "Time Right",
         "unit": "milliseconds",
         "minimum": 1.0,
         "maximum": 2000.0,
@@ -37430,7 +37471,7 @@
         "name": "Feedback",
         "unit": "percent",
         "minimum": 0.0,
-        "maximum": 0.95,
+        "maximum": 1.1,
         "default": 0.349999994039536
       },
       {
@@ -37440,6 +37481,63 @@
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.0
+      },
+      {
+        "id": "character",
+        "name": "Character",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Tape",
+        "choices": [
+          "Tape",
+          "Clean"
+        ]
+      },
+      {
+        "id": "modRate",
+        "name": "Mod Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 10.0,
+        "default": 0.5,
+        "scale": "logarithmic"
+      },
+      {
+        "id": "modDepth",
+        "name": "Mod Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "duck",
+        "name": "Duck",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "freeze",
+        "name": "Freeze",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "transition",
+        "name": "Transition",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Repitch",
+        "choices": [
+          "Repitch",
+          "Fade"
+        ]
       },
       {
         "id": "lowCut",
