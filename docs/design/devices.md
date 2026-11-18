@@ -12,7 +12,8 @@ file that any project can take in.
 | Feature | State | Note |
 | --- | --- | --- |
 | Phazite's own devices: 5 instruments, 15 effects | Built | Each has a page of its own, below |
-| A sampled-instrument device (the Multisampler) | Planned | Roadmap step 4.10 |
+| Many recordings across the keys (pianos, strings), in the Sampler | Planned | Roadmap step 4.10; no Multisampler of its own |
+| Sixteen devices in place of twenty: one synth; Motion; the Exciter in the Saturator; Stereo; Age | Planned | Roadmap stage 6 (S6.6, S6.7, S6.10 to S6.12), after the audit of 2026-11-17 |
 | An instrument first, then any number of effects, on every track | Built | No limit |
 | Effects moved by dragging | Built | Within a channel or a container; not from one channel to another |
 | A switch and a Mix for every effect, plug-ins included | Built | The Limiter, the Multiband and the Stereo Expander have no Mix |
@@ -430,8 +431,13 @@ a crash, and their windows with the keys that work over them, are in [plugin-hos
 
 ## Not built
 
-- **The Multisampler,** a device for instruments of many recordings (pianos, guitars, strings) from SFZ files:
-  Planned, roadmap step 4.10.
+- **Instruments of many recordings** (pianos, guitars, strings) from SFZ files: Planned, as a part of the
+  [Sampler](devices/sampler.md), roadmap step 4.10.
+- **The merges of the audit of 2026-11-17** ([decisions.md](decisions.md)): the Synth and the Wavetable as one synth
+  (S6.7); the Chorus, the Flanger and the Phaser as the modes of one device, Motion (S6.10); the Exciter's band and
+  colour in the Saturator (S6.6); the Vinyl as Age, with tape beside the record (S6.11); the Stereo Expander as
+  Stereo (S6.12). Planned; until each is built, this page and the devices' pages describe the twenty devices as they
+  are.
 - **Note effects** (an arpeggiator, a chord or scale device before the instrument): not built; no plan yet. A device is
   an instrument or an effect.
 - **A/B comparison of a device's settings:** Planned.

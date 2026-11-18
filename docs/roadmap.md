@@ -123,17 +123,24 @@ download. Its installer is not signed yet (4.3 is in stage 8), which the release
 
 ### Stage 6. Deep: every device and editor to the standard of the best plug-ins
 
+An audit of the device list came first (2026-11-17): twenty devices become sixteen, each generic and whole, by the
+merges in S6.6, S6.7 and S6.10, and S6.11 and S6.12 widen two more ([decisions.md](design/decisions.md), "Sound and
+devices"). The steps that change the list come first, since the listening sets, the presets and the editors follow it.
+
 | Step | Size | What | Done when |
 |---|---|---|---|
 | S6.1 | S | A listening set for each device, and at the end a verdict on each | The set and the verdict are in the device's page under [design/devices](design/devices.md) |
 | S6.2 | M | The devices' small bugs left by the audit | Each is fixed with a test, or in known-bugs.md |
-| S6.3 | L | Compressor: a sidechain in Compress, look-ahead, automatic make-up, a curve whose points can be typed | Each has a DSP test |
-| S6.4 | L | EQ: mid and side, dynamic bands, linear phase | Each has a DSP test |
+| S6.3 | L | Compressor: a sidechain in Compress, look-ahead, automatic make-up, a curve whose points can be typed; a hold, so that a curve that gates works on drums; a third mode that shapes transients | Each has a DSP test |
+| S6.4 | L | EQ: mid and side, dynamic bands (which de-ess too), linear phase | Each has a DSP test |
 | S6.5 | L | Reverb: a longer network for Room | A long decay has no audible ringing, by its test and by ear |
-| S6.6 | L | Saturator and Filter at four and eight times the rate; a filter that drives; a clean feedback path in the Delay | Aliasing measures below the level set in the device's page |
-| S6.7 | XL | Synths: modulation depth, band-limited sync and warps | A swept sync shows no aliasing above the level set |
+| S6.6 | XL | Saturator and Filter at four and eight times the rate; a filter that drives. The Exciter goes into the Saturator as a band and a colour, with a shape that crushes bits. Delay: a clean feedback path, a time for each side, modulation, ducking and freeze | Aliasing measures below the level set in the device's page; the Exciter's presets play from the Saturator as they did |
+| S6.7 | XL | Synths: the Synth and the Wavetable become one synth, named Synth; then modulation depth, band-limited sync and warps | Every preset of the old Synth plays from the new one as it did, within the level its page sets; a swept sync shows no aliasing above the level set |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
+| S6.10 | M | Motion: the Chorus, the Flanger and the Phaser as the three modes of one device, in one editor | Each mode plays what its device played, by renders kept from before; a preset of any of the three swaps in place |
+| S6.11 | L | Age: the Vinyl gains tape as a second medium (its wow and flutter, hiss, saturation and dropouts), each part with a switch, and is renamed | A tape and a record each sound as their medium by their tests and by ear; a part switched off costs nothing |
+| S6.12 | S | Stereo: the Stereo Expander gains balance, a mono switch, the sides swapped and a DC filter, and is renamed | Each has a DSP test |
 
 ### Stage 7. Professional: what bands, vocalists and keyboard players need
 
@@ -149,7 +156,7 @@ download. Its installer is not signed yet (4.3 is in stage 8), which the release
 | S7.8 | M | Time-signature changes along the song | A change added at a bar moves the bar lines, the metronome and the count-in |
 | S7.9 | L | Clips, notes and automation points reachable by a screen reader | Narrator reads the note under the keyboard's cursor |
 | S7.10 | L | Linked tracks: the tracks of a folder edited as one, so that a move, a trim, a split or a deletion of one track's clip is made to the others' at the same place | A split on one of four linked drum tracks splits all four, as one undo step |
-| 4.10 | XL | The Multisampler, as a plain SFZ player with one piano | The Grand Piano, picked in the browser, downloads its pack and plays from disk without a dropout; an SFZ file of the user's plays, listing what Phazite does not read |
+| 4.10 | XL | Many recordings across the keys in the Sampler (what was planned as a Multisampler of its own), as a plain SFZ player with one piano | The Grand Piano, picked in the browser, downloads its pack and plays from disk without a dropout; an SFZ file of the user's plays, listing what Phazite does not read |
 
 ### Stage 8. Release
 
@@ -189,8 +196,8 @@ One line each; the rows, with what is built today, are in [open-questions.md](op
 | Decision | Needed before |
 |---|---|
 | What the activity bar holds beyond its three views | S5.14 |
-| Whether the Exciter and the Vinyl stay devices of their own | Stage 6 |
-| Whether the Multisampler stays in 1.0 | 4.10 |
+| Whether Phazite gets a Pitch device | Stage 7 |
+| Whether the Sampler's many recordings (4.10) stay in 1.0 | 4.10 |
 | A certificate, or an open-source signing program | 4.3 |
 | The limit on a source file's size | S5.15 |
 | Whether the usability test with new users is held before the beta | The beta |
