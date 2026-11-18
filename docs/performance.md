@@ -79,6 +79,7 @@ instruments hold their notes. The figure is the share of one core's time.
 | FM: 8 notes held, with Spread, against the same without it in that run | 10.9 against 5.3 | 2026-11-16 |
 | FM, idle | 0.03 | 2026-11-16 |
 | EQ | 0.03 | 2026-11-16 |
+| EQ, linear phase, eight bands on | not measured yet | |
 | Filter | 0.10 | 2026-11-16 |
 | Compressor | 0.35 | 2026-11-16 |
 | Multiband: sound in / silence in | 1.46 / 1.22 | 2026-11-16 |
@@ -117,6 +118,7 @@ and silent (2026-11-16), so its stopped cost there is none.
 | Compressor | 6 | 2026-11-16 |
 | Multiband | 492 | 2026-11-16 |
 | Age (then the Vinyl) | 531 | 2026-11-16 |
+| EQ, linear phase | 4096 (by design: 4096 r, r = 1 up to 50 kHz) | 2026-11-18 |
 
 The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.15 to 0.25 ms after it to -30 dB (2026-11-16:
 the Synth 0.06 / 0.15 ms, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum Sampler's and the effects' times to sound are not recorded.

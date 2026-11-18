@@ -7,11 +7,13 @@
 // too. A band that isn't on Stereo has its placement's letter in its dot, and while any band is on Mid or Side the curve is
 // two, the middle's and the side's (and the left's and the right's while any is on Left or Right). A dynamic band's dot has
 // a line to where its gain goes at its whole Dynamic, with a handle there that drags the Dynamic, and a mark on it where its
-// gain is now; the curves are drawn with the gains as they play now. Its mix is its row's in the Devices view.
+// gain is now; the curves are drawn with the gains as they play now. Its Phase, Minimum or Linear, is two buttons beside the
+// output, with the latency Linear plays at beside them. Its mix is its row's in the Devices view.
 #pragma once
 
 #include "DeviceEditors.h"
 #include "DeviceGraph.h"
+#include "ParameterControls.h"
 #include "devices/eq/Equalizer.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
@@ -76,6 +78,10 @@ public:
     // How many times the graph has worked its curves out: once for each change of what they show, not at each repaint.
     int getCurvesWorkedOut() const noexcept;
 
+    // What shows beside the Phase: the latency the EQ reports while it plays Linear, in milliseconds ("85 ms"); nothing in
+    // Minimum.
+    juce::String getLatencyText() const { return latencyLabel.getText(); }
+
 private:
     class Graph;
 
@@ -92,6 +98,8 @@ private:
     Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, dynamicKnob { "Dynamic", 0.0 },
         thresholdKnob { "Threshold", -24.0 }, outputKnob { "Output", 0.0 };
     juce::OwnedArray<juce::Label> labels;
+    std::unique_ptr<ChoiceButtons> phaseButtons;
+    juce::Label latencyLabel;
 
     ToggleAttachment onAttachment { onButton };
     ChoiceAttachment typeAttachment { typeBox }, slopeAttachment { slopeBox }, placementAttachment { placementBox };

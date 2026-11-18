@@ -16,6 +16,7 @@ namespace
     constexpr std::string_view bandTypes[] = { "Low Cut", "Low Shelf", "Bell", "Notch", "High Shelf", "High Cut" };
     constexpr std::string_view slopes[] = { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" };
     constexpr std::string_view placements[] = { "Stereo", "Mid", "Side", "Left", "Right" };
+    constexpr std::string_view phases[] = { "Minimum", "Linear" };
 
     // The bands' parameter IDs, saved in projects, and names.
     constexpr std::string_view onIDs[] = { "band1On", "band2On", "band3On", "band4On", "band5On", "band6On", "band7On", "band8On" };
@@ -141,6 +142,13 @@ namespace
                                              .maximum = 24.0f,
                                              .defaultValue = 0.0f,
                                              .unit = Unit::decibels };
+        made[Equalizer::phaseParameter] = { .id = "phase",
+                                            .name = "Phase",
+                                            .minimum = 0.0f,
+                                            .maximum = 1.0f,
+                                            .defaultValue = (float) Equalizer::Phase::minimum,
+                                            .unit = Unit::choice,
+                                            .choices = phases };
         made[Equalizer::mixParameter] = { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent };
         return made;
     }
@@ -281,11 +289,31 @@ void Equalizer::prepare (double newSampleRate, int)
     earRise = (float) std::exp (-1.0 / (earRiseSeconds * sampleRate));
     earFall = (float) std::exp (-1.0 / (earFallSeconds * sampleRate));
     samplesPerPeak = std::max (1, (int) std::lround (sampleRate * 0.001));
+
+    // Linear phase as it was set by hand, its kernels designed whole for the values then; Minimum holds none.
+    linear = valuesBeforePrepare.size() == info.parameters.size() && valuesBeforePrepare[(size_t) phaseParameter] >= 0.5f;
+
+    if (linear)
+        linearPhase.prepare (sampleRate, valuesBeforePrepare);
+    else
+        linearPhase = LinearPhase {};
+
     reset();
+}
+
+int Equalizer::getLatencySamplesFor (std::span<const float> values) const
+{
+    return values.size() > (size_t) phaseParameter && values[(size_t) phaseParameter] >= 0.5f ? LinearPhase::getLatencyFor (sampleRate) : 0;
+}
+
+void Equalizer::takeValuesBeforePrepare (std::span<const float> values)
+{
+    valuesBeforePrepare.assign (values.begin(), values.end());
 }
 
 void Equalizer::reset()
 {
+    linearPhase.reset();
     for (auto& band : bands)
     {
         band = Band {};
@@ -298,7 +326,7 @@ void Equalizer::reset()
     outputGain = -1.0f;
     anyHearing = false;
     songPlace = 0;
-    tailSeconds.store (0.0, std::memory_order_relaxed);
+    tailSeconds.store (linear ? linearPhase.getTailSeconds() : 0.0, std::memory_order_relaxed);
     grid.reset();
 }
 
@@ -421,9 +449,15 @@ void Equalizer::update (Band& band, int index, std::span<const float> values, bo
     // more within a step, and a filter starting from rest there would click.
     band.played = played;
     const auto wasPlayed = band.numSections > 0;
-    band.numSections = isShelfOrBell (band.type) && std::abs (played) < 0.001f && ! band.hearing
-                           ? 0
-                           : makeSections (band.type, band.slope, band.frequency, played, band.q, sampleRate, band.sections);
+
+    // In Linear its shape at its Gain is in the kernels, and its sections play what its Dynamic moves alone, after them.
+    if (linear)
+        band.numSections =
+            band.hearing ? makeSections (band.type, band.slope, band.frequency, played - band.gain, band.q, sampleRate, band.sections) : 0;
+    else
+        band.numSections = isShelfOrBell (band.type) && std::abs (played) < 0.001f && ! band.hearing
+                               ? 0
+                               : makeSections (band.type, band.slope, band.frequency, played, band.q, sampleRate, band.sections);
 
     if (band.numSections == 0)
         band.fadeLeft = 0;
@@ -616,6 +650,9 @@ void Equalizer::process (const ProcessContext& block)
     // as a stretch starts.
     grid.startBlock (block.isPlaying, block.songSample);
 
+    if (linear)
+        linearPhase.startBlock (block.isPlaying, block.songSample);
+
     if (block.isPlaying)
         songPlace = block.songSample;
 
@@ -638,11 +675,15 @@ void Equalizer::process (const ProcessContext& block)
                 anyHearing = anyHearing || band.hearing;
             }
 
-            // Its tail: while a band hears, its level's fall to its floor, after the loudest it heard is held.
-            const auto tail = anyHearing ? (earHoldMilliseconds + 1) * 0.001
-                                               + earFallSeconds * std::log (10.0) / 20.0
-                                                     * (double) (earHeadroom - (lowestThreshold - earFloorUnderThreshold))
-                                         : 0.0;
+            // Its tail: while a band hears, its level's fall to its floor, after the loudest it heard is held; in Linear, at
+            // least its kernel's length, and the latency before its ears hear the end.
+            auto tail = anyHearing ? (earHoldMilliseconds + 1) * 0.001
+                                         + earFallSeconds * std::log (10.0) / 20.0
+                                               * (double) (earHeadroom - (lowestThreshold - earFloorUnderThreshold))
+                                   : 0.0;
+
+            if (linear)
+                tail = std::max (linearPhase.getTailSeconds(), anyHearing ? linearPhase.getLatency() / sampleRate + tail : 0.0);
 
             if (! juce::exactlyEqual (tail, tailSeconds.load (std::memory_order_relaxed)))
                 tailSeconds.store (tail, std::memory_order_relaxed);
@@ -660,6 +701,10 @@ void Equalizer::process (const ProcessContext& block)
         {
             float* channels[2] = { block.channels[0] + start, block.channels[numChannels - 1] + start };
 
+            // In Linear, its kernels change on a grid of lines of their own, which it walks through the stretch.
+            if (linear)
+                linearPhase.process (channels, numChannels, length, block.parameters);
+
             // The dynamic bands hear the sound as it comes in, before any band. The milliseconds whose loudest each holds are
             // counted from the song's place, as its steps are, so that after a jump (a loop going round, a start elsewhere, a
             // wake from sleep) they fall where a render's do: counted from where each began to hear, their edges stayed apart
@@ -667,7 +712,10 @@ void Equalizer::process (const ProcessContext& block)
             if (anyHearing)
             {
                 for (int channel = 0; channel < numChannels; ++channel)
-                    std::copy (channels[channel], channels[channel] + length, input[(size_t) channel].begin());
+                {
+                    const auto* heard = linear ? linearPhase.getDelayed (channel) : channels[channel];
+                    std::copy (heard, heard + length, input[(size_t) channel].begin());
+                }
 
                 const auto intoMillisecond = (int) (((songPlace % samplesPerPeak) + samplesPerPeak) % samplesPerPeak);
 
@@ -683,6 +731,10 @@ void Equalizer::process (const ProcessContext& block)
 
             for (auto& band : bands)
                 play (band, numChannels, channels, length);
+        }
+        else if (linear)
+        {
+            linearPhase.process (nullptr, 0, length, block.parameters);
         }
 
         // The output gain, ramped across the stretch.

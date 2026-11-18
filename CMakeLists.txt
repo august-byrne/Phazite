@@ -154,6 +154,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/DcBlocker.h
     src/devices/dsp/DelayLine.h
     src/devices/dsp/Envelopes.h
+    src/devices/dsp/Fft.cpp
+    src/devices/dsp/Fft.h
     src/devices/dsp/Filters.cpp
     src/devices/dsp/Filters.h
     src/devices/dsp/Math.h
@@ -165,6 +167,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Oscillators.h
     src/devices/dsp/Oversampling.cpp
     src/devices/dsp/Oversampling.h
+    src/devices/dsp/PartitionedConvolution.cpp
+    src/devices/dsp/PartitionedConvolution.h
     src/devices/dsp/Random.h
     src/devices/dsp/Saturation.cpp
     src/devices/dsp/Saturation.h
@@ -172,6 +176,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/SincReader.h
     src/devices/dsp/SpectralLoop.cpp
     src/devices/dsp/SpectralLoop.h
+    src/devices/dsp/SplitFft.cpp
+    src/devices/dsp/SplitFft.h
     src/devices/dsp/SyncedLfo.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
@@ -185,6 +191,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dynamics/TruePeak.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
+    src/devices/eq/LinearPhase.cpp
+    src/devices/eq/LinearPhase.h
     src/devices/filter/FilterEffect.cpp
     src/devices/filter/FilterEffect.h
     src/devices/fm/FmSynth.cpp
@@ -1265,6 +1273,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ContainerUiTests.cpp
         tests/ControlGridTests.cpp
         tests/ControlsTests.cpp
+        tests/ConvolutionTests.cpp
         tests/DawProjectTests.cpp
         tests/DelayTests.cpp
         tests/DesignTokenTests.cpp

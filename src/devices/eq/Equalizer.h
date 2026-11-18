@@ -4,9 +4,11 @@
 // sound, its middle, its sides, its left or its right (its placement), and a bell or a shelf can be dynamic: its gain moves
 // with the level of the sound in its band, as a de-esser's does. Its parameters move smoothly, so turning a knob doesn't
 // click, and it taps what it plays for its editor's analyzer. Its bands are matched to their analog shapes
-// (dsp::makeMatchedFilter()), so a bell or a shelf near the top keeps its width and symmetry.
+// (dsp::makeMatchedFilter()), so a bell or a shelf near the top keeps its width and symmetry. Its Phase plays the bands as
+// they are (Minimum), or the same curve with every frequency as late as every other (Linear: LinearPhase.h), at a latency.
 #pragma once
 
+#include "LinearPhase.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
@@ -17,6 +19,8 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace phazite::devices
 {
@@ -61,9 +65,18 @@ public:
         threshold  // the level of the sound in its band from which it moves, in decibels
     };
 
+    // How it plays its bands: as they are, each turning the phase as its analog shape does, or with every frequency as late as
+    // every other (LinearPhase.h), the same curve at a latency.
+    enum class Phase
+    {
+        minimum,
+        linear
+    };
+
     static constexpr int fieldsPerBand = 9;
     static constexpr int outputParameter = numBands * fieldsPerBand;
-    static constexpr int mixParameter = outputParameter + 1; // applied by its runner (DeviceInfo.h, mixParameterID)
+    static constexpr int phaseParameter = outputParameter + 1; // Phase
+    static constexpr int mixParameter = outputParameter + 2;   // applied by its runner (DeviceInfo.h, mixParameterID)
     static constexpr int getParameterIndex (int band, Field field) noexcept { return band * fieldsPerBand + (int) field; }
 
     // How far above its Threshold the sound in a dynamic band must be for its gain to move by the whole Dynamic: from none
@@ -127,8 +140,18 @@ public:
 
     // While any band is dynamic, as long as its level takes to fall from earHeadroom over full scale to the floor under the
     // lowest Threshold of them, where it is none (so that its runner lets it sleep only then, and a song played live plays as
-    // its render); none otherwise. Worked out as its bands move, read on any thread.
+    // its render); none otherwise. In Linear, at least its kernel's length, and its latency beside the dynamic bands' fall,
+    // as their ears hear what came in that late. Worked out as its bands move, read on any thread.
     double getTailSeconds() const override { return tailSeconds.load (std::memory_order_relaxed); }
+
+    // Its Phase is the one set by hand as it was prepared, as its latency is: Linear's (LinearPhase::getLatencyFor()), or
+    // none. A Phase that automation moves plays as the one set by hand, as a Look-Ahead beyond its latency does in the
+    // compressor; set by hand, its model makes it anew (model/playback/internal/SongPlayer.h).
+    int getLatencySamples() const override { return linear ? linearPhase.getLatency() : 0; }
+    int getLatencySamplesFor (std::span<const float> valuesSetByHand) const override;
+    void takeValuesBeforePrepare (std::span<const float> valuesSetByHand) override;
+    bool isLinear() const noexcept { return linear; }
+    const LinearPhase& getLinearPhase() const noexcept { return linearPhase; } // for tests and benchmarks
 
 private:
     static constexpr int stretch = 32; // samples between updates of moving coefficients
@@ -180,6 +203,14 @@ private:
     std::array<std::array<float, stretch>, 2> input {}, midSide {}, fading {};
     std::array<float, stretch> earInput {};
     bool anyHearing = false;
+
+    // Linear phase: the values set by hand before it was prepared, whether it plays Linear, and its kernels. In Linear the
+    // bands' sections play only what a dynamic band's Dynamic moves, after the kernels, and its ear hears what came in as
+    // late as the kernels play it.
+    std::vector<float> valuesBeforePrepare;
+    bool linear = false;
+    LinearPhase linearPhase;
+    static_assert (LinearPhase::maxLength >= stretch);
 
     void update (Band&, int band, std::span<const float> parameters, bool jump);
     void hear (Band&, int numChannels, int length);

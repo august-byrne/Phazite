@@ -34216,6 +34216,18 @@
         "default": 0.0
       },
       {
+        "id": "phase",
+        "name": "Phase",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Minimum",
+        "choices": [
+          "Minimum",
+          "Linear"
+        ]
+      },
+      {
         "id": "mix",
         "name": "Mix",
         "unit": "percent",

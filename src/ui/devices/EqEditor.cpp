@@ -36,7 +36,7 @@ namespace
     const auto knobCell = compactKnobSize + Space::l;
 
     // Beside the graph: the band buttons in two rows, the band's switch and shape, its slope and placement, then its knobs and
-    // the output's.
+    // the output's, and under the output the Phase with the latency.
     int getControlsWidth()
     {
         return EqEditor::numKnobs * knobCell;
@@ -45,7 +45,7 @@ namespace
     int getControlsHeight()
     {
         return bandRows * controlHeight + Space::xs + Space::s + 2 * controlHeight + Space::xs + Space::s + compactKnobSize
-               + 2 * labelHeight;
+               + 2 * labelHeight + Space::xs + controlHeight;
     }
 
     juce::String toString (std::string_view text)
@@ -783,6 +783,18 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));
     outputKnob.setTooltip (describeParameter (getInfo (Eq::outputParameter), device.getParameter (getInfo (Eq::outputParameter).id)));
+
+    // The Phase, and the latency Linear plays at beside it.
+    phaseButtons = std::make_unique<ChoiceButtons> (
+        device, getInfo (Eq::phaseParameter).id, ChoiceButtons::Direction::across,
+        std::vector<juce::String> { "Minimum phase: no latency; each band turns the phase as an analog filter does",
+                                    "Linear phase: every frequency as late as every other, at a latency; a ring before sharp sounds" });
+    addAndMakeVisible (*phaseButtons);
+    latencyLabel.setTitle ("Latency");
+    latencyLabel.setJustificationType (juce::Justification::centredRight);
+    latencyLabel.setFont (juce::FontOptions (TextSize::small));
+    setThemeColour (latencyLabel, juce::Label::textColourId, &Palette::textMuted);
+    addAndMakeVisible (latencyLabel);
     applyDeviceTint (*this, device);
 
     selectBand (selectedBand);
@@ -969,6 +981,12 @@ void EqEditor::refresh()
         labels[i + numKnobs]->setText (knobs[i]->isEnabled() ? knobs[i]->getTextFromValue (knobs[i]->getValue()) : juce::String(),
                                        juce::dontSendNotification);
 
+    // The latency it reports, while it plays Linear.
+    const auto latency = eq != nullptr && eq->isLinear() && eq->getSampleRate() > 0.0
+                             ? juce::String (juce::roundToInt (1000.0 * eq->getLatencySamples() / eq->getSampleRate())) + " ms"
+                             : juce::String();
+    latencyLabel.setText (latency, juce::dontSendNotification);
+
     auto spectraMoved = false;
 
     if (eq != nullptr)
@@ -1046,13 +1064,20 @@ void EqEditor::resized()
 
     // Its knobs, then the output's, each with its name and value.
     Knob* const knobs[] = { &frequencyKnob, &gainKnob, &qKnob, &dynamicKnob, &thresholdKnob, &outputKnob };
+    auto knobRow = area.removeFromTop (compactKnobSize + 2 * labelHeight);
 
     for (int i = 0; i < numKnobs; ++i)
     {
-        auto cell = area.removeFromLeft (knobCell).withHeight (compactKnobSize + 2 * labelHeight);
+        auto cell = knobRow.removeFromLeft (knobCell);
         knobs[i]->setBounds (cell.removeFromTop (compactKnobSize).withSizeKeepingCentre (compactKnobSize, compactKnobSize));
         labels[i]->setBounds (cell.removeFromTop (labelHeight));
         labels[i + numKnobs]->setBounds (cell.removeFromTop (labelHeight));
     }
+
+    // The Phase under the output, ending at its cell's end, and the latency beside it, at its left.
+    area.removeFromTop (Space::xs);
+    auto phaseRow = area.removeFromTop (controlHeight);
+    phaseButtons->setBounds (phaseRow.removeFromRight (std::min (phaseRow.getWidth(), phaseButtons->getPreferredWidth())));
+    latencyLabel.setBounds (phaseRow.removeFromRight (std::min (phaseRow.getWidth(), knobCell)));
 }
 } // namespace phazite::ui

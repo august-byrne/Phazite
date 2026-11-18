@@ -78,6 +78,7 @@
       "band8Dynamic": 0.0,
       "band8Threshold": -24.0,
       "output": 2.0,
+      "phase": "Minimum",
       "mix": 1.0
     }
   }

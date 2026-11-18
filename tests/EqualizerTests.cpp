@@ -19,10 +19,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -448,7 +451,8 @@ std::vector<std::pair<juce::String, std::vector<float>>> getPresetValues()
 TEST_CASE ("The EQ's description holds together, and a new EQ changes nothing")
 {
     REQUIRE (devices::isValid (Eq::info));
-    CHECK (Eq::info.parameters.size() == 74);
+    CHECK (Eq::info.parameters.size() == 75);
+    CHECK (devices::findParameter (Eq::info, "phase") == Eq::phaseParameter);
     CHECK (devices::findParameter (Eq::info, "band3Gain") == Eq::getParameterIndex (2, Eq::gain));
     CHECK (devices::findParameter (Eq::info, "band8Slope") == Eq::getParameterIndex (7, Eq::slope));
     CHECK (devices::findParameter (Eq::info, "output") == Eq::outputParameter);
@@ -601,7 +605,7 @@ TEST_CASE ("The EQ is one of the engine's devices")
 {
     const auto* info = phazite::findOwnDevice (Eq::typeID);
     REQUIRE (info != nullptr);
-    CHECK (info->parameters.size() == 74);
+    CHECK (info->parameters.size() == 75);
     CHECK (dynamic_cast<Eq*> (phazite::createOwnDevice (Eq::typeID).get()) != nullptr);
 
     // A song holds one by its type, named after it, with its parameters at their defaults.
@@ -619,10 +623,13 @@ TEST_CASE ("The EQ at its new parameters' defaults plays exactly what it played 
     // track, with each preset's values and others, and with each band's gain and frequency turned half way through.
     auto settings = getPresetValues();
 
-    // Those that came before it, the eleven that place no band and make none dynamic.
+    // Those that came before it, the eleven that place no band, make none dynamic and play in Minimum.
     std::erase_if (settings,
                    [] (const auto& setting)
                    {
+                       if (setting.second[(size_t) Eq::phaseParameter] > 0.0f)
+                           return true;
+
                        for (int band = 0; band < Eq::numBands; ++band)
                            if (setting.second[(size_t) Eq::getParameterIndex (band, Eq::placement)] > 0.0f
                                || std::abs (setting.second[(size_t) Eq::getParameterIndex (band, Eq::dynamic)]) > 0.0f)
@@ -1456,4 +1463,1332 @@ TEST_CASE ("Boom Control leaves a bass at a usual level alone and turns its boom
         else
             CHECK (moved[note] > -0.1f);
     }
+}
+
+//==============================================================================
+// Linear phase (step S6.4, part B): its bands as kernels symmetric about their middle tap, L samples late.
+namespace
+{
+constexpr int linearLatency = 4096; // at 48 kHz
+
+std::vector<float> inLinear (std::vector<float> values)
+{
+    values[(size_t) Eq::phaseParameter] = (float) Eq::Phase::linear;
+    return values;
+}
+
+// An EQ with these values set by hand, prepared as its model prepares one (its Phase set by hand decides its latency).
+std::unique_ptr<Eq> makePrepared (const std::vector<float>& values, int blockSize = 512, double rate = testRate)
+{
+    auto eq = std::make_unique<Eq>();
+    eq->takeValuesBeforePrepare (values);
+    eq->prepare (rate, blockSize);
+    return eq;
+}
+
+// A band set by its fields.
+struct BandSetting
+{
+    int band;
+    Eq::BandType type;
+    float frequency, gain = 0.0f, q = 1.0f;
+    int slope = 1;
+    Placement placement = Placement::stereo;
+};
+
+std::vector<float> withBands (std::initializer_list<BandSetting> settings, std::vector<float> values = getDefaults())
+{
+    for (const auto& setting : settings)
+    {
+        set (values, setting.band, Eq::on, 1.0f);
+        set (values, setting.band, Eq::type, (float) setting.type);
+        set (values, setting.band, Eq::frequency, setting.frequency);
+        set (values, setting.band, Eq::gain, setting.gain);
+        set (values, setting.band, Eq::q, setting.q);
+        set (values, setting.band, Eq::slope, (float) setting.slope);
+        set (values, setting.band, Eq::placement, (float) setting.placement);
+    }
+
+    return values;
+}
+
+// Each way through an EQ in Linear, by its impulse responses: [side in][side out], numSamples of each, from an impulse at the
+// first sample after it was prepared.
+using Responses = std::array<std::array<std::vector<double>, 2>, 2>;
+
+Responses getImpulseResponses (const std::vector<float>& linearValues, int numSamples = 2 * linearLatency + 64)
+{
+    Responses responses;
+
+    for (int in = 0; in < 2; ++in)
+    {
+        auto eq = makePrepared (linearValues);
+        probe::Sound sound (2, numSamples);
+        sound.clear();
+        sound.setSample (in, 0, 1.0f);
+        auto values = linearValues;
+        playEq (*eq, sound, 512, values);
+
+        for (int out = 0; out < 2; ++out)
+            for (int i = 0; i < numSamples; ++i)
+                responses[(size_t) in][(size_t) out].push_back (sound.getSample (out, i));
+    }
+
+    return responses;
+}
+
+// A response's gain at a frequency, in decibels: what a sine there comes out at once it has gone through it.
+double responseDecibels (const std::vector<double>& response, double frequency, double rate = testRate)
+{
+    double re = 0.0, im = 0.0;
+
+    for (size_t n = 0; n < response.size(); ++n)
+    {
+        const auto angle = twoPi * frequency * (double) n / rate;
+        re += response[n] * std::cos (angle);
+        im -= response[n] * std::sin (angle);
+    }
+
+    return 10.0 * std::log10 (std::max (1.0e-30, re * re + im * im));
+}
+
+// Frequencies from 20 Hz to 20 kHz, so many to an octave.
+std::vector<double> getFrequencies (int perOctave = 12, double from = 20.0, double to = 20000.0)
+{
+    std::vector<double> frequencies;
+
+    for (auto f = from; f <= to * 1.0001; f *= std::pow (2.0, 1.0 / perOctave))
+        frequencies.push_back (f);
+
+    return frequencies;
+}
+
+// The largest difference, in decibels, between a response and what the EQ reports, at frequencies where it reports more than
+// a floor; and what the response is at a frequency.
+double getLargestError (const std::vector<double>& response, const std::vector<float>& values, double floorDecibels = -60.0,
+                        Placement way = Placement::stereo)
+{
+    auto largest = 0.0;
+
+    for (const auto f : getFrequencies (24))
+    {
+        const auto reported = 20.0 * std::log10 (Eq::getMagnitude (values, f, testRate, way));
+
+        if (reported > floorDecibels)
+            largest = std::max (largest, std::abs (responseDecibels (response, f) - reported));
+    }
+
+    return largest;
+}
+
+// How far a response is from the same reversed about the latency's sample, at its worst, as a part of its largest tap.
+double getAsymmetry (const std::vector<double>& response)
+{
+    auto largest = 0.0, apart = 0.0;
+
+    for (const auto x : response)
+        largest = std::max (largest, std::abs (x));
+
+    for (int n = 1; n <= linearLatency; ++n)
+        apart = std::max (apart, std::abs (response[(size_t) (linearLatency - n)] - response[(size_t) (linearLatency + n)]));
+
+    return largest > 0.0 ? apart / largest : 0.0;
+}
+} // namespace
+
+TEST_CASE ("The EQ's Phase is Minimum by default, and Linear reports its latency and plays every frequency as late as every other")
+{
+    CHECK (juce::exactlyEqual (Eq::info.parameters[(size_t) Eq::phaseParameter].defaultValue, 0.0f));
+    CHECK (Eq::info.parameters[(size_t) Eq::phaseParameter].choices.size() == 2);
+    CHECK (devices::LinearPhase::getLatencyFor (44100.0) == 4096);
+    CHECK (devices::LinearPhase::getLatencyFor (48000.0) == 4096);
+    CHECK (devices::LinearPhase::getLatencyFor (96000.0) == 8192);
+    CHECK (devices::LinearPhase::getLatencyFor (192000.0) == 16384);
+
+    // The latency follows the Phase set by hand.
+    Eq eq;
+    eq.prepare (testRate, 512);
+    CHECK (eq.getLatencySamplesFor (getDefaults()) == 0);
+    CHECK (eq.getLatencySamplesFor (inLinear (getDefaults())) == linearLatency);
+    CHECK (eq.getLatencySamples() == 0);
+    CHECK (makePrepared (inLinear (getDefaults()))->getLatencySamples() == linearLatency);
+
+    // Six settings that between them use every type, slope and placement: each response through it is symmetric about L.
+    const std::vector<float> settings[] = {
+        withBands ({ { 0, Eq::BandType::lowCut, 80.0f, 0.0f, 0.71f, 0 },
+                     { 3, Eq::BandType::bell, 1000.0f, 6.0f, 2.0f },
+                     { 6, Eq::BandType::highShelf, 8000.0f, -4.0f, 0.71f } }),
+        withBands ({ { 0, Eq::BandType::lowCut, 30.0f, 0.0f, 0.71f, 3 },
+                     { 1, Eq::BandType::lowShelf, 150.0f, 3.0f, 0.71f },
+                     { 4, Eq::BandType::notch, 3000.0f, 0.0f, 2.0f },
+                     { 7, Eq::BandType::highCut, 12000.0f, 0.0f, 0.71f, 1 } }),
+        withBands ({ { 0, Eq::BandType::lowCut, 200.0f, 0.0f, 0.71f, 1, Placement::side },
+                     { 2, Eq::BandType::bell, 500.0f, -6.0f, 1.0f, 1, Placement::mid },
+                     { 7, Eq::BandType::highCut, 15000.0f, 0.0f, 0.71f, 2 } }),
+        withBands ({ { 1, Eq::BandType::lowShelf, 300.0f, -5.0f, 0.71f, 1, Placement::right },
+                     { 3, Eq::BandType::bell, 2000.0f, 8.0f, 1.5f, 1, Placement::left } }),
+        withBands ({ { 4, Eq::BandType::notch, 60.0f, 0.0f, 4.0f, 1, Placement::mid },
+                     { 6, Eq::BandType::highShelf, 6000.0f, 4.0f, 0.71f, 1, Placement::side } }),
+        withBands ({ { 0, Eq::BandType::lowCut, 100.0f, 0.0f, 2.0f, 2 },
+                     { 2, Eq::BandType::bell, 400.0f, 5.0f, 3.0f, 1, Placement::mid },
+                     { 4, Eq::BandType::notch, 7000.0f, 0.0f, 3.0f, 1, Placement::right },
+                     { 7, Eq::BandType::highCut, 5000.0f, 0.0f, 0.71f, 0, Placement::left } }),
+    };
+
+    for (size_t setting = 0; setting < std::size (settings); ++setting)
+    {
+        CAPTURE (setting);
+        const auto responses = getImpulseResponses (inLinear (settings[setting]));
+
+        for (int in = 0; in < 2; ++in)
+            for (int out = 0; out < 2; ++out)
+            {
+                CAPTURE (in);
+                CAPTURE (out);
+                const auto& response = responses[(size_t) in][(size_t) out];
+                const auto asymmetry = getAsymmetry (response);
+                MESSAGE ("setting " << setting << ", " << in << " to " << out << ": largest tap "
+                                    << *std::max_element (response.begin(), response.end()) << ", asymmetry " << asymmetry);
+                CHECK (asymmetry < 1.0e-6);
+            }
+    }
+
+    // With every band off, an impulse comes out as one sample of 1 at L and nothing else above -120 dB.
+    auto off = getDefaults();
+
+    for (int band = 0; band < Eq::numBands; ++band)
+        set (off, band, Eq::on, 0.0f);
+
+    const auto through = getImpulseResponses (inLinear (off));
+    auto largestElse = 0.0;
+
+    for (int out = 0; out < 2; ++out)
+        for (size_t i = 0; i < through[0][(size_t) out].size(); ++i)
+            if (out != 0 || i != (size_t) linearLatency)
+                largestElse = std::max (largestElse, std::abs (through[0][(size_t) out][i]));
+
+    MESSAGE ("every band off: " << through[0][0][(size_t) linearLatency] << " at L, the largest elsewhere " << largestElse);
+    CHECK (std::abs (through[0][0][(size_t) linearLatency] - 1.0) < 1.0e-6);
+    CHECK (largestElse < 1.0e-6);
+}
+
+TEST_CASE ("The EQ in Linear plays the curve it reports: within 0.1 dB for bells and shelves from 200 Hz with a Q up to 4")
+{
+    struct Shape
+    {
+        Eq::BandType type;
+        float frequency, gain, q;
+    };
+
+    std::vector<Shape> shapes;
+
+    for (const auto gain : { -12.0f, 12.0f })
+    {
+        for (const auto frequency : { 200.0f, 1000.0f, 5000.0f, 15000.0f })
+            for (const auto q : { 0.5f, 1.0f, 4.0f })
+                shapes.push_back ({ Eq::BandType::bell, frequency, gain, q });
+
+        for (const auto frequency : { 200.0f, 2000.0f })
+            for (const auto q : { 0.71f, 2.0f })
+            {
+                shapes.push_back ({ Eq::BandType::lowShelf, frequency, gain, q });
+                shapes.push_back ({ Eq::BandType::highShelf, frequency * 4.0f, gain, q });
+            }
+    }
+
+    auto worst = 0.0;
+
+    for (const auto& shape : shapes)
+    {
+        CAPTURE ((int) shape.type);
+        CAPTURE (shape.frequency);
+        CAPTURE (shape.gain);
+        CAPTURE (shape.q);
+        const auto values = inLinear (withBands ({ { 3, shape.type, shape.frequency, shape.gain, shape.q } }));
+        const auto error = getLargestError (getImpulseResponses (values)[0][0], values);
+        worst = std::max (worst, error);
+        CHECK (error < 0.1);
+    }
+
+    MESSAGE ("the largest error of any of them: " << worst << " dB");
+
+    // A sine through it comes out as its impulse response says it does.
+    const auto values = inLinear (withBands ({ { 3, Eq::BandType::bell, 1000.0f, 12.0f, 4.0f } }));
+    const auto response = getImpulseResponses (values)[0][0];
+    auto eq = makePrepared (values);
+    auto sine = makeStereoSine (1100.0, 3 * linearLatency + 9600, 0.5f, 0.5f);
+    const auto in = sine;
+    auto current = values;
+    playEq (*eq, sine, 512, current);
+    const auto measured = probe::inDecibels (probe::getToneLevel (sine, 0, 1100.0, testRate, 3 * linearLatency, 9600)
+                                             / probe::getToneLevel (in, 0, 1100.0, testRate, 3 * linearLatency, 9600));
+    CHECK (measured == doctest::Approx (responseDecibels (response, 1100.0)).epsilon (0.001));
+}
+
+TEST_CASE ("The EQ in Linear at the low end: how far its curve is from the reported one, the table on its design page")
+{
+    // Its kernel is 2 (L - P) taps long, 160 ms at 48 kHz: what rings longer than that at the low end is cut short, which
+    // smears its curve there. Each figure measured (2026-11-18, windows-debug) and held with a decibel of margin;
+    // docs/design/devices/eq.md has the table.
+    struct Row
+    {
+        Eq::BandType type;
+        float frequency, gain, q;
+        int slope;
+        double error;      // the largest, in decibels, where the curve is above -60 dB
+        double at10 = 0.0; // a low cut's level at 10 Hz, as measured
+    };
+
+    // clang-format off
+    const Row rows[] = {
+        { Eq::BandType::bell, 30.0f, 12.0f, 1.0f, 1, 0.11 },   { Eq::BandType::bell, 30.0f, 12.0f, 4.0f, 1, 3.64 },
+        { Eq::BandType::bell, 30.0f, 12.0f, 10.0f, 1, 5.36 },  { Eq::BandType::bell, 60.0f, 12.0f, 1.0f, 1, 0.002 },
+        { Eq::BandType::bell, 60.0f, 12.0f, 4.0f, 1, 1.04 },   { Eq::BandType::bell, 60.0f, 12.0f, 10.0f, 1, 3.04 },
+        { Eq::BandType::bell, 100.0f, 12.0f, 1.0f, 1, 0.0 },   { Eq::BandType::bell, 100.0f, 12.0f, 4.0f, 1, 0.20 },
+        { Eq::BandType::bell, 100.0f, 12.0f, 10.0f, 1, 2.08 }, { Eq::BandType::bell, 30.0f, -12.0f, 1.0f, 1, 0.016 },
+        { Eq::BandType::bell, 30.0f, -12.0f, 4.0f, 1, 1.21 },  { Eq::BandType::bell, 30.0f, -12.0f, 10.0f, 1, 3.72 },
+        { Eq::BandType::bell, 60.0f, -12.0f, 1.0f, 1, 0.0 },   { Eq::BandType::bell, 60.0f, -12.0f, 4.0f, 1, 0.27 },
+        { Eq::BandType::bell, 60.0f, -12.0f, 10.0f, 1, 2.64 }, { Eq::BandType::bell, 100.0f, -12.0f, 1.0f, 1, 0.0 },
+        { Eq::BandType::bell, 100.0f, -12.0f, 4.0f, 1, 0.027 }, { Eq::BandType::bell, 100.0f, -12.0f, 10.0f, 1, 0.44 },
+        { Eq::BandType::lowCut, 30.0f, 0.0f, 0.71f, 0, 0.0, -19.13 }, { Eq::BandType::lowCut, 80.0f, 0.0f, 0.71f, 0, 0.0, -36.12 },
+        { Eq::BandType::lowCut, 30.0f, 0.0f, 0.71f, 3, 4.30, -61.4 }, { Eq::BandType::lowCut, 80.0f, 0.0f, 0.71f, 3, 0.06, -109.6 },
+    };
+    // clang-format on
+
+    for (const auto& row : rows)
+    {
+        CAPTURE ((int) row.type);
+        CAPTURE (row.frequency);
+        CAPTURE (row.gain);
+        CAPTURE (row.q);
+        CAPTURE (row.slope);
+        const auto values = inLinear (withBands ({ { 3, row.type, row.frequency, row.gain, row.q, row.slope } }));
+        const auto response = getImpulseResponses (values)[0][0];
+        const auto error = getLargestError (response, values);
+        const auto at10 = responseDecibels (response, 10.0);
+        MESSAGE ("error " << error << " dB; at 10 Hz " << at10 << " dB, reported "
+                          << 20.0 * std::log10 (Eq::getMagnitude (values, 10.0, testRate)) << " dB");
+        CHECK (error < row.error + 1.0);
+
+        if (row.type == Eq::BandType::lowCut)
+            CHECK (at10 < row.at10 + 1.0);
+    }
+
+    // A notch's depth at its frequency (Q 1): -39.3 dB at 100 Hz, -49.6 dB at 1 kHz.
+    for (const auto& [frequency, depth] : { std::pair { 100.0f, -39.3 }, std::pair { 1000.0f, -49.6 } })
+    {
+        CAPTURE (frequency);
+        const auto values = inLinear (withBands ({ { 4, Eq::BandType::notch, frequency, 0.0f, 1.0f } }));
+        const auto measured = responseDecibels (getImpulseResponses (values)[0][0], frequency);
+        MESSAGE ("a notch at " << frequency << " Hz: " << measured << " dB deep");
+        CHECK (measured < depth + 1.0);
+    }
+
+    // Its gain at 0 Hz, a constant in and what comes out once the kernel is full of it: what the cut dropped of each kernel's
+    // sum is spread over its taps, so the cuts take it out and the shelves keep it.
+    struct AtZero
+    {
+        Eq::BandType type;
+        float q;
+        int slope;
+    };
+
+    for (const auto& row : { AtZero { Eq::BandType::lowCut, 0.71f, 3 }, AtZero { Eq::BandType::lowCut, 0.71f, 0 },
+                             AtZero { Eq::BandType::lowShelf, 0.71f, 1 }, AtZero { Eq::BandType::lowShelf, 4.0f, 1 } })
+    {
+        CAPTURE ((int) row.type);
+        CAPTURE (row.q);
+        CAPTURE (row.slope);
+        const auto isCut = row.type == Eq::BandType::lowCut;
+        const auto values = inLinear (withBands ({ { 3, row.type, 30.0f, isCut ? 0.0f : 12.0f, row.q, row.slope } }));
+        auto constant = probe::Sound (2, 3 * linearLatency);
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = 0; i < constant.getNumSamples(); ++i)
+                constant.setSample (channel, i, 0.5f);
+
+        auto current = values;
+        playEq (*makePrepared (values), constant, 512, current);
+        auto out = 0.0;
+
+        for (int i = 2 * linearLatency + 256; i < 2 * linearLatency + 512; ++i)
+            out += constant.getSample (0, i) / 0.5 / 256.0;
+
+        const auto measured = 20.0 * std::log10 (std::max (1.0e-30, std::abs (out)));
+        const auto curve = 20.0 * std::log10 (std::max (1.0e-30, (double) Eq::getMagnitude (values, 0.0, testRate)));
+        MESSAGE (std::string (isCut ? "a low cut" : "a low shelf")
+                 << " at 30 Hz: " << measured << " dB at 0 Hz, its curve " << curve << " dB");
+
+        if (isCut)
+            CHECK (measured < -90.0);
+        else
+            CHECK (std::abs (measured - curve) < 0.01);
+    }
+}
+
+TEST_CASE ("The EQ in Linear at a Mix of 50 % is an EQ of half the depth, which in Minimum it is not")
+{
+    // A bell of +12 dB: through the runner, which mixes what came in back in, as late as the EQ's latency.
+    const auto played = [] (bool isLinear)
+    {
+        auto values = withBands ({ { 3, Eq::BandType::bell, 1000.0f, 12.0f, 1.0f } });
+        values[(size_t) Eq::mixParameter] = 0.5f;
+
+        if (isLinear)
+            values = inLinear (values);
+
+        probe::Device device (Eq::info);
+        device.setAll (values);
+        device.prepare (testRate, 512);
+        const auto out = device.played (probe::makeImpulse (2 * linearLatency + 512), 512);
+        std::vector<double> response;
+
+        for (int i = 0; i < out.getNumSamples(); ++i)
+            response.push_back (out.getSample (0, i));
+
+        return std::pair { response, withBands ({ { 3, Eq::BandType::bell, 1000.0f, 12.0f, 1.0f } }) };
+    };
+
+    for (const auto isLinear : { true, false })
+    {
+        CAPTURE (isLinear);
+        const auto [response, values] = played (isLinear);
+        auto largestApart = 0.0, deepest = 0.0, deepestAt = 0.0;
+
+        for (const auto f : getFrequencies (24))
+        {
+            const auto expected = 20.0 * std::log10 (0.5 * (1.0 + Eq::getMagnitude (values, f, testRate)));
+            const auto apart = responseDecibels (response, f) - expected;
+            largestApart = std::max (largestApart, std::abs (apart));
+
+            if (apart < deepest)
+            {
+                deepest = apart;
+                deepestAt = f;
+            }
+        }
+
+        MESSAGE ((isLinear ? "Linear" : "Minimum") << ": at most " << largestApart << " dB from (1 + gain) / 2, its deepest dip " << deepest
+                                                   << " dB at " << deepestAt << " Hz");
+
+        if (isLinear)
+            CHECK (largestApart < 0.1);
+        else
+            CHECK (deepest < -0.3); // the phase the bell turns cancels some of what came in beside it
+    }
+}
+
+// How the window and the grid were chosen (devices/eq/LinearPhase.h, Design): each row's largest error where the curve is above
+// -60 dB, a low cut's level at 10 Hz, and the end tap's size against the middle tap's, for the rectangle, raised-cosine tapers
+// of the ends' last 2, 3 and 5 %, and Kaisers of several betas, on grids of 2 L and 4 L. Run with --no-skip to see the table
+// again, as for a longer kernel.
+TEST_CASE ("The EQ's linear-phase window and grid, measured" * doctest::skip())
+{
+    const auto kernelError =
+        [] (const std::vector<float>& values, devices::LinearPhase::Design design, double floorDecibels, double& at10, double& endTap)
+    {
+        devices::LinearPhase linear;
+        linear.prepare (testRate, values, 2, design);
+        const auto taps = linear.getPlayedTaps (0);
+        std::vector<double> response (taps.begin(), taps.end());
+        auto largest = 0.0;
+
+        for (const auto f : getFrequencies (24))
+        {
+            const auto reported = 20.0 * std::log10 (Eq::getMagnitude (values, f, testRate));
+
+            if (reported > floorDecibels)
+                largest = std::max (largest, std::abs (responseDecibels (response, f) - reported));
+        }
+
+        at10 = responseDecibels (response, 10.0);
+        endTap = 20.0 * std::log10 (std::max (1.0e-30, std::abs (response.front()) / std::abs (response[response.size() / 2])));
+        return largest;
+    };
+
+    std::vector<std::pair<std::string, std::vector<float>>> rows;
+
+    for (const auto q : { 1.0f, 4.0f })
+        rows.push_back ({ "bell, 200 Hz, +12 dB, Q " + std::to_string (q), withBands ({ { 3, Eq::BandType::bell, 200.0f, 12.0f, q } }) });
+
+    rows.push_back ({ "low shelf, 200 Hz, +12 dB, Q 2", withBands ({ { 3, Eq::BandType::lowShelf, 200.0f, 12.0f, 2.0f } }) });
+
+    // Every bell of the low end's table.
+    for (const auto gain : { 12.0f, -12.0f })
+        for (const auto frequency : { 30.0f, 60.0f, 100.0f })
+            for (const auto q : { 1.0f, 4.0f, 10.0f })
+                rows.push_back ({ "bell, " + std::to_string ((int) frequency) + " Hz, " + std::to_string ((int) gain) + " dB, Q "
+                                      + std::to_string ((int) q),
+                                  withBands ({ { 3, Eq::BandType::bell, frequency, gain, q } }) });
+
+    for (const auto slope : { 0, 3 })
+        for (const auto frequency : { 30.0f, 80.0f })
+            rows.push_back ({ "low cut, " + std::to_string (frequency) + " Hz, " + std::to_string (12 * (slope + 1)) + " dB",
+                              withBands ({ { 0, Eq::BandType::lowCut, frequency, 0.0f, 0.71f, slope } }) });
+
+    struct Window
+    {
+        double beta, taper;
+    };
+
+    for (const auto grid : { 2, 4 })
+        for (const auto& window : { Window { 0.0, 0.0 }, Window { 0.0, 0.02 }, Window { 0.0, 0.03 }, Window { 0.0, 0.05 },
+                                    Window { 2.0, 0.0 }, Window { 4.0, 0.0 }, Window { 8.0, 0.0 } })
+        {
+            std::string line = "grid " + std::to_string (grid) + " L, beta " + std::to_string (window.beta) + ", taper "
+                               + std::to_string (window.taper * 100.0) + " %:";
+
+            for (const auto& [name, values] : rows)
+            {
+                double at10 = 0.0, endTap = 0.0;
+                const auto error = kernelError (inLinear (values), { grid, window.beta, window.taper }, -60.0, at10, endTap);
+                line += " [" + name + "] " + std::to_string (error)
+                        + (name.rfind ("low cut", 0) == 0 ? ", at 10 Hz " + std::to_string (at10) : "") + ", end tap "
+                        + std::to_string (endTap) + " dB";
+            }
+
+            MESSAGE (line);
+        }
+}
+
+namespace
+{
+// Pink noise, the same every time: white noise through Paul Kellet's filter, at about the amplitude given.
+probe::Sound makePinkNoise (int numSamples, std::uint32_t seed, float amplitude)
+{
+    auto white = probe::makeNoise (numSamples, seed, 1.0f);
+    probe::Sound pink (2, numSamples);
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double w = white.getSample (channel, i);
+            b0 = 0.99886 * b0 + w * 0.0555179;
+            b1 = 0.99332 * b1 + w * 0.0750759;
+            b2 = 0.96900 * b2 + w * 0.1538520;
+            b3 = 0.86650 * b3 + w * 0.3104856;
+            b4 = 0.55000 * b4 + w * 0.5329522;
+            b5 = -0.7616 * b5 - w * 0.0168980;
+            pink.setSample (channel, i, (float) (amplitude * 0.11 * (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362)));
+            b6 = w * 0.115926;
+        }
+    }
+
+    return pink;
+}
+
+// A bell's frequency along a sweep from 200 Hz to 2 kHz over a second, as automation gives it at each block of 32 samples.
+float sweptFrequency (int sample)
+{
+    const auto t = std::clamp ((double) (sample / 32 * 32) / testRate, 0.0, 1.0);
+    return (float) (200.0 * std::pow (10.0, t));
+}
+} // namespace
+
+TEST_CASE ("The EQ in Linear follows a bell swept by automation without a click, its response the automation's within a step")
+{
+    constexpr int numSamples = 2 * (int) testRate, half = linearLatency / 2;
+    const auto values = inLinear (withBands ({ { 3, Eq::BandType::bell, 200.0f, 9.0f, 2.0f } }));
+    const auto frequencyIndex = (size_t) Eq::getParameterIndex (3, Eq::frequency);
+
+    const auto playedSwept = [&] (const probe::Sound& in, bool swept, float heldAt)
+    {
+        auto eq = makePrepared (values, 32);
+        auto out = in;
+        auto current = values;
+        current[frequencyIndex] = swept ? 200.0f : heldAt;
+        playEq (*eq, out, 32, current,
+                [&] (int start)
+                {
+                    if (swept)
+                        current[frequencyIndex] = sweptFrequency (start);
+                });
+        return out;
+    };
+
+    // Under pink noise: the largest step from a sample to the next no more than the bell held anywhere along the way gives.
+    const auto pink = makePinkNoise (numSamples, 31, 0.25f);
+    auto held = 0.0;
+
+    for (const auto f : { 200.0f, 400.0f, 632.0f, 1000.0f, 2000.0f })
+        held = std::max (held, largestStep (playedSwept (pink, false, f), 2 * linearLatency));
+
+    const auto moving = largestStep (playedSwept (pink, true, 0.0f), 2 * linearLatency);
+    MESSAGE ("pink noise through the swept bell: the largest step " << moving << ", held anywhere along the way " << held);
+    CHECK (moving <= held * 1.02);
+
+    // A sine at 632 Hz: what comes out at each moment is the bell at the automation's frequency of L samples before, within
+    // a step of the grid (L / 2) either way: between the least and the most the bell gives the sine over that stretch.
+    const auto sine = makeStereoSine (632.0, numSamples, 0.25f, 0.25f);
+    const auto out = playedSwept (sine, true, 0.0f);
+    constexpr int window = 256;
+    auto worst = 0.0;
+
+    for (int at = linearLatency + 2 * half; at + window < numSamples; at += window)
+    {
+        const auto measured = probe::inDecibels (probe::getToneLevel (out, 0, 632.0, testRate, at, window) / 0.25);
+        auto least = 1.0e9, most = -1.0e9;
+
+        for (int t = at - linearLatency - half - window; t <= at + window - linearLatency + half; t += 32)
+        {
+            auto bell = values;
+            bell[frequencyIndex] = sweptFrequency (std::max (0, t));
+            const auto gain = 20.0 * std::log10 (Eq::getMagnitude (bell, 632.0, testRate));
+            least = std::min (least, gain);
+            most = std::max (most, gain);
+        }
+
+        const auto outside = std::max ({ 0.0, least - measured, measured - most });
+        worst = std::max (worst, outside);
+    }
+
+    MESSAGE ("the sine's level outside what the automation gives within a step: at most " << worst << " dB");
+    CHECK (worst < 0.05);
+
+    // A step of the bell's gain at a known sample is half way in the sound L samples later, within half a step of the grid.
+    for (const auto stepAt : { 10 * half, 10 * half + half / 2, 10 * half + 32, 10 * half + half - 32 })
+    {
+        CAPTURE (stepAt);
+        auto flat = values;
+        flat[(size_t) Eq::getParameterIndex (3, Eq::frequency)] = 1000.0f;
+        flat[(size_t) Eq::getParameterIndex (3, Eq::gain)] = 0.0f;
+        auto eq = makePrepared (flat, 32);
+        auto tone = makeStereoSine (1000.0, 16 * half + 4 * linearLatency, 0.25f, 0.25f);
+        auto current = flat;
+        playEq (*eq, tone, 32, current,
+                [&current, stepAt] (int start)
+                {
+                    if (start == stepAt)
+                        current[(size_t) Eq::getParameterIndex (3, Eq::gain)] = 12.0f;
+                });
+
+        const auto middle = 0.25 * 0.5 * (1.0 + juce::Decibels::decibelsToGain (12.0));
+        auto halfWay = -1.0;
+
+        for (int at = stepAt; at + 64 < tone.getNumSamples(); at += 16)
+            if (probe::getToneLevel (tone, 0, 1000.0, testRate, at, 64) >= middle)
+            {
+                halfWay = at + 32.0;
+                break;
+            }
+
+        MESSAGE ("a step at " << stepAt << " is half way in at " << halfWay << ", " << halfWay - stepAt - linearLatency
+                              << " samples from L later");
+        CHECK (std::abs (halfWay - stepAt - linearLatency) <= half / 2 + 32);
+    }
+}
+
+TEST_CASE ("The EQ in Linear plays the same in blocks of 7, 32 and 512 samples, from a jump, and after a sleep as a render")
+{
+    // Noise, bands on the middle and the side and on one side, one dynamic, and a band's frequency and gain changed at a sample
+    // whatever the blocks (the block it falls in cut there).
+    constexpr int numSamples = 48000, changeAt = 20000;
+    const auto in = probe::makeNoise (numSamples, 41, 0.3f);
+    const auto values = inLinear (withBands ({ { 0, Eq::BandType::lowCut, 60.0f, 0.0f, 0.71f, 2 },
+                                               { 2, Eq::BandType::bell, 400.0f, 4.0f, 1.0f, 1, Placement::mid },
+                                               { 4, Eq::BandType::highShelf, 5000.0f, -3.0f, 0.71f, 1, Placement::side },
+                                               { 5, Eq::BandType::bell, 7000.0f, 0.0f, 2.0f, 1, Placement::left } }));
+    auto withDynamic = values;
+    withDynamic[(size_t) Eq::getParameterIndex (5, Eq::dynamic)] = -8.0f;
+    withDynamic[(size_t) Eq::getParameterIndex (5, Eq::threshold)] = -40.0f;
+    auto changed = withDynamic;
+    changed[(size_t) Eq::getParameterIndex (2, Eq::frequency)] = 900.0f;
+    changed[(size_t) Eq::getParameterIndex (2, Eq::gain)] = -6.0f;
+
+    const auto playedIn = [&] (int blockSize)
+    {
+        auto eq = makePrepared (withDynamic, blockSize);
+        auto out = in;
+
+        for (int start = 0; start < numSamples;)
+        {
+            auto length = std::min (blockSize, numSamples - start);
+
+            if (start < changeAt && start + length > changeAt)
+                length = changeAt - start;
+
+            float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = length;
+            block.parameters = start < changeAt ? withDynamic : changed;
+            block.isPlaying = true;
+            block.songSample = start;
+            eq->process (block);
+            start += length;
+        }
+
+        return out;
+    };
+
+    const auto in32 = playedIn (32);
+    CHECK (probe::getLargestDifference (in32, in) > 0.01);
+
+    for (const auto blockSize : { 7, 512 })
+    {
+        CAPTURE (blockSize);
+        const auto apart = probe::getLargestDifference (playedIn (blockSize), in32);
+        MESSAGE ("blocks of " << blockSize << " against 32: " << apart << " apart at most");
+        CHECK (apart <= 0.0); // to the bit: the partitions, the grid and the glides fall where they fall whatever the blocks
+    }
+
+    // From the song's start, and after a jump to the same place (the EQ having played something else before it), with its
+    // parameters standing still: the same, once its history holds the same sound (2 L after the jump).
+    constexpr int jumpTo = 12000;
+    const auto render = [&]
+    {
+        auto eq = makePrepared (values, 480);
+        auto out = in;
+        auto current = values;
+        playEq (*eq, out, 480, current);
+        return out;
+    }();
+
+    {
+        auto eq = makePrepared (values, 480);
+        auto before = probe::makeNoise (30000, 5, 0.3f);
+        auto current = values;
+        playEq (*eq, before, 480, current);
+        auto out = in;
+
+        for (int start = jumpTo; start < numSamples; start += 480)
+        {
+            const auto length = std::min (480, numSamples - start);
+            float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = length;
+            block.parameters = values;
+            block.isPlaying = true;
+            block.songSample = start;
+            eq->process (block);
+        }
+
+        const auto apart = probe::getLargestDifference (out, render, jumpTo + 2 * linearLatency);
+        MESSAGE ("after a jump: " << apart << " from the render at most, from 2 L after it");
+        CHECK (apart < 1.0e-5);
+    }
+
+    // After a sleep on silence, live, as in a render: a tone, 3 s of silence, the tone again.
+    {
+        const auto tone = makeStereoSine (300.0, 9600, 0.3f, 0.3f);
+        const auto sound = probe::join (probe::join (tone, probe::makeSilence (144000)), tone);
+        const auto playedLive = [&] (bool live, std::uint64_t& blocks)
+        {
+            probe::Device device (Eq::info);
+            device.setAll (values);
+            device.isRendering = ! live;
+            device.prepare (testRate, 480);
+            auto out = sound;
+            device.play (out, 480);
+            blocks = device.getRunner().getBlocksWorked();
+            return out;
+        };
+
+        std::uint64_t liveBlocks = 0, renderBlocks = 0;
+        const auto live = playedLive (true, liveBlocks), rendered = playedLive (false, renderBlocks);
+        const auto apart = probe::getLargestDifference (live, rendered);
+        MESSAGE ("after a sleep (" << liveBlocks << " blocks worked of " << renderBlocks << "): " << apart << " from the render at most");
+        CHECK (liveBlocks + 100 < renderBlocks);
+        CHECK (apart < 1.0e-5);
+    }
+}
+
+TEST_CASE ("The EQ in Linear with a band automated across a jump or a sleep: how far from a render, and for how long")
+{
+    // A render's kernels there come from values the jump never played, so they can't be the same: measured, for the page. Where
+    // the song jumps, a design under way for the values before it is dropped and one for the values there starts at once.
+    constexpr int numSamples = 64000, jumpFrom = 12000 + 16, firstJumpTo = 23 * linearLatency / 2;
+    const auto in = probe::makeNoise (numSamples, 43, 0.3f);
+    const auto values = inLinear (withBands ({ { 2, Eq::BandType::bell, 400.0f, 9.0f, 1.0f } }));
+    const auto frequencyIndex = (size_t) Eq::getParameterIndex (2, Eq::frequency);
+    const auto automated = [&] (std::int64_t sample) { return (float) (400.0 * std::pow (4.0, (double) sample / 96000.0)); };
+
+    const auto playFrom = [&] (Eq& eq, probe::Sound& out, int from, int to)
+    {
+        for (int start = from; start < to; start += 32)
+        {
+            auto current = values;
+            current[frequencyIndex] = automated (start);
+            float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = std::min (32, to - start);
+            block.parameters = current;
+            block.isPlaying = true;
+            block.songSample = start;
+            eq.process (block);
+        }
+    };
+
+    auto render = in;
+    {
+        auto eq = makePrepared (values, 32);
+        playFrom (*eq, render, 0, numSamples);
+    }
+
+    const auto measureApart = [] (const probe::Sound& a, const probe::Sound& b, int from, const std::string& what)
+    {
+        auto largest = 0.0;
+        auto lastApart = from;
+
+        for (int i = from; i < a.getNumSamples(); ++i)
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                const auto apart = std::abs ((double) a.getSample (channel, i) - b.getSample (channel, i));
+                largest = std::max (largest, apart);
+
+                if (apart > 1.0e-5)
+                    lastApart = i;
+            }
+
+        MESSAGE ("a band automated across " << what << ": up to " << largest << " (" << probe::inDecibels (largest)
+                                            << " dBFS) from a render, for " << lastApart - from << " samples after it");
+        return std::pair { lastApart - from, largest };
+    };
+
+    // A jump to every 16th place of a step of the grid of L / 2. Before the jump, at the song's places before jumpFrom, the
+    // sound the render had before jumpTo: so that after the jump the EQ's history is the render's, and only its kernels, from
+    // the values before the jump, differ. The new values' kernels glide in from the first line after their design, done
+    // L / 2 after the jump: wholly in under 1.5 L later at the worst.
+    auto worstLength = 0, worstAt = 0;
+    auto worstApart = 0.0;
+
+    for (int place = 0; place < 16; ++place)
+    {
+        const auto jumpTo = firstJumpTo + place * linearLatency / 32;
+        CAPTURE (jumpTo);
+        auto jumped = in;
+        auto eq = makePrepared (values, 32);
+        probe::Sound before (2, numSamples);
+        before.clear();
+
+        for (int channel = 0; channel < 2; ++channel)
+            before.copyFrom (channel, 0, in, channel, jumpTo - jumpFrom, jumpFrom);
+
+        playFrom (*eq, before, 0, jumpFrom);
+        playFrom (*eq, jumped, jumpTo, numSamples);
+        const auto [length, apart] = measureApart (jumped, render, jumpTo, "a jump to " + std::to_string (jumpTo));
+        CHECK (length < 3 * linearLatency / 2);
+
+        if (length > worstLength)
+        {
+            worstLength = length;
+            worstAt = jumpTo;
+        }
+
+        worstApart = std::max (worstApart, apart);
+    }
+
+    MESSAGE ("across a jump, at the worst: apart for " << worstLength << " samples (the jump to " << worstAt << "), up to "
+                                                       << probe::inDecibels (worstApart) << " dBFS");
+
+    // Live, asleep through silence while the band's automation goes on, against the render, which never slept: a tone, 3 s of
+    // silence, and noise.
+    const auto sound = probe::join (probe::join (makeStereoSine (300.0, 9600, 0.3f, 0.3f), probe::makeSilence (144000)),
+                                    probe::makeNoise (48000, 7, 0.3f));
+    const auto playedLive = [&] (bool live)
+    {
+        probe::Device device (Eq::info);
+        device.setAll (values);
+        device.isRendering = ! live;
+        device.prepare (testRate, 480);
+        device.automate ((int) frequencyIndex, 400.0f, 1600.0f, sound.getNumSamples());
+        auto out = sound;
+        device.play (out, 480);
+        return out;
+    };
+
+    CHECK (measureApart (playedLive (true), playedLive (false), 9600 + 144000, "a sleep").first <= 3 * linearLatency / 2);
+}
+
+TEST_CASE ("The EQ in Linear follows its knobs after a jump to a place alike on its grid of 32 samples but not on its own")
+{
+    // A jump at every place in one of the EQ's steps of 32 samples, back by a whole number of them but not of L / 2 (a 16-bar
+    // loop from bar 2 at 44.1 kHz and 120 BPM is one): the EQ's step goes on, the linear phase's is cut short there, and its
+    // next line must still come. Then a bell's Gain turned up by 12 dB: 2 L later, a sine through it is 12 dB louder.
+    constexpr int jumpAt = 3 * linearLatency, turnAfter = 64, measureAt = turnAfter + 2 * linearLatency;
+    constexpr int numSamples = jumpAt + 32 + measureAt + 1024;
+    const auto flat = inLinear (withBands ({ { 3, Eq::BandType::bell, 1000.0f, 0.0f, 1.0f } }));
+    const auto sine = makeStereoSine (1000.0, numSamples, 0.25f, 0.25f);
+    const auto gainIndex = (size_t) Eq::getParameterIndex (3, Eq::gain);
+    auto worst = 0.0;
+
+    for (const auto back : { 32 * 37, 32 * 101 })
+        for (int offset = 0; offset < 32; ++offset)
+        {
+            CAPTURE (back);
+            CAPTURE (offset);
+            REQUIRE (back % (linearLatency / 2) != 0);
+            auto eq = makePrepared (flat, 32);
+            auto out = sine;
+            auto values = flat;
+            const auto jumpSample = jumpAt + offset;
+
+            for (int start = 0; start < numSamples;)
+            {
+                auto length = std::min (32, numSamples - start);
+
+                if (start < jumpSample && start + length > jumpSample)
+                    length = jumpSample - start;
+
+                if (start >= jumpSample + turnAfter)
+                    values[gainIndex] = 12.0f;
+
+                float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+                devices::ProcessContext block;
+                block.channels = channels;
+                block.numChannels = 2;
+                block.numSamples = length;
+                block.parameters = values;
+                block.isPlaying = true;
+                block.songSample = start < jumpSample ? start : start - back;
+                eq->process (block);
+                start += length;
+            }
+
+            const auto measured = probe::inDecibels (probe::getToneLevel (out, 0, 1000.0, testRate, jumpSample + measureAt, 512) / 0.25);
+            worst = std::max (worst, std::abs (measured - 12.0));
+            CHECK (std::abs (measured - 12.0) < 0.1);
+        }
+
+    MESSAGE ("2 L after the turn, at most " << worst << " dB from the 12 dB turned up, over 64 jumps");
+}
+
+TEST_CASE ("The EQ in Linear follows its knobs in a loop shorter than its grid's step")
+{
+    // A loop of 1,000 samples going round, where its grid's step is L / 2 = 2,048. Without a line of the grid inside the loop
+    // (from 100 to 1,100) no line ever comes, and a design done must come in at a wrap; with one inside it (from 1,900 to
+    // 2,900, the line at 2,048) and a lane that holds the bell's Gain at 0 dB before the line and at 12 dB from it, each
+    // wrap finds other values than the design the line started, and one design in two must still end. Either way a sine
+    // through the bell is louder 6 L after the knob is turned (12 dB in the first case, the lane's 12 dB in the second).
+    constexpr int numSamples = 8 * linearLatency, turnAt = linearLatency, loopLength = 1000;
+    const auto flat = inLinear (withBands ({ { 3, Eq::BandType::bell, 1000.0f, 0.0f, 1.0f } }));
+    const auto sine = makeStereoSine (1000.0, numSamples, 0.25f, 0.25f);
+    const auto gainIndex = (size_t) Eq::getParameterIndex (3, Eq::gain);
+
+    for (const auto loopStart : { 100, 1900 })
+    {
+        CAPTURE (loopStart);
+        const auto hasLine = loopStart == 1900;
+        auto eq = makePrepared (flat, 32);
+        auto out = sine;
+        auto values = flat;
+        auto place = loopStart;
+
+        for (int start = 0; start < numSamples;)
+        {
+            // Blocks end at the loop's end, as the engine's do where the song jumps, and here at the grid's line too, so that
+            // the lane's step is there at the line.
+            const auto lineAt = linearLatency / 2;
+            const auto length = std::min ({ 32, numSamples - start, loopStart + loopLength - place, place < lineAt ? lineAt - place : 32 });
+
+            if (start >= turnAt)
+                values[gainIndex] = hasLine && place < linearLatency / 2 ? 0.0f : 12.0f;
+
+            float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+            devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = length;
+            block.parameters = values;
+            block.isPlaying = true;
+            block.songSample = place;
+            eq->process (block);
+            start += length;
+            place += length;
+
+            if (place >= loopStart + loopLength)
+                place = loopStart;
+        }
+
+        const auto measured = probe::inDecibels (probe::getToneLevel (out, 0, 1000.0, testRate, turnAt + 6 * linearLatency, 512) / 0.25);
+        CAPTURE (measured);
+
+        if (hasLine)
+            CHECK (measured > 6.0); // it has left 0 dB for the lane's 12 dB, or is on its way between them
+        else
+            CHECK (std::abs (measured - 12.0) < 0.1);
+    }
+}
+
+TEST_CASE ("The EQ in Linear plays each way through it as its response says, and a band on one leaves the other to the bit")
+{
+    // A bell on each placement in turn: a sine alike on both sides (the middle), opposite on them (the side), on the left
+    // alone and on the right alone, against the response for that way, from 3 L on.
+    struct Way
+    {
+        Placement way;
+        float left, right;
+    };
+
+    constexpr int numSamples = 3 * linearLatency + 9600;
+    const Way ways[] = { { Placement::mid, 0.25f, 0.25f },
+                         { Placement::side, 0.25f, -0.25f },
+                         { Placement::left, 0.25f, 0.0f },
+                         { Placement::right, 0.0f, 0.25f } };
+
+    for (const auto placement : { Placement::mid, Placement::side, Placement::left, Placement::right })
+    {
+        CAPTURE ((int) placement);
+        const auto values = inLinear (withBands ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, placement } }));
+        const auto isMidSide = placement == Placement::mid || placement == Placement::side;
+
+        for (const auto& way : ways)
+        {
+            // The middle and the side for a band on one of them; the left and the right for a band on one of those.
+            if (isMidSide != (way.way == Placement::mid || way.way == Placement::side))
+                continue;
+
+            CAPTURE ((int) way.way);
+            const auto channel = way.way == Placement::right ? 1 : 0;
+
+            for (const auto hertz : { 300.0, 1000.0, 3000.0 })
+            {
+                CAPTURE (hertz);
+                const auto in = makeStereoSine (hertz, numSamples, way.left, way.right);
+                auto out = in;
+                auto current = values;
+                playEq (*makePrepared (values), out, 512, current);
+                const auto measured = probe::inDecibels (probe::getToneLevel (out, channel, hertz, testRate, 3 * linearLatency, 9600)
+                                                         / probe::getToneLevel (in, channel, hertz, testRate, 3 * linearLatency, 9600));
+                CHECK (std::abs (measured - 20.0 * std::log10 (Eq::getMagnitude (values, hertz, testRate, way.way))) < 0.1);
+            }
+        }
+    }
+
+    // A band on the side leaves noise alike on both sides as it came, L later, to the bit; one on the middle, noise opposite on
+    // them; one on the left, the right; one on the right, the left.
+    auto alike = probe::makeNoise (3 * linearLatency, 21, 0.5f), opposite = alike, oneSide = probe::makeNoise (3 * linearLatency, 22, 0.5f);
+
+    for (int i = 0; i < alike.getNumSamples(); ++i)
+    {
+        alike.setSample (1, i, alike.getSample (0, i));
+        opposite.setSample (1, i, -opposite.getSample (0, i));
+    }
+
+    struct Untouched
+    {
+        Placement placement;
+        const probe::Sound* sound;
+        std::vector<int> channels; // those left as they came
+    };
+
+    for (const auto& [placement, sound, channels] :
+         { Untouched { Placement::side, &alike, { 0, 1 } }, Untouched { Placement::mid, &opposite, { 0, 1 } },
+           Untouched { Placement::left, &oneSide, { 1 } }, Untouched { Placement::right, &oneSide, { 0 } } })
+    {
+        CAPTURE ((int) placement);
+        const auto values = inLinear (withBands ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, placement } }));
+        auto out = *sound;
+        auto current = values;
+        playEq (*makePrepared (values), out, 512, current);
+
+        for (const auto channel : channels)
+        {
+            CAPTURE (channel);
+            auto differences = 0;
+
+            for (int i = 0; i < out.getNumSamples(); ++i)
+                if (! juce::exactlyEqual (out.getSample (channel, i),
+                                          i < linearLatency ? 0.0f : sound->getSample (channel, i - linearLatency)))
+                    ++differences;
+
+            CHECK (differences == 0);
+        }
+    }
+}
+
+TEST_CASE ("The EQ as a de-esser in Linear dips as deep as in Minimum, on the burst as it comes out")
+{
+    // Part A's de-esser case: De-Ess's band, a 7 kHz burst 20 dB over quiet noise. In Linear its shape at its Gain (0 dB) is in
+    // the kernels and what its Dynamic moves plays after them, its ear hearing what came in as late as they play it.
+    constexpr int burstFrom = 24000, burstTo = 48000, numSamples = 72000 + linearLatency, block = 48;
+    std::vector<float> values;
+
+    for (const auto& [name, preset] : getPresetValues())
+        if (name == juce::File::addTrailingSeparator ("Dynamic") + "De-Ess.phazitepreset")
+            values = preset;
+
+    REQUIRE (values.size() == Eq::info.parameters.size());
+    auto in = probe::makeNoise (numSamples, 17, 0.01f);
+    const auto burst = makeStereoSine (7000.0, numSamples, 0.25f, 0.25f);
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = burstFrom; i < burstTo; ++i)
+            in.addSample (channel, i, burst.getSample (channel, i));
+
+    struct Played
+    {
+        probe::Sound out;
+        float deepest = 0.0f;
+        int deepestAt = 0; // from where the burst comes out
+        double dip = 0.0;  // the burst's level out against in, in its middle, in decibels
+    };
+
+    const auto through = [&] (bool isLinear)
+    {
+        const auto late = isLinear ? linearLatency : 0;
+        auto eq = makePrepared (isLinear ? inLinear (values) : values, block);
+        Played played { in };
+        auto current = isLinear ? inLinear (values) : values;
+        playEq (*eq, played.out, block, current, {},
+                [&] (int end)
+                {
+                    if (const auto moved = eq->getGainMoved (5); moved < played.deepest)
+                    {
+                        played.deepest = moved;
+                        played.deepestAt = end - late - burstFrom;
+                    }
+                });
+
+        played.dip = probe::inDecibels (probe::getToneLevel (played.out, 0, 7000.0, testRate, burstFrom + late + 9600, 9600)
+                                        / probe::getToneLevel (in, 0, 7000.0, testRate, burstFrom + 9600, 9600));
+        return played;
+    };
+
+    const auto minimum = through (false), linear = through (true);
+    MESSAGE ("Minimum: its band down " << minimum.deepest << " dB at most, " << minimum.deepestAt << " samples into the burst, the burst "
+                                       << minimum.dip << " dB; Linear: " << linear.deepest << " dB, " << linear.deepestAt
+                                       << " samples into it as it comes out, the burst " << linear.dip << " dB");
+    CHECK (std::abs (linear.dip - minimum.dip) < 0.5);
+    CHECK (std::abs (linear.deepest - minimum.deepest) < 0.5f);
+    CHECK (std::abs (linear.deepestAt - minimum.deepestAt) <= (int) (0.003 * testRate));
+
+    // Before it, the noise as it came, only later.
+    CHECK (probe::getLargestDifference (probe::getPart (linear.out, linearLatency, burstFrom), probe::getPart (in, 0, burstFrom)) < 1.0e-5);
+}
+
+TEST_CASE ("The EQ in Linear's cost, counted: multiply-adds a sample for each set of kernels, and a design's work spread evenly")
+{
+    const auto prepared = [] (std::initializer_list<BandSetting> bands) { return makePrepared (inLinear (withBands (bands)), 1); };
+
+    // One kernel for both sides; one on the middle, the side a delay alone (a band on Mid alone); two (the sides' and the
+    // crossings', bands on Mid and on Side); four. Each kernel a side's sum takes is 31 partitions of 257 complex points, four
+    // real multiply-adds each, every 256 samples; beside them, an FFT of 512 points of each side in and one of each side out
+    // every 256 samples.
+    const auto one = prepared ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f } });
+    const auto middle = prepared ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, Placement::mid } });
+    const auto two = prepared ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, Placement::mid },
+                                 { 5, Eq::BandType::bell, 3000.0f, 3.0f, 1.0f, 1, Placement::side } });
+    const auto four = prepared ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, Placement::left },
+                                  { 5, Eq::BandType::bell, 3000.0f, 3.0f, 1.0f, 1, Placement::mid } });
+    const auto none = prepared ({});
+    const auto perKernel = (4.0 * 31 * 257) / 256.0;
+    MESSAGE ("multiply-adds a sample: one kernel " << one->getLinearPhase().getMultiplyAddsPerSample (2) << ", one on the middle "
+                                                   << middle->getLinearPhase().getMultiplyAddsPerSample (2) << ", two "
+                                                   << two->getLinearPhase().getMultiplyAddsPerSample (2) << ", four "
+                                                   << four->getLinearPhase().getMultiplyAddsPerSample (2) << ", every band flat "
+                                                   << none->getLinearPhase().getMultiplyAddsPerSample (2));
+    CHECK (one->getLinearPhase().getNumKernelsPlayed() == 1);
+    CHECK (middle->getLinearPhase().getNumKernelsPlayed() == 1);
+    CHECK (two->getLinearPhase().getNumKernelsPlayed() == 2);
+    CHECK (four->getLinearPhase().getNumKernelsPlayed() == 4);
+    CHECK (none->getLinearPhase().getNumKernelsPlayed() == 0); // a delay alone
+    CHECK (one->getLinearPhase().getMultiplyAddsPerSample (2) == (int) std::ceil (2.0 * perKernel));
+    CHECK (middle->getLinearPhase().getMultiplyAddsPerSample (2) == (int) std::ceil (perKernel + 2.0 * 257 / 256.0));
+    CHECK (two->getLinearPhase().getMultiplyAddsPerSample (2) == (int) std::ceil (4.0 * perKernel));
+    CHECK (four->getLinearPhase().getMultiplyAddsPerSample (2) == (int) std::ceil (4.0 * perKernel));
+    CHECK (none->getLinearPhase().getMultiplyAddsPerSample (2) <= 5);
+
+    // A design: so much work, spread over the L / 2 samples after the line it starts on, none of a sample's share more than a
+    // 64th of it, played a sample at a time; and nothing designed while nothing changes.
+    for (const auto& [name, bands] :
+         { std::pair { "eight bands, every slope", withBands ({ { 0, Eq::BandType::lowCut, 30.0f, 0.0f, 0.71f, 3 },
+                                                                { 1, Eq::BandType::lowShelf, 100.0f, 3.0f, 0.71f },
+                                                                { 2, Eq::BandType::bell, 250.0f, -2.0f, 1.0f },
+                                                                { 3, Eq::BandType::bell, 800.0f, 2.0f, 1.0f },
+                                                                { 4, Eq::BandType::notch, 2500.0f, 0.0f, 4.0f },
+                                                                { 5, Eq::BandType::bell, 6000.0f, 1.0f, 1.0f },
+                                                                { 6, Eq::BandType::highShelf, 10000.0f, -2.0f, 0.71f },
+                                                                { 7, Eq::BandType::highCut, 18000.0f, 0.0f, 0.71f, 2 } }) },
+           std::pair { "two bands, one on the left", withBands ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f, 1, Placement::left },
+                                                                  { 5, Eq::BandType::bell, 3000.0f, 3.0f, 1.0f, 1, Placement::mid } }) } })
+    {
+        CAPTURE (name);
+        auto values = inLinear (bands);
+        auto eq = makePrepared (values, 1);
+        auto silence = probe::makeSilence (3 * linearLatency);
+        auto worked = eq->getLinearPhase().getWorkDone();
+        std::int64_t largestShare = 0, total = 0;
+        auto designs = 0;
+        playEq (
+            *eq, silence, 1, values,
+            [&] (int start)
+            {
+                if (start == linearLatency / 2)
+                    values[(size_t) Eq::getParameterIndex (3, Eq::gain)] = 4.0f;
+            },
+            [&] (int)
+            {
+                const auto now = eq->getLinearPhase().getWorkDone();
+                largestShare = std::max (largestShare, now - worked);
+                total += now - worked;
+                worked = now;
+                designs = eq->getLinearPhase().getDesignsStarted();
+            });
+
+        const auto cost = eq->getLinearPhase().getDesignCost();
+        MESSAGE (std::string (name) << ": a design's work " << cost << " units, done " << total << ", its largest share in a sample "
+                                    << largestShare << " (a " << (double) cost / (double) largestShare << "th)");
+        CHECK (designs == 1);
+        CHECK (total <= cost);
+        CHECK (largestShare * 64 <= cost);
+    }
+}
+
+// A measure of time: with the benchmark gates, which run nightly on a quiet machine, not in ctest.
+TEST_CASE ("Benchmark gate: the EQ in Linear against Minimum, eight bands on, standing still and with a band automated"
+           * doctest::test_suite ("benchmark-gate") * doctest::skip())
+{
+    const auto values = withBands ({ { 0, Eq::BandType::lowCut, 30.0f, 0.0f, 0.71f, 1 },
+                                     { 1, Eq::BandType::lowShelf, 100.0f, 2.0f, 0.71f },
+                                     { 2, Eq::BandType::bell, 250.0f, -2.0f, 1.0f },
+                                     { 3, Eq::BandType::bell, 800.0f, 2.0f, 1.0f },
+                                     { 4, Eq::BandType::bell, 2500.0f, -1.0f, 1.0f },
+                                     { 5, Eq::BandType::bell, 6000.0f, 1.0f, 1.0f },
+                                     { 6, Eq::BandType::highShelf, 10000.0f, 2.0f, 0.71f },
+                                     { 7, Eq::BandType::highCut, 18000.0f, 0.0f, 0.71f } });
+    const auto noise = probe::makeNoise (24000, 3, 0.25f);
+
+    for (const auto automated : { false, true })
+    {
+        std::array<double, 2> seconds {};
+
+        for (const auto isLinear : { false, true })
+        {
+            auto current = isLinear ? inLinear (values) : values;
+            auto eq = makePrepared (current, 512);
+            const auto start = std::chrono::steady_clock::now();
+
+            for (int turn = 0; turn < 40; ++turn)
+            {
+                auto buffer = noise;
+                playEq (*eq, buffer, 512, current,
+                        [&] (int at)
+                        {
+                            if (automated)
+                                current[(size_t) Eq::getParameterIndex (3, Eq::frequency)] =
+                                    (float) (800.0 * std::pow (2.0, std::sin (twoPi * (turn * 24000 + at) / 96000.0)));
+                        });
+            }
+
+            seconds[isLinear ? 1 : 0] = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        }
+
+        MESSAGE ("20 s at 48 kHz, eight bands" << std::string (automated ? ", one automated" : ", standing still") << ": Minimum in "
+                                               << seconds[0] << " s, Linear in " << seconds[1] << " s, " << seconds[1] / seconds[0]
+                                               << " times as long");
+        CHECK (std::isfinite (seconds[1] / seconds[0]));
+    }
+}
+
+TEST_CASE ("The EQ in Linear after a reset: kernels that differ from the values come in whole L / 2 later, which costs the far pre-ring")
+{
+    // Prepared with every band off, played at once with the steepest low cut on full-scale noise that starts at the reset,
+    // against an EQ prepared with the cut: until the cut's kernels are in, only their leading half of what came in can sound.
+    auto off = getDefaults();
+
+    for (int band = 0; band < Eq::numBands; ++band)
+        set (off, band, Eq::on, 0.0f);
+
+    for (const auto frequency : { 30.0f, 100.0f, 1000.0f })
+    {
+        CAPTURE (frequency);
+        auto cut = inLinear (withBands ({ { 0, Eq::BandType::lowCut, frequency, 0.0f, 0.71f, 3 } }, off));
+        const auto noise = probe::makeNoise (3 * linearLatency, 11, 1.0f);
+        auto late = noise, right = noise;
+        auto values = cut;
+        playEq (*makePrepared (inLinear (off)), late, 512, values);
+        playEq (*makePrepared (cut), right, 512, values);
+        const auto before = probe::getLargestDifference (late, right, 0, linearLatency / 2);
+        const auto after = probe::getLargestDifference (late, right, linearLatency / 2);
+        MESSAGE ("a 48 dB low cut at " << frequency << " Hz: " << probe::inDecibels (before)
+                                       << " dBFS at most from the cut's own sound in the first L / 2 samples, " << after << " after");
+        CHECK (before < 0.002); // -54 dBFS; measured -58 dBFS at 30 Hz, -92 at 100 Hz
+        CHECK (after < 1.0e-5);
+    }
+}
+
+TEST_CASE ("A dynamic EQ band with a Gain is a hair off Minimum's curve in Linear while it moves: two bells in a row, not one")
+{
+    // In Linear its Gain is in the kernels and its moved amount plays after them as a bell of its own; Minimum plays one bell of
+    // their sum. A bell at 1 kHz with a Gain of +6 dB moved 8 dB down, its Threshold far under the sine through it: the sine's
+    // level through each mode, Linear's L later, once the band has moved all the way.
+    constexpr int numSamples = 24000 + linearLatency, from = 12000, length = 12000;
+
+    for (const auto q : { 0.7f, 1.0f, 4.0f })
+    {
+        CAPTURE (q);
+        auto values = withBands ({ { 3, Eq::BandType::bell, 1000.0f, 6.0f, q } });
+        values[(size_t) Eq::getParameterIndex (3, Eq::dynamic)] = -8.0f;
+        values[(size_t) Eq::getParameterIndex (3, Eq::threshold)] = -60.0f;
+        auto largest = 0.0;
+
+        for (const auto hertz : { 400.0, 700.0, 900.0, 1000.0, 1150.0, 1500.0, 2500.0 })
+        {
+            CAPTURE (hertz);
+            const auto in = makeStereoSine (hertz, numSamples, 0.25f, 0.25f);
+            const auto levelThrough = [&] (bool isLinear)
+            {
+                auto current = isLinear ? inLinear (values) : values;
+                auto out = in;
+                playEq (*makePrepared (current, 480), out, 480, current);
+                const auto late = isLinear ? linearLatency : 0;
+                return probe::inDecibels (probe::getToneLevel (out, 0, hertz, testRate, from + late, length)
+                                          / probe::getToneLevel (in, 0, hertz, testRate, from, length));
+            };
+
+            const auto minimum = levelThrough (false), linear = levelThrough (true);
+            largest = std::max (largest, std::abs (linear - minimum));
+
+            if (juce::exactlyEqual (hertz, 1000.0))
+                CHECK (std::abs (minimum + 2.0) < 0.05); // moved all the way: one bell of the sum, +6 - 8 dB
+        }
+
+        MESSAGE ("Q " << q << ": a sine through Linear at most " << largest << " dB from one through Minimum");
+        CHECK (largest < 0.1); // the curves alone: 0.07 dB apart at most
+    }
+}
+
+TEST_CASE ("On a mono track, the EQ in Linear plays one kernel, of the bands that play on the channel in Minimum")
+{
+    // A bell on Stereo, a low shelf on Mid and a high shelf on Left play on a mono channel; a bell on Side and a notch on Right
+    // don't. After L of silence (its kernels for one channel designed and put in), an impulse.
+    const auto values = inLinear (withBands ({ { 2, Eq::BandType::bell, 1000.0f, 6.0f, 1.0f },
+                                               { 1, Eq::BandType::lowShelf, 200.0f, -4.0f, 0.71f, 1, Placement::mid },
+                                               { 6, Eq::BandType::highShelf, 6000.0f, 3.0f, 0.71f, 1, Placement::left },
+                                               { 4, Eq::BandType::bell, 3000.0f, -9.0f, 2.0f, 1, Placement::side },
+                                               { 5, Eq::BandType::notch, 500.0f, 0.0f, 2.0f, 1, Placement::right } }));
+    auto eq = makePrepared (values);
+    auto sound = probe::makeSilence (3 * linearLatency + 64, 1);
+    sound.setSample (0, linearLatency, 1.0f);
+    auto current = values;
+    playEq (*eq, sound, 512, current);
+    std::vector<double> response;
+
+    for (int i = linearLatency; i < sound.getNumSamples(); ++i)
+        response.push_back (sound.getSample (0, i));
+
+    CHECK (eq->getLinearPhase().getNumKernelsPlayed() == 1);
+    auto largest = 0.0;
+
+    for (const auto f : getFrequencies (12, 200.0))
+    {
+        auto expected = 1.0;
+
+        for (const auto band : { 2, 1, 6 })
+            expected *= Eq::getBandShape (values, band, testRate).getMagnitude (f, testRate);
+
+        largest = std::max (largest, std::abs (responseDecibels (response, f) - 20.0 * std::log10 (expected)));
+    }
+
+    MESSAGE ("on a mono track: at most " << largest << " dB from the bands that play on it");
+    CHECK (largest < 0.05);
 }

@@ -23,7 +23,15 @@ The full text of every step, as it was written when it was built, is in the
   loudest of the last 25 ms, rises in 3 ms and falls in 60. The editor gains Placement, Dynamic and Threshold, a
   handle for the Dynamic with a mark where the gain is now, and the middle's and the side's curves (or the left's
   and the right's) drawn as they play; six presets under Dynamic and Mid-Side. A dynamic band keeps the EQ awake
-  until its level has fallen, so that live plays as a render. Left of S6.4: linear phase.
+  until its level has fallen, so that live plays as a render.
+- **S6.4 The EQ, part B:** a Phase, Minimum (as it played) or Linear, in which every band's curve plays with every
+  frequency as late as every other, at a latency of 4096 samples (85 ms at 48 kHz): for a master, for one of
+  several microphones of a source, and so that a Mix of 50 % is an EQ of half the depth. Its bands are symmetric
+  kernels (a 2 x 2 matrix of them for the placements) played by a partitioned convolution on an FFT of Phazite's
+  own, designed while it plays by a count of work and glided between on a grid of half the latency, so that
+  automation stays in time; a dynamic band's moving part plays after them. From 200 Hz up it plays within 0.01 dB
+  of its curve; a narrow bell or a steep cut below 100 Hz is up to 5 dB off (one kernel length). Two presets under
+  Linear Phase. This ends S6.4.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

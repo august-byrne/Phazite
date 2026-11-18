@@ -55,8 +55,8 @@ parameters ([automation-and-modulation.md](automation-and-modulation.md)). Each 
 real-time audit ([realtime-audit.md](../realtime-audit.md)): steady playback through it must not allocate.
 
 While Low Latency is on, a device that is on and delays its sound by more than 1 ms is left out of what plays, and the
-sound passes as it comes: the Limiter, the Multiband, Age, a Compressor set to Duck, and one set to
-Compress with a Look-Ahead that, with its drive's 6 samples, makes it more than 1 ms late.
+sound passes as it comes: the Limiter, the Multiband, Age, a Compressor set to Duck, one set to
+Compress with a Look-Ahead that, with its drive's 6 samples, makes it more than 1 ms late, and an EQ in Linear phase.
 
 ## Phazite's own devices
 
@@ -68,7 +68,7 @@ Menus list them in this order: the instruments, then the effects by what they do
 | [FM](devices/fm.md) | Instrument | Four operators in eight algorithms, for electric pianos, bells, basses and brass |
 | [Sampler](devices/sampler.md) | Instrument | One sound across the keys: held and looped, played through as a one-shot, or cut into slices |
 | [Drum Sampler](devices/drum-sampler.md) | Instrument | A pad on every note, 128 in all, each with up to four layers, an envelope, a filter and a choke group |
-| [EQ](devices/eq.md) | Effect | Eight bands over a spectrum of what comes in and what goes out, each on the whole sound, its middle, its sides, its left or its right, and each bell or shelf dynamic if wanted (a de-esser) |
+| [EQ](devices/eq.md) | Effect | Eight bands over a spectrum of what comes in and what goes out, each on the whole sound, its middle, its sides, its left or its right, and each bell or shelf dynamic if wanted (a de-esser); in minimum phase, or in linear phase at a latency of 85 ms (for a master, or one of several microphones of a source) |
 | [Filter](devices/filter.md) | Effect | A resonant filter of nine types, with drive; Clean, or Driven, its resonance saturating and singing |
 | [Compressor](devices/compressor.md) | Effect | Three modes: Compress, by a drawn curve, keyed or not; Duck, under a sidechain; and Transient, each hit's attack and tail |
 | [Multiband](devices/multiband.md) | Effect | Three bands of dynamics and saturation, then a master band |

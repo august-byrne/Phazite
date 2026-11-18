@@ -11,6 +11,7 @@
 #include "TestSong.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "engine/audio/AudioRegion.h"
 #include "engine/core/Engine.h"
@@ -622,7 +623,8 @@ TEST_CASE ("At every condition a song played live sounds as its render does")
     // Two bars at the condition's tempo. In the first, a beat on the drum sampler and off-beat stabs on the synth, which is
     // silent between them for longer than a device stays awake in silence. In the second, a single hit through a delay
     // whose echoes come half a note apart and nothing else, so that the delay is silent between them for longer than that
-    // too; and a tone from a file, which live is read ahead and at another rate than its own resampled.
+    // too; and a tone from a file, which live is read ahead and at another rate than its own resampled, through an EQ in
+    // Linear phase whose bands stand still (its kernels convolved in partitions counted from its reset, which a sleep moves).
     atEveryCondition (
         [] (const PlaybackCondition& condition)
         {
@@ -653,6 +655,10 @@ TEST_CASE ("At every condition a song played live sounds as its render does")
 
             const auto tone = song.addTrack ("Tone");
             song.addAudioClip (tone, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 0.3, 330.0, 0.1f), 4.25);
+            const auto toneEq = song.addEffect (tone, dev::Equalizer::typeID);
+            song.setParameter (toneEq, "phase", 1.0f);
+            song.setParameter (toneEq, "band3Frequency", 330.0f);
+            song.setParameter (toneEq, "band3Gain", 6.0f);
             phazite::test::dispatchPendingMessages();
 
             const auto rate = condition.getSampleRate();

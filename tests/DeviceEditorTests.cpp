@@ -96,7 +96,7 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
     song->getUndoManager().clearUndoHistory();
 
     phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*song, eq)));
-    REQUIRE (knobs.getNumKnobs() == 74);
+    REQUIRE (knobs.getNumKnobs() == 75);
 
     auto& frequency = knobs.getKnob (Equalizer::getParameterIndex (0, Equalizer::frequency));
     CHECK (frequency.getTitle() == juce::String ("Band 1 Frequency"));

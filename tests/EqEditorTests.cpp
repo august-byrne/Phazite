@@ -396,6 +396,45 @@ TEST_CASE ("The EQ's editor has the selected band's Placement, Dynamic and Thres
     CHECK (placement->isEnabled());
 }
 
+TEST_CASE ("The EQ's editor picks its Phase with two buttons, and shows the latency Linear plays at")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    auto* minimum = findControl<juce::Button> (editor, "Phase: Minimum");
+    auto* linear = findControl<juce::Button> (editor, "Phase: Linear");
+    REQUIRE (minimum != nullptr);
+    REQUIRE (linear != nullptr);
+    CHECK (minimum->getToggleState());
+    CHECK (editor.getLatencyText().isEmpty());
+    phazite::test::checkChildrenApart (editor);
+
+    // Linear, as one undo step: the device made anew at its latency, which shows beside the choice.
+    s.getUndoManager().clearUndoHistory();
+    linear->triggerClick();
+    phazite::test::dispatchPendingMessages();
+    CHECK (valueOf (s, eq, "phase") == doctest::Approx (1.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Phase"));
+    phazite::getSession (song.context)->update();
+    editor.refresh();
+    const auto handle = phazite::makeDeviceHandle (s, eq);
+    auto* processor = handle.getProcessor<Eq>();
+    REQUIRE (processor != nullptr);
+    REQUIRE (processor->isLinear());
+    const auto expected = juce::String (juce::roundToInt (1000.0 * processor->getLatencySamples() / processor->getSampleRate())) + " ms";
+    CHECK (editor.getLatencyText() == expected);
+    CHECK (linear->getToggleState());
+
+    // Back to Minimum: no latency, nothing shown.
+    phazite::undo (s);
+    phazite::getSession (song.context)->update();
+    editor.refresh();
+    CHECK (editor.getLatencyText().isEmpty());
+}
+
 TEST_CASE ("An EQ band off Stereo shows its placement's letter in its dot, and the graph draws the curves of the ways through the EQ")
 {
     using Placement = Eq::Placement;

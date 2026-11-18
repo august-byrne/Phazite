@@ -1011,6 +1011,32 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's EQ in Linear phase, a band's Frequency and Gain automated, a band dynamic and one on Mid")
+    {
+        using phazite::devices::Equalizer;
+        TestSong song;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+        const auto eq = song.addEffect (track, Equalizer::typeID);
+        song.setParameter (eq, "phase", 1.0f);
+
+        // Band 3 dynamic; band 5 raised on the middle; band 4's frequency and gain swept, so that its kernels are designed
+        // again at every line of their grid, glide, and are designed again while they glide.
+        song.setParameter (eq, getBandParameter (2, Equalizer::dynamic), -6.0f);
+        song.setParameter (eq, getBandParameter (2, Equalizer::threshold), -60.0f);
+        song.setParameter (eq, getBandParameter (4, Equalizer::placement), (float) Equalizer::Placement::mid);
+        song.setParameter (eq, getBandParameter (4, Equalizer::gain), 4.0f);
+        song.addAutomation ({ eq, getBandParameter (3, Equalizer::frequency) },
+                            { { phazite::BeatPosition(), 200.0f, 0.0f }, { phazite::BeatPosition::fromBeats (4.0), 4000.0f, 0.0f } });
+        song.addAutomation ({ eq, getBandParameter (3, Equalizer::gain) },
+                            { { phazite::BeatPosition(), -12.0f, 0.0f }, { phazite::BeatPosition::fromBeats (4.0), 12.0f, 0.0f } });
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's EQ in Linear phase, a band's Frequency and Gain automated, a band dynamic and one on Mid", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: every kind of modulator, and a macro, moving Phazite's EQ")
     {
         using phazite::devices::Equalizer;

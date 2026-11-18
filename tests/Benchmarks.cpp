@@ -166,12 +166,14 @@ bool isDrums (const DeviceCase& c)
 double percentOfCore (const DeviceCase& c)
 {
     auto processor = c.make();
-    processor->prepare (benchRate, benchBlock);
     auto values = defaultsOf (*c.info);
 
     if (c.set)
         c.set (values);
 
+    // Its values first, as the model gives them to a device it makes: the EQ's Phase decides its latency and kernels.
+    processor->takeValuesBeforePrepare (values);
+    processor->prepare (benchRate, benchBlock);
     juce::AudioBuffer<float> buffer (2, benchBlock), noise (2, benchBlock);
     juce::Random random (7);
 
@@ -334,6 +336,17 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
           } },
         { "FM, idle", maker<dev::FmSynth>(), &dev::FmSynth::info, 0 },
         { "EQ", maker<dev::Equalizer>(), &dev::Equalizer::info },
+        { "EQ, linear phase, eight bands on", maker<dev::Equalizer>(), &dev::Equalizer::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Equalizer::phaseParameter] = (float) dev::Equalizer::Phase::linear;
+
+              for (int band = 0; band < dev::Equalizer::numBands; ++band)
+              {
+                  v[(size_t) dev::Equalizer::getParameterIndex (band, dev::Equalizer::on)] = 1.0f;
+                  v[(size_t) dev::Equalizer::getParameterIndex (band, dev::Equalizer::gain)] = band % 2 == 0 ? 2.0f : -2.0f;
+              }
+          } },
         { "Filter", maker<dev::FilterEffect>(), &dev::FilterEffect::info },
         { "Compressor", maker<dev::Compressor>(), &dev::Compressor::info },
         { "Multiband", maker<dev::Multiband>(), &dev::Multiband::info },
@@ -417,6 +430,12 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
     for (const auto& c : cases)
     {
         auto processor = c.make();
+        auto values = defaultsOf (*c.info);
+
+        if (c.set)
+            c.set (values);
+
+        processor->takeValuesBeforePrepare (values);
         processor->prepare (benchRate, benchBlock);
         const auto latency = processor->getLatencySamples();
         report << "| " << c.name << " | " << juce::String (percentOfCore (c), 3) << " | "

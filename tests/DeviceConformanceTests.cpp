@@ -21,7 +21,7 @@
 // - Mix: an effect with a mix (DeviceInfo.h, mixParameterID), at 0 %, passes what comes in, as late as its latency.
 // - Blocks: what a device plays doesn't depend on how the samples are cut into blocks, with its values still; nor, with every
 //   continuous parameter moved by automation, on how blocks cut the song's control points, which automation moves them on
-//   (engine/automation/Curve.h).
+//   (engine/automation/Curve.h). Each stretch is as much longer as the device's latency.
 // - Starting over: after reset(), the same input gives the same output; and prepared again for another rate while it
 //   sounds, a device plays as one made for that rate.
 // - Offset: nothing constant lies under an instrument's held notes, at its defaults and at settings drawn at random around
@@ -221,7 +221,8 @@ const OnPurpose onPurpose[] = {
 
 // Devices measured once in each of their modes, each under a name of its own, with its mode's choice as if it were the
 // default: Motion, whose modes are three effects that were devices of their own; Age in each medium; the Delay with its
-// modulation off and on, whose phase follows the song's place; and the Reverb as a room and as a hall, whose sways follow it.
+// modulation off and on, whose phase follows the song's place; the Reverb as a room and as a hall, whose sways follow it; and
+// the EQ in Minimum and in Linear phase, which plays at a latency through kernels that change on a grid of their own.
 struct Variant
 {
     std::string_view typeID, name, parameterID;
@@ -229,11 +230,17 @@ struct Variant
 };
 
 constexpr Variant variants[] = {
-    { "phaziteAge", "Age (Record)", "medium", 0.0f },          { "phaziteAge", "Age (Tape)", "medium", 1.0f },
-    { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f },      { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
-    { "phaziteMotion", "Motion (Phaser)", "mode", 2.0f },      { "phaziteDelay", "Delay", "modDepth", 0.0f },
-    { "phaziteDelay", "Delay (Modulated)", "modDepth", 0.5f }, { "phaziteReverb", "Reverb", "mode", 0.0f },
+    { "phaziteAge", "Age (Record)", "medium", 0.0f },
+    { "phaziteAge", "Age (Tape)", "medium", 1.0f },
+    { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f },
+    { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
+    { "phaziteMotion", "Motion (Phaser)", "mode", 2.0f },
+    { "phaziteDelay", "Delay", "modDepth", 0.0f },
+    { "phaziteDelay", "Delay (Modulated)", "modDepth", 0.5f },
+    { "phaziteReverb", "Reverb", "mode", 0.0f },
     { "phaziteReverb", "Reverb (Hall)", "mode", 2.0f },
+    { "phaziteEq", "EQ", "phase", 0.0f },
+    { "phaziteEq", "EQ (Linear)", "phase", 1.0f },
 };
 
 const Exception* findException (const devices::DeviceInfo& info, Rule rule)
@@ -744,7 +751,17 @@ void checkMix (const devices::DeviceInfo& info, double rate, Findings& findings)
 // Blocks.
 void checkBlocks (const devices::DeviceInfo& info, double rate, bool automated, Findings& findings)
 {
-    constexpr int length = 4096, lengthInSingleSamples = 1024; // a block is a call: fewer of the shortest
+    // A block is a call: fewer of the shortest. Each stretch as much longer as the device's latency, so that one as late as
+    // the EQ in Linear phase (85 ms) plays as much of its sound as the others; the automation's ramp as long for every device,
+    // so that none is moved slower for its latency.
+    constexpr int rampLength = 2 * 4096;
+    const auto latency = [&info, rate]
+    {
+        probe::Device device (info);
+        device.prepare (rate, usualBlock);
+        return device.getLatencySamples();
+    }();
+    const int length = 4096 + latency, lengthInSingleSamples = 1024 + latency;
     const auto material = makeMaterial (info, length, 8, 0.5f);
 
     const auto playIn = [&] (int blockSize, int numSamples)
@@ -768,7 +785,7 @@ void checkBlocks (const devices::DeviceInfo& info, double rate, bool automated, 
                 const auto range = devices::getRange (parameter);
                 const auto place = range.convertTo0to1 (parameter.defaultValue);
                 device.automate ((int) i, parameter.defaultValue, range.convertFrom0to1 (place < 0.5f ? place + 0.2f : place - 0.2f),
-                                 2 * length);
+                                 rampLength);
             }
         }
 
