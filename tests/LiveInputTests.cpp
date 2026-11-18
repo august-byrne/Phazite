@@ -256,7 +256,12 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     phazite::test::dispatchPendingMessages(); // the song handed to the engine for its next block
     phazite::devices::Limiter itsDSP;
     itsDSP.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
-    const auto latency = itsDSP.getLatencySamples();
+    phazite::devices::Synth theInstrument;
+    theInstrument.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
+
+    // The note's own track is already as late as its instrument (the Synth's Quality, a few samples): it is held back by
+    // the rest of the limiter's latency.
+    const auto latency = itsDSP.getLatencySamples() - theInstrument.getLatencySamples();
     REQUIRE (latency > 0);
     const auto compensated = playUntil (device, [&] (const LiveNote& note) { return isNear (note.toSound(), atOnce + latency); });
     CHECK (compensated.isPlacedAsPlayed());

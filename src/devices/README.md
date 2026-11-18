@@ -25,7 +25,7 @@ model saves and automation and modulation move.
 
 | Folder | What it holds |
 |---|---|
-| `synth/` | `Synth.h`: the synth ("Synth"), two wavetable oscillators, a sub and noise, unison, a filter, three envelopes, two LFOs and eight modulation slots. |
+| `synth/` | `Synth.h`: the synth ("Synth"), two wavetable oscillators, a sub and noise, unison, a filter, three envelopes, two LFOs and eight modulation slots, at 1, 2 or 4 times the rate (Quality). |
 | `wavetable/` | `Wavetable.h`: a wavetable, its frames band-limited at every pitch, with what a part of a frame's cycle adds up to, for the warps that read one; `FactoryWavetables.h`: the tables that come with it, made from formulas the first time each is needed. |
 | `fm/` | `FmSynth.h`: the FM synth ("FM"), four operators. |
 | `drums/` | `DrumSampler.h`: the drum sampler, a pad on every note, each with its envelope, sweep, filter and layers, its parameters found by their IDs at once. `FactoryDrums.h`: its factory sounds, the default kit and each of Phazite's kits' own, synthesized when first needed, from `DrumSynthesis.h` (with the 80s' gated reverb, a room that isn't gated, `addRoom()`, struck sounds by their modes, `makeStruck()`, and the Simmons SDS-V's voice, which `tools/soundkit/` shares) and `DrumMachines.h` (the classic drum machines' voices as their circuits make them: the 808's, the 909's and a CR-78's). |

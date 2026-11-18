@@ -1394,7 +1394,8 @@ TEST_SUITE ("realtime-audit")
     }
 
     TEST_CASE ("Real-time audit: Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope "
-               "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated")
+               "sweeping each note's table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated, "
+               "its Quality switched")
     {
         using phazite::devices::Synth;
         TestSong song;
@@ -1436,12 +1437,25 @@ TEST_SUITE ("realtime-audit")
         sweepParameter (song, { wavetable, "lfo2FadeIn" }, 0.0f, 300.0f);
         sweepParameter (song, { wavetable, "mod5Amount" }, -1.0f, 1.0f);
 
+        // Its Quality switched by a lane, 4x, 2x and 1x in turn, a beat each, while chords sound.
+        const phazite::ParameterRef quality { wavetable, "quality" };
+        const auto range = phazite::getControlTravel (getSong (song), quality);
+        REQUIRE (range.has_value());
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            const auto position = phazite::toControlPosition (*range, (float) (2 - beat % 3));
+            phazite::addPoint (getSong (song), quality, { phazite::BeatPosition::fromBeats (beat), position, 0.0f });
+            phazite::addPoint (getSong (song), quality, { phazite::BeatPosition::fromBeats (beat + 0.9), position, 0.0f });
+        }
+
         // Chords a sixteenth long, as for the synth's unison.
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
         report ("Phazite's synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
-                "table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated",
+                "table, LFOs fading in, legato glides, Drift and a slot moving another's amount, automated, its Quality "
+                "switched",
                 m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);

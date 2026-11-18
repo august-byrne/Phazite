@@ -115,7 +115,7 @@ note.
 
 ### Voice
 
-In the editor: Mode, Glide, Glide Mode, Phase, Bend, Velocity, Level.
+In the editor: Mode, Glide, Glide Mode, Phase, Bend, Velocity, Level, Quality.
 
 | Parameter | Range | Default | What it does |
 | --- | --- | --- | --- |
@@ -126,6 +126,7 @@ In the editor: Mode, Glide, Glide Mode, Phase, Bend, Velocity, Level.
 | Bend Range | 0 to 24 semitones | 2 semitones | How far the pitch wheel bends, either way. |
 | Velocity | 0 to 100 % | 60 % | How much of the level depends on the note's velocity, which counts squared. |
 | Level | -36 to +6 dB | -6 dB | The synth's output level. |
+| Quality | 1x, 2x, 4x | 1x | How many times the device's rate the whole synth plays at, so that sync and the other warps don't alias: see "Quality". |
 
 ## How it works
 
@@ -229,17 +230,23 @@ the LFOs and both drifts move on only when that keeps them nearer the samples pl
 a comb's delay set at a step of one sample glides over the next step rather than jumping. The oscillators, the filter
 and Envelope 1 run at every sample.
 
-**Glides between steps.** What a step works out for the oscillators and the voice's gains goes there in a straight line,
-sample by sample, from where it was, over the step (after a step of one sample, over the next one too): each unison
-copy's increment (the pitch: vibrato, glide, bend, drift), each oscillator's level and the sub's and the noise's, what
-each oscillator's warp reads by (sync's ratio, bend's, the pulse width, the mirror's, FM's and ring modulation's amount)
-and what its warp leaves off centre, each oscillator's position as one number (a frame and how far toward the next: the
-frame pair is looked up again only where the line crosses into another frame), and the voice's volume and pan. A line's
-value k samples in is worked out from its start, not added up, so it doesn't depend on how blocks and events cut the
-step; a line from a value to itself adds nothing, so a note with nothing moving plays bit for bit as it did when these
-stepped. A note's first step, a unison copy or an oscillator that comes in and a warp chosen anew start at their values.
-The table's level (its band limit) is chosen once a step. A sine's note at 1 kHz at 44.1 kHz with a 25 Hz LFO at full
-amount leaves under it (`tests/SynthTests.cpp`, the loudest component off the note's and the LFO's grid, under the note):
+**Glides between steps.** What a step works out for the oscillators, the sub, the filter and the voice's gains goes there
+in a straight line, sample by sample, from where it was, over the step (after a step of one sample, over the next one
+too): each unison copy's increment (the pitch: vibrato, glide, bend, drift) and the sub's, each oscillator's level and the
+sub's and the noise's, what each oscillator's warp reads by (sync's ratio, bend's, the pulse width, the mirror's, FM's and
+ring modulation's amount) and what its warp leaves off centre, each oscillator's position as one number (a frame and how
+far toward the next: the frame pair is looked up again only where the line crosses into another frame), and the voice's
+volume and pan. The filter's low-pass, high-pass, band-pass and notch, at 12 and 24 dB, glide as the trapezoidal filter
+is meant to be moved, stable while it moves: each section's two numbers, g (the tangent that sets its frequency) and its
+damping k, go in straight lines, and each sample's coefficients are worked out from them (a1 = 1 / (1 + g (g + k)),
+a2 = g a1, a3 = g a2: one division a sample for each section, shared by the two sides); while neither moves, the filter
+plays the coefficients the step made. A comb's delay glides of itself; the vowel's, the phaser's and the sample and
+hold's settings move at each step. A line's value k samples in is worked out from its start, not added up, so it doesn't
+depend on how blocks and events cut the step; a line from a value to itself adds nothing, so a note with nothing moving
+plays bit for bit as it did when these stepped. A note's first step, a unison copy, an oscillator or the sub that comes
+in, the filter coming on or changing its type or slope, and a warp chosen anew start at their values. The table's level
+(its band limit) is chosen once a step. A sine's note at 1 kHz at 44.1 kHz with a 25 Hz LFO at full amount leaves under
+it (`tests/SynthTests.cpp`, the loudest component off the note's and the LFO's grid, under the note):
 
 | The LFO on | Stepping | Gliding |
 |---|---|---|
@@ -250,11 +257,65 @@ amount leaves under it (`tests/SynthTests.cpp`, the loudest component off the no
 | Osc 1 Position (four frames) | -39.4 dB | -65.3 dB |
 | Osc 1 Warp Amount (Sync) | -11.6 dB | -30.9 dB |
 | Osc 1 Warp Amount (Sync), the LFO at half, within the range | | -40.3 dB |
+| Cutoff of a 24 dB low-pass at a Resonance of 80 %, at the note, two octaves each way | -69.9 dB | -106.2 dB |
+| Resonance of that filter, from 60 to 100 % | -79.7 dB | -121.1 dB |
+| Pitch, the sub alone (a sine) | -63.4 dB | -95.2 dB |
 
 What is left is the line's own error (the LFO is a curve between two steps) and the corners where the LFO is cut off at
 the end of a range (Level, Position and the warp's amount reach theirs). Sync is the most sensitive to it: its place in
 the wave is the note's phase times its ratio, which a line between two steps misses a little wherever the ratio curves.
 Less would take a shorter step, or a curve through three steps, a step later.
+
+**Quality.** At 2x and 4x the whole synth plays at that multiple of the device's rate: every voice (its oscillators, sub,
+noise, filter and drive, its envelopes and LFOs), the control grid (16 samples at that rate, on the song's own grid
+there: the song's place and each note's sample counted at it) and the lines between its steps. Their sum is brought
+down to the device's rate once for each side, not for each voice, through JUCE's polyphase IIR half-band filters at their
+best quality (`juce::dsp::Oversampling`, as the Saturator's and the Filter's), made in `prepare()` for every Quality
+with a whole-sample latency; only their way down is played (the way up is given silence, for the buffer at the
+Quality's rate). A table's band limit (its level) is chosen as at the device's rate, at every Quality, so that the
+half-band filters have nothing of the tables' own to take away (what they let through, 75 to 80 dB under, would alias);
+what a warp makes beyond it, above the device's rate's half, is taken away rather than folded back. Every Quality is as
+late as the latest, 5 samples, which the others wait for and the engine makes up: JUCE reports its
+filters' latency only for the way up and down together, so the way down's alone is measured once, and each Quality
+waits the rest, whole samples and a fraction of one by a first-order Thiran all-pass, as JUCE makes its own whole
+([JUCE workaround W54](../../juce-workarounds.md)). At 1x the synth plays exactly what it played before it had a
+Quality, that many samples later. The DC blocker plays on the sum at the device's rate, after the half-band filters (it
+is a linear filter at 5 Hz: before them or after, it takes the same away). Times in seconds (the envelopes, the LFOs, glides, drift,
+fades) come out the same at every Quality, and a plain saw, the sub and noise are as loud. A change of Quality while
+notes sound can't go on with them at another rate: the voices sounding fade out over 3 ms, as a voice taken for another
+note does, at the rate they play at; the change waits for the fade, the latency and 16 samples more, in which the
+half-band filters' ring dies away, and is made in silence; a note that comes meanwhile starts once it is made (about 4 ms
+later at 44.1 kHz). Nothing clicks and nothing is allocated. Running two rates at once for the 3 ms instead would take
+every voice's parts at either rate and two control grids, for a fade nobody hears differently.
+
+What aliases, on Basic Shapes' saw, unison 1, at about 44.1 kHz: the loudest component that isn't a harmonic of the note,
+in dB under its loudest harmonic (`tests/AntialiasingTests.cpp`), at 1x / 2x / 4x:
+
+| Warp | C3 | C5 | C7 |
+|---|---|---|---|
+| Sync 25 % | 50.5 / 71.5 / 86.2 | 39.2 / 60.0 / 74.5 | 27.0 / 47.3 / 61.8 |
+| Sync 50 % | 47.1 / 72.0 / 86.8 | 29.3 / 59.4 / 74.1 | 17.2 / 45.4 / 60.2 |
+| Sync 75 % | 51.9 / 73.0 / 87.7 | 40.4 / 61.2 / 75.8 | 21.8 / 45.8 / 60.7 |
+| Sync 100 % (eight times: the saw eight times up) | 101.3 at each | 91.0 at each | 101.8 at each |
+| Bend + or Bend - 50 % | 53.3 / 73.8 / 88.5 | 41.7 / 62.5 / 77.1 | 30.7 / 50.4 / 65.0 |
+| Bend + or Bend - 100 % | 48.0 / 70.6 / 85.4 | 39.9 / 61.0 / 75.6 | 27.9 / 46.7 / 61.3 |
+| Pulse Width 50 % | 41.7 / 64.2 / 79.0 | 31.6 / 53.4 / 67.0 | 21.4 / 42.0 / 55.9 |
+| Pulse Width 90 % | 34.3 / 54.5 / 69.3 | 23.1 / 43.5 / 57.5 | 13.1 / 33.6 / 46.6 |
+| Mirror 100 % | 38.3 / 63.1 / 77.8 | 27.8 / 51.3 / 65.9 | 20.3 / 39.5 / 54.1 |
+| FM 50 %, Osc 2 an octave up | 40.2 / 50.6 / 54.0 | 28.1 / 38.0 / 46.2 | 17.6 / 44.5 / 96.0 |
+| FM 100 %, Osc 2 an octave up | 31.6 / 44.1 / 47.9 | 20.2 / 30.9 / 41.9 | 9.8 / 20.1 / 80.3 |
+
+Each doubling gains 10 to 25 dB for the warps that read the wave unevenly. Sync at C5 reaches 74 to 76 dB at 4x, not 80:
+what is left is sync's jump at each reset, smoothed by a two-point PolyBLEP only; a longer step (a four-point BLEP or a
+table of one) would take it further. A PolyBLAMP for the slope's jump would not help sync on a saw, whose slope doesn't
+change at the reset, but would help Pulse Width's and Mirror's corners. FM gains least: it reads the other oscillator's
+last sample, and its sidebands go on far above any rate.
+
+The cost: a voice plays its per-sample work (its oscillators' copies, sub, noise, filter, drive and Envelope 1) 2 or 4
+times for each of the device's samples, and its control steps (Envelopes 2 and 3, the LFOs, the slots, the tables'
+frames) 2 or 4 times as often; the half-band filters play once for each side, whatever the voices: their way down, and
+their way up on silence for the buffer. The benchmarks name it (`tests/Benchmarks.cpp`: Synth, 1 note and 16 notes, at
+each Quality).
 
 **Notes.** In Poly every note takes a voice of its own. A key played again while its last note rings out leaves that
 tail ringing and starts a new voice; played again while its key or the sustain pedal still holds a voice, that voice
@@ -319,14 +380,14 @@ over Voice; Unison and Modulation.
 - Eight slots and nine sources; no aftertouch or MPE; modulation is set in the Matrix's lists, not dragged onto the
   knobs it moves. A slot that moves another's amount can't itself be moved.
 - The LFOs' shapes are fixed; none can be drawn. No arpeggiator.
-- No oversampling of the oscillators and no quality setting: Sync's jump is smoothed by a two-point PolyBLEP only, and
-  Bend, Pulse Width, Mirror and FM only read a copy with fewer harmonics, so warped sounds alias on high notes.
+- Warped sounds still alias on high notes, less at a higher Quality (see Quality): Sync's jump is smoothed by a
+  two-point PolyBLEP only, Pulse Width's and Mirror's corners not at all, and FM's sidebands go on above any rate.
+- A change of Quality while notes sound cuts them, with a 3 ms fade, and a note played in the next 4 ms waits for it.
 - A frame's copies keep 16 samples for each cycle of their highest harmonic (up to 8192 a copy), 2.6 times the memory
   four took: a sound file of 256 frames takes 54 MB, and about 2.7 times as long to make, on the message thread.
-- The cutoff and the resonance move in steps of 16 samples (only a comb's delay glides), the sub's pitch too, and
-  Envelopes 2 and 3 and the LFOs run at that rate: a fast sweep of a resonant filter can be heard stepping. What the
-  oscillators and the voice's gains read glides in straight lines between the steps, which leaves a little of a fast
-  LFO's curve and corners (Glides between steps).
+- Envelopes 2 and 3 and the LFOs run at the control rate, every 16 samples; what they move glides in straight lines
+  between the steps, which leaves a little of a fast LFO's curve and corners (Glides between steps). The vowel's, the
+  phaser's and the sample and hold's settings move at each step.
 - The filter is linear: it never self-oscillates, there is no ladder or diode model, and Filter Drive, before the
   filter, gives back the gain it adds, so a loud voice driven hard comes out quieter.
 - A held note that is silent for longer than the release lets the synth sleep ([known bug 37](../../known-bugs.md)).

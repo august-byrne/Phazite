@@ -938,8 +938,9 @@ TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to
     CHECK (content.getMinimumHeight() > 0);
     phazite::test::checkChildrenApart (*editor);
 
-    // As narrow as the window can be: its columns one under another, each whole.
-    CHECK (content.getMinimumWidth() < wide / 2);
+    // As narrow as the window can be: its columns one under another, each whole. The widest thing it can't wrap is its
+    // Voice part's row of eight controls (seven, and under half the width, until the Quality joined them in S6.7).
+    CHECK (content.getMinimumWidth() <= wide * 3 / 5);
     content.setSize (content.getMinimumWidth(), high);
     phazite::test::checkChildrenApart (*editor);
 

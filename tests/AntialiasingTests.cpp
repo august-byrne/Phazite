@@ -20,6 +20,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <array>
 #include <cmath>
 #include <functional>
 #include <vector>
@@ -181,7 +182,10 @@ std::vector<float> playWavetable (const OnBin& at, float position, std::shared_p
     std::vector<float> played;
     const devices::NoteEvent start { devices::NoteEvent::Type::noteOn, 0, at.note, 1.0f };
 
-    for (int done = 0; done < skipped + fftSize; done += blockSize)
+    // The same samples of its sound whatever its latency: those from `skipped` on, as it plays them that much later.
+    const auto latency = synth.getLatencySamples();
+
+    for (int done = 0; done < skipped + latency + fftSize; done += blockSize)
     {
         buffer.clear();
         float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
@@ -198,7 +202,7 @@ std::vector<float> playWavetable (const OnBin& at, float position, std::shared_p
         played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
     }
 
-    played.erase (played.begin(), played.begin() + skipped);
+    played.erase (played.begin(), played.begin() + skipped + latency);
     played.resize ((size_t) fftSize);
     return played;
 }
@@ -260,6 +264,183 @@ TEST_CASE (
             CAPTURE (tableAliases);
             CHECK (tableAliases > 90.0);
             CHECK (tableAliases > synthAliases - 3.0);
+        }
+    }
+}
+
+namespace
+{
+// A note at a sample rate within a tenth of a percent of 44.1 kHz at which it is a whole, odd number of bins (onBinRate()).
+OnBin onBinRateNear44k (int note)
+{
+    const auto frequency = 440.0 * std::exp2 ((note - 69) / 12.0);
+    auto bin = (int) std::lround (frequency * fftSize / 44100.0);
+
+    if (bin % 2 == 0)
+        ++bin;
+
+    return { note, frequency, frequency * fftSize / bin };
+}
+
+// As getAliasesUnder(), under the note's loudest harmonic: sync at a whole ratio reads the wave that many times a cycle,
+// so its harmonics are that ratio's multiples, and its fundamental is silent.
+double getAliasesUnderLoudestHarmonic (const float* sound, double frequency, double sampleRate)
+{
+    juce::dsp::FFT fft (fftOrder);
+    std::vector<float> data ((size_t) fftSize * 2, 0.0f);
+    std::copy (sound, sound + fftSize, data.begin());
+    fft.performFrequencyOnlyForwardTransform (data.data(), true);
+
+    const auto bin = (int) std::lround (frequency * fftSize / sampleRate);
+    auto tone = 1.0e-12, loudest = 1.0e-12;
+
+    for (int k = 1; k < fftSize / 2 && k * sampleRate / fftSize < 20000.0; ++k)
+    {
+        auto& kept = k % bin == 0 ? tone : loudest;
+        kept = std::max (kept, (double) data[(size_t) k]);
+    }
+
+    return 20.0 * std::log10 (tone / loudest);
+}
+
+// The synth's first oscillator alone on Basic Shapes' saw, warped, at a Quality, as playWavetable() plays it: unison 1 and
+// drift off, as made. For FM the second oscillator, an octave up and silent, moves its phase.
+std::vector<float> playWarped (const OnBin& at, devices::Synth::Warp warp, float amount, devices::Synth::Quality quality)
+{
+    using devices::Synth;
+    auto values = getDefaults (Synth::info);
+    values[Synth::osc1Level] = 1.0f;
+    values[Synth::osc1Warp] = (float) warp;
+    values[Synth::osc1WarpAmount] = amount;
+    values[Synth::filterOn] = 0.0f;
+    values[Synth::mod1Source] = 0.0f;
+    values[Synth::env1Sustain] = 1.0f;
+    values[Synth::velocity] = 0.0f;
+    values[Synth::level] = 0.0f;
+    values[Synth::quality] = (float) quality;
+
+    if (warp == Synth::Warp::fm)
+    {
+        values[Synth::osc2On] = 1.0f;
+        values[Synth::osc2Pitch] = 12.0f;
+        values[Synth::osc2Level] = 0.0f;
+    }
+
+    constexpr int blockSize = 480, skipped = 4800;
+    Synth synth;
+    synth.prepare (at.rate, blockSize);
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    std::vector<float> played;
+    const devices::NoteEvent start { devices::NoteEvent::Type::noteOn, 0, at.note, 1.0f };
+
+    for (int done = 0; done < skipped + fftSize; done += blockSize)
+    {
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = blockSize;
+        context.parameters = values;
+
+        if (done == 0)
+            context.events = std::span (&start, 1);
+
+        synth.process (context);
+        played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + blockSize);
+    }
+
+    played.erase (played.begin(), played.begin() + skipped);
+    played.resize ((size_t) fftSize);
+    return played;
+}
+} // namespace
+
+TEST_CASE ("The synth's warps alias less the higher its Quality")
+{
+    // Each warp on a saw at C3, C5 and C7 at about 44.1 kHz: the loudest component that isn't a harmonic of the note, in dB
+    // under its loudest harmonic, at 1x, 2x and 4x (docs/design/devices/synth.md, Quality). Each held to its figures less
+    // 3 dB, and each Quality to being better than the one below it wherever that one is worse than 100 dB under.
+    using devices::Synth;
+
+    struct Row
+    {
+        const char* name;
+        Synth::Warp warp;
+        float amount;
+        int note;
+        std::array<double, Synth::numQualities> measured; // dB under the note, at 1x, 2x and 4x
+    };
+
+    const Row rows[] = {
+        { "Sync 25 %", Synth::Warp::sync, 0.25f, 48, { 50.5, 71.5, 86.2 } },
+        { "Sync 25 %", Synth::Warp::sync, 0.25f, 72, { 39.2, 60.0, 74.5 } },
+        { "Sync 25 %", Synth::Warp::sync, 0.25f, 96, { 27.0, 47.3, 61.8 } },
+        { "Sync 50 %", Synth::Warp::sync, 0.5f, 48, { 47.1, 72.0, 86.8 } },
+        { "Sync 50 %", Synth::Warp::sync, 0.5f, 72, { 29.3, 59.4, 74.1 } },
+        { "Sync 50 %", Synth::Warp::sync, 0.5f, 96, { 17.2, 45.4, 60.2 } },
+        { "Sync 75 %", Synth::Warp::sync, 0.75f, 48, { 51.9, 73.0, 87.7 } },
+        { "Sync 75 %", Synth::Warp::sync, 0.75f, 72, { 40.4, 61.2, 75.8 } },
+        { "Sync 75 %", Synth::Warp::sync, 0.75f, 96, { 21.8, 45.8, 60.7 } },
+        { "Sync 100 %", Synth::Warp::sync, 1.0f, 48, { 101.3, 101.3, 101.3 } },
+        { "Sync 100 %", Synth::Warp::sync, 1.0f, 72, { 91.0, 91.0, 91.0 } },
+        { "Sync 100 %", Synth::Warp::sync, 1.0f, 96, { 101.8, 101.8, 101.8 } },
+        { "Bend + 50 %", Synth::Warp::bendUp, 0.5f, 48, { 53.3, 73.8, 88.5 } },
+        { "Bend + 50 %", Synth::Warp::bendUp, 0.5f, 72, { 41.7, 62.5, 77.1 } },
+        { "Bend + 50 %", Synth::Warp::bendUp, 0.5f, 96, { 30.7, 50.4, 65.0 } },
+        { "Bend + 100 %", Synth::Warp::bendUp, 1.0f, 48, { 48.0, 70.6, 85.4 } },
+        { "Bend + 100 %", Synth::Warp::bendUp, 1.0f, 72, { 39.9, 61.0, 75.6 } },
+        { "Bend + 100 %", Synth::Warp::bendUp, 1.0f, 96, { 27.9, 46.7, 61.3 } },
+        { "Bend - 50 %", Synth::Warp::bendDown, 0.5f, 48, { 53.3, 73.8, 88.5 } },
+        { "Bend - 50 %", Synth::Warp::bendDown, 0.5f, 72, { 41.7, 62.5, 77.1 } },
+        { "Bend - 50 %", Synth::Warp::bendDown, 0.5f, 96, { 30.7, 50.4, 65.0 } },
+        { "Bend - 100 %", Synth::Warp::bendDown, 1.0f, 48, { 48.0, 70.6, 85.4 } },
+        { "Bend - 100 %", Synth::Warp::bendDown, 1.0f, 72, { 39.9, 61.0, 75.6 } },
+        { "Bend - 100 %", Synth::Warp::bendDown, 1.0f, 96, { 27.9, 46.7, 61.3 } },
+        { "Pulse Width 50 %", Synth::Warp::pulseWidth, 0.5f, 48, { 41.7, 64.2, 79.0 } },
+        { "Pulse Width 50 %", Synth::Warp::pulseWidth, 0.5f, 72, { 31.6, 53.4, 67.0 } },
+        { "Pulse Width 50 %", Synth::Warp::pulseWidth, 0.5f, 96, { 21.4, 42.0, 55.9 } },
+        { "Pulse Width 90 %", Synth::Warp::pulseWidth, 0.9f, 48, { 34.3, 54.5, 69.3 } },
+        { "Pulse Width 90 %", Synth::Warp::pulseWidth, 0.9f, 72, { 23.1, 43.5, 57.5 } },
+        { "Pulse Width 90 %", Synth::Warp::pulseWidth, 0.9f, 96, { 13.1, 33.6, 46.6 } },
+        { "Mirror 100 %", Synth::Warp::mirror, 1.0f, 48, { 38.3, 63.1, 77.8 } },
+        { "Mirror 100 %", Synth::Warp::mirror, 1.0f, 72, { 27.8, 51.3, 65.9 } },
+        { "Mirror 100 %", Synth::Warp::mirror, 1.0f, 96, { 20.3, 39.5, 54.1 } },
+        { "FM 50 %", Synth::Warp::fm, 0.5f, 48, { 40.2, 50.6, 54.0 } },
+        { "FM 50 %", Synth::Warp::fm, 0.5f, 72, { 28.1, 38.0, 46.2 } },
+        { "FM 50 %", Synth::Warp::fm, 0.5f, 96, { 17.6, 44.5, 96.0 } },
+        { "FM 100 %", Synth::Warp::fm, 1.0f, 48, { 31.6, 44.1, 47.9 } },
+        { "FM 100 %", Synth::Warp::fm, 1.0f, 72, { 20.2, 30.9, 41.9 } },
+        { "FM 100 %", Synth::Warp::fm, 1.0f, 96, { 9.8, 20.1, 80.3 } },
+    };
+
+    for (const auto& row : rows)
+    {
+        const auto at = onBinRateNear44k (row.note);
+        std::array<double, Synth::numQualities> under {};
+
+        for (int index = 0; index < Synth::numQualities; ++index)
+        {
+            const auto sound = playWarped (at, row.warp, row.amount, (Synth::Quality) index);
+            under[(size_t) index] = getAliasesUnderLoudestHarmonic (sound.data(), at.frequency, at.rate);
+        }
+
+        MESSAGE (std::string (row.name) << " at " << juce::MidiMessage::getMidiNoteName (row.note, true, true, 4) << ": " << under[0]
+                                        << ", " << under[1] << ", " << under[2] << " dB under the note");
+
+        for (size_t index = 0; index < under.size(); ++index)
+        {
+            CAPTURE (row.name);
+            CAPTURE (row.note);
+            CAPTURE (index);
+            CHECK (under[index] > row.measured[index] - 3.0);
+
+            // Sync at 100 %, eight times the note's cycle, a whole ratio, is the saw eight times up: no warp to take away,
+            // its table's band limit the same at every Quality, so the same within a tenth of a decibel.
+            if (index > 0 && row.warp == Synth::Warp::sync && row.amount >= 1.0f)
+                CHECK (std::abs (under[index] - under[index - 1]) < 0.1);
+            else if (index > 0 && under[index - 1] < 100.0)
+                CHECK (under[index] > under[index - 1]);
         }
     }
 }

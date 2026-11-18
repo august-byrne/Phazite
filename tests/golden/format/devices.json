@@ -1218,6 +1218,19 @@
         "minimum": -36.0,
         "maximum": 6.0,
         "default": -6.0
+      },
+      {
+        "id": "quality",
+        "name": "Quality",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": "1x",
+        "choices": [
+          "1x",
+          "2x",
+          "4x"
+        ]
       }
     ]
   },

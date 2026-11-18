@@ -236,7 +236,7 @@ TEST_CASE ("The synth's editor shows the unison's stack and drift with its other
 
     editor.getLayout().showPage (2);
     phazite::test::checkChildrenApart (editor);
-    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level" });
+    checkShowing ({ "subLevel", "noiseLevel", "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level", "quality" });
 
     editor.getLayout().showPage (3);
     phazite::test::checkChildrenApart (editor);

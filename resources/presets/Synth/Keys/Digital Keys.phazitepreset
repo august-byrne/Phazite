@@ -99,7 +99,8 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.75,
-      "level": -9.5
+      "level": -9.5,
+      "quality": "1x"
     },
     "sounds": {
       "osc1Wavetable": "FM"

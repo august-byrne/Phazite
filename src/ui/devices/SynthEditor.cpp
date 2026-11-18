@@ -508,9 +508,9 @@ SynthEditor::SynthEditor (const DeviceHandle& handle)
                 addControl (getParameterID (Synth::getModParameter (slot, field)), *control);
 
     modulation.push_back ({ "Matrix", &matrix, Matrix::getPreferredWidth(), Matrix::getPreferredHeight(), Matrix::getPreferredHeight() });
-    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level" }, 7,
-                                            ParameterControls::Size::compact,
-                                            { "Mode", "Glide", "Glide Mode", "Phase", "Bend", "Velocity", "Level" }));
+    modulation.push_back (makeControlsPart (
+        "Voice", { "voiceMode", "glide", "glideMode", "phase", "bendRange", "velocity", "level", "quality" }, 8,
+        ParameterControls::Size::compact, { "Mode", "Glide", "Glide Mode", "Phase", "Bend", "Velocity", "Level", "Quality" }));
 
     if (auto* phase = dynamic_cast<juce::SettableTooltipClient*> (findControl ("phase")))
         phase->setTooltip ("Reset starts every oscillator at the start of its wave at each note, so that a note sounds the same every "

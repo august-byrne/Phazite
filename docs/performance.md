@@ -72,6 +72,8 @@ instruments hold their notes. The figure is the share of one core's time.
 | Synth: 1 note / 8 notes / 8 notes with full unison | 0.19 / 1.38 / 4.00 | 2026-11-16 |
 | Synth: 8 notes, full unison, stacked and drifting | 4.02 | 2026-11-16 |
 | Synth, idle | 0.017 | 2026-11-16 |
+| Synth: 1 note at 2x / at 4x | not measured yet | |
+| Synth: 16 notes at 1x / 2x / 4x | not measured yet | |
 | Drum Sampler: 4 pads every 16th / idle | 0.384 / 0.004 | 2026-11-16 |
 | Sampler: 1 note / 8 notes / 16 notes filtered, looping | 0.095 / 4.54 / 11.9 | 2026-11-16 |
 | Sampler, idle | 0.03 | 2026-11-16 |

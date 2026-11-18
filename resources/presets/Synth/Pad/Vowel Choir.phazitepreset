@@ -99,7 +99,8 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.3,
-      "level": -2.5
+      "level": -2.5,
+      "quality": "1x"
     },
     "sounds": {
       "osc1Wavetable": "Vowels",

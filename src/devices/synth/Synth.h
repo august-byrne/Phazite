@@ -16,8 +16,10 @@
 // apart as an analog voice's do. 16 voices, or one in mono mode, legato, with glide (for every note, or only those played
 // over a held one, as a TB-303 slides); in poly mode every note takes a voice of its own, a key played again too: what
 // still rings of it rings out over its release, untouched, as most polyphonic synths let it. Pitch bend and the sustain
-// pedal work as on a keyboard. It has no effects of its own: Phazite's devices follow it. Its noise, unison phases, drift
-// and random values come from fixed seeds, so it renders the same every time.
+// pedal work as on a keyboard. Its Quality plays the whole synth at 1, 2 or 4 times the device's rate, brought down through
+// half-band filters, so that sync and the other warps don't alias; every Quality is as late as the latest. It has no
+// effects of its own: Phazite's devices follow it. Its noise, unison phases, drift and random values come from fixed
+// seeds, so it renders the same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -25,6 +27,7 @@
 #include "devices/core/Processor.h"
 #include "devices/dsp/ControlGrid.h"
 #include "devices/dsp/DcBlocker.h"
+#include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Noise.h"
@@ -32,6 +35,8 @@
 #include "devices/dsp/Oversampling.h"
 #include "devices/dsp/Random.h"
 #include "devices/wavetable/Wavetable.h"
+
+#include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
 #include <array>
@@ -146,7 +151,8 @@ public:
         phase,     // a Phase
         bendRange,
         velocity,
-        level
+        level,
+        quality // a Quality: how many times the device's rate the whole synth plays at
     };
 
     // An oscillator's parameters, from osc1On or osc2On; an envelope's from env1Attack; an LFO's from lfo1Shape; a
@@ -296,7 +302,23 @@ public:
                // as an analog synth's oscillators run on; a voice that has never played starts as it would reset
     };
 
+    // How many times the device's rate everything before its output plays at: its voices (oscillators, sub, noise, filter,
+    // drive, envelopes, LFOs) and the control grid, their sum brought down to the device's rate through half-band filters.
+    enum class Quality
+    {
+        once,     // 1x
+        twice,    // 2x
+        fourTimes // 4x
+    };
+
+    static constexpr int numQualities = 3;
+    static constexpr int getFactor (Quality q) noexcept { return 1 << (int) q; }
+
     static const DeviceInfo info;
+
+    // How late its sound comes, in samples, at any rate and every Quality: the latest Quality's half-band filters', which
+    // the others wait for, so that the Quality can change while the song plays.
+    static int getLatency();
 
     Synth(); // its oscillators on the first factory table
     ~Synth() override;
@@ -334,6 +356,10 @@ public:
     void process (const ProcessContext&) override;
     double getTailSeconds() const override;
     void releaseUnused() override { freeRetired(); }
+    int getLatencySamples() const override { return latency; }
+
+    // The Quality it plays at, as its last block left it. Any thread.
+    Quality getPlayingQuality() const noexcept { return (Quality) playingQuality.load (std::memory_order_relaxed); }
 
 private:
     static constexpr int controlStep = 16;      // samples between updates of pitch, position, modulation and filter
@@ -376,6 +402,35 @@ private:
             done = 0;
             length = samples;
         }
+    };
+
+    // The filter's sections, for the low-pass, the high-pass, the band-pass and the notch at 12 and 24 dB, gliding across each
+    // control step: each section's two numbers, g (the tangent that sets its frequency) and its damping k, in straight lines
+    // as a Line goes, and each sample's coefficients worked out from them (a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2, the
+    // band's mix k times its sign), once for both sides, which play the same filter: the trapezoidal filter as it is meant to
+    // be moved, stable while it moves. While neither line moves (and from where they end), the sides play the coefficients
+    // the step made, through MultimodeFilter::process(), exactly as a filter set once a step plays. The other types play as
+    // set (a comb's delay glides of itself).
+    struct FilterGlide
+    {
+        static constexpr int maxSections = 2; // of these four types
+        std::array<Line, maxSections> g, k;
+        std::array<float, maxSections> bandSign {}; // each section's band mix over its damping: 0, 1 or -1
+        std::array<dsp::FilterCoefficients, 3> target {}, played {};
+        dsp::FilterMode mode = dsp::FilterMode::lowPass;
+        int numSections = 0; // 0 for the types it doesn't glide
+        bool glides = false; // a line moves somewhere
+
+        // A step's coefficients, glided to over `samples` from where the lines are, or jumped to: as a note starts, or the
+        // filter comes on, or its type or slope changes.
+        void set (const dsp::MultimodeCoefficients&, int samples, bool atOnce) noexcept;
+
+        bool isMoving() const noexcept { return glides && g[0].isMoving(); }
+
+        // The coefficients `ahead` samples on from the last one played (1: the next sample's), while it moves.
+        const std::array<dsp::FilterCoefficients, 3>& at (int ahead) noexcept;
+
+        void advance (int samples) noexcept;
     };
 
     // An oscillator's unison voice: where it is in its cycle, and what it reads, each gliding to what the control step worked out.
@@ -438,6 +493,7 @@ private:
         dsp::Adsr amp, envelope2, envelope3;             // the second and third at the control rate
         std::array<dsp::Lfo, 2> lfos;                    // those that start again with each note, at the control rate
         std::array<dsp::MultimodeFilter, 2> filters;     // each side
+        FilterGlide filterGlide;                         // both sides' sections, gliding
         std::array<dsp::AntialiasedShaper, 2> drives;    // the filter's drive, each side, at twice the rate
         float driveBlend = 0.0f;                         // how far the sound goes through them: fades as the drive comes on or off
         bool filtering = false;                          // the filter is on
@@ -449,6 +505,7 @@ private:
         float fade = 1.0f, fadeStep = 0.0f;           // fading out: taken for another note, or cut as playback stopped
         int age = 0;                                  // the samples since its note began (up to a limit)
         Line subGain, noiseGain, gainLeft, gainRight; // gliding to what each control step works out
+        Line subIncrement;                            // of the sub's phase each sample, gliding as the readers' do
         float driveGain = 1.0f;
         float cutoffNow = 0.0f; // its filter's frequency, as it was last set
     };
@@ -459,8 +516,40 @@ private:
         std::uint64_t safeAfter = 0; // control steps begun from which the audio thread can't be reading it
     };
 
-    double sampleRate = 44100.0;
+    double deviceRate = 44100.0; // the rate it is prepared at, which its output has
+    double sampleRate = 44100.0; // the rate the voices play at: the device's times the Quality's factor
+    int factor = 1;
     double aliasLimit = 0.5; // the highest frequency, as a fraction of the sample rate, whose alias stays above hearing
+
+    // One Quality's way out: its half-band filters down to the device's rate (none at 1x), and how long it waits after them
+    // to be as late as the latest: whole samples, and the fraction of one that their way down leaves, through a first-order
+    // Thiran all-pass (flat in level, its delay that fraction and a sample at low frequencies), as JUCE makes its
+    // oversamplers' latency whole. Every Quality's is made in prepare(), so that a change of it allocates nothing.
+    struct Path
+    {
+        int delay = 0;
+        float allPass = 0.0f;                       // its coefficient; 0 at 1x, which waits whole samples alone
+        std::array<float, 2> lastIn {}, lastOut {}; // each side's
+        std::unique_ptr<juce::dsp::Oversampling<float>> filters;
+    };
+
+    std::array<Path, numQualities> paths;
+    std::array<dsp::DelayLine, 2> late;       // the wait, each side: the Quality playing's, read as long as its path says
+    int capacity = 1;                         // the most samples of the device's rate it plays at once
+    int latency = 0;                          // the latest Quality's, which every Quality takes
+    juce::AudioBuffer<float> silence, voiced; // what the up filters take (their buffer at the Quality's rate is where it
+                                              // plays), and what it plays at the device's rate before its wait
+    std::array<double, 2> lfoRates {};        // as the block set them, in hertz
+
+    // A change of Quality while voices sound (stealFadeSeconds, at the rate they play at): the change waits for the fade and for
+    // what the half-band filters and the wait still hold of it, and the events that come meanwhile wait with it, to be handled
+    // as it is made.
+    std::atomic<int> playingQuality { 0 };
+    int switchingTo = -1, switchLeft = 0;     // the Quality it changes to, and the device's samples until it does
+    static constexpr int switchSettling = 16; // samples, after the fade and the latency, for the half-band filters' ring to end
+    static constexpr int maxWaiting = 256;
+    std::array<NoteEvent, maxWaiting> waiting {};
+    int numWaiting = 0;
     static constexpr double stealFadeSeconds = 0.003; // a voice taken for another note fades out over this
     static constexpr double stopFadeSeconds = 0.01;   // a note that had only just begun when playback stopped, over this
     static constexpr double justBegunSeconds = 0.1;   // how young that is
@@ -533,6 +622,14 @@ private:
     Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters, bool playing, std::int64_t songSample);
+
+    // The device's samples from `from` to `to` of a block, at the Quality's rate, brought down to the device's and added in
+    // after the wait. At most `capacity` of them.
+    void playOut (const ProcessContext&, int from, int to);
+
+    // What depends on the rate the voices play at, for a Quality, once nothing sounds. Real-time safe.
+    void setQuality (int index) noexcept;
+    void hold (const NoteEvent&) noexcept; // an event that waits for a change of Quality
     void freeRetired();
     static void renderStep (const OscillatorRun&, Reader&, float* out, int length) noexcept;
 

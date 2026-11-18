@@ -63,7 +63,13 @@ The full text of every step, as it was written when it was built, is in the
 - **S6.7 The Synth's modulation glides:** pitch, levels, table position, the warps, volume and pan go in straight
   lines across each 16-sample control step instead of stepping, so a fast LFO no longer buzzes under the note (the
   buzz of a 25 Hz LFO on Volume falls from 47 to 87 dB under the note); a note with nothing moving plays bit for bit
-  as before. The cutoff, the resonance and the sub's pitch still step.
+  as before.
+- **S6.7 The Synth's filter glides, and a Quality:** the cutoff and the resonance of its low-pass, high-pass,
+  band-pass and notch, and its sub's pitch, go in straight lines across each control step too (a 25 Hz LFO on a
+  resonant filter's cutoff: its buzz from 70 to 106 dB under the note). A Quality of 1x, 2x or 4x plays the whole
+  synth at that multiple of the rate, down through half-band filters, every Quality 5 samples late: a swept sync at
+  C5 is 39, 60 and 74 dB under the note, a bent wave 42, 62 and 77. A change of Quality cuts the notes sounding, with
+  a 3 ms fade.
 - **S6.7 One synth, part A:** the Wavetable gains what only the Synth had, so that the two can become one: each
   LFO's Fade In, Glide Mode, a Drift source, slots that move other slots' amounts (the mod wheel brings a vibrato in),
   a Sync that modulation takes to 16 times, and tables that keep 16 samples a cycle, so that its basic waves alias

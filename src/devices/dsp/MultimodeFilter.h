@@ -235,6 +235,18 @@ public:
         return x;
     }
 
+    // A sample through the low-pass, high-pass, band-pass or notch sections (the mode set() was given last) with other
+    // coefficients than set() was given: for a filter whose sections' coefficients are worked out at each sample elsewhere, as
+    // the Synth glides its own across each control step (Synth::FilterGlide). With the coefficients set() was given, the same
+    // samples as process(). Real-time safe.
+    float processSections (float x, const std::array<FilterCoefficients, 3>& coefficients) noexcept
+    {
+        for (int s = 0; s < now.numSections; ++s)
+            x = sections[(size_t) s].process (x, coefficients[(size_t) s]);
+
+        return x;
+    }
+
     // The Driven character (makeDriven()), with a state of its own: silence, new coefficients (at once), and a sample.
     // Real-time safe.
     void resetDriven() noexcept

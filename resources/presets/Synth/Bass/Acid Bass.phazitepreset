@@ -99,7 +99,8 @@
       "phase": "Free",
       "bendRange": 2.0,
       "velocity": 0.4,
-      "level": -5.577072
+      "level": -5.577072,
+      "quality": "1x"
     },
     "sounds": {
       "osc1Wavetable": "Basic Shapes",

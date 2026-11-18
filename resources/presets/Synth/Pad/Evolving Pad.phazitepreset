@@ -99,7 +99,8 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.3,
-      "level": -3.0
+      "level": -3.0,
+      "quality": "1x"
     },
     "sounds": {
       "osc1Wavetable": "Spectra",

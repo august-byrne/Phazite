@@ -222,7 +222,8 @@ const OnPurpose onPurpose[] = {
 // Devices measured once in each of their modes, each under a name of its own, with its mode's choice as if it were the
 // default: Motion, whose modes are three effects that were devices of their own; Age in each medium; the Delay with its
 // modulation off and on, whose phase follows the song's place; the Reverb as a room and as a hall, whose sways follow it; and
-// the EQ in Minimum and in Linear phase, which plays at a latency through kernels that change on a grid of their own.
+// the EQ in Minimum and in Linear phase, which plays at a latency through kernels that change on a grid of their own; and
+// the Synth at 1x and at 2x, where it plays through half-band filters.
 struct Variant
 {
     std::string_view typeID, name, parameterID;
@@ -241,6 +242,8 @@ constexpr Variant variants[] = {
     { "phaziteReverb", "Reverb (Hall)", "mode", 2.0f },
     { "phaziteEq", "EQ", "phase", 0.0f },
     { "phaziteEq", "EQ (Linear)", "phase", 1.0f },
+    { "phaziteSynth", "Synth", "quality", 0.0f },
+    { "phaziteSynth", "Synth (2x)", "quality", 1.0f },
 };
 
 const Exception* findException (const devices::DeviceInfo& info, Rule rule)

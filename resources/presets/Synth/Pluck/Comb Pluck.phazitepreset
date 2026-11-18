@@ -99,7 +99,8 @@
       "phase": "Reset",
       "bendRange": 2.0,
       "velocity": 0.7,
-      "level": -0.5
+      "level": -0.5,
+      "quality": "1x"
     }
   }
 }

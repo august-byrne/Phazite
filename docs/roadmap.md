@@ -132,7 +132,7 @@ S6.10 (Motion), S6.11 (Age) and S6.12 (Stereo).
 |---|---|---|---|
 | S6.1 | S | A listening set for each device, and at the end a verdict on each | The set and the verdict are in the device's page under [design/devices](design/devices.md) |
 | S6.2 | S | What is left of it: a wheel notch on a knob that a latency follows remakes the device (known bug 201), which S6.9's wheel takes with it. Fixed: a sleeping Filter that a lane makes Driven, the Delay's glide stopping short | Each is fixed with a test, or in known-bugs.md |
-| S6.7 | L | What is left of it: the Synth's modulation gliding between control steps, band-limited sync and warps, and the Driven filter for the instruments. Built: the Synth and the Wavetable as one synth | A swept sync shows no aliasing above the level set; a fast LFO on a resonant filter doesn't step |
+| S6.7 | M | What is left of it: the Driven filter for the Synth, and its editor's picture of the Warp and of its own matrix. Built: the Synth and the Wavetable as one synth, modulation and the filter gliding between control steps, a Quality of 1x, 2x or 4x for sync and the warps | A swept sync shows no aliasing above the level set; a fast LFO on a resonant filter doesn't step |
 | S6.8 | L | The factory presets redone on the finished devices | The preset report passes ([presets.md](presets.md)) |
 | S6.9 | L | Editors: wrong pictures fixed; one grammar for every graph; the compressor and the multiband set precisely; drum pads sound on the press; Automate and Modulate on switches and handles; analyzers for each channel | Every graph answers the same drags, wheel and double-click |
 

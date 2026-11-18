@@ -61,6 +61,10 @@ How to keep it:
 
 **W8. A property set without an undo step only when its value changes.** Without an `UndoManager`, `ValueTree::setProperty()` compares the value's type too (`NamedValueSet::set()`, `juce_core/containers/juce_NamedValueSet.cpp`; `juce_data_structures/values/juce_ValueTree.cpp`), so the number 5 over the text "5" read from a file is a change its listeners hear; with one, it compares values alone. The two stores that write without one compare first (`storeProperty()`, `src/model/plugins/PluginInstances.cpp`; `store()`, `src/model/mixer/Mixer.cpp`); they could be one function.
 
+### Devices
+
+**W54. The Synth's way down to its rate measured, as JUCE reports its oversamplers' latency only for the round trip.** An instrument has no input, so the Synth plays only the way down of `juce::dsp::Oversampling` (its way up given silence, for the buffer at the Quality's rate). `getLatencyInSamples()` is the way up's and the way down's together, made whole between them (`Oversampling2TimesPolyphaseIIR`, `juce_dsp/processors/juce_Oversampling.cpp`), and nothing reports the way down's alone: with JUCE's figure the Synth at 2x and 4x came 2 samples early. `getDownDelays()` (`src/devices/synth/Synth.cpp`) measures it once, as the phase of a slow sine the way down brings, and each Quality waits the rest of the latest's, whole samples and a fraction by a first-order Thiran all-pass, as JUCE makes its own latency whole; `tests/SynthTests.cpp` checks that every Quality lines up. It goes if JUCE reports the way down's latency, or makes it whole on its own.
+
 ### Audio devices and the app
 
 **W9. Windows' low-latency mode by JUCE's name for it (*JUCE's insides*).** Phazite finds Windows' shared mode with small buffers by the name JUCE gives its device type, "Windows Audio (Low Latency Mode)" (`src/model/engine/AudioDevices.h`; `juce_audio_devices/native/juce_WASAPI_windows.cpp`), as JUCE has no other way to name it. Were JUCE to rename it, the first run's low-latency setup and the Low Latency switch would find nothing, without a word.

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace phazite::devices
 {
@@ -30,6 +31,7 @@ namespace
     constexpr std::string_view voiceModes[] = { "Poly", "Mono" };
     constexpr std::string_view glideModes[] = { "Always", "Legato" };
     constexpr std::string_view phases[] = { "Reset", "Free" }; // the FM synth's
+    constexpr std::string_view qualities[] = { "1x", "2x", "4x" };
 
     // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
     constexpr auto& divisions = dsp::noteValueNames;
@@ -210,9 +212,11 @@ namespace
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
+        makeChoice ("quality", "Quality", qualities, 0.0f),
     };
 
-    static_assert (std::size (parameters) == (size_t) Synth::level + 1);
+    static_assert (std::size (parameters) == (size_t) Synth::quality + 1);
+    static_assert (std::size (qualities) == (size_t) Synth::numQualities);
     static_assert (Synth::getParameter (1, Synth::oscWarpAmount) == Synth::osc2WarpAmount);
     static_assert (Synth::getEnvelopeParameter (2, Synth::envReleaseCurve) == Synth::env3ReleaseCurve);
     static_assert (Synth::getLfoParameter (1, Synth::lfoFadeIn) == Synth::lfo2FadeIn);
@@ -316,6 +320,81 @@ void Synth::place (const Wavetable& table, Reader& reader, float frame) noexcept
     }
 
     reader.morph = frame - (float) firstFrame;
+}
+
+void Synth::FilterGlide::set (const dsp::MultimodeCoefficients& next, int samples, bool atOnce) noexcept
+{
+    const auto sectioned = next.mode == dsp::FilterMode::lowPass || next.mode == dsp::FilterMode::highPass
+                           || next.mode == dsp::FilterMode::bandPass || next.mode == dsp::FilterMode::notch;
+    const auto count = sectioned ? std::min (next.numSections, maxSections) : 0;
+    const auto fresh = atOnce || next.mode != mode || count != numSections;
+    mode = next.mode;
+    numSections = count;
+    target = next.sections;
+    played = next.sections;
+    glides = false;
+
+    for (size_t s = 0; s < (size_t) numSections; ++s)
+    {
+        const auto& section = target[s];
+        bandSign[s] = section.m1 > 0.0f ? 1.0f : (section.m1 < 0.0f ? -1.0f : 0.0f);
+
+        // A line from a value to itself would be a line all the same: the coefficients worked out at each sample, a
+        // rounding away from those the step made. So a section that doesn't move goes there at once.
+        if (fresh || (juce::exactlyEqual (g[s].now(), section.g) && juce::exactlyEqual (k[s].now(), section.k)))
+        {
+            g[s].jump (section.g);
+            k[s].jump (section.k);
+        }
+        else
+        {
+            g[s].glide (section.g, samples);
+            k[s].glide (section.k, samples);
+            glides = true;
+        }
+    }
+
+    // All its lines go together: a section that doesn't move is on a line of the same length, at its value.
+    if (glides)
+    {
+        for (size_t s = 0; s < (size_t) numSections; ++s)
+        {
+            if (! g[s].isMoving())
+            {
+                g[s].glide (target[s].g, samples);
+                k[s].glide (target[s].k, samples);
+            }
+        }
+    }
+}
+
+const std::array<dsp::FilterCoefficients, 3>& Synth::FilterGlide::at (int ahead) noexcept
+{
+    if (g[0].done + ahead >= g[0].length)
+        return target; // where the lines end: the step's own coefficients
+
+    for (size_t s = 0; s < (size_t) numSections; ++s)
+    {
+        const auto gain = g[s].at (ahead), damping = k[s].at (ahead);
+        auto& section = played[s];
+        section.g = gain;
+        section.k = damping;
+        section.a1 = 1.0f / (1.0f + gain * (gain + damping));
+        section.a2 = gain * section.a1;
+        section.a3 = gain * section.a2;
+        section.m1 = bandSign[s] * damping;
+    }
+
+    return played;
+}
+
+void Synth::FilterGlide::advance (int samples) noexcept
+{
+    for (size_t s = 0; s < (size_t) numSections; ++s)
+    {
+        g[s].advance (samples);
+        k[s].advance (samples);
+    }
 }
 
 // One oscillator's unison voice over a stretch, its warp chosen once rather than at each sample, as render() plays it sample
@@ -614,18 +693,147 @@ float Synth::getPlayedPosition (int osc) const noexcept
     return juce::isPositiveAndBelow (osc, numOscillators) ? playedPositions[(size_t) osc].load (std::memory_order_relaxed) : 0.0f;
 }
 
-void Synth::prepare (double newSampleRate, int)
+namespace
 {
-    sampleRate = newSampleRate;
+    // Each Quality's half-band filters down to the device's rate (none at 1x): polyphase IIR ones, as the Saturator's, which
+    // keep the latency short and whole. Only their way down is played; the way up gives the buffer at the Quality's rate.
+    std::unique_ptr<juce::dsp::Oversampling<float>> makeHalfBands (int index, int capacity)
+    {
+        if (index == 0)
+            return nullptr;
 
-    // A harmonic may play up to where its alias, folded back from the sample rate, is above 20 kHz.
-    aliasLimit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
+        auto filters = std::make_unique<juce::dsp::Oversampling<float>> (
+            2, (size_t) index, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
+        filters->initProcessing ((size_t) capacity);
+        return filters;
+    }
+} // namespace
+
+namespace
+{
+    // How late each Quality's half-band filters' way down alone makes the sound, in the device's samples, at any rate:
+    // measured once, as the phase of a slow sine they bring down (where JUCE measures its filters' latency, which it
+    // reports for the way up and the way down together, made whole between them). 0 at 1x. JUCE workaround 54
+    // (docs/juce-workarounds.md)
+    const std::array<double, Synth::numQualities>& getDownDelays()
+    {
+        static const auto delays = []
+        {
+            std::array<double, Synth::numQualities> found {};
+            constexpr int length = 8192;
+            constexpr double cycles = 0.002; // of a cycle each device sample
+
+            for (int index = 1; index < Synth::numQualities; ++index)
+            {
+                const auto factor = Synth::getFactor ((Synth::Quality) index);
+                auto filters = makeHalfBands (index, length);
+                juce::AudioBuffer<float> quiet (2, length), out (2, length); // both sides, as the filters are made for
+                quiet.clear();
+                auto up = filters->processSamplesUp (juce::dsp::AudioBlock<float> (quiet));
+
+                for (size_t k = 0; k < up.getNumSamples(); ++k)
+                    up.setSample (0, (int) k, (float) std::sin (juce::MathConstants<double>::twoPi * cycles * (double) k / factor));
+
+                juce::dsp::AudioBlock<float> down (out);
+                filters->processSamplesDown (down);
+
+                // y = a sin (w n) + b cos (w n) = r sin (w n + phase), fitted over the second half, where the filters have
+                // settled: the delay is -phase / w.
+                const auto w = juce::MathConstants<double>::twoPi * cycles;
+                auto ss = 0.0, cc = 0.0, sc = 0.0, ys = 0.0, yc = 0.0;
+
+                for (int n = length / 2; n < length; ++n)
+                {
+                    const auto s = std::sin (w * n), c = std::cos (w * n), y = (double) out.getSample (0, n);
+                    ss += s * s;
+                    cc += c * c;
+                    sc += s * c;
+                    ys += y * s;
+                    yc += y * c;
+                }
+
+                const auto determinant = ss * cc - sc * sc;
+                const auto a = (ys * cc - yc * sc) / determinant, b = (yc * ss - ys * sc) / determinant;
+                found[(size_t) index] = -std::atan2 (b, a) / w;
+            }
+
+            return found;
+        }();
+
+        return delays;
+    }
+} // namespace
+
+int Synth::getLatency()
+{
+    // The same at any rate and any block size: the latest way down's, and at least half a sample more, so that every
+    // Quality's fraction of a sample is played by its all-pass between half a sample and one and a half (Path).
+    const auto& delays = getDownDelays();
+    return (int) std::ceil (*std::max_element (delays.begin(), delays.end()) + 0.5);
+}
+
+void Synth::prepare (double newSampleRate, int maximumBlockSize)
+{
+    deviceRate = newSampleRate;
+    capacity = std::max (1, maximumBlockSize);
+    latency = getLatency();
+
+    // Every Quality's way out, each as late as the latest.
+    for (int index = 0; index < numQualities; ++index)
+    {
+        auto& path = paths[(size_t) index];
+        path.filters = makeHalfBands (index, capacity);
+
+        if (path.filters == nullptr)
+        {
+            path.delay = latency;
+            path.allPass = 0.0f;
+            continue;
+        }
+
+        // The wait after its way down: whole samples, then the rest, from half a sample to one and a half, by a Thiran
+        // all-pass, (1 - d) / (1 + d) for a delay d.
+        const auto rest = (double) latency - getDownDelays()[(size_t) index];
+        path.delay = (int) std::floor (rest - 0.5);
+        const auto fraction = rest - path.delay;
+        path.allPass = (float) ((1.0 - fraction) / (1.0 + fraction));
+    }
+
+    for (auto& side : late)
+        side.prepare (latency + 1);
+
+    silence.setSize (2, capacity);
+    silence.clear();
+    voiced.setSize (2, capacity);
+
+    for (auto& blocker : dcBlockers)
+        blocker.prepare (deviceRate);
+
+    // A comb as long as the lowest cutoff makes it at the fastest rate.
+    for (auto& voice : voices)
+        for (auto& filter : voice.filters)
+            filter.prepare (dsp::getLongestCombDelay (lowestCutoff, deviceRate * getFactor (Quality::fourTimes)));
+
+    switchingTo = -1;
+    numWaiting = 0;
+    setQuality (playingQuality.load (std::memory_order_relaxed));
+    reset();
+}
+
+void Synth::setQuality (int index) noexcept
+{
+    playingQuality.store (index, std::memory_order_relaxed);
+    factor = getFactor ((Quality) index);
+    sampleRate = deviceRate * factor;
+
+    // A table's harmonic may play up to where its alias, folded back from the device's rate, would be above 20 kHz: as at
+    // 1x, at every Quality, so that the half-band filters have nothing of the tables' own to take away (what they let
+    // through, 80 dB under, would alias), only what the warps make beyond it.
+    aliasLimit = std::clamp (1.0 - 20000.0 / deviceRate, 0.45, 0.9) / factor;
     const auto controlRate = sampleRate / controlStep;
     driftWanderSteps = (float) (driftWanderSeconds * controlRate);
     driftFollow = (float) (1.0 - std::exp (-1.0 / (driftGlideSeconds * controlRate)));
     driveFadeStep = (float) std::min (1.0, 1.0 / (driveFadeSeconds * sampleRate));
-    for (auto& blocker : dcBlockers)
-        blocker.prepare (sampleRate);
 
     for (auto& voice : voices)
     {
@@ -634,17 +842,33 @@ void Synth::prepare (double newSampleRate, int)
         voice.envelope2.prepare (controlRate);
         voice.envelope3.prepare (controlRate);
 
-        for (auto& lfo : voice.lfos)
-            lfo.prepare (controlRate);
+        for (size_t i = 0; i < voice.lfos.size(); ++i)
+        {
+            voice.lfos[i].prepare (controlRate);
+            voice.lfos[i].setRate (lfoRates[i]);
+        }
 
         for (auto& filter : voice.filters)
-            filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
+            filter.reset();
     }
 
-    for (auto& lfo : freeLfos)
-        lfo.prepare (controlRate);
+    // The LFOs that run free go on from where they are, at the new rate.
+    for (size_t i = 0; i < freeLfos.size(); ++i)
+    {
+        freeLfos[i].prepare (controlRate);
+        freeLfos[i].setRate (lfoRates[i]);
+    }
 
-    reset();
+    freeLfosAhead = 0;
+    grid.reset();
+
+    // Its way out from silence (the wait holds the silence the last one left: read at another length, it is silence still).
+    auto& path = paths[(size_t) index];
+
+    if (path.filters != nullptr)
+        path.filters->reset();
+
+    path.lastIn = path.lastOut = {};
 }
 
 void Synth::reset()
@@ -683,6 +907,23 @@ void Synth::reset()
 
     for (auto& blocker : dcBlockers)
         blocker.reset();
+
+    // Nothing sounds: a change of Quality under way is made at once, and the events that waited for it go.
+    if (switchingTo >= 0)
+        setQuality (std::exchange (switchingTo, -1));
+
+    numWaiting = 0;
+
+    for (auto& path : paths)
+    {
+        if (path.filters != nullptr)
+            path.filters->reset();
+
+        path.lastIn = path.lastOut = {};
+    }
+
+    for (auto& side : late)
+        side.reset();
 
     freeLfoValues.fill (0.0f);
     freeLfosAhead = 0;
@@ -1456,9 +1697,15 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 setLine (voice.subGain, subGain, starts);
                 setLine (voice.noiseGain, std::clamp (settings.noiseLevel + moveOf (moves, ModTarget::noiseLevel), 0.0f, 1.0f), starts);
 
-                if (subGain > 0.0f || voice.subGain.now() > 0.0f)
+                // The sub's pitch glides as the readers' do (its line from where it was sounding; one that comes in starts
+                // at its pitch), its wave's band limit chosen once a step.
+                if (const auto wasSounding = voice.subGain.now() > 0.0f && ! starts; subGain > 0.0f || wasSounding)
+                {
                     voice.sub.setFrequency (dsp::noteToFrequency ((double) basePitch - 12.0 * settings.subOctaves), sampleRate);
+                    setLine (voice.subIncrement, voice.sub.getIncrement(), ! wasSounding);
+                }
 
+                const auto wasFiltering = voice.filtering && ! starts;
                 voice.filtering = settings.filterOn;
 
                 if (settings.filterOn)
@@ -1475,9 +1722,13 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                                                                     .q = dsp::getSynthResonanceQ (filterResonance) },
                                                                   sampleRate);
 
-                    // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too.
+                    // Glided to over the step, and after a step of one sample (the grid cut it short), over the next one too:
+                    // a comb's delay by each side, the sections' coefficients by both together (FilterGlide); at once as the
+                    // note starts or the filter comes on.
                     for (auto& side : voice.filters)
-                        side.set (coefficients, untilNextStep > 1 ? untilNextStep : untilNextStep + controlStep);
+                        side.set (coefficients, glideLength);
+
+                    voice.filterGlide.set (coefficients, glideLength, ! wasFiltering);
 
                     voice.driveGain = settings.driveGain;
                     voice.cutoffNow = (float) frequency;
@@ -1649,7 +1900,12 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 auto centre = 0.0f;
 
                 if (const auto subGain = voice.subGain.at (i + 1); subGain > 0.0f)
-                    centre += subGain * voice.sub.next (settings.subWave);
+                {
+                    // As Oscillator::next() plays it, by its gliding increment.
+                    const auto t = voice.sub.getPhase(), dt = voice.subIncrement.at (i + 1);
+                    centre += subGain * voice.sub.valueAt (settings.subWave, t);
+                    voice.sub.setPhase (t + dt < 1.0f ? t + dt : t + dt - 1.0f);
+                }
 
                 if (const auto noiseGain = voice.noiseGain.at (i + 1); noiseGain > 0.0f)
                     centre += noiseGain * voice.noise.next();
@@ -1665,6 +1921,9 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
                 voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -driveFadeStep, driveFadeStep);
 
+                // The sections' coefficients where their lines have got to, worked out once for both sides.
+                const auto* gliding = voice.filtering && voice.filterGlide.isMoving() ? &voice.filterGlide.at (i + 1) : nullptr;
+
                 for (int channel = 0; channel < channels; ++channel)
                 {
                     auto x = sides[(size_t) channel];
@@ -1678,7 +1937,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                             x += voice.driveBlend * (driven - x);
                         }
 
-                        x = voice.filters[(size_t) channel].process (x);
+                        auto& filter = voice.filters[(size_t) channel];
+                        x = gliding != nullptr ? filter.processSections (x, *gliding) : filter.process (x);
                     }
 
                     sides[(size_t) channel] = x;
@@ -1721,6 +1981,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             }
 
             voice.subGain.advance (length);
+            voice.subIncrement.advance (length);
+            voice.filterGlide.advance (length);
             voice.noiseGain.advance (length);
             voice.gainLeft.advance (length);
             voice.gainRight.advance (length);
@@ -1730,6 +1992,105 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
         }
 
         start += length;
+    }
+}
+
+void Synth::playOut (const ProcessContext& block, int from, int to)
+{
+    const auto length = to - from;
+
+    if (length <= 0)
+        return;
+
+    const auto numChannels = block.numChannels > 1 ? 2 : 1;
+    auto& path = paths[(size_t) playingQuality.load (std::memory_order_relaxed)];
+    std::array<float*, 2> fast {};
+
+    // Where the voices play: at 1x the samples it sends, otherwise the half-band filters' own buffer at the Quality's rate
+    // (their way up given silence: an instrument has no input).
+    if (path.filters == nullptr)
+    {
+        for (int c = 0; c < numChannels; ++c)
+        {
+            fast[(size_t) c] = voiced.getWritePointer (c);
+            std::fill_n (fast[(size_t) c], length, 0.0f);
+        }
+    }
+    else
+    {
+        // Both sides, as the filters are made for (their fractional delay takes no fewer), the second silent for a mono block.
+        const juce::dsp::AudioBlock<float> quiet (silence.getArrayOfWritePointers(), 2, (size_t) length);
+        auto up = path.filters->processSamplesUp (quiet);
+        up.clear();
+
+        for (int c = 0; c < numChannels; ++c)
+            fast[(size_t) c] = up.getChannelPointer ((size_t) c);
+    }
+
+    // Its events and the song's place counted at the Quality's rate, and its control grid on the song's own grid there.
+    render (fast[0], fast[1], length * factor, block.parameters, block.isPlaying,
+            (block.songSample + (block.isPlaying ? from : 0)) * factor);
+
+    if (path.filters != nullptr)
+    {
+        juce::dsp::AudioBlock<float> down (voiced.getArrayOfWritePointers(), 2, (size_t) length);
+        path.filters->processSamplesDown (down);
+    }
+
+    // As late as the latest Quality (whole samples, then the fraction of one by the all-pass), then into what it sends.
+    for (int c = 0; c < numChannels; ++c)
+    {
+        const auto* played = voiced.getReadPointer (c);
+        auto* out = block.channels[c] + from;
+        auto& side = late[(size_t) c];
+
+        if (path.filters == nullptr)
+        {
+            for (int i = 0; i < length; ++i)
+            {
+                side.push (played[i]);
+                out[i] += side.read (path.delay);
+            }
+
+            continue;
+        }
+
+        auto& lastIn = path.lastIn[(size_t) c];
+        auto& lastOut = path.lastOut[(size_t) c];
+
+        for (int i = 0; i < length; ++i)
+        {
+            side.push (played[i]);
+            const auto x = side.read (path.delay);
+            lastOut = path.allPass * (x - lastOut) + lastIn;
+            lastIn = x;
+            out[i] += lastOut;
+        }
+    }
+}
+
+void Synth::hold (const NoteEvent& event) noexcept
+{
+    if (numWaiting < maxWaiting)
+    {
+        waiting[(size_t) numWaiting++] = event;
+        return;
+    }
+
+    // Full: a note that would start is let go of; a note-off takes back a note waiting to start, as if neither came.
+    if (event.type != NoteEvent::Type::noteOff)
+        return;
+
+    for (auto i = numWaiting - 1; i >= 0; --i)
+    {
+        const auto& early = waiting[(size_t) i];
+
+        if (early.number == event.number && (early.type == NoteEvent::Type::noteOn || early.type == NoteEvent::Type::portamentoOn))
+        {
+            std::move (waiting.begin() + i + 1, waiting.begin() + numWaiting, waiting.begin() + i);
+            --numWaiting;
+            return;
+        }
     }
 }
 
@@ -1775,6 +2136,7 @@ void Synth::process (const ProcessContext& block)
             std::clamp (choiceOf<int> (values[(size_t) getLfoParameter (lfo, lfoDivision)]), 0, (int) std::size (divisionLengths) - 1);
         rates[i] = synced ? block.tempo / 60.0 / divisionLengths[(size_t) division].inBeats (block.barLength)
                           : (double) values[(size_t) getLfoParameter (lfo, lfoRate)];
+        lfoRates[i] = rates[i];
         freeLfos[i].setRate (rates[i]);
     }
 
@@ -1797,21 +2159,78 @@ void Synth::process (const ProcessContext& block)
     { return std::any_of (voices.begin(), voices.end(), [] (const Voice& each) { return each.amp.isActive(); }); };
     const auto soundedBefore = sounding();
 
-    // A stretch at a time, between the events.
+    // A change of Quality: made at once while nothing sounds. Otherwise what sounds can't go on at another rate: the voices
+    // fade out as a voice taken for another note does, at the rate they play at, and the change waits for the fade and for
+    // what the half-band filters and the wait still hold of them; the events that come meanwhile wait with it (hold()).
+    if (const auto wanted = std::clamp (choiceOf<int> (values[quality]), 0, numQualities - 1);
+        switchingTo < 0 && wanted != playingQuality.load (std::memory_order_relaxed))
+    {
+        if (soundedBefore)
+        {
+            const auto cut = (float) (1.0 / (stealFadeSeconds * sampleRate));
+
+            for (auto& voice : voices)
+            {
+                if (voice.amp.isActive())
+                {
+                    voice.held = voice.sustained = false;
+                    voice.fadeStep = std::max (voice.fadeStep, cut);
+                }
+            }
+
+            numHeld = 0;
+            switchingTo = wanted;
+            switchLeft = (int) std::ceil (stealFadeSeconds * deviceRate) + 1 + latency + switchSettling;
+        }
+        else
+        {
+            setQuality (wanted);
+        }
+    }
+
+    // A stretch at a time, between the events, and where a change of Quality is due.
     for (int done = 0; done < block.numSamples;)
     {
-        while (next < block.events.size() && block.events[next].sample <= done)
-            handle (block.events[next++], values);
+        if (switchingTo >= 0 && switchLeft <= 0)
+        {
+            setQuality (std::exchange (switchingTo, -1));
 
-        const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;
-        render (left + done, right != nullptr ? right + done : nullptr, until - done, values, block.isPlaying,
-                block.songSample + (block.isPlaying ? done : 0));
+            for (int i = 0; i < numWaiting; ++i)
+                handle (waiting[(size_t) i], values);
+
+            numWaiting = 0;
+        }
+
+        while (next < block.events.size() && block.events[next].sample <= done)
+        {
+            if (switchingTo >= 0)
+                hold (block.events[next++]);
+            else
+                handle (block.events[next++], values);
+        }
+
+        auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;
+        until = std::min (until, done + capacity);
+
+        if (switchingTo >= 0)
+            until = std::min (until, done + switchLeft);
+
+        playOut (block, done, until);
+
+        if (switchingTo >= 0)
+            switchLeft -= until - done;
+
         done = until;
     }
 
     // Events at the block's end, for the next one.
     while (next < block.events.size())
-        handle (block.events[next++], values);
+    {
+        if (switchingTo >= 0)
+            hold (block.events[next++]);
+        else
+            handle (block.events[next++], values);
+    }
 
     // Without what ring modulation and FM leave off centre at whole ratios (the product of two waves at one pitch has a part
     // at 0 Hz, as FM's sidebands do): on its sum, one blocker a side (dsp/DcBlocker.h), only while an oscillator that is on

@@ -293,6 +293,13 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
               v[dev::Synth::unisonDrift] = 25.0f;
           } },
         { "Synth, idle", maker<dev::Synth>(), &dev::Synth::info, 0 },
+        { "Synth, 1 note, 2x", maker<dev::Synth>(), &dev::Synth::info, 1, [] (std::vector<float>& v) { v[dev::Synth::quality] = 1.0f; } },
+        { "Synth, 1 note, 4x", maker<dev::Synth>(), &dev::Synth::info, 1, [] (std::vector<float>& v) { v[dev::Synth::quality] = 2.0f; } },
+        { "Synth, 16 notes", maker<dev::Synth>(), &dev::Synth::info, 16 },
+        { "Synth, 16 notes, 2x", maker<dev::Synth>(), &dev::Synth::info, 16,
+          [] (std::vector<float>& v) { v[dev::Synth::quality] = 1.0f; } },
+        { "Synth, 16 notes, 4x", maker<dev::Synth>(), &dev::Synth::info, 16,
+          [] (std::vector<float>& v) { v[dev::Synth::quality] = 2.0f; } },
         { "Drum Sampler, 4 pads every 16th", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 4 },
         { "Drum Sampler, idle", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 0 },
         { "Sampler, 1 note, looping", maker<dev::Sampler>(), &dev::Sampler::info, 1,
