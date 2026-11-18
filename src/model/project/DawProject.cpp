@@ -2122,8 +2122,8 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
                     [&context] (bool saved)
                     {
                         // As every switch: the branch's record names the song made for it until the project file holds it.
-                        if (auto* history = getVersionHistory (context); history != nullptr && saved)
-                            history->switchSaved();
+                        if (auto* now = getVersionHistory (context); now != nullptr && saved)
+                            now->switchSaved();
                     });
             else if (historyNow != nullptr && import->branch.isNotEmpty())
                 historyNow->whenNotCopying (

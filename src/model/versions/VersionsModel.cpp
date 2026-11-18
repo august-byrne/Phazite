@@ -1192,8 +1192,8 @@ namespace
                     saveProjectThen (
                         [&context] (bool saved)
                         {
-                            if (auto* history = findHistory (context); history != nullptr && saved)
-                                history->switchSaved();
+                            if (auto* now = findHistory (context); now != nullptr && saved)
+                                now->switchSaved();
                         });
 
                 if (done != nullptr)

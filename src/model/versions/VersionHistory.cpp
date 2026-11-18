@@ -1261,7 +1261,7 @@ void VersionHistory::open()
             // then starts its line again.
             juce::String base, baseSaid;
 
-            const auto missingSaid = [&branchesRead, &current] (bool baseReads)
+            const auto missingSaid = [&branchesRead, &current] (bool reads)
             {
                 juce::String name;
 
@@ -1271,9 +1271,9 @@ void VersionHistory::open()
 
                 return juce::String ("This song is on a branch this Versions folder doesn't have (yet: another computer's record of it "
                                      "may still be syncing; or it was deleted). ")
-                       + (baseReads ? "Its changes are worked out against the version it grew from. "
-                                    : "The version it grew from can't be read either: its changes are worked out against '" + name
-                                          + "''s last version. ")
+                       + (reads ? "Its changes are worked out against the version it grew from. "
+                                : "The version it grew from can't be read either: its changes are worked out against '" + name
+                                      + "''s last version. ")
                        + "No version is saved on '" + name + "', nor any branch switched to, nor '" + name
                        + "' moved back (Undo Last Version, Reset Branch), meanwhile, which would take that branch's work out or "
                          "leave the song on it: Create Branch first, which keeps working from the song on a branch of its own.";
