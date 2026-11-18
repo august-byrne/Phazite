@@ -486,3 +486,48 @@ TEST_CASE ("Stereo on a mono channel: its left's polarity, the DC filter and the
     // What came in on the right is left as it was.
     CHECK (sameSamples (out, 1, offset, 1));
 }
+
+TEST_CASE ("Stereo plays the same in blocks of any size, with its switches turned on and off on the way")
+{
+    // Everything new at work, the switches turned on at one sample and off again at another, both on every block size's
+    // edge: the same samples, bit for bit, however the sound is cut into blocks.
+    const auto in = makeNoise (51200, false);
+    constexpr int turnedOnAt = 12800, turnedOffAt = 38400;
+    auto on = with (getDefaults(), "balance", 0.3f);
+
+    for (const auto* id : { "swap", "mono", "dcFilter", "bassMono", "invertRight" })
+        set (on, id, 1.0f);
+
+    set (on, "spread", 0.5f);
+    set (on, "gain", -3.0f);
+    const auto off = with (getDefaults(), "balance", -0.6f);
+
+    const auto playInBlocksOf = [&] (int size)
+    {
+        Stereo stereo;
+        stereo.prepare (rate, size);
+        auto out = in;
+
+        for (int start = 0; start < out.getNumSamples(); start += size)
+        {
+            float* channels[] = { out.getWritePointer (0, start), out.getWritePointer (1, start) };
+            phazite::devices::ProcessContext block;
+            block.channels = channels;
+            block.numChannels = 2;
+            block.numSamples = std::min (size, out.getNumSamples() - start);
+            block.parameters = start >= turnedOnAt && start < turnedOffAt ? on : off;
+            stereo.process (block);
+        }
+
+        return out;
+    };
+
+    const auto whole = playInBlocksOf (512);
+
+    for (const auto size : { 1, 64 })
+    {
+        const auto cut = playInBlocksOf (size);
+        CHECK (sameSamples (cut, 0, whole, 0));
+        CHECK (sameSamples (cut, 1, whole, 1));
+    }
+}
