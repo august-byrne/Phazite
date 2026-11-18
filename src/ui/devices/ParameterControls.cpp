@@ -364,8 +364,13 @@ ChoiceButtons::ChoiceButtons (const DeviceHandle& device, std::string_view param
         }
         button.onClick = [this, i]
         {
-            if (juce::roundToInt (parameter.getValue() - parameter.getRange().start) != i)
+            // A right-click's showed the menu, and chooses nothing. Compared without the modulation, as a click on a
+            // modulated switch is.
+            if (! menuClicks.isMenuClick() && juce::roundToInt (parameter.getBaseValue() - parameter.getRange().start) != i)
+            {
+                WheelBurst::endAll(); // a choice made is a step of its own
                 parameter.setValue (parameter.getRange().start + (float) i);
+            }
 
             refresh();
         };
@@ -519,8 +524,13 @@ ChoiceTabs::ChoiceTabs (const DeviceHandle& device, std::string_view parameterID
 
         tab.onClick = [this, i]
         {
-            if (juce::roundToInt (parameter.getValue() - parameter.getRange().start) != i)
+            // A right-click's showed the menu, and chooses nothing. Compared without the modulation, as a click on a
+            // modulated switch is.
+            if (! menuClicks.isMenuClick() && juce::roundToInt (parameter.getBaseValue() - parameter.getRange().start) != i)
+            {
+                WheelBurst::endAll(); // a choice made is a step of its own
                 parameter.setValue (parameter.getRange().start + (float) i);
+            }
 
             refresh();
         };

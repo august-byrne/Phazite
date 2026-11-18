@@ -5,6 +5,7 @@
 #pragma once
 
 #include "DisplayTicker.h"
+#include "WheelBurst.h"
 #include "model/base/IDs.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/mixer/LevelSource.h"
@@ -13,6 +14,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <array>
+#include <functional>
+#include <memory>
 #include <optional>
 
 namespace phazite::ui
@@ -68,6 +71,13 @@ public:
     // a value typed is (none for text it couldn't read), and the slider showing what was typed meanwhile.
     std::function<void (const juce::String& typed, std::function<void (std::optional<double>)> set)> readTypedText;
 
+    // A burst of the wheel is one drag, from its first notch until it ends (WheelBurst), which ParameterAttachment makes one
+    // undo step: each notch moves the value as JUCE's slider moves it, by the same part of its travel on every platform
+    // (wheelNotch). A press on it, a key it hears, its keyboard focus going and its being hidden, turned off or destroyed end
+    // the burst. While it is dragged the wheel turns nothing.
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void endWheelBurst() { wheelBurst.end(); }
+
     juce::String getTextFromValue (double) override;
     double snapValue (double attemptedValue, DragMode) override;
     bool keyPressed (const juce::KeyPress&) override;
@@ -75,11 +85,16 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void focusGained (FocusChangeType) override { repaint(); }
-    void focusLost (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override;
+    void enablementChanged() override;
     void resized() override;
 
 private:
     struct ReadoutClicks;
+
+    std::unique_ptr<ScopedDragNotification> wheelDrag; // while a burst of the wheel is open
+    WheelBurst wheelBurst { *this };                   // after what it ends
+    juce::Time lastWheelTime;                          // JUCE may send one notch twice, with the same time
 
     bool fineDrag = false;            // Shift was held when the drag started
     bool showedMenu = false;          // the press was a right-click that showed the menu
@@ -234,6 +249,44 @@ void showAsTruePeak (juce::Slider&);
 void setPrimary (juce::TextButton&, bool primary);
 
 //==============================================================================
+// A parameter's menu, as a right-click on any of its controls shows it (docs/design.md, section 10): its name as a header;
+// Type a Value..., where typeValue is given (a knob's or a fader's field); then Automate, Delete Automation (enabled while it
+// is automated) and Modulate: the modulators of its track, ticked while they modulate it, and a new one of each kind. A
+// parameter that the first change makes (a send to a return) has Type a Value... alone; with none, it is empty. What is
+// chosen acts on the handle while the control lives, so the handle must live as long as the control (its attachment's, or
+// its owner's).
+juce::PopupMenu makeParameterMenu (ParameterHandle&, juce::Component& control, std::function<void()> typeValue = nullptr);
+
+// Shows a parameter's menu at a right-click on a switch, a list or a choice's buttons or tabs (the control given, or any
+// of its children), as a knob's right-click shows it; the right-click then does nothing else. A juce::Button clicks on any
+// button, so its owner asks isMenuClick() in its onClick and leaves the switch or the choice as it was; a left click, and
+// Space or Enter, do what they did. A list (a juce::ComboBox) opens its own popup on a left click only.
+class ParameterMenuClicks : private juce::MouseListener
+{
+public:
+    ParameterMenuClicks (juce::Component& control, ParameterHandle&); // both outlive this
+    ~ParameterMenuClicks() override;
+
+    bool isMenuClick() const noexcept { return menuPress; } // whether the press now is a right-click, which showed the menu
+    juce::PopupMenu getMenu() { return makeParameterMenu (handle, control); }
+
+    // The menu a right-click on a control shows, from the control or the nearest of its parents that shows one: empty for
+    // none. For the tests, which read it as a right-click shows it.
+    static juce::PopupMenu getMenuOf (const juce::Component&);
+
+private:
+    juce::Component& control;
+    juce::Component::SafePointer<juce::Component> listenedTo;
+    ParameterHandle& handle;
+    bool menuPress = false;
+
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    JUCE_DECLARE_NON_COPYABLE (ParameterMenuClicks)
+};
+
+//==============================================================================
 // Links a slider to a parameter of a device, such as a track's volume. Moving the slider sets the parameter, as one
 // named undo step per drag, key press or value typed, which the model's ParameterHandle owns; update() shows changes made
 // elsewhere, such as undo or automation. Right-clicking one of Phazite's sliders offers to type a value, and to automate
@@ -256,8 +309,7 @@ public:
     // Shows the parameter's value, and a knob's modulation. Call it regularly, from a timer.
     void update();
 
-    // What a right-click on one of Phazite's sliders shows: Type a Value..., Automate, Delete Automation and Modulate, or for a
-    // parameter that the first change makes (a send to a return), Type a Value... alone. Empty without a parameter.
+    // What a right-click on one of Phazite's sliders shows: the parameter's menu (makeParameterMenu()) with Type a Value...
     juce::PopupMenu getMenu();
 
 private:
@@ -270,7 +322,8 @@ private:
 };
 
 // Links a combo box to a parameter of one of Phazite's devices whose value picks one of its choices: the box lists
-// them, and picking one is an undo step that the handle owns. update() shows changes made elsewhere.
+// them, and picking one is an undo step that the handle owns. update() shows changes made elsewhere, and the choice as
+// it plays (automation, modulation). A right-click shows the parameter's menu (ParameterMenuClicks).
 class ChoiceAttachment
 {
 public:
@@ -282,10 +335,12 @@ public:
 private:
     juce::ComboBox& box;
     ParameterHandle handle;
+    ParameterMenuClicks menuClicks { box, handle };
     float minimum = 0.0f;
 };
 
-// Links a toggle button to a parameter that is on or off, in the same way.
+// Links a toggle button to a parameter that is on or off, in the same way: a click switches it, as one undo step, and
+// a right-click shows the parameter's menu, leaving the switch as it was.
 class ToggleAttachment
 {
 public:
@@ -294,9 +349,13 @@ public:
     void setParameter (ParameterHandle);
     void update();
 
+    // After a click has switched it and set the parameter (a part's switch then shows its part faint or not).
+    std::function<void()> onSwitched;
+
 private:
     juce::Button& button;
     ParameterHandle handle;
+    ParameterMenuClicks menuClicks { button, handle };
 };
 
 //==============================================================================

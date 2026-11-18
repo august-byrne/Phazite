@@ -2,28 +2,39 @@
 // How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), the knobs a device gets until it has an
 // editor of its own (src/ui/devices/DeviceEditors.h), what every device's editor repaints, how editors lay out their parts
 // (src/ui/devices/DeviceLayout.h), and the curves their graphs draw (src/ui/devices/DeviceGraph.h).
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/saturation/Saturator.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditorBase.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceGraph.h"
 #include "ui/devices/DeviceLayout.h"
+#include "ui/devices/ParameterControls.h"
 #include "ui/theme/DesignTokens.h"
 
 namespace
@@ -54,6 +65,40 @@ struct SongWithDevice
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::DeviceID id;
 };
+
+// A menu's items as text, without its header (the parameter's name): a separator as "-", a submenu's items after its name
+// and ">".
+juce::StringArray describeItems (const juce::PopupMenu& menu)
+{
+    juce::StringArray items;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+    {
+        const auto& each = item.getItem();
+
+        if (each.isSectionHeader)
+            continue;
+
+        auto text = each.isSeparator ? juce::String ("-") : each.text;
+
+        if (each.subMenu != nullptr)
+            text << " > " << describeItems (*each.subMenu).joinIntoString (", ");
+
+        items.add (text);
+    }
+
+    return items;
+}
+
+// The header of a menu: the parameter's name.
+juce::String getHeader (const juce::PopupMenu& menu)
+{
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+        if (item.getItem().isSectionHeader)
+            return item.getItem().text;
+
+    return {};
+}
 } // namespace
 
 TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
@@ -264,4 +309,190 @@ TEST_CASE ("A pinned column leads every page of a device's layout, without namin
     CHECK (second.isVisible());
     CHECK_FALSE (first.isVisible());
     CHECK (second.getX() > picker.getRight());
+}
+
+TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a part's switch shows its parameter's menu, a knob's "
+           "but for Type a Value...; a left click still switches or chooses, one undo step")
+{
+    using phazite::devices::Compressor;
+    using phazite::devices::Saturator;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto track = song.firstTrack;
+    const auto compressor = song.addEffect (track, Compressor::typeID);
+    const auto saturator = song.addEffect (track, Saturator::typeID);
+
+    phazite::ui::CompressorEditor compressorEditor (phazite::getDeviceHandle (song.context, compressor));
+    phazite::test::TestWindow compressorWindow (compressorEditor, compressorEditor.getWidth(), compressorEditor.getHeight());
+    auto saturatorEditor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, saturator));
+    REQUIRE (saturatorEditor != nullptr);
+    phazite::test::TestWindow saturatorWindow (*saturatorEditor, saturatorEditor->getWidth(), saturatorEditor->getHeight());
+    auto* saturatorBase = dynamic_cast<phazite::ui::DeviceEditorBase*> (saturatorEditor.get());
+    REQUIRE (saturatorBase != nullptr);
+
+    // A toggle and a list as a grid of a device's controls has them (ParameterControls), and a knob, to compare menus with.
+    juce::Component holder;
+    juce::ToggleButton toggle;
+    phazite::ui::ToggleAttachment toggleAttachment (toggle);
+    toggleAttachment.setParameter (phazite::getParameter (song.context, { saturator, "band" }));
+    juce::ComboBox box;
+    phazite::ui::ChoiceAttachment boxAttachment (box);
+    boxAttachment.setParameter (phazite::getParameter (song.context, { compressor, "character" }));
+    phazite::ui::Knob knob ("Attack", 0.0);
+    phazite::ui::ParameterAttachment knobAttachment (knob);
+    knobAttachment.setParameter (phazite::getParameter (song.context, { compressor, "attack" }));
+    holder.addAndMakeVisible (toggle);
+    holder.addAndMakeVisible (box);
+    holder.addAndMakeVisible (knob);
+    toggle.setBounds (10, 10, 30, 30);
+    box.setBounds (60, 10, 120, 30);
+    knob.setBounds (200, 10, 40, 40);
+    phazite::test::TestWindow holderWindow (holder, 260, 60);
+
+    auto* characters = dynamic_cast<phazite::ui::ChoiceButtons*> (compressorEditor.findControl ("character"));
+    REQUIRE (characters != nullptr);
+    auto* partSwitch = saturatorBase->findControl ("band");
+    REQUIRE (partSwitch != nullptr);
+    auto* autoMakeup = compressorEditor.findControl ("autoMakeup");
+    REQUIRE (autoMakeup != nullptr);
+
+    struct Kind
+    {
+        const char* what;
+        juce::Component* control;
+        phazite::ParameterRef parameter;
+        float clickedTo; // what a left click sets it to
+    };
+
+    // The mode's tab last: Duck's page hides Compress's controls.
+    const std::vector<Kind> kinds {
+        { "a juce::ToggleButton (ToggleAttachment)", &toggle, { saturator, "band" }, 1.0f },
+        { "a list (ChoiceAttachment)", &box, { compressor, "character" }, 2.0f },
+        { "a switch (ParameterSwitch)", autoMakeup, { compressor, "autoMakeup" }, 1.0f },
+        { "a choice's button (ChoiceButtons)", &characters->getButton (1), { compressor, "character" }, 1.0f },
+        { "a part's switch", partSwitch, { saturator, "band" }, 0.0f },
+        { "a mode's tab (ChoiceTabs)", &compressorEditor.getModeTab (1), { compressor, "mode" }, 1.0f },
+    };
+
+    for (const auto& kind : kinds)
+    {
+        CAPTURE (std::string (kind.what));
+        REQUIRE (kind.control->isShowing());
+        REQUIRE (juce::Component::getCurrentlyModalComponent() == nullptr); // no menu left open
+        auto* top = kind.control->getTopLevelComponent();
+        auto* hit = top->getComponentAt (top->getLocalPoint (kind.control, kind.control->getLocalBounds().getCentre()));
+        CAPTURE (hit != nullptr ? hit->getTitle() + " / " + hit->getName() : juce::String ("nothing"));
+        REQUIRE ((hit == kind.control || kind.control->isParentOf (hit))); // a click at its middle reaches it
+        auto handle = phazite::getParameter (song.context, kind.parameter);
+        REQUIRE (handle.exists());
+        const auto valueOf = [&s, &kind] { return phazite::getValueSetByHand (s, kind.parameter); };
+        s.getUndoManager().clearUndoHistory();
+
+        // The knob's menu less its first two items (Type a Value... and the line under it), under the parameter's name.
+        auto menu = phazite::ui::ParameterMenuClicks::getMenuOf (*kind.control);
+        auto knobItems = describeItems (knobAttachment.getMenu());
+        REQUIRE (knobItems.size() > 2);
+        CHECK (knobItems[0] == juce::String ("Type a Value..."));
+        knobItems.removeRange (0, 2);
+        CHECK (describeItems (menu) == knobItems);
+        CHECK (getHeader (menu) == handle.getName());
+        CHECK (phazite::test::findMenuItem (menu, { "Type a Value..." }) == nullptr);
+        REQUIRE (phazite::test::findMenuItem (menu, { "Delete Automation" }) != nullptr);
+        CHECK_FALSE (phazite::test::findMenuItem (menu, { "Delete Automation" })->isEnabled);
+
+        // A right-click shows it, and changes nothing.
+        const auto before = valueOf();
+        phazite::test::Mouse mouse (*kind.control);
+        mouse.click (kind.control->getLocalBounds().getCentre(), juce::ModifierKeys::rightButtonModifier);
+        CHECK (juce::Component::getCurrentlyModalComponent() != nullptr);
+        juce::PopupMenu::dismissAllActiveMenus();
+        phazite::test::dispatchPendingMessages();
+        CHECK (valueOf() == doctest::Approx (before));
+        CHECK_FALSE (s.getUndoManager().canUndo());
+        CHECK_FALSE (box.isPopupActive());
+
+        if (auto* button = dynamic_cast<juce::Button*> (kind.control); button != nullptr && button->getClickingTogglesState())
+            CHECK (button->getToggleState() == (handle.getValue() > 0.5f));
+
+        // Automate shows its lane; Delete Automation, enabled while it has automation, takes it away.
+        REQUIRE (phazite::test::runMenuItem (menu, { "Automate" }));
+        const auto lanes = phazite::getAutomationLanes (song.context, track);
+        CHECK (std::any_of (lanes.begin(), lanes.end(), [&kind] (const auto& lane) { return lane.parameter == kind.parameter; }));
+        phazite::addAutomationPoint (song.context, kind.parameter, { phazite::BeatPosition(), 0.0f });
+        CHECK (phazite::isAutomated (handle));
+        menu = phazite::ui::ParameterMenuClicks::getMenuOf (*kind.control);
+        REQUIRE (phazite::test::runMenuItem (menu, { "Delete Automation" }));
+        CHECK_FALSE (phazite::isAutomated (handle));
+
+        // Modulate > New LFO modulates it.
+        const auto modulationsBefore = phazite::getModulations (handle).size();
+        REQUIRE (phazite::test::runMenuItem (menu, { "Modulate", "New LFO" }));
+        CHECK (phazite::getModulations (handle).size() == modulationsBefore + 1);
+
+        // Undone, so that what follows clicks a parameter that nothing moves: a moved one's value is what the engine played
+        // last, which plays no blocks here.
+        phazite::undo (s);
+        CHECK (phazite::getModulations (handle).size() == modulationsBefore);
+
+        // A left click switches it or chooses, as one undo step; a list's opens its own popup, from which a choice is one step.
+        s.getUndoManager().clearUndoHistory();
+        phazite::test::UndoCheck undo (song.context);
+
+        if (kind.control == &box)
+        {
+            mouse.click (box.getLocalBounds().getCentre());
+            CHECK (box.isPopupActive());
+            phazite::test::dispatchPendingMessages(); // JUCE shows it a message later
+            juce::PopupMenu::dismissAllActiveMenus();
+            phazite::test::dispatchPendingMessages();
+            undo.check ("a choice from the list", [&box] { box.setSelectedItemIndex (2, juce::sendNotificationSync); });
+        }
+        else
+        {
+            undo.check ("a click", [&mouse, &kind] { mouse.click (kind.control->getLocalBounds().getCentre()); });
+        }
+
+        CHECK (undo.getNumSteps() == 1);
+        CHECK (valueOf() == doctest::Approx (kind.clickedTo));
+        CHECK_FALSE (phazite::Gesture::isInProgress (s));
+    }
+}
+
+TEST_CASE ("A switch that a lane moves shows the lane's value as the song plays, as a knob shows its own")
+{
+    using phazite::devices::Saturator;
+    phazite::test::TestSong song;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 16.0);
+    const auto saturator = song.addEffect (track, Saturator::typeID);
+    const phazite::ParameterRef band { saturator, "band" };
+    song.setParameter (saturator, "band", 0.0f);
+
+    // Off for the first two beats, on from there.
+    song.addAutomation (band, { { phazite::BeatPosition(), 0.0f },
+                                { phazite::BeatPosition::fromBeats (1.99), 0.0f },
+                                { phazite::BeatPosition::fromBeats (2.0), 1.0f },
+                                { phazite::BeatPosition::fromBeats (16.0), 1.0f } });
+
+    auto editor = phazite::ui::createDeviceEditor (phazite::getDeviceHandle (song.context, saturator));
+    REQUIRE (editor != nullptr);
+    phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
+    auto* base = dynamic_cast<phazite::ui::DeviceEditorBase*> (editor.get());
+    REQUIRE (base != nullptr);
+    auto* partSwitch = dynamic_cast<juce::Button*> (base->findControl ("band"));
+    REQUIRE (partSwitch != nullptr);
+    REQUIRE (partSwitch->isShowing());
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+
+    phazite::test::EnginePlayback playback;
+    song.run ("transport.playStop");
+    playback.play (0.5); // to beat 1
+    ticker->tickNow();
+    CHECK_FALSE (partSwitch->getToggleState());
+
+    playback.play (1.0); // to beat 3
+    ticker->tickNow();
+    CHECK (partSwitch->getToggleState());
+    song.run ("transport.playStop");
 }

@@ -83,11 +83,9 @@ namespace
         {
             setTooltip ("Switches it on or off: off, it does nothing to the sound, and shows faint");
             attachment.setParameter (device.getParameter (parameterID));
+            attachment.onSwitched = [this] { showState(); }; // as it switches, not at a right-click, which shows its menu
             showState();
         }
-
-        using PowerSwitch::clicked;              // the overload with the keys held, which this leaves as it is
-        void clicked() override { showState(); } // as it switches, before the parameter has
 
     private:
         ToggleAttachment attachment { *this };

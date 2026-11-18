@@ -44,6 +44,8 @@ Selecting a channel outlines the channels it feeds and those that feed it, throu
 - Pan keeps a sound's loudness wherever it is panned.
 - Every fader and knob takes a typed value: right-click it and choose **Type a Value...**. A double-click puts it back
   where it started.
+- The wheel over a fader or a knob turns it: a turn of several notches is one step to undo, which ends when the wheel
+  rests for half a second, or when you press the mouse, move the pointer off the control, press a key on it or run a command.
 - **Escape** while you drag a fader or a knob, a knob's modulation ring, or a handle in a device's picture puts it back
   where it was when you pressed, leaving nothing to undo.
 - A handle in a device's picture (an EQ band's dot, a crossover, an envelope's point) moves as far as you drag it, from

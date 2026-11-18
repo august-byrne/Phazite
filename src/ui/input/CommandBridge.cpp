@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandBridge.h"
 
+#include "ui/components/WheelBurst.h"
+
 namespace phazite::ui
 {
 CommandBridge::CommandBridge (CommandRegistry& r)
@@ -151,6 +153,10 @@ void CommandBridge::getCommandInfo (juce::CommandID commandID, juce::Application
 
 bool CommandBridge::perform (const InvocationInfo& invocation)
 {
+    // A command is a step of its own: a burst of the wheel still open ends first (a menu's item chosen by its key, a
+    // button's command), as it does before a shortcut.
+    WheelBurst::endAll();
+
     if (const auto* command = find (invocation.commandID))
         return registry.invoke (command->id);
 

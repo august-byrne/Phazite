@@ -714,3 +714,211 @@ TEST_CASE ("A frequency's knob turns along its logarithmic travel: a cutoff at 6
 
     phazite::setSong (context, nullptr);
 }
+
+TEST_CASE ("A burst of the wheel on a knob or a fader is one undo step, which a press, a key, a turn elsewhere, hiding and destroying "
+           "end at once")
+{
+    // Known bug 201: each notch was an undo step of its own, and a plan where a device's latency follows the value.
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song)[0];
+    const auto pan = [&song, track] { return phazite::getChannelPan (*song, track); };
+    const auto volume = [&song, track] { return phazite::getChannelVolume (*song, track); };
+    const auto inGesture = [&song] { return phazite::Gesture::isInProgress (*song); };
+
+    // A pan knob and a volume fader, as a strip has them, and another control that takes the keys.
+    struct PanKnob
+    {
+        phazite::ui::Knob knob { "Pan", 0.0 };
+        phazite::ui::ParameterAttachment attachment { knob };
+    };
+
+    juce::Component holder;
+    auto panKnob = std::make_unique<PanKnob>();
+    phazite::ui::showAsPan (panKnob->knob);
+    panKnob->attachment.setParameter (phazite::getPan (context, track));
+    phazite::ui::Fader fader (phazite::ui::Fader::Direction::vertical, "Volume", phazite::decibelsToFaderPosition (0.0f));
+    phazite::ui::showAsDecibels (fader);
+    phazite::ui::ParameterAttachment faderAttachment (fader);
+    faderAttachment.setParameter (phazite::getVolume (context, track));
+    juce::Component other;
+    other.setWantsKeyboardFocus (true);
+    holder.addAndMakeVisible (panKnob->knob);
+    holder.addAndMakeVisible (fader);
+    holder.addAndMakeVisible (other);
+    panKnob->knob.setBounds (20, 40, 40, 40);
+    fader.setBounds (90, 10, 30, 120);
+    other.setBounds (150, 40, 40, 40);
+    phazite::test::TestWindow window (holder, 200, 140);
+    phazite::test::Mouse mouse (holder);
+    auto& knob = panKnob->knob;
+
+    const auto notch = [&mouse] (const juce::Component& control, float notches = 1.0f)
+    { mouse.wheel (control.getBounds().getCentre(), notches * (float) phazite::ui::wheelNotch); };
+
+    const auto restart = [&]
+    {
+        phazite::ui::WheelBurst::endAll();
+        phazite::setChannelPan (*song, track, 0.0f);
+        phazite::setChannelVolume (*song, track, 0.0f);
+        panKnob->attachment.update();
+        faderAttachment.update();
+        song->getUndoManager().clearUndoHistory();
+    };
+
+    restart();
+
+    SUBCASE ("Three notches: the value follows each, one step, which Undo takes back whole and Redo puts back")
+    {
+        auto last = pan();
+
+        for (int i = 0; i < 3; ++i)
+        {
+            notch (knob);
+            CHECK (pan() > last);
+            CHECK (knob.getValue() == doctest::Approx (pan()).epsilon (0.001)); // the song keeps a pan to four places
+            CHECK (inGesture());
+            last = pan();
+        }
+
+        phazite::ui::WheelBurst::endAll();
+        CHECK_FALSE (inGesture());
+        CHECK_FALSE (phazite::ui::WheelBurst::isAnyOpen());
+        CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Pan"));
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+        phazite::redo (*song);
+        CHECK (pan() == doctest::Approx (last));
+    }
+
+    SUBCASE ("A notch moves the knob as JUCE's own wheel does: 0.15 of its travel for Windows' notch, back the same way down")
+    {
+        notch (knob);
+        const auto expected = knob.getNormalisableRange().snapToLegalValue (knob.proportionOfLengthToValue (0.5 + 0.15 * 60.0 / 256.0));
+        CHECK (expected > 0.05);
+        CHECK (knob.getValue() == doctest::Approx (expected));
+        notch (knob, -1.0f);
+        CHECK (knob.getValue() == doctest::Approx (0.0).epsilon (1.0e-6));
+    }
+
+    SUBCASE ("A press anywhere ends it")
+    {
+        notch (knob);
+        notch (knob);
+        REQUIRE (inGesture());
+        mouse.click (other.getBounds().getCentre());
+        CHECK_FALSE (inGesture());
+        CHECK_FALSE (phazite::ui::WheelBurst::isAnyOpen());
+    }
+
+    SUBCASE ("A key it hears ends it, and the key's step is one of its own")
+    {
+        knob.grabKeyboardFocus();
+        notch (knob);
+        const auto turned = pan();
+        REQUIRE (inGesture());
+        window.pressKey (juce::KeyPress (juce::KeyPress::upKey));
+        CHECK_FALSE (inGesture());
+        CHECK (pan() > turned);
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (turned));
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    SUBCASE ("Its keyboard focus going ends it")
+    {
+        knob.grabKeyboardFocus();
+        notch (knob);
+        REQUIRE (inGesture());
+        other.grabKeyboardFocus();
+        CHECK_FALSE (inGesture());
+    }
+
+    SUBCASE ("A turn on another control ends it: two steps, each named for its control")
+    {
+        notch (knob);
+        notch (fader);
+        CHECK (pan() > 0.0f);
+        CHECK (volume() > 0.0f);
+        phazite::ui::WheelBurst::endAll();
+        CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Volume"));
+        phazite::undo (*song);
+        CHECK (volume() == doctest::Approx (0.0f));
+        CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Pan"));
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    SUBCASE ("A mixer's fader: a burst is one step")
+    {
+        for (int i = 0; i < 4; ++i)
+            notch (fader, -1.0f);
+
+        CHECK (volume() < -1.0f);
+        CHECK (inGesture());
+        phazite::ui::WheelBurst::endAll();
+        CHECK_FALSE (inGesture());
+        phazite::undo (*song);
+        CHECK (volume() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    SUBCASE ("Hidden, it ends")
+    {
+        notch (knob);
+        REQUIRE (inGesture());
+        knob.setVisible (false);
+        CHECK_FALSE (inGesture());
+        knob.setVisible (true);
+    }
+
+    SUBCASE ("Destroyed with its attachment, as an editor's knob is, it ends")
+    {
+        notch (knob);
+        REQUIRE (inGesture());
+        panKnob = nullptr;
+        CHECK_FALSE (inGesture());
+        CHECK_FALSE (phazite::ui::WheelBurst::isAnyOpen());
+        CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Pan"));
+    }
+
+    SUBCASE ("A drag begun on it ends it, and is a step of its own")
+    {
+        notch (knob);
+        const auto turned = pan();
+        mouse.press (knob.getBounds().getCentre());
+        CHECK (pan() == doctest::Approx (turned));
+        mouse.dragTo (knob.getBounds().getCentre() - juce::Point<int> (0, 30));
+        mouse.release();
+        CHECK (pan() > turned);
+        CHECK_FALSE (inGesture());
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (turned));
+        phazite::undo (*song);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    SUBCASE ("Turned off, or with the wheel off, it does nothing")
+    {
+        knob.setEnabled (false);
+        notch (knob);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (phazite::ui::WheelBurst::isAnyOpen());
+        knob.setEnabled (true);
+
+        knob.setScrollWheelEnabled (false);
+        notch (knob);
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (phazite::ui::WheelBurst::isAnyOpen());
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    phazite::ui::WheelBurst::endAll();
+    phazite::setSong (context, nullptr);
+}

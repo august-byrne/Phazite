@@ -7,6 +7,7 @@
 #include "devices/core/SampleTap.h"
 #include "devices/core/Spectrum.h"
 #include "model/devices/ParameterHandle.h"
+#include "ui/components/WheelBurst.h"
 #include "ui/theme/DesignTokens.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -133,7 +134,8 @@ private:
 //     Escape through a key listener on the graph's window, from the press until the mouse goes up, so that a graph is no
 //     stop for the keyboard's focus; and a click on one leaves the keys where they were (setMouseClickGrabsKeyboardFocus()).
 //   - The graph's wheels (WheelGesture) are its too: a press ends a turn of the wheel that is still one undo step, so that
-//     the drag is a step of its own, and the wheel turns nothing while a drag is taken.
+//     the drag is a step of its own (it ends every one: WheelBurst::endAll()), and the wheel turns nothing while a drag is
+//     taken.
 // The handles are the graph's, and must outlive the drag (make it a member declared after them).
 class WheelGesture;
 
@@ -170,7 +172,6 @@ private:
     juce::Component::SafePointer<juce::Component> window; // whose keys it hears while a drag is taken
     std::vector<ParameterHandle*> handles;
     std::vector<float> starts;
-    std::vector<WheelGesture*> wheels;
     bool taken = false;
 
     void listen (bool shouldListen);
@@ -181,23 +182,23 @@ private:
 };
 
 //==============================================================================
-// The wheel turning a parameter, such as an EQ band's Q, as one undo step until it rests for a moment. The handle turned
-// is the caller's, and must outlive this (make it a member declared after the handles). A turn starts from the value set by
-// hand (ParameterHandle::getBaseValue()), as a drag does. It is its graph's, whose drag (HandleDrag, declared before it) ends
-// it as a press takes a handle, and while a drag is taken it turns nothing.
-class WheelGesture : private juce::Timer
+// The wheel turning a parameter, such as an EQ band's Q, as one undo step for a burst of it (WheelBurst: until it rests for a
+// moment, a press, or the pointer leaving the graph). The handle turned is the caller's, and must outlive this (make it a
+// member declared after the handles). A turn starts from the value set by hand (ParameterHandle::getBaseValue()), as a drag
+// does. It is its graph's, whose drag (HandleDrag, declared before it) ends it as a press takes a handle, and while a drag
+// is taken it turns nothing.
+class WheelGesture
 {
 public:
     explicit WheelGesture (HandleDrag& graphsDrag);
-    ~WheelGesture() override;
 
     void turn (ParameterHandle&, float newValue);
-    void end();
+    void end() { burst.end(); }
 
 private:
     HandleDrag& drag;
     ParameterHandle* turning = nullptr;
-    void timerCallback() override { end(); }
+    WheelBurst burst; // after what it ends
 
     JUCE_DECLARE_NON_COPYABLE (WheelGesture)
 };

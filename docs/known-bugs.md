@@ -133,22 +133,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   debug build when a plan is compiled in between (`SongPlayer.cpp`, `checkAudio`). To fix: whatever replaces a played
   file tells the player (a change marked for the tracks that play it), or kept files are looked at once a plan and the
   track's audio made again when one changed.
-- **201. The wheel or the keyboard on a knob that a device's latency follows remakes the device at every notch** (the
-  Compressor's Look-Ahead; found in S6.3's reviews, 2026-11-18): each notch of the wheel or step of a key makes a new
-  plan, the device starts from silence, and its reduction and the sound on its way are dropped, a click or a gap each
-  time. A drag of the knob doesn't: the playback session waits for a gesture's end before it makes the plan
-  (`PlaybackSession::valueTreePropertyChanged`). Why (S6.2, 2026-11-18, which left it): a knob's wheel is JUCE's own
-  (`ui::ValueSlider` doesn't take it), and `juce::Slider::mouseWheelMove` wraps each notch in a drag notification of its
-  own (`ScopedDragNotification`, `juce_Slider.cpp`), which `ui::ParameterAttachment` turns into
-  `ParameterHandle::beginGesture()` and `endGesture()`: each notch is a `Gesture` that ends at once, so the session's
-  wait runs at once, and each notch is an undo step of its own (five notches on the Compressor's Look-Ahead, a message
-  loop's turn after each: five steps "Change Look-Ahead" and a plan after each). No `Trial` is involved (those are Swap's
-  and the piano roll's velocity wheel), so letting the session wait while a `Trial` is open changes nothing here, and
-  would hold back the latency of a preset that Swap tries. A key's step is a step of its own the same way. To fix: the
-  knob holds a burst of the wheel open as one gesture until it rests, as `graph::WheelGesture` and the velocity lane do
-  (500 ms on a `juce::Timer`; a press, a key or the pointer leaving ends it at once), so that a burst is one plan and one
-  undo step; a key's step stays one of each per press. Tests need a way to end a burst without waiting for the timer (a
-  call that does what it does).
 
 ## Tests
 

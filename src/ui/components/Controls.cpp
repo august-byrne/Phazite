@@ -9,6 +9,9 @@
 #include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <cmath>
+#include <vector>
+
 namespace phazite::ui
 {
 namespace
@@ -67,6 +70,11 @@ ValueSlider::ValueSlider (SliderStyle style, const juce::String& title, double d
 
 ValueSlider::~ValueSlider()
 {
+    // A burst of the wheel open ends without telling the owners, whose callbacks may use what has gone before it (a
+    // subclass's members): what holds a gesture ends it as it goes, as a ParameterHandle does.
+    onDragStart = nullptr;
+    onDragEnd = nullptr;
+    wheelBurst.end();
     setValueReadout (nullptr);
 }
 
@@ -173,6 +181,8 @@ void ValueSlider::applyTypedText (const juce::String& text)
 
 void ValueSlider::applyTypedValue (double typed)
 {
+    WheelBurst::endAll(); // a value typed is a step of its own, not part of a burst of the wheel still open
+
     // As JUCE's own text box sets what is typed in it (Slider::Pimpl::textChanged()): between a drag's start and end, which
     // an attachment makes one undo step.
     const auto value = snapValue (typed, notDragging);
@@ -246,6 +256,9 @@ bool ValueSlider::keyPressed (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
     const auto typed = key.getTextCharacter();
 
+    // A key ends a burst of the wheel: what it does is a step of its own (an arrow key's, one for each press).
+    WheelBurst::endAll();
+
     // Escape takes a drag back only where its owner can take back what the drag did (onDragCancelled): put back alone, the
     // slider showed the value from before while what it controls kept the dragged one.
     if (key == juce::KeyPress::escapeKey && pressed && ! cancelled && onDragCancelled != nullptr)
@@ -273,6 +286,9 @@ bool ValueSlider::keyPressed (const juce::KeyPress& key)
 
 void ValueSlider::mouseDown (const juce::MouseEvent& e)
 {
+    // Before the drag begins: a burst of the wheel still open, on this or another control, is a step of its own.
+    WheelBurst::endAll();
+
     showedMenu = e.mods.isPopupMenu() && onContextMenu != nullptr;
     pressed = cancelled = false;
 
@@ -307,6 +323,70 @@ void ValueSlider::mouseDrag (const juce::MouseEvent& e)
         juce::Slider::mouseDrag (e.withNewPosition (e.mouseDownPosition + (e.position - e.mouseDownPosition) * fineDragFactor));
     else
         juce::Slider::mouseDrag (e);
+}
+
+void ValueSlider::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    // JUCE's slider wraps each notch in a drag of its own, an undo step each (known bug 201 until 2026-11-18): this takes the wheel over, its
+    // notches moving the value as JUCE's own do (Slider::Pimpl::mouseWheelMove(), juce_Slider.cpp), within one drag for the
+    // burst. JUCE workaround W55 (docs/juce-workarounds.md).
+    if (! isEnabled() || ! isScrollWheelEnabled() || isTwoValue() || isThreeValue())
+    {
+        juce::Component::mouseWheelMove (e, wheel); // to what is around it, as JUCE passes it on
+        return;
+    }
+
+    // JUCE sometimes sends one notch twice; and while it is dragged, the wheel turns nothing.
+    if (e.eventTime == lastWheelTime)
+        return;
+
+    lastWheelTime = e.eventTime;
+
+    if (! (getMaximum() > getMinimum()) || e.mods.isAnyMouseButtonDown())
+        return;
+
+    // A notch is the same part of the travel on every platform: JUCE's on Windows (W22).
+    const auto amount =
+        (std::abs (wheel.deltaX) > std::abs (wheel.deltaY) ? -wheel.deltaX : wheel.deltaY) * (wheel.isReversed ? -1.0f : 1.0f);
+    const auto notches = amount / wheelNotch;
+    const auto value = getValue();
+    double delta = 0.0;
+
+    if (getSliderStyle() == IncDecButtons)
+    {
+        delta = getInterval() * notches;
+    }
+    else
+    {
+        constexpr double proportionPerNotch = 0.15 * 60.0 / 256.0; // JUCE's 0.15 of its movement, at a notch on Windows
+        auto position = valueToProportionOfLength (value) + notches * proportionPerNotch;
+        position = isRotary() && ! getRotaryParameters().stopAtEnd ? position - std::floor (position) : juce::jlimit (0.0, 1.0, position);
+        delta = proportionOfLengthToValue (position) - value;
+    }
+
+    if (juce::approximatelyEqual (delta, 0.0))
+        return;
+
+    if (getTextBoxPosition() != NoTextBox)
+        hideTextBox (false);
+
+    const auto newValue = value + juce::jmax (getInterval(), std::abs (delta)) * (delta < 0.0 ? -1.0 : 1.0);
+    wheelBurst.turn ([this] { wheelDrag = std::make_unique<ScopedDragNotification> (*this); }, [this] { wheelDrag = nullptr; });
+    setValue (snapValue (newValue, notDragging), juce::sendNotificationSync);
+}
+
+void ValueSlider::focusLost (FocusChangeType)
+{
+    wheelBurst.end();
+    repaint();
+}
+
+void ValueSlider::enablementChanged()
+{
+    juce::Slider::enablementChanged();
+
+    if (! isEnabled())
+        wheelBurst.end();
 }
 
 void ValueSlider::resized()
@@ -423,6 +503,8 @@ bool Knob::keyPressed (const juce::KeyPress& key)
 
 void Knob::mouseDown (const juce::MouseEvent& e)
 {
+    WheelBurst::endAll(); // before the ring's drag begins too
+
     // On the ring, a drag changes the modulation's amount; anywhere else, the knob's value.
     ringCancelled = false;
     draggingRing = ! e.mods.isPopupMenu() && modulation.has_value() && isOnRing (e.position) && onModulationDragStart != nullptr
@@ -784,32 +866,46 @@ void ParameterAttachment::showMenu()
 
 juce::PopupMenu ParameterAttachment::getMenu()
 {
+    // A value typed, as FL Studio's Type in value: the slider's field, over it.
+    return makeParameterMenu (handle, slider,
+                              [safeSlider = juce::Component::SafePointer<juce::Slider> (&slider)]
+                              {
+                                  if (auto* valueSlider = dynamic_cast<ValueSlider*> (safeSlider.getComponent()))
+                                      valueSlider->showValueField();
+                              });
+}
+
+juce::PopupMenu makeParameterMenu (ParameterHandle& handle, juce::Component& control, std::function<void()> typeValue)
+{
     juce::PopupMenu menu;
 
     if (! handle.isValid())
         return menu;
 
-    // The slider and this go together; the menu's choices come later, when either may be gone.
-    const juce::Component::SafePointer<juce::Slider> safeSlider (&slider);
-    const auto act = [this, safeSlider] (std::function<void (ParameterHandle&)> action)
+    // The control and the handle go together; the menu's choices come later, when either may be gone.
+    const juce::Component::SafePointer<juce::Component> safeControl (&control);
+    auto* const target = &handle;
+    const auto act = [safeControl, target] (std::function<void (ParameterHandle&)> action)
     {
-        return [this, safeSlider, chosen = std::move (action)]
+        return [safeControl, target, chosen = std::move (action)]
         {
-            if (safeSlider != nullptr)
-                chosen (handle);
+            if (safeControl != nullptr)
+                chosen (*target);
         };
     };
 
     if (const auto name = handle.getName(); name.isNotEmpty())
         menu.addSectionHeader (name);
 
-    // A value typed, as FL Studio's Type in value: the slider's field, over it.
-    menu.addItem ("Type a Value...",
-                  [safeSlider]
-                  {
-                      if (auto* valueSlider = dynamic_cast<ValueSlider*> (safeSlider.getComponent()))
-                          valueSlider->showValueField();
-                  });
+    const auto canType = typeValue != nullptr;
+
+    if (canType)
+        menu.addItem ("Type a Value...",
+                      [safeControl, typed = std::move (typeValue)]
+                      {
+                          if (safeControl != nullptr)
+                              typed();
+                      });
 
     // A send that the first change makes has nothing to automate or modulate yet.
     if (! handle.exists())
@@ -817,7 +913,10 @@ juce::PopupMenu ParameterAttachment::getMenu()
 
     // A device's parameter can be automated; a modulator's, in its editor, can't yet.
     const auto isDevices = handle.getRef().isValid();
-    menu.addSeparator();
+
+    if (canType)
+        menu.addSeparator();
+
     menu.addItem ("Automate", isDevices, false, act ([] (ParameterHandle& h) { showAutomationLane (h); }));
     menu.addItem ("Delete Automation", isAutomated (handle), false, act ([] (ParameterHandle& h) { deleteAutomation (h); }));
 
@@ -860,6 +959,10 @@ void ParameterAttachment::setParameter (ParameterHandle newHandle)
         update();
         return;
     }
+
+    // A burst of the wheel on the old one ends with it.
+    if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+        valueSlider->endWheelBurst();
 
     // Without a parameter while the range changes, so that a value the slider clamps reaches none.
     handle = ParameterHandle();
@@ -941,12 +1044,70 @@ void ParameterAttachment::update()
 }
 
 //==============================================================================
+namespace
+{
+    // Every control that shows a parameter's menu at a right-click, for ParameterMenuClicks::getMenuOf(). Message thread.
+    std::vector<ParameterMenuClicks*>& getMenuClicks()
+    {
+        static std::vector<ParameterMenuClicks*> all;
+        return all;
+    }
+} // namespace
+
+ParameterMenuClicks::ParameterMenuClicks (juce::Component& c, ParameterHandle& h)
+    : control (c),
+      listenedTo (&c),
+      handle (h)
+{
+    control.addMouseListener (this, true);
+    getMenuClicks().push_back (this);
+}
+
+ParameterMenuClicks::~ParameterMenuClicks()
+{
+    std::erase (getMenuClicks(), this);
+
+    if (listenedTo != nullptr)
+        listenedTo->removeMouseListener (this);
+}
+
+juce::PopupMenu ParameterMenuClicks::getMenuOf (const juce::Component& component)
+{
+    for (const auto* at = &component; at != nullptr; at = at->getParentComponent())
+        for (auto* clicks : getMenuClicks())
+            if (&clicks->control == at)
+                return clicks->getMenu();
+
+    return {};
+}
+
+void ParameterMenuClicks::mouseDown (const juce::MouseEvent& e)
+{
+    // Heard after the control's own press (JUCE's listeners hear it after the component), and before the click its release
+    // makes, which isMenuClick() then tells its owner to leave alone.
+    menuPress = e.mods.isPopupMenu();
+
+    if (! menuPress || ! control.isEnabled())
+        return;
+
+    if (auto menu = getMenu(); menu.getNumItems() > 0)
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (e.eventComponent));
+}
+
+void ParameterMenuClicks::mouseUp (const juce::MouseEvent&)
+{
+    menuPress = false; // after the control's own release, and the click it made
+}
+
+//==============================================================================
 ChoiceAttachment::ChoiceAttachment (juce::ComboBox& b)
     : box (b)
 {
     box.setEnabled (false);
     box.onChange = [this]
     {
+        WheelBurst::endAll(); // a choice made is a step of its own
+
         if (handle.isValid() && box.getSelectedItemIndex() >= 0)
             handle.setValue (minimum + (float) box.getSelectedItemIndex());
     };
@@ -986,8 +1147,23 @@ ToggleAttachment::ToggleAttachment (juce::Button& b)
     button.setClickingTogglesState (true);
     button.onClick = [this]
     {
+        // A right-click's, which showed the menu: the switch as it was.
+        if (menuClicks.isMenuClick())
+        {
+            update();
+            return;
+        }
+
+        WheelBurst::endAll(); // a switch flipped is a step of its own
+
+        // Switched from what it was without its modulation (a lane's value included), as a modulated knob moves that.
         if (handle.isValid())
-            handle.setValue (button.getToggleState() ? 1.0f : 0.0f);
+            handle.setValue (handle.getBaseValue() > 0.5f ? 0.0f : 1.0f);
+
+        update();
+
+        if (onSwitched != nullptr)
+            onSwitched();
     };
 }
 

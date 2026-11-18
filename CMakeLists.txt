@@ -827,6 +827,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ValueText.h
     src/ui/components/ViewTitle.cpp
     src/ui/components/ViewTitle.h
+    src/ui/components/WheelBurst.cpp
+    src/ui/components/WheelBurst.h
     src/ui/devices/AgeEditor.cpp
     src/ui/devices/AgeEditor.h
     src/ui/devices/CompressorEditor.cpp

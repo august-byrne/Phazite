@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "KeyDispatcher.h"
+#include "ui/components/WheelBurst.h"
 
 #include <algorithm>
 
@@ -158,6 +159,9 @@ bool KeyDispatcher::runForKey (const Command& command, const juce::KeyPress& key
     // With a mouse button down, the key is used up: what the mouse does goes on as it began.
     if (isMouseButtonDown() && ! runsWhileMouseIsDown (command))
         return true;
+
+    // A burst of the wheel still open is a step of its own, which Undo then takes back whole.
+    WheelBurst::endAll();
 
     // A held key repeats. Only commands that take a step run again; for the others the repeat is used up.
     const auto held = std::find_if (heldKeys.begin(), heldKeys.end(),

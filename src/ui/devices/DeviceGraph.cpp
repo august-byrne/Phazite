@@ -307,9 +307,8 @@ void HandleDrag::take (std::vector<ParameterHandle*> taking)
 {
     end(); // a drag that never let go (a press while another was held) keeps what it did
 
-    // A turn of the graph's wheel still open is a step of its own, which the drag doesn't join.
-    for (auto* wheel : wheels)
-        wheel->end();
+    // A turn of the wheel still open, the graph's or a knob's, is a step of its own, which the drag doesn't join.
+    WheelBurst::endAll();
 
     handles = std::move (taking);
     starts.clear();
@@ -396,15 +395,9 @@ bool HandleDrag::keyPressed (const juce::KeyPress& key, juce::Component*)
 
 //==============================================================================
 WheelGesture::WheelGesture (HandleDrag& graphsDrag)
-    : drag (graphsDrag)
+    : drag (graphsDrag),
+      burst (graphsDrag.graph)
 {
-    drag.wheels.push_back (this);
-}
-
-WheelGesture::~WheelGesture()
-{
-    end();
-    drag.wheels.erase (std::remove (drag.wheels.begin(), drag.wheels.end(), this), drag.wheels.end());
 }
 
 void WheelGesture::turn (ParameterHandle& handle, float newValue)
@@ -413,24 +406,25 @@ void WheelGesture::turn (ParameterHandle& handle, float newValue)
     if (drag.isTaken())
         return;
 
+    // Another handle of the same graph (another band's Q) is a step of its own.
     if (turning != &handle)
         end();
 
-    if (! handle.isInGesture())
-        handle.beginGesture();
-
     turning = &handle;
+    burst.turn (
+        [&handle]
+        {
+            if (! handle.isInGesture())
+                handle.beginGesture();
+        },
+        [this]
+        {
+            if (turning != nullptr && turning->isInGesture())
+                turning->endGesture();
+
+            turning = nullptr;
+        });
+
     handle.setValue (newValue);
-    startTimer (500);
-}
-
-void WheelGesture::end()
-{
-    stopTimer();
-
-    if (turning != nullptr && turning->isInGesture())
-        turning->endGesture();
-
-    turning = nullptr;
 }
 } // namespace phazite::ui::graph

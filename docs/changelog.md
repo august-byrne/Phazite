@@ -39,6 +39,10 @@ The full text of every step, as it was written when it was built, is in the
 - **A device after latency is given the place of its sound:** the song's place a device counts from (a synced LFO, a
   grid of control steps, Age's crackle) is the song's less the latency of what stands before it, as its automation
   already was, so that a latency added before a device no longer moves what it plays against its sound.
+- **S6.9 The wheel as one burst, and menus on every control:** a burst of the wheel on a knob, a fader or a graph's
+  handle is one undo step and one new plan, where each notch was one (known bug 201: the Compressor's Look-Ahead was
+  remade at every notch), and a right-click on a switch, a list, a choice's button or tab or a part's switch offers
+  Automate, Delete Automation and Modulate, as a knob's does.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

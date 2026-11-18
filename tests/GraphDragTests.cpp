@@ -37,6 +37,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/WheelBurst.h"
 #include "ui/devices/AgeEditor.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DelayEditor.h"
@@ -657,7 +658,9 @@ TEST_CASE (
     mouse.wheel (dot, 0.5f);
     mouse.wheel (dot, 0.5f);
     CHECK (valueOf (song, eq, "band4Q") == doctest::Approx (qs[3] * 8.0f).epsilon (0.01));
-    REQUIRE (phazite::test::runTimersUntil ([&s] { return ! phazite::Gesture::isInProgress (s); }));
+    CHECK (phazite::Gesture::isInProgress (s));
+    phazite::ui::WheelBurst::endAll(); // as the wheel resting ends it
+    CHECK_FALSE (phazite::Gesture::isInProgress (s));
     phazite::undo (s);
     CHECK (valueOf (song, eq, "band4Q") == doctest::Approx (qs[3]));
     CHECK_FALSE (s.getUndoManager().canUndo());
@@ -821,7 +824,7 @@ TEST_CASE ("A drag begun just after a turn of the same graph's wheel is a step o
             s.getUndoManager().clearUndoHistory();
             Mouse mouse (graph);
             const auto dot = editor.getDotPosition().roundToInt();
-            mouse.wheel (graph.getLocalBounds().getCentre(), notch); // its step still open, for half a second
+            mouse.wheel (graph.getLocalBounds().getCentre(), notch); // its step still open, until the wheel rests
             const auto turned = valueOf (song, filter, "drive");
             REQUIRE (turned > drive);
 

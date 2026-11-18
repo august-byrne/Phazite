@@ -5,8 +5,10 @@
 // knobs, and its threshold a line to drag in its history; its history, two bars long at the song's tempo, on both pages; and
 // each page whole in the default dock.
 #include "GoldenFiles.h"
+#include "PerformanceCounts.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -889,4 +891,52 @@ TEST_CASE ("On Compress's page the Attack and the Release say what they do to a 
     CHECK (tooltipOf ("release").contains ("a gate opening"));
     const auto menu = editor.getCurve().isShowing() ? phazite::ui::DynamicsCurveTools (editor.getCurve()).getMenu() : juce::PopupMenu();
     CHECK (phazite::test::findMenuItem (menu, { "Shapes", "Gates: the Attack closes them, the Release opens them" }) != nullptr);
+}
+
+TEST_CASE ("Five notches of the wheel on the Look-Ahead are one undo step and one new plan, after the burst ends (known bug 201)")
+{
+    // The Look-Ahead's latency is the plan's: a plan at each notch remade the compressor at each, a gap in the sound each time.
+    Song song;
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("lookahead"));
+    REQUIRE (knob != nullptr);
+    REQUIRE (knob->isShowing());
+
+    // A value set by hand already: the first adds the device's values, a plan of its own (PerformanceGateTests.cpp).
+    song.getDevice().getParameter ("attack").setValue (20.0f);
+    song.song->getUndoManager().clearUndoHistory();
+    phazite::test::PlanCounter plans (song.context);
+    plans.take();
+    phazite::test::UndoCheck undo (*song.song);
+    const auto before = song.valueOf ("lookahead");
+
+    undo.check ("five notches of the wheel",
+                [&]
+                {
+                    phazite::test::Mouse mouse (*knob);
+                    auto last = before;
+
+                    // The value and its text follow each notch at once, and no plan comes while the burst goes on.
+                    for (int notch = 0; notch < 5; ++notch)
+                    {
+                        CAPTURE (notch);
+                        mouse.wheel (knob->getLocalBounds().getCentre(), (float) phazite::ui::wheelNotch);
+                        const auto now = song.valueOf ("lookahead");
+                        CHECK (now > last);
+                        CHECK (knob->getValue() == doctest::Approx (now));
+                        CHECK (knob->getTextFromValue (knob->getValue()) == knob->getTextFromValue (now));
+                        CHECK (plans.take() == 0);
+                        last = now;
+                    }
+
+                    phazite::ui::WheelBurst::endAll();
+                    CHECK_FALSE (phazite::Gesture::isInProgress (*song.song));
+                    CHECK (plans.take() == 1);
+                });
+
+    CHECK (undo.getNumSteps() == 1);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Look-Ahead"));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("lookahead") == doctest::Approx (before));
 }

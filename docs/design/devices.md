@@ -178,7 +178,18 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   puts the dot under the pointer when pressed away from it. Envelopes drag by their points, and each stage bends by a
   handle in its middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a
   device's page says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and
-  one undo step until the wheel rests; a press on the picture ends that step, and the wheel turns nothing during a drag.
+  one undo step for a burst of it, as a knob's wheel is (below); a press on the picture ends that step, and the wheel
+  turns nothing during a drag.
+- **Every control of a parameter works alike** (`src/ui/components/Controls.h`). A burst of the wheel on a knob, a fader
+  or a picture's handle is one undo step, named as a drag of it is, and one change to what plays, so that a value a
+  device's latency follows (the Compressor's Look-Ahead, the EQ's Phase) makes the device anew once, as the burst ends
+  (`WheelBurst`): it ends when the wheel has rested for half a second, at once at a press anywhere, the pointer leaving
+  the control, a key reaching it or a shortcut run, its losing the keyboard focus, its being hidden, or a turn of the
+  wheel on another control. A key's step (the arrow keys) is a step of its own for each press. A right-click on any of
+  them, a knob, a switch, a list, a choice's buttons or tabs and a part's switch, offers the parameter's menu: its name,
+  Type a Value... (on a knob or a fader), Automate, Delete Automation while it has automation, and Modulate; a left
+  click does what it did. A switch or a choice that a lane or a modulator moves shows the value as it plays, as a knob
+  does.
 - **Analyzers show both channels as one trace,** as Pro-Q's and Ableton's Spectrum's (L+R) do, but each channel
   analyzed apart and each level the louder of the two, so that a sound in the middle reads as before, and one panned
   hard or out of phase between the channels reads at its level (an average read it 6 dB low, or cancelled it). What

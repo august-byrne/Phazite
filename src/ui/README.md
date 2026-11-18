@@ -26,7 +26,8 @@ The base controls and what the left panel's views share.
 
 | File | What it holds |
 |---|---|
-| `Controls.h` | The base controls: `ui::Knob`, with the ring of its modulation; `ui::Fader`, with the scale of its decibels beside it in the mixer's strips; `ui::FaderScale`; `ui::LevelMeter`, on that scale beside a fader. Knobs and faders are `ui::ValueSlider`s, which take a value typed in a field over them or their readout. `ui::ParameterAttachment` links a control to a `phazite::ParameterHandle`. |
+| `Controls.h` | The base controls: `ui::Knob`, with the ring of its modulation; `ui::Fader`, with the scale of its decibels beside it in the mixer's strips; `ui::FaderScale`; `ui::LevelMeter`, on that scale beside a fader. Knobs and faders are `ui::ValueSlider`s, which take a value typed in a field over them or their readout, and a burst of the wheel as one drag. `ui::ParameterAttachment` links a slider to a `phazite::ParameterHandle`, `ui::ToggleAttachment` a switch and `ui::ChoiceAttachment` a list; `ui::makeParameterMenu()` makes the menu a right-click on any of them shows (Automate, Delete Automation, Modulate), and `ui::ParameterMenuClicks` shows it on a switch's or a choice's right-click. |
+| `WheelBurst.*` | A burst of the mouse wheel on a control as one gesture, until the wheel rests, a press, a key or the pointer leaving: knobs, faders and the graphs' handles turn through it. |
 | `ModulatorDrag.h` | What a modulator dragged onto a knob carries. |
 | `ValueText.h` | How values read as text, and how typed text reads as values: decibels, pan, a parameter's units. |
 | `ParameterText.*` | A parameter's value as text, read back as typed (a plug-in's by the plug-in, the window's input held meanwhile). |

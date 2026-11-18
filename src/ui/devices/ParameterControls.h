@@ -77,8 +77,8 @@ juce::String describeParameter (const devices::ParameterInfo&, const ParameterHa
 
 //==============================================================================
 // A switch as a button with its text, down while the switch is on, for a row of a part's own controls (an FM operator's
-// Fixed, the sampler's Reverse): a click switches it, as one undo step. Titled with the parameter's name; the
-// DisplayTicker shows changes made elsewhere (automation, undo).
+// Fixed, the sampler's Reverse): a click switches it, as one undo step, and a right-click shows its menu (ToggleAttachment).
+// Titled with the parameter's name; the DisplayTicker shows changes made elsewhere (automation, undo).
 class ParameterSwitch : public juce::TextButton,
                         private DisplayTicker::Display
 {
@@ -96,8 +96,9 @@ private:
 
 //==============================================================================
 // A choice's options as buttons, side by side, one above another (a switch's positions) or two to a row, the one chosen lit:
-// a click picks one, as one undo step, as a compressor's characters and a multiband's band modes are picked. The
-// DisplayTicker shows changes made elsewhere (automation, undo).
+// a click picks one, as one undo step, as a compressor's characters and a multiband's band modes are picked; a right-click on
+// any shows the choice's menu (Automate, Modulate: makeParameterMenu()). The DisplayTicker shows changes made elsewhere
+// (automation, undo).
 class ChoiceButtons : public juce::Component,
                       private DisplayTicker::Display
 {
@@ -129,6 +130,7 @@ public:
 
 private:
     ParameterHandle parameter;
+    ParameterMenuClicks menuClicks { *this, parameter }; // a right-click on any button shows the choice's menu
     const Direction direction;
     juce::OwnedArray<juce::TextButton> buttons;
 
@@ -139,7 +141,8 @@ private:
 // A choice's options as tabs along the top of an editor, the one chosen in front, as pills like the dock's tabs: a device's
 // modes, each showing parts of its own (DeviceEditorBase::setModes(); the compressor's Compress and Duck, as Fruity Limiter's
 // tabs switch its own). A click picks one, as one undo step; onChange then says which, as it does for a change made elsewhere
-// (an undo, automation), which the DisplayTicker brings in. Each tab is titled with the choice's name and its option's.
+// (an undo, automation), which the DisplayTicker brings in. A right-click on a tab shows the choice's menu. Each tab is titled
+// with the choice's name and its option's.
 class ChoiceTabs : public juce::Component,
                    private DisplayTicker::Display
 {
@@ -165,6 +168,7 @@ public:
 
 private:
     ParameterHandle parameter;
+    ParameterMenuClicks menuClicks { *this, parameter }; // a right-click on any tab shows the choice's menu
     juce::OwnedArray<juce::Button> tabs;
     int chosen = -1;
 

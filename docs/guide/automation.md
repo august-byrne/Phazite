@@ -7,16 +7,18 @@ sidebar:
 
 **Automation** changes a control along the song: a line you draw in a lane under the control's track. **Modulation**
 moves a control around its value while the song plays, by a modulator (an LFO, an envelope follower...) or a macro
-knob. Any of Phazite's knobs and faders, and any parameter a plug-in lets you automate, can have both.
+knob. Any of Phazite's knobs, faders, switches and choices, and any parameter a plug-in lets you automate, can have
+both.
 
 ## Automating a control
 
-Right-click any knob or fader (in the mixer, the inspector or a device in the Devices view). The menu, headed by the
-control's name, has:
+Right-click any knob, fader, switch or choice (in the mixer, the inspector or a device in the Devices view: a
+device's switches and lists, the buttons and tabs of its choices and the switch on a part's title too). The menu,
+headed by the control's name, has:
 
 | Item | Does |
 |---|---|
-| Type a Value... | Opens a field over the control to type its value |
+| Type a Value... | Opens a field over the control to type its value (on a knob or a fader) |
 | Automate | Shows the control's lane under its track |
 | Delete Automation | Deletes the control's automation, with its lane |
 | Modulate | The track's modulators, then a new one of each kind ([below](#modulators-and-macros)) |
