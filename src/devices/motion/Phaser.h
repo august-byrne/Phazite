@@ -19,6 +19,7 @@
 
 #include <array>
 #include <atomic>
+#include <complex>
 #include <span>
 
 namespace phazite::devices
@@ -54,8 +55,10 @@ public:
     // to 1 at the top): for its editor and tests.
     static double getSweptCentre (std::span<const float> parameters, float lfoValue, double sampleRate);
 
-    // Its response at a frequency for the parameters' values with its notches swept to centre (in hertz), as a gain: for its
-    // editor and tests.
+    // Its response at a frequency for the parameters' values with its notches swept to centre (in hertz), what it plays (the
+    // sound and its phased copy, half and half), whatever its mix: as a complex gain, for Motion's picture of it at Motion's
+    // Mix (Motion::getPhaserMagnitude()), and as a gain, for tests.
+    static std::complex<double> getResponse (std::span<const float> parameters, double centre, double frequency, double sampleRate);
     static double getMagnitude (std::span<const float> parameters, double centre, double frequency, double sampleRate);
 
     // Where its sweep is, once a block (devices/core/LiveValue.h): each side's centre, in hertz, and the LFO's phase (0 to 1).

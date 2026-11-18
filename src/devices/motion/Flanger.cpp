@@ -81,7 +81,7 @@ double Flanger::getSweptDelay (std::span<const float> values, float lfoValue)
     return (double) values[delay] * std::exp2 (-sweepOctaves * values[depth] * (1.0f - up));
 }
 
-double Flanger::getMagnitude (std::span<const float> values, double milliseconds, double frequency, double rate)
+std::complex<double> Flanger::getResponse (std::span<const float> values, double milliseconds, double frequency, double rate)
 {
     const auto c = makeComb (values, milliseconds, values[feedback] < 0.0f ? -1.0f : 1.0f, rate);
     const auto z = std::polar (1.0, -juce::MathConstants<double>::twoPi * frequency * (double) c.delay / rate);
@@ -95,7 +95,12 @@ double Flanger::getMagnitude (std::span<const float> values, double milliseconds
         response = bands.low + bands.high * response;
     }
 
-    return std::abs (response);
+    return response;
+}
+
+double Flanger::getMagnitude (std::span<const float> values, double milliseconds, double frequency, double rate)
+{
+    return std::abs (getResponse (values, milliseconds, frequency, rate));
 }
 
 void Flanger::prepare (double newSampleRate, int)

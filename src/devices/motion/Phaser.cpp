@@ -83,7 +83,7 @@ double Phaser::getSweptCentre (std::span<const float> values, float lfoValue, do
     return std::clamp ((double) centre, (double) lowestCentre, 0.45 * rate);
 }
 
-double Phaser::getMagnitude (std::span<const float> values, double centre, double frequency, double rate)
+std::complex<double> Phaser::getResponse (std::span<const float> values, double centre, double frequency, double rate)
 {
     // y = output (x + a), with a = A (x + feedback a): the loop solved at once, as in process().
     const auto section = dsp::makeFilter (dsp::FilterShape::allPass, centre, rate, getQ (values));
@@ -104,7 +104,12 @@ double Phaser::getMagnitude (std::span<const float> values, double centre, doubl
         response = bands.low + bands.high * response;
     }
 
-    return std::abs (response);
+    return response;
+}
+
+double Phaser::getMagnitude (std::span<const float> values, double centre, double frequency, double rate)
+{
+    return std::abs (getResponse (values, centre, frequency, rate));
 }
 
 void Phaser::prepare (double newSampleRate, int)

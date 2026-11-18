@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Motion.h"
+#include "SafeBass.h"
+#include "devices/dsp/Crossover.h"
 #include "devices/dsp/NoteValues.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 
 namespace phazite::devices
 {
@@ -90,6 +93,22 @@ namespace
     {
         return level * level * (3.0f - 2.0f * level);
     }
+
+    // What the runner plays, as a gain, of what the flanger or the phaser plays (its response, H) and the dry copy, as the one
+    // meaning of Mix mixes them: (1 - m) D + m (2 H - D), D the dry copy as Safe Bass's split turns it (SafeBass.h).
+    double mixWithDry (std::span<const float> values, std::complex<double> response, double frequency, double sampleRate)
+    {
+        std::complex<double> dry (1.0);
+
+        if (SafeBass::isOn (values[Motion::safeBass]))
+        {
+            const auto bands = dsp::Crossover::getResponses (values[Motion::safeBass], frequency, sampleRate);
+            dry = bands.low + bands.high;
+        }
+
+        const auto mixed = (double) values[Motion::mix];
+        return std::abs ((1.0 - 2.0 * mixed) * dry + 2.0 * mixed * response);
+    }
 } // namespace
 
 const DeviceInfo Motion::info { .typeID = typeID, .name = "Motion", .kind = DeviceKind::effect, .parameters = parameters };
@@ -160,6 +179,17 @@ std::array<float, Phaser::mix + 1> Motion::getPhaserValues (std::span<const floa
     engine[Phaser::safeBass] = values[safeBass];
     engine[Phaser::mix] = 2.0f * values[mix];
     return engine;
+}
+
+double Motion::getFlangerMagnitude (std::span<const float> values, double milliseconds, double frequency, double sampleRate)
+{
+    return mixWithDry (values, Flanger::getResponse (getFlangerValues (values), milliseconds, frequency, sampleRate), frequency,
+                       sampleRate);
+}
+
+double Motion::getPhaserMagnitude (std::span<const float> values, double centre, double frequency, double sampleRate)
+{
+    return mixWithDry (values, Phaser::getResponse (getPhaserValues (values), centre, frequency, sampleRate), frequency, sampleRate);
 }
 
 Processor& Motion::getEngine (int which) noexcept
@@ -276,8 +306,8 @@ void Motion::processStretch (const ProcessContext& block, int start, int length,
         }
     }
 
-    // Fading, its engine is fed the sound faded as it fades: cut in at full level, the sound would be a click of its own,
-    // which its lines would then play back and feed back (as the reverb fades what a mode is fed, reverb/Reverb.cpp).
+    // Fading, its engine is fed the sound faded as it fades, by g: cut in at full level, the sound would be a click of its
+    // own, which its lines would then play back and feed back (as the reverb fades what a mode is fed, reverb/Reverb.cpp).
     if (fades)
     {
         for (int i = 0; i < length; ++i)
@@ -349,17 +379,22 @@ void Motion::processStretch (const ProcessContext& block, int start, int length,
     if (! fades)
         return;
 
-    // And between the sound as it came in and what the mode plays, its dry copy too, so that at the fade's bottom its
-    // runner plays the sound untouched, at any mix.
+    // Then the sound as it came in, at what the fade leaves of it, with what the mode plays, its dry copy too: g of the
+    // effect and 1 - g of the sound, as what the mode played was fed the sound times g already. Near the fade's bottom what
+    // the mode plays is taken down a second time, by h = min (1, 4 g), so that at the bottom its runner plays the sound
+    // untouched, at any mix, whatever still rings in the mode's lines: 1 - g + h g of a sound the effect is in phase with,
+    // flat from a quarter of the way up and no more than 0.6 dB down below it (at g = 1/8), where the same gain twice
+    // (1 - g + g squared) would dip 2.5 dB at the fade's middle.
     for (int channel = 0; channel < numChannels; ++channel)
     {
         for (int i = 0; i < length; ++i)
         {
             const auto gain = gains[(size_t) i];
-            channels[channel][i] = (1.0f - gain) * came[channel][i] + gain * channels[channel][i];
+            const auto second = std::min (1.0f, 4.0f * gain);
+            channels[channel][i] = (1.0f - gain) * came[channel][i] + second * channels[channel][i];
 
             if (block.dry != nullptr)
-                dry[channel][i] = (1.0f - gain) * dryCame[channel][i] + gain * dry[channel][i];
+                dry[channel][i] = (1.0f - gain) * dryCame[channel][i] + second * dry[channel][i];
         }
     }
 }

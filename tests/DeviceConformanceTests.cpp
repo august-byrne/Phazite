@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The rules every one of Phazite's own devices keeps (the DSP in src/devices/), measured with the bench in DspProbe.h. The
 // devices are the model's one list of them (getOwnDevices(), model/devices/internal/Devices.h): a device added there is held
-// to every rule here without a line of this file changing. Each is played as Phazite's engine plays it, on its runner
+// to every rule here without a line of this file changing; one whose modes were devices of their own (Motion) is measured in
+// each mode, under the mode's name (the variants, below). Each is played as Phazite's engine plays it, on its runner
 // (engine/nodes/DeviceRunner.h), the song playing, at 44.1, 48 and 96 kHz, and in blocks of 1, 64, 441, 512 and 4096 samples
 // where a rule depends on the blocks:
 //
@@ -119,6 +120,7 @@ struct Exception
     Rule rule;
     double allowance;
     std::string_view why;
+    std::string_view variant {}; // for a device measured in several modes (variants, below): the one it is for, by its name
 };
 
 constexpr Exception exceptions[] = {
@@ -134,8 +136,14 @@ constexpr Exception exceptions[] = {
     { "phaziteVinyl", Rule::latency, 12.0,
       "Its wow swings the sound's delay around the delay line's middle, which is its latency: over the sixth of a second "
       "measured, the record runs some samples early." },
+    { "phaziteMotion", Rule::latency, 0.5, "The swept copies it adds, some milliseconds late, pull the peak a part of a sample.",
+      "Motion (Chorus)" },
     { "phaziteMotion", Rule::latency, 0.5,
-      "A chorus at first: the swept copies it adds, some milliseconds late, pull the peak a part of a sample." },
+      "What comes out is the sound and a copy of it a few milliseconds later, as loud, which pulls the peak a part of a sample.",
+      "Motion (Flanger)" },
+    { "phaziteMotion", Rule::latency, 2.5,
+      "Its all-pass stages turn the phase of what passes, which is its effect: the lows come out a sample or two late.",
+      "Motion (Phaser)" },
     { "phaziteVocoder", Rule::latency, anything,
       "What comes out is its carrier, a buzz at first, shaped by what came in, not what came in." },
     { "phaziteSaturator", Rule::mix, -45.0,
@@ -204,10 +212,24 @@ const OnPurpose onPurpose[] = {
     { "phaziteSynth", { { "osc2Sync", 1.0f }, { "osc2Pitch", 5.0f }, { "drive", 18.0f }, { "filterOn", 1.0f } } },
 };
 
+// Devices measured once in each of their modes, each under a name of its own, with its mode's choice as if it were the
+// default: Motion, whose modes are three effects that were devices of their own.
+struct Variant
+{
+    std::string_view typeID, name, parameterID;
+    float value;
+};
+
+constexpr Variant variants[] = {
+    { "phaziteMotion", "Motion (Chorus)", "mode", 0.0f },
+    { "phaziteMotion", "Motion (Flanger)", "mode", 1.0f },
+    { "phaziteMotion", "Motion (Phaser)", "mode", 2.0f },
+};
+
 const Exception* findException (const devices::DeviceInfo& info, Rule rule)
 {
     for (const auto& exception : exceptions)
-        if (exception.typeID == info.typeID && exception.rule == rule)
+        if (exception.typeID == info.typeID && exception.rule == rule && (exception.variant.empty() || exception.variant == info.name))
             return &exception;
 
     return nullptr;
@@ -849,19 +871,44 @@ std::vector<std::vector<float>> drawSettingsForOffset (const devices::DeviceInfo
     return settings;
 }
 
-// Every device, with its name where a check fails.
+// Every device, with its name where a check fails; a device with variants once for each, as a copy of its description
+// named for it whose default is the variant's value.
 template <typename Check>
 void forEachDevice (Check&& check)
 {
-    for (const auto* info : phazite::getOwnDevices())
+    const auto checkOne = [&check] (const devices::DeviceInfo& info)
     {
-        CAPTURE (toString (info->name));
+        CAPTURE (toString (info.name));
         const auto started = juce::Time::getMillisecondCounterHiRes();
-        check (*info);
+        check (info);
 
         if (isReporting())
-            std::printf ("%-36s took %.2f s\n", toString (info->name).toRawUTF8(),
+            std::printf ("%-36s took %.2f s\n", toString (info.name).toRawUTF8(),
                          (juce::Time::getMillisecondCounterHiRes() - started) * 0.001);
+    };
+
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        auto hasVariants = false;
+
+        for (const auto& variant : variants)
+        {
+            if (variant.typeID != info->typeID)
+                continue;
+
+            const auto index = devices::findParameter (*info, variant.parameterID);
+            REQUIRE (index >= 0);
+            std::vector<devices::ParameterInfo> parameters (info->parameters.begin(), info->parameters.end());
+            parameters[(size_t) index].defaultValue = variant.value;
+            auto described = *info;
+            described.name = variant.name;
+            described.parameters = parameters;
+            checkOne (described);
+            hasVariants = true;
+        }
+
+        if (! hasVariants)
+            checkOne (*info);
     }
 }
 } // namespace
@@ -1121,8 +1168,17 @@ TEST_CASE ("The exceptions name devices there are, each once for a rule")
         CHECK (phazite::findOwnDevice (exception.typeID) != nullptr);
         CHECK (! exception.why.empty());
         CHECK (std::count_if (std::begin (exceptions), std::end (exceptions),
-                              [&] (const Exception& other) { return other.typeID == exception.typeID && other.rule == exception.rule; })
+                              [&] (const Exception& other)
+                              {
+                                  return other.typeID == exception.typeID && other.rule == exception.rule
+                                         && (other.variant.empty() || exception.variant.empty() || other.variant == exception.variant);
+                              })
                == 1);
+
+        // A variant's exception names one of its device's variants, which are measured for it.
+        if (! exception.variant.empty())
+            CHECK (std::any_of (std::begin (variants), std::end (variants), [&] (const Variant& variant)
+                                { return variant.typeID == exception.typeID && variant.name == exception.variant; }));
     }
 }
 

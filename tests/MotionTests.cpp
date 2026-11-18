@@ -36,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -66,9 +67,11 @@ juce::AudioBuffer<float> makeStereoSound (int numSamples)
 }
 
 // Plays a stereo sound through a device's runner in blocks of a size, as Phazite's engine plays it: the song stopped, or
-// playing from its start at 120 beats a minute in 4/4.
+// playing from its start at 120 beats a minute in 4/4. Before each block, `beforeBlock` is called with the sample it starts
+// on and may change the values.
 juce::AudioBuffer<float> playStereo (const devices::DeviceInfo& info, std::unique_ptr<devices::Processor> processor,
-                                     std::span<const float> values, const juce::AudioBuffer<float>& sound, int blockSize, bool songPlays)
+                                     std::vector<float> values, const juce::AudioBuffer<float>& sound, int blockSize, bool songPlays,
+                                     const std::function<void (int, std::vector<float>&)>& beforeBlock = {})
 {
     engine::DeviceRunner runner (info, std::move (processor));
     runner.prepare (usualRate, blockSize);
@@ -77,6 +80,9 @@ juce::AudioBuffer<float> playStereo (const devices::DeviceInfo& info, std::uniqu
 
     for (int start = 0; start < out.getNumSamples(); start += blockSize)
     {
+        if (beforeBlock)
+            beforeBlock (start, values);
+
         engine::DeviceRunner::Block block;
         block.values = values;
         block.isPlaying = songPlays;
@@ -114,13 +120,13 @@ float choiceOf (const devices::DeviceInfo& info, int parameter, std::string_view
     return described.minimum + (float) *index;
 }
 
-// The largest difference between two sounds, sample for sample, on either side.
-float largestDifference (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+// The largest difference between two sounds, sample for sample, on either side, from a sample on.
+float largestDifference (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b, int from = 0)
 {
     auto largest = 0.0f;
 
     for (int channel = 0; channel < 2; ++channel)
-        for (int i = 0; i < a.getNumSamples(); ++i)
+        for (int i = from; i < a.getNumSamples(); ++i)
             largest = std::max (largest, std::abs (a.getSample (channel, i) - b.getSample (channel, i)));
 
     return largest;
@@ -169,37 +175,109 @@ bool shows (const phazite::ui::MotionEditor& editor, const char* id)
     return control != nullptr && control->isShowing();
 }
 
-struct Setting
+// A value of the device a mode was, by its parameter's ID: a number, or a choice by its name.
+struct OldValue
 {
-    std::string name;
-    std::function<void (std::vector<float>&)> set; // on Motion's values, from its defaults in the mode
-    bool songPlays = false;
+    std::string_view id;
+    std::variant<float, std::string_view> value;
 };
 
-// Plays Motion with its values, and the mode's engine alone with them mapped to its own, each through a runner of its own,
-// and checks that the two agree sample for sample.
-template <typename Engine, typename Map>
-void checkMode (Motion::Mode mode, const Setting& setting, Map&& map)
+// A setting of the device a mode was, every one of its parameters by its ID: one of its presets, or one written for the test.
+struct OldSetting
+{
+    std::string name;
+    std::vector<OldValue> values;
+};
+
+void setByID (const devices::DeviceInfo& info, std::vector<float>& values, std::string_view id, std::variant<float, std::string_view> value)
+{
+    CAPTURE (std::string (id));
+    const auto index = devices::findParameter (info, id);
+    REQUIRE (index >= 0);
+
+    if (const auto* number = std::get_if<float> (&value))
+        values[(size_t) index] = *number;
+    else
+        values[(size_t) index] = choiceOf (info, index, std::get<std::string_view> (value));
+}
+
+// Plays the mode's engine alone with the old device's values, by the engine's own IDs, and Motion with them converted by
+// hand to its own, each through a runner of its own, and checks that the two agree sample for sample. The conversion is
+// written out here, not taken from Motion's mapping (Motion::getChorusValues() and the others), which is what this guards:
+// the mode; the Feedback a part of as far as the mode's engine goes (0.9, 1 or 0.85 at 100 %); a flanger's or a phaser's
+// Mix half the old one (mixFactor), as Motion puts out the effect alone.
+template <typename Engine>
+void checkMode (Motion::Mode mode, float mostFeedback, float mixFactor, const OldSetting& setting)
 {
     CAPTURE (setting.name);
+    auto engineValues = phazite::test::getDefaultValues (Engine::info);
     auto values = getMotionDefaults (mode);
-    setting.set (values);
-    const auto mapped = map (values);
-    const std::vector<float> engineValues (mapped.begin(), mapped.end());
-    REQUIRE (engineValues[(size_t) Engine::mix] <= 1.0f); // what the device it was could be set to
+    auto songPlays = false;
+
+    for (const auto& [id, value] : setting.values)
+    {
+        setByID (Engine::info, engineValues, id, value);
+        auto converted = value;
+
+        if (auto* number = std::get_if<float> (&converted))
+        {
+            if (id == "feedback")
+                *number /= mostFeedback;
+            else if (id == devices::mixParameterID)
+                *number *= mixFactor;
+            else if (id == "sync")
+                songPlays = *number > 0.5f; // in time with the song while it plays: the LFO's phase from its place
+        }
+
+        setByID (Motion::info, values, id, converted);
+    }
+
+    // Every parameter of the device it was named once, so that nothing is left at a default that differs between the two.
+    REQUIRE (setting.values.size() == Engine::info.parameters.size());
+
+    for (const auto& parameter : Engine::info.parameters)
+        CHECK (std::count_if (setting.values.begin(), setting.values.end(), [&] (const OldValue& v) { return v.id == parameter.id; }) == 1);
 
     const auto sound = makeStereoSound ((int) usualRate);
 
     for (const auto blockSize : { 256, 37 })
     {
         CAPTURE (blockSize);
-        const auto before = playStereo (Engine::info, std::make_unique<Engine>(), engineValues, sound, blockSize, setting.songPlays);
-        const auto now = playStereo (Motion::info, std::make_unique<Motion>(), values, sound, blockSize, setting.songPlays);
+        const auto before = playStereo (Engine::info, std::make_unique<Engine>(), engineValues, sound, blockSize, songPlays);
+        const auto now = playStereo (Motion::info, std::make_unique<Motion>(), values, sound, blockSize, songPlays);
         CHECK (largestDifference (before, now) < 1.0e-5f);
 
         // It plays something: not the sound as it came, nor silence.
         CHECK (largestDifference (now, sound) > 1.0e-3f);
     }
+}
+
+// Each mode's settings, and each of its engine's parameters away from its default in at least one of them: so that a line
+// of the mapping that reads the wrong value of Motion's, or none, shows (two values that trade places are each away from
+// where the other is in one of the settings).
+template <typename Engine>
+void checkModeSettings (Motion::Mode mode, float mostFeedback, float mixFactor, const std::vector<OldSetting>& settings)
+{
+    for (const auto& parameter : Engine::info.parameters)
+    {
+        CAPTURE (std::string (parameter.id));
+        const auto moved = std::any_of (settings.begin(), settings.end(),
+                                        [&] (const OldSetting& setting)
+                                        {
+                                            auto engineValues = phazite::test::getDefaultValues (Engine::info);
+
+                                            for (const auto& [id, value] : setting.values)
+                                                if (id == parameter.id)
+                                                    setByID (Engine::info, engineValues, id, value);
+
+                                            const auto index = (size_t) devices::findParameter (Engine::info, parameter.id);
+                                            return ! juce::exactlyEqual (engineValues[index], parameter.defaultValue);
+                                        });
+        CHECK (moved);
+    }
+
+    for (const auto& setting : settings)
+        checkMode<Engine> (mode, mostFeedback, mixFactor, setting);
 }
 } // namespace
 
@@ -270,139 +348,276 @@ TEST_CASE ("Motion describes itself: three modes, a chorus at first, half and ha
 
 TEST_CASE ("Motion: each mode plays what its device played")
 {
-    const auto& info = Motion::info;
-
+    // The old devices' presets (resources/presets/Chorus/, Flanger/ and Phaser/ before roadmap step S6.10), by their own
+    // parameters' IDs, and settings written for the test where the presets leave a parameter at its default or a value at an
+    // end: in time with the song, running free, the feedback at its ends.
     SUBCASE ("Chorus")
     {
-        const std::vector<Setting> settings {
-            { "its defaults", [] (std::vector<float>&) {} },
+        const std::vector<OldSetting> settings {
             { "Solid Bass Chorus",
-              [&] (std::vector<float>& v)
-              {
-                  v[Motion::voices] = choiceOf (info, Motion::voices, "3");
-                  v[Motion::delay] = 5.0f;
-                  v[Motion::rate] = 0.6f;
-                  v[Motion::spread] = 0.4f;
-                  v[Motion::highCut] = 12000.0f;
-                  v[Motion::safeBass] = 150.0f;
-              } },
-            { "feedback at its most, eight voices with shimmer",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::voices] = 7.0f;
-                  v[Motion::feedback] = 1.0f;
-                  v[Motion::shimmer] = 1.0f;
-                  v[Motion::delay] = 12.0f;
-                  v[Motion::depth] = 1.0f;
-              } },
-            { "feedback at its least",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::voices] = 2.0f;
-                  v[Motion::feedback] = -1.0f;
-                  v[Motion::highCut] = 4000.0f;
-              } },
-            { "in time with the song, Safe Bass on, a Mix below full",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::sync] = 1.0f;
-                  v[Motion::division] = (float) devices::dsp::barNoteValue - 2.0f;
-                  v[Motion::safeBass] = 300.0f;
-                  v[Motion::mix] = 0.3f;
-                  v[Motion::stereo] = 0.4f;
-              },
-              true },
+              { { "voices", "3" },
+                { "delay", 5.0f },
+                { "depth", 0.5f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 0.6f },
+                { "shape", "Triangle" },
+                { "shimmer", 0.0f },
+                { "voicePhase", 1.0f },
+                { "spread", 0.4f },
+                { "feedback", 0.0f },
+                { "stereo", 1.0f },
+                { "highCut", 12000.0f },
+                { "safeBass", 150.0f },
+                { "mix", 0.5f } } },
+            { "Deep Swirl",
+              { { "voices", "4" },
+                { "delay", 8.19f },
+                { "depth", 0.61f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 0.7f },
+                { "shape", "Sine" },
+                { "shimmer", 0.0f },
+                { "voicePhase", 0.524f },
+                { "spread", 0.62f },
+                { "feedback", 0.0f },
+                { "stereo", 1.0f },
+                { "highCut", 13000.0f },
+                { "safeBass", 20.0f },
+                { "mix", 0.7f } } },
+            { "Lush Ensemble",
+              { { "voices", "3" },
+                { "delay", 12.0f },
+                { "depth", 0.2f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 0.35f },
+                { "shape", "Sine" },
+                { "shimmer", 1.0f },
+                { "voicePhase", 1.0f },
+                { "spread", 0.0f },
+                { "feedback", 0.0f },
+                { "stereo", 1.0f },
+                { "highCut", 20000.0f },
+                { "safeBass", 20.0f },
+                { "mix", 0.6f } } },
+            { "Metallic Chorus",
+              { { "voices", "1" },
+                { "delay", 2.5f },
+                { "depth", 0.4f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 0.3f },
+                { "shape", "Triangle" },
+                { "shimmer", 0.0f },
+                { "voicePhase", 1.0f },
+                { "spread", 0.0f },
+                { "feedback", 0.6f },
+                { "stereo", 1.0f },
+                { "highCut", 20000.0f },
+                { "safeBass", 20.0f },
+                { "mix", 0.5f } } },
+            { "Tape Wobble",
+              { { "voices", "1" },
+                { "delay", 10.0f },
+                { "depth", 0.4f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 0.6f },
+                { "shape", "Sine" },
+                { "shimmer", 0.0f },
+                { "voicePhase", 1.0f },
+                { "spread", 0.0f },
+                { "feedback", 0.0f },
+                { "stereo", 0.0f },
+                { "highCut", 6000.0f },
+                { "safeBass", 20.0f },
+                { "mix", 1.0f } } },
+            { "in time with the song, eight voices, the feedback at its least",
+              { { "voices", "8" },
+                { "delay", 12.0f },
+                { "depth", 1.0f },
+                { "sync", 1.0f },
+                { "division", "1/2" },
+                { "rate", 0.5f },
+                { "shape", "Sine" },
+                { "shimmer", 1.0f },
+                { "voicePhase", 0.3f },
+                { "spread", 0.8f },
+                { "feedback", -0.9f },
+                { "stereo", 0.4f },
+                { "highCut", 4000.0f },
+                { "safeBass", 300.0f },
+                { "mix", 0.3f } } },
+            { "the feedback at its most",
+              { { "voices", "2" },
+                { "delay", 3.0f },
+                { "depth", 0.3f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 2.0f },
+                { "shape", "Triangle" },
+                { "shimmer", 0.0f },
+                { "voicePhase", 0.7f },
+                { "spread", 0.2f },
+                { "feedback", 0.9f },
+                { "stereo", 0.6f },
+                { "highCut", 9000.0f },
+                { "safeBass", 20.0f },
+                { "mix", 0.5f } } },
         };
 
-        for (const auto& setting : settings)
-            checkMode<devices::Chorus> (Motion::Mode::chorus, setting, Motion::getChorusValues);
+        checkModeSettings<devices::Chorus> (Motion::Mode::chorus, 0.9f, 1.0f, settings);
     }
 
     SUBCASE ("Flanger")
     {
-        const std::vector<Setting> settings {
-            { "its defaults", [] (std::vector<float>&) {} },
+        const std::vector<OldSetting> settings {
             { "Jet Sweep",
-              [&] (std::vector<float>& v)
-              {
-                  v[Motion::delay] = 5.0f;
-                  v[Motion::depth] = 0.9f;
-                  v[Motion::sync] = 1.0f;
-                  v[Motion::division] = choiceOf (info, Motion::division, "2 bars");
-                  v[Motion::rate] = 0.25f;
-                  v[Motion::feedback] = 0.7f;
-                  v[Motion::stereo] = 0.25f;
-              },
-              true },
-            { "feedback at its most, the longest delay",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::feedback] = 1.0f;
-                  v[Motion::delay] = 25.0f;
-                  v[Motion::rate] = 3.0f;
-              } },
-            { "feedback at its least, a sine",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::feedback] = -1.0f;
-                  v[Motion::shape] = 0.0f;
-                  v[Motion::delay] = 0.5f;
-              } },
-            { "Safe Bass on, a Mix below full",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::safeBass] = 200.0f;
-                  v[Motion::feedback] = 0.5f;
-                  v[Motion::mix] = 0.2f;
-              } },
+              { { "delay", 5.0f },
+                { "depth", 0.9f },
+                { "sync", 1.0f },
+                { "division", "2 bars" },
+                { "rate", 0.25f },
+                { "shape", "Triangle" },
+                { "feedback", 0.7f },
+                { "stereo", 0.25f },
+                { "safeBass", 20.0f },
+                { "mix", 1.0f } } },
+            { "Negative Flange",
+              { { "delay", 3.0f },
+                { "depth", 0.9f },
+                { "sync", 1.0f },
+                { "division", "1 bar" },
+                { "rate", 0.25f },
+                { "shape", "Triangle" },
+                { "feedback", -0.7f },
+                { "stereo", 0.25f },
+                { "safeBass", 150.0f },
+                { "mix", 1.0f } } },
+            { "Metallic Ring",
+              { { "delay", 1.5f },
+                { "depth", 0.4f },
+                { "sync", 1.0f },
+                { "division", "4 bars" },
+                { "rate", 0.25f },
+                { "shape", "Sine" },
+                { "feedback", 0.85f },
+                { "stereo", 0.3f },
+                { "safeBass", 190.0f },
+                { "mix", 1.0f } } },
+            { "running free, the longest delay, the feedback at its most, a Mix below full",
+              { { "delay", 25.0f },
+                { "depth", 0.6f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 3.0f },
+                { "shape", "Triangle" },
+                { "feedback", 1.0f },
+                { "stereo", 0.8f },
+                { "safeBass", 20.0f },
+                { "mix", 0.4f } } },
+            { "a sine, a short delay, the feedback at its least",
+              { { "delay", 0.5f },
+                { "depth", 0.3f },
+                { "sync", 0.0f },
+                { "division", "1/4" },
+                { "rate", 1.2f },
+                { "shape", "Sine" },
+                { "feedback", -1.0f },
+                { "stereo", 0.0f },
+                { "safeBass", 60.0f },
+                { "mix", 0.7f } } },
         };
 
-        for (const auto& setting : settings)
-            checkMode<devices::Flanger> (Motion::Mode::flanger, setting, Motion::getFlangerValues);
+        checkModeSettings<devices::Flanger> (Motion::Mode::flanger, 1.0f, 0.5f, settings);
     }
 
     SUBCASE ("Phaser")
     {
-        const std::vector<Setting> settings {
-            { "its defaults", [] (std::vector<float>&) {} },
+        const std::vector<OldSetting> settings {
             { "Classic Phase",
-              [&] (std::vector<float>& v)
-              {
-                  v[Motion::frequency] = 700.0f;
-                  v[Motion::depth] = 0.75f;
-                  v[Motion::sync] = 1.0f;
-                  v[Motion::division] = choiceOf (info, Motion::division, "1/2");
-                  v[Motion::shape] = 0.0f;
-                  v[Motion::feedback] = 0.35f / Motion::phaserFeedback;
-                  v[Motion::stereo] = 0.0f;
-              },
-              true },
-            { "feedback at its most, six notches",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::feedback] = 1.0f;
-                  v[Motion::notches] = 5.0f;
-                  v[Motion::spacing] = 0.8f;
-              } },
-            { "feedback at its least, one notch",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::feedback] = -1.0f;
-                  v[Motion::notches] = 0.0f;
-                  v[Motion::spacing] = 0.2f;
-                  v[Motion::rate] = 4.0f;
-              } },
-            { "Safe Bass on, a Mix below full",
-              [] (std::vector<float>& v)
-              {
-                  v[Motion::safeBass] = 150.0f;
-                  v[Motion::feedback] = 0.4f;
-                  v[Motion::mix] = 0.35f;
-              } },
+              { { "notches", "2" },
+                { "frequency", 700.0f },
+                { "depth", 0.75f },
+                { "sync", 1.0f },
+                { "division", "1/2" },
+                { "rate", 0.5f },
+                { "shape", "Sine" },
+                { "feedback", 0.35f },
+                { "spacing", 0.5f },
+                { "stereo", 0.0f },
+                { "safeBass", 20.0f },
+                { "mix", 1.0f } } },
+            { "Deep Phase",
+              { { "notches", "4" },
+                { "frequency", 900.0f },
+                { "depth", 0.8f },
+                { "sync", 1.0f },
+                { "division", "1 bar" },
+                { "rate", 0.5f },
+                { "shape", "Sine" },
+                { "feedback", 0.4f },
+                { "spacing", 0.6f },
+                { "stereo", 0.5f },
+                { "safeBass", 20.0f },
+                { "mix", 1.0f } } },
+            { "Resonant Jet",
+              { { "notches", "6" },
+                { "frequency", 1200.0f },
+                { "depth", 1.0f },
+                { "sync", 1.0f },
+                { "division", "2 bars" },
+                { "rate", 0.5f },
+                { "shape", "Triangle" },
+                { "feedback", 0.55f },
+                { "spacing", 0.5f },
+                { "stereo", 0.3f },
+                { "safeBass", 120.0f },
+                { "mix", 1.0f } } },
+            { "Slow Swirl",
+              { { "notches", "3" },
+                { "frequency", 600.0f },
+                { "depth", 0.9f },
+                { "sync", 1.0f },
+                { "division", "4 bars" },
+                { "rate", 0.5f },
+                { "shape", "Sine" },
+                { "feedback", 0.2f },
+                { "spacing", 0.5f },
+                { "stereo", 0.5f },
+                { "safeBass", 20.0f },
+                { "mix", 0.8f } } },
+            { "Stereo Spin",
+              { { "notches", "2" },
+                { "frequency", 1000.0f },
+                { "depth", 0.7f },
+                { "sync", 1.0f },
+                { "division", "1 bar" },
+                { "rate", 0.5f },
+                { "shape", "Sine" },
+                { "feedback", 0.25f },
+                { "spacing", 0.5f },
+                { "stereo", 1.0f },
+                { "safeBass", 20.0f },
+                { "mix", 1.0f } } },
+            { "running free, one notch, the feedback at its least, a Mix below full",
+              { { "notches", "1" },
+                { "frequency", 2500.0f },
+                { "depth", 0.4f },
+                { "sync", 0.0f },
+                { "division", "1 bar" },
+                { "rate", 4.0f },
+                { "shape", "Triangle" },
+                { "feedback", -0.85f },
+                { "spacing", 0.2f },
+                { "stereo", 0.7f },
+                { "safeBass", 20.0f },
+                { "mix", 0.6f } } },
         };
 
-        for (const auto& setting : settings)
-            checkMode<devices::Phaser> (Motion::Mode::phaser, setting, Motion::getPhaserValues);
+        checkModeSettings<devices::Phaser> (Motion::Mode::phaser, 0.85f, 0.5f, settings);
     }
 }
 
@@ -467,6 +682,156 @@ TEST_CASE ("Motion: a change of mode fades out and in over 10 ms without a click
     {
         for (int i = changes[0] + fadeLength - 1; i < changes[0] + fadeLength + 1; ++i)
             CHECK (large.getSample (channel, i) == doctest::Approx (sound[(size_t) i]).epsilon (1.0e-4));
+    }
+}
+
+TEST_CASE ("Motion: the level holds through a change of mode, within 1 dB where the effect is in phase with the sound")
+{
+    // A low sine through Chorus mode at a Mix of 50 %, its copy 0.2 ms behind (a few degrees of the sine's cycle, so in phase
+    // with it), changed to Flanger, whose copy is as close: the level, read over each cycle of the sine through the change,
+    // within 1 dB of where it was before. Fed the sound faded by the fade's gain and then faded by it again, the effect would
+    // play 1 - g + g squared of it, 2.5 dB down at the fade's middle.
+    constexpr double hertz = 200.0;
+    constexpr int cycle = 240, changeAt = 12288, fadeLength = 480, blockSize = 512;
+    const auto sound = phazite::test::makeTone (hertz, changeAt + 8 * fadeLength, usualRate);
+    auto values = getMotionDefaults (Motion::Mode::chorus);
+    values[Motion::delay] = 0.2f;
+    values[Motion::depth] = 0.0f;
+    REQUIRE (values[Motion::mix] == doctest::Approx (0.5f));
+
+    const auto out = phazite::test::playThroughRunner (Motion::info, std::make_unique<Motion>(), values, sound, usualRate, blockSize,
+                                                       [] (int block, std::vector<float>& v)
+                                                       {
+                                                           if (block * blockSize == changeAt)
+                                                               v[Motion::mode] = (float) Motion::Mode::flanger;
+                                                       });
+
+    // A sine's amplitude from its RMS over one cycle from a sample, on the left.
+    const auto levelAt = [&out] (int from)
+    {
+        auto energy = 0.0;
+
+        for (int i = from; i < from + cycle; ++i)
+            energy += (double) out.getSample (0, i) * (double) out.getSample (0, i);
+
+        return std::sqrt (2.0 * energy / cycle);
+    };
+
+    const auto before = levelAt (changeAt - 4 * cycle);
+    REQUIRE (before > 0.4); // the sound and its copy in phase: about as loud as the sound (0.5)
+    auto furthest = 0.0;
+    auto where = 0;
+
+    for (int from = changeAt - cycle; from < changeAt + 4 * fadeLength; from += 4)
+    {
+        if (const auto off = std::abs (phazite::test::inDecibels (levelAt (from) / before)); off > furthest)
+        {
+            furthest = off;
+            where = from;
+        }
+    }
+
+    INFO ("the level " << furthest << " dB off what it was, over the cycle from sample " << where);
+    CHECK (furthest < 1.0);
+}
+
+TEST_CASE (
+    "Motion: a change of mode while the song plays, in time with it, is the same in any blocks, the new mode's LFO where the song puts it")
+{
+    // Sync on and the song playing: the LFO's phase comes from where the song is. The mode changes at a block's start in blocks
+    // of 512, so that the fade-out (480 samples) ends in the middle of one, where Motion plays the rest of the block as a
+    // block of its own with the song moved on to where it starts; in blocks of 32 the fade-out ends at a block's end.
+    constexpr int changeAt = 24576, settled = changeAt + 4800; // 100 ms after the change
+    const auto sound = makeStereoSound ((int) usualRate);
+
+    for (const auto newMode : { Motion::Mode::flanger, Motion::Mode::phaser })
+    {
+        CAPTURE ((int) newMode);
+        auto values = getMotionDefaults (Motion::Mode::chorus);
+        values[Motion::sync] = 1.0f;
+        values[Motion::division] = choiceOf (Motion::info, Motion::division, "1/4");
+        values[Motion::depth] = 0.8f;
+        const auto change = [newMode] (int start, std::vector<float>& v)
+        {
+            if (start == changeAt)
+                v[Motion::mode] = (float) newMode;
+        };
+
+        const auto small = playStereo (Motion::info, std::make_unique<Motion>(), values, sound, 32, true, change);
+        const auto large = playStereo (Motion::info, std::make_unique<Motion>(), values, sound, 512, true, change);
+        CHECK (largestDifference (small, large) < 1.0e-6f);
+        CHECK (largestDifference (large, sound, changeAt) > 1.0e-3f); // the new mode plays
+
+        // As a Motion in the new mode all along plays, once the fade is over and the new engine's lines have filled: its
+        // sweep where the song puts it, not where it would be had it started with the change.
+        auto allAlong = values;
+        allAlong[Motion::mode] = (float) newMode;
+        const auto along = playStereo (Motion::info, std::make_unique<Motion>(), allAlong, sound, 512, true);
+        CHECK (largestDifference (large, along, settled) < 1.0e-4f);
+    }
+}
+
+TEST_CASE ("Motion's Flanger and Phaser pictures draw what it plays at the Mix set, and repaint when the Mix moves")
+{
+    constexpr double rate = 48000.0;
+    const auto lowestAndHighest = [] (const std::function<double (double)>& magnitude)
+    {
+        auto lowest = 1.0e9, highest = 0.0;
+
+        for (auto hertz = 20.0; hertz < 20000.0; hertz *= 1.01)
+        {
+            lowest = std::min (lowest, magnitude (hertz));
+            highest = std::max (highest, magnitude (hertz));
+        }
+
+        return std::pair { phazite::test::inDecibels (lowest), phazite::test::inDecibels (highest) };
+    };
+
+    // The phaser without feedback at a Mix of 100 %: its all-pass sections alone, flat. At 50 % its engine's response, with
+    // its notches.
+    auto values = getMotionDefaults (Motion::Mode::phaser);
+    REQUIRE (values[Motion::feedback] == doctest::Approx (0.0f));
+    values[Motion::mix] = 1.0f;
+    const auto [flatLowest, flatHighest] =
+        lowestAndHighest ([&] (double hertz) { return Motion::getPhaserMagnitude (values, 800.0, hertz, rate); });
+    CHECK (std::abs (flatLowest) < 0.1);
+    CHECK (std::abs (flatHighest) < 0.1);
+
+    values[Motion::mix] = 0.5f;
+    CHECK (lowestAndHighest ([&] (double hertz) { return Motion::getPhaserMagnitude (values, 800.0, hertz, rate); }).first < -30.0);
+
+    for (const auto hertz : { 100.0, 800.0, 3000.0 })
+        CHECK (Motion::getPhaserMagnitude (values, 800.0, hertz, rate)
+               == doctest::Approx (devices::Phaser::getMagnitude (Motion::getPhaserValues (values), 800.0, hertz, rate)));
+
+    // The flanger's notches, as deep as they go at 50 %, shallower at 25 %: a quarter of the copy against three of the sound.
+    auto flanger = getMotionDefaults (Motion::Mode::flanger);
+    const auto deepest = [&] (float mix)
+    {
+        flanger[Motion::mix] = mix;
+        return lowestAndHighest ([&] (double hertz) { return Motion::getFlangerMagnitude (flanger, 2.0, hertz, rate); }).first;
+    };
+
+    const auto atHalf = deepest (0.5f), atQuarter = deepest (0.25f);
+    CHECK (atHalf < -30.0);
+    CHECK (atQuarter == doctest::Approx (phazite::test::inDecibels (0.5)).epsilon (0.05));
+    CHECK (atQuarter > atHalf + 20.0);
+
+    // Each picture repaints when the Mix moves, nothing else turned.
+    Song song;
+    phazite::ui::MotionEditor editor (song.getDevice());
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+
+    for (const auto mode : { Motion::Mode::flanger, Motion::Mode::phaser })
+    {
+        CAPTURE ((int) mode);
+        clickMode (editor, mode);
+        tick();
+        phazite::test::dispatchPendingMessages();
+        window.takeRepaintedArea();
+        song.set ("mix", mode == Motion::Mode::flanger ? 0.8f : 0.3f);
+        tick();
+        CHECK_FALSE (window.takeRepaintedArea().isEmpty());
     }
 }
 

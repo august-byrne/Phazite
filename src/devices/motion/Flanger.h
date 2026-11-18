@@ -19,6 +19,7 @@
 
 #include <array>
 #include <atomic>
+#include <complex>
 #include <span>
 
 namespace phazite::devices
@@ -50,7 +51,10 @@ public:
     // the shortest, to 1 at the top, the Delay itself): for its editor and tests.
     static double getSweptDelay (std::span<const float> parameters, float lfoValue);
 
-    // Its response at a frequency with the copy lagging so many milliseconds, as a gain: for its editor and tests.
+    // Its response at a frequency with the copy lagging so many milliseconds, what it plays (the sound and its copy, half and
+    // half), whatever its mix: as a complex gain, for Motion's picture of it at Motion's Mix (Motion::getFlangerMagnitude()),
+    // and as a gain, for tests.
+    static std::complex<double> getResponse (std::span<const float> parameters, double milliseconds, double frequency, double sampleRate);
     static double getMagnitude (std::span<const float> parameters, double milliseconds, double frequency, double sampleRate);
 
     // How far the copy lags each side now, in milliseconds, and the LFO's phase (0 to 1), once a block

@@ -78,8 +78,9 @@ half at 50 %, its default, and only the effect at 100 %.
 - **Flanger and Phaser:** their engines put out the sound and its copy already mixed, half and half, `y`. Motion puts
   out `2 y - x`, `x` being the dry copy its runner mixes back in (after Safe Bass's split, so that the two stay in
   phase): at 50 % Mix the runner plays `0.5 x + 0.5 (2 y - x) = y`, the full flanger or phaser, and a mode switched at
-  the default Mix sounds whole. Above 50 % the copy outweighs the sound, which deepens the notches into peaks of the
-  copy alone at 100 %.
+  the default Mix sounds whole. Below 50 % the notches are shallower, as less of the copy meets the sound; above it the
+  copy outweighs the sound and they grow shallower again, until at 100 % only the copy plays: without feedback, the
+  phaser's all-pass sections alone, flat, and the flanger's swept copy alone, a vibrato.
 
 ## Switching modes
 
@@ -87,10 +88,12 @@ The Mode is a choice parameter like any other: automation moves it, and Undo put
 fades out over 10 ms toward the sound as it came in, the new mode's engine is reset (its lines empty, its LFO at the
 start of its cycle) and fades in over 10 ms, as the Reverb changes its Mode. What each engine is fed fades with it, so
 that no sound cut in at full level clicks in its lines; what it puts out and the dry copy for the Mix fade alike, so
-that at the bottom of the fade the sound passes untouched, at any Mix. The fade is counted in samples, so that it
-plays the same however the samples are cut into blocks. A mode asked for again as it fades out fades back in from
-where it was. The tail Motion reports, which its runner waits for before it lets it sleep, is the tail of the mode
-that plays.
+that at the bottom of the fade the sound passes untouched, at any Mix. Since what an engine plays is already faded with
+what it is fed, it is faded a second time only near the bottom (by four times the fade's gain, up to whole), so that
+the level holds through the change: where the effect is in phase with the sound, no more than 0.6 dB down. The fade is
+counted in samples, so that it plays the same however the samples are cut into blocks. A mode asked for again as it
+fades out fades back in from where it was. The tail Motion reports, which its runner waits for before it lets it
+sleep, is the tail of the mode that plays.
 
 ## How each mode works
 
@@ -122,10 +125,10 @@ a triangle at 0.5 Hz, the sides opposite.
 
 Each copy's share of the output is one over the square root of the number of voices, so that several copies together
 are as loud as one wherever they don't line up, which is most of the spectrum; in the deep bass, where they do, they
-are louder, which Safe Bass keeps out. What goes back into the line is the copies' average times the Feedback (90 % at
-the most, either way), so the loop never gains, and the output is scaled by the Feedback's square, so that the comb's
-peaks rise by as many decibels as what lies between them falls, whichever its sign. High Cut is a 12 dB an octave
-low-pass on what goes into the line.
+are louder, which Safe Bass keeps out. What goes back into the line is the copies' average times the Feedback (90 %
+of it at the knob's 100 %, either way), so the loop never gains, and the output is scaled by the Feedback's square, so
+that the comb's peaks rise by as many decibels as what lies between them falls, whichever its sign. High Cut is a
+12 dB an octave low-pass on what goes into the line.
 
 When Voices changes, the copies that play fade out where they are while a set of the new number fades in, so that no
 copy jumps to a new place.
@@ -150,9 +153,9 @@ has a Q of a half, which makes it two first-order stages alike, the classic desi
 added to the sound and the sum halved: where the copy is in phase the sound keeps its level, and where it is upside
 down, at the notches, nothing is left.
 
-The Feedback (85 % at the most, either way) sends the sections' output back into their input. The loop is solved
-within each sample: before the sections take a sample, each says what it would put out for any input (a gain and an
-offset), and the input that satisfies the loop is worked out from those, so there is no one-sample delay in the
+The Feedback sends the sections' output back into their input, 85 % of it at the knob's 100 %, either way. The loop is
+solved within each sample: before the sections take a sample, each says what it would put out for any input (a gain
+and an offset), and the input that satisfies the loop is worked out from those, so there is no one-sample delay in the
 feedback to detune the notches, and it can't run away.
 
 ## Its editor
@@ -168,9 +171,10 @@ every page.
 | Flanger | its picture; Sweep (Delay, Depth, large); LFO; Tone (Feedback); Stereo and Bass |
 | Phaser | its picture; Sweep (Frequency, Depth, large); LFO; Tone (Notches, Feedback, Spacing); Stereo and Bass |
 
-Each picture shows the mode's response over the spectrum of what Motion plays, the left side's lit and the right
-side's fainter, what comes in faint behind, and under it the LFO: one cycle of the sweep with a dot for each side's
-copy, and its rate. Each reads Motion's values through the same mapping to its engine's that plays them.
+Each picture shows the response of what Motion plays, the mode's effect mixed with the sound at the Mix set (so that it
+moves when the Mix does), the left side's lit and the right side's fainter, over the spectrum of what Motion plays,
+with what comes in faint behind, and under it the LFO: one cycle of the sweep with a dot for each side's copy, and its
+rate. Each reads Motion's values through the same mapping to its engine's that plays them.
 
 - **Chorus:** the comb that the copies make with the sound now, sliding as the copies sweep. Under it is a strip of
   the delay in milliseconds, drawn as a tape's heads: how far the sweep reaches and where each copy lags now, each
@@ -201,7 +205,8 @@ Dragging a dot moves both its values as one undo step, and a press anywhere puts
   in the deep bass, several voices are louder than one unless Safe Bass keeps the bass out.
 - The phaser's all-pass sections move once every 8 samples, not every sample, so a very fast, deep sweep moves in
   small steps; every section sits at the same frequency, with no modelled spread between stages and no barber-pole
-  mode; and its Feedback stops at 85 % either way, so it can't be pushed into self-oscillation.
+  mode; and its Feedback, -100 to +100 % on the knob, sends back at most 85 % of what the sections put out (the
+  knob's 100 %), so it can't be pushed into self-oscillation.
 - A change of Mode takes 20 ms, the effect passing the sound untouched at its middle: it is for switching between
   sections of a song, not for a sweep between two modes.
 

@@ -370,7 +370,7 @@ protected:
             g.drawVerticalLine (juce::roundToInt (frequencies.xFor (notch)), area.getY(), area.getBottom());
         }
 
-        // Each side's response: the right's faint, then the left's.
+        // Each side's response, what Motion plays at its Mix: the right's faint, then the left's.
         for (int channel = 1; channel >= 0; --channel)
         {
             if (channel == 1 && values[Motion::stereo] < 0.01f)
@@ -382,7 +382,7 @@ protected:
                                   [&] (float x)
                                   {
                                       const auto magnitude =
-                                          Flanger::getMagnitude (engine, milliseconds, frequencies.frequencyAt (x), rate);
+                                          Motion::getFlangerMagnitude (values, milliseconds, frequencies.frequencyAt (x), rate);
                                       return levels.yFor ((float) juce::Decibels::gainToDecibels (magnitude, (double) lowestGain - 1.0));
                                   });
             g.setColour (channel == 0 ? tint : tint.withAlpha (GraphTint::marker));
@@ -517,7 +517,8 @@ protected:
         g.setColour (tint.withAlpha (GraphTint::partCurve));
         g.fillRoundedRectangle ({ lowX, area.getBottom() - reachHeight - 2.0f, std::max (2.0f, highX - lowX), reachHeight }, 2.0f);
 
-        // Each side's response where the LFO has it now: the right's faint, then the left's, glowing down to the bottom.
+        // Each side's response where the LFO has it now, what Motion plays at its Mix: the right's faint, then the left's,
+        // glowing down to the bottom.
         for (int channel = 1; channel >= 0; --channel)
         {
             if (channel == 1 && values[Motion::stereo] < 0.01f)
@@ -528,7 +529,7 @@ protected:
                 graph::makeCurve (area,
                                   [&] (float x)
                                   {
-                                      const auto magnitude = Phaser::getMagnitude (engine, centre, frequencies.frequencyAt (x), rate);
+                                      const auto magnitude = Motion::getPhaserMagnitude (values, centre, frequencies.frequencyAt (x), rate);
                                       return levels.yFor ((float) juce::Decibels::gainToDecibels (magnitude, (double) lowestGain - 1.0));
                                   });
 
