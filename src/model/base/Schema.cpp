@@ -245,6 +245,13 @@ namespace schema
             return list;
         }
 
+        // Where the song stands in the project's versions: kept on PHAZITE, no change to it.
+        const IdentifierList& getVersionsProperties()
+        {
+            static const IdentifierList list { &versionsBranch, &versionsBase };
+            return list;
+        }
+
         // What isn't counted, by the type of the element it is on.
         struct Uncounted
         {
@@ -258,7 +265,7 @@ namespace schema
                 { &TRACK, { &getTrackViewProperties() } },
                 { &MASTER, { &getTrackViewProperties() } },
                 { &DEVICE, { &getDeviceViewProperties() } },
-                { &PHAZITE, { &getGridProperties(), &getPlayingProperties() } },
+                { &PHAZITE, { &getGridProperties(), &getPlayingProperties(), &getVersionsProperties() } },
             };
             return table;
         }

@@ -640,7 +640,7 @@ TEST_CASE ("Fuzz: a song's merge waiting, damaged, waits whole or not at all, an
 
                    auto& opened = *phazite::findSong (s.context);
                    juce::ignoreUnused (phazite::getClashes (s.context), phazite::getMergeProblem (s.context),
-                                       phazite::describeNextCommit (s.context));
+                                       phazite::describeNextCommit (withChangesIn (s.context)));
 
                    for (int clash = 0; clash < (int) phazite::getClashes (s.context).size(); ++clash)
                        phazite::chooseClash (s.context, clash, 2);

@@ -736,7 +736,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     // goes on into its parts.
     setWantsKeyboardFocus (true);
 
-    for (auto* label : { &emptyText, &roomText })
+    for (auto* label : { &emptyText, &roomText, &newerText })
     {
         label->setFont (juce::FontOptions (TextSize::small));
         label->setJustificationType (juce::Justification::topLeft);
@@ -797,6 +797,8 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     mergeButton.onClick = [this] { commands.invoke ("version.finishMerge"); };
     cancelButton.setButtonText ("Cancel");
     cancelButton.onClick = [this] { commands.invoke ("version.cancelMerge"); };
+    newerText.setTitle ("Newer versions");
+    newerButton.onClick = [this] { commands.invoke ("version.takeNewer"); };
 
     for (auto* list : { &changesList, &historyList, &localList, &undoList })
     {
@@ -828,8 +830,8 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
                                                              localSection.get(), &localList, &undoList })
         addAndMakeVisible (c);
 
-    for (auto* c :
-         std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText, undoSection.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText, &newerText,
+                                                             &newerButton, undoSection.get() })
         addChildComponent (c);
 
     refreshTooltips();
@@ -964,6 +966,8 @@ void VersionsView::refreshTooltips()
                               "named by what changed. Ctrl+Enter saves it");
     changesList.setTooltip ("What changed in the song since the last version, by track. A added, M modified, D deleted");
     doneButton.setTooltip (withShortcut (commands, "Lists the changes since the last version again", "version.showChanges"));
+    newerButton.setTooltip (
+        withShortcut (commands, "Brings the branch's newer versions into the song, as one undo step", "version.takeNewer"));
     mergeButton.setTooltip (withShortcut (commands, "Takes every line listed into the song, as one undo step", "version.finishMerge"));
     cancelButton.setTooltip (withShortcut (commands,
                                            "Cancels the merge: closes its list, taking nothing, or, once taken, makes the song what it "
@@ -1002,7 +1006,8 @@ juce::PopupMenu VersionsView::makeMoreMenu()
     versionMenu.addSeparator();
     addCommandItems (versionMenu, commands, { "version.bounceEach" });
     addCommandItems (changesMenu, commands, { "version.discardAll" });
-    addCommandItems (branchMenu, commands, { "version.pickBranch", "version.mergeBranch", "version.renameBranch", "version.deleteBranch" });
+    addCommandItems (branchMenu, commands,
+                     { "version.takeNewer", "version.pickBranch", "version.mergeBranch", "version.renameBranch", "version.deleteBranch" });
     menu.addSubMenu ("Version", versionMenu);
     menu.addSubMenu ("Changes", changesMenu);
     menu.addSubMenu ("Branch", branchMenu);
@@ -1364,12 +1369,12 @@ void VersionsView::refresh()
     const auto savingProject = isSavingProjectFolder (context);
     juce::String notice;
 
-    for (const auto& text :
-         { savingProject ? juce::String ("Saving the project: saving a version, merging and switching wait until it "
-                                         "is saved.")
-                         : juce::String(),
-           getReadingProblem (context), getHeadProblem (context), getBounceProblem (context), getRestoreProblem (context),
-           getMergeProblem (context), describeHistoryCheck (context), describeDivergence (context) })
+    for (const auto& text : { savingProject ? juce::String ("Saving the project: saving a version, merging and switching wait until it "
+                                                            "is saved.")
+                                            : juce::String(),
+                              getSaveProblem (context), getReadingProblem (context), getHeadProblem (context), getBaseProblem (context),
+                              getBounceProblem (context), getRestoreProblem (context), getMergeProblem (context),
+                              describeHistoryCheck (context), describeDivergence (context) })
         if (notice.isEmpty())
             notice = text;
 
@@ -1380,10 +1385,19 @@ void VersionsView::refresh()
                       juce::dontSendNotification);
     roomText.setVisible (roomText.getText().isNotEmpty());
 
+    // The branch's versions the song didn't grow from, said under Save Version, with the button that takes them in.
+    const auto newer = describeNewerVersions (context);
+    newerText.setText (newer, juce::dontSendNotification);
+    newerText.setVisible (newer.isNotEmpty());
+    newerButton.setButtonText (describeTakeNewer (context));
+    newerButton.setVisible (newer.isNotEmpty() && canTakeNewerVersions (context));
+
+    // The changes' row follows the version the song grew from.
     const auto branch = getCurrentBranch (context);
+    const auto base = getBaseVersion (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
     refreshHistoryRows();
-    refreshHistoryLines (branch.has_value() ? branch->head : juce::String());
+    refreshHistoryLines (base.has_value() ? base->id : branch.has_value() ? branch->head : juce::String());
     branchButton->setBranch (branch.has_value() ? branch->name : juce::String(),
                              branch.has_value() ? branch->colour : getPalette (*this).textMuted);
     branchButton->setVisible (branch.has_value());
@@ -1450,11 +1464,12 @@ void VersionsView::refresh()
     const auto saveKey = formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
                              .replace ("Return", "Enter");
     const auto next = describeNextCommit (context);
-    messageField->setTextToShowWhenEmpty (canResetToReadable (context)
-                                              ? juce::String ("Reset Branch to Last Readable Version to save a version")
-                                              : (next.isNotEmpty() ? next : juce::String ("Name this version")) + " (" + saveKey
-                                                    + " to save it" + onBranch + ")",
-                                          getPalette (*this).textMuted);
+    messageField->setTextToShowWhenEmpty (
+        canResetToReadable (context) ? juce::String ("Reset Branch to Last Readable Version to save a version")
+        : keeps && ! canSaveOnBranch (context)
+            ? (newerButton.isVisible() ? newerButton.getButtonText() : juce::String ("Create Branch")) + " to save a version"
+            : (next.isNotEmpty() ? next : juce::String ("Name this version")) + " (" + saveKey + " to save it" + onBranch + ")",
+        getPalette (*this).textMuted);
     messageField->setEnabled (keeps);
 
     saveButton.setEnabled (canSaveVersion (context));
@@ -1573,6 +1588,19 @@ void VersionsView::resized()
     saveMenuButton.setBounds (saveRow.removeFromRight (History::saveMenuWidth));
     saveRow.removeFromRight (1); // a hairline between the two parts
     saveButton.setBounds (saveRow);
+
+    // The branch's newer versions, said under it, and the button that takes them in, across the row.
+    if (newerText.isVisible())
+        newerText.setBounds (area.removeFromTop (History::noteHeight * 3)
+                                 .withTrimmedLeft (SideBar::fieldLeft - newerText.getBorderSize().getLeft())
+                                 .withTrimmedRight (SideBar::fieldRight));
+    else
+        newerText.setBounds ({});
+
+    if (newerButton.isVisible())
+        newerButton.setBounds (inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight));
+    else
+        newerButton.setBounds ({});
 
     // The room the history takes, at the foot of the view.
     if (roomText.isVisible())

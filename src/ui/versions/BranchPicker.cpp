@@ -368,6 +368,10 @@ void BranchPicker::updateRows()
                 std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
             row.about = head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now)
                                                : juce::String ("no versions yet");
+
+            // Why not, where the song's branch isn't in the folder (Create Branch above is the way on).
+            if (const auto whyNot = whyNotSwitchBranch (context); whyNot.isNotEmpty())
+                row.about = whyNot.upToFirstOccurrenceOf (":", false, false);
         }
 
         if (firstMatch < 0)

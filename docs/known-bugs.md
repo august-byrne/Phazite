@@ -88,6 +88,31 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   song opens and saves versions as ever. Phazite keeps no backward compatibility yet, so this is as decided; it is
   entered so that it is not a surprise. To fix, if the owner wants the old histories: a reader of the old layout that
   writes each old pack again in the new one, once, as a history opens.
+- **199. A merge can make two different items one where both lines hold another item under an ID a merge gave away.**
+  Two lines count their IDs on from where they parted, so each makes items with the same IDs; a merge gives what it
+  brings in a new ID where this line holds another item under it, and records that (RENUMBERED). A later merge of the
+  same line again is right. These are not:
+  - **A merge back** (one computer is enough): main merges idea-2, whose Pad (ID c) becomes a because main's Lead holds
+    c. idea-2 goes on, edits Pad, and merges main: main's records say the item at a is idea-2's c, but idea-2 holds no
+    record for it, and main's Lead at c meets idea-2's Pad at c: Pad and Lead become one item (Lead's name, devices and
+    clips on it, or clashes where idea-2 edited them), and Pad comes in again at a.
+  - **Two computers that each merged the same version**, then one merges the other's line: right since S4.5 where both
+    lines' own items collide the same way; wrong where only the other line's merge moved an item (a device on the merged
+    track that only one computer's own track also has; a track one computer's merge kept under its ID): the other line's
+    own item keeps the old ID and takes the merged item's identity, so that what named the one (sends, sidechains,
+    modulations, automation) names the other, edits land on the wrong item, and where this line edited the item its
+    untouched clips can go as "taken away" by the other side. Cancel Merge, Undo and the versions bring it back.
+  - **A note in a clip that was itself given a new ID:** a note's translation is looked up under the other line's clip,
+    so it never applies, and the other line's own note takes the merged note's place while that comes in again.
+  Why: `crossRenumbering()` (`src/model/versions/VersionHistory.cpp`) gives the other line's own item a new ID only where
+  this line has a record for that ID, and refuses a translation onto an ID the other song holds; `translateIDs()`
+  (`SongMerge.cpp`) keys notes by the clip before the items' translation. To fix, one rule: for each of the other line's
+  latest records "from becomes to" where its song holds `to` and the parting holds `from`: if its song also holds
+  `from` (its own item), that item gets a new ID first, whether or not this line has a record for `from`; then `to` is
+  translated to this line's ID for `from`, or to `from` itself, which is free then; notes keyed by the clip after the
+  items' translation. With tests for the merge back, the device on one side only, the track kept under its ID, and
+  the note in a renumbered clip, each checked with `checkSong` and for every item being there once with its own
+  content. Found by the three reviews of S4.5 (2026-11-18); the merge back is older than stage 4.
 
 ## Devices and playback
 

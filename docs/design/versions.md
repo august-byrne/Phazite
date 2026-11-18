@@ -27,7 +27,7 @@ history, a branch, a merge. A version can carry a bounce, so that it can be hear
 | A version off every branch offered 30 days by Recover Lost Versions..., with when and why it left | Built | S4.3 |
 | The store's packs joined by size, losing nothing | Built | S4.4 |
 | The store swept of what nothing names, older than 30 days | Built, off | Known bug 196: nothing is deleted yet |
-| The song tied to the version it grew from | Planned | S4.5 ([versions-cut.md](versions-cut.md)) |
+| The song tied to the version it grew from; its changes worked out in the background | Built | S4.5 ([versions-cut.md](versions-cut.md)) |
 | The playlist marking what changed | Planned | No roadmap step |
 | Staging, a version checked out on its own, a merge of some lines | Removed | S4.2 ([versions-cut.md](versions-cut.md)) |
 | Tags, stash, rebase, squash, cherry-pick, blame, bisect | Declined | Not needed by one person working alone |
@@ -40,8 +40,8 @@ history, a branch, a merge. A version can carry a bounce, so that it can be hear
   first save.
 - **Auto Save** keeps the project file up to date ([projects-saving-export.md](projects-saving-export.md)), so every
   change shows in the changes as it is made.
-- The status bar names the branch beside the save state, with a star while the song has changes since its last
-  version ("main*"). A click opens the branch picker.
+- The status bar names the branch beside the save state, with a star while the song has changes since the version it
+  grew from ("main*"). A click opens the branch picker.
 - The Versions icon in the activity bar carries a badge that counts the changed lines.
 
 ## The Versions view
@@ -71,8 +71,9 @@ heading. The layout is VS Code's Source Control view's; the words are a producer
 
 ### Changes
 
-**Changes** lists what the song holds now that the last version doesn't, a line for each track that changed, the
-master, and the song's own (its tempo, sections, chord lane and track order).
+**Changes** lists what the song holds now that the version it grew from doesn't (the branch's last, unless the branch has
+newer versions: below), a line for each track that changed, the master, and the song's own (its tempo, sections, chord
+lane and track order).
 
 - Each line says what changed in Phazite's own words ("volume, 12 notes"), with a letter: **A** added, **M**
   modified, **D** deleted; **C** marks a merge's conflict. The colours are VS Code's.
@@ -80,9 +81,69 @@ master, and the song's own (its tempo, sections, chord lane and track order).
 - A plug-in's settings count as changed only when the plug-in reported a change or one of its knobs moved. A
   plug-in's change is named by the parameters whose values differ.
 - A click on a line selects that thing in the song.
-- **Discard Changes** (`version.putBack`) makes a line what the last version has again; **Discard All Changes**
-  (`version.discardAll`) every line. Each is one undo step. A clip moved between tracks since ends where the last
-  version has it, once, whichever of the two tracks' lines is discarded.
+- **Discard Changes** (`version.putBack`) makes a line what the version the song grew from has again; **Discard All
+  Changes** (`version.discardAll`) every line. From that version, not the branch's newest: what the user discards is
+  their own changes; versions the branch has since are taken in apart (below), never slipped in by a discard. Each is
+  one undo step. A clip moved between tracks since ends where that version has it, once, whichever of the two tracks'
+  lines is discarded.
+- **Worked out in the background** (Off the message thread, below): the badge, the star and the list show the last
+  changes worked out, and follow an edit as soon as they are in. Save Version and Discard All Changes act on the song as
+  it is, not on that list: they are there while the song may have changes (some listed, or an edit since), Discard makes
+  the song the version's whatever the list said, and Save Version records the song as it is, named by what it changed,
+  worked out from its copy.
+
+### The song tied to its version
+
+The project file says which branch the song is on and which version it grew from (`versionsBranch` and `versionsBase` on
+the song: [project-format.md](../project-format.md)), and so do its autosave, its backups and the song left on a branch.
+The changes are worked out against that version, not the branch's newest: so work saved elsewhere since is never shown as
+removals of the song's, nor taken out by the next version.
+
+- **Kept right by every command, in the same step:** Save Version moves them to the version saved; Undo Last Version to
+  the version before; Create Branch to the new branch (from Now, the same version; from a version, that one); a switch to
+  the branch entered and the version its song grew from (its song left there says, else its last version); Reset Branch
+  to Last Readable Version to the version it resets to; a merge's version to it. Restore This Version and a line's restore
+  make the song a version's but leave it growing from where it was, as git's restore leaves HEAD: the next version follows
+  the branch's line, and the changes show what the restore took back. A merge taken, Cancel Merge, Discard and Recover
+  Lost Versions leave them. They are no change to the song (no star, no unsaved project): moved without an undo step, and
+  written into the project file at once while the song has no other unsaved change (with the next save otherwise).
+- **The branch has newer versions** (another computer saved one; the project file came back from a backup or an older
+  autosave): the view says so under Save Version ("'main' has 2 newer versions than the song grew from...") with one
+  button, **Take the Newer Versions** (`version.takeNewer`): where the song has no changes of its own, the song becomes
+  the branch's last version, which it grows from then, as one undo step whose Undo takes both back; with changes of its
+  own, **Merge the Newer Versions**, the merge that exists, from the version the song grew from, its version then
+  following both lines.
+- **Save Version meanwhile:** where the newer versions are on another computer's record of the branch, a version saved
+  goes its own way beside them, which loses nothing: the branch shows the two lines to merge again, as any branch that
+  went its own way on two computers. Where only this computer's record holds them (a project file put back from a backup
+  older than versions saved here since), a version saved on top of the song's own would leave them on no branch: Save
+  Version is greyed, saying why, until they are taken in, or Create Branch goes on from the version the song grew from.
+- **A version the names point at that can't be read** (damaged, or its pieces not synced yet): the changes are worked
+  out against the branch's last version, which the song grows from then, and the view says so once; nothing of the song is
+  lost. The same after an Undo or a Redo of Take the Newer Versions that moves it to a version that can't be read.
+- **A branch the names point at that the folder hasn't** (another computer's record of it not synced yet, or deleted, or
+  a backup from before it was): the song keeps growing from its own version where that reads (so another branch's work
+  never lists as removals), its names stay as they are, the view says so, and no version is saved meanwhile, which would
+  land on the branch the folder names and take that branch's work out; **Create Branch** goes on from the song on a branch
+  of its own. Where its version doesn't read either, the changes are against the folder's branch's last version, and the same
+  holds; and a switch to another branch waits for it too, as it would leave the song on that branch. A song without names (a
+  first version not saved yet, a DAWproject's song) grows from its branch's last version.
+- **A version the branch moved back from** (Undo Last Version, or Reset Branch, on this computer, the project file not
+  saved after: Don't Save at the close): the file names a version that follows the branch's last; the song grows from the
+  branch's last version as it opens, and the work of the one undone shows as its changes, as Undo Last Version left it.
+- **Nothing saved for no change:** Save Version is there while the song may have changes (an edit since the last list),
+  and a version of a song that holds none since the version it grew from (an edit and its Undo, Discard All Changes, the
+  version restored) isn't written: the view says "Nothing changed since the last version.", and the name and note typed
+  for it stay in their fields, as they do when a version's write fails. A merge's version is saved
+  however little it changes; one of a version that follows the song's own already, and gave nothing a new ID (Merge the
+  Newer Versions', or a branch merged that was ahead of the song), follows that version alone, as the graph needs no other.
+- **A version saved as the project closed** (its write finishes after the close: The store, below), whose names the file
+  couldn't take: the project opens growing from that version where the song is that version's as it is, and from the one
+  its names say otherwise.
+- **A switch** keeps the song left on the branch entered named by that branch's record until the project file holds the
+  song after it: a save that fails leaves both branches' songs as they were.
+- **During a drag** no round of the changes runs: one runs once it is committed or put back, and at most one a tick
+  (250 ms) otherwise.
 
 ### History
 
@@ -115,7 +176,8 @@ master, and the song's own (its tempo, sections, chord lane and track order).
   the branches, the current one ticked, each with its last version; typing narrows them or names a new one.
 - **Switching to a branch** (`version.switchBranch`) makes the song the other branch's in place, with the fewest edits.
   What both branches have stays as it is: its plug-ins stay loaded and the song plays on. The branch left keeps its song
-  as it was, changes and view state included. The project is saved after, so that its file is the branch's song. It is
+  as it was, changes and view state included. The project is saved after, so that its file is the branch's song; the
+  branch entered lets go of the song left on it only once that save is done, so a save that fails loses neither. It is
   not an undo step, and the undo history starts again. Not while the song records or renders.
 - **A branch is named as typed**, spaces and all (`toBranchName()`): trimmed, each run of white space one space, no
   control characters. A branch is stored by its id, so its name needs nothing more to be safe. No two branches share a
@@ -158,9 +220,14 @@ master, and the song's own (its tempo, sections, chord lane and track order).
 - **IDs never collide.** Two branches both count their IDs on from where they parted, so a merge gives new IDs to
   what the other branch added wherever this branch has something else with them, and a later merge of that branch
   knows them again by its version's record, even where the other branch, on another computer, gave one of those IDs
-  to something it made since. No ID is in the song twice after a merge, a restore or a discard, and every one of them
-  leaves the song's count of IDs past every ID it holds.
-- **The version that finishes it** has both lines as its parents, and is named for what it merged ("Merge idea-2",
+  to something it made since. Where another computer merged the same version and gave what it added other IDs, a later
+  merge of that computer's line takes them back to this line's by both merges' records, so an item both took in is one item,
+  and an item that line made under an ID its merge gave away stays its own, with an ID of this line's; the version of that
+  merge records both, so that a merge after it knows them again.
+  No ID is in the song twice after a merge, a restore or a discard, and every one of them leaves the song's count of IDs
+  past every ID it holds.
+- **The version that finishes it** has both lines as its parents (the one merged alone where it follows the song's own
+  already and the merge gave nothing a new ID), and is named for what it merged ("Merge idea-2",
   or "Merge "Verse 2"" for a version that isn't a branch's last) unless a name is typed.
 - **Cancel Merge** (`version.cancelMerge`) closes the list, taking nothing; once the merge is taken and waits for its
   version, it makes the song what it was before, as one undo step, the song as it is kept in Local History first (the
@@ -346,6 +413,18 @@ The history is the `Versions` folder beside the project file. Its format is writ
   project closes is written after it, on the history's thread, which the close doesn't wait for; the project opened
   again (or another history of the same folder) reads the folder only after it, and quitting waits for it behind a
   window that says what is being finished. What the history reads is let go.
+- **The changes, worked out there too** (S4.5; `ChangesWorker.h`): the song's notifications mark what changed (a track,
+  the master, an automation curve, the song's own, the tracks' order and names); a round copies only those parts on the
+  message thread (a track's own parts, without the tracks in a folder; a light outline of the song's own and its tracks'
+  names and order) and the knobs of the plug-ins in them, and the history's thread compares them with the version's song,
+  which it keeps between rounds with what each part compared to, and hands back the whole list, once a turn of the message
+  loop. A track that didn't change is never copied or compared again; the message thread compares nothing. One round at a
+  time: what changes meanwhile goes into the next, and a list of another version's (the song switched, a version saved,
+  Undo Last Version) is dropped. After Save Version the changes are none, known without a round where the song didn't change
+  while it was saved; a switch to a branch's last version, the same. Where everything must be compared again (the project
+  opened, a switch to a song left on a branch, a plug-in joining), the whole song is copied once. Compare with the Song's
+  list is worked out alike, against the version compared. Local History's snapshot as the project opens waits for the first
+  list, and every snapshot checks on the history's thread that the song differs from its version.
 - **Commands that read whole songs read them there too** (known bug 126): a switch to another branch, Create Branch from a
   version, Import DAWproject back as a branch, Merge's list, Restore This Version and Restore from This Version, Compare
   with the Song, Restore from Local History, Undo Last Version and Reset Branch to Last Readable Version read on the
@@ -426,7 +505,6 @@ comes back as a branch from that version, showing only what the other DAW change
 
 ## Not built
 
-- What S4.5 builds next ([versions-cut.md](versions-cut.md)): the song tied to the version it grew from: Planned.
 - The playlist marking the clips and tracks that changed since the last version: Planned.
 - A branch's colour chosen by hand: Planned.
 - One undo for every versions operation (a switch, a deleted branch): Planned.
@@ -435,7 +513,6 @@ comes back as a branch from that version, showing only what the other DAW change
 - Backup to a folder of the user's choosing, a cloud copy, share links with comments, and working together on
   branches: Planned.
 - Tags, stash, rebase, squash, cherry-pick, blame and bisect: Declined.
-- A benchmark of saving a version and of the changes list on a 100-track song: Planned (S4.5).
 - Letting go of what nothing names (known bug 196), built and tested but off in the product (`sweepLetsGo`,
   `StoreSweep.h`): the sweep leaving out each piece of this computer's own that nothing names and that it wrote more than
   30 days before the keeping time, at most a week's worth at one open, with the bounces and this computer's edited
@@ -448,6 +525,11 @@ comes back as a branch from that version, showing only what the other DAW change
   - **One computer id per machine:** an id carried to a second machine (a roaming profile, a restored backup) would let
     one computer's sweep take what the other needs; binding the id to the machine must keep every existing install's
     id, its songs left on branches and its Local History.
+- A version saved over newer versions only this computer holds (a project file put back from a backup), as a line of its
+  own kept on a branch of its own: Not built; Save Version is greyed then, and Create Branch goes on from the song's
+  version.
+- Noticing another computer's newer versions while the project is open: Not built; they show as the project opens again,
+  and a version saved meanwhile goes its own way beside them, losing nothing.
 
 ## In the code
 
@@ -456,7 +538,8 @@ comes back as a branch from that version, showing only what the other DAW change
   History.
 - `src/model/versions/internal/VersionStore.h`, `PieceStore.h`, `SongPieces.h`: the folder, the packs and the pieces;
   `StoreSweep.h`: the sweep (its letting go off) and each computer's copy (off with it).
-- `src/model/versions/internal/SongDiff.h`: what differs between two songs.
+- `src/model/versions/internal/SongDiff.h`: what differs between two songs; `ChangesWorker.h`: the changes of the open
+  song worked out on the history's thread from what changed.
 - `src/model/versions/internal/ApplySong.h`: the song made like another with the fewest edits (`makeSongLike()`,
   `makeTrackLike()`, `makeSongTheSame()`).
 - `src/model/versions/internal/SongMerge.h`: the three-way merge of every line (`mergeSongs()`).
@@ -467,4 +550,6 @@ comes back as a branch from that version, showing only what the other DAW change
   `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
   `VersionsHearingTests.cpp` (and A/B), `VersionsKeptWholeTests.cpp`, `VersionsRecoveryTests.cpp` (the 30 days),
   `VersionsSweepTests.cpp` (the sweep, with its letting go on but for the product's own test, and Verify History),
-  `VersionsTwoComputersTests.cpp` (each computer's copy, clocks, Verify's limits), `VersionStoreTests.cpp`, `tests/golden/format/`.
+  `VersionsTiedTests.cpp` (the song tied to its version), `VersionsChangesTests.cpp` (the changes worked out in the
+  background), `VersionsTwoComputersTests.cpp` (each computer's copy, clocks, Verify's limits), `VersionStoreTests.cpp`,
+  `tests/golden/format/`.

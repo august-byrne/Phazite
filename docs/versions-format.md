@@ -32,7 +32,7 @@ Versions/
   pieces/<name>.pack                 pieces, in packs (section 3)
   branches/<branch>/<computer>.xml   a branch as one computer last had it (section 6); only that computer writes it
   messages/<computer>.xml            versions' messages as one computer edited them (section 6); only it writes it
-  current                            the id of the branch the project file is (one line, no end of line needed)
+  current                            the id of the branch the project file is on, where its song doesn't say (one line, no end of line needed)
   local/<computer>/files.xml         this computer's cache of its audio files' hashes (section 8)
   local/<computer>/working.xml       the songs this computer left on branches when it switched away (section 6)
   local/<computer>/logs/<branch>     each move of a branch's last version on this computer (section 6)
@@ -184,8 +184,12 @@ the messages it edited in `messages/<computer>.xml`, a `MESSAGES` element with a
 (`commit`), its `name` and `note` as they are now (either empty: a version without a name is named by its `summary`), and
 when they were set (`changed`). Of every computer's, the newest names the version, in place of its record's name and note.
 
-Where `current` names no branch, the branch made first is the current one: the branch whose oldest version (by `saved`)
-is the oldest.
+The song says which branch it is on and which version it grew from (`versionsBranch` and `versionsBase` on `PHAZITE`:
+[project-format.md](project-format.md), section 3), which go with it into every file it is saved into; `current` names the
+branch only where the song doesn't (a song without them, or naming a branch the folder hasn't). Where `current` names no
+branch either, the branch made first is the current one: the branch whose oldest version (by `saved`) is the oldest. The
+song's changes are worked out against the version it grew from: where the branch has newer versions, they are versions
+the song doesn't hold yet, never changes taken out of it.
 
 **This computer's own.** `local/<computer>/working.xml` is a `WORKING` element with a `LEFT` for each branch this
 computer switched away from with a song of its own on it: the `branch` and the `song` (a song piece, view state
@@ -287,6 +291,18 @@ parting whose merged-in version the other line follows, all at once, so that the
   to one of theirs, on a computer whose count never reached this line's) gets a new ID of this side's too, in both songs,
   and the merge's version records it with the others (`RENUMBERED`), so that a later merge translates it alike.
 
+Where the other line's own merges gave anew what both lines took in from a version they both merged (two computers each
+merged the same version, and gave an item of it different IDs), the other side's song is translated first, before the
+records above, through those merges' records (the latest for each `from`, of the IDs its song holds):
+- each ID that line gave such an item is made this line's: the ID this line's latest merge gave the same `from` (for a
+  note, in the same clip), else the `from` itself, as the merged version has it; not where the other side's song holds
+  that ID already for something else (for a note, in that clip); and to itself (`to>to`) where it is that ID already;
+- an item of the other line's own under an ID one of its merges gave anew (a `from` of theirs), which the records above
+  would translate as the parting's item it isn't, gets a new ID of this side's, so that it stays that line's addition;
+- the targets of the first never count as IDs of either song that one of the records above is translated to.
+The merge's version records these with the others (`RENUMBERED`). Where they aren't one to one, the crossings are left out
+and the new IDs kept, as an ID no item has can never make two items one.
+
 A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, or one another history wrote) is left out.
 
 **A merge waiting for its version** (git's `MERGE_HEAD`) is part of the song, so that every file the song is written into
@@ -295,9 +311,9 @@ A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, 
 version as the merge was taken, each a version's id; `before` is the song as it was before the merge, a song piece (view
 state included) that Cancel Merge brings back. A merge takes every line the other line changed. `chosen` has a digit
 for each conflict, in the merge's order of them (`0` the parting's value, `1` this branch's, `2` the other line's);
-`renumbered` are the IDs it gave anew, as its version will record them, and `translated` those the two songs were
-translated through before it, each `from>to`, or for a note `<its clip's group>/from>to`, separated by commas. Nothing is
-written into it after it is taken.
+`renumbered` are the IDs it gave anew, as its version will record them, `translated` those the two songs were
+translated through before it, and `crossed` those the other line's song was translated through before that (above), each
+`from>to`, or for a note `<its clip's group>/from>to`, separated by commas. Nothing is written into it after it is taken.
 
 It waits until its own version finishes it: a version of the branch's line whose second parent is `version`, whose first
 parent follows `head`, and whose `RENUMBERED` holds every one of `renumbered`. Its version follows the branch's last

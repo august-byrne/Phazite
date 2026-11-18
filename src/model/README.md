@@ -210,9 +210,10 @@ The project's versions ([docs/design/versions.md](../../docs/design/versions.md)
 | `internal/PieceStore.h`, `internal/VersionStore.h` | The pieces, kept in packs in the project's Versions folder, with each computer's record of its branches and their logs, as [docs/versions-format.md](../../docs/versions-format.md) writes them down for other tools; and the versions' clock (`getVersionsTime()`), which tests set. |
 | `internal/StoreSweep.h` | The store swept as a history opens: this computer's own packs joined by size, keeping every piece; another computer's packs are never touched. Its letting go of what nothing names (older than 30 days, with the bounces of the versions that go) and each computer's copy of what its history names (`adoptVersions()`) are built but off in the product (`sweepLetsGo`; known bug 196). |
 | `internal/SongDiff.h` | What differs between two songs, by track, in Phazite's own words. |
+| `internal/ChangesWorker.h` | The open song's changes against the version it grew from (or one compared with it), worked out on the history's thread from copies of the parts the song's notifications said changed, a round at a time. |
 | `internal/ApplySong.h` | The song made like a version, or a line of it, with the fewest edits. |
 | `internal/SongMerge.h` | The three-way merge of two lines by IDs, with its clashes. |
-| `internal/VersionHistory.h` | The open song's history, which the project context makes for each song: its branches and the merge being made, with Verify History and Recover Lost Versions, Undo Last Version, Delete Branch, the versions' names edited beside them, and Local History. |
+| `internal/VersionHistory.h` | The open song's history, which the project context makes for each song: the branch the song is on and the version it grew from, which the song says (`versionsBranch`, `versionsBase`) and the history keeps right; its branches and the merge being made, with Verify History and Recover Lost Versions, Undo Last Version, Delete Branch, the versions' names edited beside them, and Local History. |
 | `VersionsModel.h` | What the UI reaches, by plain values and IDs. |
 
 ## playback/

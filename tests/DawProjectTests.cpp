@@ -812,7 +812,7 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     CHECK (phazite::getCurrentBranch (s.context)->name == "idea-2");
 
     // Those two changes, and nothing else: the rest as it was, to the bit.
-    const auto changes = phazite::getChangesSinceLastVersion (s.context);
+    const auto changes = phazite::getChangesSinceLastVersion (withChangesIn (s.context));
     juce::String listed;
 
     for (const auto& change : changes)

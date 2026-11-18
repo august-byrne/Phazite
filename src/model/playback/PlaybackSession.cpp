@@ -113,9 +113,9 @@ void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueT
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // Where playback starts is the transport's (movePlayhead() locates the engine itself), and view state is how the song
-    // shows: nothing a plan holds.
-    if ((tree == songState && property == schema::playStart) || isViewState (tree, property))
+    // Where playback starts is the transport's (movePlayhead() locates the engine itself), view state is how the song shows,
+    // and where the song stands in its versions is the versions': nothing a plan holds.
+    if ((tree == songState && property == schema::playStart) || isViewState (tree, property) || schema::isVersionsProperty (tree, property))
         return;
 
     // A value set by hand plays at once, and an undo's or a redo's is what a pass writing it writes from then (known bug

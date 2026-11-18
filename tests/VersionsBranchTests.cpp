@@ -76,7 +76,7 @@ TEST_CASE ("New Branch from Now goes on with the song and its changes on a branc
 
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-6.0f));
-    CHECK (phazite::hasChangesSinceLastVersion (b.s.context)); // still since the version it was made from
+    CHECK (phazite::hasChangesSinceLastVersion (withChangesIn (b.s.context))); // still since the version it was made from
     const auto branches = phazite::getBranches (b.s.context);
     REQUIRE (branches.size() == 2);
     CHECK (branches[0].name == "main");
@@ -131,7 +131,7 @@ TEST_CASE ("Switching keeps each branch's song as it was left there, unsaved cha
                                       [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save); }));
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
-    CHECK (phazite::getChangesSinceLastVersion (b.s.context).size() == 1);
+    CHECK (phazite::getChangesSinceLastVersion (withChangesIn (b.s.context)).size() == 1);
     CHECK (phazite::getTrackIDs (*phazite::findSong (b.s.context)).size() == 3);
 
     // And main with Keys.
@@ -454,7 +454,7 @@ TEST_CASE ("Delete Branch takes another branch away, with the commits only it ha
 
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, recovered, b.s.save); }));
     CHECK (phazite::getChannelVolume (*phazite::findSong (b.s.context), b.drums) == doctest::Approx (-12.0f));
-    const auto changes = phazite::getChangesSinceLastVersion (b.s.context);
+    const auto changes = phazite::getChangesSinceLastVersion (withChangesIn (b.s.context));
     REQUIRE (changes.size() == 1);
     CHECK (changes[0].what == "volume");
 }
@@ -605,7 +605,7 @@ TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the fo
     b.s.reopen();
     REQUIRE (waitForVersionHistory (b.s.context));
     checkIDs (*phazite::findSong (b.s.context));
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (b.s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (withChangesIn (b.s.context)));
 }
 
 TEST_CASE ("A merge leaves out a send the other side added to a return this side deleted, with what modulated it")
@@ -741,7 +741,7 @@ TEST_CASE ("Undo after a merge takes the merge back with the song, Redo brings i
     // Undone: no merge waits, as git has none after a reset; redone, it waits again, as it was.
     phazite::undo (song);
     CHECK_FALSE (phazite::isMerging (b.s.context));
-    CHECK_FALSE (phazite::hasSomethingToCommit (b.s.context));
+    CHECK_FALSE (phazite::hasSomethingToCommit (withChangesIn (b.s.context)));
     phazite::redo (song);
     CHECK (phazite::isMerging (b.s.context));
     REQUIRE (phazite::getClashes (b.s.context).size() == 1);
@@ -944,7 +944,7 @@ TEST_CASE ("A switch reads on the history's thread, the window held meanwhile: n
     REQUIRE (waitForVersionHistory (b.s.context));
     CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
-    CHECK (phazite::getChangesSinceLastVersion (b.s.context).size() == 1);
+    CHECK (phazite::getChangesSinceLastVersion (withChangesIn (b.s.context)).size() == 1);
 
     // Again, to its end: the hold goes once the song is main's.
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, main, b.s.save); }));
@@ -962,7 +962,8 @@ TEST_CASE ("A switch keeps on the branch it leaves what a plug-in changed in the
     // change, which comes in while the window is held), it is split again as it is when the other is taken in.
     Branches b;
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
-    keepVersion (b.s.context, "Same");
+    b.s.setVolume (b.bass, -2.0f); // a version records a change (one of none is refused)
+    keepVersion (b.s.context, "Bass down");
     const auto main = findBranch (b.s.context, "main");
     REQUIRE (phazite::switchBranch (b.s.context, main, b.s.save));
     b.s.setVolume (b.drums, -4.0f); // as a change that comes in while it reads
@@ -980,6 +981,7 @@ TEST_CASE ("Create Branch from a commit leaves no branch behind when its switch 
     // Found in review (known bug 126's round): the branch was made and written before the switch read, and stayed when the
     // switch was cancelled.
     Branches b;
+    b.s.setVolume (b.bass, -2.0f); // a version records a change (one of none is refused)
     keepVersion (b.s.context, "Second");
     const auto before = phazite::getBranches (b.s.context).size();
 
@@ -1049,7 +1051,8 @@ TEST_CASE ("A switch made while the song changes splits and keeps the song left 
     // as it plays) sent the split and the write of the whole song left back onto the message thread.
     Branches b;
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
-    keepVersion (b.s.context, "Same");
+    b.s.setVolume (b.bass, -2.0f); // a version records a change (one of none is refused)
+    keepVersion (b.s.context, "Bass down");
     const auto splits = phazite::countSongsSplit();
     const auto writes = phazite::VersionStore::countSongsWritten();
 
@@ -1074,36 +1077,39 @@ TEST_CASE ("A switch whose records can't all be written leaves every branch's re
     // the record of the branch left, and the branch entered no longer named the song left there.
     Branches b;
     REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::newBranch (b.s.context, {}, b.s.save); }));
+    b.s.setVolume (b.bass, -2.0f); // a version records a change (one of none is refused)
     keepVersion (b.s.context, "Idea");
     b.s.setVolume (b.bass, -9.0f); // left on idea-2
     const auto idea = findBranch (b.s.context, "idea-2");
     REQUIRE (phazite::test::finished (b.s.context,
                                       [&] { return phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save); }));
 
-    for (const auto* failing : { "current", "branch" })
     {
-        CAPTURE (failing);
-
-        {
-            // The file named fails, as a full drive makes it: the current branch's, or the entered branch's record.
-            const phazite::WholeFileHook failure (
-                [failing, &idea] (const juce::File& file)
-                {
-                    return juce::String (failing) == "current" ? file.getFileName() != "current" : ! file.getFullPathName().contains (idea);
-                });
-            CHECK_FALSE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
-            CHECK (phazite::getReadingProblem (b.s.context).contains ("couldn't write"));
-        }
-
-        CHECK (b.current() == "main");
-
-        // What is on disk names the song left on idea-2 still: opened again, a switch there finds it.
-        b.s.reopen (false);
-        REQUIRE (waitForVersionHistory (b.s.context));
-        CHECK (b.current() == "main");
+        // The current branch's file fails, as a full drive makes it.
+        const phazite::WholeFileHook failure ([] (const juce::File& file) { return file.getFileName() != "current"; });
+        CHECK_FALSE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
+        CHECK (phazite::getReadingProblem (b.s.context).contains ("couldn't write"));
     }
 
-    REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
+    CHECK (b.current() == "main");
+
+    // What is on disk names the song left on idea-2 still: opened again, a switch there finds it.
+    b.s.reopen (false);
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (b.current() == "main");
+
+    // The entered branch's record isn't written by the switch: it names the song left there until the project file holds the
+    // song (VersionHistory::switchSaved()). Failing to be written then, it names it still, which loses nothing.
+    {
+        const phazite::WholeFileHook failure ([&idea] (const juce::File& file) { return ! file.getFullPathName().contains (idea); });
+        REQUIRE (phazite::test::finished (b.s.context, [&] { return phazite::switchBranch (b.s.context, idea, b.s.save); }));
+    }
+
+    CHECK (b.current() == "idea-2");
+    CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
+    b.s.reopen (false);
+    REQUIRE (waitForVersionHistory (b.s.context));
+    CHECK (b.current() == "idea-2");
     CHECK (b.volume (b.bass) == doctest::Approx (-9.0f));
 }
 

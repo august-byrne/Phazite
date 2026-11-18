@@ -15,7 +15,9 @@
          notes="Mix notes:&#10;turn the pad down"
          outline="golden"
          patternsKeepTheirSpeed="1"
-         punch="1">
+         punch="1"
+         versionsBase="$VERSION"
+         versionsBranch="$BRANCH">
   <AUTOMATION>
     <CURVE device="14"
            parameter="volume">

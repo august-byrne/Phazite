@@ -142,7 +142,10 @@ and nothing is listed in both.
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
 | The store swept of what nothing names any more: built, and off until it is sound ([known bug 196](known-bugs.md)); to be turned on for histories one computer alone has written | `src/model/versions/StoreSweep.cpp` | (M) | 4 | model-versions 7 |
-| The open song tied to the version it grew from | `src/model/versions/VersionHistory.cpp` | (M) | 4 | model-versions 9 |
+| Another computer's newer versions noticed while the project is open (today they show as it opens again; a version saved meanwhile goes its own way beside them) | `src/model/versions/VersionHistory.cpp` | M | — | S4.5 |
+| A version saved over newer versions that only this computer holds (a project file put back from a backup), as a line of its own; today Save Version is greyed there and Create Branch is the way on | `src/model/versions/VersionHistory.cpp` | S | — | S4.5 |
+| The comparison of the open song with its version on a thread of its own, so that the badge and the changes list don't wait behind Verify History or a version being written with a bounce | `src/model/versions/ChangesWorker.cpp` | S | 5 | S4.5 |
+| The benchmark of an edit's versions work on the 100-track song run in `windows-profile` and entered in performance.md (its debug numbers: 0.35 ms on the message thread, where the whole comparison took 550 ms) | `tests/Benchmarks.cpp` | S | 5 | S4.5 |
 | One undo for every versions operation: a log of operations (a branch switch, a deletion) to take back | `src/model/versions/VersionHistory.cpp` | — | — | source control audit |
 | The undo history kept across a branch switch | `src/model/versions/VersionsModel.cpp` | — | — | source control audit |
 | One old version reverted while the later ones are kept | `src/model/versions/SongMerge.cpp` | — | — | source control audit |

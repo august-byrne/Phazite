@@ -87,6 +87,27 @@ bool waitForVersionHistory (ProjectContext& context)
         versionHistoryTimeout);
 }
 
+const ProjectContext& withChangesIn (const ProjectContext& context)
+{
+    REQUIRE (dispatchMessagesUntil (
+        [&context]
+        {
+            // Asked for, as a view asks: a round for what changed since the last.
+            getChangesSinceLastVersion (context);
+            getListedChanges (context);
+            return areChangesWorkedOut (context);
+        },
+        versionHistoryTimeout));
+
+    return context;
+}
+
+ProjectContext& withChangesIn (ProjectContext& context)
+{
+    withChangesIn (static_cast<const ProjectContext&> (context));
+    return context;
+}
+
 bool finished (ProjectContext& context, const std::function<bool()>& command)
 {
     const auto* history = getVersionHistory (context);

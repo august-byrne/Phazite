@@ -97,6 +97,10 @@ public:
     juce::String getChangesHeading() const;
     juce::String getRoomText() const { return roomText.getText(); }
 
+    // What the view says while the branch has versions the song didn't grow from (none while it hasn't), and its button.
+    juce::String getNewerText() const { return newerText.isVisible() ? newerText.getText() : juce::String(); }
+    juce::Button& getNewerButton() noexcept { return newerButton; }
+
     // Undo History, at the foot (folded at first, as Local History; as Ableton Live 12.1's, Logic Pro's and Studio One's): the
     // song's undo steps newest first, those undone (which Redo would do again) dimmed above the one the song is at, and under
     // the oldest, the song before them all. A click on a row, or Return on the one selected, goes back or forth to it, undoing
@@ -146,6 +150,11 @@ private:
     std::unique_ptr<SectionHeader> changesSection, historySection, localSection, undoSection;
     juce::TextButton doneButton;                // from another version's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
+
+    // While the branch has versions the song didn't grow from (another computer's, or newer than a project file put back):
+    // what the view says of them, under Save Version, and Take (or Merge) the Newer Versions.
+    juce::Label newerText;
+    juce::TextButton newerButton;
     std::unique_ptr<ChangesModel> changesModel;
     std::unique_ptr<HistoryModel> historyModel;
     std::unique_ptr<LocalHistoryModel> localModel;

@@ -498,6 +498,18 @@ std::vector<std::string> findSongProblems (const Song& song)
     if (next > schema::renumberMark)
         checker.problems.push_back ("id: the song's next ID leaves no room before the largest an ID can be");
 
+    // Where the song stands in the project's versions: a branch's id and a version's, as lowercase hexadecimal digits, or
+    // none (Schema.h: versionsBranch, versionsBase).
+    const auto checkHexID = [&checker, &state] (const juce::Identifier& property, int digits)
+    {
+        if (const auto text = state[property].toString();
+            state.hasProperty (property) && (text.length() != digits || ! text.containsOnly ("0123456789abcdef")))
+            checker.add ("kind", state, property.toString() + " is no id: " + text.substring (0, 80));
+    };
+
+    checkHexID (schema::versionsBranch, 32);
+    checkHexID (schema::versionsBase, 64);
+
     checker.checkItemIDs (state);
     checker.checkKeys (state);
     checker.checkRanges (state);

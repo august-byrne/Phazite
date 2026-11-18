@@ -7,7 +7,9 @@
          loopStart="0"
          nextID="147"
          outline="rock"
-         punch="0">
+         punch="0"
+         versionsBase="$VERSION"
+         versionsBranch="$BRANCH">
   <AUTOMATION>
     <CURVE device="4"
            parameter="volume">

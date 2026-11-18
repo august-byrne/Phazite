@@ -183,6 +183,7 @@ TEST_CASE ("Bounce renders the version the song is now, once, as Export Song doe
 
     // Once the song changed, a version is bounced from its own song (an old version's bounce, below); one with a bounce, not
     // again.
+    s.setVolume (track, -3.0f); // a version records a change: one of none isn't written
     const auto second = keepVersion (s.context, "Second");
     CHECK (phazite::canBounce (s.context, second));
     s.setVolume (track, -12.0f);

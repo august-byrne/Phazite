@@ -67,14 +67,16 @@ void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>&);
 // a merge gave its ID to one of theirs, on another computer whose count never went past it), a new one from makeID, so that
 // no two items share an ID. Those given anew are in all too, and in givenAnew, which the merge's commit records with its own
 // (MergeResult::renumbered), so that a later merge of that line translates them alike. What of the records isn't one to
-// one (an ID 0, or one ID given to two: a damaged record, or one another history wrote) is left out.
+// one (an ID 0, or one ID given to two: a damaged record, or one another history wrote) is left out. What the other side's
+// song was translated through first (crossed: VersionHistory.h, crossRenumbering()) made the items under its targets this
+// side's own, which count as no other ID either song holds.
 struct Translation
 {
     std::vector<RenumberedID> all, givenAnew;
 };
 
 Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree& theirs, const std::vector<RenumberedID>& recorded,
-                             const std::function<std::uint64_t()>& makeID);
+                             const std::function<std::uint64_t()>& makeID, const std::vector<RenumberedID>& crossed = {});
 
 // Whether IDs given anew are one to one, as a merge gives them: none 0, and within each group (the items', each clip's
 // notes) no two with the same from, nor two with the same to. What isn't came from a damaged or a hand-made record.

@@ -278,6 +278,134 @@ std::optional<VersionInfo> getLastVersion (const ProjectContext& context)
     return std::nullopt;
 }
 
+//==============================================================================
+// The song tied to its version.
+std::optional<VersionInfo> getBaseVersion (const ProjectContext& context)
+{
+    if (const auto* history = findHistory (context))
+        if (const auto* version = history->findBaseVersion())
+            return toInfo (*history, *version);
+
+    return std::nullopt;
+}
+
+int countNewerVersions (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && ! history->isReading() ? history->countNewerVersions() : 0;
+}
+
+juce::String describeNewerVersions (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    const auto newer = countNewerVersions (context);
+    const auto* branch = history != nullptr ? history->findCurrentBranch() : nullptr;
+
+    if (newer == 0 || branch == nullptr)
+        return {};
+
+    // Said plainly, with what to do: one press, which the button beside it is.
+    const auto said = "'" + branch->name + "' has " + juce::String (newer) + (newer == 1 ? " newer version" : " newer versions")
+                      + " than the song grew from (saved on another computer, or since this project file was saved). ";
+
+    if (isMerging (context))
+        return said + "Save a version once the merge waiting has taken them in, or Cancel Merge first.";
+
+    return said
+           + (history->mayHaveChanges() ? "Merge the Newer Versions merges them with the song's changes; save a version then to keep both."
+                                        : "Take the Newer Versions makes the song the branch's last version.")
+           + (history->canSaveOnBranch() ? " A version saved first goes its own way beside them, to merge later."
+                                         : " No version can be saved over them until then; Create Branch goes on from the version "
+                                           "the song grew from.");
+}
+
+bool canTakeNewerVersions (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isBehind() && ! history->isReading() && ! history->isSaving() && ! history->isReadingForCommand()
+           && ! history->getMerging().has_value() && ! history->preview.has_value() && canChangeSongNow (context);
+}
+
+juce::String describeTakeNewer (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->mayHaveChanges() ? "Merge the Newer Versions" : "Take the Newer Versions";
+}
+
+namespace
+{
+    // Take the Newer Versions, once the branch's last version's song is read: the song made that version's, which it grows
+    // from then, as one undo step that moves the song's names too, so that its Undo takes both back.
+    VersionHistory::Taken takeInNewer (ProjectContext& context, const juce::String& versionID, juce::int64 changesThen, SongRead& read)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+
+        if (history == nullptr || song == nullptr)
+            return false;
+
+        if (! read.song.isValid())
+            return VersionHistory::Taken::refused ("The branch's last version can't be read from the Versions folder: a piece of it is "
+                                                   "damaged or missing. Nothing was taken. Verify History says what is damaged.");
+
+        if (const auto why = whyNotChangeSongNow (context, "nothing was taken."); why.isNotEmpty())
+            return VersionHistory::Taken::refused (why);
+
+        // Changed meanwhile, the song has changes of its own: they would go. Merge the Newer Versions keeps them.
+        if (history->countSongChanges() != changesThen || history->mayHaveChanges())
+            return VersionHistory::Taken::refused ("The song changed while the newer versions were read: nothing was taken. Merge "
+                                                   "the Newer Versions keeps the song's changes with them.");
+
+        if (! history->takeBaseFrom (versionID, read.song, read.parameters))
+            return VersionHistory::Taken::refused ("The branch moved on while its newer versions were read: nothing was taken. "
+                                                   "Try once more.");
+
+        // A change of its own, one undo step: the song made that version's, and its names moved with it, in the step.
+        const UndoStep step (*song, "Take the Newer Versions");
+        song->storeDeviceStates();
+        makeSongLike (*song, read.song);
+        removeBrokenReferences (*song);
+        song->getState().setProperty (schema::versionsBase, versionID, &song->getUndoManager());
+        history->tellNow();
+        return true;
+    }
+} // namespace
+
+bool takeNewerVersions (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+
+    if (! canTakeNewerVersions (context) || last == nullptr)
+        return false;
+
+    // With changes of its own (or the branch's line elsewhere), merged in, the song's changes kept.
+    if (history->mayHaveChanges() || history->findCommonVersion (last->id, history->getBaseVersionID()) != history->getBaseVersionID())
+        return startMerge (context, last->id);
+
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*last) + "\"", last->song, false,
+                          [&context, versionID = last->id, changesThen = history->countSongChanges()] (SongRead& read)
+                          { return takeInNewer (context, versionID, changesThen, read); });
+}
+
+juce::String getBaseProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->getBaseProblem() : juce::String();
+}
+
+bool canSaveOnBranch (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history == nullptr || history->canSaveOnBranch();
+}
+
+juce::String getSaveProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->saveProblem : juce::String();
+}
+
 namespace
 {
     VersionChange toLine (const SongChange& change)
@@ -338,12 +466,24 @@ int countChanges (const ProjectContext& context)
     return history != nullptr ? (int) history->getChanges().size() : 0;
 }
 
+bool areChangesWorkedOut (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history == nullptr || history->isReading() || history->areChangesWorkedOut();
+}
+
+bool mayHaveChangesSinceLastVersion (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->mayHaveChanges();
+}
+
 bool discardAllChanges (ProjectContext& context)
 {
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    if (song == nullptr || history == nullptr || ! history->getLastVersionSong().isValid() || history->getChanges().empty())
+    if (song == nullptr || history == nullptr || ! history->getLastVersionSong().isValid() || ! history->mayHaveChanges())
         return false;
 
     // A change of its own, one undo step: the song made the last version's again; Local History keeps what goes.
@@ -478,15 +618,16 @@ juce::int64 getVersionsSize (const ProjectContext& context)
 bool canSaveVersion (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    // Not on top of a last commit that can't be read while one that reads is offered (Reset Branch to Last Readable Commit).
+    // Not on top of a last commit that can't be read while one that reads is offered (Reset Branch to Last Readable Commit),
+    // nor over versions of the branch the song didn't grow from (Take the Newer Versions first).
     return history != nullptr && ! history->isReading() && ! history->isSaving() && ! history->canResetToReadable()
-           && hasSomethingToCommit (context);
+           && history->canSaveOnBranch() && hasSomethingToCommit (context);
 }
 
 bool hasSomethingToCommit (const ProjectContext& context)
 {
     auto* history = findHistory (context);
-    return history != nullptr && ! history->isReading() && (history->getMerging().has_value() || history->hasChanges());
+    return history != nullptr && ! history->isReading() && (history->getMerging().has_value() || history->mayHaveChanges());
 }
 
 juce::String describeNextCommit (const ProjectContext& context)
@@ -599,7 +740,7 @@ bool compareWithVersion (ProjectContext& context, const juce::String& versionID)
         return false;
 
     // The last version is the changes' own, compared with at once; another is read on the history's thread first.
-    const auto* last = history->findLastVersion();
+    const auto* last = history->findBaseVersion();
     const auto* version = history->findVersion (versionID);
 
     if (version == nullptr || (last != nullptr && last->id == versionID))
@@ -903,7 +1044,7 @@ bool canBringBack (const ProjectContext& context)
 bool canTakeFrom (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
     return canBringBack (context) && (last == nullptr || last->id != history->selectedVersion);
 }
 
@@ -972,9 +1113,20 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
 bool canSwitchBranch (const ProjectContext& context)
 {
     // Not while the song records (a take not finished would be lost), while a render has its plug-ins, while a version is
-    // being saved or the versions read, nor while a command reads them to change the song.
+    // being saved or the versions read, nor while a command reads them to change the song. Nor while the song's branch isn't
+    // in the folder: the song would be left on the branch the folder names, as its song, and come back as that branch's
+    // (whyNotSwitchBranch()).
     const auto* history = findHistory (context);
-    return canChangeSongNow (context) && ! history->isReadingForCommand();
+    return canChangeSongNow (context) && ! history->isReadingForCommand() && ! history->isBranchMissing();
+}
+
+juce::String whyNotSwitchBranch (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isBranchMissing()
+               ? juce::String ("Create Branch first: the song's branch isn't in this folder, so a switch, a merge, Undo Last Version "
+                               "or a reset would leave the song on, or move, another branch.")
+               : juce::String();
 }
 
 // What takes a switch's reads in: the song made the other's in place (switchSongInPlace()), as one; unless the song
@@ -1032,10 +1184,17 @@ namespace
                 auto read = std::make_shared<VersionHistory::SwitchRead> (VersionHistory::readSwitch (*store, plan));
                 return takeInSwitch (context, plan, read, 2);
             },
-            [saveProjectThen, done] (bool did)
+            [&context, saveProjectThen, done] (bool did)
             {
+                // The song left on the branch entered let go of once the project file holds the song, not before: a save
+                // that fails leaves both branches' songs as they were.
                 if (did)
-                    saveProjectThen ([] (bool) {});
+                    saveProjectThen (
+                        [&context] (bool saved)
+                        {
+                            if (auto* history = findHistory (context); history != nullptr && saved)
+                                history->switchSaved();
+                        });
 
                 if (done != nullptr)
                     done (did);
@@ -1148,13 +1307,16 @@ bool deleteBranch (ProjectContext& context, const juce::String& branchID)
 
 bool canMakeBranch (const ProjectContext& context)
 {
-    // From Now, while there is a version; from another version, whenever the song can switch to it.
+    // From Now, while there is a version; from another version, whenever the song can switch to it. While the song's branch
+    // isn't in the folder, from Now whatever is selected (newBranchFromSelection()): the way out, as the picker's.
     const auto* history = findHistory (context);
 
     if (history == nullptr || history->isReading() || history->isSaving())
         return false;
 
-    return history->findVersion (history->selectedVersion) != nullptr ? canSwitchBranch (context) : history->findLastVersion() != nullptr;
+    return history->findVersion (history->selectedVersion) != nullptr && ! history->isBranchMissing()
+               ? canSwitchBranch (context)
+               : history->findBaseVersion() != nullptr;
 }
 
 void selectBranch (ProjectContext& context, const juce::String& branchID)
@@ -1167,7 +1329,8 @@ juce::String newBranchNamed (ProjectContext& context, const juce::String& name)
 {
     auto* history = findHistory (context);
 
-    if (history == nullptr || ! canMakeBranch (context))
+    // From Now, whatever version is selected: while there is a version the song grew from.
+    if (history == nullptr || history->isReading() || history->isSaving() || history->findBaseVersion() == nullptr)
         return {};
 
     const auto made = history->makeBranch ({}, true);
@@ -1180,7 +1343,9 @@ juce::String newBranchNamed (ProjectContext& context, const juce::String& name)
 
 void newBranchFromSelection (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
-    newBranch (context, getSelectedVersion (context), saveProjectThen);
+    // From Now while the song's branch isn't in the folder: the way out (canMakeBranch()).
+    const auto* history = findHistory (context);
+    newBranch (context, history != nullptr && history->isBranchMissing() ? juce::String() : getSelectedVersion (context), saveProjectThen);
 }
 
 void switchToSelectedBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
@@ -1218,11 +1383,13 @@ bool canMerge (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
 
-    // Not while a merge waits for its version, as git refuses one: save its version or cancel it first.
-    if (history == nullptr || history->isReading() || history->isSaving() || history->getMerging().has_value())
+    // Not while a merge waits for its version, as git refuses one: save its version or cancel it first. Nor while the song's
+    // branch isn't in the folder, where its version couldn't be saved (whyNotSwitchBranch()).
+    if (history == nullptr || history->isReading() || history->isSaving() || history->getMerging().has_value()
+        || history->isBranchMissing())
         return false;
 
-    const auto* last = history->findLastVersion();
+    const auto* last = history->findBaseVersion();
     const auto& selected = history->selectedVersion;
 
     // Not the current branch's last version, nor one it follows: what it has already.
@@ -1231,6 +1398,10 @@ bool canMerge (const ProjectContext& context)
 
 juce::String describeMergeInto (const ProjectContext& context)
 {
+    // Not into the branch the folder names while the song isn't on it (canMerge()).
+    if (const auto* history = findHistory (context); history != nullptr && history->isBranchMissing())
+        return "Merge into Current Branch (Create Branch First)...";
+
     const auto branch = getCurrentBranch (context);
     return branch.has_value() ? "Merge into '" + branch->name + "'..." : juce::String ("Merge into Current Branch...");
 }
@@ -1243,7 +1414,7 @@ namespace
     struct MergeStart
     {
         juce::String version, head, otherBranch, basePiece, theirsPiece;
-        std::vector<RenumberedID> renumbering;
+        std::vector<RenumberedID> renumbering, ourMerges, theirMerges; // this line's merges to translate by; every one of each line's
         juce::ValueTree ours;
         PluginParameterValues ourParameters;
         juce::int64 changesAtCopy = 0;
@@ -1272,12 +1443,21 @@ namespace
         preview.theirParameters = worked.theirParametersRead;
         const auto floor = juce::jmax (findNextID (preview.base), findNextID (preview.theirs));
         worked.next = juce::jmax (findNextID (ours), floor);
-        const auto translation = findTranslation (preview.base, preview.theirs, start.renumbering, [&worked] { return worked.next++; });
+        const auto makeID = [&worked] { return worked.next++; };
+
+        // The other line's own merges of what both lines took in, made this line's first (crossRenumbering()).
+        const auto crossed = crossRenumbering (start.theirMerges, start.ourMerges, start.renumbering, preview.base, preview.theirs, makeID);
+        translateIDs (preview.theirs, crossed);
+        preview.theirParameters = translateKnobs (std::move (preview.theirParameters), crossed);
+
+        const auto translation = findTranslation (preview.base, preview.theirs, start.renumbering, makeID, crossed);
         translateIDs (preview.base, translation.all);
         translateIDs (preview.theirs, translation.all);
         preview.theirParameters = translateKnobs (std::move (preview.theirParameters), translation.all);
         preview.translation = translation.all;
-        preview.renumbered = translation.givenAnew;
+        preview.crossed = crossed;
+        preview.renumbered = crossed;
+        preview.renumbered.insert (preview.renumbered.end(), translation.givenAnew.begin(), translation.givenAnew.end());
         preview.lines = findChanges (preview.base, preview.theirs);
 
         auto next = juce::jmax (worked.next, findNextID (ours), findNextID (preview.theirs));
@@ -1332,7 +1512,7 @@ namespace
         {
             auto* history = findHistory (context);
             auto* song = findSong (context);
-            const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+            const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
             const auto* version = history != nullptr ? history->findVersion (start.version) : nullptr;
             const auto name = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : juce::String ("that version");
 
@@ -1393,11 +1573,13 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
 {
     auto* history = findHistory (context);
     auto* song = findSong (context);
-    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
-    // Not while another waits for its commit, which it would take the place of (canMerge()).
-    if (song == nullptr || last == nullptr || version == nullptr || history->getMerging().has_value() || history->isReadingForCommand())
+    // Not while another waits for its commit, which it would take the place of, nor while the song's branch isn't in the folder
+    // (canMerge()).
+    if (song == nullptr || last == nullptr || version == nullptr || history->getMerging().has_value() || history->isReadingForCommand()
+        || history->isBranchMissing())
         return false;
 
     // From the newest version both lines have, or from nothing for two of no common line; both songs read, and the list
@@ -1414,6 +1596,8 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     start.basePiece = partedVersion != nullptr ? partedVersion->song : juce::String();
     start.theirsPiece = version->song;
     start.renumbering = history->findRenumbering (last->id, versionID, parted);
+    start.ourMerges = history->findRenumbering (last->id, versionID, parted, false);
+    start.theirMerges = history->findRenumbering (versionID, last->id, parted, false);
 
     for (const auto& branch : history->getBranches())
         if (branch.id == version->branch)
@@ -1579,7 +1763,7 @@ namespace
     {
         auto* history = findHistory (context);
         auto* song = findSong (context);
-        const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+        const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
 
         if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
             return false;
@@ -1627,7 +1811,7 @@ bool finishMerge (ProjectContext& context)
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
 
     if (song == nullptr || last == nullptr || ! history->preview.has_value() || history->getMerging().has_value())
         return false;
@@ -1819,7 +2003,7 @@ int countCommitsToMerge (const ProjectContext& context, const juce::String& bran
 {
     // Its line's commits that the current branch's line doesn't hold.
     const auto* history = findHistory (context);
-    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
     const auto head = history != nullptr ? findBranchHead (*history, branchID) : juce::String();
 
     return last != nullptr && head.isNotEmpty() ? history->countVersionsNotIn (head, last->id) : 0;
@@ -1830,8 +2014,9 @@ bool canMergeBranch (const ProjectContext& context, const juce::String& branchID
     const auto* history = findHistory (context);
     const auto current = getCurrentBranch (context);
 
-    return history != nullptr && ! history->isReading() && ! history->isSaving() && current.has_value() && current->id != branchID
-           && ! history->preview.has_value() && ! history->getMerging().has_value() && countCommitsToMerge (context, branchID) > 0;
+    return history != nullptr && ! history->isReading() && ! history->isSaving() && ! history->isBranchMissing() && current.has_value()
+           && current->id != branchID && ! history->preview.has_value() && ! history->getMerging().has_value()
+           && countCommitsToMerge (context, branchID) > 0;
 }
 
 bool canMergeAnyBranch (const ProjectContext& context)
@@ -1960,8 +2145,8 @@ namespace
     // Whether the song is a version as it is now: the current branch's last, with no changes since.
     bool isSongNow (VersionHistory& history, const juce::String& versionID)
     {
-        const auto* last = history.findLastVersion();
-        return last != nullptr && last->id == versionID && ! history.hasChanges();
+        const auto* last = history.findBaseVersion();
+        return last != nullptr && last->id == versionID && ! history.mayHaveChanges();
     }
 
     // An old version's bounce (step V5): its song alone, read from the versions and made a song of its own in the project's
@@ -2205,7 +2390,7 @@ namespace
     // The song as it is, kept in Local History before what makes it another, while it differs from its last commit.
     void keepSongBefore (VersionHistory& history, const juce::String& reason)
     {
-        if (history.hasChanges())
+        if (history.mayHaveChanges())
             history.takeSnapshot (reason);
     }
 
@@ -2715,7 +2900,7 @@ juce::String getCompareVersion (const ProjectContext& context)
     if (history->findVersion (history->bounceCompared) != nullptr)
         return history->bounceCompared;
 
-    const auto* last = history->findLastVersion();
+    const auto* last = history->findBaseVersion();
     return last != nullptr ? last->id : juce::String();
 }
 
@@ -2864,7 +3049,7 @@ namespace
     juce::String getVersionToBounce (const ProjectContext& context)
     {
         const auto selected = getSelectedVersion (context);
-        const auto last = getLastVersion (context);
+        const auto last = getBaseVersion (context);
         return selected.isNotEmpty() ? selected : last.has_value() ? last->id : juce::String();
     }
 } // namespace
@@ -3028,12 +3213,23 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .perform = [&context] { undoLastCommit (context); },
            .isEnabled = [&context] { return canUndoLastCommit (context); } });
 
+    add ({ .id = "version.takeNewer",
+           .name = "Take the Newer Versions",
+           .description = "Brings in the versions the current branch has that the song didn't grow from (saved on another computer, "
+                          "or since the project file was saved), as one undo step: the song becomes the branch's last version, or, "
+                          "with changes of its own, the newer versions are merged with them.",
+           .synonyms = { "update", "pull", "sync", "merge newer", "newer versions", "git pull" },
+           .perform = [&context] { takeNewerVersions (context); },
+           .isEnabled = [&context] { return canTakeNewerVersions (context); },
+           .currentName = [&context] { return describeTakeNewer (context); },
+           .needsPluginStates = true });
+
     add ({ .id = "version.discardAll",
            .name = "Discard All Changes",
            .description = "Makes the song what the last version has again, as one undo step.",
            .synonyms = { "restore", "revert", "reset", "throw away", "git restore" },
            .perform = [&context] { discardAllChanges (context); },
-           .isEnabled = [&context] { return ! getChangesSinceLastVersion (context).empty(); },
+           .isEnabled = [&context] { return mayHaveChangesSinceLastVersion (context); },
            .needsPluginStates = true });
 
     add ({ .id = "version.putBack",

@@ -74,6 +74,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "model/versions/internal/VersionStore.h"
@@ -951,6 +952,57 @@ TEST_CASE ("Benchmark: a song of 100 tracks, its blocks at 128 and 512 samples, 
     report << "| Save again, nothing changed | " << milliseconds (millisecondsOf ([&] { REQUIRE (s.getProject().save().wasOk()); }), 1)
            << " |  |\n";
     report << "\nThe project's file: " << juce::String (s.getProject().getFile().getSize() / 1024) << " KB\n";
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: the versions' changes on a song of 100 tracks, the message thread's work for an edit"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // S4.5's Done-when (docs/design/versions-cut.md): the Versions view never stalls the window on a large song. The changes
+    // since the last version are worked out on the history's thread (model/versions/internal/ChangesWorker.h): for each edit,
+    // what the message thread does as the badge and the view ask for them (the track that changed copied and handed over),
+    // how long until they are in, and, against them, the whole song compared, as the message thread did before.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 100, 64.0);
+    auto& song = *phazite::findSong (s.context);
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    phazite::test::withChangesIn (s.context);
+    std::vector<double> asked, inAfter, whole;
+
+    for (int i = 0; i < 20; ++i)
+    {
+        phazite::addNote (s.context, built.clips[(size_t) i], 72, phazite::BeatPosition::fromBeats (2.5),
+                          phazite::BeatDuration::fromBeats (0.25), 100);
+        phazite::test::dispatchPendingMessages();
+        asked.push_back (millisecondsOf (
+            [&]
+            {
+                phazite::countChanges (s.context);
+                phazite::getChangesSinceLastVersion (s.context);
+            }));
+        inAfter.push_back (millisecondsOf ([&] { phazite::test::withChangesIn (s.context); }));
+    }
+
+    const auto& versionSong = phazite::getVersionHistory (s.context)->getLastVersionSong();
+
+    for (int i = 0; i < 5; ++i)
+        whole.push_back (millisecondsOf ([&] { phazite::findChanges (versionSong, song.getState()); }));
+
+    juce::String report ("\n| 100 tracks, the versions' changes | Median | Most |\n|---|---|---|\n");
+    report << "| The message thread's work for an edit: its track copied and handed over | "
+           << milliseconds (phazite::test::percentileOf (asked, 0.5)) << " | " << milliseconds (phazite::test::percentileOf (asked, 1.0))
+           << " |\n";
+    report << "| Until the changes are in, worked out on the history's thread | "
+           << milliseconds (phazite::test::percentileOf (inAfter, 0.5)) << " | "
+           << milliseconds (phazite::test::percentileOf (inAfter, 1.0)) << " |\n";
+    report << "| The whole song compared, as the message thread did before S4.5 | "
+           << milliseconds (phazite::test::percentileOf (whole, 0.5)) << " | " << milliseconds (phazite::test::percentileOf (whole, 1.0))
+           << " |\n";
+    report << "\nChanges listed: " << juce::String (phazite::countChanges (s.context)) << "\n";
     MESSAGE (report);
 }
 

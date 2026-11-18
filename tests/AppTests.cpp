@@ -29,6 +29,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -602,7 +603,9 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("First version"));
 
-    // A copy saved as a version is being written: the copy has it, and goes on in its own folder.
+    // A copy saved as a version is being written: the copy has it, and goes on in its own folder. (A version records a change:
+    // one of none isn't written.)
+    phazite::setProjectNotes (context, "A sketch");
     phazite::setVersionDraft (context, "Sketch", {});
     REQUIRE (phazite::saveVersion (context));
     answer = projects.getChildFile ("Beat copy.phazite");

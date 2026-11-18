@@ -55,6 +55,7 @@
 #include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/ChangesWorker.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongPieces.h"
 #include "model/versions/internal/VersionHistory.h"
@@ -1136,7 +1137,7 @@ TEST_CASE (
                                 { REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; })); });
     REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
     REQUIRE (phazite::test::waitForVersionHistory (s.context));
-    REQUIRE (phazite::countChanges (s.context) == 0);
+    REQUIRE (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
     auto* history = phazite::getVersionHistory (s.context);
 
     // Told again and again, nothing changed: nothing compared.
@@ -1145,7 +1146,7 @@ TEST_CASE (
     for (int i = 0; i < 20; ++i)
     {
         history->tellNow();
-        CHECK (phazite::countChanges (s.context) == 0);
+        CHECK (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
     }
 
     CHECK (phazite::countElementsCompared() == before);
@@ -1164,14 +1165,14 @@ TEST_CASE (
     before = phazite::countElementsCompared();
     phazite::addNote (s.context, built.clips[0], 72, at (2.5), lasting (0.25), 100);
     phazite::test::dispatchPendingMessages();
-    CHECK (phazite::countChanges (s.context) == 1);
+    CHECK (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 1);
     const auto noteAdded = phazite::countElementsCompared() - before;
 
     // A plug-in's own change, in its window: its track compared again, not the song.
     before = phazite::countElementsCompared();
     song.markChangedOutsideHistory (device.getRaw());
     phazite::test::dispatchPendingMessages();
-    phazite::countChanges (s.context);
+    phazite::countChanges (phazite::test::withChangesIn (s.context));
     const auto pluginChanged = phazite::countElementsCompared() - before;
 
     INFO ("Elements compared: the whole song " << wholeSong << ", a note added " << noteAdded << ", a plug-in's own change "
@@ -1181,6 +1182,128 @@ TEST_CASE (
     CHECK (pluginChanged > 0);
     CHECK (pluginChanged * 8 < wholeSong);
     CHECK (song.getIndex().isExact());
+}
+
+TEST_CASE ("Performance gate: an edit has the versions copy and compare the one track it changed, on the history's thread, never "
+           "on the message thread")
+{
+    // S4.5 (docs/design/versions.md: Off the message thread): the changes since the last version are worked out on the
+    // history's thread from copies of what the song's notifications said changed. An edit copies its track alone, compares
+    // it alone, and the message thread compares nothing, however many tracks the song has.
+    phazite::test::TestSong s;
+    const auto built = phazite::test::buildBenchmarkSong (s, 32, 16.0);
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    REQUIRE (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
+
+    struct Counts
+    {
+        juce::int64 copied, compared, onMessageThread;
+    };
+
+    const auto count = []
+    {
+        return Counts { phazite::ChangesWorker::countTracksCopied(), phazite::ChangesWorker::countTracksCompared(),
+                        phazite::countElementsComparedOnMessageThread() };
+    };
+
+    // A version just saved of the song as it is: no changes, known without a round.
+    auto before = count();
+    phazite::countChanges (phazite::test::withChangesIn (s.context));
+    auto after = count();
+    CHECK (after.copied == before.copied);
+    CHECK (after.compared == before.compared);
+
+    // A note added to one clip, then to another track's: each its track, once.
+    for (const auto edit : { 0, 1 })
+    {
+        CAPTURE (edit);
+        before = count();
+        phazite::addNote (s.context, built.clips[edit == 0 ? 0 : 3], 72, at (2.5), lasting (0.25), 100);
+        phazite::test::dispatchPendingMessages();
+        CHECK (phazite::countChanges (phazite::test::withChangesIn (s.context)) == edit + 1);
+        after = count();
+        CHECK (after.copied - before.copied == 1);
+        CHECK (after.compared - before.compared == 1);
+        CHECK (after.onMessageThread == before.onMessageThread);
+    }
+
+    // Told again and again, nothing changed: nothing copied or compared.
+    before = count();
+
+    for (int i = 0; i < 10; ++i)
+    {
+        phazite::getVersionHistory (s.context)->tellNow();
+        phazite::countChanges (phazite::test::withChangesIn (s.context));
+    }
+
+    after = count();
+    CHECK (after.copied == before.copied);
+    CHECK (after.compared == before.compared);
+    CHECK (after.onMessageThread == before.onMessageThread);
+}
+
+TEST_CASE ("Performance gate: a drag in a clip of 50,000 notes copies its track for the versions once, as it is committed")
+{
+    // The review of S4.5: rounds of the changes ran back to back during a drag, each copying the dragged clip's whole track on
+    // the message thread. None runs while a gesture is open; one, after it.
+    phazite::test::TestSong s;
+    const auto clip = s.addMidiClip (s.firstTrack, 0.0, 64.0);
+
+    {
+        // Its notes written into the song as a file holds them, opened as a project is.
+        auto state = phazite::findSong (s.context)->getState().createCopy();
+        juce::ValueTree clipState;
+
+        for (const auto& track : phazite::getTrackElements (state))
+            for (const auto& child : track)
+                if (child.hasType (phazite::schema::CLIP) && phazite::readID (child[phazite::schema::clipID]) == clip.getRaw())
+                    clipState = child;
+
+        REQUIRE (clipState.isValid());
+
+        for (int i = 0; i < 50000; ++i)
+            clipState.appendChild (juce::ValueTree (phazite::schema::NOTE, { { phazite::schema::noteID, (juce::int64) i + 1 },
+                                                                             { phazite::schema::notePitch, 36 + i % 48 },
+                                                                             { phazite::schema::noteStart, i * 0.00125 },
+                                                                             { phazite::schema::noteLength, 0.001 },
+                                                                             { phazite::schema::noteVelocity, 100 } }),
+                                   nullptr);
+
+        s.openSong (state);
+    }
+
+    REQUIRE (phazite::test::waitForVersionHistory (s.context));
+    std::optional<juce::Result> result;
+    REQUIRE (phazite::saveVersion (s.context, [&result] (juce::Result r) { result = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&result] { return result.has_value(); }, phazite::test::versionHistoryTimeout));
+    REQUIRE (result->wasOk());
+    REQUIRE (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 0);
+
+    // A note of it dragged through many moves, the badge and the view asking all along.
+    auto& song = *phazite::findSong (s.context);
+    const auto copied = phazite::ChangesWorker::countTracksCopied();
+
+    {
+        phazite::Gesture drag (song, "Move Notes");
+        auto note = song.getIndex().findClip (clip.getRaw()).getChild (0);
+
+        for (int i = 0; i < 60; ++i)
+        {
+            note.setProperty (phazite::schema::noteStart, 0.01 * (i + 1), &song.getUndoManager());
+            phazite::test::dispatchPendingMessages();
+            phazite::countChanges (s.context);
+        }
+
+        CHECK (phazite::ChangesWorker::countTracksCopied() == copied);
+        drag.commit();
+    }
+
+    CHECK (phazite::countChanges (phazite::test::withChangesIn (s.context)) == 1);
+    CHECK (phazite::ChangesWorker::countTracksCopied() - copied == 1);
 }
 
 TEST_CASE ("Performance gate: the check for unsaved changes compares no element after a notification that changes nothing, and a "
