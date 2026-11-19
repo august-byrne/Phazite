@@ -3,7 +3,9 @@
 #  1. The commit's author and committer email must be a GitHub noreply address, because pushing a
 #     commit publishes its email for good.
 #  2. Pinned dependencies (external/*, .gitmodules) change only in a deliberate bump.
-#  3. No staged file is larger than 5 MiB.
+#  3. No staged file is larger than 5 MiB, and no audio, video or picture file is added (the icons'
+#     and the logo's SVGs aside): sounds live in the phazite-sounds repository, the site's pictures in
+#     the site's.
 #  4. No trailing whitespace or leftover conflict markers in the staged changes.
 #  5. gitleaks finds no API keys, tokens, private keys or other secrets in the staged changes. It can't
 #     see inside binary files (UTF-16 text counts as binary) or commit messages.
@@ -11,8 +13,8 @@
 #  7. The staged code keeps to the architecture budgets in tools/architecture-budget.txt (checked by
 #     tools/check-architecture.sh), and the commit raises no budget.
 # To skip check 1, 2 or 3, or to raise an architecture budget in check 7, on purpose for one commit, add
-# -c phazite.allowPublicEmail=true, -c phazite.allowSubmoduleBump=true, -c phazite.allowLargeFiles=true or
-# -c phazite.allowBudgetIncrease=true after "git".
+# -c phazite.allowPublicEmail=true, -c phazite.allowSubmoduleBump=true, -c phazite.allowLargeFiles=true,
+# -c phazite.allowMedia=true or -c phazite.allowBudgetIncrease=true after "git".
 # Turned on per clone with "git config core.hooksPath .githooks" (tools\setup-windows.cmd does this on
 # Windows); git merge and git pull run it through pre-merge-commit. Commits made by rebase,
 # cherry-pick, revert and am skip it, as does "git commit --no-verify"; pre-push checks emails and
@@ -78,6 +80,19 @@ $big
 Keep large files such as audio, builds and dumps out of git: the history keeps every version for good.
 If one really belongs in the repository, commit it with:
     git -c phazite.allowLargeFiles=true commit ..."
+fi
+
+# 3 (also). New audio, video and picture files
+if ! allowed allowMedia; then
+    media=$(git -c core.quotepath=off diff-index --cached --no-renames --diff-filter=A --name-only "$against" -- |
+        grep -iE '\.(wav|flac|mp3|ogg|opus|aiff?|m4a|aac|wma|mp4|mov|avi|mkv|webm|wmv|png|jpe?g|gif|bmp|webp|tiff?|ico|icns|psd|svg)$' |
+        grep -vE '^resources/(icons|logo)/.*\.svg$')
+    [ -z "$media" ] || stop "this commit adds audio, video or picture files:
+$(printf '%s\n' "$media" | sed 's/^/    /')
+They stay out of this repository: sounds go in phazite-sounds, the site's pictures in phazite-site, and an
+icon is an SVG in resources/icons/. Unstage them (git restore --staged <file>).
+If the owner asked for one here (as the README's picture), commit it with:
+    git -c phazite.allowMedia=true commit ..."
 fi
 
 # 4. Whitespace errors and leftover conflict markers

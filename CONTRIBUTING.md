@@ -129,7 +129,7 @@ Every commit records git's `user.name` and `user.email`, and pushing to a public
 
 Three hooks in [.githooks/](.githooks) check your work before it is committed or pushed. On Windows, `tools\setup-windows.cmd` installs what they need and turns them on in its clone; in another clone, run `git config core.hooksPath .githooks` there.
 
-- **`pre-commit`** runs before `git commit` (also `--amend`, and finishing a merge or cherry-pick after a conflict). It checks that the author and committer email is a GitHub noreply address; that the pinned dependencies (`external/`, `.gitmodules`) don't change; that no staged file is larger than 5 MiB; that there is no trailing whitespace or leftover conflict marker; that [gitleaks](https://github.com/gitleaks/gitleaks) finds nothing that looks like a secret; that C/C++ files follow `.clang-format`; and that the code keeps to the architecture budgets.
+- **`pre-commit`** runs before `git commit` (also `--amend`, and finishing a merge or cherry-pick after a conflict). It checks that the author and committer email is a GitHub noreply address; that the pinned dependencies (`external/`, `.gitmodules`) don't change; that no staged file is larger than 5 MiB and that none adds an audio, video or picture file (the icons' and the logo's SVGs aside); that there is no trailing whitespace or leftover conflict marker; that [gitleaks](https://github.com/gitleaks/gitleaks) finds nothing that looks like a secret; that C/C++ files follow `.clang-format`; and that the code keeps to the architecture budgets.
 - **`pre-merge-commit`** runs the same checks for `git merge` and `git pull`.
 - **`pre-push`** checks the emails and secrets of every commit the remote doesn't have yet, their messages and any tag you push, and that every commit that raises an architecture budget says why. It catches what the others can't see, such as commits made by `git rebase` or with `--no-verify`.
 
@@ -159,6 +159,7 @@ The hooks don't replace reading the diff: gitleaks can't recognize personal data
 | `the staged C/C++ files couldn't be checked against .clang-format` | No clang-format 22 or newer was found: install VS Code's C/C++ extension, or run `tools\setup-windows.cmd -WithLlvm`. |
 | `this commit changes the pinned dependencies` | A submodule pointer moved by accident (for example through `git commit -a`): follow the message to unstage it. |
 | `these staged files are larger than 5 MiB` | Unstage them (`git restore --staged <file>`): audio files, builds and dumps don't belong in git. |
+| `this commit adds audio, video or picture files` | Unstage them: sounds live in the phazite-sounds repository, the site's pictures in phazite-site, and an icon is an SVG in `resources/icons/`. |
 | `the staged changes have trailing whitespace or a leftover conflict marker` | Fix the lines it lists, stage the files again and commit. |
 | `the staged code doesn't keep to the architecture budgets` | If a count went down, run `sh tools/check-architecture.sh --update` and stage `tools/architecture-budget.txt`; if one went up, change the code as the message for that rule says. |
 | `this commit raises architecture budgets` | Budgets only go down. A deliberate move between layers needs the `Architecture-Budget-Raise:` line it prints in the message, and `git -c phazite.allowBudgetIncrease=true commit`; ask in your pull request first. |
