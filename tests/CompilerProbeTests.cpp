@@ -168,6 +168,160 @@ PHAZITE_NOINLINE double lengthOfMinOfReturnedTexts()
     return (double) std::min (getText (1), getText (3)).size(); // the shorter is the lesser: all the same letter
 }
 
+// Classes of one double, each BeatPosition's shape but for one thing, to find what that compiler trips over. The three
+// sums it got wrong with BeatPosition (CI's windows-profile job, 2026-11-19), for each.
+class AsBeatPosition // BeatPosition's own shape: constexpr, a private double, compared by value
+{
+public:
+    constexpr AsBeatPosition() noexcept = default;
+    static constexpr AsBeatPosition from (double v) noexcept { return AsBeatPosition (v); }
+    constexpr double get() const noexcept { return value; }
+    constexpr bool operator< (AsBeatPosition other) const noexcept { return value < other.value; }
+
+private:
+    explicit constexpr AsBeatPosition (double v) noexcept
+        : value (v)
+    {
+    }
+
+    double value = 0.0;
+};
+
+class ComparedByReference // as AsBeatPosition, operator< taking a reference
+{
+public:
+    constexpr ComparedByReference() noexcept = default;
+    static constexpr ComparedByReference from (double v) noexcept { return ComparedByReference (v); }
+    constexpr double get() const noexcept { return value; }
+    constexpr bool operator< (const ComparedByReference& other) const noexcept { return value < other.value; }
+
+private:
+    explicit constexpr ComparedByReference (double v) noexcept
+        : value (v)
+    {
+    }
+
+    double value = 0.0;
+};
+
+class NotConstexpr // as AsBeatPosition, nothing constexpr
+{
+public:
+    NotConstexpr() noexcept = default;
+    static NotConstexpr from (double v) noexcept { return NotConstexpr (v); }
+    double get() const noexcept { return value; }
+    bool operator< (NotConstexpr other) const noexcept { return value < other.value; }
+
+private:
+    explicit NotConstexpr (double v) noexcept
+        : value (v)
+    {
+    }
+
+    double value = 0.0;
+};
+
+class NotInitialized // as AsBeatPosition, the double without its "= 0.0"
+{
+public:
+    constexpr NotInitialized() noexcept
+        : value (0.0)
+    {
+    }
+    static constexpr NotInitialized from (double v) noexcept { return NotInitialized (v); }
+    constexpr double get() const noexcept { return value; }
+    constexpr bool operator< (NotInitialized other) const noexcept { return value < other.value; }
+
+private:
+    explicit constexpr NotInitialized (double v) noexcept
+        : value (v)
+    {
+    }
+
+    double value;
+};
+
+class ComparedByFriend // as AsBeatPosition, operator< a friend of two values
+{
+public:
+    constexpr ComparedByFriend() noexcept = default;
+    static constexpr ComparedByFriend from (double v) noexcept { return ComparedByFriend (v); }
+    constexpr double get() const noexcept { return value; }
+    friend constexpr bool operator< (ComparedByFriend a, ComparedByFriend b) noexcept { return a.value < b.value; }
+
+private:
+    explicit constexpr ComparedByFriend (double v) noexcept
+        : value (v)
+    {
+    }
+
+    double value = 0.0;
+};
+
+template <typename Type>
+PHAZITE_NOINLINE Type makeValue (int index)
+{
+    return Type::from (numbers[index]);
+}
+
+template <>
+PHAZITE_NOINLINE BeatPosition makeValue<BeatPosition> (int index)
+{
+    return BeatPosition::fromBeats (numbers[index]);
+}
+
+inline double read (BeatPosition p) noexcept
+{
+    return p.inBeats();
+}
+
+template <typename Type>
+double read (Type value) noexcept
+{
+    return value.get();
+}
+
+// The clip's start and end, the range's start and end: 0, 8, 2, 6.
+template <typename Type>
+PHAZITE_NOINLINE double greatestOfGreatestAndLeast()
+{
+    const auto a = makeValue<Type> (0), b = makeValue<Type> (2), c = makeValue<Type> (1), d = makeValue<Type> (3);
+    return read (std::max (std::max (a, b), std::min (c, d)));
+}
+
+template <typename Type>
+PHAZITE_NOINLINE double leastKeptThenRead()
+{
+    const auto least = std::min (makeValue<Type> (1), makeValue<Type> (3));
+    return read (least);
+}
+
+// As BeatRange's constructor: the end never before the start.
+template <typename Type>
+struct RangeOf
+{
+    RangeOf (Type s, Type e) noexcept
+        : start (s),
+          end (std::max (s, e))
+    {
+    }
+
+    Type start, end;
+};
+
+template <typename Type>
+PHAZITE_NOINLINE double endOfRangeOfNamed()
+{
+    const auto start = std::max (makeValue<Type> (0), makeValue<Type> (2));
+    const auto end = std::min (makeValue<Type> (1), makeValue<Type> (3));
+    return read (RangeOf<Type> (start, end).end);
+}
+
+#define PHAZITE_PROBES_OF(Type)                                                                                                            \
+    { #Type ": std::max (std::max (a, b), std::min (c, d)) of named values", greatestOfGreatestAndLeast<Type>, 6.0 },                      \
+        { #Type ": std::min of made values, kept in a local, then read", leastKeptThenRead<Type>, 6.0 },                                   \
+        { #Type ": the end of a range of a named std::max and a named std::min", endOfRangeOfNamed<Type>, 6.0 }
+
 struct Probe
 {
     const char* what;
@@ -215,6 +369,12 @@ TEST_CASE ("Compiler probes: sums of least and greatest come out as the language
         { "std::min of two returned doubles", minOfReturnedDoubles, 6.0 },
         { "a call given std::max and std::min of returned doubles", sumOfMaxAndMinOfDoubles, 8.0 },
         { "the length of std::min of two returned strings", lengthOfMinOfReturnedTexts, 7.0 },
+        PHAZITE_PROBES_OF (BeatPosition),
+        PHAZITE_PROBES_OF (AsBeatPosition),
+        PHAZITE_PROBES_OF (ComparedByReference),
+        PHAZITE_PROBES_OF (NotConstexpr),
+        PHAZITE_PROBES_OF (NotInitialized),
+        PHAZITE_PROBES_OF (ComparedByFriend),
     };
 
     int wrong = 0;
