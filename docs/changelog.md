@@ -289,7 +289,8 @@ too. A line names the bug's number in that list.
   frame, so CI's linux-release job failed it in every run. The test ticks the displays first. Nothing was wrong with
   the value as it plays, which the entry suspected.
 - **207 The speed gate's count without its plan:** the gate that compares what a note added allocates in a small and
-  a big song waits for the note's plan inside the count, and requires one.
+  a big song makes the note's plan inside the count, without the message loop, and requires one: a wait for the
+  plan there took in whatever else the loop delivered meanwhile, so the same song counted differently from run to run.
 - **206 The menus compared at rest:** the test that compares every menu item with its command builds the menus once
   the versions' history is at rest after the last message delivered, with nothing delivered in between.
 - **200, 210 A folder two threads made:** the first save's test made `Versions/local` while the history's thread

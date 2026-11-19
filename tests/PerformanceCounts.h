@@ -31,7 +31,12 @@ public:
     // (dispatchPendingMessages()).
     int take();
 
+    // Gives the engine the song's plan as the song is now, at once: what the playback session does a turn of the message
+    // loop after an edit, without that turn, in which a test's count would take in whatever else the loop delivers.
+    void makePlanNow();
+
 private:
+    ProjectContext& context;
     std::shared_ptr<engine::StripState> master;
     long counted = 0;
     long countNow() const;

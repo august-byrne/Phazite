@@ -852,18 +852,14 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
         plans.take();
         Counts counts;
 
-        // The count waits for the note's plan: twice on Linux CI one round of the messages ended before the plan was made,
-        // and the count held what was left, which says nothing of how the work grows.
+        // The plan is made within the count and without the message loop: a wait for it there took in whatever else the loop
+        // delivered meanwhile (the same song counted 13,244, 15,380 or 20,407 from run to run, and Linux CI's small song 869
+        // against the big one's 10,059), which says nothing of how the work grows.
         counts.edit = phazite::test::countAllocations (
                           [&]
                           {
                               phazite::addNote (s.context, built.clips[0], 72, at (2.5), lasting (0.25), 100);
-                              REQUIRE (phazite::test::dispatchMessagesUntil (
-                                  [&]
-                                  {
-                                      counts.plans += plans.take();
-                                      return counts.plans > 0;
-                                  }));
+                              plans.makePlanNow();
                           })
                           .value_or (0);
         counts.plans += plans.take();
@@ -880,14 +876,14 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
         return counts;
     };
 
-    // Measured (2026-11-14), 8 / 16 / 32 / 64 tracks: a note added with its new plan 11,305 / 28,562 / 56,232 / 118,593; a
-    // save 4,600 / 9,164 / 18,111 / 35,867; the song's text alone 3,355 / 6,768 / 13,463 / 26,736.
+    // Measured (2026-11-19, Windows), 16 / 64 tracks: a note added with its new plan 3,779 / 13,229; a save 8,721 / 34,309;
+    // the song's text alone 6,431 / 25,534.
     const auto small = countsFor (16), big = countsFor (64); // four times the tracks
     MESSAGE ("Allocations, 16 tracks / 64 tracks: a note added with its new plan "
              << small.edit << " / " << big.edit << "; a save " << small.save << " / " << big.save << "; the song's text alone "
              << small.text << " / " << big.text);
 
-    // Four times the song: about four times the work (4.15 and 3.9 measured), and well short of the 16 times that work which
+    // Four times the song: about four times the work (3.5 and 3.9 measured), and well short of the 16 times that work which
     // grows as the square of the song makes.
     CAPTURE (small.plans);
     CAPTURE (big.plans);

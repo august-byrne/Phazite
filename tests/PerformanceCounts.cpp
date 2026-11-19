@@ -20,7 +20,8 @@ namespace
     }
 } // namespace
 
-PlanCounter::PlanCounter (ProjectContext& context)
+PlanCounter::PlanCounter (ProjectContext& contextToUse)
+    : context (contextToUse)
 {
     dispatchPendingMessages();
     auto* song = findSong (context);
@@ -40,6 +41,15 @@ long PlanCounter::countNow() const
     // Another master's state (a plan for another rate) would start another count.
     REQUIRE (getPlayedPlan().strips.back().state == master);
     return master.use_count();
+}
+
+void PlanCounter::makePlanNow()
+{
+    auto* song = findSong (context);
+    REQUIRE (song != nullptr);
+    auto* session = findPlayingSession (*song);
+    REQUIRE (session != nullptr);
+    session->update();
 }
 
 int PlanCounter::take()
