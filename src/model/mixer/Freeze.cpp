@@ -1055,8 +1055,11 @@ void toggleFreeze (ProjectContext& context, TrackRenderHost& host)
 
 bool canToggleFreeze (const ProjectContext& context)
 {
+    // Not while an old version is open in the song's place (Song::isShowingOther()): a freeze is no undo step, and would be
+    // of the version's track.
     const auto id = getSelectedTrackID (context);
-    return isFrozen (context, id) || getWhyNotFreeze (context, id).isEmpty();
+    const auto* song = findSong (context);
+    return (song == nullptr || ! song->isShowingOther()) && (isFrozen (context, id) || getWhyNotFreeze (context, id).isEmpty());
 }
 
 bool isSelectedTrackFrozen (const ProjectContext& context)

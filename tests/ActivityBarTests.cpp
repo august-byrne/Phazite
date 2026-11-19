@@ -772,7 +772,7 @@ TEST_CASE ("A click on a commit in the graph opens it, listing what it changed, 
     REQUIRE (row == 1);
     mouse.click (history.getRowPosition (row, true).getCentre());
     phazite::test::dispatchPendingMessages();
-    CHECK (view.getOpenedVersion() == quieter);
+    CHECK (view.getUnfoldedVersion() == quieter);
     REQUIRE (
         phazite::test::dispatchMessagesUntil ([&view, rows] { return view.getNumHistoryRows() == rows + 1; })); // read in the background
     CHECK (view.describeHistoryRow (row).endsWith (", open"));
@@ -790,7 +790,7 @@ TEST_CASE ("A click on a commit in the graph opens it, listing what it changed, 
     // Another click folds it.
     mouse.click (history.getRowPosition (row, true).getCentre());
     phazite::test::dispatchPendingMessages();
-    CHECK (view.getOpenedVersion().isEmpty());
+    CHECK (view.getUnfoldedVersion().isEmpty());
     CHECK (view.getNumHistoryRows() == rows);
 }
 
@@ -977,7 +977,8 @@ TEST_CASE ("Undo History lists the song's steps newest first, folded at first, a
     CHECK (view.getUndoNowRow() == 0);
 }
 
-TEST_CASE ("A double-click on a version hears it, as Hear It does, bouncing it first when it has no bounce, and changes nothing")
+TEST_CASE ("A double-click on a version opens it live, with no bounce, the bar and the transport bar say so, and Back to Now "
+           "brings the song back")
 {
     Screen screen;
     auto& context = screen.session.getContext();
@@ -989,36 +990,69 @@ TEST_CASE ("A double-click on a version hears it, as Hear It does, bouncing it f
     screen.setFirstTrackVolume (0.5f);
     const auto first = screen.saveVersion ("First");
     screen.setFirstTrackVolume (0.3f); // a change since, which stays
+    const auto nowState = phazite::findSong (context)->getState().createCopy();
 
     auto& view = screen.getVersionsView();
-    const auto doubleClick = [&view] (const juce::String& version)
+    const auto doubleClick = [&view] (int row)
     {
-        const auto row = view.getHistoryRow (version);
-        REQUIRE (row > 0);
+        REQUIRE (row >= 0);
         phazite::test::Mouse mouse (view.getHistoryList());
         mouse.doubleClick (view.getHistoryList().getRowPosition (row, true).getCentre());
         phazite::test::dispatchPendingMessages();
     };
 
-    // Without a bounce: bounced in the background, the song playing on, as A/B does, and heard as soon as it is; A/B names
-    // it meanwhile.
-    const auto branchBefore = phazite::getCurrentBranch (context)->id;
-    doubleClick (first);
-    CHECK (phazite::isWaitingToCompare (context));
-    CHECK (phazite::getCompareVersion (context) == first);
-    CHECK (phazite::describeCompare (context).contains ("\"First\""));
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&context, &first] { return phazite::getHeardVersion (context) == first; }));
-    CHECK_FALSE (phazite::isWaitingToCompare (context));
-    CHECK (phazite::getCurrentBranch (context)->id == branchBefore);
-    CHECK (phazite::hasChangesSinceLastVersion (phazite::test::withChangesIn (context)));
-    CHECK (view.describeHistoryRow (view.getHistoryRow (first)).contains ("heard"));
+    const auto readout = [&screen]
+    {
+        for (auto* label : phazite::test::findAll<juce::Label> (screen.shell))
+            if (label->getTitle() == "Hearing" && label->isVisible())
+                return label->getText();
 
-    // The song again (Hear It on the changes' row); then, with its bounce, a double-click hears it at once.
-    phazite::selectVersion (context, {});
-    REQUIRE (screen.registry.invoke ("version.hear"));
+        return juce::String();
+    };
+
+    // Its right-click menu has Open Version first, and Hear It greyed with why (no bounce).
+    const auto menu = view.makeHistoryMenu (view.getHistoryRow (first));
+    REQUIRE (menu.getNumItems() > 0);
+    {
+        juce::PopupMenu::MenuItemIterator items (menu);
+        REQUIRE (items.next());
+        CHECK (items.getItem().text.startsWith ("Open Version"));
+    }
+
+    // Opened: no bounce, nothing bounced; the branch as it was; the bar, the row's mark and the transport bar's readout.
+    const auto branchBefore = phazite::getCurrentBranch (context)->id;
+    doubleClick (view.getHistoryRow (first));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context, &first] { return phazite::getOpenVersion (context) == first; }));
+    CHECK_FALSE (phazite::getBounceProgress (context, first).has_value());
     CHECK (phazite::getHeardVersion (context).isEmpty());
-    doubleClick (first);
-    CHECK (phazite::getHeardVersion (context) == first);
+    CHECK (phazite::getCurrentBranch (context)->id == branchBefore);
+    CHECK (view.getOpenBarText().startsWith ("Looking at \"First\""));
+    CHECK (view.getBackToNowButton().isShowing());
+    CHECK (view.getBranchHereButton().isShowing());
+    CHECK (readout().startsWith ("Looking at \"First\""));
+    CHECK (screen.shell.getStatusBar().getBranchText().contains ("Looking at \"First\""));
+    CHECK (phazite::getVolume (context, track).getValue() == doctest::Approx (0.5f));
+
+    // Back to Now, by its button: the song as it was, the bar gone.
+    screen.click (view.getBackToNowButton());
+    CHECK (phazite::getOpenVersion (context).isEmpty());
+    CHECK (phazite::findSong (context)->getState().isEquivalentTo (nowState));
+    CHECK (view.getOpenBarText().isEmpty());
+    CHECK (readout().isEmpty());
+
+    // Escape, while the view has the keys, goes back too.
+    doubleClick (view.getHistoryRow (first));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context, &first] { return phazite::getOpenVersion (context) == first; }));
+    view.grabKeyboardFocus();
+    CHECK (view.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+    CHECK (phazite::getOpenVersion (context).isEmpty());
+    CHECK (phazite::findSong (context)->getState().isEquivalentTo (nowState));
+
+    // Hear It is greyed without a bounce, and says why.
+    phazite::selectVersion (context, first);
+    const auto* hear = screen.registry.find ("version.hear");
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*hear));
+    CHECK (phazite::getCurrentName (*hear) == "Hear It (No bounce: Open Version plays it live)");
     phazite::stopAndReturn (*phazite::findSong (context));
 }
 

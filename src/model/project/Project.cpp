@@ -1989,6 +1989,14 @@ private:
     }
 };
 
+namespace
+{
+    // Why nothing writes the song while a version is open in its place that can't go yet (VersionsModel.h: backToNow()).
+    const char* const notWhileShowing = "A version is open in the song's place and can't go back to Now yet (a render has it, "
+                                        "automation is being written, or the branch a change makes is being written): let that "
+                                        "finish, then save.";
+} // namespace
+
 Project::Project (Song::Ptr s, const juce::File& f)
     : song (std::move (s)),
       songState (song->getState()),
@@ -2000,13 +2008,37 @@ Project::Project (Song::Ptr s, const juce::File& f)
     // it of what nothing uses; opening it doesn't, as clips find the renders they use only when they play.
     song->setCacheFolder (getCacheFolder());
     rememberSavedState(); // what opening made of it isn't a change
-    changesOutsideHistory = song->getChangesOutsideHistory();
+    changesOutsideHistory = getOwnChangesOutsideHistory();
     songState.addListener (this);
+
+    // While the song shows another (a version open: Song::setShowingOther()), its unsaved mark is held as it was as that
+    // began, compared now: what the other changes is noted, and compared once it went (compareWithSavedState()), and neither
+    // its changes nor its plug-ins' own changes meanwhile count as the project's (a save in the background finishes as saved).
+    song->setShowingHeard (
+        [this] (bool showing)
+        {
+            if (showing)
+            {
+                compareWithSavedState();
+                outsideAtShowing = song->getChangesOutsideHistory();
+            }
+            else
+            {
+                outsideWhileShowing += song->getChangesOutsideHistory() - outsideAtShowing;
+            }
+        });
+}
+
+int Project::getOwnChangesOutsideHistory() const
+{
+    const auto all = song->getChangesOutsideHistory();
+    return all - outsideWhileShowing - (song->isShowingOther() ? all - outsideAtShowing : 0);
 }
 
 Project::~Project()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+    song->setShowingHeard (nullptr);
 
     // The versions' names, if they still wait to be written (versionsMoved()): at once, as the project closes.
     stopTimer();
@@ -2052,8 +2084,8 @@ bool Project::checkUnsavedChanges()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    if (! hasUnsavedChanges())
-        return false;
+    if (! hasUnsavedChanges() || song->isShowingOther()) // its mark held (compareWithSavedState())
+        return changedSinceSave;
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
@@ -2065,7 +2097,7 @@ bool Project::checkUnsavedChanges()
 
     // The song is as saved after all.
     changedSinceSave = changedSinceAutosave = false;
-    changesOutsideHistory = song->getChangesOutsideHistory();
+    changesOutsideHistory = getOwnChangesOutsideHistory();
     clearToCompare();
     return false;
 }
@@ -2074,7 +2106,12 @@ juce::Result Project::save()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    // What is being tried in place (Swap) is kept first, as its own step: the file holds what is heard.
+    // What is being tried in place (Swap) is kept first, as its own step: the file holds what is heard. Another song shown for
+    // a while (a version open) goes first: the file holds the song's own, never the other (which can't go while a render has
+    // it, whose step lands in it as it ends).
+    if (! Trial::putBackShowing (song->getUndoManager()))
+        return juce::Result::fail (notWhileShowing);
+
     Trial::keepOpenTrial (song->getUndoManager());
 
     autosaveWriter->wait(); // an autosave being written, which this makes old
@@ -2094,9 +2131,9 @@ juce::Result Project::save()
 
     changedSinceSave = false;
     changedSinceAutosave = false;
-    namesPending = namesFailed = false;                       // the versions' names went with the song
-    changesOutsideHistory = song->getChangesOutsideHistory(); // stored in the song as it saved
-    rememberSavedState();                                     // what the file holds now
+    namesPending = namesFailed = false;                    // the versions' names went with the song
+    changesOutsideHistory = getOwnChangesOutsideHistory(); // stored in the song as it saved
+    rememberSavedState();                                  // what the file holds now
     getAutosaveFile (file).deleteFile();
     autosavedAt = 0;
     autosaveWriter->forgetWritten();
@@ -2106,6 +2143,10 @@ juce::Result Project::save()
 juce::Result Project::autosave()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! Trial::putBackShowing (song->getUndoManager())) // as save() does; nothing while it can't
+        return juce::Result::ok();
+
     autosaveWriter->wait();
     compareWithSavedState();
 
@@ -2140,6 +2181,10 @@ bool Project::hasChangesToAutosave()
 void Project::autosaveInBackground()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! Trial::putBackShowing (song->getUndoManager())) // as save() does; nothing while it can't
+        return;
+
     compareWithSavedState();
 
     if (! changedSinceAutosave || autosaveWriter->isBusy())
@@ -2166,6 +2211,10 @@ bool Project::isAutosaving() const
 void Project::saveInBackground()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! Trial::putBackShowing (song->getUndoManager())) // as save() does; nothing while it can't
+        return;
+
     compareWithSavedState();
 
     // Also for the versions' names alone, where a write of them failed (namesPending).
@@ -2190,7 +2239,7 @@ void Project::saveInBackground()
     namesPending = false; // in what it writes; pending again if the write fails (finishBackgroundSave())
 
     changesAtBackgroundSave = changeCount;
-    outsideAtBackgroundSave = song->getChangesOutsideHistory();
+    outsideAtBackgroundSave = getOwnChangesOutsideHistory();
 }
 
 bool Project::finishBackgroundSave()
@@ -2213,7 +2262,7 @@ bool Project::finishBackgroundSave()
     savedState = written;
     changesOutsideHistory = outsideAtBackgroundSave;
 
-    if (changeCount == changesAtBackgroundSave && song->getChangesOutsideHistory() == outsideAtBackgroundSave)
+    if (changeCount == changesAtBackgroundSave && getOwnChangesOutsideHistory() == outsideAtBackgroundSave)
     {
         changedSinceSave = changedSinceAutosave = false;
         getAutosaveFile (file).deleteFile();
@@ -2246,6 +2295,12 @@ bool Project::takeAutosaveFailure()
 juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error)
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! Trial::putBackShowing (song->getUndoManager())) // as save() does
+    {
+        error = notWhileShowing;
+        return {};
+    }
 
     if (takeNamesWritten()) // the versions' names being written into the file, which the copy is made from, written first
         tellNamesFailed();
@@ -2408,6 +2463,13 @@ std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, co
                                               std::function<void (const juce::Result&)> onFinished)
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! Trial::putBackShowing (song->getUndoManager())) // as save() does
+    {
+        onFinished (juce::Result::fail (notWhileShowing));
+        return {};
+    }
+
     autosaveWriter->wait(); // its autosave goes with it
     if (takeNamesWritten()) // and its file whole, the versions' names in it, before the copy reads it
         tellNamesFailed();
@@ -2684,8 +2746,13 @@ bool Project::isAsSaved (const ToCompare& entry) const
 
 void Project::compareWithSavedState()
 {
+    // Nothing while the song shows another for a while (Song::isShowingOther(): a version open), whose changes are no unsaved
+    // ones: the mark stays what it was as that began (compared then), and what changed meanwhile is compared once it went.
+    if (song->isShowingOther())
+        return;
+
     // A plug-in's own change, which a save stores in the song.
-    if (const auto outside = song->getChangesOutsideHistory(); outside != changesOutsideHistory)
+    if (const auto outside = getOwnChangesOutsideHistory(); outside != changesOutsideHistory)
     {
         changesOutsideHistory = outside;
         changedSinceSave = changedSinceAutosave = true;
@@ -2722,7 +2789,9 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
         return;
 
-    ++changeCount;
+    // Another song shown in place (a version open) changes nothing of the project's: noted below, to compare once it went.
+    if (! song->isShowingOther())
+        ++changeCount;
 
     if (changedSinceSave)
     {

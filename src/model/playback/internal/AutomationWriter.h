@@ -75,6 +75,11 @@ public:
     // curve's one point then (model/devices/internal/Parameters.h).
     bool isWriting (const ParameterRef&) const;
 
+    // Whether any pass is under way, or what one finished waits to be written (a drag's end): its points are the song's it
+    // began on, so a version opened in the song's place (model/versions/VersionsModel.h) waits for Stop, and so does Back to
+    // Now from one, whose undos and redos it would record.
+    bool isPassUnderWay() const noexcept { return ! passes.empty() || ! waiting.empty(); }
+
     // A parameter that its curve now names otherwise (a folder's volume, its fader of the other kind: model/mixer/
     // internal/Buses.h): a pass that writes it goes on writing it by its new name, so that what was ridden is written.
     void parameterRenamed (const ParameterRef& from, const ParameterRef& to);

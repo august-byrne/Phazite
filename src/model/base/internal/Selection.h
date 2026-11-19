@@ -98,6 +98,23 @@ private:
         bool operator== (const Item&) const = default;
     };
 
+public:
+    // What is selected, every kind of it, as it is (what is gone included, which may come back), to be put back so later
+    // whatever was selected meanwhile: a version opened in the song's place, and Back to Now (model/versions/VersionsModel.h).
+    struct Kept
+    {
+        std::vector<Item> items;
+        std::vector<SectionID> sections;
+        std::vector<ClipID> noteClips;
+        std::vector<NoteRef> notes;
+        ParameterRef pointsParameter;
+        std::vector<juce::ValueTree> points;
+    };
+
+    Kept keep() const;
+    void putBack (const Kept&);
+
+private:
     juce::WeakReference<Song> heldSong;
     std::vector<Item> items;
     std::vector<SectionID> sections;

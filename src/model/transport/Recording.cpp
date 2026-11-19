@@ -32,6 +32,12 @@ void startRecording (Song& song)
     if (isRecording (song) || ! canRecord (song))
         return;
 
+    // Recording is an edit: with a version open in the song's place, the branch it starts is made first, before the take takes
+    // its tracks, so that nothing pulls the song from under the take (model/versions/VersionsModel.h: openVersion()). Where it
+    // can't be made, nothing records, and the versions say why.
+    if (! Trial::makeWayForEdit (song))
+        return;
+
     // Phazite's engine records what it plays (Take.h): from where playback starts, after the count-in, or from where the
     // song is if it plays already.
     auto* session = findPlayingSession (song);

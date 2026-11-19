@@ -109,8 +109,10 @@ version.switchBranch | plugin-states
 version.merge | plugin-states
 version.finishMerge | plugin-states
 version.cancelMerge | plugin-states
+version.open | plugin-states
+version.backToNow
 version.hear
-version.compare | N
+version.compare | N | plugin-states-when
 version.bounce
 version.deleteBounce
 version.exportDawProject | plugin-states

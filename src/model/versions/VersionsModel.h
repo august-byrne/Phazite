@@ -378,7 +378,8 @@ VersionsRoom getVersionsRoom (const ProjectContext&);
 // current branch's last version, with no changes since) is the open song rendered, playback stopped for it, in a progress
 // window: started, or nothing (with no call back) if it can't be. An older one is its song alone, rendered in the
 // background with plug-in instances of its own while the song plays on (step V5), one at a time, which stops if recording
-// starts: how far it has come, while it renders; and why the last one failed, until the next.
+// starts: how far it has come, while it renders; and why the last one failed, until the next. Only when asked: nothing bounces
+// by itself.
 bool canBounce (const ProjectContext&, const juce::String& versionID);
 std::unique_ptr<TrackRender> startBounce (ProjectContext&, const juce::String& versionID,
                                           std::function<void (const juce::Result&)> onFinished);
@@ -485,23 +486,84 @@ bool getBounceWithVersion (const ProjectContext&);
 
 // Hear It: a version's bounce heard in place of the song from the engine's next block, at the same beat, the song playing
 // from its playhead if it was stopped; none, the song itself (Now). Each switch matches the two's loudness so far, the louder
-// turned down to the other's. An edit to the song switches back to it. False for a version without a bounce.
+// turned down to the other's. An edit to the song switches back to it. False for a version without a bounce: Open Version
+// plays one live. Nothing bounces by itself.
 bool hearVersion (ProjectContext&, const juce::String& versionID);
 juce::String getHeardVersion (const ProjectContext&); // none while the song itself is heard
-juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version is heard, for the transport bar
+juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version's bounce is heard, for the transport bar
 
-// A/B (version.compare, the transport bar's A/B; docs/design/versions.md: Hearing a version), as a reference plug-in switches a mix
-// and its earlier version: a press hears B, a version's bounce, in place of the song, A, at the same point and as loud; another,
-// the song again. B is the version waiting for its bounce to be heard, else the version heard last (Hear It), else the one the
-// song comes from: the current branch's last version,
-// so that the changes not saved in a version yet are heard against it. A version without a bounce is bounced
-// in the background first (startBackgroundBounce()), the song playing on, and heard as soon as it is; a press meanwhile, or
-// an edit, stops waiting for it. Nothing to compare while B is the song itself: the last version with no changes since.
+//==============================================================================
+// A version open (docs/design/versions.md: A version open): the song made that version's in place, live, with no bounce, to
+// listen and look, and Now (the song as it was, its unsaved changes, undo and redo steps and what is selected included) back
+// exactly at Back to Now.
+//
+// Open Version (version.open, a double-click in the history): the version's song read on the history's thread (once: kept for
+// the next open of it), the window held meanwhile as a switch's read holds it, then made the song's with the fewest edits
+// (ApplySong.h: makeSongLike()) in a trial that holds the song's history (model/commands/internal/Undo.h: Trial::
+// holdHistory()), the song as it is kept in Local History first and copied, its plug-ins' settings stored. What both have stays
+// as it is, the song plays on, and a plug-in the version has and Now lacks loads in the background as any added does. From one
+// version open to another directly, one way back to Now still. The version Now is (the last, with no changes since) opens
+// nothing, and while another is open goes Back to Now. True for one opened or being read.
+//
+// While one is open: its project's unsaved mark, the Changes list, the star and the title are Now's (the song isn't Now); Undo
+// and Redo do nothing (greyed, "Back to Now first"); a freeze and Clean Up Unused Audio wait for Back to Now; and every save
+// (Auto Save waits), export, Save Version, switch, merge, restore, bounce of the song and Local History's snapshot goes Back to
+// Now first, so that nothing is written that says the song is the version's. What isn't an undo step (mute and solo, the loop,
+// view state, a plug-in's settings changed in its window) may change meanwhile, and is put back as Now had it.
+//
+// An edit while one is open makes a branch there as its step ends with changes (an undo step, a gesture, Swap's or another
+// trial kept; a press that changed nothing, a drag ended with Escape or a trial put back leave the version open, Now whole):
+// as Create Branch from the version makes one (VersionHistory::branchFromShown()), the branch named "idea-3", the song
+// growing from the version on it, Now with its unsaved changes kept on the branch it was on as a switch keeps the song it
+// leaves, by its piece written on the history's thread as the version opened; the branch's undo history starts with the
+// edit, which Undo takes back, nothing under it reachable; then the project is saved, and a notice says so with Back to
+// "main" (takeVersionsNotice()). Recording makes the branch as it starts, before anything is recorded, and doesn't start
+// where it can't be made, saying why. Where an edit's branch can't be made (the history busy, Now's piece not written yet,
+// a record that can't be written), the version is kept as a restore on Now's branch instead ("Restore "Verse 2"", the
+// edit after it, which Undo takes back), and the notice says why and how many Undos take it back.
+bool openVersion (ProjectContext&, const juce::String& versionID, const SaveProjectThen& saveProjectThen = {});
+bool canOpenVersion (const ProjectContext&, const juce::String& versionID);
+juce::String whyNotOpenVersion (const ProjectContext&, const juce::String& versionID); // none while it can
+
+// Back to Now: the version open put back; nothing while none is. Not while a render has the song (Bounce in Place,
+// Consolidate), whose step lands in the version open as it ends: false then, the song still the version's, which whatever
+// would write it refuses. Its command greyed with why (whyNotBackToNow(): also during a drag on the version, whose step ends
+// first).
+bool backToNow (ProjectContext&);
+juce::String whyNotBackToNow (const ProjectContext&); // none while it can
+bool canGoBackToNow (const ProjectContext&);
+juce::String describeBackToNow (const ProjectContext&);   // its name as menus show it: "Back to Now", or with why not
+juce::String getOpenVersion (const ProjectContext&);      // none while none is
+juce::String describeOpenVersion (const ProjectContext&); // "Looking at "Verse 2" (3 days ago)", none while none is open
+
+// The plug-ins of the version open that aren't installed here, by name, which play nothing (as in any project); and whether the
+// version has a bounce to hear in their place. None while none is open, or all are.
+juce::StringArray getOpenVersionMissingPlugins (const ProjectContext&);
+
+// version.open on the version the history selects; its name as menus show it ("Open Version", or why it can't).
+void openSelectedVersion (ProjectContext&, const SaveProjectThen& = {});
+bool canOpenSelected (const ProjectContext&);
+juce::String describeOpenSelected (const ProjectContext&);
+
+// What the versions tell without asking (an edit that started a branch while a version was open), once each: the title, the
+// text, and the branch its button goes back to ("Back to main"; none without one). None while there is nothing.
+struct VersionsNotice
+{
+    juce::String title, text, actionName, branch;
+};
+
+std::optional<VersionsNotice> takeVersionsNotice (ProjectContext&);
+
+// A/B (version.compare, N, the transport bar's A/B; docs/design/versions.md: Hearing a version), live: a press opens B
+// (openVersion()), another goes back to Now, at the same beat, the song playing on. B is the version open, else the version
+// opened last, else the version whose bounce was heard last, else the one the song grew from (the current branch's last
+// version), so that the changes not saved in a version yet are heard against it. While a version's bounce is heard (Hear It),
+// a press hears the song again. Nothing to compare while B is the song itself: the last version with no changes since. The
+// loudness isn't matched live (the two never play at once); it is for a bounce heard.
 juce::String getCompareVersion (const ProjectContext&); // B, none without a version
 bool canCompare (const ProjectContext&);
-void toggleCompare (ProjectContext&);
-bool isWaitingToCompare (const ProjectContext&);        // B is being bounced to be heard
-juce::String getCompareProblem (const ProjectContext&); // why that bounce failed, until the next press or an edit
+void toggleCompare (ProjectContext&, const SaveProjectThen& = {});
+juce::String getCompareProblem (const ProjectContext&); // why the last press couldn't open B, until the next press or an edit
 juce::String describeCompare (const ProjectContext&);   // the A/B button's tooltip: what a press does now, or why it can't
 
 // Export as DAWproject... (step D1; model/project/internal/DawProject.h): the version the Versions view selects, or the song
@@ -512,11 +574,11 @@ bool canExportDawProject (const ProjectContext&);
 void exportDawProject (ProjectContext&, TrackRenderHost&);
 
 // The commands on the version the Versions view selects (version.hear: Now while none is; version.bounce: the last while none
-// is; version.deleteBounce), each render ending in the host, as Freeze Track's does. Hear It on a version without a bounce
-// bounces it in the background first, the song playing on, and hears it as soon as it is, as A/B does (isWaitingToCompare();
-// why it couldn't, getCompareProblem()); not on the version the song is now, which has nothing to hear against.
+// is; version.deleteBounce), each render ending in the host, as Freeze Track's does. Hear It only on a version with a bounce
+// (its name says why not otherwise: "No bounce: Open Version plays it live").
 void hearSelectedVersion (ProjectContext&);
 bool canHearSelected (const ProjectContext&);
+juce::String describeHearSelected (const ProjectContext&);
 void bounceSelectedVersion (ProjectContext&, TrackRenderHost&);
 bool canBounceSelected (const ProjectContext&);
 void deleteSelectedBounce (ProjectContext&);

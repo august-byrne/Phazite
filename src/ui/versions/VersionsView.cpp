@@ -443,6 +443,10 @@ public:
         g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
                     juce::Justification::centredRight, false);
 
+        // The version open in the song's place, in plain words, in the accent's colour.
+        if (version.id == view.shownVersion)
+            area.removeFromRight (drawBadge (g, area, "Open", p.accent, p.background) + Space::xs);
+
         // The names of the branches whose last version it is: the current one's filled.
         for (const auto& branch : view.branches)
         {
@@ -484,7 +488,9 @@ public:
             return view.describeHistoryRow (row) + ". Its arrow restores it from \"" + version->name + "\"; right-click for more.";
 
         return view.describeHistoryRow (row)
-               + ". Click to show what it changed, double-click to hear it; right-click for what can be done with it." + play;
+               + ". Click to show what it changed, double-click to open it in place of the song, live; right-click for what can be "
+                 "done with it."
+               + play;
     }
 
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override
@@ -521,22 +527,28 @@ public:
             return;
         }
 
-        // A version opens, or folds.
+        // A version unfolds, or folds.
         if (const auto* version = view.getRowVersion (row))
-            view.openVersion (version->id);
+            view.unfoldVersion (version->id);
     }
 
-    // A double-click on a version hears it (Hear It), which changes nothing: what a producer asks of an old version.
+    // A double-click on a version opens it in the song's place, live (Open Version): what a producer asks of an old version.
+    // On the changes' row, Now again.
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent& e) override
     {
-        if (view.getRowVersion (row) != nullptr && ! e.mods.isPopupMenu())
-            view.commands.invoke ("version.hear");
+        if (e.mods.isPopupMenu())
+            return;
+
+        if (view.getRowVersion (row) != nullptr)
+            view.commands.invoke ("version.open");
+        else if (row == 0)
+            view.commands.invoke ("version.backToNow");
     }
 
     void returnKeyPressed (int row) override
     {
         if (const auto* version = view.getRowVersion (row))
-            view.openVersion (version->id);
+            view.unfoldVersion (version->id);
     }
 
     void selectedRowsChanged (int row) override
@@ -800,6 +812,26 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     newerText.setTitle ("Newer versions");
     newerButton.onClick = [this] { commands.invoke ("version.takeNewer"); };
 
+    // The bar of the version open in the song's place: what it is, and the ways on from it.
+    openText.setTitle ("Version open");
+    openText.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
+    openText.setJustificationType (juce::Justification::topLeft);
+    setThemeColour (openText, juce::Label::textColourId, &Palette::focus); // reads as text (4.5:1), as the transport bar's
+    backButton.setButtonText ("Back to Now");
+    backButton.onClick = [this] { commands.invoke ("version.backToNow"); };
+    branchHereButton.setButtonText ("Create Branch Here");
+    branchHereButton.onClick = [this]
+    {
+        selectVersion (context, shownVersion);
+        commands.invoke ("version.newBranch");
+    };
+    openBounceButton.setButtonText ("Hear Its Bounce");
+    openBounceButton.onClick = [this]
+    {
+        selectVersion (context, shownVersion);
+        commands.invoke ("version.hear");
+    };
+
     for (auto* list : { &changesList, &historyList, &localList, &undoList })
     {
         list->setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
@@ -831,7 +863,8 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText, &newerText,
-                                                             &newerButton, undoSection.get() })
+                                                             &newerButton, undoSection.get(), &openText, &backButton, &branchHereButton,
+                                                             &openBounceButton })
         addChildComponent (c);
 
     refreshTooltips();
@@ -978,7 +1011,7 @@ void VersionsView::refreshTooltips()
     moreButton.setTooltip ("More Actions: versions, changes, branches, DAWproject, clean up");
     historySection->setTooltip ("The song's versions: each on its branch's line, where branches part and where they merge");
     historyList.setTooltip (
-        "Every version, newest first, each on its branch's line: click one to show what it changed, double-click to hear it");
+        "Every version, newest first, each on its branch's line: click one to show what it changed, double-click to open it in the song's place");
     localSection->setTooltip ("The song as it was while it differed from its last version, kept without asking: as the project "
                               "opened, every few minutes while it changed, and before what made it another");
     localList.setTooltip ("Local History, newest first: each one's arrow restores the song to it, as one undo step");
@@ -1117,9 +1150,9 @@ void VersionsView::selectHistoryRow()
         historyList.selectRow (row, true, true);
 }
 
-void VersionsView::openVersion (const juce::String& versionID)
+void VersionsView::unfoldVersion (const juce::String& versionID)
 {
-    // Another click folds it; one version opens at a time.
+    // Another click folds it; one version unfolds at a time.
     openedVersion = openedVersion == versionID ? juce::String() : versionID;
     refreshHistoryRows();
     refreshHistoryLines (getCurrentBranch (context).has_value() ? getCurrentBranch (context)->head : juce::String());
@@ -1142,8 +1175,8 @@ juce::Rectangle<int> VersionsView::getRestorePosition (int row) const
 
 juce::PopupMenu VersionsView::makeHistoryMenu (int row)
 {
-    // Grouped: hearing it; going back to it; branching and merging; its name; its bounce; and exporting it. A line under a
-    // version: restoring it.
+    // Grouped: opening it, live; going back to it; branching and merging; its name; its bounce, and hearing that; and exporting
+    // it. A line under a version: restoring it. The changes' row: back to Now, or to the song from a bounce heard.
     juce::PopupMenu menu;
     const auto group = [this, &menu] (std::initializer_list<const char*> ids)
     {
@@ -1162,7 +1195,7 @@ juce::PopupMenu VersionsView::makeHistoryMenu (int row)
     if (const auto* version = getRowVersion (row))
     {
         const auto last = getLastVersion (context);
-        group ({ "version.hear" });
+        group ({ version->id == getOpenVersion (context) ? "version.backToNow" : "version.open" });
         group ({ "version.bringBack", "version.takeFrom" });
         group ({ "version.newBranch", "version.merge" });
 
@@ -1171,12 +1204,12 @@ juce::PopupMenu VersionsView::makeHistoryMenu (int row)
         else
             group ({ "version.editMessage" });
 
-        group ({ "version.bounce", "version.deleteBounce" });
+        group ({ "version.hear", "version.bounce", "version.deleteBounce" });
         group ({ "version.exportDawProject" });
         return menu;
     }
 
-    group ({ "version.hear" });
+    group ({ "version.backToNow", "version.hear" });
     group ({ "version.newBranch" });
     group ({ "version.exportDawProject" });
     return menu;
@@ -1346,6 +1379,7 @@ void VersionsView::refresh()
     heardVersion = getHeardVersion (context);
     anyBounce = std::any_of (versions.begin(), versions.end(), [] (const VersionInfo& version) { return version.hasBounce; });
     bouncingVersion.clear();
+    refreshOpenBar();
 
     for (const auto& version : versions)
     {
@@ -1497,6 +1531,54 @@ void VersionsView::refresh()
     resized();
 }
 
+void VersionsView::refreshOpenBar()
+{
+    // "Looking at "Verse 2" (3 days ago)", and what of it can't play here (a plug-in not installed), with its bounce where it has
+    // one; the Changes under it stay Now's.
+    const auto was = std::pair (shownVersion, openText.getText());
+    shownVersion = getOpenVersion (context);
+    auto text = describeOpenVersion (context);
+    const auto missing = getOpenVersionMissingPlugins (context);
+    const auto found = std::find_if (versions.begin(), versions.end(), [this] (const VersionInfo& v) { return v.id == shownVersion; });
+    const auto hasBounce = found != versions.end() && found->hasBounce;
+
+    if (text.isNotEmpty())
+    {
+        if (! missing.isEmpty())
+            text << ". " << missing.joinIntoString (", ") << (missing.size() == 1 ? " isn't" : " aren't")
+                 << " installed here, so it plays nothing" << (hasBounce ? "; its bounce has the whole song." : ".");
+
+        text << "\nThe changes below are the song's own (Now).";
+    }
+
+    openText.setText (text, juce::dontSendNotification);
+
+    for (auto* c : std::initializer_list<juce::Component*> { &openText, &backButton, &branchHereButton })
+        c->setVisible (shownVersion.isNotEmpty());
+
+    // Greyed while the version can't go yet (a render has it), saying why.
+    const auto whyNotBack = shownVersion.isNotEmpty() ? whyNotBackToNow (context) : juce::String();
+    backButton.setEnabled (whyNotBack.isEmpty());
+    backButton.setTooltip (whyNotBack);
+
+    openBounceButton.setVisible (shownVersion.isNotEmpty() && ! missing.isEmpty() && hasBounce);
+
+    if (was != std::pair (shownVersion, openText.getText()))
+    {
+        historyList.repaint(); // its row's mark
+        resized();
+    }
+}
+
+bool VersionsView::keyPressed (const juce::KeyPress& key)
+{
+    // Escape, while a version is open: back to Now, as the bar's button.
+    if (key == juce::KeyPress::escapeKey && shownVersion.isNotEmpty())
+        return commands.invoke ("version.backToNow");
+
+    return false;
+}
+
 void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
 {
     // Each version's lines to the versions it follows, and the changes' row's to the current branch's last version (or, on a
@@ -1566,8 +1648,25 @@ void VersionsView::resized()
         return field.withSizeKeepingCentre (field.getWidth(), height);
     };
 
-    // The title and the view's menu; then the branch, on a row of its own, as the panel is narrow.
+    // The title and the view's menu; then the version open in the song's place, across the view's top; then the branch, on a
+    // row of its own, as the panel is narrow.
     title.setBounds (area.removeFromTop (SideBar::titleHeight));
+
+    if (openText.isVisible())
+    {
+        const auto textWidth = juce::jmax (1, area.getWidth() - SideBar::fieldLeft - SideBar::fieldRight);
+        juce::AttributedString said (openText.getText());
+        said.setFont (openText.getFont());
+        juce::TextLayout saidLayout;
+        saidLayout.createLayout (said, (float) textWidth);
+        openText.setBounds (area.removeFromTop (juce::roundToInt (saidLayout.getHeight()) + History::noteHeight)
+                                .withTrimmedLeft (SideBar::fieldLeft - openText.getBorderSize().getLeft())
+                                .withTrimmedRight (SideBar::fieldRight));
+
+        for (auto* button : { &backButton, &branchHereButton, &openBounceButton })
+            if (button->isVisible())
+                button->setBounds (inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight));
+    }
 
     if (branchButton->isVisible())
         branchButton->setBounds (area.removeFromTop (ListRow::height).reduced ((int) ListRow::inset, 0));

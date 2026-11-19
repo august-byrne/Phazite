@@ -4,6 +4,7 @@
 #include "model/base/Numbers.h"
 #include "model/mixer/MixerModel.h"
 #include "model/presets/PresetModel.h"
+#include "model/versions/VersionsModel.h"
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/WindowKeys.h"
@@ -349,6 +350,24 @@ void AppShell::projectChanged()
 
     // A menu's choices name the items of the project that was open, and the new one's can have the same IDs.
     juce::PopupMenu::dismissAllActiveMenus();
+}
+
+void AppShell::versionsChanged()
+{
+    // An edit made while a version was open started a branch: said, with the way back to the branch left.
+    if (const auto notice = takeVersionsNotice (projectContext))
+    {
+        std::function<void()> back;
+
+        if (notice->branch.isNotEmpty())
+            back = [this, branch = notice->branch]
+            {
+                selectBranch (projectContext, branch);
+                commands.invoke ("version.switchBranch");
+            };
+
+        notices.show ({ .title = notice->title, .text = notice->text, .actionName = notice->actionName, .action = std::move (back) });
+    }
 }
 
 void AppShell::setLayout (Layout layout)

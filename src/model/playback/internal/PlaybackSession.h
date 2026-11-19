@@ -45,6 +45,7 @@ public:
     SongPlayer& getPlayer() noexcept { return player; }
     const SongPlayer& getPlayer() const noexcept { return player; }
     AutomationWriter& getWriter() noexcept { return writer; }
+    const AutomationWriter& getWriter() const noexcept { return writer; }
     PluginInstances& getPlugins() noexcept { return plugins; }
     AudioRecorder& getRecorder() noexcept { return *recorder; }
     const AudioRecorder& getRecorder() const noexcept { return *recorder; }

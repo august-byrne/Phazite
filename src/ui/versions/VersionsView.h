@@ -15,7 +15,9 @@
 // - History: every branch's versions newest first, each on its branch's line in its color, a branch's name on its last
 //   version, with a play mark on those with a bounce, which hears it in place of the song (the changes' row, the song again).
 //   A click on a version opens it, as a tree's row opens: what it changed shows under it, a line a track, each with its letter
-//   and, under the pointer, its Restore from This Version; another click folds it; a double-click hears it (Hear It);
+//   and, under the pointer, its Restore from This Version; another click folds it; a double-click opens it in the song's
+//   place, live (Open Version), its row marked "Open", with a bar across the view's top that says so, with Back to Now and
+//   Create Branch Here (Escape goes back too);
 // - Local History, the song as it was while it differed from its last version, and Undo History, the song's undo steps, a
 //   click going back or forth to one (docs/design.md, open question 22), each folded at first;
 // - and the room the history takes.
@@ -66,10 +68,10 @@ public:
     int getNumHistoryRows() const noexcept { return (int) historyRows.size(); } // the changes' row first
     juce::String describeHistoryRow (int row) const;
 
-    // The history's version opened, whose changes show under it (none for none), opened or folded as a click on it does; and
+    // The history's version unfolded, whose changes show under it (none for none), unfolded or folded as a click on it does; and
     // the row of a version, or of the changes (none).
-    const juce::String& getOpenedVersion() const noexcept { return openedVersion; }
-    void openVersion (const juce::String& versionID);
+    const juce::String& getUnfoldedVersion() const noexcept { return openedVersion; }
+    void unfoldVersion (const juce::String& versionID);
     int getHistoryRow (const juce::String& versionID) const;
     juce::TextEditor& getMessageField() noexcept;
 
@@ -100,6 +102,15 @@ public:
     // What the view says while the branch has versions the song didn't grow from (none while it hasn't), and its button.
     juce::String getNewerText() const { return newerText.isVisible() ? newerText.getText() : juce::String(); }
     juce::Button& getNewerButton() noexcept { return newerButton; }
+
+    // The bar across its top while a version is open in the song's place ("Looking at "Verse 2" (3 days ago)"; none while none
+    // is), with Back to Now, Create Branch Here, and, where the version's plug-ins aren't installed here and it has a bounce,
+    // Hear Its Bounce. Escape, while the view has the keys, goes back to Now.
+    juce::String getOpenBarText() const { return openText.isVisible() ? openText.getText() : juce::String(); }
+    juce::Button& getBackToNowButton() noexcept { return backButton; }
+    juce::Button& getBranchHereButton() noexcept { return branchHereButton; }
+    juce::Button& getOpenBounceButton() noexcept { return openBounceButton; }
+    bool keyPressed (const juce::KeyPress&) override;
 
     // Undo History, at the foot (folded at first, as Local History; as Ableton Live 12.1's, Logic Pro's and Studio One's): the
     // song's undo steps newest first, those undone (which Redo would do again) dimmed above the one the song is at, and under
@@ -155,6 +166,12 @@ private:
     // what the view says of them, under Save Version, and Take (or Merge) the Newer Versions.
     juce::Label newerText;
     juce::TextButton newerButton;
+
+    // The version open in the song's place (none while none is), and the bar that says so (getOpenBarText()).
+    juce::String shownVersion;
+    juce::Label openText;
+    juce::TextButton backButton, branchHereButton, openBounceButton;
+    void refreshOpenBar();
     std::unique_ptr<ChangesModel> changesModel;
     std::unique_ptr<HistoryModel> historyModel;
     std::unique_ptr<LocalHistoryModel> localModel;
@@ -236,7 +253,13 @@ private:
 
     void projectChanged() override { refresh(); }
     void versionsChanged() override { refresh(); }
-    void songChanged (const SongChanges&) override { refreshUndoHistory(); } // each change is a step, or a step's part
+    void songChanged (const SongChanges& changed) override
+    {
+        refreshUndoHistory(); // each change is a step, or a step's part
+
+        if (changed.devices && shownVersion.isNotEmpty())
+            refreshOpenBar(); // a plug-in the version has, found missing as it joins
+    }
     void textEditorTextChanged (juce::TextEditor&) override;
 };
 } // namespace phazite::ui

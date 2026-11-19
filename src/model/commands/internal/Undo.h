@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace phazite
 {
@@ -23,9 +24,27 @@ void redo (Song&);
 // was asked at (a value typed into a plug-in's control: ParameterHandle). Message thread.
 std::uint64_t countHistoryMoves (const Song&);
 
-// Whether the song has a change to undo, or an undone change to redo.
+// Whether the song has a change to undo, or an undone change to redo: neither while a trial holds its history
+// (Trial::holdHistory(): a version open), whose undo() and redo() do nothing. A redo step is only one of the song's: JUCE's
+// history can hold more after a step taken back alone, which Phazite counts (Song::History::staleRedoSteps; JUCE workaround W56
+// (docs/juce-workarounds.md)), and nothing here reaches them.
 bool canUndo (const Song&);
 bool canRedo (const Song&);
+
+// The song's steps as Undo and Redo reach them (Undo History's rows: model/commands/UndoHistory.h): those Undo would take
+// back, oldest first, and those Redo would do again, in order. While a trial holds the history (a version open), the song's
+// own as they come back at Back to Now, without the step that shows the other.
+struct HistorySteps
+{
+    juce::StringArray done, ahead;
+};
+
+HistorySteps getHistorySteps (const Song&);
+
+// The song's history from its last steps on (so many), the steps under them gone (none of them reachable any more), or from
+// nothing with none: what a branch made from a version open starts with (model/versions/VersionsModel.cpp). The last of them
+// must be a step with changes, just ended. Message thread.
+void startHistoryAgain (Song&, int lastSteps);
 
 // FL Studio's undo-or-redo: redoes the change last undone if there is one, else undoes the last change.
 void undoOrRedo (Song&);
@@ -98,6 +117,7 @@ public:
 private:
     Song& song;
     bool open = false;
+    int redoStepsBefore = 0; // the song's own redo steps as it began, which a roll back leaves as they were
 
     JUCE_DECLARE_NON_COPYABLE (Gesture)
 };
@@ -126,11 +146,77 @@ public:
     void putBack();
     bool isOpen() const noexcept { return open; }
 
-    // Keeps the trial open for a song, if it has changes: what a change that begins elsewhere does first.
+    // Keeps the trial open for a song, if it has changes: what a change that begins elsewhere does first. A trial that holds
+    // the history (below) isn't kept so: what begins goes on top of it.
     static void keepOpenTrial (juce::UndoManager&);
 
-    // Whether a song has a trial open, changes and all: Auto Save waits until it ends (model/project/internal/Project.h).
+    // A trial that shows another song for a while rather than one to keep (a version opened live: model/versions/
+    // VersionsModel.h, openVersion()) holds the song's history: from now until it closes the song says so
+    // (Song::setShowingOther(), which keeps two undo steps more meanwhile, its own and one on top of it, and more as more begin
+    // on top of it, so that none takes any of the song's away), its undo and redo do nothing (canUndo() and canRedo() are false), and a write of the song (a
+    // save, an export: putBackShowing()) puts it back first by its owner's putBack, so that no file holds what it shows.
+    //
+    // Before its first change. The song's redo steps are done again first, out of sight, so that what it shows goes on top of
+    // them and putBackHeld() takes all of it back with undos alone, and the song's redo steps are what they were (JUCE can't
+    // take a step back alone once another began on top of it: JUCE workaround W56 (docs/juce-workarounds.md)). Every change
+    // made through apply() starts again from the song's own (fromStart, always).
+    //
+    // A step that begins meanwhile (an UndoStep, a gesture, a RecordingStep, another trial such as Swap's) goes on top of it
+    // as a step of its own, and steps begun inside it go on top too. As the last of them ends, with changes on top of it (an
+    // edit of what it shows), its owner's edited (false) takes the edit: it ends the hold, with those steps the newest, or
+    // holds on until it can end it (a branch waiting for what it needs: VersionsModel.cpp), steps that end meanwhile joining
+    // the edit; refused, the trial is kept as it is. Without changes (a press that changed nothing, a drag ended with Escape,
+    // a trial put back), nothing happened, and it holds on. An edit that can't wait for a step to end (recording) asks
+    // first: makeWayForEdit(). The history keeps as many more steps meanwhile as can be on top of it (Song::History), so that
+    // none of the song's goes as they come.
+    struct Holder
+    {
+        std::function<void()> putBack;                // takes it back: Back to Now, by putBackHeld(); may refuse (open still)
+        std::function<bool (bool mustBranch)> edited; // takes the edit (above): whether it did
+    };
+
+    void holdHistory (Holder);
+    bool holdsHistory() const noexcept { return holding; }
+
+    // While it holds the history: the song's steps on top of its own (the edit's: one, or more for steps begun inside one
+    // another), and the undos that take the song back to its own from here (those, its own step if it has changes, and the
+    // song's redo steps done again under it).
+    int countStepsOnTop() const;
+    int countUndosBack() const { return countStepsOnTop() + heldSets + heldRedo; }
+
+    // What a write of a song (a save, an autosave, an export: model/project/internal/Project.h) does first: the trial that
+    // holds its history, if one is open, put back by its owner, which may refuse (then nothing is written); one without an
+    // owner's way put back as it is. Whether none holds it now.
+    static bool putBackShowing (juce::UndoManager&);
+
+    // The trial that holds the history put back: a trial with changes on top of it (Swap's) put back first, by its own
+    // putBack(); steps begun on top of it and still open taken back (they go on, as a step of the song's own); its step and
+    // the redo steps done again under it undone, so that the song and its redo steps are as they were; then whileHeld,
+    // before the song is its own again (Song::setShowingOther (false)), so that what it changes there is no change of the
+    // song's either (what isn't in the history, made as it was: VersionsModel.cpp).
+    void putBackHeld (const std::function<void()>& whileHeld = {});
+
+    // An edit that changes the song without a step that ends (recording, which starts a branch from a version open before
+    // anything is recorded): the trial that holds the song's history, if one does, asked to end the hold by its owner's
+    // edited (true). Whether it ended it as asked (nothing holds the history now): false where the owner refused, even if
+    // the hold ended (the version kept as a step: its notice says so), and then nothing may record.
+    static bool makeWayForEdit (Song&);
+
+    // Whether a step begun on top of the trial that holds a song's history is still open (a drag): nothing that would take
+    // the trial back or apply anew meanwhile.
+    static bool isStepOpenOnHeld (const Song&);
+
+    // Whether a trial with changes (Swap's) is open on top of the trial that holds a song's history: what it tries is
+    // finished first (kept, an edit; or put back) before Back to Now, which would put it back.
+    static bool isTrialOnHeld (const Song&);
+
+    // Whether a song has a trial open, changes and all, or one that holds its history: Auto Save waits until it ends
+    // (model/project/internal/Project.h).
     static bool isInProgress (const Song&);
+
+    // Whether a song has a trial with changes open, other than one that holds its history: work that changes the song as it
+    // ends waits for it (AudioWork.h), while a trial that holds the history takes such work on top of it, as an edit.
+    static bool isTrying (const Song&);
 
     // Its keep under way, waiting for work in the background (Swap's, whose sounds are copied in first: AudioWork.h): it
     // isn't kept a second time meanwhile by a change that begins elsewhere (keepOpenTrial() leaves it be), and no other trial
@@ -142,12 +228,32 @@ private:
     juce::WeakReference<Song> song;
     juce::String name;
     std::function<void()> keepFirst;
-    bool open = true, begun = false, applying = false, keepPending = false;
+    Holder holder;
+    bool open = true, begun = false, applying = false, keepPending = false, holding = false;
+    int redoStepsBefore = 0; // the song's own redo steps as its step began, which putBack() leaves as they were
+
+    // While it holds the history: its steps (one, or none before a change), the song's redo steps done again under them, and
+    // the song's undo steps under what begins on top of it (its own and those included); the steps begun on top of it and
+    // not ended yet, by what began them, with the first's name; and whether it is being put back (no edit then).
+    int heldSets = 0, heldRedo = 0, heldAt = 0;
+    std::vector<const void*> stepsOnTop;
+    juce::String stepOnTopName;
+    bool puttingBack = false;
 
     juce::UndoManager* getUndoManager() const;
     void close();
+    void undoHeld();
+    static void keepOpenTrial (juce::UndoManager&, const Trial* except);
+    static Trial* findHolding (const juce::UndoManager&);
+
+    // A step begun or ended by what began it (an UndoStep, a gesture, a trial): told to the trial that holds the history.
+    static void stepBegins (juce::UndoManager&, const void* by, const juce::String& stepName);
+    static void stepEnds (juce::UndoManager&, const void* by);
 
     friend class UndoStep;
+    friend class Gesture;
+    friend class RecordingStep;
+    friend HistorySteps getHistorySteps (const Song&);
 
     JUCE_DECLARE_NON_COPYABLE (Trial)
 };
@@ -155,14 +261,19 @@ private:
 //==============================================================================
 // The undo step of what is recorded while the song plays (automation, roadmap step 2.1), which the song takes in as
 // recording ends: it begins a named step. Unlike a Gesture, changes made meanwhile begin steps of their own as usual,
-// and what is recorded after one of them joins its step. Begun during a gesture, it joins the gesture's step. Message
-// thread only.
+// and what is recorded after one of them joins its step. Begun during a gesture, it joins the gesture's step. Made on the
+// stack: on a song shown in place (a version open: Trial::holdHistory()), what it records is an edit as any other, told as
+// it goes. Message thread only.
 class RecordingStep
 {
 public:
     RecordingStep (Song&, const juce::String& name);
+    ~RecordingStep();
 
 private:
+    juce::UndoManager& undoManager;
+    bool begun = false;
+
     JUCE_DECLARE_NON_COPYABLE (RecordingStep)
 };
 

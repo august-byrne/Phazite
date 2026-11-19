@@ -257,4 +257,8 @@ void giveUpPluginStates (const Song&);
 juce::StringArray getPluginsAnswering (const Song&);
 juce::StringArray getPluginsWithOlderStates (const Song&);
 juce::StringArray getPluginsLoading (const Song&);
+
+// The song's plug-ins that aren't installed here (PluginInstances::Status::missing), by the names the song gives them, each
+// once: none without a session.
+juce::StringArray getPluginsMissing (const Song&);
 } // namespace phazite

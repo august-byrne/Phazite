@@ -48,7 +48,7 @@ metronome, the tempo, where the playhead is, and at the right the master and the
 | Tempo | Drag it, scroll it or type in it |
 | Time signature | A menu |
 | Place and time | Where the playhead is, in bars, beats and sixteenths ("17.3.2") and in minutes and seconds ("1:23.4"). Drag, scroll or type in either to move the playhead ("17.3", "1:05") |
-| A/B | Hears the last version in place of the song, and the song again (**N**) ([Versions](versions.md)). It shows once the song has a version to compare with |
+| A/B | Opens the last version in place of the song, live, and goes back to Now at the next press (**N**) ([Versions](versions.md)). It shows once the song has a version to compare with; beside it, the bar says which version is open |
 | Master volume and level | The master's volume and how loud it plays |
 | Computer keyboard | Turns the typing keyboard into a piano (**M**) ([Keyboard shortcuts](keyboard.md#the-computer-keyboard-plays-notes)) |
 

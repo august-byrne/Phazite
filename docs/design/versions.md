@@ -19,7 +19,8 @@ history, a branch, a merge. A version can carry a bounce, so that it can be hear
 | Branches: create, switch, rename, delete | Built | |
 | A branch's colour chosen by hand | Planned | No roadmap step |
 | Merging another branch or version, whole, with conflicts | Built | |
-| Bounces of versions, Hear It and A/B | Built | |
+| A version opened live in the song's place, Back to Now, and A/B between them | Built | 2026-11-19 (A version open) |
+| Bounces of versions, and Hear It for a version with one | Built | Optional: nothing bounces by itself |
 | Local History | Built | |
 | Undo History | Built | |
 | Undo Last Version, Rename Version... | Built | |
@@ -29,7 +30,7 @@ history, a branch, a merge. A version can carry a bounce, so that it can be hear
 | The store swept of what nothing names, older than 30 days | Built, off | Known bug 196: nothing is deleted yet |
 | The song tied to the version it grew from; its changes worked out in the background | Built | S4.5 ([versions-cut.md](versions-cut.md)) |
 | The playlist marking what changed | Planned | No roadmap step |
-| Staging, a version checked out on its own, a merge of some lines | Removed | S4.2 ([versions-cut.md](versions-cut.md)) |
+| Staging, a version checked out on its own (with no way back to Now), a merge of some lines | Removed | S4.2 ([versions-cut.md](versions-cut.md)); a version opens live again, with Now kept (A version open) |
 | Tags, stash, rebase, squash, cherry-pick, blame, bisect | Declined | Not needed by one person working alone |
 | Backup to another folder, a cloud copy, share links | Planned | No roadmap step |
 
@@ -149,10 +150,10 @@ removals of the song's, nor taken out by the next version.
 
 - Every version of every branch, newest first, each on its branch's line in the branch's colour, under a row for the
   **Changes Since the Last Version**.
-- **A click on a version opens it:** under it, a row for each line it changed since the version before it. One version
-  is open at a time.
-- **A double-click hears it** (Hear It, below): it changes nothing. A version without a bounce is bounced in the
-  background first and heard as soon as it is, as A/B does.
+- **A click on a version unfolds it:** under it, a row for each line it changed since the version before it. One version
+  is unfolded at a time.
+- **A double-click opens it** in the song's place, live, with no bounce (Open Version, A version open, below); on the
+  changes' row, it goes Back to Now.
 - **Restore from This Version** on one of those rows (`version.restoreChange`) makes that line what it was in the
   version, as one undo step ("Restore Bass from "Verse 2""). A version lists only the lines it changed since the version
   before it, so a track it didn't change isn't there: Compare with the Song lists every line that differs.
@@ -164,8 +165,9 @@ removals of the song's, nor taken out by the next version.
   compared with the song, then the track's line restored.
 - A whole version's restore keeps the song as it is in Local History first; a line's restore, as a line's discard, is an
   undo step alone.
-- A version's menu also has Hear It, Create Branch, Merge into Current Branch..., Rename Version..., Undo Last Version
-  (on the last), Bounce, Delete Bounce and Export as DAWproject....
+- A version's menu has Open Version first (Back to Now on the version open), then Restore This Version, Compare with the
+  Song, Create Branch, Merge into Current Branch..., Rename Version..., Undo Last Version (on the last), Hear It (greyed
+  without a bounce), Bounce, Delete Bounce and Export as DAWproject....
 
 ## Branches
 
@@ -258,22 +260,119 @@ removals of the song's, nor taken out by the next version.
   Merge waits for it.
 - View state and how the song plays are always this branch's.
 
+## A version open
+
+Listening to an old version is opening it: its song, live, in the song's place, with no bounce, and the song as it was
+(Now) back exactly at Back to Now. A song's changes are text, so the switch is an edit of the song like any other, which
+the engine follows as it follows an edit.
+
+- **Open Version** (`version.open`, a double-click on a version, first in its menu) reads the version's song on the
+  history's thread (once: the last two read are kept for the next open), the window held meanwhile as a switch holds it,
+  then makes the song that version's in place with the fewest edits (`makeSongLike()`). What both have stays as it is:
+  its plug-ins loaded, the song playing on at the same beat. A plug-in the version has and Now lacks loads in the
+  background as one added does. The song as it is goes into Local History first ("Before Opening a Version"), and the
+  plug-ins' own settings are stored before it opens (the command asks them, as Save Version does).
+- **Kept whole:** the version is made the song's in a trial that holds the song's undo history (`Trial::holdHistory()`,
+  `model/commands/internal/Undo.h`), one step that Back to Now puts back, leaving nothing to redo: the song's own undo and
+  redo steps are as they were. The song's redo steps are done again first, out of sight, under the version's step, and
+  Back to Now undoes them with it, as JUCE can't take a step back alone once another began on top of it (JUCE workaround
+  W56); the history keeps two steps more meanwhile (the version's and one begun on top of it), and one more for each step
+  begun inside another on top of it, so that none of the song's goes. What isn't an undo step may change while a version
+  is open (mute and solo, the loop, view state, a plug-in's settings in its window): Back to Now makes each as Now had it
+  again, from a copy of the song taken as the version opened, while the song still shows it, so that none of it is a
+  change of the project's, and gives the plug-ins changed meanwhile Now's settings again. A freeze waits for Back to Now.
+  What is selected and the time range selected are kept as the version opens and put back at Back to Now, whatever was
+  selected meanwhile, and whatever range Now's redo steps, done again under the version and undone with it, set.
+- **Redo never reaches a step thrown away.** JUCE appends the redo steps it put aside whenever a step is taken back alone
+  (a drag's Escape, a trial put back, a version closed), and those it put aside long before where there were none: Phazite
+  counts them, and Redo, its name and Undo History reach only the song's own (`Song::History::staleRedoSteps`; JUCE
+  workaround W56).
+- **Now's meanwhile:** the project's unsaved mark, the title's star, the status bar's star and the Changes list are
+  Now's: the version is no change of the song's, nor are the plug-ins' own changes meanwhile, and a save in the background
+  under way as it opened ends with the project saved. The view says so under its bar ("The changes below are the song's
+  own"). Undo and Redo are greyed ("Back to Now first"); Undo History lists Now's steps alone.
+- **The bar,** across the Versions view's top: "Looking at "Verse 2" (3 days ago)", with **Back to Now**
+  (`version.backToNow`, Escape while the view has the keys, a double-click on the changes' row) and **Create Branch Here**
+  (Create Branch from the version, from Now). The version's row is marked "Open". With the view closed, the transport bar
+  says the same beside A/B, and the status bar beside the branch.
+- **From one version to another** directly: still one step back to Now. The version the song is already (the last, with no
+  changes since) opens nothing, and its command says why.
+- **Nothing writes the old version as the song.** Save, Save As, an export of the song, Save Version, a switch, a merge,
+  a restore, a bounce of the current version, an import of a DAWproject, Clean Up, closing the project and quitting each go
+  Back to Now first, silently (it is lossless), then do their work. Auto Save and the autosave wait until it is back. No
+  snapshot of Local History is taken of it, no round of the changes runs, nothing heals its base, and a project never
+  reopens in a version. And should a caller be missed: whatever in the history copies or writes the song as Now (a switch's
+  song left, a branch from Now, a merge's song before, Save Version's copy) refuses while a version is open, as does every
+  write of the project file.
+- **Back to Now waits for a render, for Stop and for a branch being made.** While Bounce in Place, Consolidate or another
+  render has the song's plug-ins, its step lands in the song as it ends: Back to Now and A/B are greyed then ("Not while a
+  render has the song"), and what would write the song refuses (a save says why). The same while automation is being
+  written ("Stop first: automation is being written": a pass's points are the song's it began on, and the undos of Back to
+  Now would be recorded into it), and while the branch an edit makes waits for Now's piece (below). During a drag on the
+  version they are greyed too, until its step ends; while a swap is tried on it, "Finish swapping first" (a save puts the
+  swap back, then the version).
+- **No version opens while automation is being written** on Now (a pass under way in Touch, Latch or Write, or one waiting
+  for a drag to end): "Stop first: automation is being written", and A/B with it; Stop gives Now its pass.
+- **An edit starts a branch there, as its step ends.** A step that begins while a version is open (an undo step, a
+  gesture, Swap's trial, the step automation is recorded in, an imported file's or Normalize's or Quantize Audio's step as
+  its work ends) goes on top of the version's as one of its own, and steps begun inside it go on top too. As the last of
+  them ends with changes, it makes a branch from the version, as Create Branch from it does ("idea-3", asking nothing): the
+  song grows from that version on the new branch, and Now, with its unsaved changes, is kept on the branch it was on, as a
+  switch keeps the song it leaves. A step that ends with none (a knob pressed and let go, the wheel on a knob at its end, a
+  click of a tool that moved nothing, a drag ended with Escape, Swap put back, a play with no automation written) did
+  nothing: the version stays open, and Back to Now brings Now back whole. Automation written while a version plays is an
+  edit as any other: a knob moved in Touch or Latch makes the branch as its drag ends, and playing a version in Write mode
+  makes a branch at Stop (earlier where a punch-in at Play sets a knob to its lane, or where the playhead is put elsewhere
+  while it writes, as the pass is written there). Now's piece is split and written on
+  the history's thread as the version opens, so the branch writes only the branches' small records. The branch's undo
+  history starts with the edit: Undo takes it back to the version, and nothing under it is reachable (JUCE drops those
+  steps as the branch is made: workaround W56). The project is saved after it, as after a switch; until that save lands,
+  the project file holds the song saved last, which names the branch it was on, so a save cancelled and a close with
+  Don't Save open that song on that branch, whole, Now's unsaved changes kept on its record as a switch keeps them. A
+  notice says "You changed "Verse 2", so this is now the branch idea-3." with **Back to main** (a switch back). The
+  version's record never changes.
+- **An edit made before Now's piece is written waits for it.** Right after an open, Now's piece may still be on the
+  history's thread (seconds for a large song, behind the "Before Opening a Version" snapshot): the edit's step ends, and
+  the branch waits for the piece, the version shown with the edit on it and the window held as a switch holds it ("Making
+  a branch from "Verse 2"", with Cancel after a second); Back to Now, A/B, saves and closes wait too, and Auto Save. Once
+  the piece is in, the branch is made as it would have been at once, its notice shown and the project saved.
+- **Where the branch can't be made** (the history busy, Now's piece or a record that can't be written, the wait above
+  cancelled, or Now's piece waiting behind a first save's copy of the folder, which takes minutes), the version is kept
+  as a restore on Now's branch instead ("Restore "Verse 2"", the edit after it), and the notice says which and how many
+  Undos take the song back as it was ("Undo twice"; more where Now had steps to redo, which are done again under it, or
+  where the edit was steps begun inside one another; one fewer where the version's song was Now's). The song is then the
+  version with the edit, an unsaved change of the project's (a save in the background under way since before it opened
+  ends with the project still unsaved).
+- **Recording** makes the branch as it starts, before the take takes its tracks, so that nothing pulls the song from under
+  it (a save during the take saves the branch's song). Where the branch can't be made at once (Now's piece not in yet, the
+  history busy, a record that can't be written), recording doesn't start, and the notice says why; where a record
+  couldn't be written, the version is kept as a restore on Now's branch, as above.
+- **Plug-ins not installed here:** a version whose plug-in isn't installed opens as any project with a missing plug-in
+  does (it plays nothing); the bar says which, and offers **Hear Its Bounce** where the version has one.
+- **How fast** (a Debug build, 2026-11-19; `tests/VersionsOpenTests.cpp` and `tests/Vst3PluginTests.cpp` say them): a small
+  song's first open about 35 ms (its read), Back to Now under 1 ms, the next open about 1 ms; with the tests' real VST3 that
+  only the version has, the open as fast and the plug-in loaded in the background some 25 ms after. A plug-in instance
+  that the open takes away (Now's alone) is let go of, and loads again in the background at Back to Now, as an undo brings
+  one back: keeping those alive meanwhile is not built.
+
 ## Hearing a version
 
-- **A bounce** is the song as it was in a version, rendered as Export Song renders it, as FLAC at 16 bits. **Bounce**
+- **A/B** (`version.compare`, N, and the transport bar's A/B, over plug-in windows too) switches between the song and B
+  live: a press opens B (Open Version), another goes Back to Now, at the same beat, the song playing on. B is the version
+  open, else the version opened last, else the version whose bounce was heard last, else the version the song grew from,
+  so that the changes since are heard against what was. A/B shows while there is a B to open, and is greyed while B is the
+  song itself. The two never play at once, so their loudness isn't matched live.
+- **A bounce** is the song as it was in a version, rendered as Export Song renders it, as FLAC at 16 bits: an extra,
+  for a version that can't open whole (its plug-ins missing here), and for an instant switch in a heavy song. **Bounce**
   (`version.bounce`) makes one for a version that has none: the current version's from the open song, playback
-  stopped; an older one's in the background, with plug-in instances of its own, while the song plays on. **Delete
-  Bounce** frees its file. Bounces are nearly all of the room a history takes.
-- **Hear It** (`version.hear`, the play mark, a double-click in the history) plays a version's bounce in place of the
-  song, from the engine's next block, at the same beat. A version without a bounce is bounced in the background first,
-  the song playing on, and heard as soon as it is, as A/B does (meanwhile A/B names it, "Bouncing to hear it"); not the
-  version the song is now, which has nothing to be heard against. The transport bar says "Hearing: *name*". An edit to
-  the song switches back to the song.
-- **Loudness matched:** both are measured as they play, and at each switch the louder one is turned down to the
-  other's loudness so far, so that a version can't win by being louder.
-- **A/B** (`version.compare`, N, and the transport bar's A/B) switches between the song and B, over plug-in windows
-  too. B is the version heard last, or else the last version, so that the changes since are heard against what was. A
-  version without a bounce is bounced in the background first. A/B is greyed while B is the song itself.
+  stopped; an older one's in the background, with plug-in instances of its own, while the song plays on. **Bounce Each
+  Version** bounces each version saved. Nothing bounces by itself. **Delete Bounce** frees its file. Bounces are nearly
+  all of the room a history takes.
+- **Hear It** (`version.hear`, the play mark on a version with a bounce) plays its bounce in place of the song, from the
+  engine's next block, at the same beat. Greyed for a version without one ("No bounce: Open Version plays it live"). The
+  transport bar says "Hearing: *name*". An edit to the song, or A/B, switches back to the song.
+- **Loudness matched,** for a bounce: both are measured as they play, and at each switch the louder one is turned down to
+  the other's loudness so far, so that a version can't win by being louder.
 
 ## Local History
 
@@ -489,8 +588,8 @@ comes back as a branch from that version, showing only what the other DAW change
   by one.
 - A version records the whole song: no staging, as no producer saves the drums alone while the bass is half done
   (they save both, or put the bass on a branch).
-- The song is always on a branch: an old version is looked at by hearing it, restoring it (an undo step) or starting a
-  branch there, never by checking it out on its own.
+- The song is always on a branch: an old version is opened live in its place, which Back to Now takes back exactly, and an
+  edit there starts a branch from it (the owner, 2026-11-19); it is never checked out on its own, with no way back to Now.
 - A merge takes every line: one track from another branch is a restore of its line, after Compare with the Song.
 - Differences and merges go by the song's IDs, and are said in Phazite's own words, by track.
 - A merge never stops on a question: a conflict takes this branch's value and stays open to switch.
@@ -548,7 +647,8 @@ comes back as a branch from that version, showing only what the other DAW change
 - `src/ui/versions/VersionsView.h`, `BranchPicker.h`; `src/ui/shell/ActivityBar.h`, `StatusBar.h`, `TopBar.h` (A/B).
 - Tests: `tests/VersionsTests.cpp`, `VersionsBranchTests.cpp`, `VersionsMergeTests.cpp`, `VersionsMergeWaitingTests.cpp`,
   `VersionsFolderCopyTests.cpp` (a first save's copy of the folder), `VersionsGoingBackTests.cpp`,
-  `VersionsHearingTests.cpp` (and A/B), `VersionsKeptWholeTests.cpp`, `VersionsRecoveryTests.cpp` (the 30 days),
+  `VersionsHearingTests.cpp` (bounces, and A/B), `VersionsOpenTests.cpp` (a version open, Back to Now, an edit there),
+  `VersionsKeptWholeTests.cpp`, `VersionsRecoveryTests.cpp` (the 30 days),
   `VersionsSweepTests.cpp` (the sweep, with its letting go on but for the product's own test, and Verify History),
   `VersionsTiedTests.cpp` (the song tied to its version), `VersionsChangesTests.cpp` (the changes worked out in the
   background), `VersionsTwoComputersTests.cpp` (each computer's copy, clocks, Verify's limits), `VersionStoreTests.cpp`,

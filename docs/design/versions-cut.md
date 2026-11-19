@@ -55,6 +55,11 @@ named for collaboration. It becomes simpler in one way, below.
 - **A double-click on a version** did the checkout. It becomes **Hear It**: it changes nothing, and it answers the
   question a producer has about an old version.
 - **Who loses what:** nobody. The song was never on "no branch" for a reason a producer has.
+- **2026-11-19:** opening a version came back, as the owner asked ("I should be able to jump between different commits
+  without having to bounce"): a double-click opens a version live in the song's place, and A/B switches to it. It differs
+  from the checkout cut here in having no detached state: the song as it was (Now) is kept and comes back exactly at Back
+  to Now, nothing saves the old version as the song, and an edit there starts a branch ([versions.md](versions.md), A
+  version open).
 
 ### A merge's ticked lines
 

@@ -41,7 +41,7 @@ What every area builds on.
 | File | What it holds |
 |---|---|
 | `CommandRegistry.h` | The command registry, with no UI code: every user action, by its id (`category.action`), name, description and synonyms. |
-| `internal/Undo.h` | Undo and redo with the undo convention: `phazite::UndoStep`, `phazite::Gesture` (a change over several events, as a drag, with `rollBack()`), `undoTargetOf()`, `withSong()`/`ifSong()`, `phazite::undo()` and `redo()`; and its Trial: what Swap tries, one step that gives way to any other change. |
+| `internal/Undo.h` | Undo and redo with the undo convention: `phazite::UndoStep`, `phazite::Gesture` (a change over several events, as a drag, with `rollBack()`), `undoTargetOf()`, `withSong()`/`ifSong()`, `phazite::undo()` and `redo()`; and its Trial: what Swap tries, one step that gives way to any other change, or a version opened live, which holds the history until Back to Now (`holdHistory()`), steps begun on top of it told to it as they end; and the redo steps that are the song's own, which Redo and Undo History never reach past (`canRedo()`, `getHistorySteps()`: JUCE workaround W56). |
 | `internal/UndoCommands.h` | Undo, redo and FL Studio's undo-or-redo, for the selection's song. |
 | `SongGesture.h` | A drag's one step for the open project, as the UI's tools hold it. |
 | `UndoHistory.h` | The undo history as the Versions view lists it, with a step gone back or forth to. |

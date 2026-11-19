@@ -434,15 +434,22 @@ void StatusBar::showBranch()
     const auto oldWidth = branchItem->getPreferredWidth();
     branchItem->setVisible (branch.has_value());
 
+    // While a version is open in the song's place, it says so, seen with the Versions view closed: "main* · Looking at "Verse 2"
+    // (3 days ago)".
     if (branch.has_value())
     {
         const auto changed = hasChangesSinceLastVersion (context);
-        branchItem->show (branch->name + (changed ? "*" : ""), Item::Emphasis::quiet);
-        branchItem->setTooltip (withShortcut (commands,
-                                              juce::String ("The branch the song is on")
-                                                  + (changed ? ", with changes since its last version (*)" : "")
-                                                  + ": click to switch to another, or to create one",
-                                              "version.pickBranch"));
+        const auto looking = describeOpenVersion (context);
+        branchItem->show (branch->name + (changed ? "*" : "") + (looking.isNotEmpty() ? juce::String (" - ") + looking : juce::String()),
+                          looking.isNotEmpty() ? Item::Emphasis::normal : Item::Emphasis::quiet);
+        branchItem->setTooltip (
+            looking.isNotEmpty()
+                ? withShortcut (commands, looking + " in place of the song: A/B, or Back to Now in the Versions view, brings the song back",
+                                "version.compare")
+                : withShortcut (commands,
+                                juce::String ("The branch the song is on") + (changed ? ", with changes since its last version (*)" : "")
+                                    + ": click to switch to another, or to create one",
+                                "version.pickBranch"));
     }
 
     if (wasVisible != branchItem->isVisible() || oldWidth != branchItem->getPreferredWidth())

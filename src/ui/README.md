@@ -201,7 +201,7 @@ The window's content and everything around the views.
 | `AppShell.*` | The window's content. |
 | `ActivityBar.*` | The activity bar down the window's left edge, whose icons show the left panel's views: the browser, the project and the versions. |
 | `TitleBar.*` | The title bar: Phazite's logo, the menus, Undo and Redo beside the command search, the panels' switches and, on Windows, where it is the window's own, the window's buttons and what its frame does where. |
-| `TopBar.*` | The transport bar, its controls in groups, with the playhead's place and time as fields that move it, and A/B, which hears the last version in place of the song and back, while there is one to compare with. |
+| `TopBar.*` | The transport bar, its controls in groups, with the playhead's place and time as fields that move it, and A/B, which opens the last version in place of the song, live, and goes back to Now, while there is one to compare with, with what is open or heard beside it. |
 | `TempoStretchPanel.*` | What a tempo change stretches, under the transport bar's tempo field while the tempo changes. |
 | `StatusBar.*` | The status bar: the save state, the audio output, Low Latency's switch, the CPU, and between them the hint bar. |
 | `HintBar.*` | The hint bar, which shows a drag's readout while one moves something, for a few seconds what a command made that its name doesn't say (copies that didn't fit), and otherwise the guide's next step. |

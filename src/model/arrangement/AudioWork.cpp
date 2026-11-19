@@ -426,9 +426,11 @@ void AudioWork::timerCallback()
         return;
     }
 
-    // Not into a drag's step or a trial's, which a step begun meanwhile would join or keep: once they end.
+    // Not into a drag's step or a trial's, which a step begun meanwhile would join or keep: once they end. A trial that holds
+    // the history (a version open in the song's place) takes the step on top of it as an edit (a branch), as any step that
+    // begins then: no wait for it, which would never end while the input is held.
     auto& open = *findSong (context);
-    waitingForGesture = Gesture::isInProgress (open) || (Trial::isInProgress (open) && ! first.job->isForTheOpenTrial());
+    waitingForGesture = Gesture::isInProgress (open) || (Trial::isTrying (open) && ! first.job->isForTheOpenTrial());
 
     if (waitingForGesture)
         return;

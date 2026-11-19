@@ -835,6 +835,19 @@ VersionHistory::~VersionHistory()
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     state.removeListener (this);
 
+    // A version open: the song as it was again, so that whatever holds it on (a test's song, which outlives its project) holds
+    // its own. Its owner's work as it goes back (VersionsModel.cpp) needs a history, which goes: the trial alone is put back.
+    // One with an edit on top of it, whose branch waited for Now's piece, is kept instead, edit and all: never thrown away.
+    if (shown.has_value())
+    {
+        auto gone = std::exchange (shown, std::nullopt);
+
+        if (gone->branchWaits)
+            gone->trial->keep ({});
+        else
+            gone->trial->putBack();
+    }
+
     // What it was given to write (a commit, a snapshot) is written, never dropped nor cut short, however long that takes:
     // it is the user's work. Its thread finishes it after the history has gone, the message thread waiting for none of it,
     // and the project's next history reads the folder only after it (open()). What it was given to read is let go, the
@@ -2240,6 +2253,13 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     if (const auto why = whyNotSaveOnBranch(); why.isNotEmpty())
         return refuse (why);
 
+    // Never of a version open in the song's place (docs/design/versions.md: A version open; Save Version goes back to Now first).
+    if (song.isShowingOther())
+    {
+        jassertfalse;
+        return refuse ("Go Back to Now first: a version is open in the song's place.");
+    }
+
     // The song as a save stores it, its plug-ins' own settings included, and their knobs' values.
     song.storeDeviceStates();
     auto copy = song.getState().createCopy();
@@ -2663,7 +2683,11 @@ juce::ValueTree VersionHistory::keepMerge (const Merge& merge, std::vector<int> 
 {
     followFolder();
 
-    if (store == nullptr)
+    // Never while a version is open in the song's place, whose song isn't the one before the merge (startMerge() goes back to
+    // Now first).
+    jassert (! song.isShowingOther());
+
+    if (store == nullptr || song.isShowingOther())
         return {};
 
     // The song before it, in the store now, so that the song (and every file it is saved into) names a piece the store has.
@@ -2889,12 +2913,21 @@ bool VersionHistory::areChangesWorkedOut() const
 
 bool VersionHistory::mayHaveChanges()
 {
+    // Now's, while a version is open in its place.
+    if (shown.has_value())
+        return shown->mayHaveChanges;
+
     return hasChanges() || (hasRead && baseline.isValid() && ! sinceBase.isUpToDate());
 }
 
 void VersionHistory::askForChanges()
 {
     if (! hasRead || store == nullptr)
+        return;
+
+    // Not while a version is open in the song's place: the changes listed are Now's, and what the version changed is compared
+    // again once Now is back, which comes out as before.
+    if (song.isShowingOther())
         return;
 
     // Not during a drag, a gesture of many changes that is one step (a round each time one came back copied the track it
@@ -3148,10 +3181,9 @@ void VersionHistory::edited()
     if (song.getUndoManager().isPerformingUndoRedo() && isBehind())
         healPending = true;
 
-    // What is heard is what is shown: an edit is heard as it is made, in the song, and A/B stops waiting to hear a commit.
-    if (hearWhenBounced.isNotEmpty() || compareProblem.isNotEmpty())
+    // What is heard is what is shown: an edit is heard as it is made, in the song.
+    if (compareProblem.isNotEmpty())
     {
-        hearWhenBounced.clear();
         compareProblem.clear();
         changed();
     }
@@ -3329,12 +3361,12 @@ void VersionHistory::timerCallback()
     }
 
     // Local History: the song every few minutes while it changes, as long as it differs from its last commit; not while it
-    // records (the take isn't in it yet), nor while a commit is being made.
-    if (editedSinceSnapshot && hasRead && store != nullptr && ! isSaving() && ! isRecording (song)
+    // records (the take isn't in it yet), nor while a commit is being made, nor while a version is open in its place.
+    if (editedSinceSnapshot && hasRead && store != nullptr && ! isSaving() && ! isRecording (song) && ! song.isShowingOther()
         && getVersionsTime() - lastSnapshotTime >= (juce::int64) snapshotMinutes * 60 * 1000 && mayHaveChanges())
         takeSnapshot ("auto");
 
-    if (healPending && ! Gesture::isInProgress (song) && ! isReadingForCommand())
+    if (healPending && ! Gesture::isInProgress (song) && ! isReadingForCommand() && ! song.isShowingOther())
         healToLast();
 
     // A round of the changes for what changed since the last, whoever asks for them.
@@ -3349,7 +3381,12 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
 {
     followFolder();
 
-    if (store == nullptr || ! hasRead || isSaving())
+    // Never while a version is open in the song's place, which a branch from Now would take with it as its song, and a branch
+    // made beside it would leave named for the wrong one (its commands go back to Now first; an edit's branch is
+    // branchFromShown()).
+    jassert (! song.isShowingOther());
+
+    if (store == nullptr || ! hasRead || isSaving() || song.isShowingOther())
         return {};
 
     // From Now: from the version the song grew from, which the song's changes are from.
@@ -3358,24 +3395,7 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
     if (findVersion (head) == nullptr)
         return {};
 
-    // "idea-2", the next number no branch has, in the next color of the tracks' palette (main took the second).
-    const auto isTaken = [this] (const juce::String& name)
-    {
-        return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name.equalsIgnoreCase (name); });
-    };
-
-    auto number = 2;
-
-    while (isTaken ("idea-" + juce::String (number)))
-        ++number;
-
-    BranchRecord branch;
-    branch.id = juce::Uuid().toString();
-    branch.name = "idea-" + juce::String (number);
-    branch.colour = getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour;
-    branch.head = head;
-    branch.computer = getThisComputer();
-    branch.changed = stampNow();
+    const auto branch = makeBranchRecord (head);
 
     if (! store->writeBranch (branch) || (makeCurrent && ! store->writeCurrentBranch (branch.id)))
         return {};
@@ -3398,8 +3418,172 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
     return branch.id;
 }
 
+BranchRecord VersionHistory::makeBranchRecord (const juce::String& head) const
+{
+    // "idea-2", the next number no branch has, in the next color of the tracks' palette (main took the second).
+    const auto isTaken = [this] (const juce::String& name)
+    {
+        return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name.equalsIgnoreCase (name); });
+    };
+
+    auto number = 2;
+
+    while (isTaken ("idea-" + juce::String (number)))
+        ++number;
+
+    BranchRecord branch;
+    branch.id = juce::Uuid().toString();
+    branch.name = "idea-" + juce::String (number);
+    branch.colour = getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour;
+    branch.head = head;
+    branch.computer = getThisComputer();
+    branch.changed = stampNow();
+    return branch;
+}
+
+const VersionHistory::ShownSong* VersionHistory::findShownSong (const juce::String& versionID) const
+{
+    const auto found =
+        std::find_if (shownSongs.begin(), shownSongs.end(), [&versionID] (const auto& each) { return each.version == versionID; });
+    return found != shownSongs.end() ? &*found : nullptr;
+}
+
+void VersionHistory::keepShownSong (ShownSong read)
+{
+    // The newest last, the oldest let go past the few kept.
+    std::erase_if (shownSongs, [&read] (const auto& each) { return each.version == read.version; });
+    shownSongs.push_back (std::move (read));
+
+    if (shownSongs.size() > shownSongsKept)
+        shownSongs.erase (shownSongs.begin());
+}
+
+void VersionHistory::keepShownNow()
+{
+    if (! shown.has_value() || store == nullptr || ! hasRead)
+        return;
+
+    shown->nowPieceComing = true;
+
+    whenNotCopying (
+        [weak = juce::WeakReference<VersionHistory> (this), number = shown->number]
+        {
+            auto* self = weak.get();
+
+            if (self == nullptr || ! self->shown.has_value() || self->shown->number != number)
+                return;
+
+            // No store any more (the history closing): it never comes, which what waits for it hears.
+            if (self->store == nullptr)
+            {
+                self->shown->nowPieceComing = false;
+
+                if (const auto then = std::exchange (self->shown->whenNowIn, {}); then != nullptr)
+                    then (false);
+
+                return;
+            }
+
+            self->run (
+                [shared = self->store, weak, number, generationThen = self->generation, now = self->shown->now,
+                 parameters = self->shown->nowParameters]
+                {
+                    const auto pieces = splitSong (now, parameters);
+                    const auto written = shared->writeSong (pieces);
+                    shared->getPieces().closeFiles();
+
+                    juce::MessageManager::callAsync (
+                        [weak, number, generationThen, written, piece = pieces.song]
+                        {
+                            auto* back = weak.get();
+
+                            if (back == nullptr)
+                                return;
+
+                            --back->pendingJobs;
+
+                            if (! back->shown.has_value() || back->shown->number != number)
+                                return;
+
+                            // Kept, and told to what waits for it (an edit's branch), which may end what is shown: taken out first.
+                            const auto in = written && back->generation == generationThen;
+                            back->shown->nowPieceComing = false;
+
+                            if (in)
+                                back->shown->nowPiece = piece;
+
+                            if (const auto then = std::exchange (back->shown->whenNowIn, {}); then != nullptr)
+                                then (in);
+                        });
+                },
+                Work::writes);
+        });
+}
+
+juce::String VersionHistory::branchFromShown()
+{
+    followFolder();
+    branchProblem = "busy";
+
+    // Not while the song shows the version still (the edit's step is a step of the branch's song, which isn't Now).
+    jassert (! song.isShowingOther());
+
+    if (! shown.has_value() || song.isShowingOther() || store == nullptr || ! hasRead || isSaving() || commandRead.has_value()
+        || missingBranch.isNotEmpty() || shown->nowPiece.isEmpty())
+        return {};
+
+    const auto* version = findVersion (shown->version);
+    const auto* then = findShownSong (shown->version);
+    const auto current =
+        std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
+
+    if (version == nullptr || then == nullptr || current == branches.end())
+        return {};
+
+    // Now, by its piece, on the branch it leaves, as finishSwitch() keeps the song it leaves; then the branch, from the
+    // version, the current one. Each record as it was if a write fails, as a switch's.
+    branchProblem = "write";
+    const auto before = *current;
+    auto left = before;
+    left.working = shown->nowPiece;
+    const auto branch = makeBranchRecord (version->id);
+
+    if (! store->writeBranch (left))
+        return {};
+
+    if (! store->writeBranch (branch) || ! store->writeCurrentBranch (branch.id))
+    {
+        store->writeBranch (before);
+        return {};
+    }
+
+    branchProblem.clear();
+
+    *current = left;
+    logMove (branch.id, {}, branch.head, "branch", branch.name);
+    branches.push_back (branch);
+    currentBranch = branch.id;
+
+    // The song grows from the version on the new branch, its changes none (it is that version's), as a switch to the branch
+    // leaves it; a merge waiting stays with the song left on the branch it was taken on.
+    preview.reset();
+    previousBaseline = {};
+    moveBase (version->id, then->song.createCopy(), then->parameters, song.getDeviceChangesOutsideHistory(), true);
+    previousBaseline = {};
+    writeNames();
+    mergeDirty = true;
+    getMerging();
+    comparedVersion.clear();
+    comparedSong = {};
+    selectedChange.reset();
+    adoptLater();
+    tellNow();
+    return branch.id;
+}
+
 juce::String VersionHistory::makeBranchWithSong (const juce::String& fromVersion, const juce::String& songPiece)
 {
+    // Never while a version is open in the song's place (makeBranch() refuses it).
     const auto id = makeBranch (fromVersion, false);
 
     if (id.isEmpty())
@@ -3537,8 +3721,12 @@ std::optional<VersionHistory::Switch> VersionHistory::prepareSwitch (const juce:
     const auto current =
         std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
 
+    // Never while a version is open in the song's place, which would be left on the branch as its song (keepLeft(); a switch
+    // goes back to Now first).
+    jassert (! song.isShowingOther());
+
     if (store == nullptr || ! hasRead || isSaving() || (commandRead.has_value() && ! withinRead) || found == branches.end()
-        || current == branches.end() || branchID == currentBranch || missingBranch.isNotEmpty())
+        || current == branches.end() || branchID == currentBranch || missingBranch.isNotEmpty() || song.isShowingOther())
         return std::nullopt;
 
     // The other's song, as it was left there, or as its last version had it; and its last version's.
@@ -3614,7 +3802,8 @@ VersionHistory::SwitchRead VersionHistory::readSwitch (VersionStore& from, const
 bool VersionHistory::copyLeftAgain (Switch& plan)
 {
     // The song left changed since it was copied (a plug-in's own change, the automation written as it plays): copied again.
-    if (! plan.left.isValid() || countSongChanges() == plan.changesAtCopy)
+    // Never a version open in its place (finishSwitch() refuses it).
+    if (! plan.left.isValid() || countSongChanges() == plan.changesAtCopy || song.isShowingOther())
         return false;
 
     song.storeDeviceStates();
@@ -3638,6 +3827,12 @@ VersionHistory::Taken VersionHistory::finishSwitch (const Switch& plan, SwitchRe
 
     if (store == nullptr || ! hasRead || isSaving() || current == branches.end())
         return Taken::refused ("The project's versions changed while the song was read." + nothing);
+
+    // Never while a version is open in the song's place, which would be left on the branch as its song.
+    jassert (! song.isShowingOther());
+
+    if (song.isShowingOther())
+        return Taken::refused ("A version was opened while the song was read." + nothing);
 
     if (! read.other.isValid())
         return Taken::refused (
@@ -3991,7 +4186,8 @@ void VersionHistory::takeSnapshot (const juce::String& reason)
 {
     followFolder();
 
-    if (store == nullptr || ! hasRead)
+    // Never of a version open in the song's place: the song as it was before is in Local History already (openVersion()).
+    if (store == nullptr || ! hasRead || song.isShowingOther())
         return;
 
     // Not while a first save copies the folder (copyFolder()): once it is over, the song as it is then.
@@ -4446,6 +4642,10 @@ void VersionHistory::followNamesOfSong()
 
 void VersionHistory::healToLast()
 {
+    // Not of a version open in the song's place, which isn't the song: once it is back (timerCallback()).
+    if (song.isShowingOther())
+        return;
+
     healPending = false;
     const auto* last = findLastVersion();
 

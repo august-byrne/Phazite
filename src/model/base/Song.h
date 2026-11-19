@@ -37,13 +37,30 @@ public:
     const SongIndex& getIndex() const noexcept { return *index; }
 
     // Its undo history, which keeps the last steps up to the number set for songs made from then on (as the app starts, from
-    // its settings: services/Settings.h, undoSteps), however much each step holds.
+    // its settings: services/Settings.h, undoSteps), however much each step holds. What Phazite keeps of it beside JUCE's
+    // (History) is read and written only by the undo code (model/commands/internal/Undo.h), which finds it from the undo
+    // manager a command names.
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
 
     static constexpr int defaultUndoSteps = 1000, minimumUndoSteps = 10, maximumUndoSteps = 100000;
     static void setUndoSteps (int steps); // limited to the range above. Message thread
     static int getUndoSteps();
+
+    class History final : public juce::UndoManager
+    {
+    public:
+        // How many of the redo steps JUCE holds, the last ones, are none of the song's: JUCE appends the redo steps it put
+        // aside as a step began whenever a step is taken back alone (a drag's Escape, a trial put back), and those it put
+        // aside long before are among them where no redo step was there as the step began (JUCE workaround W56
+        // (docs/juce-workarounds.md)).
+        int staleRedoSteps = 0;
+
+        // The steps it keeps (Song::setUndoSteps() as the song was made), and how many more for a while (a version open:
+        // Trial::holdHistory()).
+        int stepsKept = defaultUndoSteps;
+        void keepMoreSteps (int more) { setMaxNumberOfStoredUnits (1, stepsKept + more); }
+    };
 
     // Where its files are: its project file, which the paths it keeps of the files it plays start from (none for a song
     // outside a project, which keeps whole paths); and the folder of what Phazite makes for it and can make again (renders
@@ -108,16 +125,27 @@ public:
     void setDeviceStateStore (std::function<void (std::uint64_t trackID)> store);
     void storeDeviceStates (std::uint64_t trackID = 0); // nothing without one
 
+    // Whether it shows another song for a while, in place, which goes again as it was (a version opened live:
+    // model/versions/VersionsModel.h, openVersion(); the trial that shows it holds the undo history meanwhile:
+    // model/commands/internal/Undo.h, Trial::holdHistory()). What changes in it meanwhile is no change of its own: its
+    // project keeps its unsaved mark as it was and writes none of it (model/project/internal/Project.h). What hears the
+    // start, its project, is told before the flag is set, so that it can take its mark as it is. Message thread.
+    void setShowingOther (bool);
+    bool isShowingOther() const noexcept { return showingOther; }
+    void setShowingHeard (std::function<void (bool showing)> heard) { showingHeard = std::move (heard); }
+
 private:
     juce::ValueTree state;
     std::unique_ptr<SongIndex> index;
-    juce::UndoManager undoManager;
+    History undoManager;
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given
     int changesOutsideHistory = 0;
     std::map<std::uint64_t, int> deviceChangesOutsideHistory, deviceChangesHeld;
     juce::ListenerList<ParameterListener> parameterListeners;
     std::function<void (std::uint64_t)> deviceStateStore;
+    std::function<void (bool)> showingHeard;
+    bool showingOther = false;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (Song)
     JUCE_DECLARE_NON_COPYABLE (Song)

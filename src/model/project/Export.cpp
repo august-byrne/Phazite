@@ -6,6 +6,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/WholeFile.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -501,6 +502,11 @@ namespace
 std::unique_ptr<SongExport> startExport (Song& song, const juce::File& file, const ExportSettings& settings,
                                          std::function<void (const ExportReport&)> onFinished)
 {
+    // The song's own: another shown for a while (a version open) goes first, as a save sends it. It goes but while a render
+    // has the song, during which no export starts.
+    [[maybe_unused]] const auto own = Trial::putBackShowing (song.getUndoManager());
+    jassert (own);
+
     if (settings.stems)
         return std::make_unique<SongExport> (std::make_unique<StemsRender> (song, file, settings, std::move (onFinished)));
 

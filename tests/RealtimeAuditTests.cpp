@@ -2403,6 +2403,51 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: an old version opened live in the song's place while it plays, and back to Now, as A/B does")
+    {
+        // docs/design/versions.md, A version open: the song made the version's in place, which what plays follows as it follows an
+        // edit, and back. The version's song read once before it plays (the first open reads it on the history's thread), so
+        // that each open is made at its block.
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        REQUIRE (phazite::test::waitForVersionHistory (song.context));
+        phazite::setVersionDraft (song.context, "Keys", {});
+        std::optional<juce::Result> saved;
+        REQUIRE (phazite::saveVersion (song.context, [&saved] (juce::Result r) { saved = r; }));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved.has_value(); }));
+        REQUIRE (phazite::test::waitForVersionHistory (song.context));
+        const auto version = phazite::getLastVersion (song.context)->id;
+
+        // Now: quieter, with a bass the version hasn't.
+        song.setVolume (keys, -6.0f);
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        song.addNote (song.addMidiClip (bass, 0.0, 16.0), 36, 0.0, 16.0);
+        const auto now = phazite::findSong (song.context)->getState().createCopy();
+
+        REQUIRE (phazite::test::finished (song.context, [&] { return phazite::openVersion (song.context, version); }));
+        phazite::backToNow (song.context);
+
+        const auto m = playProjectAndMeasure (
+            song.context, Playing { .edits = {
+                                        { 10, "the version opened", [&] { REQUIRE (phazite::openVersion (song.context, version)); } },
+                                        { 40, "back to Now", [&] { phazite::backToNow (song.context); } },
+                                        { 70, "A/B: the version again", [&] { phazite::toggleCompare (song.context); } },
+                                        { 100, "A/B: Now again", [&] { phazite::toggleCompare (song.context); } },
+                                    } });
+        report ("A version opened and closed while it plays", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK (phazite::getOpenVersion (song.context).isEmpty());
+        CHECK (phazite::findSong (song.context)->getState().isEquivalentTo (now));
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: edited while it plays: a short loop wrapping, moved, turned off, and the playhead moved")
     {
         using phazite::BeatPosition;

@@ -26,7 +26,8 @@ bool canRecord (const Song&);
 bool isRecording (const Song&);
 
 // Starts recording, playing from where playback starts (after the count-in, when it is on), or from where the song is
-// if it plays already. Nothing if it can't.
+// if it plays already. Nothing if it can't. With a version open in the song's place, the branch an edit makes is made first
+// (model/commands/internal/Undo.h: Trial::makeWayForEdit()), and nothing records where it can't be.
 void startRecording (Song&);
 
 // Stops recording and playback, back where playback started, and keeps what was played as one undo step, "Record".

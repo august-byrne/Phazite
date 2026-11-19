@@ -26,6 +26,12 @@ void makeSongLike (Song&, const juce::ValueTree& other);
 // the song it was. Its count of IDs is the larger of the two.
 void makeSongTheSame (Song&, const juce::ValueTree& other);
 
+// The song made what a copy of it taken earlier was, outside its undo history, which stays as it is: what changed in it
+// without an undo step since (mute and solo, the loop, view state, a plug-in's settings stored, its count of IDs), once what
+// the history holds is the copy's again (a version open put back: VersionsModel.cpp, backToNow()). With the fewest edits, so
+// that only those are made; a song whose history doesn't hold the copy's would lose what that history refers to.
+void makeSongAsCopied (Song&, const juce::ValueTree& copy);
+
 // One track (a folder's own part, a return, or the master by its ID) like the other's, with what it holds and its devices'
 // automation; one the other hasn't taken away, a folder without the tracks in it, which stay where it was, in their order,
 // as ungrouping it leaves them; and one the song hasn't put back where the other has it (after the track before it there,

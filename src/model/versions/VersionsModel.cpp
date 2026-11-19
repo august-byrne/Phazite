@@ -2,6 +2,7 @@
 #include "VersionsModel.h"
 #include "internal/ApplySong.h"
 #include "internal/VersionHistory.h"
+#include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/WholeFile.h"
@@ -11,7 +12,9 @@
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/playback/internal/AutomationWriter.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/Export.h"
 #include "model/project/internal/DawProject.h"
 #include "model/project/internal/Export.h"
@@ -24,7 +27,9 @@
 #include <cmath>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
+#include <utility>
 
 namespace phazite
 {
@@ -117,11 +122,15 @@ namespace
                && (session == nullptr || ! session->isLentToRender());
     }
 
-    // Why a song can't be made another now, as what was read is taken in; none while it can.
-    juce::String whyNotChangeSongNow (const ProjectContext& context, const juce::String& what)
+    // Why a song can't be made another now, as what was read is taken in; none while it can. Never while a version is open
+    // in its place (a command that makes the song another goes back to Now first), but for opening another (showing).
+    juce::String whyNotChangeSongNow (const ProjectContext& context, const juce::String& what, bool showing = false)
     {
         const auto* song = findSong (context);
         const auto* session = getSession (context);
+
+        if (song != nullptr && song->isShowingOther() && ! showing)
+            return "A version was opened while the song was read: " + what + " Go Back to Now first.";
 
         if (song != nullptr && isRecording (*song))
             return "The song started recording while it was read: " + what + " Stop recording first.";
@@ -373,6 +382,8 @@ namespace
 
 bool takeNewerVersions (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
 
@@ -480,6 +491,8 @@ bool mayHaveChangesSinceLastVersion (const ProjectContext& context)
 
 bool discardAllChanges (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
@@ -577,6 +590,15 @@ juce::String getVersionDraftNote (const ProjectContext& context)
 
 bool saveVersion (ProjectContext& context, std::function<void (juce::Result)> done)
 {
+    // On Now, never on a version open in its place (docs/design/versions.md: A version open).
+    if (! backToNow (context))
+    {
+        if (done != nullptr)
+            done (juce::Result::fail ("Go Back to Now first: a render has the version open."));
+
+        return false;
+    }
+
     auto* history = findHistory (context);
 
     if (history == nullptr)
@@ -669,6 +691,8 @@ bool canUndoLastCommit (const ProjectContext& context)
 
 bool undoLastCommit (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
     const auto* before = last != nullptr && canUndoLastCommit (context) ? history->findVersion (last->parents[0]) : nullptr;
@@ -700,6 +724,9 @@ bool undoLastCommit (ProjectContext& context)
 
 void saveProjectAndVersion (ProjectContext& context, const SaveProjectThen& saveProjectThen, TrackRenderHost& renders)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     // The project first, which its first save puts where the user says (its versions go beside it there), then the version,
     // and then, with a bounce, the version's bounce, which the song is.
     saveProjectThen (
@@ -720,6 +747,8 @@ void saveProjectAndVersion (ProjectContext& context, const SaveProjectThen& save
 
 bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
@@ -734,6 +763,9 @@ bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
 
 bool compareWithVersion (ProjectContext& context, const juce::String& versionID)
 {
+    if (versionID.isNotEmpty())
+        backToNow (context); // compared with Now
+
     auto* history = findHistory (context);
 
     if (history == nullptr)
@@ -785,6 +817,8 @@ std::vector<VersionChange> getListedChanges (const ProjectContext& context)
 
 bool takeBack (ProjectContext& context, const VersionChange& line)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
@@ -941,6 +975,8 @@ namespace
 
 bool restoreFromVersion (ProjectContext& context, const juce::String& versionID, const VersionChange& line)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
@@ -1073,6 +1109,8 @@ void putBackSelectedChange (ProjectContext& context)
 //==============================================================================
 bool newBranch (ProjectContext& context, const juce::String& fromVersion, const SaveProjectThen& saveProjectThen)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
 
     if (history == nullptr)
@@ -1214,6 +1252,8 @@ namespace
 bool switchBranch (ProjectContext& context, const juce::String& branchID, const SaveProjectThen& saveProjectThen,
                    std::function<void (bool switched)> done)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     return history != nullptr && canSwitchBranch (context)
            && startSwitch (context, *history, history->prepareSwitch (branchID), describeBranchRead (*history, branchID), saveProjectThen,
@@ -1327,6 +1367,9 @@ void selectBranch (ProjectContext& context, const juce::String& branchID)
 
 juce::String newBranchNamed (ProjectContext& context, const juce::String& name)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return {};
+
     auto* history = findHistory (context);
 
     // From Now, whatever version is selected: while there is a version the song grew from.
@@ -1519,6 +1562,9 @@ namespace
             if (song == nullptr || history == nullptr)
                 return false;
 
+            if (const auto why = whyNotChangeSongNow (context, "nothing was merged."); song->isShowingOther())
+                return VersionHistory::Taken::refused (why);
+
             if (! worked->baseRead.isValid() || ! worked->theirsRead.isValid())
                 return VersionHistory::Taken::refused ("Nothing was merged: " + name
                                                        + " or the version both lines have can't be read from the Versions folder. "
@@ -1571,6 +1617,8 @@ namespace
 
 bool startMerge (ProjectContext& context, const juce::String& versionID)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     auto* song = findSong (context);
     const auto* last = history != nullptr ? history->findBaseVersion() : nullptr;
@@ -1672,6 +1720,8 @@ bool canResetToReadable (const ProjectContext& context)
 
 bool resetToReadable (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     const auto* readable =
         history != nullptr && history->canResetToReadable() ? history->findVersion (history->getReadableCommit()) : nullptr;
@@ -1694,6 +1744,9 @@ bool resetToReadable (ProjectContext& context)
 
 void cancelMerge (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
@@ -1808,6 +1861,8 @@ namespace
 
 bool finishMerge (ProjectContext& context)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
@@ -1913,6 +1968,8 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 bool chooseClash (ProjectContext& context, int index, int value)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
@@ -2233,22 +2290,6 @@ namespace
             history->bouncingVersion.clear();
             const auto self = std::move (history->backgroundBounce); // this: it goes as this returns
             history->readBounces();
-
-            // A/B waiting for it: heard now, or why not said.
-            if (history->hearWhenBounced == versionID)
-            {
-                history->hearWhenBounced.clear();
-
-                if (result.wasOk())
-                {
-                    hearVersion (context, versionID);
-                }
-                else
-                {
-                    history->compareProblem = history->bounceProblem;
-                    history->tellNow();
-                }
-            }
         }
     };
 } // namespace
@@ -2384,6 +2425,7 @@ namespace
                : reason == "merge"   ? "Before Merge"
                : reason == "history" ? "Before Restoring Local History"
                : reason == "abort"   ? "Before Cancel Merge"
+               : reason == "look"    ? "Before Opening a Version"
                                      : reason;
     }
 
@@ -2430,6 +2472,8 @@ namespace
 
 bool restoreSnapshot (ProjectContext& context, juce::int64 time)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return false;
     auto* history = findHistory (context);
 
     if (history == nullptr || findSong (context) == nullptr)
@@ -2761,6 +2805,9 @@ juce::String describeDivergence (const ProjectContext& context)
 
 void bounceVersion (ProjectContext& context, const juce::String& versionID, TrackRenderHost& host)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
     const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the version")) + "\"";
@@ -2886,19 +2933,523 @@ juce::String describeHearing (const ProjectContext& context)
     return version != nullptr ? "Hearing: " + getDisplayName (*version) : juce::String();
 }
 
+//==============================================================================
+// A version open (docs/design/versions.md: A version open).
+namespace
+{
+    // When a version was saved, as the bar says it: "just now", "5 minutes ago", "3 hours ago", "3 days ago", "on 12 Nov".
+    juce::String describeAgo (juce::Time saved, juce::Time now)
+    {
+        const auto minutes = (now - saved).inMinutes();
+        const auto count = [] (juce::int64 number, const char* unit)
+        { return juce::String (number) + " " + unit + (number == 1 ? "" : "s") + " ago"; };
+
+        if (minutes < 1.0)
+            return "just now";
+
+        if (minutes < 60.0)
+            return count ((juce::int64) minutes, "minute");
+
+        if (minutes < 24.0 * 60.0)
+            return count ((juce::int64) (minutes / 60.0), "hour");
+
+        if (minutes < 30.0 * 24.0 * 60.0)
+            return count ((juce::int64) (minutes / (24.0 * 60.0)), "day");
+
+        return "on " + saved.formatted ("%d %b %Y");
+    }
+
+    // Why a version open can't go back to Now yet, put back by anything (Back to Now, a save, a close): none when it can.
+    // While a render has the song's plug-ins: what it renders is the version's, and lands in the song as it ends (Bounce in
+    // Place, Consolidate). While an automation pass is under way: its points are the version's, and the undos would be
+    // recorded into it (AutomationWriter::isPassUnderWay()). While the branch an edit makes waits for Now's piece: Back to Now
+    // would take the edit back.
+    juce::String whyStaysOpen (const ProjectContext& context, const VersionHistory& history)
+    {
+        const auto* session = getSession (context);
+
+        if (session != nullptr && session->isLentToRender())
+            return "Not while a render has the song: what it renders lands in the version open. Let it finish first.";
+
+        if (history.shown.has_value() && history.shown->branchWaits)
+            return "Not now: the branch your change makes is being written. A moment.";
+
+        if (session != nullptr && session->getWriter().isPassUnderWay())
+            return "Stop first: automation is being written.";
+
+        return {};
+    }
+
+    // Now back, exactly: a trial on top put back, the trial put back (its step undone, the steps it stashed to redo back), what
+    // changed meanwhile without an undo step made as Now had it (mute and solo, the loop, view state, a plug-in's settings
+    // stored, the count of IDs), what was selected and the time range selected as Now had them, and the plug-ins changed in
+    // their own windows meanwhile given Now's settings again. Nothing where it can't go yet (whyStaysOpen()): whatever would
+    // write the song refuses then (it is still the version's).
+    bool putBackShown (ProjectContext& context, VersionHistory& history)
+    {
+        auto* song = findSong (context);
+
+        if (! history.shown.has_value() || song == nullptr)
+            return true;
+
+        if (whyStaysOpen (context, history).isNotEmpty())
+            return false;
+
+        // What isn't an undo step made as Now had it while the song is still shown, so that it is no change of the project's.
+        auto shown = std::move (*history.shown);
+        history.shown.reset();
+        shown.trial->putBackHeld ([song, &shown] { makeSongAsCopied (*song, shown.now); });
+
+        // What was selected, and the range: the redo steps undone with the version set the range from before they were done.
+        getSelection (context).putBack (shown.selected);
+        getRangeSelection (context).set (shown.range, shown.rangeTracks);
+
+        if (auto* session = getSession (context))
+        {
+            auto given = false;
+
+            for (const auto& [device, count] : song->getDeviceChangesOutsideHistory())
+            {
+                if (shown.outsideAtOpen[device] != count)
+                {
+                    session->getPlugins().giveSongState (DeviceID::fromRaw (device));
+                    given = true;
+                }
+            }
+
+            // Their knobs, which the changes read from them, once they have taken it: compared again then.
+            if (given)
+                session->getPlugins().whenStatesIn (true,
+                                                    [&context, number = context.getProjectNumber()] (bool)
+                                                    {
+                                                        juce::MessageManager::callAsync (
+                                                            [&context, number]
+                                                            {
+                                                                if (auto* h = findHistory (context);
+                                                                    h != nullptr && context.getProjectNumber() == number)
+                                                                    h->compareAllAgain();
+                                                            });
+                                                    });
+        }
+
+        history.tellNow();
+        return true;
+    }
+
+    // "Undo twice", "Undo 3 times": how to take so many steps back, in the notice's words.
+    juce::String describeUndos (int steps)
+    {
+        return steps == 1 ? juce::String ("Undo") : steps == 2 ? juce::String ("Undo twice") : "Undo " + juce::String (steps) + " times";
+    }
+
+    // Why an edit's branch wasn't made: the history busy, a record or Now's piece that couldn't be written, or its wait for
+    // Now's piece stopped (the window's Cancel, or Phazite closing).
+    enum class NoBranch
+    {
+        busy,
+        write,
+        stopped
+    };
+
+    // The branch an edit of a version open makes, now that the hold can end (endOpenVersionForEdit()): the hold ends first, the
+    // version's step kept (the song shows it no more), then the branch is made of what it is, which the steps on top of it
+    // (the edit) begin, the song growing from that version on it and Now kept on the branch it was on
+    // (VersionHistory::branchFromShown()); or, where it can't be made (cannot, or the branch's records), the version is kept as
+    // a restore on Now's branch, the edit after it, which Undo takes back, said. With mustBranch (recording, which doesn't
+    // start then), the version is kept so too, and said. Either way what it showed is the song's own now, a change of the
+    // project's. Whether the branch was made.
+    bool makeEditBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen, bool mustBranch, std::optional<NoBranch> cannot)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+
+        if (history == nullptr || song == nullptr || ! history->shown.has_value())
+            return false;
+
+        const auto versionName = describeVersion (*history, history->shown->version);
+        const auto* left = history->findCurrentBranch();
+        const auto leftID = left != nullptr ? left->id : juce::String();
+        const auto leftName = left != nullptr ? left->name : juce::String();
+
+        auto& trial = *history->shown->trial;
+        const auto onTop = trial.countStepsOnTop();
+        const auto undosBack = trial.countUndosBack();
+        trial.keep ({});
+
+        // What it showed is the song's now: a change of the project's, which its changes meanwhile weren't (Project.h), so that
+        // a save in the background under way since before it opened doesn't end with the project marked saved.
+        song->markChangedOutsideHistory();
+
+        const auto made = cannot.has_value() ? juce::String() : history->branchFromShown();
+        const auto problem = cannot.value_or (history->branchProblem == "write" ? NoBranch::write : NoBranch::busy);
+        history->shown.reset(); // its trial closed: nothing more to put back
+
+        if (made.isEmpty())
+        {
+            // Lossless still: the version is a step on Now's history, the edit after it, which Undo takes back.
+            const auto why = problem == NoBranch::write ? juce::String ("Phazite couldn't write into the project's Versions folder, so ")
+                             : problem == NoBranch::stopped ? juce::String ("Making the branch was stopped, so ")
+                                                            : juce::String ("The project's versions were busy, so ");
+            history->noticeTitle = mustBranch ? "Recording didn't start" : "No branch could be made";
+            history->noticeText =
+                why + versionName + " is now the song on '" + leftName + "'" + (mustBranch ? "." : ", with your change.")
+                + (undosBack > 0 ? " " + describeUndos (undosBack) + " takes it back to the song as it was." : juce::String());
+            history->noticeBranch.clear();
+            history->tellNow();
+            return false;
+        }
+
+        // The branch's history starts with the edit: nothing under it, Now's steps and the version's, is reachable from it.
+        startHistoryAgain (*song, onTop);
+        history->shownLast.clear();
+
+        const auto* branch = history->findCurrentBranch();
+        history->noticeTitle = "A new branch";
+        history->noticeText = "You changed " + versionName + ", so this is now the branch "
+                              + (branch != nullptr ? branch->name : juce::String()) + ". '" + leftName + "' keeps the song as you left it.";
+        history->noticeBranch = leftID;
+        history->tellNow();
+
+        // The project saved after it, as after a switch, so that its file is the branch's song: at the next turn of the message
+        // loop, once the step has ended (a gesture's waiting changes run after it).
+        if (saveProjectThen != nullptr)
+            juce::MessageManager::callAsync (
+                [&context, saveProjectThen, number = context.getProjectNumber()]
+                {
+                    if (auto* open = findSong (context); open != nullptr && context.getProjectNumber() == number)
+                        Gesture::whenEnded (*open, &context, [saveProjectThen] { saveProjectThen ([] (bool) {}); });
+                });
+
+        return true;
+    }
+
+    // What an edit of a version open does as it ends the hold (the trial's edited: the steps on top of it ended with changes;
+    // or, with mustBranch, an edit that can't wait, recording, before anything is recorded): the branch (makeEditBranch()).
+    // Where Now's piece is still being written on the history's thread (keepShownNow(): seconds for a large song), the branch
+    // waits for it: the version stays shown with the edit on top of it and the window held (as a switch holds it), so that
+    // nothing else lands meanwhile but what joins the edit, and it is made as it would have been once the piece is in, or the
+    // version kept as a restore if the piece couldn't be written or the wait is stopped. Not behind a first save's copy of
+    // the folder (minutes): the version kept as a restore at once then, said. Recording waits for nothing: where the branch
+    // can't be made at once, nothing records, and why is said, the version still open. Whether it took the edit (made the
+    // branch, kept the version as a restore, or waits): false for recording unless the branch was made.
+    bool endOpenVersionForEdit (ProjectContext& context, const SaveProjectThen& saveProjectThen, bool mustBranch)
+    {
+        auto* history = findHistory (context);
+        auto* song = findSong (context);
+
+        if (history == nullptr || song == nullptr || ! history->shown.has_value())
+            return false;
+
+        auto& shown = *history->shown;
+        const auto versionName = describeVersion (*history, shown.version);
+        const auto busy =
+            history->isSaving() || history->isReadingForCommand() || history->isBranchMissing() || history->findCurrentBranch() == nullptr;
+        const auto pieceIn = shown.nowPiece.isNotEmpty();
+
+        if (mustBranch && (shown.branchWaits || busy || ! pieceIn))
+        {
+            history->noticeTitle = "Recording didn't start";
+            history->noticeText = "No branch could be made from " + versionName
+                                  + " yet: its versions are busy. Try again in a moment, or go Back to Now to record there.";
+            history->noticeBranch.clear();
+            history->tellNow();
+            return false;
+        }
+
+        // Waiting already: what ended since joins the edit.
+        if (shown.branchWaits)
+            return true;
+
+        if (! busy && ! pieceIn && shown.nowPieceComing && ! history->isCopyingFolder())
+        {
+            const auto finish = [&context, saveProjectThen, number = shown.number] (std::optional<NoBranch> cannot)
+            {
+                auto* waiting = findHistory (context);
+
+                if (waiting == nullptr || ! waiting->shown.has_value() || waiting->shown->number != number || ! waiting->shown->branchWaits)
+                    return;
+
+                // The wait (and its hold on the window) let go of once the branch is made, as this returns.
+                const auto waited = std::exchange (waiting->shown->whenNowIn, {});
+                waiting->shown->branchWaits = false;
+                makeEditBranch (context, saveProjectThen, false, cannot);
+            };
+
+            const std::shared_ptr<ProjectContext::WorkHold> hold =
+                context.holdForWork ("Making a branch from " + versionName, [finish] (const juce::String&) { finish (NoBranch::stopped); });
+            shown.branchWaits = true;
+            shown.whenNowIn = [finish, hold] (bool written)
+            { finish (written ? std::nullopt : std::optional<NoBranch> (NoBranch::write)); };
+            history->tellNow();
+            return true;
+        }
+
+        return makeEditBranch (context, saveProjectThen, mustBranch,
+                               busy || ! pieceIn ? std::optional<NoBranch> (NoBranch::busy) : std::nullopt)
+               || ! mustBranch;
+    }
+
+    // The version's song, read and kept (VersionHistory::keepShownSong()), made the song's in place: in a trial that holds the
+    // history, Now copied and kept in Local History first; or, from another version open, from it.
+    bool showVersion (ProjectContext& context, VersionHistory& history, const juce::String& versionID,
+                      const SaveProjectThen& saveProjectThen)
+    {
+        auto* song = findSong (context);
+        const auto* read = history.findShownSong (versionID);
+        const auto* version = history.findVersion (versionID);
+
+        if (song == nullptr || read == nullptr || version == nullptr)
+            return false;
+
+        // Its step is named for what it is if an edit keeps it where no branch can be made: a restore of the version.
+        const auto stepName = "Restore \"" + getDisplayName (*version) + "\"";
+        const auto then = read->song; // kept: makeSongLike() copies what it takes
+
+        if (! history.shown.has_value())
+        {
+            keepSongBefore (history, "look");
+            song->storeDeviceStates();
+            VersionHistory::Shown shown;
+            shown.version = versionID;
+            shown.number = ++history.shownFromNow;
+            shown.now = song->getState().createCopy();
+            shown.nowParameters = history.readPluginParameters();
+            shown.outsideAtOpen = song->getDeviceChangesOutsideHistory();
+            shown.mayHaveChanges = history.mayHaveChanges(); // Now's, before the trial changes the song
+            shown.selected = getSelection (context).keep();  // and what is selected, before the redo steps done again set any
+            shown.range = getRangeSelection (context).getRange();
+            shown.rangeTracks = getRangeSelection (context).getTracks();
+            shown.trial = std::make_unique<Trial> (*song, stepName, nullptr);
+            shown.trial->holdHistory ({ [&context]
+                                        {
+                                            if (auto* h = findHistory (context))
+                                                putBackShown (context, *h);
+                                        },
+                                        [&context, saveProjectThen] (bool mustBranch)
+                                        { return endOpenVersionForEdit (context, saveProjectThen, mustBranch); } });
+            history.shown = std::move (shown);
+            history.keepShownNow(); // Now's piece, on the history's thread, for a branch an edit may make
+            history.shown->trial->apply ([song, &then] { makeSongLike (*song, then); });
+        }
+        else
+        {
+            history.shown->version = versionID;
+            history.shown->trial->rename (stepName);
+            history.shown->trial->apply ([song, &then] { makeSongLike (*song, then); }, true);
+        }
+
+        history.shownLast = versionID;
+        history.compareProblem.clear();
+        history.tellNow();
+        return true;
+    }
+} // namespace
+
+bool canOpenVersion (const ProjectContext& context, const juce::String& versionID)
+{
+    return whyNotOpenVersion (context, versionID).isEmpty();
+}
+
+juce::String whyNotOpenVersion (const ProjectContext& context, const juce::String& versionID)
+{
+    auto* history = findHistory (context);
+    const auto* song = findSong (context);
+    const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
+
+    if (history == nullptr || song == nullptr || version == nullptr)
+        return "Select a version first.";
+
+    if (history->shown.has_value() && history->shown->version == versionID)
+        return "It is open now.";
+
+    // The version Now is, while another is open: Back to Now.
+    if (! history->shown.has_value() && isSongNow (*history, versionID))
+        return "The song is " + describeVersion (*history, versionID) + " already, with no changes since.";
+
+    if (isRecording (*song))
+        return "Not while the song records.";
+
+    // What keeps an open one where it is (a render, a branch being made, automation being written) keeps it from another;
+    // and automation being written on Now is Now's: it waits for Stop too.
+    if (const auto why = whyStaysOpen (context, *history); why.isNotEmpty())
+        return why;
+
+    if (Trial::isTrialOnHeld (*song))
+        return "Finish swapping first.";
+
+    if (Trial::isStepOpenOnHeld (*song))
+        return "Not during a drag.";
+
+    if (history->isReadingForCommand() || ! canChangeSongNow (context))
+        return "Not now: the versions are busy, or a render has the song's plug-ins.";
+
+    return {};
+}
+
+bool openVersion (ProjectContext& context, const juce::String& versionID, const SaveProjectThen& saveProjectThen)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || ! canOpenVersion (context, versionID))
+        return false;
+
+    // The version Now is, from another open one: Now itself.
+    if (isSongNow (*history, versionID))
+    {
+        backToNow (context);
+        return true;
+    }
+
+    if (history->findShownSong (versionID) != nullptr)
+        return showVersion (context, *history, versionID, saveProjectThen);
+
+    // Read on the history's thread first, whole (a damaged version can't be opened: Restore This Version takes what it can),
+    // then shown.
+    const auto* version = history->findVersion (versionID);
+    return startSongRead (context, *history, "Reading \"" + getDisplayName (*version) + "\"", version->song, false,
+                          [&context, versionID, saveProjectThen] (SongRead& read) -> VersionHistory::Taken
+                          {
+                              auto* reading = findHistory (context);
+
+                              if (reading == nullptr || reading->findVersion (versionID) == nullptr)
+                                  return false;
+
+                              if (! read.song.isValid())
+                                  return VersionHistory::Taken::refused (
+                                      describeVersion (*reading, versionID)
+                                      + " can't be opened: a piece of it is damaged or missing in the Versions folder. Verify "
+                                        "History says what; Restore This Version takes what can be read.");
+
+                              if (read.idsGivenAnew)
+                                  return VersionHistory::Taken::refused (
+                                      idsTwiceRefusal().replace ("Nothing was restored", "It wasn't opened"));
+
+                              if (const auto why = whyNotChangeSongNow (context, "it wasn't opened.", true); why.isNotEmpty())
+                                  return VersionHistory::Taken::refused (why);
+
+                              reading->keepShownSong ({ versionID, std::move (read.song), std::move (read.parameters) });
+                              return showVersion (context, *reading, versionID, saveProjectThen);
+                          });
+}
+
+bool backToNow (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history == nullptr || putBackShown (context, *history);
+}
+
+bool canGoBackToNow (const ProjectContext& context)
+{
+    return whyNotBackToNow (context).isEmpty();
+}
+
+juce::String describeBackToNow (const ProjectContext& context)
+{
+    // Its name, or with why it can't while a version is open.
+    const auto why = getOpenVersion (context).isNotEmpty() ? whyNotBackToNow (context) : juce::String();
+    return why.isEmpty() ? juce::String ("Back to Now")
+                         : "Back to Now (" + why.upToFirstOccurrenceOf (":", false, false).trimCharactersAtEnd (".") + ")";
+}
+
+juce::String whyNotBackToNow (const ProjectContext& context)
+{
+    const auto* song = findSong (context);
+    const auto* history = findHistory (context);
+
+    if (getOpenVersion (context).isEmpty() || song == nullptr || history == nullptr)
+        return "No version is open.";
+
+    if (const auto why = whyStaysOpen (context, *history); why.isNotEmpty())
+        return why;
+
+    // A save goes back all the same, putting back what is tried (Trial::putBackHeld()); the button says what to do first.
+    if (Trial::isTrialOnHeld (*song))
+        return "Finish swapping first.";
+
+    if (Trial::isStepOpenOnHeld (*song))
+        return "Not during a drag.";
+
+    return {};
+}
+
+juce::String getOpenVersion (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->shown.has_value() ? history->shown->version : juce::String();
+}
+
+juce::String describeOpenVersion (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto* version = history != nullptr ? history->findVersion (getOpenVersion (context)) : nullptr;
+
+    if (version == nullptr)
+        return {};
+
+    return "Looking at \"" + getDisplayName (*version) + "\" (" + describeAgo (juce::Time (version->saved), juce::Time::getCurrentTime())
+           + ")";
+}
+
+juce::StringArray getOpenVersionMissingPlugins (const ProjectContext& context)
+{
+    const auto* song = findSong (context);
+    return song != nullptr && getOpenVersion (context).isNotEmpty() ? getPluginsMissing (*song) : juce::StringArray();
+}
+
+void openSelectedVersion (ProjectContext& context, const SaveProjectThen& saveProjectThen)
+{
+    openVersion (context, getSelectedVersion (context), saveProjectThen);
+}
+
+bool canOpenSelected (const ProjectContext& context)
+{
+    return canOpenVersion (context, getSelectedVersion (context));
+}
+
+juce::String describeOpenSelected (const ProjectContext& context)
+{
+    // Its name, or with why it can't open the version selected.
+    const auto why = getSelectedVersion (context).isNotEmpty() ? whyNotOpenVersion (context, getSelectedVersion (context)) : juce::String();
+    return why.isEmpty() ? juce::String ("Open Version") : "Open Version (" + why.trimCharactersAtEnd (".") + ")";
+}
+
+std::optional<VersionsNotice> takeVersionsNotice (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || history->noticeText.isEmpty())
+        return std::nullopt;
+
+    VersionsNotice notice { std::exchange (history->noticeTitle, {}),
+                            std::exchange (history->noticeText, {}),
+                            {},
+                            std::exchange (history->noticeBranch, {}) };
+
+    for (const auto& each : history->getBranches())
+        if (each.id == notice.branch)
+            notice.actionName = "Back to " + each.name;
+
+    if (notice.actionName.isEmpty())
+        notice.branch.clear();
+
+    return notice;
+}
+
 juce::String getCompareVersion (const ProjectContext& context)
 {
-    // The version waiting for its bounce to be heard, else the version heard last, else the one the song comes from.
+    // The version open, else the version opened last, else the version whose bounce was heard last, else the one the song
+    // grew from.
     const auto* history = findHistory (context);
 
     if (history == nullptr)
         return {};
 
-    if (history->findVersion (history->hearWhenBounced) != nullptr)
-        return history->hearWhenBounced;
+    if (history->shown.has_value())
+        return history->shown->version;
 
-    if (history->findVersion (history->bounceCompared) != nullptr)
-        return history->bounceCompared;
+    for (const auto* id : { &history->shownLast, &history->bounceCompared })
+        if (history->findVersion (*id) != nullptr)
+            return *id;
 
     const auto* last = history->findBaseVersion();
     return last != nullptr ? last->id : juce::String();
@@ -2912,18 +3463,17 @@ bool canCompare (const ProjectContext& context)
     if (history == nullptr || compared.isEmpty() || history->isReading())
         return false;
 
-    // Hearing B, or waiting to: a press goes back to the song.
-    if (history->hearingBounce || history->hearWhenBounced.isNotEmpty())
+    // Hearing a bounce, or B open: a press goes back to the song, when it can (whyNotBackToNow()).
+    if (history->hearingBounce)
         return true;
 
-    // B the song itself, nothing to compare.
-    if (isSongNow (*history, compared))
-        return false;
+    if (history->shown.has_value())
+        return whyNotBackToNow (context).isEmpty();
 
-    return history->hasBounce (compared) || history->bouncingVersion == compared || canBounce (context, compared);
+    return canOpenVersion (context, compared);
 }
 
-void toggleCompare (ProjectContext& context)
+void toggleCompare (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
     auto* history = findHistory (context);
 
@@ -2932,39 +3482,23 @@ void toggleCompare (ProjectContext& context)
 
     history->compareProblem.clear();
 
-    // Back to the song, from B or from waiting for it.
-    if (history->hearingBounce || history->hearWhenBounced.isNotEmpty())
+    if (history->hearingBounce)
     {
-        history->hearWhenBounced.clear();
+        hearVersion (context, {});
+        return;
+    }
 
-        if (history->hearingBounce)
-            hearVersion (context, {});
+    if (history->shown.has_value())
+    {
+        backToNow (context);
+        return;
+    }
 
+    if (! openVersion (context, getCompareVersion (context), saveProjectThen))
+    {
+        history->compareProblem = whyNotOpenVersion (context, getCompareVersion (context));
         history->tellNow();
-        return;
     }
-
-    const auto compared = getCompareVersion (context);
-
-    if (history->hasBounce (compared))
-    {
-        hearVersion (context, compared);
-        return;
-    }
-
-    // Bounced first, the song playing on, then heard; or why it can't be, said.
-    if (history->bouncingVersion == compared || startBackgroundBounce (context, compared))
-        history->hearWhenBounced = compared;
-    else
-        history->compareProblem = history->bounceProblem;
-
-    history->tellNow();
-}
-
-bool isWaitingToCompare (const ProjectContext& context)
-{
-    const auto* history = findHistory (context);
-    return history != nullptr && history->hearWhenBounced.isNotEmpty();
 }
 
 juce::String getCompareProblem (const ProjectContext& context)
@@ -2985,47 +3519,26 @@ juce::String describeCompare (const ProjectContext& context)
     const auto name = "\"" + getDisplayName (*version) + "\"";
 
     if (history->hearingBounce)
-        return "A/B: hearing " + name + " (B) in place of the song. Press to hear the song (A) again";
+        return "A/B: hearing " + name + "'s bounce (B) in place of the song. Press to hear the song (A) again";
 
-    if (history->hearWhenBounced.isNotEmpty())
+    if (history->shown.has_value())
     {
-        const auto progress = getBounceProgress (context, compared);
-        return "A/B: bouncing " + name + " to hear it"
-               + (progress.has_value() ? " (" + juce::String (juce::roundToInt (*progress * 100.0f)) + "%)" : juce::String())
-               + ". Press to stop waiting";
+        if (const auto why = whyNotBackToNow (context); why.isNotEmpty())
+            return "A/B: " + name + " (B) is open in place of the song. " + why.trimCharactersAtEnd (".");
+
+        return "A/B: " + name + " (B) is open in place of the song. Press to go back to Now (A), at the same beat";
     }
 
-    if (isSongNow (*history, compared))
+    if (! history->shown.has_value() && isSongNow (*history, compared))
         return "A/B: nothing to compare. The song is " + name + ", with no changes since";
 
-    return "A/B: hear " + name + " (B) in place of the song (A), at the same point and as loud"
-           + (history->hasBounce (compared) ? juce::String() : juce::String ("; it is bounced first, in the background"));
+    return "A/B: open " + name + " (B) in place of the song (A), live, at the same beat; press again to go back to Now";
 }
 
 void hearSelectedVersion (ProjectContext& context)
 {
-    auto* history = findHistory (context);
-    const auto selected = getSelectedVersion (context);
-
-    if (history == nullptr || ! canHearSelected (context))
-        return;
-
-    if (selected.isEmpty() || history->hasBounce (selected))
-    {
-        hearVersion (context, selected);
-        return;
-    }
-
-    // A version without a bounce: bounced first in the background, the song playing on, then heard, as A/B does; or why it
-    // can't be, said.
-    history->compareProblem.clear();
-
-    if (history->bouncingVersion == selected || startBackgroundBounce (context, selected))
-        history->hearWhenBounced = selected;
-    else
-        history->compareProblem = history->bounceProblem;
-
-    history->tellNow();
+    if (canHearSelected (context))
+        hearVersion (context, getSelectedVersion (context));
 }
 
 bool canHearSelected (const ProjectContext& context)
@@ -3036,11 +3549,17 @@ bool canHearSelected (const ProjectContext& context)
     if (history == nullptr)
         return false;
 
-    if (selected.isEmpty())
-        return history->hearingBounce;
+    // On the changes' row, the song again; on a version, its bounce, which nothing makes by itself.
+    return selected.isEmpty() ? history->hearingBounce : history->hasBounce (selected);
+}
 
-    return history->hasBounce (selected) || history->bouncingVersion == selected
-           || (canBounce (context, selected) && ! isSongNow (*history, selected));
+juce::String describeHearSelected (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto selected = getSelectedVersion (context);
+    return history != nullptr && history->findVersion (selected) != nullptr && ! history->hasBounce (selected)
+               ? juce::String ("Hear It (No bounce: Open Version plays it live)")
+               : juce::String ("Hear It");
 }
 
 namespace
@@ -3126,6 +3645,9 @@ bool canExportDawProject (const ProjectContext& context)
 
 void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 {
+    if (! backToNow (context)) // on Now, never on a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     auto* open = findSong (context);
 
     if (! canExportDawProject (context))
@@ -3324,26 +3846,48 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .isEnabled = [&context] { return canCancelMerge (context); },
            .needsPluginStates = true });
 
+    // A version open in the song's place, live, and back: not undo steps (docs/design/versions.md: A version open). Opening one
+    // stores the plug-ins' settings first, which Now keeps.
+    add ({ .id = "version.open",
+           .name = "Open Version",
+           .description = "Opens the selected version in place of the song, live and without a bounce, to listen and look; Back to "
+                          "Now brings the song back exactly as it was, and an edit there starts a branch.",
+           .synonyms = { "checkout", "check out", "jump to", "view", "look at", "listen", "go to version" },
+           .perform = [&context, saveProjectThen] { openSelectedVersion (context, saveProjectThen); },
+           .isEnabled = [&context] { return canOpenSelected (context); },
+           .currentName = [&context] { return describeOpenSelected (context); },
+           .needsPluginStates = true });
+
+    add ({ .id = "version.backToNow",
+           .name = "Back to Now",
+           .description = "Closes the version open and brings the song back as it was, its unsaved changes, undo steps and "
+                          "selection included, at the same beat.",
+           .synonyms = { "back", "now", "close version", "return", "a/b" },
+           .perform = [&context] { backToNow (context); },
+           .isEnabled = [&context] { return canGoBackToNow (context); },
+           .currentName = [&context] { return describeBackToNow (context); },
+           .overPlugins = true });
+
     // Bounces, and hearing them: not undo steps, as they change the history and what is heard, not the song.
     add ({ .id = "version.hear",
            .name = "Hear It",
-           .description = "Plays the selected version's bounce in place of the song, at the same beat and as loud, to compare them, "
-                          "bouncing it first in the background if it has none; on the changes' row, the song itself again. An edit "
-                          "to the song switches back to it.",
-           .synonyms = { "listen", "compare", "a/b", "reference", "play version", "play commit" },
+           .description = "Plays the selected version's bounce in place of the song, at the same beat and as loud, to compare them; "
+                          "on the changes' row, the song itself again. An edit to the song switches back to it.",
+           .synonyms = { "listen", "compare", "a/b", "reference", "play bounce", "play version" },
            .perform = [&context] { hearSelectedVersion (context); },
-           .isEnabled = [&context] { return canHearSelected (context); } });
+           .isEnabled = [&context] { return canHearSelected (context); },
+           .currentName = [&context] { return describeHearSelected (context); } });
 
     add ({ .id = "version.compare",
            .name = "A/B Compare",
-           .description = "Hears the last version (or the version heard last) in place of the song, at the same point and as loud, "
-                          "and the song again at the next press: what changed since against what was. A version without a "
-                          "bounce is bounced first, in the background.",
+           .description = "Opens the last version (or the version opened last) in place of the song, live and at the same beat, and "
+                          "brings the song back at the next press: what changed since against what was.",
            .synonyms = { "a/b", "ab", "compare", "before and after", "reference", "listen", "stash", "toggle" },
-           .perform = [&context] { toggleCompare (context); },
+           .perform = [&context, saveProjectThen] { toggleCompare (context, saveProjectThen); },
            .isEnabled = [&context] { return canCompare (context); },
-           .isTicked = [&context] { return getHeardVersion (context).isNotEmpty(); },
-           .overPlugins = true });
+           .isTicked = [&context] { return getHeardVersion (context).isNotEmpty() || getOpenVersion (context).isNotEmpty(); },
+           .overPlugins = true,
+           .readsPluginStates = [&context] { return getOpenVersion (context).isEmpty() && getHeardVersion (context).isEmpty(); } });
 
     add ({ .id = "version.bounce",
            .name = "Bounce",

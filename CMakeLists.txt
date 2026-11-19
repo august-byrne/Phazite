@@ -1484,6 +1484,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsKeptWholeTests.cpp
         tests/VersionsMergeTests.cpp
         tests/VersionsMergeWaitingTests.cpp
+        tests/VersionsOpenTests.cpp
         tests/VersionsRecoveryTests.cpp
         tests/VersionsSweepTests.cpp
         tests/VersionsTests.cpp

@@ -481,6 +481,14 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     song.getUndoManager().clearUndoHistory();
 }
 
+void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
+{
+    // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
+    // that only what changed without it differs (a property set without a step, view state, the count of IDs).
+    makeLike (song.getState(), copy, nullptr, true, Taken::everything);
+    song.getState().setProperty (schema::nextID, copy[schema::nextID], nullptr);
+}
+
 namespace
 {
     bool makeTrackLikeIn (juce::ValueTree state, TrackID id, const juce::ValueTree& other, juce::UndoManager* undo)

@@ -141,6 +141,11 @@ juce::String getWhyNotCleanUpAudio (const ProjectContext& context)
     if (isRecording (*song))
         return "Not while recording: the take being written is in the Audio folder.";
 
+    // An old version open in its place: what the song plays is the version's, not its own (Clean Up's command goes back to
+    // Now first).
+    if (song->isShowingOther())
+        return "Not while a version is open: go Back to Now first.";
+
     if (history != nullptr && history->isReading())
         return "Phazite is still reading the project's versions.";
 

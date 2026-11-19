@@ -13,7 +13,8 @@
 // its progress with Cancel, in the window a render shows (TrackRenderHost: the app's progress window), which only its
 // Cancel cancels. Cancel stops it and leaves the project as it was. A job's change is made on the message thread, as one
 // named undo step of its own, never inside a drag in progress (a Gesture) or a Swap's open trial (a Trial, which it keeps
-// first as it starts, as an edit made at once would); if the song changed meanwhile so that what it read no longer fits
+// first as it starts, as an edit made at once would; on a version open in the song's place, it is an edit of that version,
+// which makes a branch as any step does: model/versions/VersionsModel.h); if the song changed meanwhile so that what it read no longer fits
 // (something other than the user can change it: a plug-in, a recording ending; its clip or its track gone, its clip
 // playing another file, another part or at another gain, the project moved), nothing is changed, and the user is told why
 // (reportProblem(), model/project/internal/ProjectContext.h). Another project opened stops every job at once.

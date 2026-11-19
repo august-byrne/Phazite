@@ -234,7 +234,7 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &masterMeter, &masterVolume })
         addAndMakeVisible (c);
 
-    // A/B, and nothing hidden: while a version's bounce is heard rather than the song, the bar says so.
+    // A/B, and nothing hidden: while a version is open in the song's place, or its bounce heard, the bar says so.
     compareButton.setTitle ("A/B");
     compareButton.setMouseClickGrabsKeyboardFocus (false);
     compareButton.onClick = [this] { commands.invoke ("version.compare"); };
@@ -243,8 +243,8 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     hearing.setTitle ("Hearing");
     hearing.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     hearing.setJustificationType (juce::Justification::centredLeft);
-    hearing.setTooltip (
-        "A version's bounce is heard in place of the song. A/B, hearing the changes since the last version, or any edit, plays the song again");
+    hearing.setTooltip ("A version is open in place of the song, or its bounce is heard. A/B, or Back to Now in the Versions view, "
+                        "brings the song back as it was");
     addChildComponent (hearing);
 
     lookAndFeelChanged();
@@ -260,34 +260,31 @@ void TopBar::versionsChanged()
 
 void TopBar::updateCompare()
 {
-    // What is heard, or bounced to be heard, while it isn't the song; and A/B lit meanwhile, saying what a press does.
-    juce::String text = describeHearing (projectContext);
-    const auto waiting = isWaitingToCompare (projectContext);
+    // What is heard while it isn't the song (a version open in its place, or a version's bounce), seen with the Versions view
+    // closed too; and A/B lit meanwhile, saying what a press does.
+    juce::String text = describeOpenVersion (projectContext);
+    const auto opened = text.isNotEmpty();
 
-    if (waiting)
-    {
-        const auto compared = getCompareVersion (projectContext);
-        const auto progress = getBounceProgress (projectContext, compared);
-        text = "Bouncing to hear it"
-               + (progress.has_value() ? ": " + juce::String (juce::roundToInt (*progress * 100.0f)) + "%" : juce::String());
-    }
-    else if (text.isEmpty())
-    {
-        text = getCompareProblem (projectContext); // why the last press couldn't hear it
-    }
+    if (! opened)
+        text = describeHearing (projectContext);
+
+    if (text.isEmpty())
+        text = getCompareProblem (projectContext); // why the last press couldn't open B
 
     if (hearing.getText() != text)
         hearing.setText (text, juce::dontSendNotification);
 
-    // A/B only while there is something to compare: a version, and changes since it (or it heard).
+    // A/B only while there is something to compare: a version that can be opened (or one open, or a bounce heard); greyed while
+    // a version open can't be left yet (a render has it), its tooltip saying why.
     const auto wasShown = std::pair (compareButton.isVisible(), hearing.isVisible());
     hearing.setVisible (text.isNotEmpty());
-    compareButton.setVisible (canCompare (projectContext));
+    compareButton.setVisible (opened || canCompare (projectContext));
+    compareButton.setEnabled (canCompare (projectContext));
 
     if (std::pair (compareButton.isVisible(), hearing.isVisible()) != wasShown)
         resized();
 
-    compareButton.setToggleState (waiting || getHeardVersion (projectContext).isNotEmpty(), juce::dontSendNotification);
+    compareButton.setToggleState (opened || getHeardVersion (projectContext).isNotEmpty(), juce::dontSendNotification);
 
     if (const auto tip = withShortcut (commands, describeCompare (projectContext), "version.compare"); compareButton.getTooltip() != tip)
         compareButton.setTooltip (tip);
@@ -627,10 +624,6 @@ void TopBar::timerCallback()
 {
     const auto open = projectContext.hasProject();
     const bool playing = isPlaying (projectContext);
-
-    // How far the bounce A/B waits for has come.
-    if (isWaitingToCompare (projectContext))
-        updateCompare();
 
     // The play button shows what clicking it does, and screen readers say so.
     if (const auto title = juce::String (playing ? "Stop" : "Play"); playButton.getTitle() != title)

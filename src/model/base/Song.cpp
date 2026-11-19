@@ -29,7 +29,8 @@ Song::Song (juce::ValueTree s)
 {
     // By steps alone: JUCE weighs each change by the size of its record, not by what it holds, so a budget of units kept as
     // few as 30 steps after a drag of many notes.
-    undoManager.setMaxNumberOfStoredUnits (1, undoSteps.load());
+    undoManager.stepsKept = undoSteps.load();
+    undoManager.keepMoreSteps (0);
 }
 
 Song::~Song()
@@ -82,6 +83,22 @@ void Song::storeDeviceStates (std::uint64_t trackID)
 {
     if (deviceStateStore != nullptr)
         deviceStateStore (trackID);
+}
+
+void Song::setShowingOther (bool showing)
+{
+    if (showing == showingOther)
+        return;
+
+    if (showingHeard != nullptr)
+        showingHeard (showing);
+
+    showingOther = showing;
+
+    // The step that shows the other, and one begun on top of it (an edit, which may be taken back), kept beside every step of
+    // its own, so that neither takes one of them away as it begins; more as more begin on top of it (Trial::stepBegins()). JUCE drops steps only as one is performed, never as the
+    // limit falls (JUCE workaround W56 (docs/juce-workarounds.md)).
+    undoManager.keepMoreSteps (showing ? 2 : 0);
 }
 
 std::map<std::uint64_t, int> Song::getDeviceChangesHeld() const

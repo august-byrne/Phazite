@@ -259,6 +259,7 @@ private:
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
     void projectChanged() override;                      // stops a preview, which may be in time with the project
+    void versionsChanged() override;                     // what the versions tell (an edit that started a branch), as a notice
 
     std::unique_ptr<PanelWindow>& getWindow (Panel); // a detachable panel's (not the song's views)
 };

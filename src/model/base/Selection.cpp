@@ -208,6 +208,22 @@ void Selection::deselectAll()
         changed();
 }
 
+Selection::Kept Selection::keep() const
+{
+    return { items, sections, noteClips, notes, pointsParameter, points };
+}
+
+void Selection::putBack (const Kept& kept)
+{
+    items = kept.items;
+    sections = kept.sections;
+    noteClips = kept.noteClips;
+    notes = kept.notes;
+    pointsParameter = kept.pointsParameter;
+    points = kept.points;
+    changed();
+}
+
 int Selection::getNumObjectsSelected() const
 {
     auto count = 0;

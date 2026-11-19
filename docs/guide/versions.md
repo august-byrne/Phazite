@@ -26,9 +26,9 @@ Changed your mind? A line's arrow (**Discard Changes**) makes that track what th
 
 ## Go back
 
-**History** lists every version, newest first, each on its branch's line. Click a version to open it: what it changed shows under it, a line per track. Click it again to fold it.
+**History** lists every version, newest first, each on its branch's line. Click a version to unfold it: what it changed shows under it, a line per track. Click it again to fold it.
 
-- **One track:** right-click the version and choose **Compare with the Song**: every track that differs from it is listed. Click the arrow on the track's line to make it what it was then; the rest of the song stays as it is. (Opening a version lists only what it changed, with the same arrows.)
+- **One track:** right-click the version and choose **Compare with the Song**: every track that differs from it is listed. Click the arrow on the track's line to make it what it was then; the rest of the song stays as it is. (Unfolding a version lists only what it changed, with the same arrows.)
 - **The whole song:** right-click the version and choose **Restore This Version**.
 - **Compare first:** right-click a version and choose **Compare with the Song** to list what differs from the song now, each line with its own arrow. **Done** goes back to the changes.
 
@@ -36,12 +36,12 @@ Each restore is one undo step, so Ctrl+Z takes it back, and restoring the whole 
 
 To rename a version, for example to mark the one you sent to the label, right-click it and choose **Rename Version...**.
 
-## Hear a version against the song
+## Hear an old version against the song
 
-- **A/B:** press **N**, or click **A/B** in the transport bar, to hear the last version in place of the song, at the same point and just as loud. Press it again to hear the song. This is the quick way to hear whether a change is better. The first time, Phazite bounces the version in the background while the song plays on, and switches as soon as it's ready. Any edit switches back to the song.
-- **An older version:** double-click it, or right-click it and choose **Hear It**, to hear it in place of the song. A version without a bounce is bounced first, in the background while the song plays on, and heard as soon as it's ready; one with a bounce has a play mark, which plays it at once. To bounce versions ahead, right-click one and choose **Bounce**, or turn on **Bounce Each Version** in **Save Version**'s menu. A/B then switches between the song and the version you heard last.
-
-Both are matched in loudness as they play, so the louder one doesn't win just by being louder.
+- **Open a version:** double-click it in **History**, or right-click it and choose **Open Version**. The song becomes that version right away, live, with no bounce, and keeps playing at the same beat. A bar across the top of the view says **Looking at "Verse 2" (3 days ago)**, and the transport bar and the status bar say it too. Your song as it was, unsaved changes and all, is kept: click **Back to Now** (or press **Escape** in the view) and it comes back exactly as it was, Undo and Redo included. Nothing is saved while you look: saving, exporting or saving a version goes back to Now first.
+- **A/B:** press **N**, or click **A/B** in the transport bar, to open the last version (or the one you opened last) in place of the song, and press it again to go back to Now. This is the quick way to hear whether a change is better.
+- **Change something while a version is open, or record there,** and Phazite starts a branch there for you (**idea-3**) as the change is made (automation you write while it plays counts too, from Stop), so it never touches the old version or your song: a notice says so, with **Back to main** to return to your song as you left it. While automation is being written, stop first: no version opens, and Back to Now waits, until you press Stop. To start a branch without changing anything, click **Create Branch Here** in the bar.
+- **Bounces** are optional. A version with a bounce has a play mark: click it, or right-click the version and choose **Hear It**, to hear the bounce in place of the song, matched in loudness so the louder one doesn't win just by being louder. Bounce a version that uses a plug-in you don't always have installed (right-click it and choose **Bounce**, or turn on **Bounce Each Version** in **Save Version**'s menu): the bar offers its bounce when that plug-in is missing.
 
 ## Try an idea on a branch
 

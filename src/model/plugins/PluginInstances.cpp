@@ -1206,6 +1206,18 @@ juce::StringArray getPluginsLoading (const Song& song)
     return session != nullptr ? session->getPlugins().getLoading() : juce::StringArray();
 }
 
+juce::StringArray getPluginsMissing (const Song& song)
+{
+    juce::StringArray missing;
+
+    if (auto* session = findSession (song))
+        for (const auto& device : findPlugins (song))
+            if (session->getPlugins().getStatus (getDeviceID (device)) == PluginInstances::Status::missing)
+                missing.addIfNotAlreadyThere (getDeviceName (device));
+
+    return missing;
+}
+
 bool reloadPlugin (Song& song, DeviceID id, PluginInstances::Reloaded then)
 {
     auto* session = findSession (song);

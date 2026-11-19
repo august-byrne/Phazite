@@ -468,7 +468,7 @@ TEST_CASE ("An edit to the song switches back to it, so that what is heard is wh
     phazite::stopAndReturn (*phazite::findSong (s.context));
 }
 
-TEST_CASE ("A/B hears the last version in place of the song once it is bounced in the background, and the song at the next press")
+TEST_CASE ("A/B opens the last version live, without a bounce, and brings the song back exactly at the next press")
 {
     TestSong s;
     const auto track = s.addTrack ("Tone");
@@ -480,41 +480,53 @@ TEST_CASE ("A/B hears the last version in place of the song once it is bounced i
     CHECK_FALSE (phazite::canCompare (s.context));
 
     s.setVolume (track, -6.0f);
+    const auto now = phazite::findSong (s.context)->getState().createCopy();
     REQUIRE (phazite::canCompare (s.context));
-    CHECK (phazite::describeCompare (s.context).contains ("bounced first"));
+    CHECK (phazite::describeCompare (s.context).contains ("live"));
 
-    // A press: the version is bounced in the background, the song playing on, and heard as soon as it is.
+    // A press: the version open in the song's place once it is read, nothing bounced; another, Now again, exactly.
     phazite::toggleCompare (s.context);
-    CHECK (phazite::isWaitingToCompare (s.context));
-    REQUIRE (dispatchMessagesUntil ([&s, &saved] { return phazite::getHeardVersion (s.context) == saved; }));
-    CHECK_FALSE (phazite::isWaitingToCompare (s.context));
-    CHECK (phazite::describeHearing (s.context) == "Hearing: Tone");
-
-    // Another: the song again. And again: the bounce, at once this time.
-    phazite::toggleCompare (s.context);
+    REQUIRE (dispatchMessagesUntil ([&s, &saved] { return phazite::getOpenVersion (s.context) == saved; }));
+    CHECK_FALSE (phazite::getBounceProgress (s.context, saved).has_value());
     CHECK (phazite::getHeardVersion (s.context).isEmpty());
-    phazite::toggleCompare (s.context);
-    CHECK (phazite::getHeardVersion (s.context) == saved);
+    CHECK (phazite::describeOpenVersion (s.context).startsWith ("Looking at \"Tone\" ("));
+    CHECK (phazite::getCompareVersion (s.context) == saved);
 
-    // An edit is heard as it is made: the song again.
-    s.setVolume (track, -3.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getHeardVersion (s.context).isEmpty(); }));
+    phazite::toggleCompare (s.context);
+    CHECK (phazite::getOpenVersion (s.context).isEmpty());
+    CHECK (phazite::findSong (s.context)->getState().isEquivalentTo (now));
+
+    // Again: at once this time, its song kept from the first read.
+    phazite::toggleCompare (s.context);
+    CHECK (phazite::getOpenVersion (s.context) == saved);
+    phazite::toggleCompare (s.context);
+    CHECK (phazite::findSong (s.context)->getState().isEquivalentTo (now));
     phazite::stopAndReturn (*phazite::findSong (s.context));
 }
 
-TEST_CASE ("A/B says why it can't hear a version with nothing to bounce, until the next press or an edit")
+TEST_CASE ("A/B, while a version's bounce is heard, hears the song again; nothing bounces by itself")
 {
     TestSong s;
-    const auto track = s.addTrack ("Empty");
-    keepVersion (s.context, "Nothing yet");
-    s.setVolume (track, -6.0f);
-    REQUIRE (phazite::canCompare (s.context));
-
-    phazite::toggleCompare (s.context);
-    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isWaitingToCompare (s.context); }));
-    CHECK (phazite::getHeardVersion (s.context).isEmpty());
-    CHECK (phazite::getCompareProblem (s.context).contains ("nothing to bounce"));
-
+    TemporaryFolder sounds;
+    const auto track = s.addTrack ("Hits");
+    s.addAudioClip (track, writeHits (sounds.folder.getChildFile ("Hits.wav"), 4.0, 0.5f), 0.0);
+    const auto first = keepVersion (s.context, "First");
+    bounce (s, first);
     s.setVolume (track, -3.0f);
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getCompareProblem (s.context).isEmpty(); }));
+    const auto second = keepVersion (s.context, "Second"); // no bounce
+    s.setVolume (track, -6.0f);
+
+    REQUIRE (phazite::hearVersion (s.context, first));
+    REQUIRE (phazite::canCompare (s.context));
+    phazite::toggleCompare (s.context);
+    CHECK (phazite::getHeardVersion (s.context).isEmpty());
+    CHECK (phazite::getOpenVersion (s.context).isEmpty());
+
+    // Hear It on a version without a bounce: greyed, nothing started.
+    phazite::selectVersion (s.context, second);
+    CHECK_FALSE (phazite::canHearSelected (s.context));
+    CHECK (phazite::describeHearSelected (s.context) == "Hear It (No bounce: Open Version plays it live)");
+    phazite::hearSelectedVersion (s.context);
+    CHECK_FALSE (phazite::getBounceProgress (s.context, second).has_value());
+    phazite::stopAndReturn (*phazite::findSong (s.context));
 }

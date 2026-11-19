@@ -12,7 +12,11 @@
 #include "StoreSweep.h"
 #include "VersionStore.h"
 #include "model/base/BackgroundJobs.h"
+#include "model/base/Beats.h"
+#include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/Selection.h"
+#include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 
 #include <juce_events/juce_events.h>
@@ -299,9 +303,81 @@ public:
     juce::String bounceCompared;
     bool hearingBounce = false;
 
-    // A/B's B waiting for its bounce, rendering in the background, to be heard as soon as it is: none while none waits. An
-    // edit stops waiting. And why the bounce it waited for failed, until the next press or edit.
-    juce::String hearWhenBounced, compareProblem;
+    // A version opened live (VersionsModel.h: openVersion()): the song made that version's in place, in a trial that holds the
+    // song's history (model/commands/internal/Undo.h: Trial::holdHistory()), which Back to Now puts back. What it keeps
+    // meanwhile: the version; the trial; the song as it was (Now: a copy taken as it opened, its plug-ins' settings stored
+    // first, with their knobs), which what changed without an undo step is made again from; Now's piece in the store, split
+    // and written on the history's thread as it opened (keepShownNow()), which the branch it is on names should an edit start a
+    // branch (none until it is written, or if it couldn't be); the counts of the plug-ins' own changes as it opened; and what
+    // the changes' getters said as it opened (mayHaveChanges() answers that meanwhile, no round of the changes runs and no
+    // snapshot of Local History is taken: the song isn't Now). None while none is. Now never changes while it is open: what
+    // changes meanwhile is the version's (an edit, which makes a branch of it; or what isn't an undo step, which Back to Now
+    // makes as Now had it), so the piece written as it opened stays Now's.
+    //
+    // Also what is selected and the time range selected as it opened, which Back to Now puts back (the song's redo steps, done
+    // again under it and undone with it, set the range they set and the one before); and an edit's branch waiting for Now's
+    // piece (VersionsModel.cpp: the edit's step ended while the piece was still being written), with what it does once the
+    // piece is in, written or not (whenNowIn, which holds the window meanwhile).
+    struct Shown
+    {
+        juce::String version;
+        std::unique_ptr<Trial> trial;
+        juce::ValueTree now;
+        PluginParameterValues nowParameters;
+        juce::String nowPiece;
+        bool nowPieceComing = false; // its write asked for (keepShownNow()), until it is in or failed
+        int number = 0;              // which open from Now it is, for what comes back from the history's thread
+        std::map<std::uint64_t, int> outsideAtOpen;
+        bool mayHaveChanges = false;
+        Selection::Kept selected;
+        BeatRange range;
+        std::vector<TrackID> rangeTracks;
+        bool branchWaits = false;
+        std::function<void (bool written)> whenNowIn;
+    };
+
+    std::optional<Shown> shown;
+    int shownFromNow = 0; // opens from Now so far (Shown::number)
+
+    // Now's piece written for the version open (shown), on the history's thread: once a first save's copy of the folder is
+    // over, if one is under way.
+    void keepShownNow();
+
+    // The version opened last (A/B's B once none is open), and the songs of the versions opened, as they were read with their
+    // knobs, kept for the next open (a version never changes): the last two.
+    juce::String shownLast;
+
+    struct ShownSong
+    {
+        juce::String version;
+        juce::ValueTree song;
+        PluginParameterValues parameters;
+    };
+
+    std::vector<ShownSong> shownSongs;
+    static constexpr size_t shownSongsKept = 2;
+    const ShownSong* findShownSong (const juce::String& versionID) const;
+    void keepShownSong (ShownSong);
+
+    // What an edit while a version is open makes of it (VersionsModel.cpp): a branch from the version open, made the current
+    // one, the song growing from that version, as Create Branch from it makes one (named "idea-3", in the next colour); and
+    // Now, by its piece written as the version opened (keepShownNow()), kept on the branch it leaves as a switch keeps the song
+    // it leaves: only the branches' small records are written here. The song itself isn't touched: it is the version's
+    // already. Called once the song shows the version no more (Song::isShowingOther()). The new branch's id; none, with
+    // nothing changed, if it can't be made, and why in branchProblem ("busy": the history is, or Now's piece isn't written
+    // yet; "write": a record couldn't be written).
+    juce::String branchFromShown();
+    juce::String branchProblem;
+
+    // The whole song compared again at the next round of the changes: after Back to Now gave plug-ins changed in their
+    // windows meanwhile Now's settings again, once they took them (their knobs, which the song doesn't hold, follow).
+    void compareAllAgain() { markAllChanged(); }
+
+    // What the versions tell without asking, once (VersionsModel.h: takeVersionsNotice()): none while there is nothing.
+    juce::String noticeTitle, noticeText, noticeBranch;
+
+    // Hear It's bounce: why the last press couldn't hear it, until the next press or an edit.
+    juce::String compareProblem;
 
     //==============================================================================
     // Branches (docs/design/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
@@ -761,6 +837,7 @@ private:
     void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues,
                 ReportCounts committed, juce::int64 changesAtCopy);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
+    BranchRecord makeBranchRecord (const juce::String& head) const; // "idea-2", the next number free, in the next colour
 
     // While the folder is copied (copyFolder()), and what the history started meanwhile, to start once it is over: with the
     // version whose bounce it stopped, and how to make it again. What the copy job and the message thread share.

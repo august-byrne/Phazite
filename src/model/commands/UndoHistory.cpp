@@ -14,18 +14,17 @@ UndoHistoryInfo getUndoHistory (const ProjectContext& context)
     if (song == nullptr)
         return history;
 
-    // JUCE lists the steps Undo would take back newest first, and those Redo would do again oldest first.
-    const auto& undoManager = song->getUndoManager();
-    const auto undoable = undoManager.getUndoDescriptions();
-    const auto redoable = undoManager.getRedoDescriptions();
+    // As Undo and Redo reach them: the song's own steps alone (getHistorySteps()), its own as they come back while a version is
+    // open.
+    const auto steps = getHistorySteps (*song);
 
-    for (int i = undoable.size(); --i >= 0;)
-        history.steps.push_back (undoable[i]);
-
-    for (const auto& step : redoable)
+    for (const auto& step : steps.done)
         history.steps.push_back (step);
 
-    history.done = undoable.size();
+    for (const auto& step : steps.ahead)
+        history.steps.push_back (step);
+
+    history.done = steps.done.size();
     return history;
 }
 

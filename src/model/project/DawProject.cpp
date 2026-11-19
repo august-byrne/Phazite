@@ -2001,6 +2001,10 @@ bool importDawProjectAsBranch (ProjectContext& context, std::shared_ptr<const Da
     if (open == nullptr || version == nullptr || in == nullptr || in->project == nullptr)
         return refuse ("It wasn't exported from a version of this project.");
 
+    // Now left on its branch, never a version open in its place (docs/design/versions.md: A version open).
+    if (! backToNow (context))
+        return refuse (whyNotBackToNow (context));
+
     if (const auto whyNot = whyNotSwitchBranch (context); whyNot.isNotEmpty())
         return refuse (whyNot);
 

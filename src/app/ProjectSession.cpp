@@ -595,6 +595,9 @@ void ProjectSession::chooseRecentProject()
 
 void ProjectSession::saveProjectAs()
 {
+    if (! backToNow (context)) // Now's, never a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     if (project == nullptr)
         return;
 
@@ -641,6 +644,13 @@ void ProjectSession::saveProject()
 
 void ProjectSession::saveThen (std::function<void (bool saved)> callback)
 {
+    if (! backToNow (context)) // Now's, never a version open in its place (docs/design/versions.md: A version open)
+    {
+        showError ("Phazite couldn't save the project", whyNotBackToNow (context));
+        callback (false);
+        return;
+    }
+
     if (project == nullptr)
     {
         callback (false);
@@ -852,6 +862,9 @@ void ProjectSession::chooseWhereToSave (const juce::File& suggested, std::functi
 
 void ProjectSession::exportSong()
 {
+    if (! backToNow (context)) // Now's, never a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     if (project != nullptr && onExport != nullptr)
         onExport();
 }
@@ -894,6 +907,13 @@ void ProjectSession::keepRecording()
 
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
+    if (! backToNow (context)) // Now's, never a version open in its place (docs/design/versions.md: A version open)
+    {
+        showError ("Phazite couldn't close the project", whyNotBackToNow (context));
+        callback (false);
+        return;
+    }
+
     if (project == nullptr)
     {
         callback (true);
@@ -1602,6 +1622,9 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& ho
 
 void ProjectSession::cleanUpAudio()
 {
+    if (! backToNow (context)) // Now's, never a version open in its place (docs/design/versions.md: A version open)
+        return;
+
     if (project != nullptr && onCleanUpAudio != nullptr)
         onCleanUpAudio();
 }
@@ -1619,6 +1642,14 @@ void ProjectSession::importDawProject()
 
 void ProjectSession::importDawProject (const juce::File& file)
 {
+    // Now's, never a version open in its place (docs/design/versions.md: A version open): what the import leaves on the branch
+    // it leaves, or replaces, is the song's own.
+    if (! backToNow (context))
+    {
+        showError ("Phazite couldn't import " + file.getFileName(), whyNotBackToNow (context));
+        return;
+    }
+
     const auto read = std::make_shared<DawProjectFile> (readDawProject (file));
 
     if (read->project == nullptr)

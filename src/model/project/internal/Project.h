@@ -294,6 +294,12 @@ private:
     juce::File file;
     int changesOutsideHistory = 0; // the song's count of them as it was last compared (a plug-in's own changes)
 
+    // While the song shows another (a version open: Song::isShowingOther()), what changes in it is none of the project's: its
+    // changes aren't counted (changeCount), and the plug-ins' own changes made meanwhile are left out of the song's count of
+    // them (getOwnChangesOutsideHistory()): those made while it showed another, and the song's count as it began to.
+    int outsideWhileShowing = 0, outsideAtShowing = 0;
+    int getOwnChangesOutsideHistory() const;
+
     class BackgroundWriter; // one file at a time; its destructor waits for the one under way
     std::unique_ptr<BackgroundWriter> autosaveWriter;
     VersionsCopier versionsCopier; // setVersionsCopier()'s

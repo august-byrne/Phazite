@@ -84,6 +84,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Phazite's FM synth: a stack at full feedback, chords a sixteenth apart, its LFO on Timbre, a pitch envelope, and four operators side by side, one fixed, one fed back toward a square, spread, gliding in mono, its filter opened by its envelope and by velocity on every note and two operators starting from their own phases (2026-11-10) | 0 | 0 |
 | A frozen track: its synth's notes played from its frozen file | 0 | 0 |
 | A version's bounce heard in place of the song, both measured as they play (Hear It) | 0 | 0 |
+| An old version opened live in the song's place while it plays, back to Now, and A/B twice (2026-11-19) | 0 | 0 |
 | An audio clip | 0 | 0 |
 | Two tracks in a folder bus with Phazite's compressor | 0 | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from Phazite's render | 0 | 0 |

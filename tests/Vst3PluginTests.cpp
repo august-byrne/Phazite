@@ -18,8 +18,11 @@
 #include "model/plugins/internal/SandboxedInstance.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/VersionsModel.h"
 #include "sandbox/core/Vst3State.h"
 #include "vst3/TestVst3s.h"
+
+#include <optional>
 
 using phazite::test::EnginePlayback;
 using phazite::test::TestSong;
@@ -418,4 +421,57 @@ TEST_CASE ("A VST3 effect's state goes into the song as a .vstpreset and back, i
     REQUIRE (reloadedState.has_value());
     CHECK (readTrim (*reloadedState) == doctest::Approx (0.25f));
     CHECK (levelNow() == doctest::Approx (quarter).epsilon (0.002));
+}
+
+TEST_CASE (
+    "A version opened with a real VST3 that Now lacks: it loads in the background as the version opens, and goes at Back to Now (times measured)")
+{
+    // docs/design/versions.md, A version open: what both have stays loaded; a plug-in only the version has loads in the
+    // background, the song playing on, and is let go of at Back to Now. The times are said, not checked: they depend on the
+    // machine.
+    Vst3Plugins plugins;
+    TestSong song;
+    REQUIRE (phazite::test::waitForVersionHistory (song.context));
+    const auto synth = song.setInstrument (song.firstTrack, Vst3Plugins::synthType());
+    song.waitForPlugins();
+
+    phazite::setVersionDraft (song.context, "With the synth", {});
+    std::optional<juce::Result> saved;
+    REQUIRE (phazite::saveVersion (song.context, [&saved] (juce::Result r) { saved = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved.has_value(); }));
+    REQUIRE (phazite::test::waitForVersionHistory (song.context));
+    const auto version = phazite::getLastVersion (song.context)->id;
+    phazite::removeDevice (song.context, synth); // Now lacks it
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::findPluginInstance (getSong (song), synth) == nullptr; }));
+
+    const auto loaded = [&song] { return phazite::getPluginsLoading (getSong (song)).isEmpty(); };
+    const auto seconds = [] (double since) { return (juce::Time::getMillisecondCounterHiRes() - since) / 1000.0; };
+
+    // The first open reads the version on the history's thread; the plug-in loads after.
+    auto start = juce::Time::getMillisecondCounterHiRes();
+    REQUIRE (phazite::test::finished (song.context, [&] { return phazite::openVersion (song.context, version); }));
+    const auto firstOpen = seconds (start);
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&] { return loaded() && phazite::findPluginInstance (getSong (song), synth) != nullptr; }));
+    const auto firstLoaded = seconds (start);
+
+    start = juce::Time::getMillisecondCounterHiRes();
+    phazite::backToNow (song.context);
+    const auto back = seconds (start);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::findPluginInstance (getSong (song), synth) == nullptr; }));
+
+    // Again, as A/B does: its song kept, so the open is at once; the plug-in loads again.
+    start = juce::Time::getMillisecondCounterHiRes();
+    REQUIRE (phazite::openVersion (song.context, version));
+    const auto againOpen = seconds (start);
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&] { return loaded() && phazite::findPluginInstance (getSong (song), synth) != nullptr; }));
+    const auto againLoaded = seconds (start);
+    start = juce::Time::getMillisecondCounterHiRes();
+    phazite::backToNow (song.context);
+    const auto backAgain = seconds (start);
+
+    MESSAGE ("Open with a VST3 Now lacks: first open " << firstOpen << " s (read), its plug-in loaded at " << firstLoaded << " s; back "
+                                                       << back << " s; open again " << againOpen << " s, loaded at " << againLoaded
+                                                       << " s; back " << backAgain << " s");
 }
