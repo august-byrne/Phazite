@@ -69,34 +69,41 @@ instruments hold their notes. The figure is the share of one core's time.
 
 | Device, and what it plays | % of a core | From |
 |---|---|---|
-| Synth: 1 note / 8 notes / 8 notes with full unison | 0.19 / 1.38 / 4.00 | 2026-11-16 |
-| Synth: 8 notes, full unison, stacked and drifting | 4.02 | 2026-11-16 |
-| Synth, idle | 0.017 | 2026-11-16 |
-| Synth: 1 note at 2x / at 4x | not measured yet | |
-| Synth: 16 notes at 1x / 2x / 4x | not measured yet | |
-| Synth: 1 note Driven at 1x / 2x / 4x; 16 notes Driven | not measured yet | |
-| Drum Sampler: 4 pads every 16th / idle | 0.384 / 0.004 | 2026-11-16 |
+| Synth: 1 note / 8 notes / 8 notes with full unison | 0.27 / 1.96 / 6.42 | 2026-11-19 |
+| Synth: 8 notes, full unison, stacked and drifting | 6.61 | 2026-11-19 |
+| Synth, idle | 0.031 | 2026-11-19 |
+| Synth: 1 note at 2x / at 4x | 0.65 / 1.31 | 2026-11-19 |
+| Synth: 16 notes at 1x / 2x / 4x | 3.89 / 7.89 / 15.9 | 2026-11-19 |
+| Synth: 1 note Driven at 1x / 2x / 4x; 16 notes Driven | 0.63 / 1.38 / 2.83; 9.45 | 2026-11-19 |
+| Drum Sampler: 4 pads every 16th / idle | 0.293 / 0.004 | 2026-11-19 |
 | Sampler: 1 note / 8 notes / 16 notes filtered, looping | 0.095 / 4.54 / 11.9 | 2026-11-16 |
 | Sampler, idle | 0.03 | 2026-11-16 |
 | FM: 1 note / 8 notes / 16 notes filtered, held | 0.63 / 5.33 / 12.1 | 2026-11-16 |
 | FM: 8 notes held, with Spread, against the same without it in that run | 10.9 against 5.3 | 2026-11-16 |
 | FM, idle | 0.03 | 2026-11-16 |
-| EQ | 0.03 | 2026-11-16 |
-| EQ, linear phase, eight bands on | not measured yet | |
-| Filter | 0.10 | 2026-11-16 |
-| Compressor | 0.35 | 2026-11-16 |
+| EQ | 0.04 | 2026-11-19 |
+| EQ, linear phase, eight bands on | 0.89 | 2026-11-19 |
+| Filter | 0.13 | 2026-11-19 |
+| Compressor | 0.45 | 2026-11-19 |
 | Multiband: sound in / silence in | 1.46 / 1.22 | 2026-11-16 |
 | Limiter | 0.35 | 2026-11-16 |
-| Saturator | 0.74 | 2026-11-16 |
-| Age, a record (then the Vinyl): stopped / playing, everything on / silence in, stopped | 1.32 / 1.40 / 0.012 | 2026-11-16 |
-| Delay | 0.14 | 2026-11-16 |
+| Saturator / its Band from 1 to 8 kHz, Tube with Colour | 1.17 / 1.96 | 2026-11-19 |
+| Age, a record: stopped / playing, everything on / silence in, stopped; a tape, playing, everything on | 1.36 / 1.47 / 0.013; 1.76 | 2026-11-19 |
+| Delay | 0.24 | 2026-11-19 |
 | Reverb: room / plate / room with silence in | 0.89 / 0.40 / 0.93 | 2026-11-16 |
-| Reverb: hall | not measured yet | |
+| Reverb: hall | 1.45 | 2026-11-19 |
 | Stereo, spreading | 0.27 | 2026-11-16 |
 | Motion, phaser, six notches (then the Phaser) | 0.49 | 2026-11-16 |
 | Motion, flanger (then the Flanger) | 0.20 | 2026-11-16 |
 | Motion, chorus (then the Chorus): three voices with Shimmer / eight voices spread | 0.36 / 0.71 | 2026-11-16 |
 | Vocoder, 40 bands | 3.24 | 2026-11-16 |
+
+Stage 6 made some of these dearer (the run of 2026-11-19, a quiet machine, once; not run beside `main`, so the older rows
+are the comparison): the Synth by about 40 % a note and 60 % with full unison (its modulation, its filter and its sub glide
+for every sample, and its tables keep 16 samples a cycle); the Saturator from 0.74 to 1.17 (its Quality's three rates are
+kept ready, and the lower ones wait in a delay); the Compressor from 0.35 to 0.45 (its mode's hand-over ring and its
+look-ahead line); the Delay from 0.14 to 0.24 (a line and a time for each side, its duck's follower). Each is a backlog
+row's worth of looking at before 1.0, none is near a limit: a Synth voice at 4x costs 1.3 % of a core, sixteen 16 %.
 
 Three of these were higher in the run of 2026-11-16 than the audit's numbers that stood here before (the Compressor
 0.35 against 0.19 of section 7, the Drum Sampler's beat 0.384 against 0.312 of section 18, the Vinyl (now Age) with silence in
@@ -115,6 +122,7 @@ and silent (2026-11-16), so its stopped cost there is none.
 
 | Latency reported at 48 kHz | Samples | From |
 |---|---|---|
+| Synth, at every Quality | 5 | 2026-11-19 |
 | Limiter | 101 | 2026-11-16 |
 | Saturator, at every Quality | 7 | 2026-11-18 |
 | Filter, at every Quality | 7 | 2026-11-18 |
@@ -123,8 +131,8 @@ and silent (2026-11-16), so its stopped cost there is none.
 | Age (then the Vinyl) | 531 | 2026-11-16 |
 | EQ, linear phase | 4096 (by design: 4096 r, r = 1 up to 50 kHz) | 2026-11-18 |
 
-The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.15 to 0.25 ms after it to -30 dB (2026-11-16:
-the Synth 0.06 / 0.15 ms, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum Sampler's and the effects' times to sound are not recorded.
+The instruments sound 0.04 to 0.06 ms after their note to -60 dB, and 0.15 to 0.25 ms after it to -30 dB (2026-11-16; the Synth 2026-11-19, later by its 5 samples of latency:
+the Synth 0.17 / 0.25 ms, the Sampler 0.04 / 0.15, the FM synth 0.06 / 0.25). The Drum Sampler's and the effects' times to sound are not recorded.
 
 ### Benchmark: each device's reset, as Play and a jump reset every device in the block that starts or lands
 

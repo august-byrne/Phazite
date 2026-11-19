@@ -725,10 +725,16 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
     dev::Limiter limiterAlone;
     limiterAlone.prepare (benchRate, benchBlock);
     const auto latency = limiterAlone.getLatencySamples();
+
+    // The note's own track is already as late as its instrument (the Synth's 5 samples, its Quality's): lined up with the
+    // limiter's track, it is held back by the rest.
+    dev::Synth synthAlone;
+    synthAlone.prepare (benchRate, benchBlock);
+    const auto own = synthAlone.getLatencySamples();
     CHECK (alone >= 0);
     CHECK (switchedOff == alone);
-    CHECK (withLimiter - alone == latency);
-    CHECK (onMasterToo - alone == 2 * latency);
+    CHECK (withLimiter - alone == latency - own);
+    CHECK (onMasterToo - alone == 2 * latency - own);
     MESSAGE (report);
     phazite::setSong (context, nullptr);
 }
