@@ -307,9 +307,17 @@ juce::StringArray checkMenus (MainScreen& screen, int& recent)
 {
     // What a command may do can depend on what another thread is doing (Clean Up Unused Audio waits for a commit or a snapshot
     // being written): the menus are compared once the versions' writes are in, so that both sides read the same state.
+    // A message delivered after such a wait can start the next write (a snapshot of Local History), which ended between
+    // the menu's making and its check, once, on CI: so the history is at rest when the last message has been delivered,
+    // and nothing is delivered between that and the menus.
     REQUIRE (phazite::test::waitForVersionHistory (screen.session.getContext()));
     phazite::test::waitForVersionsWrites();
-    dispatchPendingMessages();
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&screen]
+        {
+            const auto* history = phazite::getVersionHistory (screen.session.getContext());
+            return history == nullptr || (! history->isReading() && ! history->isBusy() && ! history->isWriting());
+        }));
 
     auto& menus = getMenus (screen);
     const auto names = menus.getMenuBarNames();

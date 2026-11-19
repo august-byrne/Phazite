@@ -823,7 +823,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
     struct Counts
     {
         int edit = 0, save = 0, text = 0;
-        int plans = 0; // made within the edit's count (known bug 207: twice on Linux CI the count held no plan's work)
+        int plans = 0; // made within the edit's count
     };
 
     const auto countsFor = [] (int numTracks)
@@ -837,14 +837,23 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
         phazite::test::PlanCounter plans (s.context);
         plans.take();
         Counts counts;
+
+        // The count waits for the note's plan: twice on Linux CI one round of the messages ended before the plan was made,
+        // and the count held what was left, which says nothing of how the work grows.
         counts.edit = phazite::test::countAllocations (
                           [&]
                           {
                               phazite::addNote (s.context, built.clips[0], 72, at (2.5), lasting (0.25), 100);
-                              phazite::test::dispatchPendingMessages();
+                              REQUIRE (phazite::test::dispatchMessagesUntil (
+                                  [&]
+                                  {
+                                      counts.plans += plans.take();
+                                      return counts.plans > 0;
+                                  }));
                           })
                           .value_or (0);
-        counts.plans = plans.take();
+        counts.plans += plans.take();
+        REQUIRE (counts.plans == 1);
         counts.save = phazite::test::countAllocations ([&] { REQUIRE (s.getProject().save().wasOk()); }).value_or (0);
         counts.text = phazite::test::countAllocations (
                           [&]

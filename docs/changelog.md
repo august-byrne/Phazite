@@ -249,6 +249,20 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **208 The switch read before a tick:** the right-click menu's test read a part's switch before the displays' ticker
+  had shown it a click made on another control of its parameter; a release build runs the whole case within one
+  frame, so CI's linux-release job failed it in every run. The test ticks the displays first. Nothing was wrong with
+  the value as it plays, which the entry suspected.
+- **207 The speed gate's count without its plan:** the gate that compares what a note added allocates in a small and
+  a big song waits for the note's plan inside the count, and requires one.
+- **206 The menus compared at rest:** the test that compares every menu item with its command builds the menus once
+  the versions' history is at rest after the last message delivered, with nothing delivered in between.
+- **200, 210 A folder two threads made:** the first save's test made `Versions/local` while the history's thread
+  made its own folder inside it; JUCE's `createDirectory()` tells the thread that came second that it failed. The
+  test asks whether the folder is there.
+- **The Versions view's button, read too early:** the test of Take the Newer Versions waits until the song was
+  compared with the version it grew from; until then the button says Merge, as CI's Clang job caught once.
+
 - **140 Escape in the devices' graphs:** Escape takes a drag back in every device's graph and on a knob's modulation
   ring, leaving nothing to undo or redo. Every graph takes its handles the same way now (`graph::HandleDrag`): a
   press grabs the parameter for Touch and Latch without changing it, a turn of the wheel just before a drag stays a

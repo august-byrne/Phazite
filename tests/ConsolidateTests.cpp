@@ -6,13 +6,17 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/stereo/Stereo.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Consolidate.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongIndex.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -242,6 +246,91 @@ TEST_CASE ("With a time range selected across tracks, Consolidate joins what lie
 
     CHECK (range.getRange() == phazite::BeatRange (at (2.0), at (6.0)));
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Consolidate"));
+}
+
+TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the notes read, the range cleared, the clip made, its notes set")
+{
+    // Known bug 204: in CI's Windows release builds the range's case above finds the joined clip without notes, and no
+    // build elsewhere does. The same steps as consolidatePart() takes (model/arrangement/Consolidate.cpp), one at a time,
+    // so that a failure there names the step that went wrong.
+    Song song;
+    auto& model = song.getSong();
+    const auto clip = phazite::test::addMidiClip (model, song.keys, { at (0.0), at (8.0) });
+
+    for (int beat = 0; beat < 8; ++beat)
+        phazite::test::addMidiNote (model, clip, 60, at (beat), lasting (0.5));
+
+    const phazite::BeatRange range (at (2.0), at (6.0));
+    const auto read = phazite::getClipNotes (model, clip);
+    REQUIRE (read.size() == 8);
+
+    // Cut at the range's edges, as consolidatePart() cuts them.
+    const auto clipRange = phazite::getClipRange (model, clip);
+    CHECK (clipRange == phazite::BeatRange (at (0.0), at (8.0)));
+    const auto played =
+        phazite::BeatRange (std::max (clipRange.getStart(), range.getStart()), std::min (clipRange.getEnd(), range.getEnd()));
+    CHECK (played == range);
+    std::vector<phazite::NoteData> notes;
+
+    for (auto note : read)
+    {
+        const auto from = std::max (note.start, played.getStart()), to = std::min (note.getEnd(), played.getEnd());
+        CAPTURE (note.start.inBeats());
+        CAPTURE (note.getEnd().inBeats());
+        CAPTURE (from.inBeats());
+        CAPTURE (to.inBeats());
+        CHECK ((to <= from) == (note.start < at (2.0) || note.start >= at (6.0)));
+
+        if (to <= from)
+            continue;
+
+        note.start = from;
+        note.length = to - from;
+        note.id = {};
+        notes.push_back (note);
+    }
+
+    CHECK (notes.size() == 4);
+
+    {
+        const phazite::UndoStep step (model, "Join by Hand");
+        phazite::clearClipsIn (model, song.keys, range);
+        CHECK (phazite::getClips (model, song.keys).size() == 2);
+        CHECK (model.getIndex().isExact());
+
+        const auto joined = phazite::insertMidiClip (model, song.keys, range, nullptr, "Joined");
+        REQUIRE (joined.isValid());
+        CHECK (phazite::getClips (model, song.keys).size() == 3);
+        CHECK (model.getIndex().isExact());
+        const auto joinedState = phazite::findClipState (model, joined);
+        REQUIRE (joinedState.isValid());
+        CHECK (joinedState.getParent() == phazite::findTrackState (model, song.keys));
+        const auto aliases = phazite::getAliasStates (model, joinedState);
+        REQUIRE (aliases.size() == 1);
+        CHECK (aliases.front() == joinedState);
+
+        for (auto& note : notes)
+            note.clip = joined;
+
+        phazite::setClipNotes (model, joined, notes);
+        CAPTURE (joinedState.toXmlString().toStdString());
+        CHECK (joinedState.getNumChildren() == 4);
+        CHECK (phazite::getClipNotes (model, joined).size() == 4);
+        CHECK (model.getIndex().isExact());
+    }
+
+    // And consolidatePart() itself, on the other track, without the command around it.
+    const auto other = phazite::test::addMidiClip (model, song.bass, { at (0.0), at (8.0) });
+
+    for (int beat = 0; beat < 8; ++beat)
+        phazite::test::addMidiNote (model, other, 60, at (beat), lasting (0.5));
+
+    phazite::ConsolidatePart part { song.bass, range };
+    part.midi = true;
+    const auto made = phazite::consolidatePart (model, part, {});
+    REQUIRE (made.size() == 1);
+    CAPTURE (phazite::findClipState (model, made.front()).toXmlString().toStdString());
+    CHECK (phazite::getClipNotes (model, made.front()).size() == 4);
 }
 
 TEST_CASE ("With nothing selected, Consolidate can't, and says why")

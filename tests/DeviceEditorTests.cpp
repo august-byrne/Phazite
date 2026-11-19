@@ -564,6 +564,7 @@ TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a pa
            "but for Type a Value...; a left click still switches or chooses, one undo step")
 {
     const phazite::test::ScopedDisplay display; // JUCE places a menu on its display
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
     using phazite::devices::Compressor;
     using phazite::devices::Saturator;
     phazite::test::TestSong song;
@@ -664,17 +665,14 @@ TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a pa
         CHECK_FALSE (s.getUndoManager().canUndo());
         CHECK_FALSE (box.isPopupActive());
 
-        // The switch shows what it showed: the value set by hand, which nothing moves here. (Compared with that, not with the
-        // value as it plays: in CI's linux-release job the played value of the Saturator's Band read above a half once
-        // while its value by hand was 0, known bug 208; what it reads is captured for the next time.)
+        // The switch shows the value set by hand, which nothing moves here. A control follows a change made elsewhere (an
+        // earlier round's click on another control of the same parameter) at the displays' next tick: ticked here, as a
+        // release build runs this whole case within one frame (CI's linux-release job read the part's switch before any
+        // tick).
+        ticker->tickNow();
+
         if (auto* button = dynamic_cast<juce::Button*> (kind.control); button != nullptr && button->getClickingTogglesState())
-        {
-            CAPTURE (handle.getValue());
-            CAPTURE (handle.getBaseValue());
-            CAPTURE (phazite::isAutomated (handle));
-            CAPTURE (phazite::getModulations (handle).size());
             CHECK (button->getToggleState() == (valueOf() > 0.5f));
-        }
 
         // Automate shows its lane; Delete Automation, enabled while it has automation, takes it away.
         REQUIRE (phazite::test::runMenuItem (menu, { "Automate" }));

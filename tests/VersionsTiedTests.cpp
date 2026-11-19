@@ -653,7 +653,11 @@ TEST_CASE ("The Versions view says when the branch has newer versions, and its b
     REQUIRE (dispatchMessagesUntil ([&view] { return view.getNewerText().isNotEmpty(); }));
     CHECK (view.getNewerText().contains ("1 newer version"));
     REQUIRE (view.getNewerButton().isVisible());
-    CHECK (view.getNewerButton().getButtonText() == "Take the Newer Versions");
+
+    // Until the song is compared with the version it grew from, on the history's thread, it may have changes, and the button
+    // says Merge (as it did once on CI, where the click then merged); compared, it has none, and the button says so by itself.
+    withChangesIn (context);
+    REQUIRE (dispatchMessagesUntil ([&view] { return view.getNewerButton().getButtonText() == "Take the Newer Versions"; }));
 
     // Another computer's: a version may be saved meanwhile, going its own way, so the field doesn't say otherwise.
     CHECK_FALSE (view.getMessageField().getTextToShowWhenEmpty().contains ("to save a version"));

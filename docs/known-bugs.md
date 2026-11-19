@@ -143,49 +143,17 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Tests
 
-- **210. `AppTests`, "A first save's versions are copied by their history's thread, after its writes…", failed once in CI's
-  windows-profile job** (2026-11-19, the run of `4d6b87be`; the other two Windows jobs and every local run passed it): its
-  helper `addToVersions()` could not make the folder `Versions/local` in the untitled project (`AppTests.cpp`, near
-  1598: `createDirectory()` gave false). Not looked into. To start: whether the history's thread, or the first save's
-  copy, has that folder open or is moving it as the test makes it; the test waiting for the history to be at rest first.
-
-- **208. `DeviceEditorTests`, the right-click menu's case: in CI's linux-release job the Saturator's Band read as on
-  while its value set by hand was off** (2026-11-18, the run of `7ab6d312`; linux-debug and the three Windows jobs
-  passed it): after a right-click on the part's switch, which changes nothing, `ParameterHandle::getValue()` (the value
-  as it plays) was above a half, the value set by hand 0 and the switch off. Nothing automated or modulated that
-  parameter then; three parameters of another device on the track had been modulated and the modulation undone, in
-  the test's earlier rounds. So either the value as it plays is read for a parameter nothing moves (a leftover of
-  what moved another), or it is read before it was ever written. The test compares the switch with the value set by
-  hand since, and captures the played value, the base value and what moves the parameter for the next time. To find
-  it: `getCurrentValue()` (`src/model/devices/`) and what it reads of the engine's played values for a parameter that
-  nothing moves, after a modulation on its track was undone, with no block played.
-- **207. `PerformanceGateTests`, "what an edit and a save allocate grows as the song does", failed once in CI's linux-tsan
-  job** (2026-11-18, the run of `367e9321`); and again in its linux-debug job on `9afe34a2`, with the same two counts, so it is one of two fixed outcomes and not noise; the test captures since how many plans were made within each count: a note added "with its new plan" allocated 867 times in the song of 16
-  tracks and 10,056 in the one of 64, where it measures about 28,000 and 119,000: in neither count was the plan
-  compiled inside the counted stretch (one `dispatchPendingMessages()` after the edit), and the two counts then hold
-  different leftovers, so their ratio (11.6, against a bound of 6) says nothing. So under the thread sanitizer the plan
-  is not always made by the time that call returns. To fix: the test waits for the plan it counts (the engine has
-  the song: the condition `tests/EnginePlayback.h`'s helpers wait for) inside the counted stretch, and requires that
-  a plan was made there.
-- **206. `MainWindowTests`, the case that compares every menu item with its command, failed once in CI's linux-clang
-  job** (2026-11-18, the run of `50234b25`; the other eight jobs passed it): File > Clean Up Unused Audio... was
-  disabled in the menu and its command enabled when the test asked a moment later (`tests/MainWindowTests.cpp`, the
-  check of `item.isEnabled`). So that command's `isEnabled` depends on something that changes without the message
-  thread's doing between the two reads (`src/app/ProjectSession.cpp`, where it is registered): a save or a background
-  job ending. With 205, the second case in stage 4's code that fails only now and then and only under Clang, whose
-  job is the slowest. To fix: find what its `isEnabled` reads, and have the test wait for the project to be at rest
-  before it builds the menu.
 - **204. `ConsolidateTests`, "With a time range selected across tracks, Consolidate joins what lies in it on each...",
-  failed once in CI's windows-profile job** (2026-11-18, the run of `4ff18a92`; the run before it passed
-  there, as did every other preset); and again in its windows-release job on `367e9321`, so it is the release
-  builds on CI's Windows runner alone; since then the test says, when it fails, how many notes the parts before and
-  after hold and what the joined clip holds in the song: the joined clip on the first track was where it should be, from beat 2 to 6, and
-  held no notes (`joined.size() == 4` was 0). Not reproduced: 300 runs of the file in a windows-profile build of the
-  same commit on this PC, 240 of them six at once, all passed. The path is on the message thread alone
-  (`consolidateSelection()` joins MIDI at once: `consolidatePart()` reads the notes, `clearClipsIn()`,
-  `insertMidiClip()`, `setClipNotes()`), with nothing random and no thread in it, so what is left is something read
-  before it is set, which only an optimized build shows. To find it: when it fails again, the test should say how
-  many notes `consolidatePart()` read and whether the new clip was found; or run the file under `windows-asan`.
+  fails in CI's windows-release job in most runs** (from 2026-11-18; once in its windows-profile job; never in a
+  Linux job, and never on this PC: 300 runs of a windows-profile build and 20 of a windows-release one passed): the
+  joined clip on the first track is where it should be, from beat 2 to 6, named as the clip it came of, and holds no
+  notes, while the parts before and after hold theirs (CI's log of `b663b7e3`). The path is on the message thread
+  alone (`consolidatePart()`, `src/model/arrangement/Consolidate.cpp`: the notes read and cut at the range's edges,
+  `clearClipsIn()`, `insertMidiClip()`, `setClipNotes()`), with nothing random and no thread in it, so it is
+  something only that compiler's optimized build shows: a value read before it is set, or the compiler's own fault.
+  The test file has a case since that takes the same steps one at a time and checks each ("The steps of a join over
+  part of a MIDI clip, each checked"): CI's log of it names the step that goes wrong (whether the notes were cut
+  away, or set and not kept). To fix: read that log, then the step.
 - **205. `VersionsTests`, the plug-in update's case, failed once in CI's linux-clang job** (2026-11-18, the run of
   `4ff18a92`): after the project opened again, its plug-ins loaded and their settings stored as a save stores them,
   the changes didn't name the update ("updated 1.0 → 2.0", its last check). `39633f06` made that case wait for the
@@ -193,17 +161,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   again, on another compiler, so the wait isn't the whole of it. To fix: find what `describeChanges()` reads of the
   plug-in's stored settings there and whether `saveWithPluginStates()` can return before the reopened plug-in's
   answer is in the song (the test should print the stored version when the check fails).
-- **200. `AppTests`, "A first save's versions are copied by their history's thread...", once couldn't write its 8 MiB file
-  into an untitled project's `Versions/local`** (CI's windows-profile job, 2026-11-18, one run of six), and then hung to
-  its time limit. The hang is fixed: the test held the history's writes by a hook, and a check that failed left them
-  held while the project waited for them; the tests that hold writes now let go of them before the project goes. Why
-  the write failed is unknown. Ruled out: the versions write nothing in `Versions/local/` itself (only in
-  `local/<computer>/`, and nothing at a new project's first open); the sweep and the stamps' floor are done before the
-  history has read; `removeLeftovers()` deletes only `joining-*` in `pieces/`; the readers only read, and list only
-  folders in `local/`; no first save's copy held the folder yet; the test's hook isn't on JUCE's `replaceWithData()`.
-  Left: `replaceWithData()` renames a temporary file over the target in five tries over about half a second, which a
-  scanner reading a new large file on a runner can outlast. The test now writes the file in place and says the
-  system's error if it fails again: read that message then.
 - **191. `SandboxedPluginTests`, "A plug-in opened from its project keeps the settings the project holds when it
   crashes", failed once under AddressSanitizer** (2026-11-17, `main`'s own run of `7df779c8`; the same commit's run on
   its branch passed): the stand-in effect, added and waited for until no plug-in was loading, had no Gain parameter

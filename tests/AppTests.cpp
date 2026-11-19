@@ -1595,7 +1595,13 @@ namespace
 juce::File addToVersions (FirstSave& s, juce::int64 bytes)
 {
     const auto file = s.session.getProject()->getFolder().getChildFile ("Versions").getChildFile ("local").getChildFile ("big.bin");
-    REQUIRE (file.getParentDirectory().createDirectory());
+
+    // The history's thread may be making its own folder, local/<computer>, at this moment: of two threads that make the same
+    // folder, JUCE's createDirectory() tells the one that came second that it failed (the folder "already exists"), as
+    // it told this test twice on CI. So what counts is that the folder is there.
+    const auto made = file.getParentDirectory().createDirectory();
+    INFO (made.getErrorMessage());
+    REQUIRE (file.getParentDirectory().isDirectory());
 
     // Written in place: File::replaceWithData() renames a temporary file over it, a few tries in half a second, which a
     // virus scanner reading a new file of many megabytes (a CI runner's) can outlast. Said why if it fails.
