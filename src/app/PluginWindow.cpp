@@ -109,7 +109,7 @@ namespace
             return song != nullptr && findDeviceState (*song, id).isValid();
         }
 
-        // Its folder among the user's presets, named after it.
+        // Its folder among the user's presets, named after it in the plug-ins' folder (PresetModel.h: getPresetFolderName()).
         juce::File getPresetFolder() const
         {
             return services->library.getPresetsFolder().getChildFile (getPresetFolderName (services->context, id));

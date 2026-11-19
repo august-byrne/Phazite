@@ -70,7 +70,7 @@ The engine as the app and the UI reach it, and what Phazite reads and opens arou
 | File | What it holds |
 |---|---|
 | `AppInfo.h` | Phazite's name and version, and the notices the About box shows. |
-| `AudioFiles.h` | What Phazite reads of an audio file without playing it, and a sound's key from its name or its loop data. |
+| `AudioFiles.h` | What Phazite reads of an audio file without playing it, a sound's key from its name or its loop data, and a file's identity on the disk (asked at most once a second), which the player and the renders' names go by. |
 | `internal/LiveInput.h` | Live MIDI, which plays one track of the open project. |
 | `Preview.h`, `internal/Preview.h` | Previews from the browser: each sound a plan of its own on the engine for previews, beside the song's; a loop plays in time with the project. |
 | `internal/PreviewLoop.h` | A preview's loop, stretched by Rubber Band into memory as it starts. |

@@ -56,7 +56,8 @@ juce::File makeFileOfFullPath (const juce::String& path);
 // the superscript digits), so that a file of it can't be made: by what comes before its first dot, spaces at its end left
 // out ("con.wav", "COM1 .flac"). Asked on every system, as a project goes from one to another. And a name for a file made
 // from text anyone wrote (an archive's entry): juce::File::createLegalFileName(), and, for a reserved one, with "_" after
-// it ("CON_").
+// it ("CON_"); dots alone, a step along a path, each a "_" ("..": "__", and ".. ", which Windows reads as ".."); and
+// without the trailing dots and spaces Windows drops ("Loop. ": "Loop").
 bool isReservedFileName (const juce::String& name);
 juce::String makeUsableFileName (const juce::String& name);
 } // namespace phazite

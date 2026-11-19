@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BrowserModel.h"
-#include "model/base/WholeFile.h"
+#include "model/presets/PresetModel.h"
 
 #include <algorithm>
 #include <iterator>
@@ -392,6 +392,9 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place, const Brow
     if (const auto shelf = getShelf (place))
         return getContents (*shelf);
 
+    if (place.kind == Kind::otherPresets)
+        return describePlace (place, library.listFolders (getOtherPresetsFolders(), Library::Together::joined));
+
     if (listsFolder (place))
         return describePlace (place, place.folder.isDirectory() ? std::optional (library.listFolder (place.folder)) : std::nullopt);
 
@@ -436,8 +439,9 @@ std::optional<PresetShelf> BrowserModel::getShelf (const LibraryItem& item)
     if (! item.device.has_value())
         return std::nullopt;
 
-    // Its folder among the presets, as getPresetFolderName() names a device's in the song: by its name.
-    return PresetShelf::ofDevice (makeUsableFileName (item.device->name), item.device->name);
+    // Its folder among the presets, as getPresetFolderName() names a device's in the song: by its name, a plug-in's among
+    // the plug-ins'.
+    return PresetShelf::ofDevice (getPresetFolderName (*item.device), item.device->name);
 }
 
 std::optional<PresetShelf> BrowserModel::getShelf (const BrowserPlace& place) const
@@ -546,20 +550,36 @@ juce::StringArray BrowserModel::getDeviceFolders() const
     return folders;
 }
 
-bool BrowserModel::isOtherPreset (const LibraryItem& item, const juce::StringArray& deviceFolders)
+bool BrowserModel::isOtherPreset (const LibraryItem& item, const juce::StringArray& deviceFolders, bool inPluginsFolder)
 {
     if (item.kind == LibraryItem::Kind::preset)
         return true;
 
+    if (item.kind != LibraryItem::Kind::folder)
+        return false;
+
     const auto& name = item.name;
-    return item.kind == LibraryItem::Kind::folder && ! name.equalsIgnoreCase ("Containers") && ! name.equalsIgnoreCase (trackPresetsFolder)
-           && ! deviceFolders.contains (name, true);
+
+    if (inPluginsFolder)
+        return ! deviceFolders.contains (getPluginPresetFolderName (name), true);
+
+    return ! name.equalsIgnoreCase ("Containers") && ! name.equalsIgnoreCase (trackPresetsFolder)
+           && ! name.equalsIgnoreCase (pluginPresetsFolder) && ! deviceFolders.contains (name, true);
+}
+
+juce::Array<juce::File> BrowserModel::getOtherPresetsFolders() const
+{
+    // The plug-ins' folder as the index has it (named so without regard to case): the user's, first of the two.
+    const auto root = library.getPresetsFolder();
+    return root != juce::File() ? juce::Array<juce::File> { root, library.getPresetFolders (pluginPresetsFolder).getFirst() }
+                                : juce::Array<juce::File>();
 }
 
 bool BrowserModel::hasOtherPresets() const
 {
-    // From the index: the user's presets' folder, if it was there as the index walked, holding any. Where the index doesn't
-    // hold it whole, it may hold some: shown, and read from the disk as it opens.
+    // From the index: the user's presets' folder, if it was there as the index walked, holding any, at its top or at the top
+    // of its plug-ins' folder. Where the index doesn't hold either whole, it may hold some: shown, and read from the disk as
+    // it opens.
     const auto root = library.getPresetsFolder();
     const auto index = library.getWholeIndex();
 
@@ -574,8 +594,25 @@ bool BrowserModel::hasOtherPresets() const
         return true;
 
     const auto deviceFolders = getDeviceFolders();
-    return std::any_of (listed->begin(), listed->end(),
-                        [&deviceFolders] (const LibraryItem& item) { return isOtherPreset (item, deviceFolders); });
+    const auto holdsAny = [&deviceFolders] (const std::vector<LibraryItem>& items, bool inPluginsFolder)
+    {
+        return std::any_of (items.begin(), items.end(), [&deviceFolders, inPluginsFolder] (const LibraryItem& item)
+                            { return isOtherPreset (item, deviceFolders, inPluginsFolder); });
+    };
+
+    if (holdsAny (*listed, false))
+        return true;
+
+    // The plug-ins' folder, as the index has it (named so without regard to case).
+    const auto plugins =
+        std::find_if (listed->begin(), listed->end(), [] (const LibraryItem& item)
+                      { return item.kind == LibraryItem::Kind::folder && item.name.equalsIgnoreCase (pluginPresetsFolder); });
+
+    if (plugins == listed->end())
+        return false;
+
+    const auto inside = library.isListedFromIndex (*index, plugins->file) ? index->listChildren (plugins->file) : std::nullopt;
+    return ! inside.has_value() || holdsAny (*inside, true);
 }
 
 void BrowserModel::describeDevices (BrowserContents& contents, bool instruments) const
@@ -673,6 +710,17 @@ std::optional<BrowserModel::PresetHome> BrowserModel::findHome (const juce::File
                             {} };
     }
 
+    // In the plug-ins' folder: a plug-in's folder (its folder name and the path in it), or loose there, in Other Presets.
+    if (folderName.equalsIgnoreCase (pluginPresetsFolder))
+    {
+        const auto plugin = within.upToFirstOccurrenceOf (juce::File::getSeparatorString(), false, false);
+
+        if (plugin == within)
+            return isUsers ? std::optional (PresetHome { Kind::otherPresets, std::nullopt, {} }) : std::nullopt;
+
+        folderName = getPluginPresetFolderName (plugin);
+    }
+
     // A device's folder: under that device's row, whatever device the preset is for (one saved into another's folder).
     for (const auto& device : library.getAllDevices())
         if (const auto shelf = getShelf (device); shelf.has_value() && shelf->folderName.equalsIgnoreCase (folderName))
@@ -743,11 +791,12 @@ BrowserContents BrowserModel::describePlace (const BrowserPlace& place, std::opt
             break;
         case Kind::otherPresets:
         {
-            // What the user's presets' folder holds that no other row lists: its own presets, and the folders of no device.
+            // What the user's presets' folder holds that no other row lists: its own presets, and the folders of no device; and
+            // in its plug-ins' folder, the folders of the plug-ins not scanned, each by the plug-in's name.
             const auto deviceFolders = getDeviceFolders();
 
             for (auto& item : listed.value_or (std::vector<LibraryItem>()))
-                if (isOtherPreset (item, deviceFolders))
+                if (isOtherPreset (item, deviceFolders, item.file.getParentDirectory() != place.folder))
                     contents.items.push_back (std::move (item));
 
             hint = "None: each of your presets shows under its device";
@@ -804,8 +853,13 @@ std::unique_ptr<Library::FolderListing> BrowserModel::open (const BrowserPlace& 
         return {};
     }
 
-    return library.startListing (place.folder, [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
-                                 { opened (describePlace (place, std::move (listed))); });
+    auto described = [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+    { opened (describePlace (place, std::move (listed))); };
+
+    if (place.kind == BrowserPlace::Kind::otherPresets)
+        return library.startListing (getOtherPresetsFolders(), std::move (described), Library::Together::joined);
+
+    return library.startListing (place.folder, std::move (described));
 }
 
 std::unique_ptr<Library::FolderListing> BrowserModel::open (const LibraryItem& item, std::function<void (BrowserContents)> opened) const
@@ -838,8 +892,13 @@ std::unique_ptr<Library::FolderListing> BrowserModel::check (const BrowserPlace&
     if (! listsFolder (place))
         return {};
 
-    return library.checkListing (place.folder, [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
-                                 { opened (describePlace (place, std::move (listed))); });
+    auto described = [this, place, opened = std::move (opened)] (std::optional<std::vector<LibraryItem>> listed)
+    { opened (describePlace (place, std::move (listed))); };
+
+    if (place.kind == BrowserPlace::Kind::otherPresets)
+        return library.checkListing (getOtherPresetsFolders(), std::move (described), Library::Together::joined);
+
+    return library.checkListing (place.folder, std::move (described));
 }
 
 std::unique_ptr<Library::FolderListing> BrowserModel::check (const LibraryItem& item, std::function<void (BrowserContents)> opened) const

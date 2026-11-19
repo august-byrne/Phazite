@@ -34,9 +34,10 @@ One click opens a folder. A folder you added has **Remove from the Browser** in 
 folders by kind of sound (Bass, Lead, Pad...). A click on the device's name selects it, and **Enter**, a double-click
 or a drag adds the device as it starts. Presets of containers show under **Container** at the top of Effects, and
 under **Instrument Container** at the top of Instruments, once you have saved some. A device's row lists its folder of
-presets, so a preset you save into another device's folder shows under that device. **Other Presets** holds your
-presets kept elsewhere: at the top of your presets folder, or in a folder of a plug-in that isn't scanned (yet). Once
-you scan that plug-in, its presets show under it.
+presets, so a preset you save into another device's folder shows under that device. A plug-in's presets are in its own
+folder in `Plug-ins`, so a plug-in called "Reverb" keeps its presets apart from Phazite's Reverb. **Other Presets**
+holds your presets kept elsewhere: at the top of your presets folder, or in a folder of a plug-in that isn't scanned
+(yet). Once you scan that plug-in, its presets show under it.
 
 ## Search and tags
 

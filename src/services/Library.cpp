@@ -1276,17 +1276,20 @@ std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::File&
     return listFolderOf (folder, std::move (listed), std::nullopt, true);
 }
 
-std::unique_ptr<Library::FolderListing> Library::startListing (const juce::Array<juce::File>& folders, Listed listed) const
+std::unique_ptr<Library::FolderListing> Library::startListing (const juce::Array<juce::File>& folders, Listed listed,
+                                                               Together together) const
 {
-    return listFoldersOf (folders, std::move (listed), false);
+    return listFoldersOf (folders, std::move (listed), false, together);
 }
 
-std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::Array<juce::File>& folders, Listed listed) const
+std::unique_ptr<Library::FolderListing> Library::checkListing (const juce::Array<juce::File>& folders, Listed listed,
+                                                               Together together) const
 {
-    return listFoldersOf (folders, std::move (listed), true);
+    return listFoldersOf (folders, std::move (listed), true, together);
 }
 
-std::unique_ptr<Library::FolderListing> Library::listFoldersOf (const juce::Array<juce::File>& folders, Listed listed, bool check) const
+std::unique_ptr<Library::FolderListing> Library::listFoldersOf (const juce::Array<juce::File>& folders, Listed listed, bool check,
+                                                                Together together) const
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -1321,7 +1324,7 @@ std::unique_ptr<Library::FolderListing> Library::listFoldersOf (const juce::Arra
     // What they hold together, given once every folder's rows are in; and opened, while one not in is late, what came (a
     // drive that doesn't answer hides nothing the others hold), then again with each folder's rows that come. Told of a
     // folder that became late, given only what it hadn't given.
-    const auto give = [parts, weakState] (bool becameLate)
+    const auto give = [parts, weakState, together] (bool becameLate)
     {
         const auto held = weakState.lock();
 
@@ -1353,7 +1356,7 @@ std::unique_ptr<Library::FolderListing> Library::listFoldersOf (const juce::Arra
 
         // A copy: what it calls may cancel the listing, which lets go of its own.
         if (auto then = held->listed)
-            then (mergeListings (all));
+            then (mergeListings (all, together));
     };
 
     for (int i = 0; i < folders.size(); ++i)
@@ -1431,7 +1434,8 @@ bool Library::isListedFromIndex (const LibraryIndex& indexed, const juce::File& 
     return indexed.holdsWhole (folder);
 }
 
-std::optional<std::vector<LibraryItem>> Library::mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>& parts)
+std::optional<std::vector<LibraryItem>> Library::mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>& parts,
+                                                                Together together)
 {
     std::vector<LibraryItem> folders, files;
     auto any = false;
@@ -1447,8 +1451,9 @@ std::optional<std::vector<LibraryItem>> Library::mergeListings (const std::vecto
         {
             if (item.kind != LibraryItem::Kind::folder)
                 files.push_back (item);
-            else if (std::none_of (folders.begin(), folders.end(),
-                                   [&item] (const LibraryItem& other) { return other.name.equalsIgnoreCase (item.name); }))
+            else if (together == Together::joined
+                     || std::none_of (folders.begin(), folders.end(),
+                                      [&item] (const LibraryItem& other) { return other.name.equalsIgnoreCase (item.name); }))
                 folders.push_back (item);
         }
     }
@@ -1464,14 +1469,14 @@ std::optional<std::vector<LibraryItem>> Library::mergeListings (const std::vecto
     return folders;
 }
 
-std::optional<std::vector<LibraryItem>> Library::listFolders (const juce::Array<juce::File>& folders) const
+std::optional<std::vector<LibraryItem>> Library::listFolders (const juce::Array<juce::File>& folders, Together together) const
 {
     std::vector<std::optional<std::vector<LibraryItem>>> parts;
 
     for (const auto& folder : folders)
         parts.push_back (readFolder (folder, findRootByPath (folder), audioExtensions, *getFacts()));
 
-    return mergeListings (parts);
+    return mergeListings (parts, together);
 }
 
 juce::Array<juce::File> Library::getPresetFolders (const juce::String& folderName) const

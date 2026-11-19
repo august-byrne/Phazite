@@ -1035,7 +1035,8 @@ which is the same on any machine (`tests/PerformanceCounts.h`):
   and every device sounds on;
 - an edit's plan reads the values of the devices on the channel it changed and no others, the automation curve it
   changed and no others (none for a note, a clip moved or the tempo), and asks the disk about the files of the track
-  whose clips it changed, each once (none for the tempo); view state (a grid, a lane shown, a device's window moved)
+  whose clips it changed, each once (none for the tempo), and about every file the song plays, each once, only once a
+  second has passed since it last did (known bug 198); view state (a grid, a lane shown, a device's window moved)
   gives no plan; a track's height, a mute, a device's window moved or a plug-in's state stored (as every save stores
   it) leave the next note's plan reading no device's values; and an export of stems compiles its first stem alone
   before it starts (`countDevicesRead()`, `countCurvesRead()`, `countFilesAsked()`; known bugs 124, 125 and 145);

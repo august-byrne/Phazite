@@ -23,6 +23,7 @@
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/ContainerModel.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -335,6 +336,59 @@ TEST_CASE ("An instrument's preset takes a track's instrument's place, or makes 
     REQUIRE (phazite::loadPreset (context, file, {}));
     CHECK (phazite::getTrackIDs (song.getSong()).size() == 3);
     CHECK (phazite::getInstrument (context, song.track (2)).has_value());
+}
+
+TEST_CASE ("A plug-in's presets go in its folder among the plug-ins', apart from one of Phazite's devices of its name; no device of "
+           "Phazite's is named as the folders kept for other presets (known bug 209)")
+{
+    phazite::test::TemporaryFolder temp;
+    Song song (temp.folder, "Song");
+    auto& context = song.context;
+    const auto track = song.track (0);
+
+    // Phazite's reverb, and a plug-in called Reverb (not installed here), on a track.
+    const auto reverb = song.addEffect (track, "phaziteReverb");
+    juce::PluginDescription description;
+    description.name = "Reverb";
+    description.pluginFormatName = "VST3";
+    description.manufacturerName = "Elsewhere";
+    description.fileOrIdentifier = "C:/Plug-ins/Reverb.vst3";
+    const auto pluginType = phazite::makeDeviceType (description);
+    const auto plugin = phazite::insertDeviceState (song.getSong(), track, phazite::makeDeviceState (song.getSong(), pluginType));
+    REQUIRE (plugin.isValid());
+
+    // A device in the song and its type in the device lists (as the browser's rows list them) have the same folder.
+    CHECK (phazite::getPresetFolderName (context, reverb) == juce::String ("Reverb"));
+    CHECK (phazite::getPresetFolderName (song.find ("phaziteReverb")) == juce::String ("Reverb"));
+    CHECK (phazite::getPresetFolderName (context, plugin) == juce::String ("Plug-ins/Reverb"));
+    CHECK (phazite::getPresetFolderName (pluginType) == juce::String ("Plug-ins/Reverb"));
+
+    // Its name made usable as a file's, inside the plug-ins' folder: one named for a folder kept for other presets, too.
+    description.name = "Tracks";
+    CHECK (phazite::getPresetFolderName (phazite::makeDeviceType (description)) == juce::String ("Plug-ins/Tracks"));
+    description.name = "Echo: Wide";
+    CHECK (phazite::getPresetFolderName (phazite::makeDeviceType (description)) == juce::String ("Plug-ins/Echo Wide"));
+
+    // Nor one named as a step along a path, which would put its presets outside the plug-ins' folder.
+    description.name = "..";
+    CHECK (phazite::getPresetFolderName (phazite::makeDeviceType (description)) == juce::String ("Plug-ins/__"));
+    description.name = ".";
+    CHECK (phazite::getPresetFolderName (phazite::makeDeviceType (description)) == juce::String ("Plug-ins/_"));
+
+    // None of Phazite's devices' folders is one kept for other presets: no device of Phazite's shares one.
+    for (const auto& type : phazite::getDeviceTypes (context))
+    {
+        if (! type.isBuiltIn)
+            continue;
+
+        CAPTURE (type.name);
+        const auto folder = phazite::getPresetFolderName (type);
+        CHECK (folder.isNotEmpty());
+        CHECK_FALSE (folder.containsChar ('/'));
+
+        for (const auto* kept : { phazite::pluginPresetsFolder, phazite::trackPresetsFolder, "Containers" })
+            CHECK_FALSE (folder.equalsIgnoreCase (kept));
+    }
 }
 
 TEST_CASE ("A track's preset makes a new track with its devices, mix and modulation")

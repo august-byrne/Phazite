@@ -2362,11 +2362,11 @@ void Browser::saveSelectedDevicePreset()
     if (! canSaveDevicePreset())
         return;
 
-    // In its device's folder, or Containers, named after it.
+    // In its device's folder, or Containers, named after it (its folder's last name: a plug-in's is in the plug-ins').
     const auto device = projectContext.getSongSelection().getDevices().front();
     const auto folder = getPresetFolderName (projectContext, device);
     const auto container = getContainerName (projectContext, device);
-    choosePresetFile (folder, container.isNotEmpty() ? container : folder,
+    choosePresetFile (folder, container.isNotEmpty() ? container : folder.fromLastOccurrenceOf ("/", false, false),
                       [this, device] (const juce::File& file) { return saveDevicePreset (projectContext, device, file); });
 }
 

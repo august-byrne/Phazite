@@ -515,8 +515,10 @@ juce::File getRenderFile (const Song& song, const juce::File& source, const stre
 {
     // Written into a stream, which grows by doubling: a String appended to point by point copies the whole key each time,
     // which took a tenth of a second of the message thread at each plan for a clip with thousands of warp markers.
+    // The source by its identity on the disk, as last asked (at most once a second: model/engine/AudioFiles.h): a source
+    // written again in its place asks for a render of its own, and the old one is asked for no more (known bug 198).
     juce::MemoryOutputStream key;
-    key << source.getFullPathName() << "|" << juce::String (settings.timeRatio, 9) << "|" << juce::String (settings.semitones, 4) << "|"
+    key << getFileIdentity (source) << "|" << juce::String (settings.timeRatio, 9) << "|" << juce::String (settings.semitones, 4) << "|"
         << (settings.reversed ? "backwards" : "forwards") << "|" << renderVersion;
 
     // Along tempo changes, the whole stretch: two clips under the same changes share it.

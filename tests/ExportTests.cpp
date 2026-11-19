@@ -7,6 +7,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
@@ -473,6 +474,63 @@ TEST_CASE ("An export of stems compiles each stem as its turn comes, not every o
     REQUIRE (report->result.wasOk());
     CHECK (report->stems.size() == 4);
     CHECK (phazite::SongPlayer::countFilesAsked() - asked == 4 * perPlan);
+}
+
+TEST_CASE ("An export plays a reversed clip's source as it is now, written again in its place within the second (known bug 198)")
+{
+    // The second review of known bug 198: a source's identity on the disk is trusted for a second (model/engine/AudioFiles.h),
+    // but the export's fresh player asks about every file it plays, and names the render for the source as it is now. The
+    // renders made first ask about their sources too (renderMissingClipAudio()): trusting the old identity, they found the
+    // old render there and made none, and the player named a render nobody made: silence. Phazite's clock held.
+    const phazite::test::HeldClock clock;
+    SineSong sine;
+    phazite::setClipReversed (*sine.song, sine.clip, true);
+    REQUIRE (phazite::renderMissingClipAudio (*sine.song)); // the source as first written, asked about
+    const auto written = sine.sound.getLastModificationTime();
+    phazite::test::writeSound (sine.sound, 2.0, 440.0);
+    REQUIRE (sine.sound.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+
+    const auto report = exportAndWait (*sine.song, sine.renders.getChildFile ("Song.wav"), {});
+    REQUIRE (report.result.wasOk());
+    const auto audio = readAll (report.file);
+    CHECK (getLevel (audio, 44100.0, 0.1, 1.4) > 0.1);
+    CHECK (getFrequency (audio, 44100.0, 0.1, 1.1) == doctest::Approx (440.0).epsilon (0.01));
+}
+
+TEST_CASE ("An export of stems plays a reversed clip's source as it is when the clip's stem's turn comes (known bug 198)")
+{
+    // The second review of known bug 198: each stem's player is made as its turn comes, and names each render for its source
+    // as it is then. A source written again after the export began, while the first stem played, named a render nobody made
+    // (the renders were made once, as the export began): silence in that stem. Now the renders a stem's player plays are
+    // made as it is made. The second stem's compile comes on the message thread, which this test holds until the source is
+    // written again. Phazite's clock held.
+    const phazite::test::HeldClock clock;
+    phazite::test::TemporaryFolder temp;
+    const auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto source = phazite::test::writeSound (temp.folder.getChildFile ("Source.wav"), 2.0, 220.0);
+    REQUIRE (phazite::test::addAudioClip (*song, tracks[0], "Other",
+                                          phazite::test::writeSound (temp.folder.getChildFile ("Other.wav"), 2.0, 165.0), 0.0, 1.5)
+                 .isValid());
+    const auto reversed = phazite::test::addAudioClip (*song, tracks[1], "Source", source, 0.0, 1.5);
+    REQUIRE (reversed.isValid());
+    phazite::setClipReversed (*song, reversed, true);
+    REQUIRE (phazite::renderMissingClipAudio (*song));
+
+    std::optional<ExportReport> report;
+    const auto running =
+        phazite::startExport (*song, temp.folder.getChildFile ("Stems"), stems(), [&report] (const ExportReport& done) { report = done; });
+    const auto written = source.getLastModificationTime();
+    phazite::test::writeSound (source, 2.0, 440.0);
+    REQUIRE (source.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }));
+    REQUIRE (report->result.wasOk());
+    REQUIRE (report->stems.size() == 2);
+
+    const auto first = readAll (report->stems[0]), second = readAll (report->stems[1]);
+    CHECK (getFrequency (first, 44100.0, 0.1, 1.1) == doctest::Approx (165.0).epsilon (0.01));
+    CHECK (getLevel (second, 44100.0, 0.1, 1.4) > 0.05);
+    CHECK (getFrequency (second, 44100.0, 0.1, 1.1) == doctest::Approx (440.0).epsilon (0.01));
 }
 
 TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was there")

@@ -82,13 +82,27 @@ sends, and the buses and the master they reach.
   audio clips are kept until that track's clips change (its audio until the tempo changes too), and each of Phazite's
   own devices keeps the values the plan before read until something of its devices changes (not the channel's own
   height, mute or volume, nor a plug-in's stored state); what joins the channels (routing, delay compensation, sends,
-  audibility) is worked out whole each time, being cheap. The disk is asked about a file again only for a track whose
-  clips changed, once a plan however many clips play it, and the tempo map made once: a file another program writes
-  again in its place while no clip of its track changes plays as it was until one does or the project opens again
-  (Phazite's own renders, freezes and recordings are found). While the tests run, kept parts are compared with a read of
-  the song (`SongPlayer::setChecking()`), after every edit, Undo and Redo the undo check makes and every random edit. A
-  render compiles each of its jobs (an export's stems) as its turn comes, on the message thread, and lets go of the one
-  before.
+  audibility) is worked out whole each time, being cheap. What the player keeps of a sound file is its identity on the
+  disk as it was read (its path, size and modification time: `getFileIdentity()`, `src/model/engine/AudioFiles.h`).
+  The disk is asked about a file again for a track whose clips changed, and for every file a plan plays once a second
+  has passed since anything last asked (`trustFilesMilliseconds`), each once a plan however many clips play it, and the
+  tempo map made once: a file another program writes again in its place plays as it is now from the first plan after
+  that second, made for whatever reason, the audio of every track that plays it made again; within the second, as it
+  was. A clip's render is named for its source's identity (`getRenderFile()`), so a source written again asks for a
+  render of its own, which the project's renders make (they hear of the change), and plays it once it is made (silent
+  meanwhile, as any render not made yet); the old render is asked for no more, and goes as the cache is purged when the
+  project closes. A change of a source's modification time alone (files restored without their times) makes its
+  stretched clips' renders anew too. A clip's waveform follows its file the same way: a paint never asks the disk, and
+  the waveform shows the file again once a plan (or anything else that asks) finds it changed. Each job of a render
+  (an export's stems, one after another) makes the clip renders it needs as its turn comes. Phazite's own renders, recordings, consolidations and imports take names that are free; a freeze
+  writes its new file over the track's frozen one in its place, which the player asks about at every plan; and a writer
+  that writes where a song played a file before (a DAWproject's audio unpacked into the project) tells the players to ask
+  again at the next plan (`noteFilesWritten()`; known bug 198). The disk is asked only as a plan is made: a file written
+  in its place while nothing is edited plays on from the old reader until the next plan. A sampler's sounds are read as
+  they are loaded, and not again. While the tests run, kept parts are compared with a read of the song and of what the
+  player knows of each file (`SongPlayer::setChecking()`), after every edit, Undo and Redo the undo check makes and
+  every random edit. A render compiles each of its jobs (an export's stems) as its turn comes, on the message thread,
+  and lets go of the one before.
 - **Each open project has a playback session.** It gives the engine the song again as it changes, owns the song's
   plug-in instances and its recorder, plays the transport, takes live MIDI into the song, and keeps the take it
   records.

@@ -453,6 +453,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     }
 
     askedForPlan.clear();
+    filesChangedForPlan = false;
+    trustedForPlan.clear();
     std::optional<ClipTempo> clipTempo; // read once, if a track's audio is placed again
 
     auto plan = std::make_unique<engine::Plan>();
@@ -472,6 +474,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     rendered = of;
     used.clear();
     usedFiles.clear();
+    usedSources.clear();
     usedRegions.clear();
     usedNotes.clear();
     usedModulators.clear();
@@ -580,6 +583,14 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         plan->strips.push_back (std::move (strip));
     }
 
+    // A file this plan found changed after it kept the audio of a track that plays it, or made it from what it trusted of
+    // the file (a later track's clips changed, and asked about it again): that track's audio made again, so that every
+    // track plays the file as it is now. One whose audio isn't kept whole (a render not made yet) made again in any case.
+    if (filesChangedForPlan)
+        for (const auto& [id, trackState] : std::exchange (trustedForPlan, {}))
+            if (const auto kept = audio.find (id); kept == audio.end() || ! isOnDiskAsKept (kept->second))
+                addAudio (plan->strips[(size_t) places[id]], trackState, clipTempo);
+
     updateAudibility();
 
     // The master adds up what goes to it: the tracks and buses in no bus, and the returns; or what a render plays of the
@@ -633,7 +644,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (devices, [this] (const auto& device) { return used.count (device.first) == 0; });
     std::erase_if (modulators, [this] (const auto& modulator) { return usedModulators.count (modulator.first) == 0; });
     std::erase_if (files, [this] (const auto& file) { return usedFiles.count (file.first) == 0; });
-    std::erase_if (fileKeys, [this] (const auto& file) { return ! usedFiles.contains (file.second); }); // and those not there
+    std::erase_if (fileKeys,
+                   [this] (const auto& file) { return ! usedFiles.contains (file.second) && ! usedSources.contains (file.first); });
     std::erase_if (regions, [this] (const auto& region) { return usedRegions.count (region.first) == 0; });
     std::erase_if (notes, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
     std::erase_if (audio, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
@@ -2250,29 +2262,44 @@ void SongPlayer::readLive (engine::FileReader& fileReader, const std::atomic<std
     audio.clear(); // which plays them
 }
 
-juce::String SongPlayer::describeFile (const juce::File& file)
-{
-    // By its path, when it was written and how long it is: a file written again at the same path (a track frozen again) is
-    // read again.
-    return file.getFullPathName() + "|" + juce::String (file.getLastModificationTime().toMilliseconds()) + "|"
-           + juce::String (file.getSize());
-}
-
 juce::String SongPlayer::getFileKey (const juce::File& file, bool askAgain)
 {
-    // The disk asked once for a plan at most, however many clips play the file, and not at all for a file a plan played
-    // already unless asked again (known bug 124: every plan asked about each clip's file).
+    // Its identity on the disk (model/engine/AudioFiles.h), the disk asked once for a plan at most, however many clips play
+    // the file; for a file this player knows already, only if asked again, or once what was known of it is too old to trust
+    // (known bug 124: every plan asked about each clip's file; known bug 198: one written again in its place played as it
+    // was first read). A key that changed is a file this plan found written again (compile()).
     const auto path = file.getFullPathName();
-    auto& key = fileKeys[path];
+    auto& known = fileKeys[path];
 
-    if (key.isEmpty() || (askAgain && ! askedForPlan.contains (path)))
+    if (! askedForPlan.contains (path))
     {
-        key = describeFile (file);
-        askedForPlan.insert (path);
-        ++filesAsked;
+        auto asked = askAgain || known.isEmpty();
+        const auto key = asked ? askFileIdentity (file) : getFileIdentity (file, &asked);
+
+        if (asked)
+        {
+            askedForPlan.insert (path);
+            ++filesAsked;
+        }
+
+        filesChangedForPlan = filesChangedForPlan || (known.isNotEmpty() && key != known);
+        known = key;
     }
 
-    return key;
+    return known;
+}
+
+bool SongPlayer::isOnDiskAsKept (const TrackAudio& kept)
+{
+    for (size_t i = 0; i < kept.played.size(); ++i)
+        if (getFileKey (kept.played[i], false) != kept.files[i])
+            return false;
+
+    for (const auto& [source, key] : kept.sources)
+        if (getFileKey (source, false) != key)
+            return false;
+
+    return true;
 }
 
 std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& file, bool askAgain, juce::String* keyOut)
@@ -2400,10 +2427,13 @@ SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState,
             continue;
 
         // What plays for it: its file, or Phazite's render of it, where it plays in seconds, the song's tempo read once for
-        // the plan (known bug 124).
+        // the plan (known bug 124). Its file asked about first, as a render is named for it as it is known (getRenderFile():
+        // one written again asks for a render of its own).
         if (! tempo.has_value())
             tempo.emplace (song);
 
+        const auto source = getClipFile (song, clip);
+        const auto sourceKey = getFileKey (source, askAgain);
         const auto played = getPlayedClip (song, clip, *tempo);
         juce::String key;
         auto file = getAudioFile (played.file, askAgain, &key);
@@ -2421,6 +2451,13 @@ SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState,
         made.regions.push_back (std::move (region));
         made.clips.push_back (id);
         made.files.push_back (key);
+        made.played.push_back (played.file);
+
+        if (played.file != source)
+        {
+            made.sources.emplace_back (source, sourceKey);
+            usedSources.insert (source.getFullPathName());
+        }
     }
 
     return made;
@@ -2428,11 +2465,12 @@ SongPlayer::TrackAudio SongPlayer::makeAudio (const juce::ValueTree& trackState,
 
 void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
 {
-    // As the plan before played it, while nothing of its clips, the tempo, the rate or the song's folders changed; placed
-    // again otherwise, its files asked about again only if its clips changed.
+    // As the plan before played it, while nothing of its clips, the tempo, the rate, the song's folders or its files on the
+    // disk changed, nor the sources its renders are named for (each asked about only once what was known of it is too old:
+    // getFileKey()); placed again otherwise, its files asked about again if its clips changed.
     const auto clipsChanged = compiling.hasNotes (strip.id);
 
-    if (const auto kept = audio.find (strip.id); kept != audio.end() && ! clipsChanged)
+    if (const auto kept = audio.find (strip.id); kept != audio.end() && ! clipsChanged && isOnDiskAsKept (kept->second))
     {
         if (shouldCheck())
             checkAudio (kept->second, trackState, tempo);
@@ -2443,12 +2481,19 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
             usedFiles.insert (kept->second.files[i]);
         }
 
+        for (const auto& source : kept->second.sources)
+            usedSources.insert (source.first.getFullPathName());
+
+        trustedForPlan.emplace_back (strip.id, trackState);
         strip.audio = kept->second.regions;
         return;
     }
 
     auto made = makeAudio (trackState, tempo, clipsChanged);
     strip.audio = made.regions;
+
+    if (! clipsChanged)
+        trustedForPlan.emplace_back (strip.id, trackState); // made from what was known of its files, not asked again
 
     if (made.whole)
         audio[strip.id] = std::move (made);
@@ -2458,9 +2503,10 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
 
 void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trackState, std::optional<ClipTempo>& tempo)
 {
-    // What makeAudio() would make of the track now, without making anything: the same clips, each the same file (as the disk
-    // knows it now), the same place in it and the same region, as the plan before placed them. A difference is a change of
-    // the song's that its player didn't hear of (markChange()), or a file that changed under the same name.
+    // What makeAudio() would make of the track now, without making anything: the same clips, each the same file (as this
+    // player knows it now: a file that changed under the same name, once it asked, makes the track's audio again), the same
+    // place in it and the same region, as the plan before placed them. A difference is a change of the song's that its
+    // player didn't hear of (markChange()), or a file it found changed and didn't make the track's audio again for.
     auto same = true;
     size_t index = 0;
 
@@ -2473,7 +2519,8 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const juce::ValueTree& trac
             tempo.emplace (song);
 
         const auto played = getPlayedClip (song, clip, *tempo);
-        const auto file = files.find (describeFile (played.file));
+        const auto known = fileKeys.find (played.file.getFullPathName());
+        const auto file = known != fileKeys.end() ? files.find (known->second) : files.end();
         const auto state = regions.find (getID (clip, schema::clipID));
 
         if (index >= kept.regions.size() || file == files.end() || state == regions.end())

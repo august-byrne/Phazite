@@ -150,13 +150,20 @@ namespace
 
     // How an export renders: on Phazite's engine, on as many threads as it plays on, with the plug-ins of the song's
     // session, which it lends (none play without one); or, for a song no session plays, with plug-in instances of its own,
-    // in the background, on one thread.
+    // in the background, on one thread. Each job's player made once every clip's render it plays is there (the engine plays
+    // a clip whose render isn't there silent), as that job's turn comes: a source written again since the job before (or
+    // since the export began, while its plug-ins loaded) names a render of its own, made then.
     OfflineRender::Setup getRenderSetup (Song& song, double sampleRate, PluginInstances* own = nullptr)
     {
         auto* session = findSession (song);
         auto* plugins = session != nullptr ? &session->getPlugins() : own;
         return { .session = session,
-                 .makePlayer = [&song, plugins] { return std::make_unique<SongPlayer> (song, plugins); },
+                 .makePlayer =
+                     [&song, plugins]
+                 {
+                     renderMissingClipAudio (song);
+                     return std::make_unique<SongPlayer> (song, plugins);
+                 },
                  .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                  .sampleRate = sampleRate,
                  .blockSize = renderBlockSize,
@@ -322,7 +329,6 @@ namespace
                 stopAndReturn (song);
 
             file.getParentDirectory().createDirectory();
-            renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
 
             // A song no session plays: its plug-ins in instances of its own, opened in the background (the review of known bug
             // 166: the render's start opened each while the message thread waited), and the render begun once they are in, each
@@ -423,7 +429,6 @@ namespace
                 return;
             }
 
-            renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
             const auto channels = getStemChannels (song);
             const auto end = toSeconds (song, getExportRange (song).getEnd());
             std::vector<OfflineRender::Job> jobs;

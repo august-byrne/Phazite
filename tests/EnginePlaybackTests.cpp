@@ -19,6 +19,7 @@
 #include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
@@ -38,7 +39,9 @@
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TempoValues.h"
 #include "model/transport/TransportModel.h"
@@ -1947,6 +1950,295 @@ TEST_CASE ("A jump into a long audio file where it isn't read yet is silent only
     CAPTURE (longestQuiet);
     CHECK (longestQuiet < 400 + (int) (phazite::engine::Engine::maximumHoldSeconds * EnginePlayback::sampleRate));
     song.run ("transport.playStop");
+}
+
+TEST_CASE ("A sound file written again in its place by another program plays as it is now from the first plan a second on, made "
+           "for another reason; one not written again keeps its track's audio (known bug 198)")
+{
+    // A track plays a file; another program writes it again in its place, with other samples, then with another length too,
+    // each time with a modification time of its own. A plan made for another reason (a note on another track) asks the disk
+    // about the file once a second has passed since it last did (trustFilesMilliseconds, model/engine/AudioFiles.h), and plays it as it is
+    // then; before, it asks nothing. Phazite's clock held, so that a second doesn't depend on how busy the machine is.
+    // Before, the track's audio was kept as first read until its clips changed, and the plan's check asserted that the file
+    // differed from the disk.
+    phazite::test::HeldClock clock;
+    TestSong song;
+    song.setTempo (120.0);
+    song.addAudioClip (song.firstTrack, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Loop.wav"), 2.0, 440.0, 0.25f),
+                       0.0);
+    phazite::test::waitForAudioWork (song.context);
+    const auto copies = song.getProject().getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (copies.size() == 1);
+    const auto played = copies[0]; // the project's copy, which the clip plays
+    const auto notes = song.addMidiClip (song.addTrack ("Other"), 0.0, 4.0);
+    EnginePlayback playback;
+
+    // The file the engine's plan plays for the track, and the frequency the track plays from the song's start.
+    const auto playedFile = [&song]
+    {
+        const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+        REQUIRE (plan != nullptr);
+
+        for (const auto& strip : plan->strips)
+            if (strip.id == (std::int64_t) song.firstTrack.getRaw() && ! strip.audio.empty())
+                return strip.audio.front().file;
+
+        FAIL ("the track plays nothing");
+        return std::shared_ptr<phazite::engine::AudioFile>();
+    };
+
+    const auto frequency = [&song, &playback]
+    {
+        phazite::movePlayhead (song.context, phazite::BeatPosition());
+        EnginePlayback::waitForFiles();
+        song.run ("transport.playStop");
+        const auto audio = playback.play (0.6);
+        song.run ("transport.playStop");
+        auto crossings = 0;
+
+        for (auto i = (int) (0.2 * EnginePlayback::sampleRate) + 1; i < (int) (0.6 * EnginePlayback::sampleRate); ++i)
+            if ((audio.getSample (0, i - 1) < 0.0f) != (audio.getSample (0, i) < 0.0f))
+                ++crossings;
+
+        return crossings / (2.0 * 0.4);
+    };
+
+    // A note on the other track, and how many times its plan asked the disk about a file.
+    const auto editElsewhere = [&song, notes] (double beat)
+    {
+        const auto asked = phazite::SongPlayer::countFilesAsked();
+        song.addNote (notes, 60, beat, 0.5);
+        phazite::test::dispatchPendingMessages();
+        return phazite::SongPlayer::countFilesAsked() - asked;
+    };
+
+    // The file as first written; a second on, a plan for another reason asks about it once, and keeps the track's audio.
+    CHECK (frequency() == doctest::Approx (440.0).epsilon (0.02));
+    const auto first = playedFile();
+    clock.advance (1000.0);
+    CHECK (editElsewhere (0.0) == 1);
+    CHECK (playedFile() == first);
+
+    // Written again, as long, so with as many bytes: within the second, a plan asks nothing (and plays it as it was).
+    const auto written = played.getLastModificationTime();
+    phazite::test::writeSound (played, 2.0, 660.0, 0.25f);
+    REQUIRE (played.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+    CHECK (editElsewhere (0.5) == 0);
+    CHECK (playedFile() == first);
+
+    // A second on: asked about, and played as it is now.
+    clock.advance (1000.0);
+    CHECK (editElsewhere (1.0) == 1);
+    CHECK (playedFile() != first);
+    CHECK (frequency() == doctest::Approx (660.0).epsilon (0.02));
+
+    // Written again shorter, half as long.
+    phazite::test::writeSound (played, 1.0, 330.0, 0.25f);
+    REQUIRE (played.setLastModificationTime (written + juce::RelativeTime::hours (2.0)));
+    clock.advance (1000.0);
+    CHECK (editElsewhere (1.5) == 1);
+    REQUIRE (playedFile() != nullptr);
+    CHECK (playedFile()->getLength() == 44100);
+    CHECK (frequency() == doctest::Approx (330.0).epsilon (0.02));
+}
+
+namespace
+{
+// The path of the file a track's first audio region plays in the engine's plan (what its file was opened as: its identity on
+// the disk, model/engine/AudioFiles.h), or nothing while it plays none.
+juce::String getPathPlayed (phazite::TrackID track)
+{
+    const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+    REQUIRE (plan != nullptr);
+
+    for (const auto& strip : plan->strips)
+        if (strip.id == (std::int64_t) track.getRaw() && ! strip.audio.empty())
+            return strip.audio.front().file->getOrigin().upToFirstOccurrenceOf ("|", false, false);
+
+    return {};
+}
+
+// The frequency a song plays from its start, through the engine, counted from its zero crossings between 0.2 and 0.6 s.
+double getFrequencyPlayed (TestSong& song, EnginePlayback& playback)
+{
+    phazite::movePlayhead (song.context, phazite::BeatPosition());
+    EnginePlayback::waitForFiles();
+    song.run ("transport.playStop");
+    const auto audio = playback.play (0.6);
+    song.run ("transport.playStop");
+    auto crossings = 0;
+
+    for (auto i = (int) (0.2 * EnginePlayback::sampleRate) + 1; i < (int) (0.6 * EnginePlayback::sampleRate); ++i)
+        if ((audio.getSample (0, i - 1) < 0.0f) != (audio.getSample (0, i) < 0.0f))
+            ++crossings;
+
+    return crossings / (2.0 * 0.4);
+}
+} // namespace
+
+TEST_CASE ("A clip's source written again in its place has a render of its own made, which plays from the first plan a second on, "
+           "made for another reason (known bug 198)")
+{
+    // A reversed clip plays Phazite's render of its file, named for the file as it is on the disk (getRenderFile()). The file
+    // written again in its place, with other samples and a modification time of its own: within the second, a plan plays the
+    // render as it was; a plan a second on, made for another reason (a note on another track), finds the file changed and
+    // asks for a render under another name, which is made and played; the old one is left in the cache, never asked for
+    // again. Before, the render kept its name and was never made again, and the old sound played on. Phazite's clock held.
+    phazite::test::HeldClock clock;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto clip = song.addAudioClip (
+        song.firstTrack, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 2.0, 440.0, 0.25f), 0.0);
+    phazite::test::waitForAudioWork (song.context);
+    const auto copies = song.getProject().getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (copies.size() == 1);
+    const auto source = copies[0]; // the project's copy, which the clip's render is made from
+    const auto notes = song.addMidiClip (song.addTrack ("Other"), 0.0, 4.0);
+    EnginePlayback playback;
+    const auto renderOf = [&song, clip]
+    {
+        const auto& played = *phazite::findSong (song.context);
+        return phazite::getPlayedFile (played, phazite::findClipState (played, clip));
+    };
+
+    // Reversed: its render made, and played (a sine is the same backwards).
+    phazite::setClipReversed (song.context, clip, true);
+    const auto first = renderOf();
+    REQUIRE (first.getFileName().startsWith (phazite::renderFilePrefix));
+    song.waitForClipRenders();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getPathPlayed (song.firstTrack) == first.getFullPathName(); }));
+    CHECK (getFrequencyPlayed (song, playback) == doctest::Approx (440.0).epsilon (0.02));
+
+    // Written again, as long: within the second, the render is the same, and plays as it was.
+    const auto written = source.getLastModificationTime();
+    phazite::test::writeSound (source, 2.0, 660.0, 0.25f);
+    REQUIRE (source.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+    song.addNote (notes, 60, 0.0, 0.5);
+    phazite::test::dispatchPendingMessages();
+    CHECK (renderOf() == first);
+    CHECK (getPathPlayed (song.firstTrack) == first.getFullPathName());
+
+    // A second on, a plan for another reason: a render of the file as it is now, made and played.
+    clock.advance (1000.0);
+    song.addNote (notes, 62, 1.0, 0.5);
+    phazite::test::dispatchPendingMessages();
+    const auto second = renderOf();
+    CHECK (second != first);
+    REQUIRE (second.getFileName().startsWith (phazite::renderFilePrefix));
+    song.waitForClipRenders();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getPathPlayed (song.firstTrack) == second.getFullPathName(); }));
+    CHECK (getFrequencyPlayed (song, playback) == doctest::Approx (660.0).epsilon (0.02));
+    CHECK (first.existsAsFile()); // until the cache is purged, as the project closes
+}
+
+TEST_CASE ("A clip's source written again in its place has a render of its own made from a plan alone, nothing in the song changed "
+           "(known bug 198)")
+{
+    // The second review of known bug 198: the case before wakes the project's clip renders through the song's change (a
+    // note), so they would make the new render even if nothing told them of the file. Here nothing in the song changes: the
+    // source is written again, a second passes, and a plan made for no change of the song's (PlaybackSession::update())
+    // asks the disk about the source, finds it changed and tells the record's listeners, the clip renders among them
+    // (ClipRenders::fileIdentityChanged()), which make the render it now names. Phazite's clock held.
+    phazite::test::HeldClock clock;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto clip = song.addAudioClip (
+        song.firstTrack, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 2.0, 440.0, 0.25f), 0.0);
+    phazite::test::waitForAudioWork (song.context);
+    const auto copies = song.getProject().getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (copies.size() == 1);
+    const auto source = copies[0];
+    EnginePlayback playback;
+    const auto renderOf = [&song, clip]
+    {
+        const auto& played = *phazite::findSong (song.context);
+        return phazite::getPlayedFile (played, phazite::findClipState (played, clip));
+    };
+
+    phazite::setClipReversed (song.context, clip, true);
+    const auto first = renderOf();
+    song.waitForClipRenders();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getPathPlayed (song.firstTrack) == first.getFullPathName(); }));
+
+    // Written again; a second on, a plan alone.
+    const auto written = source.getLastModificationTime();
+    phazite::test::writeSound (source, 2.0, 660.0, 0.25f);
+    REQUIRE (source.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+    clock.advance (1000.0);
+    auto* session = phazite::findSession (*phazite::findSong (song.context));
+    REQUIRE (session != nullptr);
+    session->update();
+
+    const auto second = renderOf();
+    REQUIRE (second != first);
+    song.waitForClipRenders();
+    CHECK (second.existsAsFile());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getPathPlayed (song.firstTrack) == second.getFullPathName(); }));
+    CHECK (getFrequencyPlayed (song, playback) == doctest::Approx (660.0).epsilon (0.02));
+}
+
+TEST_CASE ("Two tracks that play one file play it alike after a plan finds it written again in its place (known bug 198)")
+{
+    // Two tracks play one file, the first track's audio kept from plan to plan. The file written again in its place, and the
+    // second track's clip changed within the second (its gain): the plan asks the disk about the file for the second track,
+    // finds it changed, and makes the first track's audio again too. Before, the first track was kept as it was (its file
+    // asked about less than a second before) and played the file as first read, the second as it is now, until another
+    // plan. Phazite's clock held.
+    phazite::test::HeldClock clock;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto clip = song.addAudioClip (
+        song.firstTrack, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Loop.wav"), 2.0, 440.0, 0.25f), 0.0);
+    phazite::test::waitForAudioWork (song.context);
+    const auto copies = song.getProject().getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (copies.size() == 1);
+    const auto played = copies[0];
+    const auto second = song.addTrack ("Second");
+    const auto copy = song.copyClip (clip, 0.0, false);
+    phazite::moveClip (song.context, copy, phazite::BeatPosition::fromBeats (0.0), second);
+    phazite::test::dispatchPendingMessages();
+
+    const auto fileOf = [] (phazite::TrackID track)
+    {
+        const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
+        REQUIRE (plan != nullptr);
+
+        for (const auto& strip : plan->strips)
+            if (strip.id == (std::int64_t) track.getRaw() && ! strip.audio.empty())
+                return strip.audio.front().file;
+
+        return std::shared_ptr<phazite::engine::AudioFile>();
+    };
+
+    const auto before = fileOf (song.firstTrack);
+    REQUIRE (before != nullptr);
+    REQUIRE (fileOf (second) == before);
+
+    const auto written = played.getLastModificationTime();
+    phazite::test::writeSound (played, 1.0, 660.0, 0.25f);
+    REQUIRE (played.setLastModificationTime (written + juce::RelativeTime::hours (1.0)));
+    phazite::setClipGain (song.context, copy, -3.0f);
+    phazite::test::dispatchPendingMessages();
+
+    const auto now = fileOf (second);
+    REQUIRE (now != nullptr);
+    CHECK (now != before);
+    CHECK (now->getLength() == 44100);
+    CHECK (fileOf (song.firstTrack) == now);
+
+    // The other order: the first track's audio not kept but made afresh, from what was known of the file (the tempo changed),
+    // in the plan in which the second track's clip changed and asked about it. The first track made again too.
+    phazite::test::writeSound (played, 1.5, 330.0, 0.25f);
+    REQUIRE (played.setLastModificationTime (written + juce::RelativeTime::hours (2.0)));
+    song.setTempo (100.0);
+    phazite::setClipGain (song.context, copy, -6.0f);
+    phazite::test::dispatchPendingMessages();
+
+    const auto third = fileOf (second);
+    REQUIRE (third != nullptr);
+    CHECK (third != now);
+    CHECK (third->getLength() == 66150);
+    CHECK (fileOf (song.firstTrack) == third);
 }
 
 TEST_CASE ("A device asleep on silence plays its modulation into the values it shows without playing a sound")

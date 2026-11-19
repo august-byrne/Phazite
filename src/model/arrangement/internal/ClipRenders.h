@@ -9,6 +9,7 @@
 #include "model/base/BackgroundJobs.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/engine/AudioFiles.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -27,7 +28,8 @@ namespace phazite
 bool renderClipAudio (const juce::File& source, const stretch::Settings&, const juce::File& render,
                       const std::function<bool()>& shouldStop = {}, std::atomic<juce::int64>* framesWritten = nullptr);
 
-// Renders, on the calling thread, every clip's render that isn't there yet, and has each new one played. What
+// Renders, on the calling thread, every clip's render that isn't there yet (its source asked about now, as the render that
+// plays it next asks: getRenderFile()), and has each new one played. What
 // the project's ClipRenders does in the background; exports and freezes call it first, as a render that isn't there plays
 // silence. Returns false if shouldStop stopped it or a render failed.
 bool renderMissingClipAudio (const Song&, const std::function<bool()>& shouldStop = {});
@@ -39,13 +41,15 @@ void purgeClipRenders (const Song&);
 //==============================================================================
 // Makes the renders a song's clips need, in the background, while the project context holds it: each one that
 // isn't there yet, a short while after the clips last changed (a drag of a clip's tempo makes no render for each value
-// it passes), two at a time. When one is ready, the engine plays it, so that the clip sounds.
+// it passes), or a source was found written again in its place (its render is named for what is on the disk:
+// getRenderFile()), two at a time. When one is ready, the engine plays it, so that the clip sounds.
 // One that no clip needs any more stops. One that fails (its source can't be read, or the cache folder written) is
-// remembered and not tried again until its source changes (its date or its size), or, for one whose folder couldn't be
-// written, until the folder can be (both looked at every two seconds while any failed: checkFailedAgain()), or the clip
-// needs another render (other settings, or another cache folder) or needs it again after no clip did: its clips stay
-// silent and say so (hasFailed(), getFailedClips()).
+// remembered and not tried again until its source changes (its date or its size, which names another render), or, for one
+// whose folder couldn't be written, until the folder can be (both looked at every two seconds while any failed:
+// checkFailedAgain()), or the clip needs another render (other settings, or another cache folder) or needs it again after
+// no clip did: its clips stay silent and say so (hasFailed(), getFailedClips()).
 class ClipRenders : private juce::ValueTree::Listener,
+                    private FileIdentityListener,
                     private juce::Timer,
                     private juce::AsyncUpdater
 {
@@ -107,21 +111,10 @@ private:
     // The frames of the renders made and being made since none was, those stopped left out, for getProgress().
     juce::int64 framesMade = 0, framesAll = 0;
 
-    // The renders that failed, each with its source as it was then: whether it was there, its date and its size.
-    struct Source
-    {
-        bool exists = false;
-        juce::Time modified;
-        juce::int64 size = 0;
-
-        static Source of (const juce::File&);
-        bool operator== (const Source&) const = default;
-    };
-
-    // And whether its folder couldn't be written as it failed.
+    // The renders that failed, each with whether its folder couldn't be written as it failed. One whose source changed is
+    // another render (getRenderFile()).
     struct Failure
     {
-        Source source;
         bool folderShut = false;
     };
 
@@ -130,12 +123,11 @@ private:
     int rendersStarted = 0;
 
     // A job that ended, by the jobs, for the message thread to have played: whether it failed (not stopped, and no render),
-    // its source as it was when it began, and whether the folder of its render couldn't be written as it failed.
+    // and whether the folder of its render couldn't be written as it failed.
     struct Finished
     {
         juce::File render;
         bool failed = false;
-        Source source;
         bool folderShut = false;
     };
 
@@ -152,6 +144,7 @@ private:
 
     void timerCallback() override;
     void handleAsyncUpdate() override;
+    void fileIdentityChanged (const juce::File&) override; // a source may be written again: another render to make
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;

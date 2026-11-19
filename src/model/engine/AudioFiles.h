@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What Phazite reads of an audio file without playing it: how long it is, at what rate and in how many channels, whether it
-// is a loop that knows its beats, and its key; with the readers of the formats it reads. Message thread only, but for
-// readAudioFileInfo(), getTempoFromName(), getKeyFromName() and getAudioFormats().
+// is a loop that knows its beats, and its key, and its identity on the disk; with the readers of the formats it reads.
+// Message thread only, but for readAudioFileInfo(), getTempoFromName(), getKeyFromName(), getAudioFormats() and
+// noteFilesWritten().
 #pragma once
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <cstdint>
 #include <optional>
 
 namespace phazite
@@ -56,6 +58,43 @@ struct AudioFileInfo
 // A file's, read once for each time it was written (by its path, its size and when it was last changed); one that isn't
 // there, or that no format reads, is invalid.
 AudioFileInfo getAudioFileInfo (const juce::File&);
+
+// A file's identity on the disk: its path, when it was last written and how long it is, in one string, which a file written
+// again in its place changes. What Phazite's player keeps of each file it plays (model/playback/internal/SongPlayer.h), and
+// what a render of a clip's file is named for (model/arrangement/internal/AudioClips.h: getRenderFile()), so that a file
+// written again plays as it is now, and a source written again asks for a render of its own (known bug 198).
+// askFileIdentity() asks the disk now. getFileIdentity() asks it only if it wasn't asked about the file in the last
+// trustFilesMilliseconds (by Phazite's clock, devices/core/Clock.h, which a test holds) or since Phazite wrote a sound file
+// (noteFilesWritten()), and gives what was found then otherwise; asked, if given, says whether it asked. A file that isn't
+// there is asked about every time. Message thread.
+juce::String askFileIdentity (const juce::File&);
+juce::String getFileIdentity (const juce::File&, bool* asked = nullptr);
+inline constexpr juce::uint32 trustFilesMilliseconds = 1000;
+
+// The identity an ask of the disk (above) last found for a file, however long ago, without asking: nothing for a file never
+// asked about. For what paints, which never asks the disk (a clip's waveform: src/app/ClipWaveforms.cpp), and learns of a
+// file written again from the listeners below. Message thread.
+juce::String findKnownFileIdentity (const juce::File&);
+
+// How many times the disk was asked about a file's identity (askFileIdentity()), for tests.
+std::uint64_t countFileIdentityAsks() noexcept;
+
+// Phazite wrote a sound file where a song may play one already (a DAWproject's audio unpacked at a path that was free): the
+// disk is asked again about each file at its next getFileIdentity(). Any thread.
+void noteFilesWritten() noexcept;
+
+// Hears of a file whose identity was found changed by an ask of the disk (above): ClipRenders, which a source written again
+// gives another render to make (model/arrangement/internal/ClipRenders.h), and a clip's waveform, which shows the file
+// again. Told on the message thread, as the ask is made.
+class FileIdentityListener
+{
+public:
+    virtual ~FileIdentityListener() = default;
+    virtual void fileIdentityChanged (const juce::File&) = 0;
+};
+
+void addFileIdentityListener (FileIdentityListener&);
+void removeFileIdentityListener (FileIdentityListener&);
 
 // What a reader tells of its file, with the file's name: its beats as a loop come from its loop data (the beats a WAV file's
 // acid chunk or an AIFF file's Apple loop data say, unless they say it plays once), or else from a tempo in its name at

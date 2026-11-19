@@ -249,6 +249,17 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **209 A plug-in's presets apart from Phazite's devices':** a plug-in's presets are kept in a folder of its own in
+  `Plug-ins`, so a plug-in named as one of Phazite's devices ("Reverb") no longer shares that device's presets in the
+  browser, Swap or the presets menus, and Other Presets shows the folders of plug-ins not scanned by their names.
+  Presets a plug-in saved in the old place aren't moved (no backward compatibility yet).
+- **198 A sound file written again in its place:** it plays as it is now from the first plan a second on. The player
+  asks the disk about each file it plays at most once a second, and at once after a DAWproject import unpacked
+  files; a stretched, pitched or reversed clip gets a render of the new file (a render is named for its source's
+  size and time, not its path alone); every track that plays the file is made again in the same plan; an export
+  makes the renders each of its jobs plays as the job's turn comes; and the clip's waveform shows the new file,
+  without a paint ever asking the disk. A name made safe for a file that was only dots and spaces names no folder
+  above.
 - **199 A merge that made two items one:** a line merged back into the line that merged it, two lines that each merged
   the same version with other IDs, and a note in a clip a merge gave a new ID, keep every item once with its own
   content, and what names an item names it still. A merge takes the other line's song to the IDs the version both

@@ -29,13 +29,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   JUCE tells a component before its peer is destroyed. Found by the review of known bug 165's Linux side
   (2026-11-16); never seen, and the Linux code is not yet compiled by CI.
 
-- **209. A plug-in named as one of Phazite's devices shares that device's presets** (2026-11-19, found as the browser
-  put presets under their devices): a presets folder is named by the device's name (`getPresetFolderName()`), so a
-  plug-in called "Reverb", "EQ", "Delay" or "Filter" opens, in the browser and in Swap, to Phazite's presets, which it
-  can't load, and Phazite's device lists the plug-in's. To fix: plug-ins' presets in folders of their own, such as
-  `Plug-ins/<name>`, in `getPresetFolderName()` and `BrowserModel::getShelf()`, Other Presets looking inside
-  `Plug-ins/` for plug-ins not scanned.
-
 ## Versions
 
 - **186. After a song's IDs were given anew as it opened, Restore and Merge against its earlier commits do wrong
@@ -125,14 +118,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
-- **198. A sound file replaced on disk at the same path plays as first read** (found in S4.5's review, 2026-11-17; older than
-  it): a plan keeps a track's audio while its clips don't change, without asking the disk again, so a file replaced at
-  the same path (a DAWproject import unpacking over files the song plays; another program writing a file in `Audio/`
-  again) plays as it was first read until that track's clips change, and the plan's check of its audio asserts in a
-  debug build when a plan is compiled in between (`SongPlayer.cpp`, `checkAudio`). To fix: whatever replaces a played
-  file tells the player (a change marked for the tracks that play it), or kept files are looked at once a plan and the
-  track's audio made again when one changed.
-
 ## Tests
 
 - **205. `VersionsTests`, the plug-in update's case, failed once in CI's linux-clang job** (2026-11-18, the run of

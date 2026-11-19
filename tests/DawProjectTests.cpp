@@ -1240,6 +1240,52 @@ TEST_CASE ("A DAWproject imported back unpacks its audio off the message thread,
     CHECK (phazite::countBytesUnpackedOnMessageThread() == bytes);
 }
 
+TEST_CASE ("A DAWproject imported back that unpacks a sound file where the song played one has the next plan play it as it is now "
+           "(known bug 198)")
+{
+    // The song's own copy of its loop gone (deleted from outside Phazite), and the song imported back: the import unpacks the
+    // loop at its path, free again, as a file of its own, and the next plan, made for whatever reason (here none: before the
+    // import's switch), asks the disk about the song's files again and plays the loop as it is now, though a second hasn't
+    // passed (Phazite's clock held) and the track's clips didn't change. Before, the track's audio was kept as first read,
+    // and the plan's check asserted that it differed from the disk.
+    const HeldClock clock;
+    TestSong s;
+    const auto drums = s.addTrack ("Drums");
+    s.addAudioClip (drums, writeSound (s.getSoundsFolder().getChildFile ("Loop.wav"), 1.0), 8.0);
+    const auto first = keepVersion (s.context, "First");
+    auto content = phazite::describeDawProject (*phazite::findSong (s.context), "Test",
+                                                "Exported by Phazite from the version \"First\" (" + first + ").");
+    TemporaryFolder folder;
+    const auto file = folder.folder.getChildFile ("Back.dawproject");
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    const auto read = std::make_shared<phazite::DawProjectFile> (phazite::readDawProject (file));
+
+    const auto own = s.getProject().getAudioFolder().findChildFiles (juce::File::findFiles, false, "*.wav");
+    REQUIRE (own.size() == 1);
+    REQUIRE (own[0].deleteFile());
+    std::optional<bool> imported;
+    const auto told = [&imported] (bool done, const juce::StringArray&) { imported = done; };
+
+    // Unpacked, its switch held where it starts: the loop at its path again.
+    const auto branches = phazite::getBranches (s.context).size();
+    const ReadsHeldAfter held (2);
+    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, told));
+    REQUIRE (dispatchMessagesUntil ([&] { return phazite::getBranches (s.context).size() > branches; }, versionHistoryTimeout));
+    REQUIRE (own[0].existsAsFile());
+
+    // A plan: the loop asked about again, as the import told the players, and played as it is.
+    auto* session = phazite::findSession (*phazite::findSong (s.context));
+    REQUIRE (session != nullptr);
+    const auto asked = phazite::SongPlayer::countFilesAsked();
+    session->update();
+    CHECK (phazite::SongPlayer::countFilesAsked() - asked == 1);
+
+    held.letGo();
+    REQUIRE (waitForVersionHistory (s.context));
+    REQUIRE (imported.has_value());
+    CHECK (*imported);
+}
+
 TEST_CASE ("Import DAWproject unpacks its audio before the open project closes: cancelled, that project stays open as it was")
 {
     // The third review of known bug 126: the open project closed first and the audio was unpacked after, so Cancel left
@@ -1336,6 +1382,8 @@ TEST_CASE ("An archive's entry named as Windows names a device is unpacked under
     CHECK_FALSE (phazite::isReservedFileName ("COM10"));
     CHECK (phazite::makeUsableFileName ("CON") == "CON_");
     CHECK (phazite::makeUsableFileName ("con.backup") == "con_.backup");
+    CHECK (phazite::makeUsableFileName (".. ") == "__"); // Windows drops trailing spaces: ".." there, the folder above
+    CHECK (phazite::makeUsableFileName ("Loop. ") == "Loop");
 
     TemporaryFolder folder;
     const auto archive = folder.folder.getChildFile ("Devices.dawproject");

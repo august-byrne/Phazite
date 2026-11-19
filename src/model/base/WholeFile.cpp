@@ -143,7 +143,16 @@ bool isReservedFileName (const juce::String& name)
 
 juce::String makeUsableFileName (const juce::String& name)
 {
-    const auto legal = juce::File::createLegalFileName (name);
+    auto legal = juce::File::createLegalFileName (name);
+
+    // Dots alone are a step along a path ("..": the folder above), not a name; with spaces too, as Windows drops a name's
+    // trailing dots and spaces (".. " is ".." there).
+    if (legal.containsChar ('.') && legal.containsOnly (". "))
+        legal = legal.replaceCharacter ('.', '_');
+
+    // A name's trailing dots and spaces left out on every system, as Windows leaves them out (but of spaces alone).
+    if (const auto trimmed = legal.trimCharactersAtEnd (". "); trimmed.isNotEmpty())
+        legal = trimmed;
 
     if (! isReservedFileName (legal))
         return legal;

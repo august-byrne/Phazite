@@ -12,6 +12,7 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
@@ -1258,6 +1259,17 @@ std::optional<PresetInfo> readPresetInfo (const juce::File& file)
     return PresetInfo { *kind, device[keys::name].toString(), (bool) device[keys::instrument] };
 }
 
+juce::String getPluginPresetFolderName (const juce::String& pluginName)
+{
+    const auto name = makeUsableFileName (pluginName);
+    return name.isNotEmpty() ? juce::String (pluginPresetsFolder) + "/" + name : juce::String();
+}
+
+juce::String getPresetFolderName (const DeviceType& type)
+{
+    return type.isBuiltIn ? makeUsableFileName (type.name) : getPluginPresetFolderName (type.name);
+}
+
 juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);
@@ -1266,7 +1278,11 @@ juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
     if (! device.isValid())
         return {};
 
-    return isContainerState (device) ? juce::String ("Containers") : makeUsableFileName (getDeviceName (*song, id));
+    if (isContainerState (device))
+        return "Containers";
+
+    // As its type's in the device lists.
+    return getPresetFolderName (DeviceType { .name = getDeviceName (*song, id), .isBuiltIn = ! isPluginState (device) });
 }
 
 bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::File& file)

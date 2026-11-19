@@ -13,6 +13,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/engine/AppInfo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
@@ -21,6 +22,7 @@
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/playback/internal/SongPlayer.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -1960,6 +1962,11 @@ UnpackedAudio unpackDawProjectAudio (const DawProjectFile& in, const juce::File&
         if (made)
             unpacked.made.push_back (file);
     }
+
+    // Each at a path that was free, which may be one the song played before its file went (deleted meanwhile): what plays
+    // the song asks the disk about its files again at its next plan (model/engine/AudioFiles.h; known bug 198).
+    if (! unpacked.made.empty())
+        noteFilesWritten();
 
     unpacked.stopped = unpacked.stopped || (shouldStop != nullptr && shouldStop());
     return unpacked;

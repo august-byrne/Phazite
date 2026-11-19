@@ -589,7 +589,9 @@ TEST_CASE ("A song holding two curves of one parameter, the first without points
 TEST_CASE ("A tempo change places every kept audio clip again, where the new tempo plays it, without asking about its file")
 {
     // Known bug 124's review: a player keeps each track's audio from plan to plan, placed in seconds; a tempo change moves
-    // it, and the file it plays is the same.
+    // it, and the file it plays is the same. Phazite's clock held: within a second of its last ask, the disk isn't asked
+    // about the file again (trustFilesMilliseconds, model/engine/AudioFiles.h).
+    const phazite::test::HeldClock clock;
     phazite::test::TemporaryFolder temp;
     const auto song = phazite::createSong();
     const auto track = phazite::ensureTracks (*song, 1).front();

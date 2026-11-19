@@ -216,6 +216,7 @@ private:
     std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
     std::map<std::int64_t, std::shared_ptr<engine::RegionState>> regions;
     std::set<juce::String> usedFiles;
+    std::set<juce::String> usedSources; // by their paths: the sources of the renders the plan plays (fileKeys)
     std::set<std::int64_t> usedRegions;
     engine::FileReader* reader = nullptr;
     const std::atomic<std::uint64_t>* blocks = nullptr;
@@ -269,29 +270,35 @@ private:
     bool shouldCheck();
 
     // A track's audio clips as its strip plays them, kept from plan to plan (above): their regions, each region's clip (by
-    // its ID) and file (by its key in files), and whether every clip's file was there (one that isn't, a render not made
-    // yet, is looked for again by the next plan). Made again for every track once the tempo, the rate, the song's folders
-    // or what reads the files changes. A frozen track's file isn't kept (it is written again in its place as the track is
-    // frozen again).
+    // its ID), file (by its key in files) and the file itself; the source of each that plays a render, with its key as the
+    // render was named for it (getRenderFile()); and whether every clip's file was there (one that isn't, a render not made
+    // yet, is looked for again by the next plan). Made again for every track once the tempo, the rate, the song's folders or
+    // what reads the files changes, and for a track one of whose files or sources changed on the disk (isOnDiskAsKept()). A
+    // frozen track's file isn't kept (it is written again in its place as the track is frozen again).
     struct TrackAudio
     {
         std::vector<engine::AudioRegion> regions;
         std::vector<std::int64_t> clips;
         std::vector<juce::String> files;
+        std::vector<juce::File> played;
+        std::vector<std::pair<juce::File, juce::String>> sources;
         bool whole = true;
     };
 
     std::map<std::int64_t, TrackAudio> audio;
     juce::String audioFolders; // the song's folders the kept tracks' files were found in
-    // What is known of each file a plan played (getAudioFile()'s key, by its path), kept until it changes: asked of the
-    // disk again only for the clips of a track that changed (the file a clip plays may have been written again in its
-    // place), a frozen track's file and a version's bounce, once for a plan however many ask; a file that wasn't there
-    // isn't kept. Without asking again, a file another program writes again in its place, while no clip of its track
-    // changes, plays as it was until the project opens again.
+    // What this player knows of each file a plan played or named a render for (its key: its identity on the disk, from its
+    // path, size and when it was written: model/engine/AudioFiles.h), by its path. The disk asked at most once for a plan
+    // however many ask: for a file it doesn't know yet, the clips of a track that changed (the file a clip plays may have been
+    // written again in its place), a frozen track's file and a version's bounce; for any other, only once what is known of
+    // it is too old to trust (getFileIdentity(): trustFilesMilliseconds, or Phazite wrote a sound file meanwhile).
     std::map<juce::String, juce::String> fileKeys;
     std::set<juce::String> askedForPlan;
-    static juce::String describeFile (const juce::File&); // its key, from the disk
+    bool filesChangedForPlan = false; // a file's key that this plan found changed (compile() makes trustedForPlan's again)
+    // The tracks whose audio this plan kept, or made without asking the disk again about their files, with their elements.
+    std::vector<std::pair<std::int64_t, juce::ValueTree>> trustedForPlan;
     juce::String getFileKey (const juce::File&, bool askAgain);
+    bool isOnDiskAsKept (const TrackAudio&); // each of its files and sources as the plan before knew it (getFileKey())
     std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&, bool askAgain, juce::String* key = nullptr);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
     void placeRegion (engine::AudioRegion&, const juce::ValueTree& clipState, const PlayedClip&) const;

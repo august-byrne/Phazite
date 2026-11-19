@@ -16,6 +16,7 @@
 namespace phazite
 {
 class ProjectContext;
+struct DeviceType;
 
 enum class PresetKind
 {
@@ -38,10 +39,18 @@ bool isPresetFile (const juce::File&); // by its extension
 // What a preset file holds, from its first element; nothing for a file that isn't a preset.
 std::optional<PresetInfo> readPresetInfo (const juce::File&);
 
-// The folder a device's presets go in, among the user's presets: the device's name ("EQ"), or "Containers"; and the one
-// tracks' go in.
+// The folder a device's presets go in, among the user's presets and Phazite's, as a path from their folder: one of Phazite's
+// own devices' its name ("EQ"); a plug-in's its name in the plug-ins' folder ("Plug-ins/Reverb"), so that a plug-in named as
+// one of Phazite's devices keeps presets of its own (known bug 209); a container's "Containers"; each name made a usable
+// file name. For a device in the song, and for a device type as the device lists and the browser list them (the same
+// folder for the same device). And the folders tracks' presets and the plug-ins' folders go in. Neither, nor
+// "Containers", is one of Phazite's devices' names, which are its own and fixed: a test holds every one of its devices'
+// folders to differ from the three (tests/PresetTests.cpp), so that no device of Phazite's shares one.
 juce::String getPresetFolderName (const ProjectContext&, DeviceID);
+juce::String getPresetFolderName (const DeviceType&);
+juce::String getPluginPresetFolderName (const juce::String& pluginName); // "Plug-ins/Reverb"
 inline constexpr const char* trackPresetsFolder = "Tracks";
+inline constexpr const char* pluginPresetsFolder = "Plug-ins";
 
 // Writes a preset of a device (a container is one) or of a track into a file, replacing what it held, and returns
 // whether it did. A device's holds its settings and its mix (every parameter of one of Phazite's own, by its ID; a plug-in's

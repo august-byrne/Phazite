@@ -37,7 +37,8 @@ namespace
     constexpr int samplesPerLevel = 256; // how many of a file's samples each level the cache keeps sums up
 
     class Waveform : public ui::ClipWaveform,
-                     private juce::ChangeListener
+                     private juce::ChangeListener,
+                     private FileIdentityListener
     {
     public:
         Waveform (ProjectContext& c, ClipID id, std::function<void()> onLoaded)
@@ -45,10 +46,13 @@ namespace
               clipID (id),
               loaded (std::move (onLoaded))
         {
+            addFileIdentityListener (*this);
         }
 
         ~Waveform() override
         {
+            removeFileIdentityListener (*this);
+
             if (thumbnail != nullptr)
                 thumbnail->removeChangeListener (this);
         }
@@ -83,8 +87,9 @@ namespace
         std::function<void()> loaded; // called as more of the levels load
         juce::SharedResourcePointer<Levels> levels;
         std::unique_ptr<juce::AudioThumbnail> thumbnail;
-        juce::File shownFile;  // what it shows
-        int levelsChanged = 0; // how often the thumbnail's levels changed: more of them read, or another file's
+        juce::File shownFile;       // what it shows
+        juce::String shownIdentity; // and the file's identity on the disk as it was known then (empty if it wasn't)
+        int levelsChanged = 0;      // how often the thumbnail's levels changed: more of them read, or another file's
 
         // A stretch of the file that plays straight, where it is drawn: the file's times at its left and its right (the later
         // one at its left while the clip plays backwards), and the clip's gain.
@@ -126,6 +131,19 @@ namespace
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
             ++levelsChanged;
+
+            if (loaded != nullptr)
+                loaded();
+        }
+
+        // Its file was found written again in its place, by what asked the disk (the player's next plan): its picture let
+        // go, and painted again at once, which reads the file anew (showFileOf()).
+        void fileIdentityChanged (const juce::File& file) override
+        {
+            if (file != shownFile)
+                return;
+
+            mask = {};
 
             if (loaded != nullptr)
                 loaded();
@@ -296,14 +314,18 @@ namespace
 
         // The file the clip's audio comes from. Not the render it plays while stretched, pitched or reversed, which may not
         // be ready yet: the waveform shows the file unstretched, as Ableton Live shows a sample, and all of it.
+        // Shown again once the file is known to be written again in its place (its identity on the disk as last asked:
+        // model/engine/AudioFiles.h), which a paint never asks: a clip whose file isn't there would ask at every paint.
         void showFileOf (const Song& song, const juce::ValueTree& clipState)
         {
             const auto file = getClipFile (song, clipState);
+            const auto identity = findKnownFileIdentity (file);
 
-            if (thumbnail != nullptr && file == shownFile)
+            if (thumbnail != nullptr && file == shownFile && (identity.isEmpty() || identity == shownIdentity))
                 return;
 
             shownFile = file;
+            shownIdentity = identity;
             ++levelsChanged;
 
             if (thumbnail == nullptr)
@@ -312,7 +334,9 @@ namespace
                 thumbnail->addChangeListener (this); // repaints as it loads
             }
 
-            thumbnail->setSource (file.existsAsFile() ? new juce::FileInputSource (file) : nullptr);
+            // The levels kept by the file and when it was written: by its path alone, the cache gave the levels of the file it
+            // replaced.
+            thumbnail->setSource (file.existsAsFile() ? new juce::FileInputSource (file, true) : nullptr);
         }
     };
 } // namespace

@@ -68,14 +68,14 @@ selected sound and the preview's controls. The places at the top of the tree, in
 | A track's | **Track Presets** |
 | One of the user's kept where no row above lists it | **Other Presets** |
 
-- A device's row lists the presets of the folder of its name ("Synth") in Phazite's presets and in the user's as one
-  list: their folders first, one of each name (Phazite's kinds of sound, Bass, Lead..., with the user's of that name
+- A device's row lists the presets of its folder in Phazite's presets and in the user's as one list: one of Phazite's
+  devices' is the folder of its name ("Synth"), a plug-in's the folder of its name in `Plug-ins` ("Plug-ins/Reverb"), so
+  that a plug-in named as one of Phazite's devices has presets of its own. Their folders first, one of each name (Phazite's kinds of sound, Bass, Lead..., with the user's of that name
   inside), then the presets by name, with no heading or mark between Phazite's and the user's; of one name, the user's
   first. A folder there opens to the same folder of both. Folders are matched without regard to case, in each presets'
   folder as the index has them: a user's `synth` or `Synth/bass` is the Synth's, and its Bass's, on every system.
 - A row lists its folder, not the presets' devices: a preset saved (through Save Preset's dialog) into another device's
-  folder shows under that folder's device. A plug-in named as one of Phazite's devices ("Reverb") shares its folder,
-  and so its presets (docs/known-bugs.md).
+  folder shows under that folder's device.
 - A device's row shows a chevron only while it has presets, as the index counts them (no disk on the message thread):
   a device without any opens to nothing. While the index is first made the rows show none, and gain them once it is in.
   Where the index doesn't hold a presets' folder that is there whole (a library larger than it holds: 50,000 sounds,
@@ -88,9 +88,10 @@ selected sound and the preview's controls. The places at the top of the tree, in
 - The containers' presets are in one folder, `Containers`: those of instrument containers at its top show under
   Instrument Container, the others at its top under Container; a folder in it shows under both.
 - **Other Presets,** after Track Presets, shows only while it holds something, as the index has it (no listing to decide
-  it): the presets at the top of the user's presets' folder, and each folder there named for no device listed, nor
-  `Containers` nor `Tracks` (a plug-in not scanned yet, as after a fresh install or a settings reset, or one removed). It
-  opens as a folder does. Once the plug-in is scanned, its folder leaves Other Presets and shows under the plug-in's
+  it): the presets at the top of the user's presets' folder, and each folder there named for none of Phazite's devices,
+  nor `Containers`, `Tracks` or `Plug-ins`; and in `Plug-ins`, its presets and each folder named for no plug-in scanned
+  (a plug-in not scanned yet, as after a fresh install or a settings reset, or one removed), shown by the plug-in's name,
+  never `Plug-ins` itself. It opens as a folder does. Once the plug-in is scanned, its folder leaves Other Presets and shows under the plug-in's
   row, with no restart (the scan's list changing tells the library, which tells the browser). Phazite's own presets are
   all in their devices' folders: the test that walks every one of them and the user's of each kind finds each in the
   tree.

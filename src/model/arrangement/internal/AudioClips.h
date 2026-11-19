@@ -116,7 +116,10 @@ stretch::Settings getClipStretch (const Song&, ClipID);
 bool isRendered (const Song&, ClipID);
 
 // The file Phazite renders a file into with some settings: in the song's cache folder (a project's Cache folder), named
-// for the file and the settings, so that clips that play a file alike share one.
+// for the file's identity on the disk (its path, size and when it was written, asked at most once a second:
+// model/engine/AudioFiles.h) and the settings, so that clips that play a file alike share one, and a file written again in
+// its place has a render of its own made (the old one is never asked for again, and goes as the cache is purged:
+// ClipRenders.h). Message thread.
 juce::File getRenderFile (const Song&, const juce::File& source, const stretch::Settings&);
 
 // What the start of the name of every render file is, to tell them from the rest of the Cache folder.

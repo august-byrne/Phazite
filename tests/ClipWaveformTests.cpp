@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -33,6 +34,32 @@ juce::File writeBurst (const juce::File& file, double seconds, double from, doub
         writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
 
     return file;
+}
+
+// Writes a tone over a file in its place, as long as it was, without deleting it first (a thumbnail's reader may still hold
+// it open, which Windows lets write to but not delete), and gives it a modification time a minute later.
+void writeToneInPlace (const juce::File& file, double seconds, float amplitude)
+{
+    constexpr double sampleRate = 44100.0;
+    const auto modified = file.getLastModificationTime();
+    juce::AudioBuffer<float> buffer (1, (int) (seconds * sampleRate));
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+        buffer.setSample (0, i, amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / sampleRate));
+
+    {
+        auto out = std::make_unique<juce::FileOutputStream> (file);
+        REQUIRE (out->openedOk());
+        REQUIRE (out->setPosition (0));
+        REQUIRE (out->truncate().wasOk());
+        std::unique_ptr<juce::OutputStream> stream = std::move (out);
+
+        if (auto writer = juce::WavAudioFormat().createWriterFor (
+                stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (16)))
+            writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+    }
+
+    REQUIRE (file.setLastModificationTime (modified + juce::RelativeTime::minutes (1.0)));
 }
 
 // How many pixels of an image's columns, from one to another, a waveform lit.
@@ -90,6 +117,69 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
     // Another waveform of the same file has its levels at once, from the cache.
     auto again = make (context, clips[0], {});
     CHECK (countLit (paint (*again, span), 0, 190) > 190 * 10);
+
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A clip's waveform shows its file anew once an ask of the disk finds it written again, and a paint never asks the disk "
+           "(known bug 198)")
+{
+    // The second review of known bug 198: each paint asked the disk about the clip's file, twice at every paint for a file
+    // that isn't there (which the record of identities never trusts, model/engine/AudioFiles.h), and a file written again
+    // showed only at the clip's next paint. Now a paint reads what the record knows, and the record's listeners tell the
+    // waveform of a file found written again (by the player's next plan, here an ask as it makes).
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, &song);
+
+    // A second of a loud tone: two beats at 120 BPM, its file asked about as a plan asks.
+    const auto track = phazite::getTrackIDs (song).front();
+    const auto clips = phazite::importFiles (
+        context, { phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 1.0, 220.0, 0.9f).getFullPathName() }, track,
+        phazite::BeatPosition());
+    REQUIRE (clips.size() == 1);
+    const auto file = phazite::getClipFile (song, phazite::findClipState (song, clips[0]));
+    phazite::askFileIdentity (file);
+
+    auto loads = 0;
+    auto waveform = phazite::getClipWaveformMaker() (context, clips[0], [&loads] { ++loads; });
+    REQUIRE (waveform != nullptr);
+    const phazite::BeatRange span { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (2.0) };
+    const auto lit = [&] { return countLit (paint (*waveform, span), 0, 400); };
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return lit() > 400 * 40; }));
+    phazite::test::dispatchPendingMessages(); // every level loaded
+
+    // Written again in its place, quiet, a minute later: the waveform is told to paint again as an ask finds it, and shows
+    // the file as it is now.
+    writeToneInPlace (file, 1.0, 0.05f);
+    const auto loadsBefore = loads;
+    phazite::askFileIdentity (file);
+    CHECK (loads > loadsBefore);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return lit() < 400 * 10; }));
+    CHECK (lit() > 0);
+
+    // A clip of a file that isn't there, painted again and again: the disk never asked.
+    const auto goneClips =
+        phazite::importFiles (context, { phazite::test::writeSound (temp.folder.getChildFile ("Gone.wav"), 1.0).getFullPathName() }, track,
+                              phazite::BeatPosition::fromBeats (4.0));
+    REQUIRE (goneClips.size() == 1);
+    const auto gone = phazite::getClipFile (song, phazite::findClipState (song, goneClips[0]));
+    REQUIRE (gone.deleteFile());
+    phazite::askFileIdentity (gone);
+    auto missing = phazite::getClipWaveformMaker() (context, goneClips[0], {});
+    REQUIRE (missing != nullptr);
+    const phazite::BeatRange goneSpan { phazite::BeatPosition::fromBeats (4.0), phazite::BeatPosition::fromBeats (6.0) };
+    paint (*missing, goneSpan);
+    const auto asked = phazite::countFileIdentityAsks();
+
+    for (int i = 0; i < 20; ++i)
+        paint (*missing, goneSpan);
+
+    CHECK (phazite::countFileIdentityAsks() == asked);
 
     setSong (context, nullptr);
 }

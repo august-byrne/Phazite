@@ -435,7 +435,7 @@ TEST_CASE ("Every preset that comes with Phazite, and a user's of each kind, sho
             // And kept where no device's row lists them: one at the top of the user's presets, one in the folder of a
             // plug-in not scanned, and an effect's saved (through Save Preset's dialog) into an instrument's folder.
             writeDevicePreset (own.getChildFile ("Loose.phazitepreset"), "phaziteEq", "EQ", false);
-            writeDevicePreset (own.getChildFile ("Faraway Synth/Big Lead.phazitepreset"), "plugin", "Faraway Synth", true);
+            writeDevicePreset (own.getChildFile ("Plug-ins/Faraway Synth/Big Lead.phazitepreset"), "plugin", "Faraway Synth", true);
             writeDevicePreset (own.getChildFile ("Synth/EQ In Synth.phazitepreset"), "phaziteEq", "EQ", false);
         },
         phazite::test::getFactoryPresetsFolder());
@@ -515,7 +515,7 @@ TEST_CASE ("Every preset that comes with Phazite, and a user's of each kind, sho
     CHECK (homeOf ("Tracks/Lead Track.phazitepreset")->place == Kind::trackPresets);
 
     // Those of no device in Other Presets; one in another device's folder under that device, whatever device it is for.
-    for (const auto* path : { "Loose.phazitepreset", "Faraway Synth/Big Lead.phazitepreset" })
+    for (const auto* path : { "Loose.phazitepreset", "Plug-ins/Faraway Synth/Big Lead.phazitepreset" })
     {
         CAPTURE (path);
         REQUIRE (homeOf (path).has_value());
@@ -525,7 +525,8 @@ TEST_CASE ("Every preset that comes with Phazite, and a user's of each kind, sho
     REQUIRE (homeOf ("Synth/EQ In Synth.phazitepreset").has_value());
     CHECK (homeOf ("Synth/EQ In Synth.phazitepreset")->place == Kind::instruments);
     CHECK (homeOf ("Synth/EQ In Synth.phazitepreset")->deviceFolder == juce::String ("Synth"));
-    CHECK (model.leadsTo (model.getContents (presets.find (Kind::otherPresets)).items[0], own ("Faraway Synth/Big Lead.phazitepreset")));
+    CHECK (model.leadsTo (model.getContents (presets.find (Kind::otherPresets)).items[0],
+                          own ("Plug-ins/Faraway Synth/Big Lead.phazitepreset")));
 
     // With a filter set, presets have none of its values: no place with presets shows.
     CHECK (model.getPlaces ({ .type = "Kick" }).empty());
@@ -569,15 +570,16 @@ TEST_CASE (
     CHECK_FALSE (getTitles (model.getPlaces()).contains ("Other Presets"));
 
     // One saved for a plug-in not scanned yet (after a fresh install, or a plug-in removed): in Other Presets, in its folder.
-    writeDevicePreset (presets.own.getChildFile ("Faraway Echo/Wide.phazitepreset"), "plugin", "Faraway Echo", false);
+    const auto wide = presets.own.getChildFile ("Plug-ins/Faraway Echo/Wide.phazitepreset");
+    writeDevicePreset (wide, "plugin", "Faraway Echo", false);
     presets.library.refresh();
     REQUIRE (phazite::test::runTimersUntil ([&presets] { return ! presets.library.isIndexing(); }));
     REQUIRE (getTitles (model.getPlaces()).contains ("Other Presets"));
     const auto other = model.getContents (presets.find (Kind::otherPresets));
     REQUIRE (getNames (other.items) == juce::StringArray { "Faraway Echo" });
     CHECK (getNames (model.getContents (other.items[0]).items) == juce::StringArray { "Wide" });
-    REQUIRE (model.findHome (presets.own.getChildFile ("Faraway Echo/Wide.phazitepreset")).has_value());
-    CHECK (model.findHome (presets.own.getChildFile ("Faraway Echo/Wide.phazitepreset"))->place == Kind::otherPresets);
+    REQUIRE (model.findHome (wide).has_value());
+    CHECK (model.findHome (wide)->place == Kind::otherPresets);
 
     // The plug-in scanned: its folder is its row's, and Other Presets goes, with nothing read again.
     {
@@ -586,14 +588,84 @@ TEST_CASE (
         const auto row = presets.findDevice (Kind::effects, "Faraway Echo");
         CHECK (model.getContents (presets.find (Kind::effects)).getPresets (row) == 1);
         CHECK (getNames (model.getContents (row).items) == juce::StringArray { "Wide" });
-        const auto home = model.findHome (presets.own.getChildFile ("Faraway Echo/Wide.phazitepreset"));
+        const auto home = model.findHome (wide);
         REQUIRE (home.has_value());
         CHECK (home->place == Kind::effects);
-        CHECK (home->deviceFolder == juce::String ("Faraway Echo"));
+        CHECK (home->deviceFolder == juce::String ("Plug-ins/Faraway Echo"));
     }
 
     // Gone again (removed): back in Other Presets.
     CHECK (getTitles (model.getPlaces()).contains ("Other Presets"));
+}
+
+TEST_CASE ("A plug-in named as one of Phazite's devices has its presets in the plug-ins' folder, under its own row alone; Other "
+           "Presets shows those of plug-ins not scanned by their names, not the plug-ins' folder (known bug 209)")
+{
+    // Phazite's reverb's preset, and presets of two plug-ins named as Phazite's devices: a reverb that is scanned, and an EQ
+    // that isn't (removed, or not scanned yet), each in its folder among the plug-ins' (PresetModel.h: getPresetFolderName()).
+    PresetLibraries presets (
+        [] (const juce::File&, const juce::File& own)
+        {
+            writeDevicePreset (own.getChildFile ("Reverb/Room.phazitepreset"), "phaziteReverb", "Reverb", false);
+            writeDevicePreset (own.getChildFile ("Plug-ins/Reverb/Big Hall.phazitepreset"), "plugin", "Reverb", false);
+            writeDevicePreset (own.getChildFile ("Plug-ins/EQ/Gone.phazitepreset"), "plugin", "EQ", false);
+        });
+
+    auto& model = presets.model;
+    const auto findReverb = [&presets, &model] (bool builtIn)
+    {
+        for (const auto& item : model.getContents (presets.find (Kind::effects)).items)
+            if (item.name == "Reverb" && item.device.has_value() && item.device->isBuiltIn == builtIn)
+                return item;
+
+        FAIL ("no reverb");
+        return phazite::LibraryItem {};
+    };
+
+    // The EQ not scanned: in Other Presets, by its name; the plug-ins' folder isn't a row there, nor Phazite's EQ's row
+    // the plug-in's preset.
+    {
+        REQUIRE (getTitles (model.getPlaces()).contains ("Other Presets"));
+        const auto other = model.getContents (presets.find (Kind::otherPresets));
+        REQUIRE (getNames (other.items) == juce::StringArray { "EQ", "Reverb" });
+        CHECK (getNames (model.getContents (other.items[0]).items) == juce::StringArray { "Gone" });
+        CHECK (model.getContents (presets.findDevice (Kind::effects, "EQ")).items.empty());
+    }
+
+    // The reverb scanned: its row holds its own preset, and Phazite's reverb's its own; Other Presets the EQ's folder alone.
+    const ScannedPlugin reverb ("Reverb");
+    const auto own = findReverb (true), plugin = findReverb (false);
+    CHECK (phazite::BrowserModel::getShelf (plugin)->folderName == juce::String ("Plug-ins/Reverb"));
+    const auto effects = model.getContents (presets.find (Kind::effects));
+    CHECK (effects.getPresets (own) == 1);
+    CHECK (effects.getPresets (plugin) == 1);
+    CHECK (getNames (model.getContents (own).items) == juce::StringArray { "Room" });
+    CHECK (getNames (model.getContents (plugin).items) == juce::StringArray { "Big Hall" });
+    CHECK (getNames (model.getContents (presets.find (Kind::otherPresets)).items) == juce::StringArray { "EQ" });
+    CHECK (model.getDeviceFolders().contains ("Plug-ins/Reverb"));
+
+    // Where each saved one shows: under its own device's row; the EQ's in Other Presets.
+    const auto home = model.findHome (presets.own.getChildFile ("Plug-ins/Reverb/Big Hall.phazitepreset"));
+    REQUIRE (home.has_value());
+    CHECK (home->place == Kind::effects);
+    CHECK (home->deviceFolder == juce::String ("Plug-ins/Reverb"));
+    const auto room = model.findHome (presets.own.getChildFile ("Reverb/Room.phazitepreset"));
+    REQUIRE (room.has_value());
+    CHECK (room->deviceFolder == juce::String ("Reverb"));
+    const auto gone = model.findHome (presets.own.getChildFile ("Plug-ins/EQ/Gone.phazitepreset"));
+    REQUIRE (gone.has_value());
+    CHECK (gone->place == Kind::otherPresets);
+
+    // What tells Other Presets' rows: a folder at the top named as one of Phazite's devices is that device's; one in the
+    // plug-ins' folder named as a plug-in scanned is that plug-in's; the plug-ins' folder itself none.
+    const auto folders = model.getDeviceFolders();
+    const auto folder = [] (const juce::String& name)
+    { return phazite::LibraryItem { .kind = phazite::LibraryItem::Kind::folder, .name = name }; };
+    CHECK_FALSE (phazite::BrowserModel::isOtherPreset (folder ("Reverb"), folders, false));
+    CHECK_FALSE (phazite::BrowserModel::isOtherPreset (folder ("Plug-ins"), folders, false));
+    CHECK_FALSE (phazite::BrowserModel::isOtherPreset (folder ("Reverb"), folders, true));
+    CHECK (phazite::BrowserModel::isOtherPreset (folder ("EQ"), folders, true));
+    CHECK (phazite::BrowserModel::isOtherPreset (folder ("Faraway"), folders, false));
 }
 
 TEST_CASE ("Where the index doesn't hold the presets' folders whole, every device's row can open, and opens to its presets from the disk")

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AudioFiles.h"
+#include "devices/core/Clock.h"
 #include "devices/core/Processor.h"
 #include "model/base/Json.h"
 
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -528,5 +532,111 @@ AudioFileInfo getAudioFileInfo (const juce::File& file)
     }
 
     return entry.info;
+}
+
+//==============================================================================
+namespace
+{
+    std::atomic<std::uint64_t> filesWritten { 0 }; // noteFilesWritten()'s count
+    std::uint64_t identitiesAsked = 0;             // countFileIdentityAsks()'s count
+
+    // What is known of each file's identity, by its path, and when the disk was asked (none: ask at the next
+    // getFileIdentity()); with the count of noteFilesWritten() as it was last seen, and those who hear of a change.
+    struct KnownIdentity
+    {
+        juce::String identity;
+        std::optional<juce::uint32> askedAt;
+    };
+
+    struct Identities
+    {
+        std::map<juce::String, KnownIdentity> known;
+        std::uint64_t writtenSeen = 0;
+        juce::ListenerList<FileIdentityListener> listeners;
+    };
+
+    Identities& getIdentities()
+    {
+        static Identities identities;
+        return identities;
+    }
+} // namespace
+
+juce::String askFileIdentity (const juce::File& file)
+{
+    // By its path, when it was written and how long it is: a file written again at the same path (a track frozen again) is
+    // another.
+    ++identitiesAsked;
+    const auto modified = file.getLastModificationTime().toMilliseconds();
+    const auto size = file.getSize();
+    const auto path = file.getFullPathName();
+    const auto identity = path + "|" + juce::String (modified) + "|" + juce::String (size);
+    auto& known = getIdentities().known[path];
+    const auto changed = known.identity.isNotEmpty() && known.identity != identity;
+
+    // One that isn't there (no time, no length) is asked about every time: a render not made yet is looked for again.
+    known.identity = identity;
+    known.askedAt = modified != 0 || size != 0 ? std::optional (devices::Clock::getMillisecondCounter()) : std::nullopt;
+
+    if (changed)
+        getIdentities().listeners.call ([&file] (FileIdentityListener& l) { l.fileIdentityChanged (file); });
+
+    return identity;
+}
+
+juce::String getFileIdentity (const juce::File& file, bool* asked)
+{
+    auto& identities = getIdentities();
+
+    if (const auto written = filesWritten.load(); written != identities.writtenSeen)
+    {
+        identities.writtenSeen = written;
+
+        for (auto& entry : identities.known)
+            entry.second.askedAt.reset();
+    }
+
+    const auto now = devices::Clock::getMillisecondCounter();
+
+    if (const auto known = identities.known.find (file.getFullPathName());
+        known != identities.known.end() && known->second.askedAt.has_value() && now - *known->second.askedAt < trustFilesMilliseconds)
+    {
+        if (asked != nullptr)
+            *asked = false;
+
+        return known->second.identity;
+    }
+
+    if (asked != nullptr)
+        *asked = true;
+
+    return askFileIdentity (file);
+}
+
+juce::String findKnownFileIdentity (const juce::File& file)
+{
+    const auto& known = getIdentities().known;
+    const auto found = known.find (file.getFullPathName());
+    return found != known.end() ? found->second.identity : juce::String();
+}
+
+std::uint64_t countFileIdentityAsks() noexcept
+{
+    return identitiesAsked;
+}
+
+void noteFilesWritten() noexcept
+{
+    ++filesWritten;
+}
+
+void addFileIdentityListener (FileIdentityListener& listener)
+{
+    getIdentities().listeners.add (&listener);
+}
+
+void removeFileIdentityListener (FileIdentityListener& listener)
+{
+    getIdentities().listeners.remove (&listener);
 }
 } // namespace phazite

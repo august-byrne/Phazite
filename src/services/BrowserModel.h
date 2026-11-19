@@ -65,7 +65,8 @@ struct BrowserContents
 
 // A list of presets the browser shows under a row (docs/design/browser.md), as Library::getPresetFolders() gives the folder
 // of its name: the user's presets and Phazite's in one list. A device's, under its row in Instruments or Effects, are in the
-// folder of its name ("EQ"); the containers', in Containers, show under Instrument Container (those of instrument
+// folder getPresetFolderName() names for it ("EQ", or a plug-in's "Plug-ins/Reverb"); the containers', in Containers, show
+// under Instrument Container (those of instrument
 // containers at its top) or Container (the others at its top: a folder in it shows under both); the tracks', in Tracks,
 // under Track Presets.
 struct PresetShelf
@@ -161,13 +162,16 @@ public:
     static std::optional<int> countPresets (const LibraryIndex&, const juce::Array<juce::File>& folders, const PresetShelf&,
                                             const std::function<bool (const juce::File&)>& listedFromIndex);
 
-    // The folders of the devices' presets, one for each device listed (as getShelf() names them: "EQ", a plug-in's name), in
-    // the order the devices are listed: what tells a folder of no device's (Other Presets) from the others. No disk.
+    // The folders of the devices' presets, one for each device listed (as getShelf() names them: "EQ", or a plug-in's
+    // "Plug-ins/Reverb"), in the order the devices are listed: what tells a folder of no device's (Other Presets) from the
+    // others. No disk.
     juce::StringArray getDeviceFolders() const;
 
-    // Whether an item at the top of the user's presets' folder shows in Other Presets: a preset, or a folder named for no
-    // device listed, and neither Containers nor Tracks (without regard to case, as the folders are found).
-    static bool isOtherPreset (const LibraryItem&, const juce::StringArray& deviceFolders);
+    // Whether an item at the top of the user's presets' folder, or at the top of the plug-ins' folder in it
+    // (pluginPresetsFolder), shows in Other Presets: a preset; at the top, a folder named for none of Phazite's devices
+    // listed, and neither Containers, Tracks nor the plug-ins' folder; in the plug-ins' folder, one named for no plug-in
+    // scanned, shown by its name, the plug-in's (without regard to case, as the folders are found).
+    static bool isOtherPreset (const LibraryItem&, const juce::StringArray& deviceFolders, bool inPluginsFolder);
 
     // Where a preset of the presets' folders shows: the place at the top it is under (Instruments, Effects, Track Presets or
     // Other Presets), the container's row it is in under that, if any, and the folder name of the device whose row it is
@@ -285,9 +289,11 @@ private:
     // Instruments' or Effects' rows: the devices, each with how many presets its row holds, and the containers' row while it
     // holds some.
     void describeDevices (BrowserContents&, bool instruments) const;
-    int countForRow (const PresetShelf&) const; // countPresets(), or while the index doesn't know, -1 (none while it is made)
-    bool isIndexFirstMade() const;              // the index not made yet: none of its roots walked, its walk under way
-    bool hasOtherPresets() const;               // Other Presets' row: what it holds, from the index; or, unknown, shown
+    int countForRow (const PresetShelf&) const;             // countPresets(), or while the index doesn't know, -1 (none while it is made)
+    bool isIndexFirstMade() const;                          // the index not made yet: none of its roots walked, its walk under way
+    bool hasOtherPresets() const;                           // Other Presets' row: what it holds, from the index; or, unknown, shown
+    juce::Array<juce::File> getOtherPresetsFolders() const; // what Other Presets lists, side by side: the user's presets' folder
+                                                            // and the plug-ins' folder in it
     FilteredPlaces assemble (const BrowserFilters&, std::vector<BrowserPlace> places, std::vector<Listed> ofIndex) const;
     BrowserContents describeSearch (const juce::String& query, const BrowserFilters&, SearchResults) const;
 };

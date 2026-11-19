@@ -8,6 +8,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 
 #include <algorithm>
+#include <set>
 #include <span>
 #include <utility>
 
@@ -32,15 +33,28 @@ namespace
         return folder.createDirectory().wasOk() && folder.isDirectory() && folder.hasWriteAccess();
     }
 
-    // The renders the song's clips play, each with what it is made from.
-    std::map<juce::File, Recipe> getNeededRenders (const Song& song)
+    // The renders the song's clips play, each with what it is made from: named for their sources as last asked about
+    // (getRenderFile()), or as the disk says now if asked to ask.
+    std::map<juce::File, Recipe> getNeededRenders (const Song& song, bool askSources = false)
     {
         std::map<juce::File, Recipe> needed;
+        std::set<juce::String> asked;
 
         for (const auto& clipState : getClipStates (song))
-            if (isAudioState (clipState))
-                if (const auto settings = getClipStretch (song, clipState); ! stretch::isUnchanged (settings))
-                    needed.emplace (getPlayedFile (song, clipState), Recipe { getClipFile (song, clipState), settings });
+        {
+            if (! isAudioState (clipState))
+                continue;
+
+            if (const auto settings = getClipStretch (song, clipState); ! stretch::isUnchanged (settings))
+            {
+                const auto source = getClipFile (song, clipState);
+
+                if (askSources && asked.insert (source.getFullPathName()).second)
+                    askFileIdentity (source);
+
+                needed.emplace (getPlayedFile (song, clipState), Recipe { source, settings });
+            }
+        }
 
         return needed;
     }
@@ -119,7 +133,9 @@ bool renderMissingClipAudio (const Song& song, const std::function<bool()>& shou
     auto allRendered = true;
     juce::Array<juce::File> made;
 
-    for (const auto& [render, recipe] : getNeededRenders (song))
+    // Their sources asked about now, as the fresh player of the render that plays them next asks about each file it doesn't
+    // know yet: each render named as that player will name it (a source written again within the second, under another).
+    for (const auto& [render, recipe] : getNeededRenders (song, true))
     {
         if (render.existsAsFile())
             continue;
@@ -160,12 +176,14 @@ ClipRenders::ClipRenders (const Song& s)
       jobs ("Phazite clip renders", 2, juce::Thread::Priority::low)
 {
     state.addListener (this);
+    addFileIdentityListener (*this);
     update();
 }
 
 ClipRenders::~ClipRenders()
 {
     state.removeListener (this);
+    removeFileIdentityListener (*this);
     stopTimer();
     jobs.removeAll (true); // each stops between blocks, and is waited for
     cancelPendingUpdate();
@@ -183,11 +201,6 @@ bool ClipRenders::isRendering() const
 bool ClipRenders::hasFailed (const juce::File& render) const
 {
     return failed.find (render) != failed.end();
-}
-
-ClipRenders::Source ClipRenders::Source::of (const juce::File& file)
-{
-    return { file.existsAsFile(), file.getLastModificationTime(), file.getSize() };
 }
 
 ClipRenders::Progress ClipRenders::getProgress() const
@@ -243,15 +256,11 @@ void ClipRenders::update()
         if (render.existsAsFile() || running.find (render) != running.end())
             continue;
 
-        // One that failed waits for its source to change, or, for one that failed as its folder couldn't be written, for
-        // the folder to be one that can (which a check in the background finds: checkFailedAgain(), and forgets it then).
-        if (const auto found = failed.find (render); found != failed.end())
-        {
-            if (Source::of (recipe.source) == found->second.source)
-                continue;
-
-            failed.erase (found);
-        }
+        // One that failed waits for its source to change, which names another render, or, for one that failed as its folder
+        // couldn't be written, for the folder to be one that can (which a check in the background finds:
+        // checkFailedAgain(), and forgets it then).
+        if (failed.contains (render))
+            continue;
 
         ++rendersStarted;
         auto made = std::make_shared<Render>();
@@ -262,11 +271,10 @@ void ClipRenders::update()
         jobs.add (
             [this, toMake = recipe, file = render, shared = std::move (made)] (const BackgroundJobs::ShouldStop& shouldStop)
             {
-                const auto source = Source::of (toMake.source);
                 const auto stopping = [&] { return shouldStop() || shared->stopped.load(); };
                 const auto rendered = renderClipAudio (toMake.source, toMake.settings, file, stopping, &shared->written);
                 const auto failedNow = ! rendered && ! stopping();
-                jobFinished ({ file, failedNow, source, failedNow && ! canWriteInto (file.getParentDirectory()) });
+                jobFinished ({ file, failedNow, failedNow && ! canWriteInto (file.getParentDirectory()) });
             });
     }
 
@@ -382,7 +390,7 @@ void ClipRenders::handleAsyncUpdate()
         if (job.render.existsAsFile())
             made.add (job.render);
         else if (job.failed)
-            failed[job.render] = { job.source, job.folderShut }; // not tried again until its source or its folder changes
+            failed[job.render] = { job.folderShut }; // not tried again until its source or its folder changes
     }
 
     announce (song, made);
@@ -412,6 +420,12 @@ void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int
 {
     // A tempo change taken away, or a clip's last warp marker: the clips under it play at another speed now, from a render
     // of their own.
+    clipsChanged();
+}
+
+void ClipRenders::fileIdentityChanged (const juce::File&)
+{
+    // Whichever file it is: the renders the clips need are found again as they would be after a change of the clips.
     clipsChanged();
 }
 

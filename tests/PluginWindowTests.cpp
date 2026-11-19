@@ -96,13 +96,13 @@ TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into
 
     // Presets saved for it (as Save Preset... does, once its dialog has a file) in its folder and a folder in it; and one of
     // another device, put there by hand, which it doesn't offer.
-    CHECK (phazite::getPresetFolderName (context, studio.plugin) == juce::String ("Test Effect"));
+    CHECK (phazite::getPresetFolderName (context, studio.plugin) == juce::String ("Plug-ins/Test Effect"));
     TestPlugin::setGain (song, studio.plugin, 0.9f);
-    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Test Effect/Loud")));
+    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Plug-ins/Test Effect/Loud")));
     TestPlugin::setGain (song, studio.plugin, 0.3f);
-    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Test Effect/Soft/Quiet")));
+    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Plug-ins/Test Effect/Soft/Quiet")));
     const auto eq = studio.song.addEffect (studio.song.firstTrack, "phaziteEq");
-    REQUIRE (phazite::saveDevicePreset (context, eq, studio.presetFile ("Test Effect/Not This One")));
+    REQUIRE (phazite::saveDevicePreset (context, eq, studio.presetFile ("Plug-ins/Test Effect/Not This One")));
     TestPlugin::setGain (song, studio.plugin, 0.5f);
     song.getUndoManager().clearUndoHistory();
 

@@ -262,14 +262,24 @@ public:
     // once a folder not in yet is late (a drive that doesn't answer), listed gets what the others gave meanwhile, and
     // isPartial() says so, then all of it once that folder's rows come. Looked at again, those the index knows count as it
     // has them until their reads differ, and listed gets nothing while none differs.
-    std::unique_ptr<FolderListing> startListing (const juce::Array<juce::File>& folders, Listed) const;
-    std::unique_ptr<FolderListing> checkListing (const juce::Array<juce::File>& folders, Listed) const;
+    // Several folders are one (the same folder in the user's presets and in Phazite's: merged), or each its own, side by side
+    // (Other Presets: the user's presets' folder and the plug-ins' folder in it, whose rows may share a name: joined).
+    enum class Together
+    {
+        merged,
+        joined
+    };
+
+    std::unique_ptr<FolderListing> startListing (const juce::Array<juce::File>& folders, Listed, Together = Together::merged) const;
+    std::unique_ptr<FolderListing> checkListing (const juce::Array<juce::File>& folders, Listed, Together = Together::merged) const;
 
     // What several folders hold, as one, in listFolder()'s order: their folders, one of each name (the first folder's), then
-    // their files by name, those of one name in the folders' order; none while none of them is there. And the same read from
-    // the disk on the calling thread.
-    static std::optional<std::vector<LibraryItem>> mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>&);
-    std::optional<std::vector<LibraryItem>> listFolders (const juce::Array<juce::File>&) const;
+    // their files by name, those of one name in the folders' order; none while none of them is there. Joined, the same with
+    // every folder of each kept, those of one name in the folders' order. And the same read from the disk on the calling
+    // thread.
+    static std::optional<std::vector<LibraryItem>> mergeListings (const std::vector<std::optional<std::vector<LibraryItem>>>&,
+                                                                  Together = Together::merged);
+    std::optional<std::vector<LibraryItem>> listFolders (const juce::Array<juce::File>&, Together = Together::merged) const;
 
     // Whether a folder is being read for a listing, or waits to be (tests). Message thread.
     bool isReadingFolders() const;
@@ -574,7 +584,7 @@ private:
 
     std::unique_ptr<FolderListing> listFolderOf (const juce::File& folder, Listed, std::optional<std::vector<LibraryItem>> shown,
                                                  bool againstIndex) const;
-    std::unique_ptr<FolderListing> listFoldersOf (const juce::Array<juce::File>& folders, Listed, bool check) const;
+    std::unique_ptr<FolderListing> listFoldersOf (const juce::Array<juce::File>& folders, Listed, bool check, Together) const;
 
     // What the index knows of a folder, without the disk, as isListedFromIndex() allows: its rows, where it holds it whole;
     // none (not there), in a presets' folder its walk didn't find there; else nothing known.

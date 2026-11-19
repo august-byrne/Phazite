@@ -41,6 +41,7 @@
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -347,8 +348,11 @@ TEST_CASE ("Performance gate: an edit's plan asks the disk about the files of th
 {
     // Known bug 124: every plan asked the disk about each audio clip's file twice, and made the tempo map several times for
     // each clip. Now a track's audio is placed again only once its clips (or the tempo) changed, and the disk is asked
-    // about a file again only for a track whose clips changed, once however many of its clips play it. Four tracks of ten
-    // clips, each track's of a file of its own, beside the first track's MIDI clip.
+    // about a file again only for a track whose clips changed, once however many of its clips play it; and about every file
+    // the song plays once a second has passed since it last did (known bug 198: a file written again in its place by another
+    // program played as first read), once however many of its clips play it, by Phazite's clock, held here. Four tracks of
+    // ten clips, each track's of a file of its own, beside the first track's MIDI clip.
+    phazite::test::HeldClock clock;
     phazite::test::TestSong s;
     std::vector<phazite::TrackID> tracks;
     std::vector<phazite::ClipID> clips;
@@ -389,6 +393,16 @@ TEST_CASE ("Performance gate: an edit's plan asks the disk about the files of th
     phazite::deleteClips (s.context, { clips[12] }, false);
     REQUIRE (plans.take() == 1);
     CHECK (take() == 1); // the second track's file, for its nine clips left
+
+    // A second on: the next edit's plan asks about each file once, and the one after it about none.
+    clock.advance (phazite::trustFilesMilliseconds);
+    s.addNote (midi, 62, 1.0, 1.0);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 4);
+
+    s.addNote (midi, 64, 2.0, 1.0);
+    REQUIRE (plans.take() == 1);
+    CHECK (take() == 0);
 }
 
 //==============================================================================

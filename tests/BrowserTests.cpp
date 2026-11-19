@@ -2,6 +2,7 @@
 // The browser and the plug-in picker, driven as the user would: places and folders, previews, search, favorites, and
 // putting items into the song with Enter, a drop or the picker (roadmap step 1.5).
 #include "SoundPackTestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
@@ -9,9 +10,11 @@
 #include "model/engine/Preview.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/Preview.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -1859,7 +1862,7 @@ TEST_CASE (
     "Other Presets shows the user's presets of no device, a save there is shown, and a plug-in scanned takes its folder, with no restart")
 {
     PresetScreen screen;
-    writeDevicePreset (screen.own.getChildFile ("Faraway Echo/Wide.phazitepreset"), "plugin", "Faraway Echo", false);
+    writeDevicePreset (screen.own.getChildFile ("Plug-ins/Faraway Echo/Wide.phazitepreset"), "plugin", "Faraway Echo", false);
     screen.refresh();
     screen.makeBrowser();
 
@@ -1904,4 +1907,71 @@ TEST_CASE (
     const ScannedPlugin echo ("Faraway Echo");
     screen.library.noteDevicesChanged();
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.rows().contains ("Other Presets"); }));
+}
+
+TEST_CASE ("A plug-in named as one of Phazite's devices saves its presets apart, among the plug-ins': its menu lists them, and "
+           "Phazite's device's menu and Swap list its own alone (known bug 209)")
+{
+    // Phazite's reverb, and a plug-in called Reverb (not installed here: it plays nothing, but is saved as it is), on a track.
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto reverb = song.addEffect (song.firstTrack, "phaziteReverb");
+    juce::PluginDescription description;
+    description.name = "Reverb";
+    description.pluginFormatName = "VST3";
+    description.manufacturerName = "Elsewhere";
+    description.fileOrIdentifier = "C:/Plug-ins/Reverb.vst3";
+    const auto plugin =
+        phazite::insertDeviceState (s, song.firstTrack, phazite::makeDeviceState (s, phazite::makeDeviceType (description)));
+    REQUIRE (plugin.isValid());
+
+    // Each saved where its Save Preset... saves it: the plug-in's among the plug-ins'.
+    phazite::test::TemporaryFolder temp;
+    const auto own = temp.folder.getChildFile ("Presets");
+    const auto save = [&song, &own] (phazite::DeviceID device, const juce::String& name)
+    {
+        const auto file =
+            own.getChildFile (phazite::getPresetFolderName (song.context, device)).getChildFile (name + phazite::presetExtension);
+        REQUIRE (file.getParentDirectory().createDirectory());
+        REQUIRE (phazite::saveDevicePreset (song.context, device, file));
+        return file;
+    };
+
+    CHECK (save (plugin, "Big Hall") == own.getChildFile ("Plug-ins/Reverb/Big Hall.phazitepreset"));
+    CHECK (save (reverb, "Room") == own.getChildFile ("Reverb/Room.phazitepreset"));
+
+    phazite::SoundPack soundPack { temp.folder.getChildFile ("Packs") }; // not installed
+    phazite::Settings settings;
+    phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, temp.folder.getChildFile ("Factory") };
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }));
+
+    // Each one's presets menu (a device's Presets button), its own alone.
+    const auto menuOf = [&library, &song] (phazite::DeviceID device)
+    {
+        juce::StringArray items;
+        const auto menu = phazite::ui::makeDevicePresetMenu (library, phazite::getPresetFolderName (song.context, device), "Reverb",
+                                                             [] (const juce::File&) {});
+
+        for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+            if (! item.getItem().isSectionHeader)
+                items.add (item.getItem().text);
+
+        return items;
+    };
+
+    CHECK (menuOf (reverb) == juce::StringArray { "Room" });
+    CHECK (menuOf (plugin) == juce::StringArray { "Big Hall" });
+
+    // Phazite's reverb's Swap: its own preset alone.
+    const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser { library, *previewer, soundPack, settings, song.context };
+    phazite::test::TestWindow window { browser, 320, 700 };
+    phazite::test::dispatchPendingMessages();
+    browser.startSwap (reverb);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    CHECK (getRows (browser) == juce::StringArray { "Room, Reverb" });
+    window.pressKey (escapeKey);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (browser.isSwapping());
 }

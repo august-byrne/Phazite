@@ -406,8 +406,9 @@ its ID, a plug-in by what identifies it with its own state, and containers, modu
 them. The model makes the song's parts from it as it loads, with new IDs, so that a change in how the song keeps a
 device cannot break a saved preset. Presets carry no format version.
 
-- The user's presets are in the `Phazite/Presets` folder of the user's documents: a folder for each device ("EQ", or
-  a plug-in's name), `Containers` and `Tracks`.
+- The user's presets are in the `Phazite/Presets` folder of the user's documents: a folder for each of Phazite's devices
+  ("EQ"), one for each plug-in in `Plug-ins` ("Plug-ins/Reverb": a plug-in named as one of Phazite's devices keeps its
+  own), `Containers` and `Tracks` (`getPresetFolderName()`, `src/model/presets/PresetModel.h`).
 - The presets that come with Phazite are in a `presets` folder next to the app, by device and kind of sound. Nothing
   writes to them.
 - The browser shows the two as one, under what each is for: a device's under its row in Instruments or Effects, a
