@@ -7,11 +7,13 @@ commit that fixes it. Races and allocations on the audio thread in code Phazite 
 
 The entries keep the numbers they were given, so that the changelog, the tests and the commits that name them stay
 right: 19 to 43 were seen while the quality audit's priorities were fixed, 44 to 133 came from the audit itself, 134
-to 170 from the tests of stage 2 and the rest of stage 1, and those from 171 on were found while the known bugs were
-fixed (2026-11-15 and 16). That round fixed every entry but four, each of which says why it stays: one is
-the written reason of a test's exception, one waits for the owner's answer, one can only be built and tried on
-Linux, and one needs a file made by another program to show, and a saved value to fix. Each fix has a line in the
-[changelog](changelog.md), under "The known bugs". 191, a test file that fails in some runs on CI's Linux builds, came the day after (2026-11-17), with 190, which is fixed.
+to 170 from the tests of stage 2 and the rest of stage 1, those from 171 to 190 were found while the known bugs were
+fixed (2026-11-15 and 16), and those from 191 on since. Each fix has a line in the [changelog](changelog.md), under
+"The known bugs". A round on 2026-11-19 fixed what could be fixed without the owner (186, 198, 199, 200, 204 to 210)
+and entered what it and its reviews found (211 to 214). What stays, each entry saying why: 136 is the written reason of a
+test's exception; 137 and 197 wait for the owner's answer; 185, 191 and 213 can only be built and tried on Linux;
+196 turns on the deleting of what the versions hold, which needs a decision and a review of its own first; 211
+and 212 are new; and 214 is a fault of the compiler on CI, which waits for the owner's choice of what to do about it.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -141,3 +143,25 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   run the test on Linux with the plug-in's status and error said at each step (`TestSong::describePlugin()` shows
   how), and which of the two helpers the failed load was sent to (`getHelper()`'s second try in
   `src/model/plugins/PluginHost.cpp`).
+
+## The build
+
+- **214. The compiler of CI's Windows jobs (MSVC 19.52) gets some sums of beats wrong in optimized builds**
+  (2026-11-19, found through known bug 204; MSVC 19.51 on the owner's PC, GCC and Clang get them right). Seen, each in
+  a CI run: `BeatRange (std::max (a.getStart(), b.getStart()), std::min (a.getEnd(), b.getEnd()))` ending at its
+  start (windows-release and windows-profile: Consolidate over part of a clip lost its notes, 204); a test of such
+  sums crashing (windows-release); and, in a probe of single sums (windows-profile), `std::max (std::max (a, b),
+  std::min (c, d))` of four named `BeatPosition`s giving 0, and a `std::min` of two kept in a local giving 0: no
+  temporary in either, so it isn't the code's fault. The same sums with a plain class of one double, with doubles
+  and with strings came out right, and so did every one of them in the next run, after more probes were added to
+  the same file: which sum goes wrong depends on what is compiled around it. So the installer CI builds
+  (windows-release) may hold such a sum anywhere `BeatPosition`s or `BeatDuration`s are compared through `std::min`
+  and `std::max`, and the tests show only those a test happens to reach. What was done: the six places that made a
+  range of `std::min` and `std::max` of getters ask the range for its union or intersection, and
+  `tests/CompilerProbeTests.cpp` runs the sums one at a time, guarded, and says what it finds as a warning (ctest
+  shows a test's output only when it fails: to read it, make its last line a `CHECK` on a branch of its own). To
+  settle it, one of: CI's Windows jobs pinned to the MSVC the owner's PC has, if the runner's image holds it
+  (`cmake/toolchains/windows-msvc.cmake` takes the newest); the fault reported to Microsoft with a case cut from the
+  probe; or `BeatPosition` and `BeatDuration` given `min` and `max` of their own that compare the doubles, and
+  every `std::min` and `std::max` of them in `src/` moved to those, with a count in `tools/check-architecture.sh`.
+  Until then a release for others should be built with a compiler the tests passed on without this entry's cases.
