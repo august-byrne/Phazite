@@ -268,8 +268,7 @@ TEST_CASE ("The steps of a join over part of a MIDI clip, each checked: the note
     // Cut at the range's edges, as consolidatePart() cuts them.
     const auto clipRange = phazite::getClipRange (model, clip);
     CHECK (clipRange == phazite::BeatRange (at (0.0), at (8.0)));
-    const auto played =
-        phazite::BeatRange (std::max (clipRange.getStart(), range.getStart()), std::min (clipRange.getEnd(), range.getEnd()));
+    const auto played = clipRange.getIntersectionWith (range);
     CHECK (played == range);
     std::vector<phazite::NoteData> notes;
 
