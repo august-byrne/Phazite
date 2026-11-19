@@ -50,6 +50,7 @@
 #include "DynamicsCurve.h"
 #include "devices/core/Clock.h"
 #include "devices/core/DeviceInfo.h"
+#include "devices/core/LevelTrail.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/AlignedShaper.h"
@@ -64,6 +65,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <vector>
 
 namespace phazite::devices
 {
@@ -144,6 +146,11 @@ public:
     MeterValue& getLevelMeter() noexcept { return levelMeter; }
     MeterValue& getReductionMeter() noexcept { return reductionMeter; }
     MeterValue& getBoostMeter() noexcept { return boostMeter; }
+
+    // How its levels went, a reading every half millisecond, for its editor's history (devices/core/LevelTrail.h): what came
+    // in and what went out (after the Mix, as its runner mixes it), how far it turned down and up, and how loud its detector
+    // heard (its own sound or the key, or Transient's ear).
+    LevelTrail& getTrail() noexcept { return trail; }
 
     // Message thread: plays the key, as the detector hears it, instead of the sound, for the next half second by the clock;
     // its editor asks again each time it refreshes, so that the key stops when the editor no longer shows, whether the
@@ -265,6 +272,25 @@ private:
     std::array<std::array<dsp::Filter, 2>, 2> highCuts {}; // the key's, two sections per channel
     MeterValue levelMeter { -120.0f }, reductionMeter { 0.0f }, boostMeter { 0.0f };
     FallingValue gainReduction { reductionFallPerSecond };
+
+    // The trail (getTrail()), while a display listens: each sample of a block, the loudest that came in, how far its mode
+    // turned it down (in decibels, below 0 up) and the level its detector heard, which its mode notes (note()), then what went
+    // out with them. Sized for the longest block, as it is prepared.
+    LevelTrail trail;
+    bool trailing = false; // this block
+    std::vector<float> trailInputs, trailTurns, trailHeard;
+
+    void note (int sample, float turnedDecibels, float heard) noexcept
+    {
+        if (trailing)
+        {
+            trailTurns[(size_t) sample] = turnedDecibels;
+            trailHeard[(size_t) sample] = heard;
+        }
+    }
+
+    void startTrail (const ProcessContext&) noexcept;
+    void endTrail (const ProcessContext&) noexcept;
     std::atomic<double> listenUntil { 0.0 }; // in the clock's milliseconds
 
     // The characters' own state: the average level (RMS) as a mean square, and Opto's release, from the reduction where it

@@ -34541,7 +34541,7 @@
         "unit": "none",
         "minimum": 2.0,
         "maximum": 8.0,
-        "default": 4.0
+        "default": 3.0
       },
       {
         "id": "point1X",
@@ -34588,7 +34588,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.102205999195576
+        "default": 0.582999706268311
       },
       {
         "id": "point2Y",
@@ -34596,7 +34596,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.102205999195576
+        "default": 0.582999706268311
       },
       {
         "id": "point2Tension",
@@ -34627,7 +34627,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 1.0
       },
       {
         "id": "point3Y",
@@ -34635,7 +34635,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.160455003380775
+        "default": 0.687249779701233
       },
       {
         "id": "point3Tension",
@@ -34643,7 +34643,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.100808002054691
+        "default": 0.0
       },
       {
         "id": "point3Type",
@@ -34674,7 +34674,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.213276997208595
+        "default": 0.687249779701233
       },
       {
         "id": "point4Tension",
@@ -34682,7 +34682,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.006570000201464
+        "default": 0.0
       },
       {
         "id": "point4Type",
@@ -34713,7 +34713,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.213276997208595
+        "default": 0.687249779701233
       },
       {
         "id": "point5Tension",
@@ -34721,7 +34721,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.006570000201464
+        "default": 0.0
       },
       {
         "id": "point5Type",
@@ -34752,7 +34752,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.213276997208595
+        "default": 0.687249779701233
       },
       {
         "id": "point6Tension",
@@ -34760,7 +34760,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.006570000201464
+        "default": 0.0
       },
       {
         "id": "point6Type",
@@ -34791,7 +34791,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.213276997208595
+        "default": 0.687249779701233
       },
       {
         "id": "point7Tension",
@@ -34799,7 +34799,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.006570000201464
+        "default": 0.0
       },
       {
         "id": "point7Type",
@@ -34830,7 +34830,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.213276997208595
+        "default": 0.687249779701233
       },
       {
         "id": "point8Tension",
@@ -34838,7 +34838,7 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
-        "default": 0.006570000201464
+        "default": 0.0
       },
       {
         "id": "point8Type",
@@ -35186,7 +35186,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint2Y",
@@ -35194,7 +35194,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint2Tension",
@@ -35233,7 +35233,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint3Tension",
@@ -35272,7 +35272,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint4Tension",
@@ -35311,7 +35311,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint5Tension",
@@ -35350,7 +35350,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint6Tension",
@@ -35389,7 +35389,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint7Tension",
@@ -35428,7 +35428,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "lowPoint8Tension",
@@ -35652,7 +35652,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint2Y",
@@ -35660,7 +35660,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint2Tension",
@@ -35699,7 +35699,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint3Tension",
@@ -35738,7 +35738,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint4Tension",
@@ -35777,7 +35777,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint5Tension",
@@ -35816,7 +35816,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint6Tension",
@@ -35855,7 +35855,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint7Tension",
@@ -35894,7 +35894,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "midPoint8Tension",
@@ -36118,7 +36118,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint2Y",
@@ -36126,7 +36126,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint2Tension",
@@ -36165,7 +36165,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint3Tension",
@@ -36204,7 +36204,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint4Tension",
@@ -36243,7 +36243,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint5Tension",
@@ -36282,7 +36282,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint6Tension",
@@ -36321,7 +36321,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint7Tension",
@@ -36360,7 +36360,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "highPoint8Tension",
@@ -36584,7 +36584,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint2Y",
@@ -36592,7 +36592,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint2Tension",
@@ -36631,7 +36631,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint3Tension",
@@ -36670,7 +36670,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint4Tension",
@@ -36709,7 +36709,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint5Tension",
@@ -36748,7 +36748,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint6Tension",
@@ -36787,7 +36787,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint7Tension",
@@ -36826,7 +36826,7 @@
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
-        "default": 0.5
+        "default": 0.832856774330139
       },
       {
         "id": "masterPoint8Tension",

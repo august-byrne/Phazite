@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A dynamics device's curve (devices/dynamics/DynamicsCurve.h), as Maximus's envelope editor shows and edits it, for the
 // multiband's bands and the compressor (the owner, 2026-11-01: "i want this graph to also be used the same in the
-// compressor plugin"): level in across, level out up, each in decibels from -60 dB (at the left and the bottom, where silence
-// also sits) to +12 dB, evenly, so that a quiet point is as easy to see and take as a loud one, over a grid line every 6 dB
-// (numbered every 12), the 0 dB lines stronger, and the line where level in equals level out. Its points are places on the
-// device's own axis (devices::curves::toAxis()), as it plays and saves them: only where they show is in decibels, and a drag
-// or Snap (to the grid's lines) goes through the same mapping. The area under the curve is shaded, and lit, as Maximus lights it,
-// up to the level its compressor hears now, so that it moves with the sound. Its points are dots and the handles in the
-// middle of its lines hollow:
+// compressor plugin"): level in across, level out up, on the curve's own axes (devices::curves), which are decibels, from -60
+// dB at the left and the bottom (out at the bottom is silence) to +12 dB, evenly, so that a quiet point is as easy to see and
+// take as a loud one, over a grid line every 6 dB (numbered every 12), the 0 dB lines stronger, and the line where level in
+// equals level out. What it draws is what the device plays: a straight line is a ratio, and a bent one stays in the box its
+// points span. The area under the curve is shaded, and lit, as Maximus lights it, up to the level its compressor hears now, so
+// that it moves with the sound. Its points are dots and the handles in the middle of its lines hollow, on the lines:
 //
 // - Drag a point; Shift keeps it level, Ctrl keeps it where it is across, and with Snap on it goes onto a grid line near it.
 //   The first and last points stay at the curve's ends.
 // - Drag a handle up or down to bend its line (Ctrl in fine steps); right-click it to straighten the line.
-// - Right-click a point for its line's shape (single or double curve, hold, stairs, smooth stairs) or to delete it; Alt and
-//   a click deletes it too. Right-click elsewhere to add a point there.
+// - Right-click a point for its menu, at the pointer: its line's shape (single or double curve, hold, stairs, smooth
+//   stairs), Type Values... or Delete Point; Alt and a click deletes it too. Right-click elsewhere to add a point there.
 //
 // Under the pointer, what a drag takes lights up, ringed in the text colour as the other graphs' handles are, the pointer
 // shows which way it moves (a hand for a point, up and down for an end point or a handle), and its tooltip, which the hint
@@ -77,12 +76,13 @@ public:
     bool snaps = true;
 
     // Where it shows a place across and up its axes (from 0 to 1), a point, and the handle that bends the line before it
-    // (none for the first point), in its own coordinates.
+    // (none for the first point), in its own coordinates; and the curve's line as it draws it.
     juce::Point<float> getPosition (float across, float up) const;
     juce::Point<float> getPointPosition (int point) const;
+    juce::Path getLine() const;
 
-    // Where a level in decibels shows across or up its display, from 0 (-60 dB and below, silence) to 1 (its top, +12 dB), and
-    // the step of its grid's lines and of their numbers: what shares its scale (the Multiband's Monitor) takes them.
+    // Where a level in decibels shows across or up its display, from 0 (-60 dB and below) to 1 (its top, +12 dB), and the step
+    // of its grid's lines and of their numbers: what shares its scale (the Multiband's Monitor) takes them.
     static float getShareForDecibels (float decibels);
     static constexpr float gridDecibels = 6.0f, numberedDecibels = 12.0f;
     std::optional<juce::Point<float>> getTensionPosition (int point) const;
@@ -174,7 +174,7 @@ private:
     void addPoint (juce::Point<float>);
     void edited();
     void paintHandle (juce::Graphics&, const Palette&, juce::Colour tint, Target, juce::Point<float>) const;
-    void showPointMenu (int point);
+    void showPointMenu (int point, juce::Point<int> screenPosition);
     void showCursorFor (const std::optional<Target>&);
 };
 

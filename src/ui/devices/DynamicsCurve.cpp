@@ -14,11 +14,9 @@ namespace
 {
     namespace curves = devices::curves;
 
-    // The display, in decibels, the same across and up: from -60 dB at the left and the bottom, where silence also sits, to
-    // the top of the curve's axis (+12 dB), a grid line every 6 dB, the 0 dB lines heavier, numbers every 12 dB. Its points
-    // are places on the curve's own axis (devices::curves::toAxis()), as the device plays and saves them; only where they
-    // show changes.
-    constexpr float lowestShown = -60.0f;
+    // The display: the curve's own axes (devices::curves), in decibels, the same across and up, from -60 dB at the left and
+    // the bottom to their top (+12 dB), a grid line every 6 dB, the 0 dB lines heavier, numbers every 12 dB; a place on them
+    // is a share of its area.
     constexpr float gridStep = DynamicsCurve::gridDecibels, numberStep = DynamicsCurve::numberedDecibels;
     constexpr float snapDistance = 6.0f; // pixels from a grid line within which a dragged point snaps to it
     constexpr float tensionDrag = 2.0f;  // a drag the curve's height bends a line by this much of its range
@@ -32,68 +30,38 @@ namespace
         return copied;
     }
 
-    // A place on the curve's axis as a level: "-12.0 dB", or silence at its start.
-    juce::String describeLevel (float place)
+    // A level out at the bottom is silence; in, the bottom is -60 dB (and what is under it).
+    bool isSilent (float place, curves::PointField field)
     {
-        const auto amplitude = curves::fromAxis (place);
-        return amplitude <= 1.0e-6f ? juce::String ("silence") : graph::formatDecibels (20.0f * std::log10 (amplitude));
+        return field == curves::pointY && place <= 0.0f;
+    }
+
+    // A place as a level: "-12.0 dB", or silence.
+    juce::String describeLevel (float place, curves::PointField field)
+    {
+        return isSilent (place, field) ? juce::String ("silence") : graph::formatDecibels (curves::decibelsForAxis (place));
     }
 
     // The same to a tenth of a decibel always, as the corner reads it and Type Values... shows it: "-18.0", "+3.0", or silence.
-    constexpr float silentAmplitude = 1.0e-6f;
-
-    bool isSilent (float place)
+    juce::String formatLevel (float place, curves::PointField field)
     {
-        return curves::fromAxis (place) <= silentAmplitude;
-    }
-
-    float toDecibels (float place)
-    {
-        return 20.0f * std::log10 (std::max (silentAmplitude, curves::fromAxis (place)));
-    }
-
-    // The top of the display: the curve's axis's top, in decibels (about +12).
-    float getHighestShown()
-    {
-        return 20.0f * std::log10 (curves::fromAxis (1.0f));
-    }
-
-    // A place on the curve's axis as a share of the display, from 0 (-60 dB and below, silence) to 1 (its top); and back.
-    float getShare (float place)
-    {
-        return juce::jlimit (0.0f, 1.0f, (toDecibels (place) - lowestShown) / (getHighestShown() - lowestShown));
-    }
-
-    float getPlace (float share)
-    {
-        if (share <= 0.0f)
-            return 0.0f;
-
-        if (share >= 1.0f)
-            return 1.0f;
-
-        return juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (lowestShown + share * (getHighestShown() - lowestShown)));
-    }
-
-    // The grid's lines, as shares of the display: every 6 dB from the bottom up, and the top.
-    std::vector<float> getGridShares()
-    {
-        std::vector<float> shares;
-
-        for (auto decibels = lowestShown; decibels < getHighestShown(); decibels += gridStep)
-            shares.push_back ((decibels - lowestShown) / (getHighestShown() - lowestShown));
-
-        shares.push_back (1.0f);
-        return shares;
-    }
-
-    juce::String formatLevel (float place)
-    {
-        if (isSilent (place))
+        if (isSilent (place, field))
             return "silence";
 
-        const auto tenths = std::round (toDecibels (place) * 10.0f); // 0 dB as "0.0", never "-0.0"
+        const auto tenths = std::round (curves::decibelsForAxis (place) * 10.0f); // 0 dB as "0.0", never "-0.0"
         return (tenths > 0.0f ? "+" : "") + juce::String (std::abs (tenths) < 0.5f ? 0.0f : tenths / 10.0f, 1);
+    }
+
+    // The grid's lines, as places: every 6 dB from the bottom up, and the top.
+    std::vector<float> getGridPlaces()
+    {
+        std::vector<float> places;
+
+        for (auto decibels = curves::bottomDecibels; decibels < curves::topDecibels; decibels += gridStep)
+            places.push_back (curves::axisForDecibels (decibels));
+
+        places.push_back (1.0f);
+        return places;
     }
 
     // A level typed, in decibels ("-18", "-18 dB", "+3.5") or silence ("silence", "-inf"), as a place on the axis; none for
@@ -152,18 +120,17 @@ namespace
     constexpr int keyRunMilliseconds = 500; // a run of arrow presses ends after this long without one, as a turn of the wheel
     constexpr float limitRatio = 20.0f, gateRatio = 10.0f;
 
-    // To the nearest of the grid's lines (the bottom one silence) and the top, within a few pixels of it, as a place.
+    // To the nearest of the grid's lines (the bottom one) and the top, within a few pixels of it, as a place.
     float snap (float place, float size)
     {
-        const auto share = getShare (place);
         auto best = place;
         auto bestDistance = snapDistance / std::max (1.0f, size);
 
-        for (const auto line : getGridShares())
+        for (const auto line : getGridPlaces())
         {
-            if (const auto distance = std::abs (line - share); distance <= bestDistance)
+            if (const auto distance = std::abs (line - place); distance <= bestDistance)
             {
-                best = getPlace (line);
+                best = line;
                 bestDistance = distance;
             }
         }
@@ -206,14 +173,16 @@ juce::String DynamicsCurve::describePoint (int point) const
     if (! juce::isPositiveAndBelow (point, getCount()))
         return {};
 
-    const auto level = [] (float place) { return isSilent (place) ? juce::String ("silence") : formatLevel (place) + " dB"; };
-    return "In " + level (getValue (point, curves::pointX)) + ", Out " + level (getValue (point, curves::pointY));
+    const auto level = [] (float place, curves::PointField field)
+    { return isSilent (place, field) ? juce::String ("silence") : formatLevel (place, field) + " dB"; };
+    return "In " + level (getValue (point, curves::pointX), curves::pointX) + ", Out "
+           + level (getValue (point, curves::pointY), curves::pointY);
 }
 
 juce::String DynamicsCurve::describeRatio (int point) const
 {
     // The line that leaves the point, to the next, where it is a single curve: how many decibels in for one out, between its
-    // ends.
+    // ends, its slope on the axes, which are the same in decibels across and up.
     const auto next = point + 1;
 
     if (point < 0 || next >= getCount() || juce::roundToInt (getValue (next, curves::pointType)) != (int) curves::PointType::singleCurve)
@@ -222,13 +191,14 @@ juce::String DynamicsCurve::describeRatio (int point) const
     const auto fromX = getValue (point, curves::pointX), toX = getValue (next, curves::pointX);
     const auto fromY = getValue (point, curves::pointY), toY = getValue (next, curves::pointY);
 
-    if (isSilent (fromX) || toX <= fromX)
+    if (toX <= fromX)
         return {};
 
-    if (isSilent (fromY))
-        return isSilent (toY) ? "Limit" : "Gate"; // from silence out: as steep as it gets
+    // Along the bottom, a gate's floor: silence, no ratio.
+    if (fromY <= 0.0f && toY <= 0.0f)
+        return {};
 
-    const auto in = toDecibels (toX) - toDecibels (fromX), out = toDecibels (toY) - toDecibels (fromY);
+    const auto in = toX - fromX, out = toY - fromY;
 
     if (out <= 0.0f || in / out >= limitRatio)
         return "Limit";
@@ -344,8 +314,8 @@ void DynamicsCurve::typeValues (int point)
     };
 
     parent->addAndMakeVisible (*valuesField);
-    const auto outText = formatLevel (getValue (point, curves::pointY));
-    valuesField->show (isEnd ? outText : formatLevel (getValue (point, curves::pointX)) + ", " + outText);
+    const auto outText = formatLevel (getValue (point, curves::pointY), curves::pointY);
+    valuesField->show (isEnd ? outText : formatLevel (getValue (point, curves::pointX), curves::pointX) + ", " + outText);
 }
 
 juce::TextEditor* DynamicsCurve::getValuesField() const
@@ -416,14 +386,15 @@ void DynamicsCurve::movePointBy (int point, float inDecibels, float outDecibels)
     if (! juce::exactlyEqual (inDecibels, 0.0f) && ! isEnd)
     {
         const auto earliest = getValue (point - 1, curves::pointX), latest = getValue (point + 1, curves::pointX);
-        const auto moved = curves::axisForDecibels (toDecibels (getValue (point, curves::pointX)) + inDecibels);
+        const auto moved = curves::axisForDecibels (curves::decibelsForAxis (getValue (point, curves::pointX)) + inDecibels);
         keyedAcross.setValue (juce::jlimit (earliest, std::max (earliest, latest), moved));
     }
 
     if (! juce::exactlyEqual (outDecibels, 0.0f))
     {
         keyedUp.beginGesture();
-        keyedUp.setValue (juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (toDecibels (getValue (point, curves::pointY)) + outDecibels)));
+        keyedUp.setValue (
+            juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (curves::decibelsForAxis (getValue (point, curves::pointY)) + outDecibels)));
         keyedUp.endGesture();
     }
 
@@ -539,7 +510,8 @@ juce::String DynamicsCurve::getTooltip()
         return "The line before point " + juce::String (i + 1)
                + ": drag up or down to bend it (Ctrl in fine steps), or right-click it to straighten it";
 
-    const auto levels = describeLevel (getValue (i, curves::pointX)) + " in, " + describeLevel (getValue (i, curves::pointY)) + " out";
+    const auto levels = describeLevel (getValue (i, curves::pointX), curves::pointX) + " in, "
+                        + describeLevel (getValue (i, curves::pointY), curves::pointY) + " out";
 
     if (i == 0 || i == getCount() - 1)
         return "The curve's " + juce::String (i == 0 ? "start" : "end") + " (" + levels
@@ -566,23 +538,24 @@ juce::Rectangle<float> DynamicsCurve::getArea() const
 
 float DynamicsCurve::getShareForDecibels (float decibels)
 {
-    return juce::jlimit (0.0f, 1.0f, (decibels - lowestShown) / (getHighestShown() - lowestShown));
+    return juce::jlimit (0.0f, 1.0f, curves::axisForDecibels (decibels));
 }
 
 juce::Point<float> DynamicsCurve::getPosition (float across, float up) const
 {
     const auto area = getArea();
-    return { area.getX() + getShare (across) * area.getWidth(), area.getBottom() - getShare (up) * area.getHeight() };
+    return { area.getX() + juce::jlimit (0.0f, 1.0f, across) * area.getWidth(),
+             area.getBottom() - juce::jlimit (0.0f, 1.0f, up) * area.getHeight() };
 }
 
 float DynamicsCurve::acrossAt (float x) const
 {
-    return getPlace ((x - getArea().getX()) / std::max (1.0f, getArea().getWidth()));
+    return juce::jlimit (0.0f, 1.0f, (x - getArea().getX()) / std::max (1.0f, getArea().getWidth()));
 }
 
 float DynamicsCurve::upAt (float y) const
 {
-    return getPlace ((getArea().getBottom() - y) / std::max (1.0f, getArea().getHeight()));
+    return juce::jlimit (0.0f, 1.0f, (getArea().getBottom() - y) / std::max (1.0f, getArea().getHeight()));
 }
 
 int DynamicsCurve::getCount() const
@@ -733,9 +706,8 @@ void DynamicsCurve::paint (juce::Graphics& g)
     // The grid, the same across and up: a line every 6 dB, the 0 dB lines stronger, and level in equalling level out; numbers
     // every 12 dB, up the left and along the bottom.
     g.setFont (juce::FontOptions (TextSize::small));
-    const auto highest = getHighestShown();
 
-    for (auto decibels = lowestShown + gridStep; decibels < highest - 0.5f * gridStep; decibels += gridStep)
+    for (auto decibels = curves::bottomDecibels + gridStep; decibels < curves::topDecibels - 0.5f * gridStep; decibels += gridStep)
     {
         const auto place = curves::axisForDecibels (decibels);
         const auto at = getPosition (place, place);
@@ -764,11 +736,8 @@ void DynamicsCurve::paint (juce::Graphics& g)
     g.drawText ("OUT", area.reduced (Space::xs).toNearestInt(), juce::Justification::topLeft);
     g.drawText ("IN", area.reduced (Space::xs).toNearestInt(), juce::Justification::bottomRight);
 
-    // The curve, over a wash of the area under it, lit up to the level its compressor hears now: at each pixel across, the
-    // level out for the level in there, as the device plays it.
-    const auto curve = std::span (values).subspan ((size_t) first, curves::parameterCount);
-    const auto line =
-        graph::makeCurve (area, [this, curve] (float x) { return getPosition (0.0f, curves::getAt (curve, acrossAt (x))).y; }, 1.0f);
+    // The curve, over a wash of the area under it, lit up to the level its compressor hears now.
+    const auto line = getLine();
     auto wash = line;
     wash.lineTo (area.getBottomRight());
     wash.lineTo (area.getBottomLeft());
@@ -805,6 +774,31 @@ void DynamicsCurve::paint (juce::Graphics& g)
 
     for (const auto& row : readout)
         graph::paintReadout (g, p, corner.removeFromTop (TextSize::small + (float) Space::xs), row, juce::Justification::topRight);
+}
+
+juce::Path DynamicsCurve::getLine() const
+{
+    // At each pixel across, the level out for the level in there, as the device plays it; and at each point, where the line
+    // turns, so that a corner is sharp.
+    const auto area = getArea();
+    const auto curve = std::span (values).subspan ((size_t) first, curves::parameterCount);
+    std::vector<float> places;
+
+    for (auto x = area.getX(); x < area.getRight(); x += 1.0f)
+        places.push_back (acrossAt (x));
+
+    for (int i = 0; i < getCount(); ++i)
+        places.push_back (juce::jlimit (0.0f, 1.0f, getValue (i, curves::pointX)));
+
+    places.push_back (1.0f);
+    std::sort (places.begin(), places.end());
+    juce::Path line;
+    line.startNewSubPath (getPosition (places.front(), curves::getAt (curve, places.front())));
+
+    for (size_t i = 1; i < places.size(); ++i)
+        line.lineTo (getPosition (places[i], curves::getAt (curve, places[i])));
+
+    return line;
 }
 
 void DynamicsCurve::paintHandle (juce::Graphics& g, const Palette& p, juce::Colour tint, Target target, juce::Point<float> at) const
@@ -906,7 +900,7 @@ void DynamicsCurve::mouseDown (const juce::MouseEvent& e)
         if (! target.has_value())
             addPoint (e.position);
         else if (target->point)
-            showPointMenu (target->index);
+            showPointMenu (target->index, e.getScreenPosition());
         else
             setValue (target->index, curves::pointTension, 0.0f, "Straighten Line");
 
@@ -999,7 +993,7 @@ void DynamicsCurve::mouseUp (const juce::MouseEvent&)
     }
 }
 
-void DynamicsCurve::showPointMenu (int point)
+void DynamicsCurve::showPointMenu (int point, juce::Point<int> at)
 {
     juce::PopupMenu menu;
     const auto current = juce::roundToInt (getValue (point, curves::pointType));
@@ -1020,8 +1014,11 @@ void DynamicsCurve::showPointMenu (int point)
     menu.addSeparator();
     menu.addItem (juce::PopupMenu::Item ("Delete Point").setID (deleteItem).setEnabled (point > 0 && point < getCount() - 1));
 
+    // At the click, where the pointer is (as withMousePosition() puts a menu, but from the click itself, which a test's mouse
+    // makes too: withMousePosition() reads the system's pointer); in the window the curve is in (ui::LookAndFeel finds it by
+    // the target).
     const juce::Component::SafePointer<DynamicsCurve> safeThis (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea ({ at.x, at.y, 1, 1 }),
                         [safeThis, point] (int result)
                         {
                             if (safeThis == nullptr || result <= 0)

@@ -282,11 +282,11 @@ TEST_CASE ("The compressor's description holds together: its mode first, its cur
 
 TEST_CASE ("The compressor turns each level as its curve says once settled: down, up, or not at all")
 {
-    // Downward: 4:1 over -18 dB, 18 dB over coming out 4.5 dB over exactly at 0 dB, and nearly 4:1 between.
+    // Downward: 4:1 over -18 dB, 18 dB over coming out 4.5 dB over at 0 dB, and 4:1 all along its straight line.
     auto values = getDefaults();
     CHECK (getCurveGain (values, -30.0f) == doctest::Approx (0.0f).epsilon (1.0e-4));
     CHECK (getCurveGain (values, 0.0f) == doctest::Approx (-13.5f).epsilon (0.001));
-    CHECK (std::abs (getCurveGain (values, -9.0f) + 6.75f) < 0.1f); // nearly 4:1 between the points, its line bent
+    CHECK (getCurveGain (values, -9.0f) == doctest::Approx (-6.75f).epsilon (0.001));
 
     // Each shape as it plays, once settled, at levels around it: what its curve says, to a twentieth of a decibel (its table
     // of gains is a little off the curve between its entries).
@@ -304,8 +304,11 @@ TEST_CASE ("The compressor turns each level as its curve says once settled: down
             compressor.prepare (testRate, testBlockSize);
             const auto played = play (compressor, values, 24000, [level] (int t, int) { return steady (t, level); });
 
+            // (Where the curve is silent, the gain as far down as its table goes.)
             for (const auto& channel : played)
-                CHECK (std::abs (gainAt (channel, 23999, level) - getCurveGain (values, level)) < 0.05f);
+                CHECK (std::isinf (getCurveGain (values, level))
+                           ? gainAt (channel, 23999, level) < -100.0f
+                           : std::abs (gainAt (channel, 23999, level) - getCurveGain (values, level)) < 0.05f);
         }
     }
 
@@ -703,48 +706,50 @@ TEST_CASE ("The compressor's drive saturates what it puts out in its character's
     CHECK (std::abs (-tubeLow - tubeHigh) > 0.1f * tubeHigh);
 }
 
-TEST_CASE ("A curve made as a threshold, a ratio and a knee set it follows them, though a straight line on its axes isn't a ratio")
+TEST_CASE ("A curve made as a threshold, a ratio and a knee set it follows them: exactly but in its knee, its lines straight")
 {
     struct Setting
     {
-        float threshold, ratio, knee, within;
+        float threshold, ratio, knee;
     };
 
-    // Exact at its points, and between them as near as its lines' tensions bend them: within a tenth of a decibel for the
-    // presets' settings and the default, a fifth for 8:1 over -30 dB; a lower corner, further from the middle of Maximus's
-    // axes, less closely.
-    for (const auto& setting :
-         { Setting { -18.0f, 4.0f, 0.0f, 0.1f }, Setting { -14.0f, 2.0f, 12.0f, 0.1f }, Setting { -24.0f, 10.0f, 6.0f, 0.1f },
-           Setting { -20.0f, 3.0f, 10.0f, 0.1f }, Setting { -30.0f, 8.0f, 0.0f, 0.2f }, Setting { -36.0f, 4.0f, 0.0f, 0.6f } })
+    // A straight line on the curve's axes is a ratio: exact at its points and along its straight lines, at any threshold, a
+    // ratio under 1 (upward) going along the top once it reaches it; its knee's line, bent, within a tenth of a decibel of
+    // the knee (0.07 dB at most for these).
+    constexpr float kneeWithin = 0.1f;
+
+    for (const auto& setting : { Setting { -18.0f, 4.0f, 0.0f }, Setting { -14.0f, 2.0f, 12.0f }, Setting { -24.0f, 10.0f, 6.0f },
+                                 Setting { -20.0f, 3.0f, 10.0f }, Setting { -30.0f, 8.0f, 0.0f }, Setting { -36.0f, 4.0f, 0.0f },
+                                 Setting { -54.0f, 20.0f, 0.0f }, Setting { -30.0f, 0.5f, 0.0f } })
     {
         CAPTURE (setting.threshold);
         CAPTURE (setting.ratio);
         CAPTURE (setting.knee);
         auto values = getDefaults();
-        setCurve (values, curves::makeCompression (setting.threshold, setting.ratio, setting.knee));
+        const auto points = curves::makeCompression (setting.threshold, setting.ratio, setting.knee);
+        setCurve (values, points);
         const auto slope = 1.0f - 1.0f / setting.ratio;
 
-        for (auto in = setting.threshold - setting.knee - 6.0f; in <= 12.0f; in += 0.25f)
+        for (size_t i = 1; i < points.size(); ++i)
+            if (setting.knee <= 0.0f || i != 2)
+                CHECK (points[i][curves::pointTension] == 0.0f);
+
+        for (auto in = curves::bottomDecibels + 0.25f; in <= curves::topDecibels; in += 0.25f)
         {
             CAPTURE (in);
             const auto over = in - setting.threshold;
-            const auto out = 2.0f * over <= -setting.knee ? in
-                             : 2.0f * over < setting.knee
-                                 ? in - slope * (over + 0.5f * setting.knee) * (over + 0.5f * setting.knee) / (2.0f * setting.knee)
-                                 : in - slope * over;
-            CHECK (std::abs (in + getCurveGain (values, in) - out) < setting.within);
+            const auto inKnee = 2.0f * over > -setting.knee && 2.0f * over < setting.knee;
+            const auto out =
+                std::min (curves::topDecibels,
+                          2.0f * over <= -setting.knee
+                              ? in
+                              : (inKnee ? in - slope * (over + 0.5f * setting.knee) * (over + 0.5f * setting.knee) / (2.0f * setting.knee)
+                                        : in - slope * over));
+            const auto off =
+                std::abs (curves::decibelsForAxis (curves::getAt (Compressor::getCurve (values), curves::axisForDecibels (in))) - out);
+            CHECK (off < (inKnee ? kneeWithin : 0.001f));
         }
     }
-
-    // A straight line would be a decibel and more off at -36 dB.
-    auto straight = curves::makeCompression (-36.0f, 4.0f);
-
-    for (auto& point : straight)
-        point[curves::pointTension] = 0.0f;
-
-    auto values = getDefaults();
-    setCurve (values, straight);
-    CHECK (std::abs (getCurveGain (values, -18.0f) + 13.5f) > 1.0f);
 }
 
 //==============================================================================
@@ -1920,7 +1925,7 @@ TEST_CASE ("Compress's Auto Makeup adds half what its curve takes off 0 dB, foll
     auto lifting = getDefaults();
     setCurve (lifting,
               { curves::makePoint (0.0f, 0.0f), curves::makePoint (curves::axisForDecibels (-40.0f), curves::axisForDecibels (-40.0f)),
-                curves::makePoint (0.5f, curves::axisForDecibels (6.0f)), curves::makePoint (1.0f, 1.0f) });
+                curves::makePoint (curves::axisForDecibels (0.0f), curves::axisForDecibels (6.0f)), curves::makePoint (1.0f, 1.0f) });
     gains.update (Compressor::getCurve (lifting));
     CHECK (std::abs (Compressor::getAutoMakeupDecibels (gains) + 3.0f) < 0.1f);
 

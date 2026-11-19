@@ -55,7 +55,8 @@ namespace
     }
 
     // A point of a band's curve, from its band's prefix: at first the curve is a limiter at 0 dB, as Maximus's default is: up
-    // the diagonal to 0 dB (the middle), then level to the end.
+    // the diagonal to 0 dB (curves::axisForDecibels (0.0f)), then level to the end.
+    constexpr float zeroDecibels = -curves::bottomDecibels / (curves::topDecibels - curves::bottomDecibels);
 #define PHAZITE_MULTIBAND_POINT(band, Band, n, x, y)                                                                                       \
     { .id = band "Point" #n "X", .name = Band " Point " #n " X", .defaultValue = x, .unit = Unit::percent },                               \
         { .id = band "Point" #n "Y", .name = Band " Point " #n " Y", .defaultValue = y, .unit = Unit::percent },                           \
@@ -74,10 +75,10 @@ namespace
         makeChoice (band "Detection", Band " Detection", detections, 0.0f), makeBipolar (band "Saturation", Band " Saturation"),           \
         makeDecibels (band "Ceiling", Band " Ceiling", -24.0f, 6.0f), makeToggle (band "Key", Band " Sidechain"),                          \
         { .id = band "Points", .name = Band " Points", .minimum = 2.0f, .maximum = 8.0f, .defaultValue = 3.0f },                           \
-        PHAZITE_MULTIBAND_POINT (band, Band, 1, 0.0f, 0.0f), PHAZITE_MULTIBAND_POINT (band, Band, 2, 0.5f, 0.5f),                          \
-        PHAZITE_MULTIBAND_POINT (band, Band, 3, 1.0f, 0.5f), PHAZITE_MULTIBAND_POINT (band, Band, 4, 1.0f, 0.5f),                          \
-        PHAZITE_MULTIBAND_POINT (band, Band, 5, 1.0f, 0.5f), PHAZITE_MULTIBAND_POINT (band, Band, 6, 1.0f, 0.5f),                          \
-        PHAZITE_MULTIBAND_POINT (band, Band, 7, 1.0f, 0.5f), PHAZITE_MULTIBAND_POINT (band, Band, 8, 1.0f, 0.5f)
+        PHAZITE_MULTIBAND_POINT (band, Band, 1, 0.0f, 0.0f), PHAZITE_MULTIBAND_POINT (band, Band, 2, zeroDecibels, zeroDecibels),          \
+        PHAZITE_MULTIBAND_POINT (band, Band, 3, 1.0f, zeroDecibels), PHAZITE_MULTIBAND_POINT (band, Band, 4, 1.0f, zeroDecibels),          \
+        PHAZITE_MULTIBAND_POINT (band, Band, 5, 1.0f, zeroDecibels), PHAZITE_MULTIBAND_POINT (band, Band, 6, 1.0f, zeroDecibels),          \
+        PHAZITE_MULTIBAND_POINT (band, Band, 7, 1.0f, zeroDecibels), PHAZITE_MULTIBAND_POINT (band, Band, 8, 1.0f, zeroDecibels)
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {

@@ -71,13 +71,13 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `DeviceWindowContent.*` | An editor in a window of its own, out of the Devices view (`src/app/PluginWindow.h`): as wide as the window, its parts wrapping into rows, scrolling when the window is shorter. |
 | `ParameterControls.*` | A parameter's controls; `ParameterControls::showParameters()` shows a set of them. |
 | `DeviceGraph.*` | Graphs' axes, spectra and histories, and the grammar every graph's handles keep, as a knob does (`HandleDrag`: a drag from the value set by hand, as far as the pointer goes and a fifth as far with Shift, Escape taking it back; a double-click for the defaults, a right-click for the parameters' menus with Type a Value..., the readout and the tooltip of the handle under the pointer; `Handle` says what each moves), and the wheel turning one (`WheelGesture`). |
-| `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars, each reading drawn across the time it covers. |
+| `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars: a line through its readings (the compressor's a reading every half millisecond), each at the middle of the time it covers, a reading kept for each half pixel column at most. |
 | `SidechainMenus.*` | What a device's sidechain listens to, a track or a bus, picked inside the device under the word every DAW prints on its picker, Sidechain. |
 | `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a graph's one dot, which a drag from anywhere on the graph moves (through `HandleDrag`), as far as the pointer goes. |
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |
 | `SweepPicture.*` | The picture Motion's three modes share, with their LFO. |
 | `DeviceTint.*` | Each device's colour. |
-| `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it: by dragging, and by numbers (its corner's readout of a point and its line's ratio, Type Values..., the arrow keys). |
+| `DynamicsCurve.*` | A dynamics device's curve (`src/devices/dynamics/DynamicsCurve.h`) as the multiband's bands and the compressor show and edit it, on its own decibel axes, drawn as it plays: by dragging, and by numbers (its corner's readout of a point and its line's ratio, Type Values..., the arrow keys). |
 | `ModulatorEditor.*` | Modulators' editors. |
 
 The editors, one pair of files each: `AgeEditor` (two media, each a page of its own), `CompressorEditor`, `DelayEditor`, `DrumSamplerEditor`, `EqEditor`,

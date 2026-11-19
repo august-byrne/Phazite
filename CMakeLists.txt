@@ -130,6 +130,7 @@ target_sources(phazite_core PRIVATE
     src/devices/core/DeviceInfo.h
     src/devices/core/DeviceScope.h
     src/devices/core/FallingValue.h
+    src/devices/core/LevelTrail.h
     src/devices/core/LiveValue.h
     src/devices/core/MeterValue.h
     src/devices/core/Processor.h
@@ -1292,6 +1293,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/DspProbe.cpp
         tests/DspProbe.h
         tests/DspTests.cpp
+        tests/DynamicsCurveTests.cpp
         tests/EditorDragTests.cpp
         tests/EditorScreens.h
         tests/EditorToolTests.cpp

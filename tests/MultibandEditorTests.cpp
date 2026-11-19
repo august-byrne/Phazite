@@ -395,16 +395,17 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
     phazite::test::Mouse mouse (curve);
 
     // The corner at 0 dB, dragged down (Shift keeps it where it is up and down, so here Ctrl keeps it across).
+    const auto zero = curves::axisForDecibels (0.0f);
     const auto corner = curve.getPointPosition (1).roundToInt();
     mouse.press (corner, juce::ModifierKeys::ctrlModifier);
     mouse.dragTo (corner + juce::Point<int> (25, 20));
     mouse.release();
-    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < 0.45f);
-    CHECK (song.pointValue (Multiband::low, 1, curves::pointX) == doctest::Approx (0.5f)); // Ctrl: across, it stayed
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < zero - 0.05f);
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointX) == doctest::Approx (zero)); // Ctrl: across, it stayed
     CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
     phazite::undo (*song.song);
     editor.refresh();
-    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) == doctest::Approx (0.5f));
+    CHECK (song.pointValue (Multiband::low, 1, curves::pointY) == doctest::Approx (zero));
 
     // The handle of the line before it, dragged up: bent up; right-clicked: straight again.
     REQUIRE (curve.getTensionPosition (1).has_value());
@@ -419,10 +420,10 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
     CHECK (song.pointValue (Multiband::low, 1, curves::pointTension) == doctest::Approx (0.0f));
 
     // A right-click away from the points adds one there; Alt and a click deletes it.
-    const auto empty = curve.getPosition (0.75f, 0.9f).roundToInt();
+    const auto empty = curve.getPosition (0.92f, 0.3f).roundToInt();
     mouse.click (empty, juce::ModifierKeys::rightButtonModifier);
     CHECK (song.pointCount (Multiband::low) == doctest::Approx (4.0f));
-    CHECK (song.pointValue (Multiband::low, 2, curves::pointX) == doctest::Approx (0.75f).epsilon (0.02));
+    CHECK (song.pointValue (Multiband::low, 2, curves::pointX) == doctest::Approx (0.92f).epsilon (0.02));
     CHECK (song.describeUndo() == juce::String ("Undo Add Point"));
     editor.refresh();
     mouse.click (curve.getPointPosition (2).roundToInt(), juce::ModifierKeys::altModifier);

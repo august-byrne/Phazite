@@ -1165,7 +1165,7 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters read")
+    TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters and its trail read")
     {
         using phazite::devices::Compressor;
         TestSong song;
@@ -1183,10 +1183,22 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::getSidechainSource (getSong (song), compressor) == source);
         REQUIRE (phazite::hearsSidechain (getSong (song), compressor));
 
-        const auto meter = [&song, compressor]() -> auto&
-        { return dynamic_cast<Compressor&> (getPlayed (song, compressor).getProcessor()).getReductionMeter(); };
-        const auto m = playAndMeasure (song, [&meter] { meter().take(); }, [&meter] { CHECK (meter().take() > 1.0f); });
-        report ("Phazite's compressor, ducked by another track at 70 % mix, with its meters read", m);
+        const auto played = [&song, compressor]() -> auto&
+        { return dynamic_cast<Compressor&> (getPlayed (song, compressor).getProcessor()); };
+        std::vector<phazite::devices::LevelReading> readings ((size_t) phazite::devices::LevelTrail::capacity);
+        const auto m = playAndMeasure (
+            song,
+            [&played]
+            {
+                played().getReductionMeter().take();
+                played().getTrail().setListening (true); // the history's trail, its readings mixed as its runner mixes them
+            },
+            [&played, &readings]
+            {
+                CHECK (played().getReductionMeter().take() > 1.0f);
+                CHECK (played().getTrail().pull (readings.data(), (int) readings.size()) > 0);
+            });
+        report ("Phazite's compressor, ducked by another track at 70 % mix, with its meters and its trail read", m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -1224,6 +1236,7 @@ TEST_SUITE ("realtime-audit")
             {
                 played().getReductionMeter().take();
                 played().getLevelMeter().take();
+                played().getTrail().setListening (true); // its trail fills and then drops what it can't hold
                 played().listenToKey();
             },
             [&played] { CHECK (played().getReductionMeter().take() > 1.0f); });

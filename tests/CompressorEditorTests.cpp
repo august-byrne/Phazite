@@ -363,10 +363,8 @@ TEST_CASE ("Compressing, the history draws what came in as it came in, not as th
     compressor->prepare (48000.0, 24000);
     phazite::ui::CompressorEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    editor.refresh(); // it listens from now on
-    auto* scope = device.getScope();
-    REQUIRE (scope != nullptr);
-    REQUIRE (scope->isListening());
+    editor.refresh(); // it listens from now on, to the compressor's trail
+    REQUIRE (compressor->getTrail().isListening());
 
     // -12 dB comes in, which the input gain turns up 12 dB before the detector hears it.
     auto values = getDefaults();
@@ -382,8 +380,6 @@ TEST_CASE ("Compressing, the history draws what came in as it came in, not as th
     }
 
     REQUIRE (found);
-    std::vector<float> in (4800, juce::Decibels::decibelsToGain (-12.0f));
-    scope->pushInput (in.data(), in.data(), (int) in.size());
     play (*compressor, -12.0f, 24000, values);
     editor.refresh();
     CHECK (editor.getShownLevel() > -3.0f); // what the detector heard
@@ -711,7 +707,7 @@ TEST_CASE ("Shaping transients, the compressor's history shows its gain up and d
     CHECK (history.getKeyName().isEmpty());
     CHECK (history.showsGainAroundMiddle());
 
-    // Turning a hit up: the newest reading is below 0, how far it turned up.
+    // Turning a hit up: a reading below 0, as far as it turned up.
     auto* compressor = song.getDevice().getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
     compressor->prepare (48000.0, 4800);
@@ -733,15 +729,19 @@ TEST_CASE ("Shaping transients, the compressor's history shows its gain up and d
     block.parameters = values;
     compressor->process (block);
     editor.refresh();
-    CHECK (history.getNewestReduction() < -10.0f);
+    auto furthestUp = 0.0f;
+
+    for (int i = 0; i < history.getNumReadings(); ++i)
+        furthestUp = std::min (furthestUp, history.getReduction (i));
+
+    CHECK (furthestUp < -10.0f);
     CHECK (editor.getShownBoost() > 10.0f);
 }
 
 TEST_CASE ("The compressor's curve shows levels evenly in decibels, -60 to +12 dB both ways: a point at -30 dB is as easy to take")
 {
-    // On the old axis (the device's log1p one) -30 dB was 3 % of the way across and -18 dB 10 %: everything quiet squeezed into
-    // the corner. The display is now even in decibels, from -60 dB (where silence sits too) to the axis's top, +12 dB; the points
-    // are still the places the parameters hold.
+    // Even in decibels, from -60 dB (out there, silence) to the axes' top, +12 dB, as the curve's own axes are
+    // (devices/dynamics/DynamicsCurve.h): a quiet point is not squeezed into the corner.
     Song song;
     phazite::ui::CompressorEditor editor ((song.getDevice()));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
@@ -793,10 +793,12 @@ TEST_CASE ("The compressor's curve by numbers: its corner reads a point and its 
     auto& curve = editor.getCurve();
     const auto decibelsOf = [&song] (const char* id) { return juce::Decibels::gainToDecibels (curves::fromAxis (song.valueOf (id))); };
 
-    // The default curve's corner at -18 dB, as numbers, and the line that leaves it, 4:1 to 0 dB; from silence, no ratio.
+    // The default curve's corner at -18 dB, as numbers, and the line that leaves it, 4:1 to the end; from the bottom left
+    // corner (in -60 dB, out silence at the bottom, rising from -60 dB), level in level out.
     CHECK (curve.describePoint (1) == juce::String ("In -18.0 dB, Out -18.0 dB"));
     CHECK (curve.describeRatio (1) == juce::String ("4.0:1"));
-    CHECK (curve.describeRatio (0).isEmpty());
+    CHECK (curve.describePoint (0) == juce::String ("In -60.0 dB, Out silence"));
+    CHECK (curve.describeRatio (0) == juce::String ("1.0:1"));
     CHECK (curve.describeRatio (curve.getCount() - 1).isEmpty()); // the last point: no line leaves it
 
     // Under the pointer, the corner reads it.
@@ -808,8 +810,8 @@ TEST_CASE ("The compressor's curve by numbers: its corner reads a point and its 
     // Ratios: a line that expands, a limit, a gate; and one that lifts quiet levels, 2:1 as it rises.
     REQUIRE (curve.applyShape ("Lift under -30 dB")); // from -60 dB in, -45 out, to -30 dB both
     editor.refresh();
-    CHECK (curve.describeRatio (1) == juce::String ("2.0:1"));
-    REQUIRE (curve.applyShape ("Expand under -24 dB")); // from -40 dB in, -56 out, to -24 dB both
+    CHECK (curve.describeRatio (0) == juce::String ("2.0:1"));
+    REQUIRE (curve.applyShape ("Expand under -24 dB")); // from -42 dB in, silence out, to -24 dB both
     editor.refresh();
     CHECK (curve.describeRatio (1) == juce::String ("1:2.0"));
     REQUIRE (curve.applyShape ("Limit at 0 dB"));
@@ -831,9 +833,10 @@ TEST_CASE ("The compressor's curve by numbers: its corner reads a point and its 
     CHECK (decibelsOf ("point2X") == doctest::Approx (-18.0f).epsilon (1.0e-4));
     CHECK (decibelsOf ("point2Y") == doctest::Approx (-18.0f).epsilon (1.0e-4));
     const auto last = curve.getCount() - 1;
+    REQUIRE (last == 2);
     REQUIRE (curve.setPointLevels (last, "-3"));
-    CHECK (song.valueOf ("point4X") == doctest::Approx (1.0f));
-    CHECK (decibelsOf ("point4Y") == doctest::Approx (-3.0f).epsilon (1.0e-4));
+    CHECK (song.valueOf ("point3X") == doctest::Approx (1.0f));
+    CHECK (decibelsOf ("point3Y") == doctest::Approx (-3.0f).epsilon (1.0e-4));
     CHECK_FALSE (curve.setPointLevels (1, "loud"));
     CHECK_FALSE (curve.setPointLevels (1, "-12")); // a point between needs both
     phazite::undo (*song.song);
@@ -915,8 +918,9 @@ TEST_CASE ("Type Values reads a decimal comma where it can't be mistaken, and sa
     const auto last = curve.getCount() - 1;
 
     // An end's "-3,5" is -3.5 dB; a point between's "-18,5, -12" is -18.5 in and -12 out; "-20;-14" and "-20 -14" alike.
+    REQUIRE (last == 2);
     REQUIRE (curve.setPointLevels (last, "-3,5"));
-    CHECK (decibelsOf ("point4Y") == doctest::Approx (-3.5f).epsilon (1.0e-4));
+    CHECK (decibelsOf ("point3Y") == doctest::Approx (-3.5f).epsilon (1.0e-4));
     REQUIRE (curve.setPointLevels (1, "-18,5, -12"));
     CHECK (decibelsOf ("point2X") == doctest::Approx (-18.5f).epsilon (1.0e-4));
     CHECK (decibelsOf ("point2Y") == doctest::Approx (-12.0f).epsilon (1.0e-4));

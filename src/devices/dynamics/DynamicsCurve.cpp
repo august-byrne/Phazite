@@ -11,9 +11,10 @@ namespace phazite::devices::curves
 {
 namespace
 {
-    constexpr float log9 = 2.1972245773f; // the axes: ln 9
-    constexpr float quietest = -120.0f;   // decibels: no quieter gains than this
-    constexpr float loudest = 48.0f;      // and no louder
+    constexpr float axisDecibels = topDecibels - bottomDecibels; // how many decibels the axes span
+    constexpr float quietest = -120.0f;                          // decibels: no quieter gains than this
+    constexpr float loudest = 48.0f;                             // and no louder
+    constexpr float justOverBottom = 1.0e-4f; // the place whose gain the levels under the axes' bottom take: 0.007 dB over it
 
     // A line rising (or falling) from 0 to 1 over a fraction s of its way, bent up by a tension above 0 or down below it:
     // (e^(-a s) - 1) / (e^(-a) - 1), the bend a = 8 tension (as the synths' envelopes bend, devices/dsp/Envelopes.h).
@@ -65,19 +66,24 @@ namespace
     }
 } // namespace
 
+float axisForDecibels (float decibels) noexcept
+{
+    return std::max (0.0f, (decibels - bottomDecibels) / axisDecibels); // not a number, 0
+}
+
+float decibelsForAxis (float place) noexcept
+{
+    return bottomDecibels + place * axisDecibels;
+}
+
 float toAxis (float amplitude) noexcept
 {
-    return std::log1p (2.0f * std::max (0.0f, amplitude)) / log9;
+    return amplitude > 0.0f ? axisForDecibels (dsp::gainToDecibels (amplitude)) : 0.0f;
 }
 
 float fromAxis (float place) noexcept
 {
-    return 0.5f * std::expm1 (place * log9);
-}
-
-float axisForDecibels (float decibels) noexcept
-{
-    return toAxis (dsp::decibelsToGain (decibels));
+    return place > 0.0f ? dsp::decibelsToGain (decibelsForAxis (place)) : 0.0f;
 }
 
 int getStairs (float tension) noexcept
@@ -134,39 +140,43 @@ std::vector<Point> makeCompression (float thresholdDecibels, float ratio, float 
     };
     const auto place = [] (float decibels) { return juce::jlimit (0.0f, 1.0f, axisForDecibels (decibels)); };
 
-    const auto end = dsp::gainToDecibels (fromAxis (1.0f));
-    const auto start = thresholdDecibels - 0.5f * kneeDecibels;
-    std::vector<Point> points { makePoint (0.0f, 0.0f), makePoint (place (start), place (start)) };
+    // Where it starts (level in level out, unless the knee or the ratio start under the axes' bottom), where the knee starts
+    // and ends, and the end: where an upward ratio reaches the top, then along it.
+    const auto start = thresholdDecibels - 0.5f * kneeDecibels, kneeEnd = thresholdDecibels + 0.5f * kneeDecibels;
+    std::vector<Point> points { makePoint (0.0f, place (wanted (bottomDecibels))) };
+    auto kneeLine = -1;
 
-    if (const auto kneeEnd = thresholdDecibels + 0.5f * kneeDecibels; kneeDecibels > 0.0f && kneeEnd < 0.0f)
-        points.push_back (makePoint (place (kneeEnd), place (wanted (kneeEnd))));
+    if (start > bottomDecibels && start < topDecibels)
+        points.push_back (makePoint (place (start), place (start)));
 
-    if (start < 0.0f)
-        points.push_back (makePoint (0.5f, place (wanted (0.0f))));
-
-    points.push_back (makePoint (1.0f, place (wanted (end))));
-
-    // Each line after the knee's start: the tension at which it is nearest the compressor's curve where it is furthest from
-    // it, sampled evenly in decibels (a golden-section search: the error falls, then rises, as the tension grows).
-    for (size_t i = 2; i < points.size(); ++i)
+    if (kneeDecibels > 0.0f && kneeEnd > bottomDecibels && kneeEnd < topDecibels)
     {
-        const auto& from = points[i - 1];
-        const auto& to = points[i];
+        kneeLine = (int) points.size();
+        points.push_back (makePoint (place (kneeEnd), place (wanted (kneeEnd))));
+    }
 
-        if (to[pointX] <= from[pointX])
-            continue;
+    if (const auto atTop = thresholdDecibels + (topDecibels - thresholdDecibels) * ratio;
+        wanted (topDecibels) > topDecibels && atTop > std::max (bottomDecibels, kneeEnd) && atTop < topDecibels)
+        points.push_back (makePoint (place (atTop), 1.0f));
 
-        const auto low = dsp::gainToDecibels (fromAxis (from[pointX])), high = dsp::gainToDecibels (fromAxis (to[pointX]));
+    points.push_back (makePoint (1.0f, place (wanted (topDecibels))));
+
+    // The knee's line: the tension at which it is nearest the knee's curve where it is furthest from it, sampled evenly (a
+    // golden-section search: the error falls, then rises, as the tension grows).
+    if (kneeLine > 0 && points[(size_t) kneeLine][pointX] > points[(size_t) kneeLine - 1][pointX])
+    {
+        const auto& from = points[(size_t) kneeLine - 1];
+        const auto& to = points[(size_t) kneeLine];
         const auto worstError = [&] (float tension)
         {
             auto worst = 0.0f;
 
             for (int k = 1; k < 32; ++k)
             {
-                const auto in = low + (high - low) * (float) k / 32.0f;
-                const auto s = (axisForDecibels (in) - from[pointX]) / (to[pointX] - from[pointX]);
+                const auto s = (float) k / 32.0f;
+                const auto in = decibelsForAxis (from[pointX] + s * (to[pointX] - from[pointX]));
                 const auto out = getLine (PointType::singleCurve, tension, s, from[pointY], to[pointY]);
-                worst = std::max (worst, std::abs (dsp::gainToDecibels (fromAxis (out)) - wanted (in)));
+                worst = std::max (worst, std::abs (decibelsForAxis (out) - wanted (in)));
             }
 
             return worst;
@@ -185,7 +195,7 @@ std::vector<Point> makeCompression (float thresholdDecibels, float ratio, float 
                 a = c;
         }
 
-        points[i][pointTension] = 0.5f * (a + b);
+        points[(size_t) kneeLine][pointTension] = 0.5f * (a + b);
     }
 
     return points;
@@ -193,8 +203,10 @@ std::vector<Point> makeCompression (float thresholdDecibels, float ratio, float 
 
 const std::vector<Shape>& getShapes()
 {
+    // Each as it says, exactly: a straight line a ratio, a gate a floor of silence under its level, with a 1 dB edge.
+    const auto zero = axisForDecibels (0.0f);
     static const std::vector<Shape> shapes {
-        { "Limit at 0 dB", { makePoint (0.0f, 0.0f), makePoint (0.5f, 0.5f), makePoint (1.0f, 0.5f) } },
+        { "Limit at 0 dB", { makePoint (0.0f, 0.0f), makePoint (zero, zero), makePoint (1.0f, zero) } },
         { "No Compression", { makePoint (0.0f, 0.0f), makePoint (1.0f, 1.0f) } },
         { "Compress 2:1 over -12 dB", makeCompression (-12.0f, 2.0f) },
         { "Compress 4:1 over -18 dB", makeCompression (-18.0f, 4.0f) },
@@ -207,16 +219,18 @@ const std::vector<Shape>& getShapes()
         { "Gate under -50 dB",
           { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-51.0f), 0.0f),
             makePoint (axisForDecibels (-50.0f), axisForDecibels (-50.0f)), makePoint (1.0f, 1.0f) } },
+        // 1:2 under -24 dB, down to -60 dB out at -42 dB in; silent under that, as a gate, since the axis ends there.
         { "Expand under -24 dB",
-          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-40.0f), axisForDecibels (-56.0f)),
+          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-42.0f), 0.0f),
             makePoint (axisForDecibels (-24.0f), axisForDecibels (-24.0f)), makePoint (1.0f, 1.0f) } },
+        // 2:1 upward under -30 dB: -60 dB, and what is quieter, 15 dB louder.
         { "Lift under -30 dB",
-          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-60.0f), axisForDecibels (-45.0f)),
-            makePoint (axisForDecibels (-30.0f), axisForDecibels (-30.0f)), makePoint (1.0f, 1.0f) } },
+          { makePoint (0.0f, axisForDecibels (-45.0f)), makePoint (axisForDecibels (-30.0f), axisForDecibels (-30.0f)),
+            makePoint (1.0f, 1.0f) } },
+        // 2.5:1 upward under -30 dB, and over it 30:16 to 0 dB and 4:1 above.
         { "Squeeze Both Ways",
-          { makePoint (0.0f, 0.0f), makePoint (axisForDecibels (-60.0f), axisForDecibels (-42.0f)),
-            makePoint (axisForDecibels (-30.0f), axisForDecibels (-30.0f)), makePoint (0.5f, axisForDecibels (-14.0f)),
-            makePoint (1.0f, axisForDecibels (-11.0f)) } },
+          { makePoint (0.0f, axisForDecibels (-42.0f)), makePoint (axisForDecibels (-30.0f), axisForDecibels (-30.0f)),
+            makePoint (zero, axisForDecibels (-14.0f)), makePoint (1.0f, axisForDecibels (-11.0f)) } },
     };
     return shapes;
 }
@@ -238,15 +252,16 @@ bool Gains::update (std::span<const float> curve) noexcept
     std::copy (curve.begin(), curve.begin() + parameterCount, shownCurve.begin());
     hasTable = true;
 
-    // The gain for each level in: how far out the curve puts it, against how far in it is.
-    endDecibels = dsp::gainToDecibels (fromAxis (1.0f));
+    // The gain for each level in: how far out the curve puts it, against how far in it is; silence out at the bottom, and
+    // under the axes' bottom the gain just over it.
+    endDecibels = topDecibels;
     stepDecibels = (endDecibels - lowestDecibels) / (float) tableSize;
 
     for (int i = 0; i <= tableSize; ++i)
     {
-        const auto decibels = lowestDecibels + (float) i * stepDecibels;
-        const auto out = fromAxis (getAt (curve, axisForDecibels (decibels)));
-        gains[(size_t) i] = juce::jlimit (quietest, loudest, dsp::gainToDecibels (out) - decibels);
+        const auto place = std::max (justOverBottom, axisForDecibels (lowestDecibels + (float) i * stepDecibels));
+        const auto out = getAt (curve, place);
+        gains[(size_t) i] = out > 0.0f ? juce::jlimit (quietest, loudest, decibelsForAxis (out) - decibelsForAxis (place)) : quietest;
     }
 
     const auto [lowest, highest] = std::minmax_element (gains.begin(), gains.end());

@@ -2,6 +2,7 @@
 #include "CompressorEditor.h"
 #include "DeviceTint.h"
 #include "SidechainMenus.h"
+#include "devices/dsp/Math.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/project/ProjectContext.h"
 #include "ui/theme/LookAndFeel.h"
@@ -189,7 +190,9 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
       DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       context (projectContext),
       threshold (handle.getParameter (getInfo (Compressor::threshold).id)),
-      shownLevel (silence)
+      shownLevel (silence),
+      pulled ((size_t) devices::LevelTrail::capacity),
+      historyLevels ((size_t) devices::LevelTrail::capacity)
 {
     for (const auto& parameter : Compressor::info.parameters)
     {
@@ -288,8 +291,8 @@ CompressorEditor::~CompressorEditor()
 {
     history->setLine (nullptr, {}); // the threshold's handle goes before it
 
-    if (auto* scope = device.getScope())
-        scope->setListening (false);
+    if (auto* compressor = device.getProcessor<Compressor>())
+        compressor->getTrail().setListening (false);
 }
 
 juce::Button& CompressorEditor::getModeTab (int mode)
@@ -366,10 +369,8 @@ void CompressorEditor::shownAgain()
         compressor->getLevelMeter().take();
         compressor->getReductionMeter().take();
         compressor->getBoostMeter().take();
+        compressor->getTrail().drain();
     }
-
-    if (auto* scope = device.getScope())
-        scope->drain();
 
     shownLevel = silence;
     shownReduction = 0.0f;
@@ -385,25 +386,22 @@ void CompressorEditor::refresh()
 
     characters->refresh();
 
-    // The meters jump up and fall back smoothly; the history takes each reading as it comes, with what comes in and goes out.
-    auto level = silence, reduction = 0.0f, boost = 0.0f, input = silence, output = silence;
+    // The meters jump up and fall back smoothly; the history takes the trail's readings since the last refresh, a reading
+    // every half millisecond.
+    auto level = silence, reduction = 0.0f, boost = 0.0f;
+    auto numPulled = 0;
 
     if (auto* compressor = device.getProcessor<Compressor>())
     {
         level = compressor->getLevelMeter().take();
         reduction = compressor->getReductionMeter().take();
         boost = compressor->getBoostMeter().take();
+        compressor->getTrail().setListening (true);
+        numPulled = compressor->getTrail().pull (pulled.data(), (int) pulled.size());
 
         // Listen: what the detector hears, for as long as the editor shows Listen, on Compress's page or Duck's, and asks.
         if (! isShapingTransients() && keyPart->listen.getToggleState() && keyPart->listen.isShowing())
             compressor->listenToKey();
-    }
-
-    if (auto* scope = device.getScope())
-    {
-        scope->setListening (true);
-        input = scope->getInputPeak().take();
-        output = scope->getOutputPeak().take();
     }
 
     shownLevel = std::max (level, shownLevel - meterFall);
@@ -413,15 +411,27 @@ void CompressorEditor::refresh()
     // The sound's peak as it came in and as it went out, as each mode's page shows them; with a key, also the key as the
     // detector heard it (ducking, against the threshold). Compressing without one, the detector's level is the curve's dot
     // and the meter's alone: after the input gain and the key's low cut, and for some characters an average, it isn't what
-    // came in. Shaping transients, how far it turned up (below 0) or down, whichever went further.
-    const auto now = juce::Time::getMillisecondCounterHiRes();
+    // came in. Shaping transients, how far it turned up (below 0) or down, whichever went further.     // reading (nothing played since the last, or the device sleeps), silence.
+    const auto transients = isShapingTransients();
+    const auto keyed = ! transients && (isDucking() || history->getKeyName().isNotEmpty());
+    const auto toDecibels = [] (float amplitude) { return devices::dsp::gainToDecibels (amplitude); }; // silence at -120 dB
 
-    if (isShapingTransients())
-        history->push (now, device.getSongTime(), input, output, boost > reduction ? -boost : reduction);
-    else if (isDucking() || history->getKeyName().isNotEmpty())
-        history->push (now, device.getSongTime(), input, output, reduction, level);
-    else
-        history->push (now, device.getSongTime(), input, output, reduction);
+    for (int i = 0; i < numPulled; ++i)
+    {
+        const auto& reading = pulled[(size_t) i];
+        historyLevels[(size_t) i] = { toDecibels (reading.input), toDecibels (reading.output),
+                                      transients && reading.up > reading.down ? -reading.up : reading.down,
+                                      keyed ? toDecibels (reading.heard) : LevelHistoryView::Levels().key };
+    }
+
+    // A refresh between two of the device's blocks brings none (a block can be longer than a refresh): nothing is drawn for
+    // it. Only after several in a row is it silence, or where the history has nothing yet (shown again).
+    emptyRefreshes = numPulled == 0 ? emptyRefreshes + 1 : 0;
+
+    if (emptyRefreshes > refreshesToSilence || (numPulled == 0 && history->getNumReadings() == 0))
+        historyLevels[(size_t) numPulled++] = { silence, silence, 0.0f, keyed ? silence : LevelHistoryView::Levels().key };
+
+    history->push (juce::Time::getMillisecondCounterHiRes(), device.getSongTime(), std::span (historyLevels).first ((size_t) numPulled));
 
     // What it listens to, in its colour and named in the history, and in the picker: again as the song changes (its own
     // undo, Duck Under, a track renamed or recoloured).

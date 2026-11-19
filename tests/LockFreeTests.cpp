@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The engine's lock-free parts raced on real threads: the queue that live notes come through from any thread
 // (EventQueue.h), the handover of what the audio thread plays (Handover.h), the playhead's stamps (PlayheadClock.h),
-// the transport the message thread asks for (Engine.h), a device's sample tap made as a display listens (SampleTap.h),
-// and the sounds the synth and the sampler let go of once the audio thread can't be reading them.
+// the transport the message thread asks for (Engine.h), a device's sample tap made as a display listens (SampleTap.h) and a
+// dynamics device's trail (LevelTrail.h), and the sounds the synth and the sampler let go of once the audio thread can't be
+// reading them.
 // Each race runs a fixed count of operations, never for a time, and waits only for what the other threads do, so that it
 // says the same on one core as on many; ThreadSanitizer (linux-tsan) sees each access the threads share. What a thread
 // finds wrong it counts, and the test thread checks the counts once the threads have ended (doctest's checks are the test
 // thread's).
 #include "TestHelpers.h"
+#include "devices/core/LevelTrail.h"
 #include "devices/core/SampleTap.h"
 #include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
@@ -830,6 +832,88 @@ TEST_CASE ("A device's sample tap raced: made as a display first listens while t
     CHECK (torn == 0);
     CHECK (outOfOrder == 0);
     CHECK (last <= (float) (pushedBlocks.load() * blockSize - 1));
+}
+
+TEST_CASE ("A dynamics device's trail raced: made as a display first listens while the audio thread adds, each reading whole and in order")
+{
+    // As the sample tap's race: the audio thread adds samples, a reading's worth at a time each holding the reading's count in
+    // every field (half more up), a fixed count of them and on until something was pulled; the message thread listens once it
+    // has added some and pulls until it has ended. Whatever is pulled is whole and in order.
+    constexpr int readings = 200000;
+    phazite::devices::LevelTrail trail;
+    trail.prepare (48000.0); // 24 samples a reading
+    std::atomic<int> added { 0 };
+    std::atomic<bool> audioDone { false }, pulledSome { false };
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (phazite::test::hangTimeout);
+
+    std::thread audio (
+        [&]
+        {
+            constexpr int mostReadings = 1 << 24;
+
+            for (int reading = 0;
+                 reading < readings
+                 || (reading < mostReadings && ! pulledSome.load (std::memory_order_acquire) && std::chrono::steady_clock::now() < until);
+                 ++reading)
+            {
+                if (reading >= readings)
+                    std::this_thread::yield();
+
+                const auto count = (float) reading;
+
+                if (trail.isListening())
+                    for (int i = 0; i < 24; ++i)
+                        trail.add (count, count, count, count + 0.5f, count);
+
+                added.store (reading + 1, std::memory_order_release);
+            }
+
+            audioDone.store (true, std::memory_order_release);
+        });
+
+    while (added.load (std::memory_order_acquire) < 1000 && ! audioDone.load (std::memory_order_acquire))
+        std::this_thread::yield();
+
+    trail.setListening (true);
+    std::vector<phazite::devices::LevelReading> pulled (512);
+    auto total = 0, torn = 0, outOfOrder = 0;
+    auto last = -1.0f;
+
+    for (;;)
+    {
+        const auto done = audioDone.load (std::memory_order_acquire);
+        const auto n = trail.pull (pulled.data(), (int) pulled.size());
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& each = pulled[(size_t) i];
+
+            if (! juce::exactlyEqual (each.output, each.input) || ! juce::exactlyEqual (each.down, each.input)
+                || ! juce::exactlyEqual (each.heard, each.input) || ! juce::exactlyEqual (each.up, each.input + 0.5f))
+                ++torn;
+
+            if (each.input <= last)
+                ++outOfOrder;
+
+            last = each.input;
+        }
+
+        total += n;
+
+        if (n > 0)
+            pulledSome.store (true, std::memory_order_release);
+
+        if (done && n == 0)
+            break;
+
+        if (n == 0)
+            std::this_thread::yield();
+    }
+
+    audio.join();
+    CHECK (total > 0);
+    CHECK (torn == 0);
+    CHECK (outOfOrder == 0);
 }
 
 namespace

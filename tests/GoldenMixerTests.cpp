@@ -296,9 +296,18 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: Phazite's compressor on a beat and stabs")
     {
-        // Its curve turning down from -36 dB, its corner there.
+        // Its curve turning down from -36 dB, its corner there: about 1.6:1 to -13.5 dB out at 0 dB, then 4:1.
         const auto corner = phazite::devices::curves::axisForDecibels (-36.0f);
-        checkEffect (phazite::devices::Compressor::typeID, "effect-compressor", { { "point2X", corner }, { "point2Y", corner } },
+        const auto zero = phazite::devices::curves::axisForDecibels (0.0f);
+        checkEffect (phazite::devices::Compressor::typeID, "effect-compressor",
+                     { { "points", 4.0f },
+                       { "point2X", corner },
+                       { "point2Y", corner },
+                       { "point3X", zero },
+                       { "point3Y", 0.6454643f },
+                       { "point3Tension", 0.0013359f },
+                       { "point4X", 1.0f },
+                       { "point4Y", 0.6872495f } },
                      "Phazite's compressor turning down from -36 dB, on a beat and chord stabs.");
     }
 
@@ -424,11 +433,17 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: Phazite's compressor driven in Tube at half mix, on a beat and stabs")
     {
-        // Its curve turning down from -24 dB, Tube's colour and the drive's curve in, half and half with the sound.
+        // Its curve turning down from -24 dB (about 2.3:1 to -13.5 dB out at 0 dB, then 4:1), Tube's colour and the drive's
+        // curve in, half and half with the sound.
         const auto corner = phazite::devices::curves::axisForDecibels (-24.0f);
         checkEffect (phazite::devices::Compressor::typeID, "effect-compressor-driven",
-                     { { "point2X", corner },
+                     { { "points", 4.0f },
+                       { "point2X", corner },
                        { "point2Y", corner },
+                       { "point3X", phazite::devices::curves::axisForDecibels (0.0f) },
+                       { "point3Y", 0.6454643f },
+                       { "point4X", 1.0f },
+                       { "point4Y", 0.6872495f },
                        { "character", (float) phazite::devices::Compressor::Character::tube },
                        { "drive", 0.6f },
                        { "mix", 0.5f } },

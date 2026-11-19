@@ -14,6 +14,9 @@ The full text of every step, as it was written when it was built, is in the
   switches stand in one column, the velocity lane leaves nothing behind as it is sized, the inspector's title matches
   the side panels', the transport bar is in evenly spaced groups with Low Latency in the status bar and A/B only when
   it can be used, and the areas' tabs look like tabs, with a line before the tools.
+- **The dynamics curves on decibel axes:** the Compressor's and the Multiband's curves show what they play (a straight
+  line a ratio, a bent one inside its points), their presets converted to play as they did, a point's menu at the
+  pointer, and the Compressor's history a reading every half millisecond, drawn as a line, not stairs.
 - **No new audio, video or picture files in the repository:** the pre-commit hook refuses them.
 
 ## Stage 6. Deep: every device to the standard of the best plug-ins (from 2026-11-18)

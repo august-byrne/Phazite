@@ -289,13 +289,17 @@ the [changelog](changelog.md).
 
 | # | Check | Proves | Checked on |
 |---|---|---|---|
-| F1 | Right-click the master volume, a mixer fader, an EQ dot, a knob and a view's tab | Each menu opens at the pointer | |
-| F2 | Right-click an effect's name in a mixer strip and point at Replace; pick one. The same on an instrument | The list opens without a click, and the pick replaces the device | |
-| F3 | A mixer strip with a Compressor, an EQ and an effect with a long name | The green switches are in one column | |
-| F4 | Drag the piano roll's velocity lane's edge up and down | "Velocity" is drawn once, never left behind | |
-| F5 | Look at the inspector's title beside the browser's | Same inset, height and size | |
-| F6 | Look along the transport bar; click Low Latency beside the CPU in the status bar, and press its key | Even gaps in groups; Low Latency lights while on; A/B shows once there is a version to compare with | |
-| F7 | Look at the playlist's area: its tabs and its tools | The tabs read as tabs, the shown one joined to its view; a thin line stands before the tools | |
+| X1 | Right-click the master volume, a mixer fader, an EQ dot, a knob and a view's tab | Each menu opens at the pointer | |
+| X2 | Right-click an effect's name in a mixer strip and point at Replace; pick one. The same on an instrument | The list opens without a click, and the pick replaces the device | |
+| X3 | A mixer strip with a Compressor, an EQ and an effect with a long name | The green switches are in one column | |
+| X4 | Drag the piano roll's velocity lane's edge up and down | "Velocity" is drawn once, never left behind | |
+| X5 | Look at the inspector's title beside the browser's | Same inset, height and size | |
+| X6 | Look along the transport bar; click Low Latency beside the CPU in the status bar, and press its key | Even gaps in groups; Low Latency lights while on; A/B shows once there is a version to compare with | |
+| X7 | Look at the playlist's area: its tabs and its tools | The tabs read as tabs, the shown one joined to its view; a thin line stands before the tools | |
+| X8 | Compressor, and a Multiband's band: right-click a hollow handle; drag it up and down; look at the default curve's corner readout | The line goes straight with the handle on its middle; it bows toward the pointer, never past its points or the edges; the corner reads 4.0:1 | |
+| X9 | Right-click a point of the curve | Its menu opens at the pointer | |
+| X10 | Compressor in Duck under a kick at 120 and at 174 BPM, in the dock and in a wide window | Smooth dips with their attack, hold and release, no stairs, no notches to silence between kicks | |
+| X11 | Load Compressor > Noise Gate, Drum Bus Glue and Gentle Master, and Multiband > Upward Squash, on what they are for | They sound as they did; the gates open and close where they did | |
 
 ## Performance on other machines
 

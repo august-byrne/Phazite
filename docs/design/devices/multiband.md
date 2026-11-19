@@ -43,7 +43,7 @@ Post").
 | Ceiling | -24 to +6 dB | 0 dB | The most the saturation lets out. It does nothing while Saturation is 0 %. |
 | Sidechain | Off, On | Off | The band's compressor hears the key in place of its own band. |
 | Points | 2 to 8 | 3 | How many points the band's curve has. |
-| Point 1 to 8 X, Y | 0 to 100 % | The default curve | Each point's place across (level in) and up (level out) the curve's axes. |
+| Point 1 to 8 X, Y | 0 to 100 % | The default curve | Each point's place across (level in) and up (level out) the curve's axes, even in decibels: -60 dB at 0 % (out, silence), 0 dB at 83.3 %, +12.04 dB at 100 %. |
 | Point 1 to 8 Tension | -100 to +100 % | 0 % | How the line to the point bends. |
 | Point 1 to 8 Type | Single Curve, Double Curve, Hold, Stairs, Smooth Stairs | Single Curve | The shape of the line to the point. |
 
@@ -73,8 +73,9 @@ Post gain and its saturation. The three bands, mixed with the delayed sound as i
 master band's same chain.
 
 **The compressors.** Each reads its gain from its curve, which is the [Compressor](compressor.md)'s: level out
-against level in through up to eight points, on axes where an amplitude `a` sits at `ln (1 + 2a) / ln 9` (silence, 0
-dB in the middle, +12 dB), so that it compresses or expands, downward or upward, limits or gates by its shape. The
+against level in through up to eight points, on axes that are decibels, the same across and up, from -60 dB (out,
+silence at the bottom; in, -60 dB and every level under it, which take the gain just over it) to +12.04 dB, where a
+straight line is a ratio, so that it compresses or expands, downward or upward, limits or gates by its shape. The
 detector hears the band's peak, the louder channel's, held for the Sustain, or its average over the Sustain. The gain
 goes down through as many one-pole stages as the Curve box says, the Attack shared among them. It comes back through
 two releases: Release follows a power curve that speeds up and reaches the gain wanted as its time is up (Release
@@ -151,8 +152,8 @@ for the session, not to the project. Each edit of a parameter is one undo step.
 - The whole chain is not oversampled; only the saturations run at twice the rate, with no higher setting.
 - A new Multiband's limit at 0 dB is a compressor's curve with an attack, not a brick wall: fast peaks pass over it.
   The [Limiter](limiter.md) keeps a ceiling.
-- The curve is small in the dock, and shows nothing under -60 dB, where it puts silence: a point quieter than that is
-  typed or moved by the keyboard. No threshold or ratio is set as a number.
+- The curve is small in the dock, and shows nothing under -60 dB, where it puts silence: no level out
+  between -60 dB and silence can be drawn. No threshold or ratio is set as a number.
 - The bands' graph draws the bands as blocks, not the crossovers' slopes, and shows no gain reduction on the spectrum.
 - Monitor takes the meters once at each refresh of the display: each column is the most they reached since the one
   before, drawn across that time, so a short peak shows, but how it rose and fell within a refresh doesn't.

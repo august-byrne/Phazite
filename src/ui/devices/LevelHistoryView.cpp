@@ -57,6 +57,12 @@ void LevelHistoryView::describe()
 
 void LevelHistoryView::push (double milliseconds, const SongTime& song, float input, float output, float reduction, float key)
 {
+    const Levels levels[] = { { input, output, reduction, key } };
+    push (milliseconds, song, levels);
+}
+
+void LevelHistoryView::push (double milliseconds, const SongTime& song, std::span<const Levels> levels)
+{
     // Two bars at the tempo where the playhead is.
     span = barsShown * std::max (song.barLength, 0.25) * 60000.0 / std::max (song.bpm, 1.0);
 
@@ -64,7 +70,34 @@ void LevelHistoryView::push (double milliseconds, const SongTime& song, float in
     if (song.playing && ! readings.empty())
         addLines (readings.back().milliseconds, milliseconds, song);
 
-    readings.push_back ({ milliseconds, input, output, reduction, key });
+    // Each reading over its share of the time since the last, those in one half column as one: the loudest of what came in
+    // and went out and the key, and the furthest it turned (down, or up below 0).
+    const auto from = readings.empty() || readings.back().milliseconds >= milliseconds ? milliseconds : readings.back().milliseconds;
+    const auto bucket = span / std::max (2.0, 2.0 * (double) getLevels().area.getWidth());
+    const auto bucketOf = [bucket] (double time) { return std::ceil (time / bucket - 1.0e-9); };
+
+    for (size_t i = 0; i < levels.size(); ++i)
+    {
+        const auto& each = levels[i];
+        const auto time = from + (milliseconds - from) * (double) (i + 1) / (double) levels.size();
+
+        if (! readings.empty() && bucketOf (readings.back().milliseconds) >= bucketOf (time))
+        {
+            auto& last = readings.back();
+            last.milliseconds = time;
+            last.input = std::max (last.input, each.input);
+            last.output = std::max (last.output, each.output);
+            last.key = std::max (last.key, each.key);
+
+            if (std::abs (each.reduction) > std::abs (last.reduction))
+                last.reduction = each.reduction;
+
+            continue;
+        }
+
+        readings.push_back ({ time, each.input, each.output, each.reduction, each.key });
+    }
+
     lastSong = song;
     ++pushes;
 
@@ -224,22 +257,23 @@ float LevelHistoryView::getYForLevel (float decibels) const
 
 juce::Path LevelHistoryView::makeTrace (float Reading::* value, const std::function<float (float)>& yFor) const
 {
-    // Each reading across the time it covers, since the one before, at its level: a tick that came late as wide as it lasted.
+    // A line through the readings, each at the middle of the time it covers (since the one before), from the start of the
+    // first's to the end of the last's: so that readings fewer than the columns draw as lines between them, not as steps, and
+    // a tick that came late spreads over as long as it lasted.
     juce::Path trace;
+
+    if (readings.empty())
+        return trace;
+
+    trace.startNewSubPath (getReadingSpan (0).getStart(), yFor (readings.front().*value));
 
     for (size_t i = 0; i < readings.size(); ++i)
     {
-        const auto y = yFor (readings[i].*value);
         const auto across = getReadingSpan ((int) i);
-
-        if (i == 0)
-            trace.startNewSubPath (across.getStart(), y);
-        else
-            trace.lineTo (across.getStart(), y);
-
-        trace.lineTo (across.getEnd(), y);
+        trace.lineTo (0.5f * (across.getStart() + across.getEnd()), yFor (readings[i].*value));
     }
 
+    trace.lineTo (getReadingSpan ((int) readings.size() - 1).getEnd(), yFor (readings.back().*value));
     return trace;
 }
 
@@ -256,6 +290,11 @@ juce::Range<float> LevelHistoryView::getReadingSpan (int index) const
     const auto& reading = readings[(size_t) index];
     const auto from = index > 0 ? readings[(size_t) index - 1].milliseconds : reading.milliseconds;
     return { getXForTime (from), getXForTime (reading.milliseconds) };
+}
+
+float LevelHistoryView::getReduction (int index) const
+{
+    return juce::isPositiveAndBelow (index, (int) readings.size()) ? readings[(size_t) index].reduction : 0.0f;
 }
 
 void LevelHistoryView::clear()

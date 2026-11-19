@@ -4,8 +4,9 @@
 // "should the line graph even co-exist in the same effect as sidechaining"; the research found no transfer curve helps
 // while ducking, so the curve and the ducking don't share a page: Compress shows the curve, Duck shows time). A click on a
 // tab sets the mode, as one undo step, and shows its page; each fits the default dock on one page. Each shows its history
-// (LevelHistoryView.h), the last two bars at the song's tempo with its beats and bars, and how far it turns the sound down
-// in red from the top (Transient's, up and down about the middle).
+// (LevelHistoryView.h), the last two bars at the song's tempo with its beats and bars, a reading every half millisecond from
+// the compressor's trail (devices/core/LevelTrail.h), and how far it turns the sound down in red from the top (Transient's,
+// up and down about the middle).
 //
 // - Compress, kept plain for a quick compressor (the owner, 2026-11-01): its characters as a row of buttons; its curve, drawn
 //   and edited as the multiband's are, as Maximus's (DynamicsCurve.h), lit up to the level it hears, with its menu's shapes
@@ -28,6 +29,7 @@
 #include "DeviceEditorBase.h"
 #include "DynamicsCurve.h"
 #include "LevelHistoryView.h"
+#include "devices/core/LevelTrail.h"
 
 #include <memory>
 #include <vector>
@@ -79,7 +81,11 @@ private:
     std::vector<float> values;
     ParameterHandle threshold; // Duck's, which the history's line drags
     float shownLevel, shownReduction = 0.0f, shownBoost = 0.0f;
-    DrawnNumbers drawnCurve; // what its curve and meter show
+    std::vector<devices::LevelReading> pulled;           // from the compressor's trail, at each refresh,
+    std::vector<LevelHistoryView::Levels> historyLevels; // and as its history takes them
+    int emptyRefreshes = 0;                              // refreshes in a row that brought no reading
+    static constexpr int refreshesToSilence = 4;         // after which the device is taken to sleep
+    DrawnNumbers drawnCurve;                             // what its curve and meter show
     int shownSongVersion = -1;
     bool knobsChosen = false; // Compress's knobs shown first, where its column shows its parts under tabs
 

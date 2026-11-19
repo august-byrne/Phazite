@@ -11,7 +11,8 @@
 // it has no speed to set. A line across at a level the device sets (a limiter's ceiling, a ducking compressor's
 // threshold) moves with a drag up or down near it, as one undo step, and keeps every graph's grammar there (graph::HandleDrag:
 // Shift fine, a double-click for its default, a right-click for its menu): there the pointer becomes an up-and-down arrow,
-// the line lights up, and the hint bar says what a drag does. Its editor pushes a reading each tick.
+// the line lights up, and the hint bar says what a drag does. Its editor pushes the readings since the last tick at each
+// tick: the compressor's a reading every half millisecond (devices/core/LevelTrail.h), the limiter's one.
 #pragma once
 
 #include "DeviceGraph.h"
@@ -23,6 +24,7 @@
 
 #include <deque>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace phazite::ui
@@ -37,21 +39,32 @@ public:
     using SongTime = DeviceHandle::SongTime;
     static constexpr double barsShown = 2.0;
 
-    // A tick's reading, taken at a moment (milliseconds, by juce::Time::getMillisecondCounterHiRes()) with where the song was
-    // then (DeviceHandle::getSongTime()), in decibels: the loudest in, the loudest out, how far it was turned down at its
-    // deepest (0 or more), and, while it listens to another track (setKey()), that track's loudest, as its detector hears it,
-    // each over the time since the reading before (the devices' meters give the most since they were last read), which it
-    // is drawn across: a tick that came late draws as wide as it lasted, and a short peak between two ticks shows.
+    // A reading, in decibels: the loudest in, the loudest out, how far it was turned down at its deepest (0 or more), and,
+    // while it listens to another track (setKey()), that track's loudest, as its detector hears it.
+    struct Levels
+    {
+        float input = -200.0f, output = -200.0f, reduction = 0.0f, key = -200.0f;
+    };
+
+    // A tick's readings, oldest first, taken at a moment (milliseconds, by juce::Time::getMillisecondCounterHiRes()) with where
+    // the song was then (DeviceHandle::getSongTime()), each over an even share of the time since the tick before (a device's
+    // meters give the most since they were last read; its trail, devices/core/LevelTrail.h, a reading every half
+    // millisecond), which it is drawn across: a tick that came late draws as wide as it lasted, and a short peak between two
+    // ticks shows. It keeps a reading for each half pixel column at most, the loudest and deepest of those that fall in it,
+    // and draws a line through them, each in the middle of its time, so that readings fewer than its columns draw as lines
+    // between them, not as steps.
+    void push (double milliseconds, const SongTime&, std::span<const Levels>);
     void push (double milliseconds, const SongTime&, float input, float output, float reduction, float key = -200.0f);
 
     // Afresh: no readings and no lines, until the next push (an editor shown again: DisplayTicker::Display::shownAgain()), so
     // that nothing is drawn across the time nobody looked.
     void clear();
 
-    // Its readings, oldest first, and where each is drawn across: from the reading before it to its own moment (the first,
-    // at its moment alone), in its own coordinates.
+    // Its readings, oldest first, where each is drawn across (from the reading before it to its own moment; the first, at
+    // its moment alone, in its own coordinates), and how far each turned the sound down (below 0, up).
     int getNumReadings() const noexcept;
     juce::Range<float> getReadingSpan (int index) const;
+    float getReduction (int index) const;
 
     // How long it shows across its width: two bars at the tempo where the playhead was at the newest reading.
     double getSpanMilliseconds() const noexcept { return span; }
@@ -109,7 +122,7 @@ public:
 private:
     struct Reading
     {
-        double milliseconds = 0.0;
+        double milliseconds = 0.0; // where its time ends
         float input = 0.0f, output = 0.0f, reduction = 0.0f, key = -200.0f;
     };
 

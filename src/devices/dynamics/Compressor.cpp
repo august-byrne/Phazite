@@ -15,7 +15,8 @@ namespace
     constexpr std::string_view modes[] = { "Compress", "Duck", "Transient" };
     constexpr std::string_view characters[] = { "Clean", "VCA", "FET", "Opto", "Tube" };
 
-    // A point of its curve. At first it compresses 4:1 over -18 dB (curves::makeCompression(), as a test checks).
+    // A point of its curve. At first it compresses 4:1 over -18 dB (curves::makeCompression(), as a test checks): level in
+    // level out to -18 dB, then a straight line to the axes' end.
 #define PHAZITE_COMPRESSOR_POINT(n, x, y, t)                                                                                               \
     { .id = "point" #n "X", .name = "Point " #n " X", .defaultValue = x, .unit = Unit::percent },                                          \
         { .id = "point" #n "Y", .name = "Point " #n " Y", .defaultValue = y, .unit = Unit::percent },                                      \
@@ -116,15 +117,15 @@ namespace
           .defaultValue = 20000.0f,
           .unit = Unit::hertz,
           .scale = Scale::logarithmic },
-        { .id = "points", .name = "Points", .minimum = 2.0f, .maximum = (float) curves::maxPoints, .defaultValue = 4.0f },
+        { .id = "points", .name = "Points", .minimum = 2.0f, .maximum = (float) curves::maxPoints, .defaultValue = 3.0f },
         PHAZITE_COMPRESSOR_POINT (1, 0.0f, 0.0f, 0.0f),
-        PHAZITE_COMPRESSOR_POINT (2, 0.102206f, 0.102206f, 0.0f),
-        PHAZITE_COMPRESSOR_POINT (3, 0.5f, 0.160455f, 0.100808f),
-        PHAZITE_COMPRESSOR_POINT (4, 1.0f, 0.213277f, 0.00657f),
-        PHAZITE_COMPRESSOR_POINT (5, 1.0f, 0.213277f, 0.00657f),
-        PHAZITE_COMPRESSOR_POINT (6, 1.0f, 0.213277f, 0.00657f),
-        PHAZITE_COMPRESSOR_POINT (7, 1.0f, 0.213277f, 0.00657f),
-        PHAZITE_COMPRESSOR_POINT (8, 1.0f, 0.213277f, 0.00657f),
+        PHAZITE_COMPRESSOR_POINT (2, 0.58299973f, 0.58299973f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (3, 1.0f, 0.6872498f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (4, 1.0f, 0.6872498f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (5, 1.0f, 0.6872498f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (6, 1.0f, 0.6872498f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (7, 1.0f, 0.6872498f, 0.0f),
+        PHAZITE_COMPRESSOR_POINT (8, 1.0f, 0.6872498f, 0.0f),
         { .id = mixParameterID, .name = "Mix", .defaultValue = 1.0f, .unit = Unit::percent },
     };
 
@@ -297,9 +298,14 @@ const DeviceInfo Compressor::info { .typeID = typeID,
                                     .parameters = parameters,
                                     .hasSidechain = true };
 
-void Compressor::prepare (double newSampleRate, int)
+void Compressor::prepare (double newSampleRate, int maximumBlockSize)
 {
     sampleRate = newSampleRate;
+    trail.prepare (sampleRate);
+
+    for (auto* scratch : { &trailInputs, &trailTurns, &trailHeard })
+        scratch->assign ((size_t) std::max (1, maximumBlockSize), 0.0f);
+
     reduction.prepare (sampleRate);
     makeupSmoothing = (float) (1.0 - std::exp (-1.0 / (makeupSeconds * sampleRate)));
     keyStep = (float) std::min (1.0, 1.0 / (keyFadeSeconds * sampleRate));
@@ -671,6 +677,7 @@ void Compressor::process (const ProcessContext& block)
 
     lastMode = shownMode;
     playedYet = true;
+    startTrail (block);
 
     // Transient's ear hears the level in every mode (two filters and a comparison), so that it has it when it switches to
     // Transient; its followers run in Transient alone.
@@ -697,8 +704,56 @@ void Compressor::process (const ProcessContext& block)
             break;
     }
 
+    endTrail (block);
     workOutTail (shownMode, values);
     isFresh = false;
+}
+
+void Compressor::startTrail (const ProcessContext& block) noexcept
+{
+    // While a display listens, and for a block no longer than it was prepared for (no other comes): what came in, before the
+    // mode turns it.
+    trailing = trail.wantsReadings() && block.numChannels > 0 && block.numSamples <= (int) trailInputs.size();
+
+    if (! trailing)
+        return;
+
+    const auto* left = block.channels[0];
+    const auto* right = block.numChannels > 1 ? block.channels[1] : left;
+
+    for (int i = 0; i < block.numSamples; ++i)
+    {
+        trailInputs[(size_t) i] = std::max (std::abs (left[i]), std::abs (right[i]));
+        trailTurns[(size_t) i] = 0.0f;
+        trailHeard[(size_t) i] = 0.0f;
+    }
+}
+
+void Compressor::endTrail (const ProcessContext& block) noexcept
+{
+    if (! trailing)
+        return;
+
+    // What went out, as its runner mixes it with the copy of what came in (DeviceRunner::mixWithDry()), unless it plays its key
+    // whole.
+    const auto wet = block.dry != nullptr && ! overridesMix() ? std::clamp (block.parameters[mix], 0.0f, 1.0f) : 1.0f;
+    const auto channels = std::min (block.numChannels, 2);
+
+    for (int i = 0; i < block.numSamples; ++i)
+    {
+        auto out = 0.0f;
+
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            const auto played = block.channels[channel][i];
+            out = std::max (out, std::abs (wet < 1.0f ? wet * played + (1.0f - wet) * block.dry[channel][i] : played));
+        }
+
+        const auto turned = trailTurns[(size_t) i];
+        trail.add (trailInputs[(size_t) i], out, std::max (0.0f, turned), std::max (0.0f, -turned), trailHeard[(size_t) i]);
+    }
+
+    trailing = false;
 }
 
 void Compressor::workOutTail (Mode shownMode, std::span<const float> values) noexcept
@@ -1066,6 +1121,7 @@ void Compressor::compress (const ProcessContext& block)
         loudestPeak = std::max (loudestPeak, level);
         most = std::max (most, amount);
         least = std::min (least, amount);
+        note (i, amount, level);
     }
 
     levelMeter.raise (dsp::gainToDecibels (loudestPeak));
@@ -1247,6 +1303,7 @@ void Compressor::duck (const ProcessContext& block)
 
         loudestKey = std::max (loudestKey, lastKeyPeak);
         most = std::max (most, ducked);
+        note (i, ducked, lastKeyPeak);
     }
 
     levelMeter.raise (dsp::gainToDecibels (loudestKey));
@@ -1360,6 +1417,7 @@ void Compressor::shapeTransients (const ProcessContext& block)
         loudest = std::max (loudest, transientLevel);
         most = std::max (most, -transientDecibels);
         least = std::min (least, -transientDecibels);
+        note (i, -transientDecibels, transientHeld);
     }
 
     levelMeter.raise (loudest);

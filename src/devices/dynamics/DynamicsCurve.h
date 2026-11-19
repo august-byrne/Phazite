@@ -7,8 +7,15 @@
 // how many points it has, then each point's place across, its place up, its line's tension and its line's type (PointField),
 // from left to right, the last one repeated in the places it leaves.
 //
-// Its axes: an amplitude a (1 at 0 dB) sits at ln (1 + 2a) / ln 9 across, from silence at 0 through 0 dB at the middle to
-// +12 dB at 1, as Maximus draws its curves; a line between two points is straight on those axes.
+// Its axes: a level in decibels, the same across and up, evenly from -60 dB at 0 (bottomDecibels) to 20 log10 4 dB, about
+// +12.04, at 1 (topDecibels: where the curves' end was before their axes were decibels, so that an end means what it meant).
+// What its editor shows is what plays: its lines are worked out on these axes, so that a straight line is a constant ratio
+// (from -18 dB to the top, rising 7.5 dB, is 4:1), as the transfer curves of FabFilter's, Ableton's and Bitwig's compressors
+// are drawn, and a bent one stays in the box its two points span. The bottom, a place of 0, says two things:
+// - Out, it is silence: a point at the bottom puts out nothing (a gate's floor), and a line leaving it rises from -60 dB.
+// - In, it is -60 dB and every level under it, which come out with the gain the curve gives just over -60 dB: unchanged under
+//   a line that rises from the corner (No Compression's), silent under one that stays at the bottom (a gate's floor), and as
+//   much louder or quieter as at -60 dB under one that starts higher or lower (Lift's).
 #pragma once
 
 #include <array>
@@ -48,10 +55,16 @@ constexpr int getPointParameter (int point, PointField field) noexcept
     return 1 + point * pointFields + field;
 }
 
-// The axes: an amplitude's place across, from 0 to 1, and back; and where a level in decibels is.
+// The axes' ends, in decibels.
+inline constexpr float bottomDecibels = -60.0f;
+inline constexpr float topDecibels = 12.0411998f; // 20 log10 4
+
+// The axes: where a level in decibels is (0 at -60 dB and under, past 1 over the top), and the level at a place (-60 dB at
+// 0); an amplitude's place, and the amplitude at a place, which is silence at 0 (out at the bottom is no sound).
+float axisForDecibels (float decibels) noexcept;
+float decibelsForAxis (float place) noexcept;
 float toAxis (float amplitude) noexcept;
 float fromAxis (float place) noexcept;
-float axisForDecibels (float decibels) noexcept;
 
 // How many steps a stairs line takes, for a tension.
 int getStairs (float tension) noexcept;
@@ -69,10 +82,11 @@ constexpr Point makePoint (float across, float up) noexcept
 
 // A compressor's curve as one with a threshold, a ratio and a soft knee centred on the threshold sets it (Giannoulis,
 // Massberg and Reiss, 2012): level in equalling level out up to the knee, then coming out 1 / ratio as far over the
-// threshold as it goes in (a ratio under 1 expands upward). It has a point where the knee starts, one where it ends, one at
-// 0 dB and one at the axes' end, which are exact, and the lines between them bent as near the compressor's curve as their
-// tensions take them, since a straight line on Maximus's axes isn't a ratio: within a tenth of a decibel at 4:1 over -18 dB,
-// half a decibel at 4:1 over -36 dB.
+// threshold as it goes in (a ratio under 1 expands upward). A straight line on its axes is a ratio, so its points (at the
+// axes' start, where the knee starts, where it ends, at the axes' end, and where an upward ratio reaches the top) and its
+// straight lines are exact; only the knee's line, bent as near the knee's curve as its tension takes it, is off it:
+// within about 0.15 dB for knees of 6 to 12 dB at 2:1 to 10:1 (0.2 dB at 24 dB), for a threshold whose knee starts
+// above the axis's bottom and ends under its top.
 std::vector<Point> makeCompression (float thresholdDecibels, float ratio, float kneeDecibels = 0.0f);
 
 // The shapes a curve starts from, as Maximus's manual shows its curves, by name.
@@ -86,8 +100,8 @@ const std::vector<Shape>& getShapes();
 const Shape* findShape (std::string_view name);
 
 // A curve's gains, for a compressor: how many decibels each level comes out louder (below 0, quieter), a table of them every
-// quarter of a decibel or so from -120 dB to the axes' end, so that quiet levels, which Maximus's axes crowd together, are
-// as exact as loud ones. Made again only when the curve's values change, without allocating.
+// quarter of a decibel or so from -120 dB (under the axes' bottom, the gain just over it) to the axes' end. Made again only
+// when the curve's values change, without allocating.
 class Gains
 {
 public:

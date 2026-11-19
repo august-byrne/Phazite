@@ -31,14 +31,15 @@ curve drawn as a step it is a gate. **Duck** turns the sound down while its key 
 | Makeup | -12 to +24 dB | 0 dB | A gain after it (Transient's too). Labelled Out. |
 | Auto Makeup | Off, On | Off | A gain after it of half the decibels the curve takes off a 0 dB level, which Makeup adds to. Labelled Auto. |
 | Drive | 0 to 100 % | 0 % | Saturates what goes out in the character's colour, up to 18 dB into a soft curve and back out at the level it went in. |
-| Points | 2 to 8 | 4 | How many points the curve has. |
-| Point 1 to 8 X | 0 to 100 % | The default curve | The point's place across the curve's axis (level in): silence at 0 %, 0 dB at 50 %, +12 dB at 100 %. |
-| Point 1 to 8 Y | 0 to 100 % | The default curve | The point's place up the same axis (level out). |
+| Points | 2 to 8 | 3 | How many points the curve has. |
+| Point 1 to 8 X | 0 to 100 % | The default curve | The point's place across the curve's axis (level in), even in decibels: -60 dB (and every level under it) at 0 %, 0 dB at 83.3 %, +12.04 dB at 100 %. |
+| Point 1 to 8 Y | 0 to 100 % | The default curve | The point's place up the same axis (level out); at 0 %, silence. |
 | Point 1 to 8 Tension | -100 to +100 % | The default curve | How the line to the point bends. |
 | Point 1 to 8 Type | Single Curve, Double Curve, Hold, Stairs, Smooth Stairs | Single Curve | The shape of the line to the point. |
 
-The default curve compresses 4:1 over -18 dB. Points past the count repeat the last one. The points are parameters
-like any other, but are edited by dragging the curve.
+The default curve compresses 4:1 over -18 dB: level in equals level out to -18 dB, then a straight line to -10.5 dB out
+at the top. Points past the count repeat the last one. The points are parameters like any other, but are edited by
+dragging the curve.
 
 ### Duck
 
@@ -73,12 +74,22 @@ character. While its sidechain listens to a track, the detector hears that track
 same cuts, and not through the Input Gain, as a keyed compressor does: a pad keyed by a kick is turned down by what the
 curve gives the kick's level, and not between the kicks once released.
 
-The curve gives level out against level in, through up to eight points, on axes where an amplitude `a` sits at
-`ln (1 + 2a) / ln 9`: silence at one end, 0 dB in the middle, +12 dB at the other. A line is straight on those axes,
-bent by its tension, or shaped as an S, a hold or stairs. By its shape alone the curve compresses or expands, downward
-or upward, limits or gates; there is no threshold, ratio or knee. The compressor reads the gain for a level from a
-table with an entry every quarter of a decibel from -120 dB up, made again only when the curve changes. The curve,
-its editor and its shapes are the [Multiband](multiband.md)'s too.
+The curve gives level out against level in, through up to eight points, on axes that are decibels, the same across
+and up, evenly from -60 dB to +12.04 dB (20 log10 4, where the curve's axes ended before they were decibels), as the
+transfer curves of FabFilter Pro-C, Ableton's Compressor and Bitwig's Dynamics are drawn. A line is straight on those
+axes, which is a constant ratio (from -18 dB in to the top, rising 7.5 dB, is 4:1), bent by its tension, or shaped as
+an S, a hold or stairs; a bent line stays in the box its two points span. Out, the bottom is silence: a point there
+puts out nothing (a gate's floor), and a line leaving it rises from -60 dB. In, the bottom is -60 dB and every level
+under it, which come out with the gain the curve gives just over -60 dB: unchanged under a line from the corner (No
+Compression's, the default's), silent under a gate's floor, 15 dB louder under Lift under -30 dB's. By its shape alone
+the curve compresses or expands, downward or upward, limits or gates; there is no threshold, ratio or knee to set. The
+compressor reads the gain for a level from a table with an entry every quarter of a decibel from -120 dB up, made again
+only when the curve changes. The curve, its editor and its shapes are the [Multiband](multiband.md)'s too.
+
+The shapes are exact on these axes: Compress 2:1 over -12 dB and 4:1 over -18 dB are straight lines from their
+thresholds; the gates are a floor of silence under their level with a 1 dB edge up to it; Expand under -24 dB is 1:2
+down to -60 dB out at -42 dB in, and silent under that (the axis ends there, so it closes as a gate); Lift under -30 dB is 2:1 upward; Squeeze Both Ways is 2.5:1 upward under -30 dB,
+30:16 from there to 0 dB and 4:1 above.
 
 The gain moves in decibels with the Attack as it goes down and the Release as it comes back, as time constants: after
 that time it has gone 63 % of the way (Giannoulis, Massberg and Reiss, 2012).
@@ -242,15 +253,16 @@ page. Each page fits the default dock without scrolling or pages.
 - **Transient:** the history, its gain a line above and below the middle; and the knobs Punch and Sustain, large, over
   Speed, Out and Low Cut.
 
-The curve shows level in across and level out up, each in decibels from -60 dB (at the left and the bottom, where
-silence also sits) to +12 dB, evenly, over a grid line every 6 dB, numbered every 12, the 0 dB lines stronger, and the
-line where level in equals level out: a point at -30 dB is as easy to see and take as one at -6. This is the picture's
-scale only: the points are the places the parameters above hold, on the curve's own axis.
+The curve shows level in across and level out up, on its own axes, each in decibels from -60 dB (at the left and the
+bottom; out at the bottom is silence) to +12 dB, evenly, over a grid line every 6 dB, numbered every 12, the 0 dB lines
+stronger, and the line where level in equals level out: a point at -30 dB is as easy to see and take as one at -6.
+What it draws is what the compressor plays: a line with no tension shows straight, a bent one stays between its points,
+and the handle that bends a line sits on it, half way across.
 
 The curve is edited by its points: drag a point (Shift keeps it level, Ctrl keeps it where it is across, and with
 Snap on it goes onto a grid line); drag the hollow handle in the middle of a line up or down to bend it (Ctrl in fine
-steps), and right-click it to straighten the line; right-click a point to type its levels, for its line's type or to delete it
-(Alt and a click also deletes it); right-click elsewhere to add a point. The first and last points stay at the curve's ends. Each
+steps), and right-click it to straighten the line; right-click a point for its menu, at the pointer, to type its levels,
+for its line's type or to delete it (Alt and a click also deletes it); right-click elsewhere to add a point. The first and last points stay at the curve's ends. Each
 change is one undo step. Under the curve are its menu (the shapes to start from: Limit at 0 dB, No Compression,
 Compress 2:1 over -12 dB, Compress 4:1 over -18 dB, Gate under -30 dB, Gate under -40 dB, Gate under -50 dB, Expand
 under -24 dB, Lift under -30 dB and
@@ -278,10 +290,12 @@ bars: a pale trace, what goes out over it in the device's colour, and how far th
 hanging from the top, the deepest dips numbered (on Transient's page, how far it is turned up or down, as a line about
 the middle). On Duck's page, and on Compress's while a key is heard, the key shows as a line in its track's colour,
 named, in place of the red; and on Duck's the Threshold is a line across the history to drag up or down against the key's level, as one undo step.
-Each reading is the most the meters reached since the one before (the loudest in and out, the deepest it turned down),
-drawn across the time it covers, so a short hit between two refreshes shows and a late refresh draws as wide as it
-lasted. Shown again after it was hidden (another tab, page or device, or a closed window), the history starts empty
-and the meters from the sound now.
+The compressor keeps a reading for every half millisecond it plays while its editor shows (the loudest in, and out
+after the Mix as its runner mixes it, the most it turned down and up, and what its detector heard), and the history
+takes those since its last refresh, spread over the time since it, a reading for each half pixel column at most (the
+loudest and deepest of those that fall in it), with a line through them: at any tempo and width there is a reading for
+every column, and each duck's dip shows its attack, hold and release. Shown again after it was hidden (another tab,
+page or device, or a closed window), the history starts empty and the meters from the sound now.
 
 Mix is the knob on the device's row in the Devices view.
 
@@ -297,13 +311,15 @@ Mix is the knob on the device's row in the Devices view.
 - The channels are always linked: no unlinked, mid/side or per-channel detection.
 - There is no threshold, ratio or knee as numbers to set: a point's levels are typed and its line's ratio is read,
   but a ratio or a knee is drawn, not typed. A line's ratio is shown from its ends, though its tension bends it.
+- The curve's axes reach down to -60 dB: what comes in quieter takes the gain the curve gives just over -60 dB, and
+  out, the only level under -60 dB is silence (a line from the bottom rises from -60 dB).
 - A gate drawn on the curve shuts the sound as far as the curve's table goes, 120 dB under full scale; quieter sound
   under it is turned down less than that.
 - The key has two cuts and no other filter, and no gain of its own.
 - The gain change itself is not oversampled, and the drive runs at twice the rate with no higher setting.
 - The characters are choices of detector, release and colour, not models of the circuits they are named after.
-- The history takes the meters once at each refresh of the display, the most they reached since the last: a short peak
-  shows, but how a fast attack or release moves within a refresh doesn't.
+- The history's readings are half a millisecond apart, the loudest in each: a peak shorter than that shows as that
+  long. What went out is drawn as late as the compressor's latency after what came in (at most 10 ms: a pixel or so).
 - A drag of the threshold's line starts from the Threshold as modulation plays it, and sets that as the value by
   hand.
 

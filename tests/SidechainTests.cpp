@@ -533,7 +533,7 @@ TEST_CASE ("Phazite's multiband, as it was made, starts ducking its lows when it
     CHECK (valueOf (multiband, "lowRelease2") == doctest::Approx (150.0f));
     CHECK (valueOf (multiband, "midKey") == doctest::Approx (0.0f));
     CHECK (valueOf (multiband, "masterKey") == doctest::Approx (0.0f));
-    CHECK (valueOf (multiband, "midPoint2X") == doctest::Approx (0.5f));
+    CHECK (valueOf (multiband, "midPoint2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (0.0f)));
     CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
 
     // One step: undo puts back both the source and the settings.
