@@ -707,8 +707,9 @@ inline const juce::Identifier mergingChosen { "chosen" };
 
 // On MERGING: the IDs the merge gave anew, which its commit records (renumbered); those the parting's and the other line's
 // songs were translated through before it (translated; model/versions/internal/SongMerge.h: findTranslation()); and those
-// the other line's song was translated through before that, where that line's own merges gave what both lines took in other
-// IDs than this line's did (crossed; model/versions/internal/VersionHistory.h: crossRenumbering()). Each separated by commas,
+// the other line's song was translated through before that, where that line's own merges gave anew what this line holds too
+// (a merge back, or another computer's merge of a version this line merged; crossed: model/versions/internal/VersionHistory.h,
+// crossRenumbering()), a note's by its clip as they number it. Each separated by commas,
 // each "from>to", or for a note "<its clip's group>/from>to" ("clip 66/3>7"), as a commit's RENUMBERED. No ID 0, and no two
 // of one group with the same from, or the same to.
 inline const juce::Identifier mergingRenumbered { "renumbered" }, mergingTranslated { "translated" }, mergingCrossed { "crossed" };

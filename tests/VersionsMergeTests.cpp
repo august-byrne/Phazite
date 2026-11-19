@@ -460,11 +460,12 @@ TEST_CASE ("A note the other line made with the ID a merge gave one of its notes
     CHECK_FALSE (phazite::areOneToOne ({ { {}, 0, 2 } }));
 }
 
-TEST_CASE ("The other line's merges of a version both merged cross to this line's IDs: the latest word, for what its song holds, never "
-           "onto an ID it holds, and its own item under such an ID given one of its own")
+TEST_CASE ("The other line's merges of a version both merged cross to this line's IDs: the latest word, for what its song holds, onto "
+           "an ID it holds only where that crosses away too, and its own item under such an ID given one of its own")
 {
-    // The review of S4.5: three lines that merged the same version, notes crossed onto a note their clip holds, and the other
-    // line's own item under an ID its merge gave anew, which this line's records would take for the parting's.
+    // The review of S4.5: three lines that merged the same version, a note crossed onto a note their clip holds that crosses
+    // away itself (known bug 199), and the other line's own item under an ID its merge at the parting gave anew, which this
+    // line's records would take for the parting's.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 3);
     const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
@@ -489,9 +490,9 @@ TEST_CASE ("The other line's merges of a version both merged cross to this line'
         { {}, far + 900, far + 901 },  // what their song no longer holds: nothing
         { {}, far + 10, far + 902 },   // an earlier merge's word...
         { {}, far + 10, t1 },          // ...and the latest's, which their song holds
-        { group, far + 20, notes[0] }, // onto a note their clip holds: left out
+        { group, far + 20, notes[0] }, // onto a note their clip holds, which crosses away
         { group, far + 30, notes[1] }, // a note crossed
-        { {}, t2, t0 },                // an item crossed, and their own Lead under t2, which the records translate
+        { {}, t2, t0 },                // an item crossed, and their own Lead under t2, which the parting holds
     };
     const std::vector<phazite::RenumberedID> ourMerges {
         { group, far + 20, notes[1] },
@@ -501,15 +502,13 @@ TEST_CASE ("The other line's merges of a version both merged cross to this line'
     };
 
     std::uint64_t next = 5000;
-    auto crossed = phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, far + 41 } }, theirs, theirs, [&next] { return next++; });
+    // Their merge of t2 at the parting, which holds the version's item under t2.
+    auto crossed = phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, t0 } }, {}, theirs, theirs, [&next] { return next++; });
     std::sort (crossed.begin(), crossed.end(),
                [] (const auto& a, const auto& b) { return a.clip != b.clip ? a.clip.compare (b.clip) < 0 : a.from < b.from; });
 
     const std::vector<phazite::RenumberedID> expected {
-        { {}, t0, far + 41 },
-        { {}, t1, far + 10 },
-        { {}, t2, 5000 },
-        { group, notes[1], far + 31 },
+        { {}, t0, far + 41 }, { {}, t1, far + 10 }, { {}, t2, 5000 }, { group, notes[0], notes[1] }, { group, notes[1], far + 31 },
     };
     CHECK (crossed == expected);
 
@@ -518,7 +517,7 @@ TEST_CASE ("The other line's merges of a version both merged cross to this line'
     const auto lead = findItems (without, schema::TRACK, t2);
     REQUIRE (lead.size() == 1);
     juce::ValueTree (lead.front()).getParent().removeChild (lead.front(), nullptr);
-    CHECK (phazite::crossRenumbering ({ { {}, t2, t0 } }, { { {}, t2, far + 41 } }, { { {}, t2, far + 41 } }, without, theirs,
+    CHECK (phazite::crossRenumbering ({ { {}, t2, t0 } }, { { {}, t2, far + 41 } }, { { {}, t2, t0 } }, {}, without, theirs,
                                       [&next] { return next++; })
            == std::vector<phazite::RenumberedID> { { {}, t0, far + 41 } });
 }
@@ -536,8 +535,181 @@ TEST_CASE ("Crossings that aren't one to one are left out, and the other line's 
     const std::vector<phazite::RenumberedID> theirMerges { { {}, far + 10, t0 }, { {}, far + 11, t1 }, { {}, t2, far + 60 } };
     const std::vector<phazite::RenumberedID> ourMerges { { {}, far + 10, far + 50 }, { {}, far + 11, far + 50 } }; // two to one
     std::uint64_t next = 5000;
-    CHECK (phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, far + 41 } }, theirs, theirs, [&next] { return next++; })
+    CHECK (phazite::crossRenumbering (theirMerges, ourMerges, { { {}, t2, far + 60 } }, {}, theirs, theirs, [&next] { return next++; })
            == std::vector<phazite::RenumberedID> { { {}, t2, 5000 } });
+}
+
+TEST_CASE ("The other line's song crosses into the parting's numbering where this line's records at the parting take an item on, so "
+           "that nothing is translated twice (known bug 199)")
+{
+    // The parting holds Pad under a and Rhodes under b; this line's merges took them to b and c.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 4);
+    const auto a = tracks[0].getRaw(), b = tracks[1].getRaw(), c = tracks[2].getRaw(), d = tracks[3].getRaw();
+
+    const auto songOf = [&song] (const std::map<std::uint64_t, juce::String>& names)
+    {
+        auto copy = song->getState().createCopy();
+
+        for (auto track : phazite::getTrackElements (copy))
+        {
+            if (const auto found = names.find (phazite::readID (track[schema::trackID])); found != names.end())
+                track.setProperty (schema::trackName, found->second, nullptr);
+            else
+                track.getParent().removeChild (track, nullptr);
+        }
+
+        return copy;
+    };
+
+    const auto base = songOf ({ { a, "Pad" }, { b, "Rhodes" } });
+    const std::vector<phazite::RenumberedID> ours { { {}, a, b }, { {}, b, c } };
+
+    // Both stages, as a merge takes them: the other line's song, each track's ID by its name, and what the merge records.
+    struct Merged
+    {
+        std::vector<phazite::RenumberedID> crossed, recorded;
+        std::map<juce::String, std::uint64_t> theirs;
+    };
+
+    const auto merge = [&base, &ours] (const juce::ValueTree& theirsRead, const std::vector<phazite::RenumberedID>& theirMerges)
+    {
+        std::uint64_t next = 5000;
+        const auto makeID = [&next] { return next++; };
+        Merged merged;
+        merged.crossed = phazite::crossRenumbering (theirMerges, ours, theirMerges, ours, base, theirsRead, makeID);
+        auto theirs = theirsRead.createCopy(), parting = base.createCopy();
+        phazite::translateIDs (theirs, merged.crossed);
+        const auto translation = phazite::findTranslation (parting, theirs, ours, makeID, merged.crossed);
+        phazite::translateIDs (parting, translation.all);
+        phazite::translateIDs (theirs, translation.all);
+        CHECK (translation.givenAnew.empty());
+        CHECK (phazite::holdsEachIDOnce (theirs));
+        merged.recorded = phazite::recordCrossings (merged.crossed, translation.all);
+
+        for (const auto& track : phazite::getTrackElements (theirs))
+            merged.theirs[track[schema::trackName].toString()] = phazite::readID (track[schema::trackID]);
+
+        for (auto* ids : { &merged.crossed, &merged.recorded })
+            std::sort (ids->begin(), ids->end(), [] (const auto& x, const auto& y) { return x.from < y.from; });
+
+        return merged;
+    };
+
+    SUBCASE ("the other line's merges took them to b and c too, and its Keys holds a")
+    {
+        // Pad to a, Rhodes to b, Keys out of the way first; then this line's records take Pad to b and Rhodes to c, once each.
+        const auto merged = merge (songOf ({ { a, "Keys" }, { b, "Pad" }, { c, "Rhodes" } }), ours);
+        CHECK (merged.crossed == std::vector<phazite::RenumberedID> { { {}, a, 5000 }, { {}, b, a }, { {}, c, b } });
+        CHECK (merged.theirs == std::map<juce::String, std::uint64_t> { { "Keys", 5000 }, { "Pad", b }, { "Rhodes", c } });
+        CHECK (merged.recorded == std::vector<phazite::RenumberedID> { { {}, a, 5000 }, { {}, b, b }, { {}, c, c } });
+    }
+
+    SUBCASE ("the other line's merge took Pad to d alone, and it holds the parting's Rhodes under b, as the parting does")
+    {
+        // Rhodes is the parting's, which this line's records take to c, not an item of that line's in the way of Pad.
+        const auto merged = merge (songOf ({ { a, "Keys" }, { b, "Rhodes" }, { d, "Pad" } }), { { {}, a, d } });
+        CHECK (merged.crossed == std::vector<phazite::RenumberedID> { { {}, a, 5000 }, { {}, d, a } });
+        CHECK (merged.theirs == std::map<juce::String, std::uint64_t> { { "Keys", 5000 }, { "Pad", b }, { "Rhodes", c } });
+        CHECK (merged.recorded == std::vector<phazite::RenumberedID> { { {}, a, 5000 }, { {}, d, b } });
+    }
+}
+
+TEST_CASE ("The other line's own note under an ID its merge gave away is found by its clip as the parting numbers it, where both "
+           "lines' merges gave that clip new IDs (known bug 199)")
+{
+    // The parting's clip k holds note n. This line's merge took the clip to k2; the other line's to k3, and gave the parting's
+    // note there a new ID (its own note held n), then took that note out. Its own note n is no note of the parting's.
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 1);
+    const auto clip = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+    addMidiNote (*song, clip, 36, at (0.0), lasting (1.0));
+    const auto base = song->getState().createCopy();
+    constexpr std::uint64_t far = 1000000; // no ID either song holds
+    const auto k = clip.getRaw(), k2 = far + 2, k3 = far + 3;
+
+    auto theirs = base.createCopy();
+    auto theirClip = findItems (theirs, schema::CLIP, k).front();
+    theirClip.setProperty (schema::clipID, (juce::int64) k3, nullptr);
+    const auto n = phazite::readID (theirClip.getChildWithName (schema::NOTE)[schema::noteID]);
+    const auto group = [] (std::uint64_t id) { return "clip " + juce::String ((juce::uint64) id); };
+
+    const std::vector<phazite::RenumberedID> theirMerges { { {}, k, k3 }, { group (k3), n, far + 5 } };
+    const std::vector<phazite::RenumberedID> ours { { {}, k, k2 } };
+    std::uint64_t next = 5000;
+    const auto makeID = [&next] { return next++; };
+    auto crossed = phazite::crossRenumbering (theirMerges, ours, theirMerges, ours, base, theirs, makeID);
+    std::sort (crossed.begin(), crossed.end(), [] (const auto& a, const auto& b) { return a.clip.compare (b.clip) < 0; });
+    CHECK (crossed == std::vector<phazite::RenumberedID> { { {}, k3, k }, { group (k), n, 5000 } });
+
+    // Translated on: the clip is this line's k2 on both sides, and the other line's note an addition of its own there.
+    auto translatedBase = base.createCopy();
+    phazite::translateIDs (theirs, crossed);
+    const auto translation = phazite::findTranslation (translatedBase, theirs, ours, makeID, crossed);
+    phazite::translateIDs (translatedBase, translation.all);
+    phazite::translateIDs (theirs, translation.all);
+    const auto ids = [] (const juce::ValueTree& tree, std::uint64_t clipID)
+    {
+        const auto found = findItems (tree, schema::CLIP, clipID);
+        REQUIRE (found.size() == 1);
+        return phazite::readID (found.front().getChildWithName (schema::NOTE)[schema::noteID]);
+    };
+    CHECK (ids (translatedBase, k2) == n);
+    CHECK (ids (theirs, k2) == 5000);
+}
+
+TEST_CASE ("What crossed is recorded by the IDs the merged song holds, a note by its clip as that numbers it")
+{
+    // An item the second stage takes on, a note in a clip it gives another ID, and a note neither touches.
+    const std::vector<phazite::RenumberedID> crossed { { {}, 10, 20 }, { "clip 20", 3, 4 }, { "clip 7", 1, 2 } };
+    const std::vector<phazite::RenumberedID> translation { { {}, 20, 30 }, { "clip 30", 4, 8 } };
+    CHECK (phazite::recordCrossings (crossed, translation)
+           == std::vector<phazite::RenumberedID> { { {}, 10, 30 }, { "clip 30", 3, 8 }, { "clip 7", 1, 2 } });
+    CHECK (phazite::recordCrossings (crossed, {}) == crossed);
+}
+
+TEST_CASE ("A song holds each ID once where each item's is once, and each note's once in its clip")
+{
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto first = addMidiClip (*song, tracks[0], { at (0.0), at (4.0) }, "Riff");
+    const auto second = addMidiClip (*song, tracks[1], { at (0.0), at (4.0) }, "Riff");
+    addMidiNote (*song, first, 36, at (0.0), lasting (1.0));
+    addMidiNote (*song, first, 38, at (1.0), lasting (1.0));
+    addMidiNote (*song, second, 40, at (0.0), lasting (1.0));
+    CHECK (phazite::holdsEachIDOnce (song->getState()));
+
+    const auto notesOf = [] (const juce::ValueTree& tree, phazite::ClipID clip)
+    {
+        const auto clips = findItems (tree, schema::CLIP, clip.getRaw());
+        REQUIRE (clips.size() == 1);
+        std::vector<juce::ValueTree> notes;
+
+        for (const auto& note : clips.front())
+            if (note.hasType (schema::NOTE))
+                notes.push_back (note);
+
+        return notes;
+    };
+
+    // A note with the ID of a note in another clip: once in each.
+    auto acrossClips = song->getState().createCopy();
+    juce::ValueTree (notesOf (acrossClips, second)[0])
+        .setProperty (schema::noteID, notesOf (acrossClips, first)[0][schema::noteID], nullptr);
+    CHECK (phazite::holdsEachIDOnce (acrossClips));
+
+    // Two notes of one clip, or two tracks, under one ID: twice.
+    auto inOneClip = song->getState().createCopy();
+    const auto notes = notesOf (inOneClip, first);
+    REQUIRE (notes.size() == 2);
+    juce::ValueTree (notes[1]).setProperty (schema::noteID, notes[0][schema::noteID], nullptr);
+    CHECK_FALSE (phazite::holdsEachIDOnce (inOneClip));
+
+    auto twoTracks = song->getState().createCopy();
+    auto trackElements = phazite::getTrackElements (twoTracks);
+    REQUIRE (trackElements.size() == 2);
+    trackElements[1].setProperty (schema::trackID, trackElements[0][schema::trackID], nullptr);
+    CHECK_FALSE (phazite::holdsEachIDOnce (twoTracks));
 }
 
 TEST_CASE ("The renumberings that apply are those of this line's merges since the parting that merged in the other line")

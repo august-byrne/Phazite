@@ -224,10 +224,14 @@ removals of the song's, nor taken out by the next version.
   knows them again by its version's record, even where the other branch, on another computer, gave one of those IDs
   to something it made since. Where another computer merged the same version and gave what it added other IDs, a later
   merge of that computer's line takes them back to this line's by both merges' records, so an item both took in is one item,
-  and an item that line made under an ID its merge gave away stays its own, with an ID of this line's; the version of that
-  merge records both, so that a merge after it knows them again.
-  No ID is in the song twice after a merge, a restore or a discard, and every one of them leaves the song's count of IDs
-  past every ID it holds.
+  and an item that line made under an ID its merge gave away stays its own, with an ID of this line's; a line merged back
+  into the line that merged it (main merged idea-2, then idea-2 merges main) takes its own items back from main's IDs
+  alike, by main's merge's record. The other line's song is taken first to the IDs the version both lines have gives
+  them, then to this line's, one step each, so that no item is moved twice. The version of that merge records both, by
+  the IDs the merged song holds, so that a merge after it knows them again. Where the two songs, so matched, would still
+  hold one ID for two things (records another tool wrote, or a history the records don't cover), nothing is merged, and
+  the merge says why: two things are never made one. No ID is in the song twice after a merge, a restore or a discard,
+  and every one of them leaves the song's count of IDs past every ID it holds.
 - **The version that finishes it** has both lines as its parents (the one merged alone where it follows the song's own
   already and the merge gave nothing a new ID), and is named for what it merged ("Merge idea-2",
   or "Merge "Verse 2"" for a version that isn't a branch's last) unless a name is typed.

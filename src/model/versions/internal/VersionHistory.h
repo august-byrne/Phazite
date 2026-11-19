@@ -998,22 +998,41 @@ bool follows (const std::map<juce::String, VersionRecord>& versions, const juce:
 std::vector<RenumberedID> findRenumbering (const std::map<juce::String, VersionRecord>& versions, const juce::String& ours,
                                            const juce::String& theirs, const juce::String& parted, bool onlyAtParting = true);
 
-// What the other side's song (theirSong, as read) is translated through first (translateIDs()), before the translation this
-// line's records make (SongMerge.h: findTranslation(), which counts none of these targets as a collision), when the other
-// line's own merges (theirMerges: findRenumbering() from that line's side, without onlyAtParting) gave anew what both lines
-// took in from a version they both merged: another computer's merge of the same version, which gave an item another ID than
-// this line's merge did (the review of S4.5). Each such ID, as that line's latest merge of it gave it and its song holds it,
-// made this line's: the ID this line's latest merge gave the same one (ourMerges, by clip and from), else the ID the version
-// merged has; none where its song holds that ID already for something else (an item's anywhere, a note's in that clip), and
-// to itself where it is that ID already (both lines' merges gave the same), so that it counts as this line's too. And
-// the other line's own item under an ID it gave anew (a from of theirMerges), which this line's records (recorded, as
-// findRenumbering() with onlyAtParting found them) would translate as the parting's (base) item it is not, given one of its
-// own from makeID, so that it stays an addition of that line. All of them, which the merge's commit records with those
-// findTranslation() gives; where they aren't one to one, those new IDs alone (one no item has never makes two items one). Any
-// thread.
+// What the other side's song (theirSong, as read) is translated through first (translateIDs()), into the parting's (base)
+// numbering, before the translation this line's records make takes it into this line's (SongMerge.h: findTranslation(),
+// which counts none of these targets as a collision): one numbering a stage, so that nothing is translated twice. Where the
+// other line's own merges gave anew what this line holds too: this line merged in by a merge back (main merged idea-2 and
+// gave its Pad a new ID; idea-2 merges main), or another computer's merge of a version this line merged too, which gave an
+// item another ID than this line's merge did (the review of S4.5; known bug 199). theirMerges are those merges' records
+// (findRenumbering() from that line's side, without onlyAtParting: those of versions this line's follows), and
+// theirMergesAtParting those of them whose version the parting follows (with onlyAtParting), which holds that version's items
+// under their own IDs (from); ourMerges are this line's alike, and ourMergesAtParting those findTranslation() translates by.
+// Each of the other line's latest records whose to its song holds crosses: to from, the parting's ID, where ourMergesAtParting
+// give it a word that findTranslation() takes (an item the parting holds; a note in its clip), which moves it on; else straight
+// to this line's ID, the one this line's latest merge gave the same from (ourMerges, by clip and from), else from itself; to
+// itself where it is that ID already, so that it counts as this line's too. And, given one of its own first (from makeID, one
+// neither song nor any record holds), each of the other line's own items in the way: under an ID one of those crosses to,
+// unless it crosses away itself or is the parting's own item there (one the parting holds that none of that line's words gave
+// another ID: two items then, which the merge refuses: holdsEachIDOnce()); and under an ID one of its merges at the parting
+// gave away (a from of theirMergesAtParting) that the parting holds too, which would be taken for the parting's item it is
+// not, whether or not this line has a word for it. A note by its clip (its group) as that line's song has it, looked up in
+// the parting by its clip as the parting numbers it, and given here by its clip as the items' translation numbers it, as
+// translateIDs() looks it up. All of them, simultaneous; where they aren't one to one, those new IDs alone (one no item has
+// never makes two items one). The merge's commit records them as recordCrossings() gives them. Any thread.
 std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& theirMerges, const std::vector<RenumberedID>& ourMerges,
-                                            const std::vector<RenumberedID>& recorded, const juce::ValueTree& base,
+                                            const std::vector<RenumberedID>& theirMergesAtParting,
+                                            const std::vector<RenumberedID>& ourMergesAtParting, const juce::ValueTree& base,
                                             const juce::ValueTree& theirSong, const std::function<std::uint64_t()>& makeID);
+
+// What crossRenumbering() gave (crossed) as the merge's commit records it (VersionRecord::renumbered), so that a later merge
+// translates by it at once: each made the ID the merged song holds after the translation that follows it (translation:
+// SongMerge.h, findTranslation()'s all), a note keyed by its clip as the merged song numbers it.
+std::vector<RenumberedID> recordCrossings (const std::vector<RenumberedID>& crossed, const std::vector<RenumberedID>& translation);
+
+// Whether a song holds each item's ID once, and each clip each note's: the other side's song and the parting's as a merge
+// translated them (two items under one ID would be made one: the merge is refused), or as a merge waiting says (which a
+// hand-made one could make hold one twice).
+bool holdsEachIDOnce (const juce::ValueTree& song);
 
 // A command that reads whole songs before it changes anything, on the history's thread (VersionHistory::startReading()),
 // the window held meanwhile (ProjectContext::holdForWork(): its title for the progress window, and its Cancel cancelling the

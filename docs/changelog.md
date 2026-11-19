@@ -249,6 +249,12 @@ The owner asked for every entry of [known-bugs.md](known-bugs.md) to be fixed be
 bug has a test that failed before its fix, and a reviewer read each area's changes; what the reviews found is fixed
 too. A line names the bug's number in that list.
 
+- **199 A merge that made two items one:** a line merged back into the line that merged it, two lines that each merged
+  the same version with other IDs, and a note in a clip a merge gave a new ID, keep every item once with its own
+  content, and what names an item names it still. A merge takes the other line's song to the IDs the version both
+  lines have gives them, then to this line's, one step each, the other line's own items given IDs of their own first;
+  it records what it took by the IDs the merged song holds; and it refuses a merge that would still put two items
+  under one ID, changing nothing. Left, as known bug 211: the other line's merge of a later version than the parting.
 - **204 Consolidate over part of a clip, in CI's Windows release build:** the joined clip had no notes there, and
   nowhere else. A test that takes the join's steps one at a time named the step on CI: the part of the clip in the
   range, made as `BeatRange (std::max (...), std::min (...))` of what the two ranges' getters return, came out empty

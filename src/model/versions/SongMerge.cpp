@@ -1281,26 +1281,27 @@ void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>& renumb
     translateNotes (song);
 }
 
-namespace
+std::vector<RenumberedID> findLatestWords (const std::vector<RenumberedID>& recorded)
 {
-    // An ID given anew as findTranslation() keys it: an item's by itself, a note's by its clip's group and itself.
-    juce::String getGroup (std::uint64_t)
-    {
-        return {};
-    }
-    juce::String getGroup (const std::pair<juce::String, std::uint64_t>& note)
-    {
-        return note.first;
-    }
-    std::uint64_t getID (std::uint64_t id)
-    {
-        return id;
-    }
-    std::uint64_t getID (const std::pair<juce::String, std::uint64_t>& note)
-    {
-        return note.second;
-    }
-} // namespace
+    // The later record's word for each ID; then, left out, what isn't one to one: an ID 0, and every ID two IDs were given.
+    std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> latest;
+
+    for (const auto& id : recorded)
+        latest[{ id.clip, id.from }] = id.to;
+
+    std::map<std::pair<juce::String, std::uint64_t>, int> targets;
+
+    for (const auto& [from, to] : latest)
+        ++targets[{ from.first, to }];
+
+    std::vector<RenumberedID> words;
+
+    for (const auto& [from, to] : latest)
+        if (from.second != 0 && to != 0 && targets[{ from.first, to }] == 1)
+            words.push_back ({ from.first, from.second, to });
+
+    return words;
+}
 
 bool areOneToOne (const std::vector<RenumberedID>& ids)
 {
@@ -1335,33 +1336,18 @@ PluginParameterValues translateKnobs (PluginParameterValues knobs, const std::ve
 Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree& theirs, const std::vector<RenumberedID>& recorded,
                              const std::function<std::uint64_t()>& makeID, const std::vector<RenumberedID>& crossed)
 {
-    // What was recorded, the later merge's word for an ID over an earlier's.
+    // What was recorded, the later merge's word for an ID over an earlier's, without what isn't one to one (a record of a
+    // history another wrote, damaged), which would make two items one.
     CopiedIDs items;
     std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> notes;
 
-    for (const auto& id : recorded)
+    for (const auto& id : findLatestWords (recorded))
     {
         if (id.clip.isEmpty())
             items[id.from] = id.to;
         else
             notes[{ id.clip, id.from }] = id.to;
     }
-
-    // What isn't one to one (a record of a history another wrote, damaged), left out: an ID 0, and every ID two IDs were
-    // given, which would make two items one.
-    const auto keepOneToOne = [] (auto& map)
-    {
-        std::map<std::pair<juce::String, std::uint64_t>, int> targets;
-
-        for (const auto& [from, to] : map)
-            ++targets[{ getGroup (from), to }];
-
-        std::erase_if (map, [&targets] (const auto& entry)
-                       { return getID (entry.first) == 0 || entry.second == 0 || targets[{ getGroup (entry.first), entry.second }] > 1; });
-    };
-
-    keepOneToOne (items);
-    keepOneToOne (notes);
 
     // The items' IDs the parting holds, alone: what the other line made since is no item a merge numbered. Of the other
     // side's, not those it was translated to first (crossed), each the item this side has under that ID already.
@@ -1424,8 +1410,22 @@ Translation findTranslation (const juce::ValueTree& base, const juce::ValueTree&
     collectNotes (base, notesInEither);
     collectNotes (theirs, theirNotes);
 
+    // The notes the other side's song was translated to first, keyed by their clips as these songs are numbered then: as
+    // translated here.
+    std::set<NoteKey> notesCrossedTo;
+
+    for (const auto& id : crossed)
+    {
+        if (const auto space = id.clip.lastIndexOfChar (' '); space >= 0)
+        {
+            const auto to = items.find ((std::uint64_t) id.clip.substring (space + 1).getLargeIntValue());
+            notesCrossedTo.insert (
+                { to != items.end() ? id.clip.substring (0, space + 1) + juce::String ((juce::uint64) to->second) : id.clip, id.to });
+        }
+    }
+
     for (const auto& note : theirNotes)
-        if (crossedTo.count (note) == 0)
+        if (notesCrossedTo.count (note) == 0)
             notesInEither.insert (note);
     std::erase_if (notes, [&heldNotes] (const auto& entry) { return heldNotes.count (entry.first) == 0; });
 

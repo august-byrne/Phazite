@@ -291,17 +291,32 @@ parting whose merged-in version the other line follows, all at once, so that the
   to one of theirs, on a computer whose count never reached this line's) gets a new ID of this side's too, in both songs,
   and the merge's version records it with the others (`RENUMBERED`), so that a later merge translates it alike.
 
-Where the other line's own merges gave anew what both lines took in from a version they both merged (two computers each
-merged the same version, and gave an item of it different IDs), the other side's song is translated first, before the
-records above, through those merges' records (the latest for each `from`, of the IDs its song holds):
-- each ID that line gave such an item is made this line's: the ID this line's latest merge gave the same `from` (for a
-  note, in the same clip), else the `from` itself, as the merged version has it; not where the other side's song holds
-  that ID already for something else (for a note, in that clip); and to itself (`to>to`) where it is that ID already;
-- an item of the other line's own under an ID one of its merges gave anew (a `from` of theirs), which the records above
-  would translate as the parting's item it isn't, gets a new ID of this side's, so that it stays that line's addition;
+Where the other line's own merges gave anew what this line holds too (a merge back: main merged idea-2 and gave an item of
+it a new ID, and idea-2 merges main; or two computers each merged the same version and gave an item of it different IDs),
+the other side's song is translated first, before the records above, into the parting's numbering, through the records of
+the other line's merges since the parting whose merged-in version this line follows (the latest for each `from`, of the
+IDs its song holds), all at once; the records above then take it into this side's. One numbering a stage, so that nothing
+is translated twice:
+- each ID that line gave such an item is made the parting's, its `from`, where one of the records above translates that
+  `from` (an item the parting holds; a note in its clip, as the parting numbers the clip); else this line's straight away:
+  the ID this line's latest merge gave the same `from` (for a note, in its clip as this line numbers it), else the `from`
+  itself; to itself (`to>to`) where it is that ID already;
+- an item of the other line's own in the way first gets a new ID of this side's, one neither song nor any record holds,
+  so that it stays that line's addition: one under an ID the first crosses to, unless it crosses away itself or is the
+  parting's own item there (one the parting holds that none of that line's records gave another ID); and one under an ID
+  one of its merges gave anew (a `from` of theirs) whose merged-in version the parting follows, where the parting holds
+  that ID too (that version's item), whether or not this line has a record for it; a note alike, in its clip, which the
+  parting is asked for by its own ID for that clip;
+- a note is translated by its clip as these translate it: by its new ID, for a clip given one;
 - the targets of the first never count as IDs of either song that one of the records above is translated to.
-The merge's version records these with the others (`RENUMBERED`). Where they aren't one to one, the crossings are left out
-and the new IDs kept, as an ID no item has can never make two items one.
+The merge's version records these with the others (`RENUMBERED`), each as the merged song holds it, after both stages
+(`from>to`, `to` the ID the records above took it on to; a note's by its clip as the merged song numbers it), so that a later
+merge translates by it at once. Where they aren't one to one, the crossings are left out and the new IDs kept, as an ID no
+item has can never make two items one.
+
+Where both songs, translated, would still hold an ID twice (an item's anywhere, a note's in one clip: records another tool
+wrote, or a history these translations don't cover), nothing is merged, and the merge says why: two items under one ID
+would be made one.
 
 A record that isn't one to one (an ID 0, or one ID given to two: a damaged one, or one another history wrote) is left out.
 
@@ -312,7 +327,8 @@ version as the merge was taken, each a version's id; `before` is the song as it 
 state included) that Cancel Merge brings back. A merge takes every line the other line changed. `chosen` has a digit
 for each conflict, in the merge's order of them (`0` the parting's value, `1` this branch's, `2` the other line's);
 `renumbered` are the IDs it gave anew, as its version will record them, `translated` those the two songs were
-translated through before it, and `crossed` those the other line's song was translated through before that (above), each
+translated through before it, and `crossed` those the other line's song was translated through before that (above, as the
+first stage gives them, not as its version records them), each
 `from>to`, or for a note `<its clip's group>/from>to`, separated by commas. Nothing is written into it after it is taken.
 
 It waits until its own version finishes it: a version of the branch's line whose second parent is `version`, whose first

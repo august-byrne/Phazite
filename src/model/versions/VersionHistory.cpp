@@ -207,37 +207,35 @@ namespace
         properties.sort (false);
         return properties.joinIntoString (";");
     }
-
-    // Whether a song holds each item's ID once, and each clip each note's: as a commit's, translated through what a merge
-    // waiting says (which a hand-made one could make hold one twice).
-    bool holdsEachIDOnce (const juce::ValueTree& song)
-    {
-        std::set<std::uint64_t> items;
-        auto once = true;
-        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::CLIP))
-                {
-                    std::set<std::uint64_t> notes;
-
-                    for (const auto& note : child)
-                        if (note.hasType (schema::NOTE))
-                            once = once && notes.insert (readID (note[schema::noteID])).second;
-                }
-
-                if (! child.hasType (schema::NOTE) && child.hasProperty (schema::trackID) && schema::holdsID (child, schema::trackID))
-                    once = once && items.insert (readID (child[schema::trackID])).second;
-
-                visit (child);
-            }
-        };
-
-        visit (song);
-        return once;
-    }
 } // namespace
+
+bool holdsEachIDOnce (const juce::ValueTree& song)
+{
+    std::set<std::uint64_t> items;
+    auto once = true;
+    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+    {
+        for (const auto& child : element)
+        {
+            if (child.hasType (schema::CLIP))
+            {
+                std::set<std::uint64_t> notes;
+
+                for (const auto& note : child)
+                    if (note.hasType (schema::NOTE))
+                        once = once && notes.insert (readID (note[schema::noteID])).second;
+            }
+
+            if (! child.hasType (schema::NOTE) && child.hasProperty (schema::trackID) && schema::holdsID (child, schema::trackID))
+                once = once && items.insert (readID (child[schema::trackID])).second;
+
+            visit (child);
+        }
+    };
+
+    visit (song);
+    return once;
+}
 
 namespace
 {
@@ -377,7 +375,8 @@ VersionHistory::Merge findMergeAgain (const VersionStore& store, const std::map<
                                                  : juce::ValueTree();
     merge.theirs = store.readSong (merged->second.song, &merge.theirParameters);
 
-    // The other line's own merges of what both lines took in, made this line's first, as the merge was (crossRenumbering()).
+    // The other line's own merges of what this line holds too, taken into the parting's numbering first, then both songs into
+    // this line's, as the merge was (crossRenumbering(), findTranslation()).
     translateIDs (merge.theirs, state.crossed);
     merge.theirParameters = translateKnobs (std::move (merge.theirParameters), state.crossed);
 
@@ -4823,18 +4822,29 @@ namespace
         collect (song);
         return held;
     }
+
+    // A note's group as a merge's records key it ("link 12", "clip 66"), its alias group's or clip's ID translated through the
+    // items' IDs given (from, to).
+    juce::String translateGroup (const juce::String& group, const std::map<std::uint64_t, std::uint64_t>& items)
+    {
+        const auto space = group.lastIndexOfChar (' ');
+        const auto to = space >= 0 ? items.find ((std::uint64_t) group.substring (space + 1).getLargeIntValue()) : items.end();
+        return to != items.end() ? group.substring (0, space + 1) + juce::String ((juce::uint64) to->second) : group;
+    }
 } // namespace
 
 std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& theirMerges, const std::vector<RenumberedID>& ourMerges,
-                                            const std::vector<RenumberedID>& recorded, const juce::ValueTree& base,
+                                            const std::vector<RenumberedID>& theirMergesAtParting,
+                                            const std::vector<RenumberedID>& ourMergesAtParting, const juce::ValueTree& base,
                                             const juce::ValueTree& theirSong, const std::function<std::uint64_t()>& makeID)
 {
     using Key = std::pair<juce::String, std::uint64_t>;
-    const auto held = collectRecordedIDs (theirSong);
+    const auto held = collectRecordedIDs (theirSong), inBase = collectRecordedIDs (base);
 
     // Each line's latest word for an ID, oldest first as findRenumbering() gives them; the other line's only for what its
     // song holds as that word gave it (three lines' merges of the same version, or an item that line took out since).
     std::map<Key, std::uint64_t> theirs, ours;
+    std::set<Key> atParting;
 
     for (const auto& id : theirMerges)
         theirs[{ id.clip, id.from }] = id.to;
@@ -4842,36 +4852,174 @@ std::vector<RenumberedID> crossRenumbering (const std::vector<RenumberedID>& the
     for (const auto& id : ourMerges)
         ours[{ id.clip, id.from }] = id.to;
 
-    std::vector<RenumberedID> crossed;
+    for (const auto& id : theirMergesAtParting)
+        atParting.insert ({ id.clip, id.from });
 
-    for (const auto& [from, to] : theirs)
+    // What the translation after this one moves (findTranslation(), through this line's records at the parting, as it takes
+    // them): an item the parting holds, by its ID there; a note by its clip as this line numbers it.
+    std::map<std::uint64_t, std::uint64_t> partingItems;
+    std::map<Key, std::uint64_t> partingNotes;
+
+    for (const auto& id : findLatestWords (ourMergesAtParting))
     {
-        const auto our = ours.find (from);
-        const auto target = our != ours.end() ? our->second : from.second;
-
-        // Where both lines' merges gave it the same ID, as it is, so that it counts as this line's (findTranslation()).
-        if (held.count ({ from.first, to }) > 0 && (target == to || held.count ({ from.first, target }) == 0))
-            crossed.push_back ({ from.first, to, target });
+        if (id.clip.isNotEmpty())
+            partingNotes[{ id.clip, id.from }] = id.to;
+        else if (inBase.count ({ {}, id.from }) > 0)
+            partingItems[id.from] = id.to;
     }
 
-    // The other line's own items under the IDs its merges gave anew, which this line's records would take for the parting's.
-    const auto inBase = collectRecordedIDs (base);
-    std::set<Key> translated;
+    // The new IDs: none either song or any record holds, so that one never meets another item.
+    std::set<std::uint64_t> taken;
 
-    for (const auto& id : recorded)
-        translated.insert ({ id.clip, id.from });
+    for (const auto* ids : { &held, &inBase })
+        for (const auto& key : *ids)
+            taken.insert (key.second);
 
-    std::vector<RenumberedID> givenAnew;
+    for (const auto* records : { &theirMerges, &ourMerges, &theirMergesAtParting, &ourMergesAtParting })
+    {
+        for (const auto& id : *records)
+        {
+            taken.insert (id.from);
+            taken.insert (id.to);
+        }
+    }
 
-    for (const auto& [from, to] : theirs)
-        if (held.count (from) > 0 && inBase.count (from) > 0 && translated.count (from) > 0)
-            givenAnew.push_back ({ from.first, from.second, makeID() });
+    const auto makeFreeID = [&taken, &makeID]
+    {
+        auto id = makeID();
+
+        while (! taken.insert (id).second)
+            id = makeID();
+
+        return id;
+    };
+
+    // The items first, then the notes, each in their clip as the items' translation numbers it (translateIDs() looks them up
+    // so). Each kept by its key in the other line's song. What crosses into the parting's numbering, one numbering a stage:
+    // to the parting's ID (the record's from) where the translation after this one moves it on to this line's, else straight
+    // to this line's ID (this line's latest word for the same from, else from itself), where both lines' merges gave the same
+    // ID to itself, so that it counts as this line's (findTranslation()). And the other line's own items in the way, each
+    // given a new ID first: one under an ID something crosses to, unless it crosses away itself or is the parting's own item
+    // there; and one under an ID a merge of that line gave away at the parting, which holds that version's item under it
+    // (theirMergesAtParting), whether this line has a word for it or not.
+    std::vector<RenumberedID> crossed, givenAnew;
+    std::map<std::uint64_t, std::uint64_t> items, partingOf; // the items' translation here; a crossed item's ID in the parting
+
+    // Whether the parting holds an ID of the other line's song (a note's in its clip as the parting numbers it); and whether
+    // that line's latest word gave the parting's item under it another ID (its own item holds that one then).
+    const auto inParting = [&inBase, &partingOf] (const Key& key)
+    { return inBase.count ({ translateGroup (key.first, partingOf), key.second }) > 0; };
+    const auto givenAway = [&theirs] (const Key& key)
+    {
+        const auto word = theirs.find (key);
+        return word != theirs.end() && word->second != key.second;
+    };
+
+    for (const auto notes : { false, true })
+    {
+        const auto isOfGroup = [notes] (const Key& key) { return key.first.isNotEmpty() == notes; };
+        std::map<Key, std::uint64_t> crossings;
+
+        for (const auto& [from, to] : theirs)
+        {
+            if (! isOfGroup (from) || held.count ({ from.first, to }) == 0)
+                continue;
+
+            // Its clip as this line numbers it after both translations, by which this line's records key a note.
+            const auto ourGroup = translateGroup (translateGroup (from.first, items), partingItems);
+            const auto movedOn =
+                notes ? partingNotes.count ({ ourGroup, from.second }) > 0 && inParting (from) : partingItems.count (from.second) > 0;
+            const auto our = ours.find ({ ourGroup, from.second });
+            crossings[{ from.first, to }] = movedOn ? from.second : our != ours.end() ? our->second : from.second;
+
+            if (! notes)
+                partingOf[to] = from.second;
+        }
+
+        std::set<Key> own;
+
+        for (const auto& [at, target] : crossings)
+            if (const Key under { at.first, target };
+                held.count (under) > 0 && crossings.count (under) == 0 && (! inParting (under) || givenAway (under)))
+                own.insert (under);
+
+        for (const auto& key : atParting)
+            if (isOfGroup (key) && held.count (key) > 0 && crossings.count (key) == 0 && inParting (key))
+                own.insert (key);
+
+        for (const auto& [at, target] : crossings)
+            crossed.push_back ({ at.first, at.second, target });
+
+        for (const auto& key : own)
+            givenAnew.push_back ({ key.first, key.second, makeFreeID() });
+
+        if (! notes)
+        {
+            for (const auto* ids : { &crossed, &givenAnew })
+                for (const auto& id : *ids)
+                    items[id.from] = id.to;
+        }
+    }
+
+    // Each note keyed by its clip as the items' translation numbers it.
+    const auto keyNotes = [] (std::vector<RenumberedID> ids, const std::map<std::uint64_t, std::uint64_t>& translatedItems)
+    {
+        for (auto& id : ids)
+            id.clip = translateGroup (id.clip, translatedItems);
+
+        return ids;
+    };
+
+    auto all = crossed;
+    all.insert (all.end(), givenAnew.begin(), givenAnew.end());
+    all = keyNotes (std::move (all), items);
+
+    if (areOneToOne (all))
+        return all;
 
     // Where the crossings aren't one to one (records another history wrote, or damaged), they are left out; the new IDs stay,
     // as an ID no item has can never make two items one.
-    auto all = crossed;
-    all.insert (all.end(), givenAnew.begin(), givenAnew.end());
-    return areOneToOne (all) ? all : givenAnew;
+    std::map<std::uint64_t, std::uint64_t> itemsGivenAnew;
+
+    for (const auto& id : givenAnew)
+        if (id.clip.isEmpty())
+            itemsGivenAnew[id.from] = id.to;
+
+    return keyNotes (givenAnew, itemsGivenAnew);
+}
+
+std::vector<RenumberedID> recordCrossings (const std::vector<RenumberedID>& crossed, const std::vector<RenumberedID>& translation)
+{
+    std::map<std::uint64_t, std::uint64_t> items;
+    std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> notes;
+
+    for (const auto& id : translation)
+    {
+        if (id.clip.isEmpty())
+            items[id.from] = id.to;
+        else
+            notes[{ id.clip, id.from }] = id.to;
+    }
+
+    // As translateIDs() takes the second after the first: the items, then each note by its clip as they number it.
+    std::vector<RenumberedID> recorded;
+
+    for (const auto& id : crossed)
+    {
+        if (id.clip.isEmpty())
+        {
+            const auto to = items.find (id.to);
+            recorded.push_back ({ {}, id.from, to != items.end() ? to->second : id.to });
+        }
+        else
+        {
+            const auto group = translateGroup (id.clip, items);
+            const auto to = notes.find ({ group, id.to });
+            recorded.push_back ({ group, id.from, to != notes.end() ? to->second : id.to });
+        }
+    }
+
+    return recorded;
 }
 
 std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile, const juce::String& computer)

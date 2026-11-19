@@ -1457,7 +1457,9 @@ namespace
     struct MergeStart
     {
         juce::String version, head, otherBranch, basePiece, theirsPiece;
-        std::vector<RenumberedID> renumbering, ourMerges, theirMerges; // this line's merges to translate by; every one of each line's
+        // This line's merges to translate by (those whose version the parting follows); every one of each line's; the other
+        // line's whose version the parting follows.
+        std::vector<RenumberedID> renumbering, ourMerges, theirMerges, theirMergesAtParting;
         juce::ValueTree ours;
         PluginParameterValues ourParameters;
         juce::int64 changesAtCopy = 0;
@@ -1475,6 +1477,7 @@ namespace
         PluginParameterValues theirParametersRead;
         std::uint64_t next = 0;
         bool idsGivenAnew = false; // as either song was read: then it can't be merged
+        bool heldTwice = false;    // an ID either song holds twice once translated, which would make two items one: refused
     };
 
     void workOutMerge (MergeWorked& worked, const MergeStart& start, const juce::ValueTree& ours,
@@ -1488,8 +1491,10 @@ namespace
         worked.next = juce::jmax (findNextID (ours), floor);
         const auto makeID = [&worked] { return worked.next++; };
 
-        // The other line's own merges of what both lines took in, made this line's first (crossRenumbering()).
-        const auto crossed = crossRenumbering (start.theirMerges, start.ourMerges, start.renumbering, preview.base, preview.theirs, makeID);
+        // The other line's own merges of what this line holds too, taken into the parting's numbering first (crossRenumbering()),
+        // then both songs into this line's: one numbering a stage.
+        const auto crossed = crossRenumbering (start.theirMerges, start.ourMerges, start.theirMergesAtParting, start.renumbering,
+                                               preview.base, preview.theirs, makeID);
         translateIDs (preview.theirs, crossed);
         preview.theirParameters = translateKnobs (std::move (preview.theirParameters), crossed);
 
@@ -1499,8 +1504,16 @@ namespace
         preview.theirParameters = translateKnobs (std::move (preview.theirParameters), translation.all);
         preview.translation = translation.all;
         preview.crossed = crossed;
-        preview.renumbered = crossed;
+        preview.renumbered = recordCrossings (crossed, translation.all); // by the IDs the merged song holds
         preview.renumbered.insert (preview.renumbered.end(), translation.givenAnew.begin(), translation.givenAnew.end());
+
+        // Never two items under one ID, which the merge would make one (records another history wrote, or a history these
+        // translations don't cover): nothing merged.
+        worked.heldTwice = ! holdsEachIDOnce (preview.base) || ! holdsEachIDOnce (preview.theirs);
+
+        if (worked.heldTwice)
+            return;
+
         preview.lines = findChanges (preview.base, preview.theirs);
 
         auto next = juce::jmax (worked.next, findNextID (ours), findNextID (preview.theirs));
@@ -1539,7 +1552,9 @@ namespace
         if (worked.baseRead.isValid() && worked.theirsRead.isValid() && ! worked.idsGivenAnew)
         {
             workOutMerge (worked, start, start.ours, start.ourParameters);
-            keepSongBeforeMerge (store, worked, start);
+
+            if (! worked.heldTwice)
+                keepSongBeforeMerge (store, worked, start);
         }
 
         return worked;
@@ -1592,13 +1607,22 @@ namespace
                         [&context, start, worked, rounds, store = history->getStore()]() -> VersionHistory::TakeIn
                         {
                             workOutMerge (*worked, start, start.ours, start.ourParameters);
-                            keepSongBeforeMerge (*store, *worked, start);
+
+                            if (! worked->heldTwice)
+                                keepSongBeforeMerge (*store, *worked, start);
                             return takeInMerge (context, start, worked, rounds - 1);
                         });
 
                 workOutMerge (*worked, start, start.ours, start.ourParameters);
                 worked->preview.beforePiece.clear(); // kept again as Merge is clicked
             }
+
+            if (worked->heldTwice)
+                return VersionHistory::Taken::refused (
+                    "Nothing was merged: matched by the IDs earlier merges of these lines gave anew, " + name
+                    + " or the version both lines have would hold one ID for two different things, which a merge would make one "
+                      "(a history these lines' merges made that Phazite can't follow yet, or records another tool wrote). "
+                      "To bring over what you need from it, open that version and use Restore on its tracks.");
 
             if (worked->next > findNextID (song->getState()) && ! worked->preview.renumbered.empty())
             {
@@ -1646,6 +1670,7 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     start.renumbering = history->findRenumbering (last->id, versionID, parted);
     start.ourMerges = history->findRenumbering (last->id, versionID, parted, false);
     start.theirMerges = history->findRenumbering (versionID, last->id, parted, false);
+    start.theirMergesAtParting = history->findRenumbering (versionID, last->id, parted);
 
     for (const auto& branch : history->getBranches())
         if (branch.id == version->branch)

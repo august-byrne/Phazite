@@ -7,7 +7,10 @@
 #include "SongIDs.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/WholeFile.h"
@@ -135,10 +138,10 @@ struct WaitingMerge
 
 // A commit another computer made on a branch, on top of one, with its song and its parents, and that computer's record
 // of the branch at it: as a synced Versions folder brings them.
-juce::String commitElsewhere (WaitingMerge& m, const juce::String& branchID, juce::StringArray parents,
+juce::String commitElsewhere (TestSong& s, const juce::String& branchID, juce::StringArray parents,
                               std::vector<phazite::RenumberedID> renumbered = {})
 {
-    const auto folder = phazite::getVersionsFolder (m.song());
+    const auto folder = phazite::getVersionsFolder (*phazite::findSong (s.context));
     phazite::VersionStore store (folder, "elsewhere");
     phazite::VersionRecord record;
     record.name = "From elsewhere";
@@ -146,14 +149,14 @@ juce::String commitElsewhere (WaitingMerge& m, const juce::String& branchID, juc
     record.renumbered = std::move (renumbered);
     record.branch = branchID;
     record.saved = juce::Time::currentTimeMillis();
-    const auto song = phazite::getVersionHistory (m.s.context)->readSong (parents[0]);
+    const auto song = phazite::getVersionHistory (s.context)->readSong (parents[0]);
     REQUIRE (song.isValid());
     const auto id = store.writeVersion (record, phazite::splitSong (song));
     REQUIRE (id.isNotEmpty());
 
     phazite::BranchRecord branch;
 
-    for (const auto& b : phazite::getVersionHistory (m.s.context)->getBranches())
+    for (const auto& b : phazite::getVersionHistory (s.context)->getBranches())
         if (b.id == branchID)
             branch = b;
 
@@ -163,6 +166,12 @@ juce::String commitElsewhere (WaitingMerge& m, const juce::String& branchID, juc
     REQUIRE (store.writeBranch (branch));
     store.getPieces().closeFiles();
     return id;
+}
+
+juce::String commitElsewhere (WaitingMerge& m, const juce::String& branchID, juce::StringArray parents,
+                              std::vector<phazite::RenumberedID> renumbered = {})
+{
+    return commitElsewhere (m.s, branchID, std::move (parents), std::move (renumbered));
 }
 } // namespace
 
@@ -1084,7 +1093,7 @@ void mergeTwoLinesThatMergedPad (bool other)
     {
         REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, version); }));
         REQUIRE (phazite::test::finished (s.context, [&] { return phazite::finishMerge (s.context); }));
-        REQUIRE (phazite::isMerging (s.context));
+        REQUIRE_MESSAGE (phazite::isMerging (s.context), phazite::getReadingProblem (s.context).toStdString());
         CHECK (phazite::getClashes (s.context).empty());
     };
 
@@ -1128,11 +1137,13 @@ void mergeTwoLinesThatMergedPad (bool other)
     CHECK (named ("Bass") == std::vector { bass });
     checkSong (song);
 
-    // What crossed (B's Pad, to A's ID) is in the merge waiting, which the song's file holds and its reading again finds.
+    // What crossed (B's Pad, to the parting's ID, which A's record takes on to A's) is in the merge waiting, which the song's
+    // file holds and its reading again finds; its version records B's Pad by A's ID, or as it is, A's already.
     const auto* waiting = &*phazite::getVersionHistory (s.context)->getMerging();
-    const auto crossedToA = [&padA] (const std::vector<phazite::RenumberedID>& ids)
-    { return std::any_of (ids.begin(), ids.end(), [&padA] (const auto& id) { return id.clip.isEmpty() && id.to == padA[0].getRaw(); }); };
-    CHECK (crossedToA (waiting->crossed)); // B's Pad to A's ID, or kept as it is, A's already
+    const auto crossedTo = [] (const std::vector<phazite::RenumberedID>& ids, phazite::TrackID track)
+    { return std::any_of (ids.begin(), ids.end(), [track] (const auto& id) { return id.clip.isEmpty() && id.to == track.getRaw(); }); };
+    const auto crossedToA = [&padA, &crossedTo] (const std::vector<phazite::RenumberedID>& ids) { return crossedTo (ids, padA[0]); };
+    CHECK (crossedTo (waiting->crossed, pad));
     CHECK (crossedToA (waiting->renumbered));
     CHECK (song.getState().getChildWithName (schema::MERGING).hasProperty (schema::mergingCrossed) == true);
 
@@ -1148,7 +1159,7 @@ void mergeTwoLinesThatMergedPad (bool other)
             return found.has_value() && found->readWhole;
         }));
     waiting = &*phazite::getVersionHistory (s.context)->getMerging();
-    CHECK (crossedToA (waiting->crossed));
+    CHECK (crossedTo (waiting->crossed, pad));
     CHECK (waiting->clashes.empty());
 
     for (const auto& track : phazite::getTrackElements (waiting->theirs))
@@ -1177,4 +1188,685 @@ TEST_CASE ("Two lines that each merged the same version beside an item of their 
     {
         mergeTwoLinesThatMergedPad (false);
     }
+}
+
+namespace
+{
+// Known bug 199: lines that count their IDs on from the same place (two computers, or a line and the line it merged into)
+// and merge each other's work, in a project of their own.
+struct Lines
+{
+    TestSong s;
+    phazite::Song& song = *phazite::findSong (s.context);
+
+    juce::String branch() const { return phazite::getCurrentBranch (s.context)->id; }
+    juce::var count() const { return song.getState()[schema::nextID]; }
+    void countFrom (const juce::var& next) { song.getState().setProperty (schema::nextID, next, nullptr); }
+
+    // A new branch from the song as it is, or from a version; and the branch this one is, the song made its last version's.
+    juce::String newLine (const juce::String& from = {})
+    {
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::newBranch (s.context, from, s.save); }));
+        return branch();
+    }
+
+    void toBranch (const juce::String& id)
+    {
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::switchBranch (s.context, id, s.save); }));
+    }
+
+    // A version merged into the song, every line of it, without a clash, waiting for its commit.
+    void merge (const juce::String& version)
+    {
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::startMerge (s.context, version); }));
+        REQUIRE (phazite::test::finished (s.context, [&] { return phazite::finishMerge (s.context); }));
+        REQUIRE_MESSAGE (phazite::isMerging (s.context), phazite::getReadingProblem (s.context).toStdString());
+        CHECK (phazite::getClashes (s.context).empty());
+    }
+
+    std::vector<phazite::TrackID> named (const juce::String& name) const
+    {
+        std::vector<phazite::TrackID> found;
+
+        for (const auto track : phazite::getTrackIDs (song))
+            if (phazite::getTrackName (song, track) == name)
+                found.push_back (track);
+
+        return found;
+    }
+
+    juce::String typeOf (phazite::DeviceID device) const { return phazite::findDeviceState (song, device)[schema::deviceType].toString(); }
+
+    // The curves that name a device.
+    int countCurves (phazite::DeviceID device) const
+    {
+        int curves = 0;
+
+        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+            curves += phazite::readID (curve[schema::curveDevice]) == device.getRaw() ? 1 : 0;
+
+        return curves;
+    }
+
+    // Every clip of the song, and a clip's notes by their pitches, each pitch's IDs.
+    std::vector<juce::ValueTree> clips() const
+    {
+        std::vector<juce::ValueTree> found;
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::CLIP))
+                    found.push_back (child);
+                else
+                    visit (child);
+            }
+        };
+
+        visit (song.getState());
+        return found;
+    }
+
+    juce::ValueTree findClip (std::uint64_t id) const
+    {
+        for (const auto& clip : clips())
+            if (phazite::readID (clip[schema::clipID]) == id)
+                return clip;
+
+        return {};
+    }
+
+    static std::map<int, std::vector<std::uint64_t>> notesOf (const juce::ValueTree& clip)
+    {
+        std::map<int, std::vector<std::uint64_t>> notes;
+
+        for (const auto& note : clip)
+            if (note.hasType (schema::NOTE))
+                notes[(int) note[schema::notePitch]].push_back (phazite::readID (note[schema::noteID]));
+
+        return notes;
+    }
+};
+} // namespace
+
+TEST_CASE ("A line merged back into the line that merged it, whose merge gave its item new IDs, merges each item once (known bug 199)")
+{
+    // main merged idea-2, whose Pad and its EQ had the IDs of main's Lead and its synth, so the merge gave them new ones. idea-2
+    // goes on, Pad renamed, and merges main: Pad stays idea-2's, renamed, with its EQ; main's Lead comes in once, under IDs of
+    // its own, with its synth and the sidechain that names it. Cancel Merge and Undo bring the song back exactly.
+    Lines l;
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    const auto compressor = l.s.addEffect (bass, phazite::devices::Compressor::typeID);
+    keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    const auto idea = l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    const auto eq = l.s.addEffect (pad, phazite::devices::Equalizer::typeID);
+    const auto x = keepVersion (l.s.context, "Pad");
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    const auto lead = l.s.addTrack ("Lead");
+    REQUIRE (lead == pad);
+    REQUIRE (l.s.setInstrument (lead, phazite::devices::Synth::typeID).getRaw() == eq.getRaw());
+    phazite::setSidechainSource (l.s.context, compressor, lead);
+    REQUIRE (phazite::getSidechainSource (l.s.context, compressor) == lead);
+    keepVersion (l.s.context, "Lead");
+    l.merge (x);
+    const auto merged = keepVersion (l.s.context);
+    REQUIRE (l.named ("Pad").size() == 1);
+    REQUIRE (l.named ("Pad")[0] != pad);
+    REQUIRE (phazite::getDevices (l.song, l.named ("Pad")[0]) != std::vector { eq });
+
+    l.toBranch (idea);
+    l.s.rename (pad, "Pad 2");
+    keepVersion (l.s.context, "Pad 2");
+    const auto before = l.song.getState().createCopy();
+
+    REQUIRE (phazite::test::finished (l.s.context, [&] { return phazite::startMerge (l.s.context, merged); }));
+    UndoCheck undo (l.s.context);
+    undo.check ("Merge", [&l] { REQUIRE (phazite::test::finished (l.s.context, [&l] { return phazite::finishMerge (l.s.context); })); });
+    REQUIRE (phazite::isMerging (l.s.context));
+    CHECK (phazite::getClashes (l.s.context).empty());
+
+    CHECK (l.named ("Pad 2") == std::vector { pad });
+    CHECK (l.named ("Pad").empty());
+    CHECK (phazite::getDevices (l.song, pad) == std::vector { eq });
+    const auto leads = l.named ("Lead");
+    REQUIRE (leads.size() == 1);
+    CHECK (leads[0] != pad);
+    const auto leadDevices = phazite::getDevices (l.song, leads[0]);
+    REQUIRE (leadDevices.size() == 1);
+    CHECK (leadDevices[0] != eq);
+    CHECK (l.typeOf (leadDevices[0]) == phazite::devices::Synth::typeID);
+    CHECK (phazite::getSidechainSource (l.s.context, compressor) == leads[0]);
+    CHECK (l.named ("Bass") == std::vector { bass });
+    checkSong (l.song);
+
+    // Cancel Merge: the song as it was before.
+    REQUIRE (phazite::canCancelMerge (l.s.context));
+    phazite::cancelMerge (l.s.context);
+    CHECK_FALSE (phazite::isMerging (l.s.context));
+    CHECK (phazite::findChanges (before, l.song.getState()).empty());
+    CHECK (l.named ("Pad 2") == std::vector { pad });
+    CHECK (l.named ("Lead").empty());
+}
+
+TEST_CASE ("Two lines that each merged the same version, where only one line's merge gave a device of it a new ID, merge with "
+           "each device once (known bug 199)")
+{
+    // idea-2's Pad has an EQ, whose gain has a curve. main's Lead had Pad's IDs but not its EQ's, so main's merge gave Pad new
+    // IDs and kept the EQ's; another line's Keys had Pad's IDs and an EQ with its EQ's, so that line's merge gave both new
+    // ones. main merges that line: Pad once, with its EQ under main's ID and the curve on it; Keys once, with its own EQ.
+    Lines l;
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    const auto first = keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    const auto eq = l.s.addEffect (pad, phazite::devices::Equalizer::typeID);
+    REQUIRE (phazite::addAutomationPoint (l.s.context, { eq, "band4Gain" }, { phazite::BeatPosition::fromBeats (0.0), 0.5f }) >= 0);
+    const auto x = keepVersion (l.s.context, "Pad");
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    REQUIRE (l.s.addTrack ("Lead") == pad);
+    keepVersion (l.s.context, "Lead");
+    const auto atMerge = l.count();
+    l.merge (x);
+    keepVersion (l.s.context);
+    const auto padHere = l.named ("Pad");
+    REQUIRE (padHere.size() == 1);
+    REQUIRE (padHere[0] != pad);
+    REQUIRE (phazite::getDevices (l.song, padHere[0]) == std::vector { eq });
+
+    l.newLine (first);
+    l.countFrom (count);
+    const auto keys = l.s.addTrack ("Keys");
+    REQUIRE (keys == pad);
+    REQUIRE (l.s.addEffect (keys, phazite::devices::Equalizer::typeID) == eq);
+    keepVersion (l.s.context, "Keys");
+    l.countFrom ((juce::int64) atMerge + 1000);
+    l.merge (x);
+    const auto other = keepVersion (l.s.context);
+    REQUIRE (l.named ("Pad").size() == 1);
+    REQUIRE (phazite::getDevices (l.song, l.named ("Pad")[0]).size() == 1);
+    REQUIRE (phazite::getDevices (l.song, l.named ("Pad")[0])[0] != eq);
+
+    l.toBranch (mainLine);
+    l.merge (other);
+    CHECK (l.named ("Pad") == padHere);
+    CHECK (phazite::getDevices (l.song, padHere[0]) == std::vector { eq });
+    CHECK (l.countCurves (eq) == 1);
+    const auto keysHere = l.named ("Keys");
+    REQUIRE (keysHere.size() == 1);
+    const auto keysDevices = phazite::getDevices (l.song, keysHere[0]);
+    REQUIRE (keysDevices.size() == 1);
+    CHECK (keysDevices[0] != eq);
+    CHECK (l.countCurves (keysDevices[0]) == 0);
+    CHECK (l.named ("Lead") == std::vector { pad });
+    CHECK (phazite::getDevices (l.song, pad).empty());
+    CHECK (l.named ("Bass") == std::vector { bass });
+    checkSong (l.song);
+}
+
+TEST_CASE ("A line whose merge of a version kept an item's IDs merges a line whose merge of it gave that item new ones with each "
+           "item once (known bug 199)")
+{
+    // idea-2's Pad had the IDs of main's Lead, which the compressor on Bass is sidechained to, so main's merge gave Pad new
+    // ones; another line merged idea-2 with Pad under its own IDs, then merges main: Pad once, as that line has it, with its
+    // EQ; main's Lead once, under IDs of its own, which the sidechain names.
+    Lines l;
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    const auto compressor = l.s.addEffect (bass, phazite::devices::Compressor::typeID);
+    const auto first = keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    const auto eq = l.s.addEffect (pad, phazite::devices::Equalizer::typeID);
+    const auto x = keepVersion (l.s.context, "Pad");
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    const auto lead = l.s.addTrack ("Lead");
+    REQUIRE (lead == pad);
+    phazite::setSidechainSource (l.s.context, compressor, lead);
+    REQUIRE (phazite::getSidechainSource (l.s.context, compressor) == lead);
+    keepVersion (l.s.context, "Lead");
+    l.merge (x);
+    const auto fromMain = keepVersion (l.s.context);
+    REQUIRE (l.named ("Pad").size() == 1);
+    REQUIRE (l.named ("Pad")[0] != pad);
+
+    l.newLine (first);
+    l.s.setVolume (bass, -3.0f);
+    keepVersion (l.s.context, "Quieter");
+    l.merge (x);
+    keepVersion (l.s.context);
+    REQUIRE (l.named ("Pad") == std::vector { pad });
+
+    l.merge (fromMain);
+    CHECK (l.named ("Pad") == std::vector { pad });
+    CHECK (phazite::getDevices (l.song, pad) == std::vector { eq });
+    const auto leads = l.named ("Lead");
+    REQUIRE (leads.size() == 1);
+    CHECK (leads[0] != pad);
+    CHECK (phazite::getDevices (l.song, leads[0]).empty());
+    CHECK (phazite::getSidechainSource (l.s.context, compressor) == leads[0]);
+    CHECK (l.named ("Bass") == std::vector { bass });
+    checkSong (l.song);
+}
+
+TEST_CASE ("A note a merge gave a new ID, in a clip an earlier merge gave a new ID, is the line's own note again when that "
+           "line merges back (known bug 199)")
+{
+    // idea-2 made a clip on Bass with the ID of main's own clip there, so main's merge gave it a new one. Each line then put
+    // a note in it with the same ID, so main's next merge gave idea-2's note a new one, recorded in that clip as main numbers
+    // it. idea-2 merges main: its clip and its note keep their IDs; main's own clip and note come in under IDs of their own.
+    Lines l;
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    const auto idea = l.newLine();
+    const auto riff = l.s.addMidiClip (bass, 0.0, 4.0);
+    l.s.addNote (riff, 60, 0.0, 1.0);
+    const auto x1 = keepVersion (l.s.context, "Riff");
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    const auto own = l.s.addMidiClip (bass, 8.0, 4.0);
+    REQUIRE (own == riff);
+    l.s.addNote (own, 48, 8.0, 1.0);
+    keepVersion (l.s.context, "A clip of main's");
+    l.merge (x1);
+    keepVersion (l.s.context);
+    auto riffHere = phazite::ClipID();
+
+    for (const auto& clip : l.clips())
+        if (Lines::notesOf (clip).count (60) > 0)
+            riffHere = phazite::ClipID::fromRaw (phazite::readID (clip[schema::clipID]));
+
+    REQUIRE (riffHere.isValid());
+    REQUIRE (riffHere != riff);
+
+    // A note in it on each line, with the same ID.
+    l.toBranch (idea);
+    const auto noteCount = l.count();
+    l.s.addNote (riff, 64, 1.0, 1.0);
+    const auto x2 = keepVersion (l.s.context, "A note more");
+    const auto ideaNotes = Lines::notesOf (l.findClip (riff.getRaw()));
+    REQUIRE (ideaNotes.count (64) == 1);
+    const auto note = ideaNotes.at (64).front();
+
+    l.toBranch (mainLine);
+    const auto mainCount = l.count();
+    l.countFrom (noteCount);
+    l.s.addNote (riffHere, 67, 2.0, 1.0);
+    l.countFrom (mainCount);
+    REQUIRE (Lines::notesOf (l.findClip (riffHere.getRaw())).at (67) == std::vector { note });
+    keepVersion (l.s.context, "A note of main's");
+    l.merge (x2);
+    const auto fromMain = keepVersion (l.s.context);
+    const auto mainNotes = Lines::notesOf (l.findClip (riffHere.getRaw()));
+    REQUIRE (mainNotes.count (64) == 1);
+    REQUIRE (mainNotes.at (64).front() != note);
+
+    l.toBranch (idea);
+    l.s.setVolume (bass, -3.0f);
+    keepVersion (l.s.context, "Quieter");
+    l.merge (fromMain);
+
+    REQUIRE (l.clips().size() == 2);
+    const auto notes = Lines::notesOf (l.findClip (riff.getRaw()));
+    CHECK (notes.size() == 3);
+    CHECK (notes.count (60) == 1);
+    REQUIRE (notes.count (64) == 1);
+    CHECK (notes.at (64) == std::vector { note });
+    REQUIRE (notes.count (67) == 1);
+    CHECK (notes.at (67).size() == 1);
+    CHECK (notes.at (67) != std::vector { note });
+
+    for (const auto& clip : l.clips())
+    {
+        if (phazite::readID (clip[schema::clipID]) != riff.getRaw())
+        {
+            const auto others = Lines::notesOf (clip);
+            CHECK (others.size() == 1);
+            CHECK (others.count (48) == 1);
+        }
+    }
+
+    checkSong (l.song);
+}
+
+namespace
+{
+// idea-2 made Pad with the IDs main's Lead and C's Keys have, then Rhodes with an EQ; main and C each merged both versions,
+// which gave Pad and Rhodes new IDs on each line (C, with Bass 2 too, gave Pad others, and took Bass 2 out before it merged
+// Rhodes, which kept its ID there: the parting's Rhodes, under an ID main's records move on). Each track has a volume of its
+// own.
+struct ThreeLines
+{
+    Lines l;
+    std::size_t tracksAtStart = phazite::getTrackIDs (l.song).size();
+    juce::String mainLine = l.branch(), idea, c, first, v, v2, fromC;
+    phazite::TrackID bass, pad, lead, keys;
+    std::vector<phazite::TrackID> padHere, rhodesHere;
+
+    explicit ThreeLines (bool cTakesOutBass2)
+    {
+        bass = l.s.addTrack ("Bass");
+        first = keepVersion (l.s.context, "First");
+        const auto count = l.count();
+
+        idea = l.newLine();
+        pad = l.s.addTrack ("Pad");
+        l.s.setVolume (pad, -1.0f);
+        v = keepVersion (l.s.context, "Pad");
+
+        l.toBranch (mainLine);
+        l.countFrom (count);
+        lead = l.s.addTrack ("Lead");
+        REQUIRE (lead == pad);
+        l.s.setVolume (lead, -4.0f);
+        keepVersion (l.s.context, "Lead");
+        const auto atMerge = l.count();
+        l.merge (v);
+        keepVersion (l.s.context);
+        const auto padOnMain = l.named ("Pad");
+        REQUIRE (padOnMain.size() == 1);
+
+        // Rhodes with the IDs main's merge gave Pad, as idea-2 counting on from where main's count was would give it.
+        l.toBranch (idea);
+        l.countFrom ((juce::int64) padOnMain[0].getRaw());
+        const auto rhodesTrack = l.s.addTrack ("Rhodes");
+        REQUIRE (rhodesTrack == padOnMain[0]);
+        l.s.setVolume (rhodesTrack, -2.0f);
+        l.s.addEffect (rhodesTrack, phazite::devices::Equalizer::typeID);
+        v2 = keepVersion (l.s.context, "Rhodes");
+        const auto rhodes = l.named ("Rhodes");
+
+        l.toBranch (mainLine);
+        l.merge (v2);
+        keepVersion (l.s.context);
+        padHere = l.named ("Pad");
+        rhodesHere = l.named ("Rhodes");
+        REQUIRE (padHere.size() == 1);
+        REQUIRE (rhodesHere.size() == 1);
+        REQUIRE (padHere[0] != pad);
+        REQUIRE (rhodesHere != rhodes);
+
+        // C counts on from where main did, so that its merge of Pad gives it main's IDs; with Bass 2, others.
+        c = l.newLine (first);
+        l.countFrom (count);
+        keys = l.s.addTrack ("Keys");
+        REQUIRE (keys == pad);
+        l.s.setVolume (keys, -3.0f);
+        const auto bass2 = cTakesOutBass2 ? l.s.addTrack ("Bass 2") : phazite::TrackID();
+        keepVersion (l.s.context, "Keys");
+
+        if (! cTakesOutBass2)
+            l.countFrom (atMerge);
+
+        l.merge (v);
+        keepVersion (l.s.context);
+
+        if (cTakesOutBass2)
+        {
+            phazite::deleteTracks (l.song, { bass2 }, nullptr);
+            keepVersion (l.s.context, "No Bass 2");
+        }
+
+        l.merge (v2);
+        fromC = keepVersion (l.s.context);
+        REQUIRE (l.named ("Pad").size() == 1);
+        REQUIRE ((l.named ("Rhodes") == rhodes) == cTakesOutBass2);
+        REQUIRE ((l.named ("Pad") == padHere) == ! cTakesOutBass2);
+        l.toBranch (mainLine);
+    }
+
+    float volume (phazite::TrackID track) const { return phazite::getChannelVolume (l.song, track); }
+
+    // main as it is after merging C: every track once, with its own volume and devices, Keys under IDs of its own.
+    phazite::TrackID checkMerged (const juce::String& keysName = "Keys")
+    {
+        CHECK (l.named ("Pad") == padHere);
+        CHECK (l.named ("Rhodes") == rhodesHere);
+        CHECK (l.named ("Lead") == std::vector { lead });
+        CHECK (l.named ("Bass") == std::vector { bass });
+        CHECK (l.named ("Bass 2").empty());
+        const auto keysHere = l.named (keysName);
+        REQUIRE (keysHere.size() == 1);
+        CHECK (keysHere[0] != lead);
+        CHECK (phazite::getTrackIDs (l.song).size() == tracksAtStart + 5);
+        CHECK (volume (rhodesHere[0]) == doctest::Approx (-2.0f));
+        CHECK (volume (lead) == doctest::Approx (-4.0f));
+        CHECK (volume (keysHere[0]) == doctest::Approx (-3.0f));
+        const auto rhodesDevices = phazite::getDevices (l.song, rhodesHere[0]);
+        REQUIRE (rhodesDevices.size() == 1);
+        CHECK (l.typeOf (rhodesDevices[0]) == phazite::devices::Equalizer::typeID);
+        CHECK (phazite::getDevices (l.song, padHere[0]).empty());
+        CHECK (phazite::getDevices (l.song, keysHere[0]).empty());
+        CHECK (phazite::getDevices (l.song, lead).empty());
+        checkSong (l.song);
+        return keysHere[0];
+    }
+};
+} // namespace
+
+TEST_CASE ("A line that merged two versions of another merges a line that merged the same two beside an item of its own with each "
+           "item once, and again after that line went on (known bug 199)")
+{
+    // main merges C: C's Pad and Rhodes cross to the parting's IDs, which main's records take on to main's, each once, not
+    // twice; Keys comes in under IDs of its own. C goes on, and main merges it again by what that merge recorded.
+    ThreeLines t (false);
+    t.l.merge (t.fromC);
+    CHECK (t.volume (t.padHere[0]) == doctest::Approx (-1.0f));
+    const auto keysHere = t.checkMerged();
+    keepVersion (t.l.s.context);
+
+    t.l.toBranch (t.c);
+    t.l.s.rename (t.keys, "Keys 2");
+    t.l.s.setVolume (t.l.named ("Pad")[0], -6.0f);
+    const auto again = keepVersion (t.l.s.context, "Keys 2");
+
+    t.l.toBranch (t.mainLine);
+    t.l.merge (again);
+    CHECK (t.checkMerged ("Keys 2") == keysHere);
+    CHECK (t.l.named ("Keys").empty());
+    CHECK (t.volume (t.padHere[0]) == doctest::Approx (-6.0f));
+}
+
+TEST_CASE ("A line that merged two versions of another merges a line whose own merge alone moved one of their items, which holds "
+           "the parting's other item under the ID this line's merge gave the first, with each item once (known bug 199)")
+{
+    // C holds the parting's Rhodes under the ID main gave Pad: it is the parting's Rhodes, which main's records move on, not an
+    // item of C's own in the way of C's Pad.
+    ThreeLines t (true);
+    t.l.merge (t.fromC);
+    CHECK (t.volume (t.padHere[0]) == doctest::Approx (-1.0f));
+    t.checkMerged();
+}
+
+TEST_CASE ("A line merged back, then merged again both ways after both lines went on, holds each item and note once with its own "
+           "content (known bug 199)")
+{
+    // main merged idea-2, giving its Pad and its note in Bass's riff new IDs (main's Lead and note had them); idea-2 merged
+    // main back, then both went on, each renaming and adding a note to the riff; main merges idea-2 again, then idea-2 main.
+    Lines l;
+    const auto tracksAtStart = phazite::getTrackIDs (l.song).size();
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    const auto riff = l.s.addMidiClip (bass, 0.0, 4.0);
+    l.s.addNote (riff, 60, 0.0, 1.0);
+    keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    const auto idea = l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    l.s.addNote (riff, 64, 1.0, 1.0);
+    const auto x = keepVersion (l.s.context, "Pad");
+    const auto note = Lines::notesOf (l.findClip (riff.getRaw())).at (64).front();
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    const auto lead = l.s.addTrack ("Lead");
+    REQUIRE (lead == pad);
+    l.s.addNote (riff, 67, 2.0, 1.0);
+    REQUIRE (Lines::notesOf (l.findClip (riff.getRaw())).at (67) == std::vector { note });
+    keepVersion (l.s.context, "Lead");
+    l.merge (x);
+    const auto merged = keepVersion (l.s.context);
+    const auto padHere = l.named ("Pad");
+    REQUIRE (padHere.size() == 1);
+    REQUIRE (padHere[0] != pad);
+
+    // Each pitch once in the riff, the owned pitch under the ID both lines gave their own notes, the other's under another;
+    // Pad and Lead once.
+    const auto checkLine = [&l, &riff, &note, tracksAtStart] (phazite::TrackID padID, const juce::String& padName,
+                                                              const juce::String& leadName, int ownedPitch, int otherPitch,
+                                                              const std::vector<int>& pitches)
+    {
+        CHECK (l.named (padName) == std::vector { padID });
+        REQUIRE (l.named (leadName).size() == 1);
+        CHECK (l.named (leadName)[0] != padID);
+        CHECK (l.named ("Bass").size() == 1);
+        CHECK (phazite::getTrackIDs (l.song).size() == tracksAtStart + 3);
+        REQUIRE (l.clips().size() == 1);
+        const auto notes = Lines::notesOf (l.findClip (riff.getRaw()));
+        std::vector<int> held;
+
+        for (const auto& [pitch, ids] : notes)
+        {
+            held.push_back (pitch);
+            CHECK (ids.size() == 1);
+        }
+
+        CHECK (held == pitches);
+        REQUIRE (notes.count (ownedPitch) == 1);
+        REQUIRE (notes.count (otherPitch) == 1);
+        CHECK (notes.at (ownedPitch) == std::vector { note });
+        CHECK (notes.at (otherPitch) != std::vector { note });
+        checkSong (l.song);
+    };
+
+    l.toBranch (idea);
+    l.merge (merged);
+    checkLine (pad, "Pad", "Lead", 64, 67, { 60, 64, 67 });
+    const auto leadThere = l.named ("Lead")[0];
+    keepVersion (l.s.context);
+
+    l.s.rename (pad, "Pad 2");
+    l.s.addNote (riff, 72, 3.0, 1.0);
+    const auto ideaOn = keepVersion (l.s.context, "Pad 2");
+
+    l.toBranch (mainLine);
+    l.s.rename (lead, "Lead 2");
+    l.s.addNote (riff, 74, 3.5, 0.5);
+    keepVersion (l.s.context, "Lead 2");
+    l.merge (ideaOn);
+    checkLine (padHere[0], "Pad 2", "Lead 2", 67, 64, { 60, 64, 67, 72, 74 });
+    CHECK (l.named ("Lead 2") == std::vector { lead });
+    const auto mainOn = keepVersion (l.s.context);
+
+    l.toBranch (idea);
+    l.merge (mainOn);
+    checkLine (pad, "Pad 2", "Lead 2", 64, 67, { 60, 64, 67, 72, 74 });
+    CHECK (l.named ("Lead 2") == std::vector { leadThere });
+}
+
+TEST_CASE ("A line merged back, whose merge gave its item a new ID and took that item out since, keeps its own item under the ID "
+           "it gave away apart (known bug 199)")
+{
+    // main merged idea-2, giving its Pad new IDs (main's Lead had them), then took Pad out. idea-2 merges main: main's Lead
+    // isn't the parting's Pad, which main took out: Pad goes, Lead comes in once under IDs of its own.
+    Lines l;
+    const auto tracksAtStart = phazite::getTrackIDs (l.song).size();
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    keepVersion (l.s.context, "First");
+    const auto count = l.count();
+
+    const auto idea = l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    const auto eq = l.s.addEffect (pad, phazite::devices::Equalizer::typeID);
+    const auto x = keepVersion (l.s.context, "Pad");
+
+    l.toBranch (mainLine);
+    l.countFrom (count);
+    const auto lead = l.s.addTrack ("Lead");
+    REQUIRE (lead == pad);
+    l.s.setVolume (lead, -4.0f);
+    keepVersion (l.s.context, "Lead");
+    l.merge (x);
+    keepVersion (l.s.context);
+    REQUIRE (l.named ("Pad").size() == 1);
+    phazite::deleteTracks (l.song, l.named ("Pad"), nullptr);
+    const auto noPad = keepVersion (l.s.context, "No Pad");
+
+    l.toBranch (idea);
+    l.s.setVolume (bass, -3.0f);
+    keepVersion (l.s.context, "Quieter");
+    l.merge (noPad);
+
+    CHECK (l.named ("Pad").empty());
+    CHECK_FALSE (phazite::findDeviceState (l.song, eq).isValid());
+    const auto leads = l.named ("Lead");
+    REQUIRE (leads.size() == 1);
+    CHECK (leads[0] != pad);
+    CHECK (phazite::getChannelVolume (l.song, leads[0]) == doctest::Approx (-4.0f));
+    CHECK (phazite::getDevices (l.song, leads[0]).empty());
+    CHECK (l.named ("Bass") == std::vector { bass });
+    CHECK (phazite::getChannelVolume (l.song, bass) == doctest::Approx (-3.0f));
+    CHECK (phazite::getTrackIDs (l.song).size() == tracksAtStart + 2);
+    checkSong (l.song);
+}
+
+TEST_CASE ("A merge whose songs, matched by the IDs earlier merges gave anew, would hold two items under one ID is refused, and "
+           "nothing changes (known bug 199)")
+{
+    // Records no merge of these lines wrote (another tool's): idea-2's merge says it gave its Pad an ID neither song holds, and
+    // main's merge says it gave that ID Bass's. Crossed so, Pad would meet Bass, which both lines hold as the parting has it,
+    // and the merge would make them one: it says why, and merges nothing.
+    Lines l;
+    const auto mainLine = l.branch();
+    const auto bass = l.s.addTrack ("Bass");
+    const auto first = keepVersion (l.s.context, "First");
+    constexpr std::uint64_t far = 1000000; // no ID either song holds
+
+    const auto idea = l.newLine();
+    const auto pad = l.s.addTrack ("Pad");
+    const auto x = keepVersion (l.s.context, "Pad");
+    const auto theirMerge = commitElsewhere (l.s, idea, { x, first }, { { {}, far, pad.getRaw() } });
+
+    l.toBranch (mainLine);
+    l.s.addTrack ("Lead");
+    const auto withLead = keepVersion (l.s.context, "Lead");
+    const auto ourMerge = commitElsewhere (l.s, mainLine, { withLead, first }, { { {}, far, bass.getRaw() } });
+    REQUIRE (l.s.getProject().save().wasOk());
+    REQUIRE (waitForVersionHistory (l.s.context));
+    REQUIRE (l.s.reopenAs (TestSong::Reopening::withoutSaving));
+    REQUIRE (waitForVersionHistory (l.s.context));
+    // The song, which is that version's, grows from it as it opens.
+    REQUIRE (phazite::getVersionHistory (l.s.context)->findLastVersion()->id == ourMerge);
+    REQUIRE (phazite::getVersionHistory (l.s.context)->getBaseVersionID() == ourMerge);
+
+    auto& song = *phazite::findSong (l.s.context);
+    const auto before = song.getState().createCopy();
+    CHECK_FALSE (phazite::test::finished (l.s.context, [&l, &theirMerge] { return phazite::startMerge (l.s.context, theirMerge); }));
+    CHECK_FALSE (phazite::isMerging (l.s.context));
+    CHECK (phazite::getMergeLines (l.s.context).empty());
+    CHECK (phazite::getReadingProblem (l.s.context).contains ("Nothing was merged"));
+    CHECK (phazite::getReadingProblem (l.s.context).contains ("one ID for two"));
+    CHECK (phazite::findChanges (before, song.getState()).empty());
+    CHECK (song.getState()[schema::nextID] == before[schema::nextID]);
+    checkSong (song);
 }
