@@ -49,6 +49,7 @@ namespace
 } // namespace
 
 class ReverbEditor::Graph : public juce::Component,
+                            public juce::TooltipClient,
                             private DisplayTicker::Display
 {
 public:
@@ -73,6 +74,17 @@ public:
             dragged = -1;
             readValues();
             repaint();
+        };
+
+        // The handle a press takes (findTarget()).
+        drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+        {
+            const auto target = findTarget (at);
+
+            if (target < 0)
+                return std::nullopt;
+
+            return graph::Handle ({ &parameters[(size_t) target] }, at);
         };
     }
 
@@ -342,6 +354,7 @@ public:
     // The pointer says which way the handle a press takes moves, and the handle lights up.
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (-1); }
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
     // A press takes the handle and changes nothing; the drag moves it from its value set by hand as far as the pointer goes
     // (graph::HandleDrag), so that a press near a line doesn't move it.
@@ -363,8 +376,7 @@ public:
 
         // The decay and the pre-delay sideways, by the time the pointer moved across at the scale the drag began with; the
         // pitches up and down.
-        const auto secondsMoved =
-            (double) ((float) e.getDistanceFromDragStartX() / std::max (1.0f, getMapArea().getWidth())) * dragStartSeconds;
+        const auto secondsMoved = (double) (drag.getMoved (e).x / std::max (1.0f, getMapArea().getWidth())) * dragStartSeconds;
 
         if (dragged == Reverb::decay)
             drag.set (0, (float) std::max (0.0, drag.getStart (0) + secondsMoved));
@@ -372,8 +384,7 @@ public:
             drag.set (0, (float) (drag.getStart (0) + secondsMoved * 1000.0));
         else
             drag.moveAlong (
-                0, (float) e.getDistanceFromDragStartY(), [this] (float pitch) { return yFor (pitch); },
-                [this] (float y) { return (float) pitchAt (y); });
+                0, drag.getMoved (e).y, [this] (float pitch) { return yFor (pitch); }, [this] (float y) { return (float) pitchAt (y); });
 
         readValues();
         repaint();

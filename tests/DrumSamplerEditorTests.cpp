@@ -341,3 +341,48 @@ TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however l
         CHECK (samples < phazite::test::HostedDevice::blockSize);
     }
 }
+
+TEST_CASE ("A drum pad sounds as it is pressed, harder the higher on it, and at 80 % from the keyboard (S6.9)")
+{
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSampler (song);
+    const auto device = phazite::makeDeviceHandle (s, id);
+    auto* sampler = device.getProcessor<DrumSampler>();
+    REQUIRE (sampler != nullptr);
+    sampler->prepare (48000.0, 4800);
+    const phazite::test::HeldClock clock; // which a press can't wait too long for its block by
+
+    phazite::ui::DrumSamplerEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& kick = getShownPad (editor, 36);
+    phazite::test::Mouse mouse (kick);
+    sampler->getPadMeter (36).take();
+
+    // Told to play as the press comes, not as the mouse goes up; and only once.
+    const auto pressAt = [&] (int y)
+    {
+        mouse.press ({ kick.getWidth() / 2, y });
+        CHECK (sampler->isWaitingToPlay());
+        playNext (*sampler);
+        const auto hit = sampler->getPadMeter (36).take();
+        mouse.release();
+        mouse.pause();
+        CHECK_FALSE (sampler->isWaitingToPlay());
+        return hit;
+    };
+
+    const auto low = pressAt (kick.getHeight() - 1), high = pressAt (0);
+    CHECK (low >= 0.25f);
+    CHECK (low < 0.3f);
+    CHECK (high == doctest::Approx (1.0f));
+    CHECK (pressAt (kick.getHeight() / 2) == doctest::Approx (0.25f + 0.75f * 0.5f).epsilon (0.02));
+
+    // Enter on the pad that has the keys (juce::Button clicks at it): at 80 %.
+    kick.grabKeyboardFocus();
+    REQUIRE (kick.hasKeyboardFocus (false));
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([sampler] { return sampler->isWaitingToPlay(); }));
+    playNext (*sampler);
+    CHECK (sampler->getPadMeter (36).take() == doctest::Approx (0.8f));
+}

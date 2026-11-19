@@ -15,6 +15,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/WheelBurst.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
 
@@ -275,15 +276,33 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     CHECK (valueOf (s, eq, "band4Frequency") == doctest::Approx (800.0f));
     CHECK (valueOf (s, eq, "band4Gain") == doctest::Approx (0.0f));
 
-    // A double-click turns the band off, and on again.
-    mouse.pause();
-    mouse.doubleClick (editor.getDotPosition (3).roundToInt());
-    CHECK (valueOf (s, eq, "band4On") == doctest::Approx (0.0f));
-    mouse.doubleClick (editor.getDotPosition (3).roundToInt());
-    CHECK (valueOf (s, eq, "band4On") == doctest::Approx (1.0f));
-
     // The wheel narrows or widens it.
+    mouse.pause();
     mouse.wheel (editor.getDotPosition (3).roundToInt(), 0.5f);
+    CHECK (valueOf (s, eq, "band4Q") == doctest::Approx (2.0f));
+    phazite::ui::WheelBurst::endAll();
+
+    // A double-click puts back its frequency, gain and Q, exactly, as one undo step named as its drag is; the band stays on
+    // (on and off are its menu's and its switch's, since S6.9).
+    mouse.press (editor.getDotPosition (3).roundToInt());
+    mouse.dragTo (editor.getDotPosition (3).roundToInt() + juce::Point<int> (40, -30));
+    mouse.release();
+    mouse.pause();
+    editor.refresh();
+    REQUIRE (valueOf (s, eq, "band4Frequency") > 900.0f);
+    mouse.doubleClick (editor.getDotPosition (3).roundToInt());
+
+    for (const auto* id : { "band4Frequency", "band4Gain", "band4Q" })
+    {
+        CAPTURE (id);
+        CHECK (valueOf (s, eq, id) == *phazite::makeDeviceHandle (s, eq).getParameter (id).getDefaultValue());
+    }
+
+    CHECK (valueOf (s, eq, "band4On") == 1.0f);
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Move Band 4"));
+    phazite::undo (s);
+    editor.refresh();
+    CHECK (valueOf (s, eq, "band4Frequency") > 900.0f);
     CHECK (valueOf (s, eq, "band4Q") == doctest::Approx (2.0f));
 }
 

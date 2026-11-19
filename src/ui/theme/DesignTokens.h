@@ -507,6 +507,10 @@ namespace ButtonTint
 inline constexpr int knobSize = 64;
 inline constexpr int compactKnobSize = 40;
 
+// How far a drag with Shift held moves a value for each pixel the pointer goes, as a part of a plain drag's: a knob's, a
+// fader's and a graph's handle's alike, and a notch of the wheel over a graph's handle.
+inline constexpr float fineDragFactor = 0.2f;
+
 // Colours that tell apart the parts of a device's editor, such as the EQ's bands. Each part also shows its number,
 // with an outline in the theme's text colour, so that colour is never the only sign.
 inline constexpr juce::uint32 partColours[] = { 0xffe5534b, 0xfff0883e, 0xffd4a72c, 0xff57ab5a,
@@ -535,10 +539,9 @@ namespace GraphTint
     inline constexpr float padLit = 0.85f;        // how far a drum pad's colour fills it as it plays (partCurve when it doesn't)
 
     // A point of a picture that a drag moves, such as an envelope's corner, and how near the pointer must come to take one
-    // (pixels); and how far a drag with Shift moves it, as on knobs.
+    // (pixels). A drag with Shift moves it as far as a knob's moves (fineDragFactor).
     inline constexpr float handleRadius = 4.5f;
     inline constexpr float grabDistance = 12.0f;
-    inline constexpr float fineDragFactor = 0.2f;
     inline constexpr float handleOutline = 1.5f; // a hollow handle's, such as a compressor's threshold ring
 
     // A handle under the pointer, or dragged, lights up as the EQ's dots do: ringed in the text colour, this far outside it

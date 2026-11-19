@@ -48,6 +48,10 @@ The full text of every step, as it was written when it was built, is in the
   Sides; the dynamics curve even in decibels from -60 to +12 dB (-18 dB sat a tenth of the way up); the histories
   draw every reading across its time, and a display starts afresh when its editor is shown again; the EQ shows a
   spectrum for each of its middle and side, or left and right, curves.
+- **S6.9 One grammar for every graph:** every picture in the device editors answers the mouse as a knob does: a drag
+  (Shift fine), a double-click for the defaults, a right-click for each parameter's menu with Type a Value..., the
+  wheel named in the hint, the values in the corner; the Filter's and Motion's dots no longer jump to a click, and
+  the drum pads sound on the press, harder the higher.
 - **S6.5 The Reverb's Hall:** a third mode beside the Room and the Plate: sixteen lines (2.3 s at the largest Size)
   through a Hadamard matrix, an all-pass in each loop and sways that run on over a sleep, so that a tail of 20 s
   doesn't ring (its largest peak 12.5 dB over its envelope, where decaying noise measures 10.5 and the Room 17); the

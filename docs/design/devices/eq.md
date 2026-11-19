@@ -208,10 +208,16 @@ colour, the spectrum of what the EQ plays and, fainter behind it, the spectrum o
 
 - drag a dot to move the band's frequency and, for a bell or a shelf, its gain, as one undo step: it moves as far as
   the pointer, from where it is set (a click changes nothing), and Escape takes the drag back;
-- the wheel over a dot changes its band's Q, a turn of several notches one undo step; elsewhere it scrolls the view;
-- a double-click turns the band on or off;
-- a right-click offers the band's type, a cut's slope, its placement, Make Dynamic for a bell or a shelf that isn't
-  dynamic (its Dynamic at -6 dB, which gives it a handle to drag), and Turn On or Turn Off.
+- Shift drags a fifth as far (pressed or let go in the middle without a jump), as on a knob;
+- the wheel over a dot changes its band's Q (in finer steps with Shift), a turn of several notches one undo step;
+  elsewhere it scrolls the view, and the tooltip over a dot says "Wheel: Band 4 Q";
+- a double-click puts back the band's Frequency, Gain and Q, as one undo step; the band stays on;
+- a right-click shows the Frequency's, the Gain's (a bell or a shelf) and the Q's menus (Type a Value..., Automate,
+  Delete Automation, Modulate), then the band's type, a cut's slope, its placement, Make Dynamic for a bell or a shelf
+  that isn't dynamic (its Dynamic at -6 dB, which gives it a handle to drag), and Turn On or Turn Off; a dynamic
+  band's handle shows its Dynamic's and its Threshold's menus;
+- while a dot or a handle is under the pointer or dragged, the graph's top left shows what it moves ("Band 4  Frequency
+  800 Hz  Gain +3.0 dB  Q 0.71").
 
 Over a dot the pointer becomes a hand and the dot lights up. A band that isn't on Stereo has its placement's letter after
 its number in its dot (M, S, L or R). While any band that is on is on Mid or Side, the graph draws two curves in place of

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceGraph.h"
+#include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/TypedField.h"
+#include "ui/components/ValueText.h"
+#include "ui/theme/DesignTokens.h"
 
 #include <algorithm>
 #include <cmath>
@@ -423,6 +427,94 @@ juce::Path LevelHistory::makeArea (juce::Rectangle<float> area, const std::funct
 }
 
 //==============================================================================
+namespace
+{
+    // Every graph's drag, for HandleDrag::findOf(). Message thread.
+    std::vector<HandleDrag*>& getDrags()
+    {
+        static std::vector<HandleDrag*> all;
+        return all;
+    }
+
+    juce::String describeValue (const ParameterHandle& parameter, float value)
+    {
+        if (const auto info = parameter.getInfo())
+            return formatParameterValue (*info, value);
+
+        return parameter.getText (value);
+    }
+
+    // Each once, in order.
+    void addOnce (std::vector<ParameterHandle*>& to, ParameterHandle* parameter)
+    {
+        if (parameter != nullptr && std::find (to.begin(), to.end(), parameter) == to.end())
+            to.push_back (parameter);
+    }
+
+    // What a handle's menu and readout show: what a drag of it moves, what the wheel turns there, and the others it names.
+    std::vector<ParameterHandle*> getShown (const Handle& handle)
+    {
+        auto shown = handle.parameters;
+        addOnce (shown, handle.wheel);
+
+        for (auto* parameter : handle.alsoShown)
+            addOnce (shown, parameter);
+
+        return shown;
+    }
+
+    // What a double-click on it puts back: what a drag of it moves, and the others it names.
+    std::vector<ParameterHandle*> getReverted (const Handle& handle)
+    {
+        auto reverted = handle.parameters;
+
+        for (auto* parameter : handle.alsoReverted)
+            addOnce (reverted, parameter);
+
+        return reverted;
+    }
+
+    // The words a name begins with up to its last one ("Band 4 " of "Band 4 Frequency"), for describe() to say once.
+    juce::String getLeadingWords (const juce::String& name)
+    {
+        return name.containsChar (' ') ? name.upToLastOccurrenceOf (" ", true, false) : juce::String();
+    }
+} // namespace
+
+juce::String describe (const std::vector<ParameterHandle*>& parameters)
+{
+    std::vector<const ParameterHandle*> shown;
+
+    for (const auto* parameter : parameters)
+        if (parameter != nullptr && parameter->isValid())
+            shown.push_back (parameter);
+
+    if (shown.empty())
+        return {};
+
+    auto common = shown.size() > 1 ? getLeadingWords (shown.front()->getName()) : juce::String();
+
+    for (const auto* parameter : shown)
+        if (common.isNotEmpty() && ! parameter->getName().startsWith (common))
+            common = {};
+
+    juce::StringArray parts;
+
+    if (common.isNotEmpty())
+        parts.add (common.trimEnd());
+
+    for (const auto* parameter : shown)
+        parts.add (parameter->getName().substring (common.length()) + " " + describeValue (*parameter, parameter->getBaseValue()));
+
+    return parts.joinIntoString ("  ");
+}
+
+float getFineFactor (const juce::ModifierKeys& mods)
+{
+    return mods.isShiftDown() ? fineDragFactor : 1.0f;
+}
+
+//==============================================================================
 HandleDrag::HandleDrag (juce::Component& g)
     : graph (g)
 {
@@ -430,13 +522,305 @@ HandleDrag::HandleDrag (juce::Component& g)
     // them (Component::grabKeyboardFocus() from a click on a component that doesn't), a knob or a button, which took them
     // from the drum sampler's pads, say.
     graph.setMouseClickGrabsKeyboardFocus (false);
+
+    // After the graph, which takes its presses and drags first: the double-click, the right-click and the pointer's place.
+    graph.addMouseListener (this, false);
+    getDrags().push_back (this);
 }
 
 HandleDrag::~HandleDrag()
 {
+    std::erase (getDrags(), this);
+    graph.removeMouseListener (this);
+
+    valueField = nullptr; // a field left open goes without setting what it says
+
     // A drag in progress is the handles' to end: each ends its gesture as it goes, keeping it. The graph's wheels go first
     // (they are declared after it).
     listen (false);
+}
+
+HandleDrag* HandleDrag::findOf (const juce::Component& g)
+{
+    for (auto* drag : getDrags())
+        if (&drag->graph == &g)
+            return drag;
+
+    return nullptr;
+}
+
+juce::Point<float> HandleDrag::getMoved (const juce::MouseEvent& e)
+{
+    // Each step of the pointer since the last, a fifth as far with Shift: Shift pressed or let go moves only what comes after.
+    // In whole pixels, as JUCE's offset from the press is (MouseEvent::getOffsetFromDragStart()): a tremor under a pixel moves
+    // nothing.
+    if (! movedFromPress)
+    {
+        movedFromPress = true;
+        lastPosition = e.getMouseDownPosition().toFloat();
+        movedSoFar = {};
+    }
+
+    const auto at = e.getPosition().toFloat();
+    movedSoFar += (at - lastPosition) * getFineFactor (e.mods);
+    lastPosition = at;
+    return movedSoFar;
+}
+
+std::optional<Handle> HandleDrag::getHandleAt (juce::Point<float> position) const
+{
+    return findHandle != nullptr ? findHandle (position) : std::nullopt;
+}
+
+void HandleDrag::changed()
+{
+    if (onCancelled != nullptr)
+        onCancelled();
+
+    graph.repaint();
+}
+
+void HandleDrag::revert (const std::vector<ParameterHandle*>& parameters)
+{
+    end();
+    WheelBurst::endAll();
+
+    // One step, named after the first, as its drag's is; a parameter at its default already changes nothing.
+    for (auto* parameter : parameters)
+        if (parameter != nullptr && parameter->isValid())
+            parameter->beginGesture();
+
+    for (auto* parameter : parameters)
+        if (parameter != nullptr && parameter->isValid())
+            if (const auto initial = parameter->getDefaultValue();
+                initial.has_value() && ! juce::exactlyEqual (*initial, parameter->getBaseValue()))
+                parameter->setValue (*initial);
+
+    for (auto each = parameters.rbegin(); each != parameters.rend(); ++each)
+        if (*each != nullptr && (*each)->isInGesture())
+            (*each)->endGesture();
+
+    changed();
+}
+
+juce::PopupMenu HandleDrag::getMenu (const Handle& handle)
+{
+    juce::PopupMenu menu;
+    const juce::Component::SafePointer<juce::Component> safeGraph (&graph);
+
+    for (auto* parameter : getShown (handle))
+    {
+        if (parameter == nullptr || ! parameter->isValid())
+            continue;
+
+        const auto section = makeParameterMenu (*parameter, graph,
+                                                [this, safeGraph, parameter, at = handle.at]
+                                                {
+                                                    if (safeGraph != nullptr)
+                                                        typeValue (*parameter, at);
+                                                });
+
+        for (juce::PopupMenu::MenuItemIterator item (section); item.next();)
+            menu.addItem (item.getItem());
+    }
+
+    if (handle.addItems != nullptr)
+    {
+        juce::PopupMenu own;
+        handle.addItems (own);
+
+        if (own.getNumItems() > 0)
+        {
+            menu.addSeparator();
+
+            for (juce::PopupMenu::MenuItemIterator item (own); item.next();)
+                menu.addItem (item.getItem());
+        }
+    }
+
+    return menu;
+}
+
+juce::PopupMenu HandleDrag::getMenuAt (juce::Point<float> position)
+{
+    const auto handle = getHandleAt (position);
+    return handle.has_value() ? getMenu (*handle) : juce::PopupMenu();
+}
+
+void HandleDrag::typeValue (ParameterHandle& parameter, juce::Point<float> at)
+{
+    auto* parent = TypedField::findParent (graph);
+
+    if (parent == nullptr || ! parameter.isValid() || ! graph.isShowing())
+        return;
+
+    // Over the handle, as wide as the parameter's least, most and value as its knob writes them, as a knob's field is.
+    auto field = std::make_unique<TypedField> (graph);
+    auto* const typed = &parameter;
+    const auto range = parameter.getRange();
+    field->setTitle (parameter.getName());
+    field->getTarget = [this, at] (const juce::Component& in)
+    { return in.getLocalArea (&graph, juce::Rectangle<int> (TypedField::getMinimumWidth(), controlHeight).withCentre (at.roundToInt())); };
+    field->getTexts = [typed, range]
+    {
+        return juce::StringArray { describeValue (*typed, range.start), describeValue (*typed, range.end),
+                                   describeValue (*typed, typed->getBaseValue()) };
+    };
+    field->onApply = [this, typed] (const juce::String& text)
+    {
+        const auto info = typed->getInfo();
+        const auto value = info.has_value() ? parseParameterValue (*info, text) : typed->readText (text);
+
+        if (! value.has_value())
+            return;
+
+        // A step of its own, as a value typed on a knob is, named as a drag of it.
+        WheelBurst::endAll();
+        typed->beginGesture();
+        typed->setValue (*value);
+        typed->endGesture();
+        changed();
+    };
+    field->onFinished = [safeGraph = juce::Component::SafePointer<juce::Component> (&graph), this]
+    {
+        juce::MessageManager::callAsync (
+            [safeGraph, this]
+            {
+                if (safeGraph == nullptr)
+                    return;
+
+                if (valueField != nullptr && valueField->isFinished())
+                    valueField = nullptr;
+            });
+    };
+
+    parent->addAndMakeVisible (*field);
+    field->show (describeValue (parameter, parameter.getBaseValue()));
+    valueField = std::move (field);
+}
+
+juce::TextEditor* HandleDrag::getValueField() const noexcept
+{
+    return valueField != nullptr && ! valueField->isFinished() ? valueField.get() : nullptr;
+}
+
+void HandleDrag::passWheelOn (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    // As juce::Component's own passes it to its parent: past the graph's, which turns its handles.
+    graph.juce::Component::mouseWheelMove (e, wheel); // NOLINT(bugprone-parent-virtual-call): the graph's own is what calls this
+}
+
+juce::String HandleDrag::getReadout() const
+{
+    if (taken)
+        return describe (handles);
+
+    if (! pointer.has_value())
+        return {};
+
+    const auto handle = getHandleAt (*pointer);
+    return handle.has_value() ? describe (getShown (*handle)) : juce::String();
+}
+
+juce::String HandleDrag::getTooltip() const
+{
+    const auto handle = pointer.has_value() ? getHandleAt (*pointer) : std::nullopt;
+
+    if (! handle.has_value())
+        return {};
+
+    juce::StringArray names;
+
+    for (const auto* parameter : handle->parameters)
+        if (parameter != nullptr && parameter->isValid())
+            names.add (parameter->getName());
+
+    const auto turns = handle->wheel != nullptr && handle->wheel->isValid();
+
+    // The graph's own words for what is under the pointer first (the hint bar shows a tooltip in place of a description),
+    // then the grammar, kept short: the bar is one line.
+    auto text = graph.getDescription().trim();
+
+    if (text.isNotEmpty() && ! text.endsWithChar ('.'))
+        text << ".";
+
+    if (text.isNotEmpty())
+        text << " ";
+
+    if (names.isEmpty())
+        return turns ? text + "Wheel: " + handle->wheel->getName() + " (Shift fine). Right-click: menu" : juce::String();
+
+    text << "Shift: fine. " << (handle->revertsOnDoubleClick ? "Double-click: default. " : "") << "Right-click: menu";
+
+    if (turns)
+        text << ". Wheel: " << handle->wheel->getName();
+
+    return text;
+}
+
+void HandleDrag::pointAt (std::optional<juce::Point<float>> position)
+{
+    pointer = position;
+
+    // The readout follows the pointer from handle to handle.
+    if (findHandle == nullptr)
+        return;
+
+    if (auto readout = getReadout(); readout != shownReadout)
+    {
+        shownReadout = std::move (readout);
+        graph.repaint();
+    }
+}
+
+void HandleDrag::mouseEnter (const juce::MouseEvent& e)
+{
+    pointAt (e.position);
+}
+
+void HandleDrag::mouseMove (const juce::MouseEvent& e)
+{
+    pointAt (e.position);
+}
+
+void HandleDrag::mouseExit (const juce::MouseEvent&)
+{
+    pointAt (std::nullopt);
+}
+
+void HandleDrag::mouseDown (const juce::MouseEvent& e)
+{
+    movedFromPress = false;
+    pointAt (e.position);
+
+    if (! e.mods.isPopupMenu() || findHandle == nullptr)
+        return;
+
+    // A right-click never acts as a left click: what a graph took for it goes back, and its menu shows.
+    cancel();
+
+    if (const auto handle = getHandleAt (e.position))
+        if (auto menu = getMenu (*handle); menu.getNumItems() > 0)
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&graph));
+}
+
+void HandleDrag::mouseDrag (const juce::MouseEvent& e)
+{
+    pointAt (e.position);
+}
+
+void HandleDrag::mouseUp (const juce::MouseEvent& e)
+{
+    pointAt (graph.getLocalBounds().toFloat().contains (e.position) ? std::optional (e.position) : std::nullopt);
+}
+
+void HandleDrag::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        return;
+
+    if (const auto handle = getHandleAt (e.position); handle.has_value() && handle->revertsOnDoubleClick)
+        revert (getReverted (*handle));
 }
 
 void HandleDrag::listen (bool shouldListen)
@@ -455,6 +839,7 @@ void HandleDrag::listen (bool shouldListen)
 void HandleDrag::take (std::vector<ParameterHandle*> taking)
 {
     end(); // a drag that never let go (a press while another was held) keeps what it did
+    movedFromPress = false;
 
     // A turn of the wheel still open, the graph's or a knob's, is a step of its own, which the drag doesn't join.
     WheelBurst::endAll();

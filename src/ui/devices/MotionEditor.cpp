@@ -99,8 +99,8 @@ public:
     {
         setTitle ("Chorus copies");
         setDescription ("The comb its copies make with the sound now, over the spectrum of what it plays, and under it how far each "
-                        "copy lags, in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or "
-                        "down for the depth. The wheel turns the rate.");
+                        "copy lags, in milliseconds. Drag anywhere to move the dot: sideways for the delay, up or down "
+                        "for the depth. The wheel turns the rate.");
 
         // A drag moves the dot, as one undo step.
         dot.setDrag (
@@ -112,6 +112,7 @@ public:
                 readValues();
                 repaint();
             });
+        dot.setWheel ([this] { return sync.getValue() > 0.5f ? &division : &rate; });
     }
 
     std::array<float, Chorus::mix + 1> getEngineValues() const { return Motion::getChorusValues (values); }
@@ -144,7 +145,7 @@ public:
     }
 
     // The wheel turns the rate faster or slower, or in time with the song steps through the note values.
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto faster = wheel.deltaY > 0.0f;
 
@@ -156,7 +157,8 @@ public:
         else
         {
             const auto range = rate.getRange();
-            const auto along = juce::jlimit (0.0f, 1.0f, range.convertTo0to1 (rate.getBaseValue()) + (faster ? rateStep : -rateStep));
+            const auto along = juce::jlimit (
+                0.0f, 1.0f, range.convertTo0to1 (rate.getBaseValue()) + (faster ? rateStep : -rateStep) * graph::getFineFactor (e.mods));
             wheelGesture.turn (rate, range.convertFrom0to1 (along));
         }
 
@@ -312,8 +314,8 @@ public:
     {
         setTitle ("Flanger comb");
         setDescription ("Its comb of notches now, over the spectrum of what it plays, and under it how far the copy lags each side, "
-                        "in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or down for "
-                        "the feedback. The wheel turns the depth.");
+                        "in milliseconds. Drag anywhere to move the dot: sideways for the delay, up or down for the "
+                        "feedback. The wheel turns the depth.");
 
         // A drag moves the dot, as one undo step.
         dot.setDrag ({ &delay, [this] (float milliseconds) { return getFrequencies().xFor (1000.0 / (double) milliseconds); },
@@ -325,6 +327,7 @@ public:
                          readValues();
                          repaint();
                      });
+        dot.setWheel ([this] { return &depth; });
     }
 
     double getDelay (int channel) const { return Flanger::getSweptDelay (Motion::getFlangerValues (values), getLfoValue (channel)); }
@@ -337,11 +340,11 @@ public:
         return { getFrequencies().xFor (1000.0 / (double) values[Motion::delay]), feedbackAxis.yFor (values[Motion::feedback]) };
     }
 
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = depth.getRange();
-        wheelGesture.turn (depth,
-                           juce::jlimit (range.start, range.end, depth.getBaseValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
+        const auto step = (wheel.deltaY > 0.0f ? depthStep : -depthStep) * graph::getFineFactor (e.mods);
+        wheelGesture.turn (depth, juce::jlimit (range.start, range.end, depth.getBaseValue() + step));
         readValues();
         repaint();
     }
@@ -473,9 +476,9 @@ public:
           depth (device.getParameter ("depth"))
     {
         setTitle ("Phaser notches");
-        setDescription ("Where its notches are now, over the spectrum of what it plays, and how far the sweep reaches. Drag the "
-                        "dot, or press anywhere to put it there: sideways for the frequency, up or down for the feedback. The "
-                        "wheel turns the depth.");
+        setDescription ("Where its notches are now, over the spectrum of what it plays, and how far the sweep reaches. Drag "
+                        "anywhere to move the dot: sideways for the frequency, up or down for the feedback. The wheel turns the "
+                        "depth.");
 
         // A drag moves the dot, the frequency with it sideways and the feedback up and down, as one undo step.
         dot.setDrag ({ &frequency, [this] (float hertz) { return getFrequencies().xFor (hertz); },
@@ -487,6 +490,7 @@ public:
                          readValues();
                          repaint();
                      });
+        dot.setWheel ([this] { return &depth; });
     }
 
     double getCentre (int channel) const
@@ -499,11 +503,11 @@ public:
         return { getFrequencies().xFor (values[Motion::frequency]), feedbackAxis.yFor (values[Motion::feedback]) };
     }
 
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = depth.getRange();
-        wheelGesture.turn (depth,
-                           juce::jlimit (range.start, range.end, depth.getBaseValue() + (wheel.deltaY > 0.0f ? depthStep : -depthStep)));
+        const auto step = (wheel.deltaY > 0.0f ? depthStep : -depthStep) * graph::getFineFactor (e.mods);
+        wheelGesture.turn (depth, juce::jlimit (range.start, range.end, depth.getBaseValue() + step));
         readValues();
         repaint();
     }

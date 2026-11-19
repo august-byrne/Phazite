@@ -178,8 +178,7 @@ and nothing is listed in both.
 
 | Item | Where | Size | Stage | Source |
 |---|---|---|---|---|
-| One grammar for every graph: what a double-click, a right-click, a press and the fine-drag key do | `src/ui/devices/DeviceGraph.h` | L | 6 | ui-device-editors 9 |
-| Drum pads sound on the press, not the release, and at more than one fixed velocity | `src/ui/devices/DrumSamplerEditor.cpp` | S | 6 | ui-device-editors 5 |
+| Graphs after S6.9's grammar: keyboard use (Tab to a graph, arrows to move a handle); the Synth's wavetable picture on the grammar; Space on a drum pad (Enter plays it); the handles no test drives yet (the review's list: band ends, bend handles, the Flanger's and the Phaser's dots...) | `src/ui/devices/DeviceGraph.h` | L | 6 | ui-device-editors 9 |
 | Automate and Modulate on graphs' handles (switches and choices have them since S6.9); the top bar's tempo and position fields' wheel as one burst (a plan a notch now); a touch or a pen press ending a wheel's burst before what is pressed takes it | `src/ui/devices/DeviceGraph.cpp` | M | 6 | ui-device-editors 10 |
 | Displays left from S6.9's pass: Age's and the Vocoder's don't start afresh when their editor is shown again; the Saturator's two views share one scope, so one's fresh start drops a tick of the other's; Stereo's line under Mono doesn't lean with a Balance; the EQ's curve in Linear at a Mix under 100 % is approximate while a dynamic band moves; the quietest value between two ticks isn't kept (the meters give the loudest) | `src/ui/devices/LevelHistoryView.cpp` | — | 6 | ui-device-editors 7 |
 | The pages' bar overflows into a menu, and a part keeps its switch under tabs | `src/ui/devices/DeviceLayout.cpp` | — | 6 | ui-device-editors 14 |

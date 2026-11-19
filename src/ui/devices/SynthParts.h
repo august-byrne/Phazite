@@ -25,8 +25,10 @@ namespace phazite::ui
 // its curves given, each stage that goes up or down bends by the handle in its middle, dragged up or down, as Vital's,
 // FabFilter Twin's and Ableton's envelopes bend (no envelope found bends with the wheel, which scrolls the view around it:
 // docs/design.md, B123); a double-click on a stage puts its curve back. Each drag is one undo step; Shift drags in fine
-// steps. While a point is dragged the picture keeps its scale, so that the point stays under the pointer.
+// steps; a right-click on a point or a handle shows its parameters' menus, and their values show in the corner while the
+// pointer is over it or drags it (every graph's grammar, graph::HandleDrag). While a point is dragged the picture keeps its scale, so that the point stays under the pointer.
 class EnvelopeView : public juce::Component,
+                     public juce::TooltipClient,
                      private DisplayTicker::Display
 {
 public:
@@ -59,6 +61,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
 private:
     // What a press takes: a point, or the handle that bends the stage ending at it.
@@ -102,8 +105,10 @@ private:
 };
 
 // An LFO's wave, one cycle, and a dot where it is now. With its controls given, a drag up or down sets its depth (the wave
-// drawn as tall as it moves) and the wheel its rate, or with its sync on, the note value, each one undo step.
+// drawn as tall as it moves) and the wheel its rate, or with its sync on, the note value, each one undo step; a right-click shows
+// their menus, and their values show in the corner while the pointer is over it (every graph's grammar, graph::HandleDrag).
 class LfoView : public juce::Component,
+                public juce::TooltipClient,
                 private DisplayTicker::Display
 {
 public:
@@ -119,6 +124,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
 private:
     static constexpr int drawnWavePoints = 64; // where a tick reads the wave, to see whether it changed
@@ -131,7 +137,8 @@ private:
     float shownPhase = -1.0f;
     DrawnNumbers drawn;
 
-    float getDrawnDepth() const; // how tall the wave is drawn, from 0 to 1
+    float getDrawnDepth() const;          // how tall the wave is drawn, from 0 to 1
+    ParameterHandle* getWheelParameter(); // the rate, or the note value while in time; none without controls
     void tick() override;
 };
 
@@ -140,8 +147,10 @@ private:
 float getDrawnLfoValue (int shape, float phase);
 
 // A filter's response: at its cutoff as set, and, fainter, where the newest note plays it now; a dot at the cutoff, as high
-// as the resonance, which a drag moves (both, as one undo step) and a press anywhere puts under the pointer (GraphDot).
+// as the resonance, which a drag from anywhere moves (both, as one undo step, as far as the pointer goes: GraphDot, which keeps
+// every graph's grammar); the readout says the cutoff, and the resonance too while the pointer is over the picture.
 class FilterView : public juce::Component,
+                   public juce::TooltipClient,
                    private DisplayTicker::Display
 {
 public:
@@ -160,6 +169,7 @@ public:
     juce::String getReadout() const;
 
     void paint (juce::Graphics&) override;
+    juce::String getTooltip() override { return dot.getDrag().getTooltip(); }
 
 private:
     ParameterHandle cutoff, resonance;

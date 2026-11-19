@@ -14,7 +14,13 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
+
+namespace phazite::ui
+{
+class TypedField; // ui/components/TypedField.h: the field a value is typed in
+} // namespace phazite::ui
 
 namespace phazite::ui::graph
 {
@@ -162,8 +168,47 @@ private:
 };
 
 //==============================================================================
+// A handle of a graph, as the graph finds it at a place (HandleDrag::findHandle): the parameters a drag of it moves (the first
+// names the undo step), the one the wheel turns over it (none for nothing), where it is (the field a value is typed in opens
+// over it), and the graph's own items for its menu, after the parameters' sections (an EQ band's types). A handle that is a
+// thing rather than its parameters' values (a sampler's slice) takes a double-click as its graph says. More parameters its
+// menu and readout show, after those (an EQ band's threshold beside its Dynamic); and more a double-click puts back with
+// those it moves (an EQ band's Q with its frequency and gain).
+struct Handle
+{
+    Handle (std::vector<ParameterHandle*> moving, juce::Point<float> place, ParameterHandle* turning = nullptr)
+        : parameters (std::move (moving)),
+          wheel (turning),
+          at (place)
+    {
+    }
+
+    std::vector<ParameterHandle*> parameters;
+    ParameterHandle* wheel = nullptr;
+    juce::Point<float> at;
+    std::function<void (juce::PopupMenu&)> addItems;
+    bool revertsOnDoubleClick = true;
+    std::vector<ParameterHandle*> alsoShown, alsoReverted;
+};
+
+// What a handle moves, by name and value as its knob writes it, from the values set by hand: "Cutoff 1.2 kHz  Resonance 40%";
+// the words its names begin with alike said once ("Band 4  Frequency 800 Hz  Gain +3.0 dB").
+juce::String describe (const std::vector<ParameterHandle*>&);
+
+// How far a drag moves a handle for each pixel the pointer goes, and a notch of the wheel turns it: a fifth as far while Shift
+// is held, as on a knob (fineDragFactor).
+float getFineFactor (const juce::ModifierKeys&);
+
+//==============================================================================
 // A drag of a graph's handles, which every graph's drag goes through, so that each takes a handle the same way (known bugs
-// 116, 117 and 140):
+// 116, 117 and 140), and the grammar every graph's handles keep, as a knob does (docs/design/devices.md, "A graph's gestures"):
+//   - A drag moves a handle as far as the pointer goes, a fifth as far while Shift is held (getMoved()); a double-click puts
+//     back the defaults of what it moves (revert()); a right-click shows the menu of each parameter it moves (getMenu()),
+//     whose Type a Value... opens the field a knob has, over the handle (typeValue()); the wheel over it turns what it says,
+//     and elsewhere goes on to what is around the graph (passWheelOn()); and while it is under the pointer or dragged, its
+//     values show in the graph's corner (getReadout()) and the pointer's tooltip says what it does (getTooltip()). A graph
+//     that keeps the grammar says where its handles are (findHandle); the drag hears the graph's mouse after the graph for
+//     the double-click, the right-click and the pointer's place.
 //   - A press takes the handles it moves (take()), each from its value set by hand (ParameterHandle::getBaseValue()), not from
 //     the value it plays with its modulation, which the graph draws. It begins their gesture, as a knob's press does, so that
 //     a handle held still while the song plays grabs its parameter in Touch and Latch; but it changes no value, and a gesture
@@ -183,7 +228,8 @@ private:
 // The handles are the graph's, and must outlive the drag (make it a member declared after them).
 class WheelGesture;
 
-class HandleDrag : private juce::KeyListener
+class HandleDrag : private juce::KeyListener,
+                   private juce::MouseListener
 {
 public:
     explicit HandleDrag (juce::Component& graph);
@@ -193,6 +239,10 @@ public:
     void take (std::vector<ParameterHandle*>);
     bool isTaken() const noexcept { return taken; } // from take() until end() or Escape
     float getStart (size_t handle) const;           // its value set by hand as the press took it
+
+    // How far the pointer has gone since the press, for the handles to move by: a fifth as far while Shift is held, which may be
+    // pressed or let go in the middle without a jump. In the graph's coordinates, from the graph's own drags.
+    juce::Point<float> getMoved (const juce::MouseEvent&);
 
     // A value for a handle taken, kept to its range; nothing is written when it is the value the handle has.
     void set (size_t handle, float value);
@@ -206,8 +256,40 @@ public:
     void end();    // the mouse went up: keeps what the drag did
     bool cancel(); // Escape: takes it back; whether there was a drag to take back
 
-    // After Escape took the drag back, for the graph to show the values from before (and forget what it was dragging).
+    // After Escape took the drag back, for the graph to show the values from before (and forget what it was dragging); and after
+    // a double-click or a value typed set a handle's values, for the graph to show them.
     std::function<void()> onCancelled;
+
+    // Where the graph's handles are: the one at a place in the graph's coordinates, or none there (empty space). Unset, the
+    // graph takes its double-clicks, right-clicks and wheel itself.
+    std::function<std::optional<Handle> (juce::Point<float>)> findHandle;
+    std::optional<Handle> getHandleAt (juce::Point<float>) const;
+
+    // A double-click on a handle: the defaults of the parameters it moves, exactly, as one undo step named as its drag's is.
+    void revert (const std::vector<ParameterHandle*>&);
+
+    // A right-click on a handle: a section for each parameter it moves, as a knob's menu has (makeParameterMenu(), Type a
+    // Value... opening the field over the handle), then the graph's own items. Empty where there is no handle.
+    juce::PopupMenu getMenu (const Handle&);
+    juce::PopupMenu getMenuAt (juce::Point<float>);
+
+    // The field a knob opens to type a value in, over a place in the graph: what is typed, read in the parameter's units, is set
+    // as one undo step. The field while it is open, else nullptr.
+    void typeValue (ParameterHandle&, juce::Point<float> at);
+    juce::TextEditor* getValueField() const noexcept;
+
+    // The wheel where the graph turns nothing: to what is around it, as a component without a wheel of its own passes it on (a
+    // view that scrolls).
+    void passWheelOn (const juce::MouseEvent&, const juce::MouseWheelDetails&);
+
+    // What the handle dragged, or else the one under the pointer, moves, by name and value (describe()), for the graph's corner;
+    // empty over empty space. And the pointer's tooltip over a handle: what it moves and how, and what the wheel turns there
+    // ("Wheel: Drive"); empty elsewhere, where the graph's description says what it is.
+    juce::String getReadout() const;
+    juce::String getTooltip() const;
+
+    // The drag of a graph, for the tests, which right-click, read and turn its handles through it.
+    static HandleDrag* findOf (const juce::Component& graph);
 
 private:
     friend class WheelGesture;
@@ -217,10 +299,25 @@ private:
     std::vector<ParameterHandle*> handles;
     std::vector<float> starts;
     bool taken = false;
+    bool movedFromPress = false;                 // getMoved() has heard the drag since the press
+    juce::Point<float> lastPosition, movedSoFar; // where the pointer was last, and how far the handles have gone
+    std::optional<juce::Point<float>> pointer;   // over the graph, where; none while it is elsewhere
+    juce::String shownReadout;                   // as the graph last showed it, to repaint as it changes
+    std::unique_ptr<TypedField> valueField;      // Type a Value...'s, while it is open and until a message after it closed
 
     void listen (bool shouldListen);
     void letGo(); // forgets the handles, and stops listening
+    void changed();
+    void pointAt (std::optional<juce::Point<float>>);
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+
+    void mouseEnter (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
     JUCE_DECLARE_NON_COPYABLE (HandleDrag)
 };

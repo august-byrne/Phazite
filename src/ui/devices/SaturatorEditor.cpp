@@ -38,6 +38,7 @@ namespace
 
 //==============================================================================
 class SaturatorEditor::CurveView : public juce::Component,
+                                   public juce::TooltipClient,
                                    private DisplayTicker::Display
 {
 public:
@@ -57,6 +58,9 @@ public:
                         "Drag up or down anywhere on them to turn the drive.");
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         drag.onCancelled = [this] { repaint(); };
+
+        // One handle, all of it: the drive.
+        drag.findHandle = [this] (juce::Point<float> at) { return graph::Handle ({ &drive }, at); };
     }
 
     ~CurveView() override
@@ -95,12 +99,13 @@ public:
         if (! drag.isTaken())
             return;
 
-        const auto moved = -(float) e.getDistanceFromDragStartY() / std::max (1.0f, (float) getHeight()) * driveRange;
+        const auto moved = -drag.getMoved (e).y / std::max (1.0f, (float) getHeight()) * driveRange;
         drag.set (0, drag.getStart (0) + moved);
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent&) override { drag.end(); }
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
     // Under the pointer, what a drag bends lights up: the whole curve.
     void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
@@ -393,6 +398,7 @@ private:
 // the drag moves sideways from where it is drawn, as one undo step (graph::HandleDrag): Escape takes it back. From pushes
 // To up ahead of it, so that the knobs show what plays.
 class SaturatorEditor::BandView : public juce::Component,
+                                  public juce::TooltipClient,
                                   private DisplayTicker::Display
 {
 public:
@@ -414,6 +420,13 @@ public:
         {
             readValues();
             repaint();
+        };
+
+        // The nearer edge, anywhere on it.
+        drag.findHandle = [this] (juce::Point<float> at)
+        {
+            const auto edge = findEdge (at);
+            return graph::Handle ({ &parameters[(size_t) edge] }, { getEdgeX (edge == Saturator::bandHigh), at.y });
         };
     }
 
@@ -489,7 +502,7 @@ public:
         // To stays an octave above From, as the saturator plays it: so a drag of To starts from where its edge is drawn
         // (above its knob's value, if that is set under the octave) and stops an octave above From, and a drag of From
         // pushes To up ahead of it, back as From comes down again; after either, the knobs show what plays.
-        const auto moved = (float) e.getDistanceFromDragStartX();
+        const auto moved = drag.getMoved (e).x;
         const auto axis = getAxis();
         auto& toEdge = parameters[(size_t) Saturator::bandHigh];
         const auto toRange = toEdge.getRange();
@@ -541,6 +554,7 @@ public:
     // Over the picture, the pointer that moves sideways, and the nearer edge lit, which a press takes.
     void mouseMove (const juce::MouseEvent& e) override { hover (findEdge (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (nothing); }
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
 private:
     static constexpr int nothing = -1;

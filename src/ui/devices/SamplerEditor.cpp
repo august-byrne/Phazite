@@ -65,6 +65,7 @@ namespace
 //==============================================================================
 // The sound, drawn, with what plays it marked; its markers drag, and it takes a sound dropped on it.
 class SamplerEditor::SampleView : public juce::Component,
+                                  public juce::TooltipClient,
                                   public juce::DragAndDropTarget,
                                   public juce::FileDragAndDropTarget,
                                   private DisplayTicker::Display
@@ -77,7 +78,8 @@ public:
         setTitle ("Sound");
         setDescription ("The sound the sampler plays. Drag its markers to choose what plays and what loops; in Slice mode, click "
                         "under it to add a slice, drag a slice to move it and double-click one to take it away. Press on it to "
-                        "hear it. Drop a sound on it to play that instead.");
+                        "hear it. Shift drags in fine steps, a double-click puts a marker back and a right-click shows its menu. Drop "
+                        "a sound on it to play that instead.");
 
         for (const auto& each : Sampler::info.parameters)
             handles.push_back (editor.getDevice().getParameter (each.id));
@@ -95,6 +97,21 @@ public:
             target = {};
             draggedTo = -1.0f;
             refresh();
+        };
+
+        // A marker, or the loop's band (its start and end), keeps every graph's grammar; a slice is a thing, which a double-click
+        // takes away (mouseDoubleClick()).
+        drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+        {
+            const auto found = sound != nullptr ? findTarget (at) : Target {};
+
+            if (found.kind == Kind::marker)
+                return graph::Handle ({ &handles[(size_t) found.parameter] }, { getMarkerX (found.parameter), at.y });
+
+            if (found.kind == Kind::loopBand)
+                return graph::Handle ({ &handles[(size_t) Sampler::loopStart], &handles[(size_t) Sampler::loopEnd] }, at);
+
+            return std::nullopt;
         };
 
         refresh();
@@ -293,6 +310,9 @@ public:
             g.drawText ("Root " + juce::MidiMessage::getMidiNoteName (juce::roundToInt (value (Sampler::root)), true, true, 4), corner,
                         juce::Justification::topLeft, false);
 
+        // What the marker under the pointer, or dragged, is set to.
+        graph::paintReadout (g, p, area, drag.getReadout(), juce::Justification::centredTop);
+
         if (dropping)
         {
             g.setColour (p.accent);
@@ -304,7 +324,8 @@ public:
     // the sound, or the slice under the pointer, while it is held.
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (sound == nullptr)
+        // A right-click is the drag's (a marker's menu): it moves nothing and plays nothing.
+        if (sound == nullptr || e.mods.isPopupMenu())
             return;
 
         target = findTarget (e.position);
@@ -353,8 +374,8 @@ public:
 
         // Where the pointer takes it: in fine steps with Shift, on the nearest zero crossing unless Alt places it anywhere.
         const auto area = getWaveArea();
-        const auto moved = (float) e.getDistanceFromDragStartX() / std::max (1.0f, area.getWidth()); // in whole pixels
-        auto fraction = e.mods.isShiftDown() ? startValue + moved * GraphTint::fineDragFactor : startValue + moved;
+        const auto moved = drag.getMoved (e).x / std::max (1.0f, area.getWidth());
+        auto fraction = startValue + moved;
 
         // Not moved: where it was, not the zero crossing nearest it.
         fraction = juce::exactlyEqual (moved, 0.0f) ? startValue : snap (std::clamp (fraction, 0.0f, 1.0f), e.mods);
@@ -421,19 +442,16 @@ public:
         refresh();
     }
 
-    // A double-click takes a slice away, or puts a marker back where it starts.
+    // A double-click takes a slice away; on a marker or the loop it is the drag's (their defaults).
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        const auto found = findTarget (e.position);
-
-        if (found.kind == Kind::slice)
+        if (const auto found = findTarget (e.position); found.kind == Kind::slice && ! e.mods.isPopupMenu())
             editor.getDevice().removeSlice (found.slice);
-        else if (found.kind == Kind::marker)
-            if (const auto start = handles[(size_t) found.parameter].getDefaultValue())
-                handles[(size_t) found.parameter].setValue (*start);
 
         refresh();
     }
+
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
     void mouseMove (const juce::MouseEvent& e) override
     {

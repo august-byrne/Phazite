@@ -31,6 +31,15 @@ LevelHistoryView::LevelHistoryView (const juce::String& title, float lowestLevel
         dragging = false;
         repaint();
     };
+
+    // Near the line, the line: its parameter.
+    drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+    {
+        if (! isNearLine (at.y))
+            return std::nullopt;
+
+        return graph::Handle ({ line }, { at.x, getYForLevel (line->getValue()) });
+    };
 }
 
 void LevelHistoryView::describe()
@@ -391,7 +400,9 @@ void LevelHistoryView::setLineLit (bool lit)
     // Near the line: an up-and-down arrow, the line lit, and the hint bar says what a drag does (its tooltip).
     lineLit = lit;
     setMouseCursor (lit ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
-    setTooltip (lit ? "Drag up or down to move the " + lineName.toLowerCase() + "; double-click to put it back" : juce::String());
+    setTooltip (lit ? "Drag up or down to move the " + lineName.toLowerCase()
+                          + " (Shift in fine steps); double-click to put it back; right-click for its menu"
+                    : juce::String());
     repaint();
 }
 
@@ -424,8 +435,7 @@ void LevelHistoryView::mouseDrag (const juce::MouseEvent& e)
     const auto levels = getLevels();
     const auto perPixel = (levels.high - levels.low) / std::max (1.0f, levels.area.getHeight());
     const auto range = line->getRange();
-    drag.set (0, range.snapToLegalValue (
-                     juce::jlimit (range.start, range.end, drag.getStart (0) - (float) e.getDistanceFromDragStartY() * perPixel)));
+    drag.set (0, range.snapToLegalValue (juce::jlimit (range.start, range.end, drag.getStart (0) - drag.getMoved (e).y * perPixel)));
     repaint();
 }
 
@@ -435,12 +445,5 @@ void LevelHistoryView::mouseUp (const juce::MouseEvent& e)
     dragging = false;
     setLineLit (getLocalBounds().contains (e.getPosition()) && isNearLine (e.position.y));
     repaint();
-}
-
-void LevelHistoryView::mouseDoubleClick (const juce::MouseEvent& e)
-{
-    if (isNearLine (e.position.y))
-        if (const auto initial = line->getDefaultValue())
-            line->setValue (*initial);
 }
 } // namespace phazite::ui

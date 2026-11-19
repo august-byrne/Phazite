@@ -444,7 +444,7 @@ struct ModulatorEditor::Breakpoints : public juce::Component
             return;
 
         const auto area = getArea();
-        const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
+        const auto fine = e.mods.isShiftDown() ? fineDragFactor : 1.0f;
         const auto up = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, area.getHeight()) * fine;
         const auto i = dragged->index;
 

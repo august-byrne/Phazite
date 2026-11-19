@@ -6,6 +6,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <array>
 #include <cmath>
 #include <utility>
 
@@ -480,8 +481,8 @@ public:
         setTitle ("Bands");
         setDescription ("The low, mid and high bands across the spectrum, each as high as its level, with the spectrum of what the "
                         "multiband plays over them: drag a crossover, or the low cut's edge at the left, left or right; drag a band up "
-                        "or down for its level; click a band to show its curve and controls; double-click to put one back where it "
-                        "started. The crossovers' slopes are in its top corners.");
+                        "or down for its level (Shift in fine steps); click a band to show its curve and controls; double-click to put "
+                        "one back where it started; right-click one for its menu. The crossovers' slopes are in its top corners.");
         addAndMakeVisible (lowSlope);
         addAndMakeVisible (highSlope);
 
@@ -496,6 +497,22 @@ public:
             moved = false;
             editor.refresh();
             repaint();
+        };
+
+        // What each target moves, for every graph's grammar: a double-click puts it back, a right-click shows its menu.
+        for (const auto target : { Target { Target::Kind::lowCut, 0 }, Target { Target::Kind::crossover, 0 },
+                                   Target { Target::Kind::crossover, 1 }, Target { Target::Kind::level, Multiband::low },
+                                   Target { Target::Kind::level, Multiband::mid }, Target { Target::Kind::level, Multiband::high } })
+            handles[(size_t) indexOf (target)] = editor.device.getParameter (idOf (getParameter (target)));
+
+        drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+        {
+            const auto target = findTarget (at);
+
+            if (! target.has_value())
+                return std::nullopt;
+
+            return graph::Handle ({ &handles[(size_t) indexOf (*target)] }, at);
         };
     }
 
@@ -524,12 +541,13 @@ public:
         {
             case Target::Kind::lowCut:
                 return "The low cut, " + graph::formatFrequency (value)
-                       + ", under which the multiband takes the sound away: drag its edge left or right; double-click it to put it back";
+                       + ", under which the multiband takes the sound away: drag its edge left or right; double-click it to put it back; right-click it for its menu";
 
             case Target::Kind::crossover:
                 return juce::String ("The crossover between the ") + (target->index == 0 ? "low and mid" : "mid and high") + " bands, "
                        + graph::formatFrequency (value) + ": drag it left or right; its slope is in the "
-                       + (target->index == 0 ? "left" : "right") + " corner above; double-click it to put it back";
+                       + (target->index == 0 ? "left" : "right")
+                       + " corner above; double-click it to put it back; right-click it for its menu";
 
             case Target::Kind::level:
                 break;
@@ -537,7 +555,7 @@ public:
 
         return "The " + juce::String (bandNames[target->index]).toLowerCase() + " band's level, " + graph::formatDecibels (value)
                + " (its Post, after its compressor): drag it up or down; click it to show its curve and controls; double-click it for "
-                 "0 dB";
+                 "0 dB; right-click it for its menu";
     }
 
     void resized() override
@@ -638,8 +656,7 @@ public:
 
         if (dragged.has_value())
         {
-            handle = editor.device.getParameter (idOf (getParameter (*dragged)));
-            drag.take ({ &handle }); // from its value set by hand
+            drag.take ({ &handles[(size_t) indexOf (*dragged)] }); // from its value set by hand
             repaint();
         }
     }
@@ -657,13 +674,13 @@ public:
         {
             // Up or down from where it was, as far as the pointer moved.
             const auto perPixel = (highestLevel - lowestLevel) / std::max (1.0f, getArea().getHeight());
-            drag.set (0, devices::constrain (info, drag.getStart (0) - (float) e.getDistanceFromDragStartY() * perPixel));
+            drag.set (0, devices::constrain (info, drag.getStart (0) - drag.getMoved (e).y * perPixel));
         }
         else
         {
             // Sideways from where it was, as far as the pointer moved: an edge taken a little off it doesn't jump to the pointer.
             drag.moveAlong (
-                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getFrequencies().xFor (hertz); },
+                0, drag.getMoved (e).x, [this] (float hertz) { return getFrequencies().xFor (hertz); },
                 [this, &info] (float x) { return devices::constrain (info, (float) getFrequencies().frequencyAt (x)); });
         }
 
@@ -683,17 +700,6 @@ public:
         moved = false;
         setHovered (findTarget (e.position));
         repaint();
-    }
-
-    void mouseDoubleClick (const juce::MouseEvent& e) override
-    {
-        // Back where it started, as a knob's double-click puts it.
-        if (const auto target = findTarget (e.position))
-        {
-            const auto& info = getInfo (getParameter (*target));
-            editor.device.getParameter (info.id).setValue (info.defaultValue);
-            editor.refresh();
-        }
     }
 
 private:
@@ -717,9 +723,9 @@ private:
     ChoiceButtons &lowSlope, &highSlope;
     float lowestLevel = -24.0f, highestLevel = 24.0f;
     std::optional<Target> hovered, dragged;
-    ParameterHandle handle;           // what a drag moves
-    graph::HandleDrag drag { *this }; // after it
-    bool moved = false;               // the press has become a drag
+    std::array<ParameterHandle, 6> handles; // what each target moves, by indexOf()
+    graph::HandleDrag drag { *this };       // after them
+    bool moved = false;                     // the press has become a drag
 
     float valueOf (int index) const { return editor.values[(size_t) index]; }
 
@@ -743,6 +749,24 @@ private:
         }
 
         return Multiband::getBandParameter (target.index, Multiband::post);
+    }
+
+    // The low cut, the two crossovers, then the three bands' levels.
+    static int indexOf (Target target)
+    {
+        switch (target.kind)
+        {
+            case Target::Kind::lowCut:
+                return 0;
+
+            case Target::Kind::crossover:
+                return 1 + target.index;
+
+            case Target::Kind::level:
+                break;
+        }
+
+        return 3 + target.index;
     }
 
     bool isHot (Target target) const { return dragged.has_value() ? *dragged == target : hovered == target; }

@@ -48,8 +48,12 @@ Selecting a channel outlines the channels it feeds and those that feed it, throu
   rests for half a second, or when you press the mouse, move the pointer off the control, press a key on it or run a command.
 - **Escape** while you drag a fader or a knob, a knob's modulation ring, or a handle in a device's picture puts it back
   where it was when you pressed, leaving nothing to undo.
-- A handle in a device's picture (an EQ band's dot, a crossover, an envelope's point) moves as far as you drag it, from
-  where it is set, even when a modulator moves it as it plays; a click on it changes nothing.
+- A handle in a device's picture (an EQ band's dot, a crossover, an envelope's point) works as a knob does: it moves as
+  far as you drag it, from where it is set, even when a modulator moves it as it plays, and a fifth as far with
+  **Shift**; a click on it changes nothing; a double-click puts back what it moves; a right-click shows each of its
+  parameters' menus, with **Type a Value...**; and while the pointer is over it, the picture's corner says what it is
+  set to. A picture with one handle (the Filter's dot, the Saturator's curve) is dragged from anywhere on it. Where the
+  wheel turns something over a handle (an EQ band's Q), the hint bar says what ("Wheel: Band 4 Q").
 
 ## Mute and solo
 

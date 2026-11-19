@@ -121,7 +121,7 @@ TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves acros
 
     // A drag of the dot toward the pixel nearest 1 kHz at half the resonance, and one nearest 100 Hz near the top: each moves
     // the dot as far as the pointer went (from where the dot was: known bug 116), and lands on the values where it is drawn.
-    // A press away from the dot puts it under the pointer.
+    // A press away from the dot moves nothing.
     for (const auto& [hz, resonance] : { std::pair (1000.0, 0.5), std::pair (100.0, 0.9) })
     {
         CAPTURE (hz);
@@ -142,14 +142,17 @@ TEST_CASE ("The Filter's graph runs from 20 Hz to 20 kHz evenly by octaves acros
         CHECK (song.valueOf ("resonance") == doctest::Approx ((area.getBottom() - landed.y) / area.getHeight()).epsilon (0.002));
         CHECK (editor.getDotPosition().getDistanceFrom (landed) < 0.05f);
 
-        // Pressed away from it, and let go: the dot under the pointer, at the values there.
+        // Pressed away from it, and let go: nothing moves (since S6.9 a press beside the dot no longer puts it there).
         const juce::Point<int> away (juce::roundToInt (area.getX() + area.getWidth() * 0.2f),
                                      juce::roundToInt (area.getBottom() - area.getHeight() * 0.3f));
+        const auto cutoff = song.valueOf ("cutoff"), resonanceBefore = song.valueOf ("resonance");
+        REQUIRE (std::abs (song.valueOf ("cutoff") - frequencyAt (away.x)) > 1.0);
         mouse.press (away);
         mouse.release();
         mouse.pause();
-        CHECK (song.valueOf ("cutoff") == doctest::Approx (frequencyAt (away.x)).epsilon (0.002));
-        CHECK (song.valueOf ("resonance") == doctest::Approx (resonanceAt (away.y)).epsilon (0.002));
+        CHECK (song.valueOf ("cutoff") == cutoff);
+        CHECK (song.valueOf ("resonance") == resonanceBefore);
+        CHECK (resonanceAt (away.y) > 0.0); // the place pressed is inside the graph
     }
 }
 

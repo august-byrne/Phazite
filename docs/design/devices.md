@@ -174,12 +174,42 @@ At the default window size (1280 by 800), every built-in device shows whole in t
   handle taken at its edge doesn't jump to the pointer; an axis the pointer hasn't moved along keeps its value exactly,
   and a move under a pixel writes nothing. Escape takes the drag back, leaving nothing to redo; it reaches the drag
   through the window's keys while the mouse is down, so that a picture is no stop for the keyboard's focus and a click
-  on one leaves the keys where they were. A picture with one dot (the Filter's, Motion's)
-  puts the dot under the pointer when pressed away from it. Envelopes drag by their points, and each stage bends by a
-  handle in its middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a
-  device's page says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and
-  one undo step for a burst of it, as a knob's wheel is (below); a press on the picture ends that step, and the wheel
-  turns nothing during a drag.
+  on one leaves the keys where they were. Envelopes drag by their points, and each stage bends by a handle in its
+  middle. The wheel bends no line: over a picture it scrolls the view the picture is in, except where a device's page
+  says it turns something (the EQ's Q, over a band's dot only), each turn from the value set by hand and one undo step
+  for a burst of it, as a knob's wheel is (below); a press on the picture ends that step, and the wheel turns nothing
+  during a drag.
+- **A graph's gestures are a knob's** (roadmap step S6.9), the same in every picture, built once in `graph::HandleDrag`
+  (`src/ui/devices/DeviceGraph.h`), which each picture tells where its handles are and what each moves:
+  1. **A drag** on a handle moves its parameters, as one undo step, which Escape takes back. A picture with one handle
+     (the Filter's dot, Motion's, the instruments' filter pictures, the Saturator's curve, Stereo's fan, the Vocoder's
+     bands, an LFO's wave) is dragged from anywhere on it, relative to where the handle is: a press beside the dot
+     doesn't move it there. A picture with several takes the handle under the pointer, or the nearest within reach;
+     empty space does nothing unless the picture adds something there (the dynamics curve's right-click, the Sampler's
+     slice strip).
+  2. **Shift** while dragging moves it a fifth as far, the knobs' own factor (`fineDragFactor`), on every handle, pressed
+     or let go in the middle of a drag without a jump. The dynamics curve keeps its own: Shift keeps a point's level,
+     Ctrl its place across, and Ctrl is a line handle's fine drag (its tooltip says so).
+  3. **A double-click** on a handle puts back the defaults of the parameters a drag of it moves, exactly, as one undo
+     step named as the drag is (in a one-handle picture, anywhere on it). The EQ's dot puts back its band's Frequency,
+     Gain and Q and leaves the band on (on and off are in its menu and on its switch). The dynamics curve's points and
+     the Sampler's slices are things, not values: a double-click does nothing to a point and takes a slice away.
+  4. **A right-click** on a handle shows, for each parameter it moves (and the one the wheel turns there), the menu a
+     knob shows (`ui::makeParameterMenu()`): its name, Type a Value..., Automate, Delete Automation and Modulate; then the
+     picture's own items (the EQ's shapes, slopes, placements and on or off; a dynamic band's Threshold). Type a Value...
+     opens the knob's field over the handle, and what is typed is set as one undo step. A right-click never acts as a
+     left click.
+  5. **The wheel** turns one parameter over a handle, where a picture has one (the EQ's Q over a dot, the Filter's
+     drive, Motion's rate or depth, Age's wow rate over the record, Stereo's width, an LFO's rate), a fifth as far with
+     Shift; the pointer's tooltip and the hint bar name it ("Wheel: Band 4 Q"). Elsewhere it is passed on, so that the
+     view around the picture scrolls.
+  6. **Numbers while a handle is under the pointer or moves:** the picture's corner readout shows each parameter it moves,
+     by name and value as its knob writes it ("Band 4  Frequency 800 Hz  Gain +3.0 dB  Q 0.71"); a picture with its own
+     readout (the Filter's, the Delay's, the Reverb's, the Multiband's) keeps it.
+  7. **The pointer** over a handle shows which way it moves, and the handle lights up.
+
+  A drum pad sounds as it is pressed, as a drum machine's does, harder the higher on the pad (from 25 % at its bottom
+  edge to full at its top), and at 80 % from the keyboard (Space or Enter on a pad that has the keys).
 - **Every control of a parameter works alike** (`src/ui/components/Controls.h`). A burst of the wheel on a knob, a fader
   or a picture's handle is one undo step, named as a drag of it is, and one change to what plays, so that a value a
   device's latency follows (the Compressor's Look-Ahead, the EQ's Phase) makes the device anew once, as the burst ends

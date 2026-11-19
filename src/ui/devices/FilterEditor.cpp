@@ -25,6 +25,7 @@ namespace
 } // namespace
 
 class FilterEditor::Graph : public juce::Component,
+                            public juce::TooltipClient,
                             private DisplayTicker::Display
 {
 public:
@@ -36,8 +37,8 @@ public:
           drive (device.getParameter (getInfo (FilterEffect::drive).id))
     {
         setTitle ("Filter response");
-        setDescription ("How the filter shapes the sound, over the spectrum of what it plays. Drag the dot, or press anywhere to "
-                        "put it there: sideways for the cutoff, up or down for the resonance. The wheel turns the drive.");
+        setDescription ("How the filter shapes the sound, over the spectrum of what it plays. Drag anywhere to move the dot: "
+                        "sideways for the cutoff, up or down for the resonance. The wheel turns the drive.");
 
         for (const auto& parameter : FilterEffect::info.parameters)
         {
@@ -57,6 +58,7 @@ public:
                          readValues();
                          repaint();
                      });
+        dot.setWheel ([this] { return &drive; });
     }
 
     ~Graph() override
@@ -129,11 +131,14 @@ public:
                + (showsMix ? "  Mix " + juce::String (juce::roundToInt (mix * 100.0f)) + "%" : juce::String());
     }
 
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    juce::String getTooltip() override { return dot.getDrag().getTooltip(); }
+
+    // Anywhere on it, the wheel turns the drive, in finer steps with Shift.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto range = drive.getRange();
-        wheelGesture.turn (drive,
-                           juce::jlimit (range.start, range.end, drive.getBaseValue() + (wheel.deltaY > 0.0f ? driveStep : -driveStep)));
+        const auto step = (wheel.deltaY > 0.0f ? driveStep : -driveStep) * graph::getFineFactor (e.mods);
+        wheelGesture.turn (drive, juce::jlimit (range.start, range.end, drive.getBaseValue() + step));
         readValues();
         repaint();
     }

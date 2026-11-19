@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The EQ's editor (roadmap steps 1.6 and S6.4, devices/eq/Equalizer.h): its curve over an analyzer of what it plays (and,
 // fainter, what comes in; DeviceGraph.h's SpectrumTrace, which shows short sounds too), with a dot for each band to drag
-// (frequency and gain, as one undo step, from where it was taken, Escape taking it back: graph::HandleDrag; the wheel over a
-// dot changes its Q; a double-click turns the band on or off; a right-click picks its shape and placement), which the pointer
-// over it shows can be grabbed, and beside it the selected band's controls and the output's, which work from the keyboard
+// (frequency and gain, as one undo step, from where it was taken, a fifth as far with Shift, Escape taking it back; the wheel
+// over a dot changes its Q; a double-click puts back its frequency, gain and Q; a right-click shows those parameters' menus,
+// then its shape, placement and on or off: every graph's grammar, graph::HandleDrag), which the pointer over it shows can
+// be grabbed, with their values in the graph's corner, and beside it the selected band's controls and the output's, which work from the keyboard
 // too. A band that isn't on Stereo has its placement's letter in its dot, and while any band is on Mid or Side the curve is
 // two, the middle's and the side's (and the left's and the right's while any is on Left or Right). A dynamic band's dot has
 // a line to where its gain goes at its whole Dynamic, with a handle there that drags the Dynamic, and a mark on it where its

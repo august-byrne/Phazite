@@ -7,6 +7,7 @@
 #include "devices/core/Clock.h"
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/MixerModel.h"
+#include "ui/theme/DesignTokens.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <cmath>
@@ -16,8 +17,7 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr float fineDragFactor = 0.2f; // Shift-drag moves a fifth as far
-    constexpr int knobDragDistance = 200;  // pixels from one end of a knob's range to the other
+    constexpr int knobDragDistance = 200; // pixels from one end of a knob's range to the other
     constexpr juce::uint32 peakHoldMs = 1000;
     constexpr float meterMoveDb = 0.1f; // the least change of a level that a meter shows
 

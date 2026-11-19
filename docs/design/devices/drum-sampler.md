@@ -131,7 +131,8 @@ any other note its clips play (see [the piano roll](../piano-roll.md)).
 - Each pad shows its note, what it plays (an empty pad shows, faintly, the drum General MIDI puts on its note), its
   choke group in its corner ("C1"), M while it is muted and S while it is soloed. A pad with more than one layer says
   how many more ("Snare +1"). Pads light as they play.
-- Clicking a pad, or Space or Enter on it, plays it and selects it; the rest of the editor shows the selected pad's
+- Pressing a pad plays it at once, as a drum machine's pad sounds as it is hit: softly at its bottom edge (25 %), fully at
+  its top; Enter on a pad that has the keys plays it at 80 %, and a right-click as the button goes up. Either selects it; the rest of the editor shows the selected pad's
   controls. A sound dropped on a pad from the browser or the system's file manager plays there.
 - **Sound:** the selected pad's name with Reverse, Swap and Reset; its sound drawn as it plays (reversed, from its
   end) with its envelope over it and a line where it is as it plays. Its start, and the ends of its attack, hold and
@@ -155,9 +156,9 @@ Swap tries sounds from the [browser](../browser.md) on the selected pad in place
 - Every kit is synthesized: no recorded kit comes with it.
 - Sounds read from floating-point files aren't checked for values that aren't numbers (known bug 35 in
   [known-bugs.md](../../known-bugs.md)).
-- In the editor a pad sounds when the mouse button is let go, not when it is pressed, and always at full velocity.
 - A press anywhere on the sound's drawing takes the nearest envelope handle, however far it is (a drag then moves it
-  from where it is, as far as the pointer goes).
+  from where it is, as far as the pointer goes). A right-click there shows the nearest handle's menu, and a double-click puts it
+  back.
 - Pads light as they play but have no level meters.
 
 ## In the code

@@ -7,6 +7,7 @@
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iterator>
@@ -84,10 +85,40 @@ public:
         : juce::Button ("Pad"),
           editor (e)
     {
-        setTooltip ("Plays the pad and shows its controls; drop a sound on it to play that instead");
+        setTooltip ("Plays the pad as it is pressed, harder the higher on it, and shows its controls; drop a sound on it to play "
+                    "that instead");
         setWantsKeyboardFocus (true);
-        onClick = [this] { editor.play (pad); };
     }
+
+    // A press plays it at once, as a pad of a drum machine sounds as it is hit (and the sampler's sound as it is pressed): soft at
+    // its bottom edge, full at its top. A right-click plays it as it goes up, as a click did, and Space or Enter at keyVelocity.
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        juce::Button::mouseDown (e);
+
+        if (e.mods.isPopupMenu())
+            return;
+
+        playedOnPress = true;
+        const auto height = std::max (1.0f, (float) getHeight());
+        const auto up = juce::jlimit (0.0f, 1.0f, 1.0f - e.position.y / height);
+        editor.play (pad, softest + (1.0f - softest) * up);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        juce::Button::mouseUp (e); // its click, which the press played already
+        playedOnPress = false;
+    }
+
+    using juce::Button::clicked;
+    void clicked (const juce::ModifierKeys& mods) override
+    {
+        if (! playedOnPress)
+            editor.play (pad, mods.isPopupMenu() ? 1.0f : keyVelocity);
+    }
+
+    static constexpr float softest = 0.25f, keyVelocity = 0.8f; // a press at the bottom edge, and Space or Enter
 
     int getPadNumber() const noexcept { return pad; }
 
@@ -203,6 +234,7 @@ private:
     float brightness = 0.0f;
     int choke = 0;
     bool muted = false, soloed = false, dropping = false;
+    bool playedOnPress = false; // the left button pressed it, which played it: its click doesn't again
 
     void setDropping (bool now)
     {
@@ -472,6 +504,17 @@ public:
             show (shownPad);
             repaint();
         };
+
+        // The nearest handle, wherever the pointer is: its value.
+        drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+        {
+            const auto target = findTarget (at);
+
+            if (target < 0)
+                return std::nullopt;
+
+            return graph::Handle ({ &handles[(size_t) target] }, getHandlePoint (handleFields[(size_t) target]));
+        };
     }
 
     // The pad shown, its sound and its values: drawn again when one of them changes.
@@ -634,6 +677,9 @@ public:
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::small));
         g.drawText (juce::String (getLength(), 2) + " s", area.reduced ((float) Space::xs), juce::Justification::bottomRight, false);
+
+        // What the handle under the pointer, or dragged, is set to.
+        graph::paintReadout (g, p, area, drag.getReadout(), juce::Justification::topRight);
     }
 
     // The handle a press takes, by its place in handleFields: the nearest, wherever the press is; of two in one place, the
@@ -685,7 +731,7 @@ public:
 
         const auto area = getArea();
         const auto field = handleFields[(size_t) dragged];
-        const auto x = pressedX + (float) e.getDistanceFromDragStartX();
+        const auto x = pressedX + drag.getMoved (e).x; // a fifth as far with Shift
         auto value = drag.getStart (0) + valueAt (field, x) - valueAt (field, pressedX);
 
         if (field == Field::hold)
@@ -1290,12 +1336,12 @@ void DrumSamplerEditor::showPadsFrom (int pad)
     refresh();
 }
 
-void DrumSamplerEditor::play (int pad)
+void DrumSamplerEditor::play (int pad, float velocity)
 {
     selectPad (pad);
 
     if (auto* drums = device.getProcessor<DrumSampler>())
-        drums->audition (pad, 1.0f);
+        drums->audition (pad, velocity);
 }
 
 bool DrumSamplerEditor::dropFile (int pad, const juce::File& file, int layer)

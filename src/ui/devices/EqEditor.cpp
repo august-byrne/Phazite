@@ -217,22 +217,35 @@ namespace
 } // namespace
 
 //==============================================================================
-class EqEditor::Graph : public juce::Component
+class EqEditor::Graph : public juce::Component,
+                        public juce::TooltipClient
 {
 public:
     explicit Graph (EqEditor& e)
         : editor (e)
     {
         setTitle ("EQ curve");
-        setDescription ("Drag a band's dot to move its frequency and gain, and a dynamic band's handle to change its Dynamic; the "
-                        "wheel over a dot changes its Q, a double-click turns it on or off, and a right-click picks its shape and "
-                        "placement");
+        setDescription ("Drag a band's dot to move its frequency and gain (Shift in fine steps), and a dynamic band's handle to change "
+                        "its Dynamic; the wheel over a dot changes its Q, a double-click puts back its frequency, gain and Q, and a "
+                        "right-click shows its parameters, shape and placement");
 
         for (int band = 0; band < Eq::numBands; ++band)
-            qs[(size_t) band] = editor.device.getParameter (getInfo (indexOf (band, Eq::q)).id);
+        {
+            const auto handleOf = [this, band] (Eq::Field field, const juce::String& stepName)
+            { return editor.device.getParameter (getInfo (indexOf (band, field)).id, stepName); };
+            const auto number = juce::String (band + 1);
+            bandFrequencies[(size_t) band] = handleOf (Eq::frequency, "Move Band " + number);
+            gains[(size_t) band] = handleOf (Eq::gain, {});
+            qs[(size_t) band] = handleOf (Eq::q, {});
+            dynamics[(size_t) band] = handleOf (Eq::dynamic, "Change Band " + number + " Dynamic");
+            thresholds[(size_t) band] = handleOf (Eq::threshold, {});
+        }
 
         drag.onCancelled = [this] { editor.refresh(); };
+        drag.findHandle = [this] (juce::Point<float> at) { return findHandle (at); };
     }
+
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
     float xFor (double frequency) const
     {
@@ -343,6 +356,7 @@ public:
 
         paintDynamics (g, palette);
         paintDots (g, palette);
+        graph::paintReadout (g, palette, getLocalBounds().toFloat(), drag.getReadout(), juce::Justification::topLeft);
     }
 
     // How many times its curves were worked out, for the tests.
@@ -371,39 +385,33 @@ public:
         const auto band = target.band;
         editor.selectBand (band);
 
+        // A right-click's menu is the drag's (findHandle()).
         if (e.mods.isPopupMenu())
-        {
-            showMenu (band);
             return;
-        }
 
         // A dynamic band's handle: its Dynamic, from where it is set by hand, as one undo step.
         if (target.handle)
         {
-            dragDynamic = editor.device.getParameter (getInfo (indexOf (band, Eq::dynamic)).id,
-                                                      "Change Band " + juce::String (band + 1) + " Dynamic");
             draggingDynamic = true;
             dragBand = band;
-            drag.take ({ &dragDynamic });
+            drag.take ({ &dynamics[(size_t) band] });
             return;
         }
 
         // Its frequency and, for a shelf or a bell, its gain, from where they are set by hand: one undo step.
-        dragFrequency = editor.device.getParameter (getInfo (indexOf (band, Eq::frequency)).id, "Move Band " + juce::String (band + 1));
-        dragGain = editor.device.getParameter (getInfo (indexOf (band, Eq::gain)).id);
         draggingGain = hasGain (juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)]));
         draggingDynamic = false;
-        drag.take (draggingGain ? std::vector<ParameterHandle*> { &dragFrequency, &dragGain }
-                                : std::vector<ParameterHandle*> { &dragFrequency });
+        drag.take (getDotParameters (band));
     }
 
-    // The dot moves as far as the pointer: a dot taken at its edge doesn't jump to the pointer. A handle moves up and down.
+    // The dot moves as far as the pointer (a fifth as far with Shift): a dot taken at its edge doesn't jump to the pointer. A
+    // handle moves up and down.
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (! drag.isTaken())
             return;
 
-        const auto moved = e.getOffsetFromDragStart().toFloat();
+        const auto moved = drag.getMoved (e);
 
         if (draggingDynamic)
         {
@@ -433,19 +441,8 @@ public:
         draggingDynamic = false;
     }
 
-    void mouseDoubleClick (const juce::MouseEvent& e) override
-    {
-        if (const auto target = findTarget (e.position); target.band >= 0 && ! target.handle)
-        {
-            const auto band = target.band;
-            auto on = editor.device.getParameter (getInfo (indexOf (band, Eq::on)).id);
-            on.setValue (on.getValue() > 0.5f ? 0.0f : 1.0f);
-            editor.refresh();
-        }
-    }
-
-    // Over a dot, the wheel narrows or widens its band, as one undo step until it rests (known bug 118); elsewhere it is the
-    // view's, to scroll it.
+    // Over a dot, the wheel narrows or widens its band (in finer steps with Shift), as one undo step until it rests (known bug
+    // 118); elsewhere it is the view's, to scroll it.
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto target = drag.isTaken() ? Target {} : findTarget (e.position);
@@ -453,13 +450,14 @@ public:
 
         if (band < 0)
         {
-            juce::Component::mouseWheelMove (e, wheel);
+            drag.passWheelOn (e, wheel);
             return;
         }
 
         const auto& info = getInfo (indexOf (band, Eq::q));
         auto& q = qs[(size_t) band];
-        qWheel.turn (q, devices::constrain (info, q.getBaseValue() * std::pow (2.0f, 2.0f * wheel.deltaY)));
+        const auto octaves = 2.0f * wheel.deltaY * graph::getFineFactor (e.mods);
+        qWheel.turn (q, devices::constrain (info, q.getBaseValue() * std::pow (2.0f, octaves)));
         editor.refresh();
     }
 
@@ -504,10 +502,10 @@ private:
     };
 
     EqEditor& editor;
-    ParameterHandle dragFrequency, dragGain, dragDynamic;
-    std::array<ParameterHandle, Eq::numBands> qs; // each band's, which the wheel turns
-    graph::HandleDrag drag { *this };             // after the handles it moves
-    graph::WheelGesture qWheel { drag };          // and turns
+    std::array<ParameterHandle, Eq::numBands> bandFrequencies, gains, dynamics, thresholds; // each band's, which its handles move
+    std::array<ParameterHandle, Eq::numBands> qs;                                           // and which the wheel turns
+    graph::HandleDrag drag { *this };                                                       // after the handles it moves
+    graph::WheelGesture qWheel { drag };                                                    // and turns
     bool draggingGain = false, draggingDynamic = false;
     int dragBand = -1;
     Target hovered; // what the pointer is over
@@ -515,6 +513,39 @@ private:
     std::vector<std::pair<Placement, juce::Path>> curves; // each way's, as the bands play now
     std::vector<float> curvesFor;                         // what they were worked out for
     int curvesWorkedOut = 0;
+
+    // What a drag of a band's dot moves: its frequency and, for a shelf or a bell, its gain.
+    std::vector<ParameterHandle*> getDotParameters (int band)
+    {
+        if (hasGain (juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)])))
+            return { &bandFrequencies[(size_t) band], &gains[(size_t) band] };
+
+        return { &bandFrequencies[(size_t) band] };
+    }
+
+    // A dot: its frequency and gain, the wheel its Q, a double-click putting back all three (the band stays on), and its
+    // menu's shapes and placements after their sections. A dynamic band's handle: its Dynamic, its menu showing its Threshold
+    // too.
+    std::optional<graph::Handle> findHandle (juce::Point<float> at)
+    {
+        const auto target = findTarget (at);
+        const auto band = target.band;
+
+        if (band < 0)
+            return std::nullopt;
+
+        if (target.handle)
+        {
+            graph::Handle handle ({ &dynamics[(size_t) band] }, getHandle (band).value_or (at));
+            handle.alsoShown = { &thresholds[(size_t) band] };
+            return handle;
+        }
+
+        graph::Handle handle (getDotParameters (band), getDot (band), &qs[(size_t) band]);
+        handle.alsoReverted = { &gains[(size_t) band], &qs[(size_t) band] };
+        handle.addItems = [this, band] (juce::PopupMenu& menu) { addBandItems (menu, band); };
+        return handle;
+    }
 
     // The nearer to the press of the dot and the handle within reach of it: a small Dynamic's handle sits within a dot's reach.
     Target findTarget (juce::Point<float> position) const
@@ -725,7 +756,9 @@ private:
         }
     }
 
-    void showMenu (int band)
+    // A dot's own items, after its parameters' sections: its shapes, a cut's slopes, its placements, Make Dynamic for a bell or
+    // a shelf that isn't dynamic, and Turn On or Off; each one undo step.
+    void addBandItems (juce::PopupMenu& menu, int band)
     {
         const auto type = juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::type)]);
         const auto slope = juce::roundToInt (editor.values[(size_t) indexOf (band, Eq::slope)]);
@@ -734,63 +767,56 @@ private:
         const auto& types = getInfo (indexOf (band, Eq::type)).choices;
         const auto& slopes = getInfo (indexOf (band, Eq::slope)).choices;
         const auto& placements = getInfo (indexOf (band, Eq::placement)).choices;
-        constexpr int slopeItems = 100, placementItems = 300, onItem = 200, dynamicItem = 400;
 
-        juce::PopupMenu menu;
+        // What is chosen comes later, when the graph may be gone.
+        const auto act = [safe = juce::Component::SafePointer<Graph> (this), band] (std::function<void (EqEditor&)> action)
+        {
+            return [safe, action = std::move (action)]
+            {
+                if (safe == nullptr)
+                    return;
+
+                action (safe->editor);
+                safe->editor.refresh();
+            };
+        };
+        const auto set = [act, band] (Eq::Field field, float value)
+        {
+            return act (
+                [field, value, band] (EqEditor& owner)
+                {
+                    auto parameter = owner.device.getParameter (getInfo (indexOf (band, field)).id);
+                    parameter.setValue (value);
+                });
+        };
+
         menu.addSectionHeader ("Band " + juce::String (band + 1));
 
         for (size_t i = 0; i < types.size(); ++i)
-            menu.addItem ((int) i + 1, toString (types[i]), true, (int) i == type);
+            menu.addItem (toString (types[i]), true, (int) i == type, set (Eq::type, (float) i));
 
         if (isCut (type))
         {
             menu.addSeparator();
 
             for (size_t i = 0; i < slopes.size(); ++i)
-                menu.addItem (slopeItems + (int) i, toString (slopes[i]), true, (int) i == slope);
+                menu.addItem (toString (slopes[i]), true, (int) i == slope, set (Eq::slope, (float) i));
         }
 
         menu.addSeparator();
 
         for (size_t i = 0; i < placements.size(); ++i)
-            menu.addItem (placementItems + (int) i, toString (placements[i]), true, (int) i == placement);
+            menu.addItem (toString (placements[i]), true, (int) i == placement, set (Eq::placement, (float) i));
 
         // A bell or a shelf that isn't dynamic: Make Dynamic, which gives it a handle to drag.
         if (hasGain (type) && ! BandValues (editor.values, band).isDynamic())
         {
             menu.addSeparator();
-            menu.addItem (dynamicItem, "Make Dynamic");
+            menu.addItem ("Make Dynamic", act ([band] (EqEditor& owner) { owner.makeDynamic (band); }));
         }
 
         menu.addSeparator();
-        menu.addItem (onItem, on ? "Turn Off" : "Turn On");
-
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-                            [safe = juce::Component::SafePointer<Graph> (this), band, on] (int result)
-                            {
-                                if (safe == nullptr || result == 0)
-                                    return;
-
-                                auto& owner = safe->editor;
-                                const auto set = [&owner, band] (Eq::Field field, float value)
-                                {
-                                    auto parameter = owner.device.getParameter (getInfo (indexOf (band, field)).id);
-                                    parameter.setValue (value);
-                                };
-
-                                if (result == onItem)
-                                    set (Eq::on, on ? 0.0f : 1.0f);
-                                else if (result == dynamicItem)
-                                    owner.makeDynamic (band);
-                                else if (result >= placementItems)
-                                    set (Eq::placement, (float) (result - placementItems));
-                                else if (result >= slopeItems)
-                                    set (Eq::slope, (float) (result - slopeItems));
-                                else
-                                    set (Eq::type, (float) (result - 1));
-
-                                owner.refresh();
-                            });
+        menu.addItem (on ? "Turn Off" : "Turn On", set (Eq::on, on ? 0.0f : 1.0f));
     }
 };
 

@@ -81,30 +81,39 @@ juce::Point<int> getFarCorner (const juce::Component& c, juce::Point<float> from
     return { from.x < (float) c.getWidth() * 0.5f ? c.getWidth() - 6 : 6, from.y < (float) c.getHeight() * 0.5f ? c.getHeight() - 6 : 6 };
 }
 
-// A graph whose dot a drag moves both ways, and a press anywhere puts under the pointer (GraphDot): over the dot, the grabbing
-// hand, and the dot ringed a little further out than it is; elsewhere, the crosshair, and the dot as it was; and while a
-// press drags it, the hand. The hint says so.
+// Where two pictures differ inside an area of them (its readout, which says what the pointer is over, left out).
+juce::Rectangle<int> getChangedAreaWithin (const juce::Image& before, const juce::Image& after, juce::Rectangle<int> within)
+{
+    return getChangedArea (before.getClippedImage (within), after.getClippedImage (within)).translated (within.getX(), within.getY());
+}
+
+// A graph whose dot a drag from anywhere moves both ways (GraphDot, since S6.9 no longer put under the pointer by a press): the
+// grabbing hand all over it; over the dot, the dot ringed a little further out than it is; elsewhere, the dot as it was. The
+// hint says so.
 void checkDot (juce::Component& graph, juce::Point<float> dot)
 {
     phazite::test::Mouse mouse (graph);
     const auto before = snapshot (graph);
     const auto away = getFarCorner (graph, dot);
-    CHECK (graph.getDescription().contains ("Drag the dot, or press anywhere to put it there"));
+    const auto aroundDot = juce::Rectangle<int> (4 * juce::roundToInt (dotRadius), 4 * juce::roundToInt (dotRadius))
+                               .withCentre (dot.roundToInt())
+                               .getIntersection (graph.getLocalBounds());
+    CHECK (graph.getDescription().contains ("Drag anywhere to move the dot"));
 
     mouse.moveTo (away);
-    CHECK (graph.getMouseCursor() == Cursor (Cursor::CrosshairCursor));
-    CHECK (getChangedArea (before, snapshot (graph)).isEmpty());
+    CHECK (graph.getMouseCursor() == Cursor (Cursor::DraggingHandCursor));
+    CHECK (getChangedAreaWithin (before, snapshot (graph), aroundDot).isEmpty());
 
     mouse.moveTo (dot.roundToInt());
     CHECK (graph.getMouseCursor() == Cursor (Cursor::DraggingHandCursor));
-    const auto lit = getChangedArea (before, snapshot (graph));
+    const auto lit = getChangedAreaWithin (before, snapshot (graph), aroundDot);
     CHECK (lit.contains (dot.roundToInt()));
-    CHECK (lit.getWidth() <= 2 * juce::roundToInt (dotRadius + 4.0f));
-    CHECK (lit.getHeight() <= 2 * juce::roundToInt (dotRadius + 4.0f));
+    CHECK (lit.getWidth() <= 2 * juce::roundToInt (dotRadius + 3.0f)); // the ring about the dot, no wider
+    CHECK (lit.getHeight() <= 2 * juce::roundToInt (dotRadius + 3.0f));
 
     mouse.moveTo (away);
-    CHECK (graph.getMouseCursor() == Cursor (Cursor::CrosshairCursor));
-    CHECK (getChangedArea (before, snapshot (graph)).isEmpty());
+    CHECK (graph.getMouseCursor() == Cursor (Cursor::DraggingHandCursor));
+    CHECK (getChangedAreaWithin (before, snapshot (graph), aroundDot).isEmpty());
 
     mouse.press (away);
     CHECK (graph.getMouseCursor() == Cursor (Cursor::DraggingHandCursor));
@@ -112,7 +121,7 @@ void checkDot (juce::Component& graph, juce::Point<float> dot)
 }
 } // namespace
 
-TEST_CASE ("Over the filter's dot the pointer grabs it and the dot lights up; elsewhere it is the crosshair, where a press puts the dot")
+TEST_CASE ("Over the filter's picture the pointer grabs the dot, which lights up while the pointer is over it")
 {
     phazite::test::TestSong song;
     phazite::ui::FilterEditor editor (addDevice (song, phazite::devices::FilterEffect::typeID));
@@ -120,8 +129,7 @@ TEST_CASE ("Over the filter's dot the pointer grabs it and the dot lights up; el
     checkDot (editor.getGraph(), editor.getDotPosition());
 }
 
-TEST_CASE (
-    "Over a synth's filter's dot the pointer grabs it and the dot lights up; elsewhere it is the crosshair, where a press puts the dot")
+TEST_CASE ("Over a synth's filter's picture the pointer grabs the dot, which lights up while the pointer is over it")
 {
     // The synth's and the FM synth's filter views are the same (SynthParts.h).
     phazite::test::TestSong song;
@@ -194,7 +202,7 @@ TEST_CASE ("Over Age's record the pointer moves up and down, for the wow; over i
     CHECK (record.getDescription().contains ("the low cut"));
 }
 
-TEST_CASE ("Over the dots of Motion's chorus, flanger and phaser the pointer grabs them and they light up; elsewhere, the crosshair")
+TEST_CASE ("Over the pictures of Motion's chorus, flanger and phaser the pointer grabs the dot, which lights up under it")
 {
     phazite::test::TestSong song;
     phazite::ui::MotionEditor editor (addDevice (song, phazite::devices::Motion::typeID));

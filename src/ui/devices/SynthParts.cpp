@@ -40,6 +40,23 @@ EnvelopeView::EnvelopeView (const juce::String& title, ParameterHandle a, Parame
         dragged.reset();
         repaint();
     };
+
+    // A point: its time (the decay's corner its sustain too); a bend handle: its stage's curve.
+    drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+    {
+        const auto target = findTarget (at);
+
+        if (! target.has_value())
+            return std::nullopt;
+
+        if (target->bend)
+            return graph::Handle ({ &getCurveOf (target->point) }, getBendPosition (target->point).value_or (at));
+
+        if (target->point == Point::decay)
+            return graph::Handle ({ &getTimeOf (target->point), &sustain }, getPointPosition (target->point));
+
+        return graph::Handle ({ &getTimeOf (target->point) }, getPointPosition (target->point));
+    };
 }
 
 void EnvelopeView::setCurves (ParameterHandle a, ParameterHandle d, ParameterHandle r)
@@ -279,6 +296,9 @@ void EnvelopeView::paint (juce::Graphics& g)
 
         paintHandle ({ point, false }, getPointPosition (point));
     }
+
+    // What the point under the pointer, or dragged, is set to.
+    graph::paintReadout (g, p, getLocalBounds().toFloat(), drag.getReadout(), juce::Justification::topRight);
 }
 
 void EnvelopeView::mouseMove (const juce::MouseEvent& e)
@@ -318,9 +338,10 @@ void EnvelopeView::mouseDrag (const juce::MouseEvent& e)
     if (! dragged.has_value() || ! drag.isTaken())
         return;
 
+    // As far as the pointer went, a fifth as far while Shift was held.
     const auto layout = getLayout();
-    const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
-    const auto rise = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, layout.area.getHeight()) * fine;
+    const auto moved = drag.getMoved (e);
+    const auto rise = -moved.y / std::max (1.0f, layout.area.getHeight());
 
     if (dragged->bend)
     {
@@ -330,8 +351,7 @@ void EnvelopeView::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
-    const auto moved = (float) e.getDistanceFromDragStartX() / std::max (1.0f, layout.area.getWidth()) * dragTotal * fine;
-    drag.set (0, drag.getStart (0) + moved);
+    drag.set (0, drag.getStart (0) + moved.x / std::max (1.0f, layout.area.getWidth()) * dragTotal);
 
     if (dragged->point == Point::decay)
         drag.set (1, juce::jlimit (0.0f, 1.0f, drag.getStart (1) + rise));
@@ -352,38 +372,13 @@ void EnvelopeView::mouseUp (const juce::MouseEvent&)
 
 void EnvelopeView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    const auto target = findTarget (e.position);
-
-    // On a stage that bends, or its handle: its curve back, one undo step.
-    if (! target.has_value() || target->bend)
-    {
-        const auto stage = target.has_value() ? std::optional<Point> (target->point) : findStage (e.position.x);
-
-        if (stage.has_value() && getBendPosition (*stage).has_value())
-            if (const auto initial = getCurveOf (*stage).getDefaultValue())
-                getCurveOf (*stage).setValue (*initial);
-
-        repaint();
+    // A point or a bend handle is the drag's (its defaults: findHandle()); elsewhere on a stage that bends, its curve back, one
+    // undo step.
+    if (findTarget (e.position).has_value())
         return;
-    }
 
-    // A point back where it started, as a knob's double-click puts its value back: one undo step.
-    std::vector<ParameterHandle*> handles { &getTimeOf (target->point) };
-
-    if (target->point == Point::decay)
-        handles.push_back (&sustain);
-
-    for (auto* handle : handles)
-        handle->beginGesture();
-
-    for (auto* handle : handles)
-        if (const auto initial = handle->getDefaultValue())
-            handle->setValue (*initial);
-
-    for (auto* handle : handles)
-        handle->endGesture();
-
-    repaint();
+    if (const auto stage = findStage (e.position.x); stage.has_value() && getBendPosition (*stage).has_value())
+        drag.revert ({ &getCurveOf (*stage) });
 }
 
 float getDrawnLfoValue (int shape, float phase)
@@ -407,6 +402,17 @@ LfoView::LfoView (const juce::String& title, std::function<float (float)> shape,
     setTitle (title);
     setDescription ("The LFO's wave, one cycle, with a dot where it is now.");
     drag.onCancelled = [this] { repaint(); };
+
+    // All of it: the depth (where it has one), and the wheel its rate, or its note value while in time.
+    drag.findHandle = [this] (juce::Point<float> at) -> std::optional<graph::Handle>
+    {
+        auto* turned = getWheelParameter();
+
+        if (! depth.exists() && turned == nullptr)
+            return std::nullopt;
+
+        return graph::Handle (depth.exists() ? std::vector<ParameterHandle*> { &depth } : std::vector<ParameterHandle*> {}, at, turned);
+    };
 }
 
 void LfoView::setControls (ParameterHandle newDepth, ParameterHandle newRate, ParameterHandle newSync, ParameterHandle newDivision)
@@ -460,6 +466,9 @@ void LfoView::paint (juce::Graphics& g)
         g.setColour (p.text);
         g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
     }
+
+    // Under the pointer or dragged, its depth and rate.
+    graph::paintReadout (g, p, getLocalBounds().toFloat(), drag.getReadout(), juce::Justification::topLeft);
 }
 
 void LfoView::mouseDown (const juce::MouseEvent& e)
@@ -476,8 +485,7 @@ void LfoView::mouseDrag (const juce::MouseEvent& e)
         return;
 
     // Up for more, the whole height for the whole range; Shift in fine steps.
-    const auto fine = e.mods.isShiftDown() ? GraphTint::fineDragFactor : 1.0f;
-    const auto change = (float) -e.getDistanceFromDragStartY() / std::max (1.0f, (float) getHeight()) * fine;
+    const auto change = -drag.getMoved (e).y / std::max (1.0f, (float) getHeight());
     drag.set (0, juce::jlimit (0.0f, 1.0f, drag.getStart (0) + change));
     repaint();
 }
@@ -487,20 +495,36 @@ void LfoView::mouseUp (const juce::MouseEvent&)
     drag.end();
 }
 
+ParameterHandle* LfoView::getWheelParameter()
+{
+    if (sync.exists() && sync.getValue() >= 0.5f && division.exists())
+        return &division;
+
+    return rate.exists() ? &rate : nullptr;
+}
+
 void LfoView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details)
 {
+    auto* turned = getWheelParameter();
+
+    if (turned == nullptr)
+    {
+        drag.passWheelOn (e, details);
+        return;
+    }
+
     const auto step = details.deltaY > 0.0f ? 1 : details.deltaY < 0.0f ? -1 : 0;
 
     if (step == 0)
         return;
 
     // A note value a notch while synced; otherwise a tenth faster or slower a notch (Shift: a fiftieth).
-    if (sync.exists() && sync.getValue() >= 0.5f && division.exists())
+    if (turned == &division)
     {
         const auto range = division.getRange();
         wheel.turn (division, juce::jlimit (range.start, range.end, division.getBaseValue() + (float) step));
     }
-    else if (rate.exists())
+    else
     {
         const auto range = rate.getRange();
         const auto factor = std::pow (e.mods.isShiftDown() ? 1.02f : 1.1f, (float) step);
@@ -519,8 +543,8 @@ FilterView::FilterView (const juce::String& title, ParameterHandle c, ParameterH
       playing (std::move (nowPlaying))
 {
     setTitle (title);
-    setDescription ("The filter's response, and where the newest note plays it now. Drag the dot, or press anywhere to put it "
-                    "there: sideways for the cutoff, up or down for the resonance.");
+    setDescription ("The filter's response, and where the newest note plays it now. Drag anywhere to move the dot: "
+                    "sideways for the cutoff, up or down for the resonance.");
 
     // A drag moves the dot, both values as one undo step.
     const auto area = [this] { return getLocalBounds().toFloat().reduced (2.0f); };
@@ -552,7 +576,10 @@ void FilterView::setReadoutWord (std::function<juce::String (const std::vector<f
 juce::String FilterView::getReadout() const
 {
     const auto word = readoutWord != nullptr ? readoutWord (readValues()) : juce::String();
-    return (word.isEmpty() ? juce::String() : word + "  ") + graph::formatFrequency (cutoff.getValue());
+
+    // Under the pointer or dragged, what its dot moves, by name; otherwise the cutoff.
+    const auto moved = dot.getDrag().getReadout();
+    return (word.isEmpty() ? juce::String() : word + "  ") + (moved.isNotEmpty() ? moved : graph::formatFrequency (cutoff.getValue()));
 }
 
 void FilterView::tick()

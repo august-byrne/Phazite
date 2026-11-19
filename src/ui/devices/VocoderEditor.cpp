@@ -44,7 +44,8 @@ public:
 
         // The whole picture moves the carrier's bands: a left-and-right arrow over it, and the hint bar says so.
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-        setTooltip ("Drag sideways to move the carrier's bands up or down (Formant): a smaller or larger voice");
+        setTooltip ("Drag sideways to move the carrier's bands up or down (Formant): a smaller or larger voice; with Shift in fine "
+                    "steps; double-click for its default; right-click for its menu");
 
         for (const auto& parameter : Vocoder::info.parameters)
         {
@@ -59,6 +60,9 @@ public:
             readValues();
             repaint();
         };
+
+        // One handle, all of it: the Formant.
+        drag.findHandle = [this] (juce::Point<float> at) { return graph::Handle ({ &formant }, at); };
     }
 
     float getShownLevel (int band) const { return shown[(size_t) band]; }
@@ -196,7 +200,7 @@ public:
         if (! drag.isTaken())
             return;
 
-        const auto semitones = 12.0 * std::log2 (getFrequencies().frequencyAt (e.position.x) / startHertz);
+        const auto semitones = 12.0 * std::log2 (getFrequencies().frequencyAt (e.mouseDownPosition.x + drag.getMoved (e).x) / startHertz);
         drag.set (0, drag.getStart (0) + (float) semitones);
         readValues();
         repaint();

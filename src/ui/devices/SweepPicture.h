@@ -5,8 +5,8 @@
 // now, and under it a strip of the LFO, one cycle of its sweep with a dot for each side's copy (the right a part of a cycle
 // ahead) and its rate, as Ableton's Phaser-Flanger shows its LFO, so that the sweep moves with the sound and a knob's turn
 // shows at once.
-// The device's own picture draws its response and its dot, which a drag moves both ways and a press anywhere puts under the
-// pointer (GraphDot: the grabbing hand over it, the crosshair elsewhere); a strip between the two may show more of it.
+// The device's own picture draws its response and its dot, which a drag from anywhere moves both ways, as far as the pointer
+// goes (GraphDot, which keeps every graph's grammar); a strip between the two may show more of it.
 #pragma once
 
 #include "DeviceGraph.h"
@@ -22,6 +22,7 @@
 namespace phazite::ui
 {
 class SweepPicture : public juce::Component,
+                     public juce::TooltipClient,
                      private DisplayTicker::Display
 {
 public:
@@ -49,6 +50,7 @@ public:
     virtual juce::Point<float> getDotPosition() const = 0;
 
     void paint (juce::Graphics&) override;
+    juce::String getTooltip() override { return dot.getDrag().getTooltip(); }
 
     static constexpr int lfoHeight = 30;
 

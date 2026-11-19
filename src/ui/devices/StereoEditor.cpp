@@ -21,6 +21,7 @@ namespace
 } // namespace
 
 class StereoEditor::Image : public juce::Component,
+                            public juce::TooltipClient,
                             private DisplayTicker::Display
 {
 public:
@@ -40,6 +41,9 @@ public:
                         "two sides are, from -1 to +1; below 0 the mono sum loses sound.");
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         drag.onCancelled = [this] { repaint(); };
+
+        // One handle, all of it: the width, which the wheel turns too.
+        drag.findHandle = [this] (juce::Point<float> at) { return graph::Handle ({ &width }, at, &width); };
     }
 
     ~Image() override
@@ -100,7 +104,8 @@ public:
         if (! drag.isTaken())
             return;
 
-        const auto turned = getAngle (e.position) - getAngle (e.mouseDownPosition);
+        // Where the pointer would be had it gone a fifth as far while Shift was held.
+        const auto turned = getAngle (e.mouseDownPosition + drag.getMoved (e)) - getAngle (e.mouseDownPosition);
         drag.set (0, juce::exactlyEqual (turned, 0.0f) ? drag.getStart (0)
                                                        : drag.getStart (0) + turned / juce::MathConstants<float>::halfPi * 2.0f);
         repaint();
@@ -114,11 +119,15 @@ public:
     }
 
     void mouseUp (const juce::MouseEvent&) override { drag.end(); }
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& details) override
+    // Anywhere on it, the wheel opens or closes the fan, in finer steps with Shift.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
     {
-        if (const auto step = details.deltaY > 0.0f   ? 0.05f
-                              : details.deltaY < 0.0f ? -0.05f
+        const auto fine = graph::getFineFactor (e.mods);
+
+        if (const auto step = details.deltaY > 0.0f   ? 0.05f * fine
+                              : details.deltaY < 0.0f ? -0.05f * fine
                                                       : 0.0f;
             ! juce::approximatelyEqual (step, 0.0f))
         {

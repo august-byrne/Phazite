@@ -96,7 +96,7 @@ private:
     ParameterControls& makePadControls (std::vector<devices::DrumSampler::Field>, int columns, const std::vector<juce::String>& names);
     DeviceLayout::Part makePadPart (const juce::String& title, std::vector<devices::DrumSampler::Field>, int columns,
                                     const std::vector<juce::String>& names);
-    void play (int pad);
+    void play (int pad, float velocity); // selects it, and plays it this hard, from 0 to 1
     void tick() override { refresh(); }
     void shownAgain() override; // what was hit while nobody looked isn't shown
 };

@@ -184,7 +184,10 @@ the frame every editor shares).
   markers; One-Shot's fades are ramps; Slice's slices are lines, those put in by hand in the accent colour. Each voice's
   place in the sound shows as it plays.
 - Every marker drags, as one undo step, snapping to the zero crossing within 10 ms of the pointer; Alt places it
-  anywhere, Shift moves it in fine steps, and a double-click puts it back. The loop's band drags the loop whole.
+  anywhere, Shift moves it in fine steps, a double-click puts it back, and a right-click shows its menu (Type a
+  Value..., Automate, Delete Automation, Modulate) and plays and moves nothing. The loop's band drags the loop whole, and
+  its right-click shows the loop start's and end's menus. While a marker is under the pointer or dragged, the drawing's top
+  says where it is.
 - In Slice mode a click on the strip under the drawing adds a slice there, a drag moves a slice and a double-click
   takes it away, each one undo step. **Slices to Clip** writes each slice's note, as long as its slice, into a new MIDI
   clip on the track at the play start (after the track's last clip where one is in the way), as one undo step, so that

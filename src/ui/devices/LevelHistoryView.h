@@ -9,7 +9,8 @@
 // line in its colour, named; and faint lines at the time signature's beats, stronger ones at the bars, where the song
 // was as it played, which scroll with the sound, so that a kick on the beat lands on a line. It always shows two bars:
 // it has no speed to set. A line across at a level the device sets (a limiter's ceiling, a ducking compressor's
-// threshold) moves with a drag up or down near it, as one undo step: there the pointer becomes an up-and-down arrow,
+// threshold) moves with a drag up or down near it, as one undo step, and keeps every graph's grammar there (graph::HandleDrag:
+// Shift fine, a double-click for its default, a right-click for its menu): there the pointer becomes an up-and-down arrow,
 // the line lights up, and the hint bar says what a drag does. Its editor pushes a reading each tick.
 #pragma once
 
@@ -104,7 +105,6 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
     struct Reading

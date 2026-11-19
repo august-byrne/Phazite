@@ -37,6 +37,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/ValueText.h"
 #include "ui/components/WheelBurst.h"
 #include "ui/devices/AgeEditor.h"
 #include "ui/devices/CompressorEditor.h"
@@ -1377,4 +1378,633 @@ TEST_CASE ("An EQ played into shows its band's modulation, and a drag on its dot
     dragBy (graph, editor.getDotPosition (3).roundToInt(), { 0, -20 });
     CHECK (valueOf (song, eq, "band4Gain") == doctest::Approx (20.0 / graph.getHeight() * 48.0).epsilon (0.002));
     CHECK (valueOf (song, eq, "band4Frequency") == 800.0f);
+}
+
+//==============================================================================
+// One grammar for every graph (roadmap step S6.9, docs/design/devices.md, "A graph's gestures"): a drag moves a handle, a fifth
+// as far with Shift, which may be pressed or let go in the middle without a jump; a double-click puts back its parameters'
+// defaults exactly, as one undo step; a right-click shows a section for each parameter it moves, the same as a knob's menu
+// for it, and changes nothing; its Type a Value... sets the value typed; the wheel turns what the tooltip names over the
+// handle, and nothing over empty space; and the readout names what the handle moves.
+namespace
+{
+using phazite::ParameterRef;
+using phazite::ui::graph::HandleDrag;
+
+const auto shift = juce::ModifierKeys (juce::ModifierKeys::shiftModifier);
+
+void refreshDisplays()
+{
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+}
+
+HandleDrag& dragOf (juce::Component& graph)
+{
+    auto* drag = HandleDrag::findOf (graph);
+    REQUIRE (drag != nullptr);
+    return *drag;
+}
+
+// A menu's items, after its first header up to the next (a separator as "-", a submenu with its items), and that header.
+std::pair<juce::String, juce::StringArray> getFirstSection (const juce::PopupMenu& menu)
+{
+    juce::String header;
+    juce::StringArray items;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+    {
+        const auto& each = item.getItem();
+
+        if (each.isSectionHeader)
+        {
+            if (header.isNotEmpty())
+                break;
+
+            header = each.text;
+            continue;
+        }
+
+        auto text = each.isSeparator ? juce::String ("-") : each.text;
+
+        if (each.subMenu != nullptr)
+            for (juce::PopupMenu::MenuItemIterator inner (*each.subMenu); inner.next();)
+                text << " / " << inner.getItem().text;
+
+        items.add (text);
+    }
+
+    return { header, items };
+}
+
+// The headers of a menu's sections.
+juce::StringArray getHeaders (const juce::PopupMenu& menu)
+{
+    juce::StringArray headers;
+
+    for (juce::PopupMenu::MenuItemIterator item (menu); item.next();)
+        if (item.getItem().isSectionHeader)
+            headers.add (item.getItem().text);
+
+    return headers;
+}
+
+// A graph's handle, as a test drives it.
+struct Grammar
+{
+    juce::Component& graph;
+    std::function<juce::Point<int>()> probe; // a place where a press takes the handle, where it is drawn now
+    std::vector<ParameterRef> moved;         // what a drag of it moves, the first first
+    juce::Point<int> by;                     // a small drag, which keeps them inside their ranges
+    std::optional<ParameterRef> wheel;       // what the wheel turns over it
+    std::optional<juce::Point<int>> empty;   // a place over no handle
+};
+
+void checkGrammar (TestSong& song, const Grammar& g)
+{
+    auto& s = songOf (song);
+    auto& drag = dragOf (g.graph);
+    const auto parameterOf = [&song] (const ParameterRef& ref) { return phazite::getParameter (song.context, ref); };
+    const auto valuesOf = [&]
+    {
+        std::vector<float> values;
+
+        for (const auto& ref : g.moved)
+            values.push_back (phazite::getValueSetByHand (s, ref));
+
+        return values;
+    };
+    const auto handleAt = [&]
+    {
+        refreshDisplays();
+        const auto handle = drag.getHandleAt (g.probe().toFloat());
+        REQUIRE (handle.has_value());
+        return handle->at.roundToInt();
+    };
+    const auto undoAll = [&]
+    {
+        while (s.getUndoManager().canUndo())
+            phazite::undo (s);
+
+        refreshDisplays();
+    };
+
+    s.getUndoManager().clearUndoHistory();
+    Mouse mouse (g.graph);
+
+    // What a drag of it moves, in order; and its menu's first section is the first parameter's, as a knob's menu has it.
+    {
+        const auto handle = drag.getHandleAt (g.probe().toFloat());
+        REQUIRE (handle.has_value());
+        REQUIRE (handle->parameters.size() == g.moved.size());
+
+        for (size_t i = 0; i < g.moved.size(); ++i)
+            CHECK (handle->parameters[i]->getRef() == g.moved[i]);
+
+        phazite::ui::Knob knob ("Knob", 0.0);
+        phazite::ui::ParameterAttachment attachment (knob);
+        attachment.setParameter (parameterOf (g.moved.front()));
+        const auto [header, items] = getFirstSection (drag.getMenu (*handle));
+        const auto [knobHeader, knobItems] = getFirstSection (attachment.getMenu());
+        CHECK (header == parameterOf (g.moved.front()).getName());
+        CHECK (header == knobHeader);
+        CHECK (items == knobItems);
+        CHECK (items.contains ("Type a Value..."));
+    }
+
+    // A right-click shows it, and changes nothing.
+    {
+        const phazite::test::ScopedDisplay display;
+        const auto before = songText (song);
+        mouse.click (handleAt(), juce::ModifierKeys::rightButtonModifier);
+        CHECK (juce::Component::getCurrentlyModalComponent() != nullptr);
+        juce::PopupMenu::dismissAllActiveMenus();
+        phazite::test::dispatchPendingMessages();
+        CHECK (songText (song) == before);
+        CHECK_FALSE (s.getUndoManager().canUndo());
+        mouse.pause();
+    }
+
+    // Type a Value... opens the field over the handle; what is typed there is set, as one undo step.
+    {
+        auto first = parameterOf (g.moved.front());
+        const auto info = first.getInfo();
+        REQUIRE (info.has_value());
+        const auto range = first.getRange();
+        auto target = range.snapToLegalValue (range.convertFrom0to1 (0.3f));
+
+        if (std::abs (target - first.getBaseValue()) < 1.0e-3f * (range.end - range.start))
+            target = range.snapToLegalValue (range.convertFrom0to1 (0.7f));
+
+        const auto text = phazite::ui::formatParameterValue (*info, target);
+        const auto expected = phazite::ui::parseParameterValue (*info, text);
+        REQUIRE (expected.has_value());
+        const auto before = first.getBaseValue();
+        auto menu = drag.getMenuAt (g.probe().toFloat());
+        REQUIRE (phazite::test::runMenuItem (menu, { "Type a Value..." }));
+        auto* field = drag.getValueField();
+        REQUIRE (field != nullptr);
+        CHECK (field->isShowing());
+        field->setText (text);
+        field->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+        CHECK (phazite::getValueSetByHand (s, g.moved.front()) == doctest::Approx (*expected).epsilon (1.0e-4));
+        CHECK (s.getUndoManager().canUndo());
+        phazite::undo (s);
+        CHECK (phazite::getValueSetByHand (s, g.moved.front()) == doctest::Approx (before));
+        phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
+        CHECK (drag.getValueField() == nullptr);
+        s.getUndoManager().clearUndoHistory();
+    }
+
+    // A double-click puts back every default, exactly, as one undo step.
+    {
+        for (const auto& ref : g.moved)
+        {
+            auto parameter = parameterOf (ref);
+            const auto range = parameter.getRange();
+            const auto initial = *parameter.getDefaultValue();
+            auto off = range.snapToLegalValue (range.convertFrom0to1 (0.4f));
+
+            if (juce::exactlyEqual (off, initial))
+                off = range.snapToLegalValue (range.convertFrom0to1 (0.6f));
+
+            parameter.setValue (off);
+        }
+
+        refreshDisplays();
+        s.getUndoManager().clearUndoHistory();
+        const auto changed = valuesOf();
+        mouse.doubleClick (handleAt());
+
+        for (size_t i = 0; i < g.moved.size(); ++i)
+        {
+            CAPTURE (g.moved[i].parameter);
+            CHECK (phazite::getValueSetByHand (s, g.moved[i]) == *parameterOf (g.moved[i]).getDefaultValue());
+        }
+
+        REQUIRE (s.getUndoManager().canUndo());
+        phazite::undo (s);
+        CHECK (valuesOf() == changed);
+        CHECK_FALSE (s.getUndoManager().canUndo());
+        undoAll();
+        s.getUndoManager().clearUndoHistory();
+    }
+
+    // Shift: a fifth as far, from the press or from the middle of the drag, without a jump.
+    {
+        const auto dragAndRead = [&] (juce::Point<int> plain, juce::Point<int> withShift, bool shiftFromPress)
+        {
+            const auto from = handleAt();
+            mouse.press (from, shiftFromPress ? shift : juce::ModifierKeys());
+
+            if (plain != juce::Point<int>())
+                mouse.dragTo (from + plain);
+
+            if (withShift != juce::Point<int>())
+            {
+                mouse.holdKeys (shift);
+                mouse.dragTo (from + plain + withShift / 2);
+                mouse.dragTo (from + plain + withShift);
+            }
+
+            mouse.release();
+            mouse.pause();
+            const auto values = valuesOf();
+            undoAll();
+            s.getUndoManager().clearUndoHistory();
+            return values;
+        };
+
+        const auto plain = dragAndRead (g.by, {}, false);
+        const auto plainTwice = dragAndRead (g.by * 2, {}, false);
+        const auto fine = dragAndRead ({}, g.by * 5, true);
+        const auto shiftedMidway = dragAndRead (g.by, g.by * 5, false);
+        CHECK (plain != valuesOf()); // the drag moved something
+
+        for (size_t i = 0; i < g.moved.size(); ++i)
+        {
+            CAPTURE (g.moved[i].parameter);
+            CHECK (fine[i] == doctest::Approx (plain[i]).epsilon (1.0e-3));
+            CHECK (shiftedMidway[i] == doctest::Approx (plainTwice[i]).epsilon (1.0e-3));
+        }
+    }
+
+    // The readout names what the handle moves, and the wheel turns what the tooltip says over it, and nothing elsewhere.
+    {
+        mouse.moveTo (handleAt());
+        auto first = parameterOf (g.moved.front());
+        CHECK (drag.getReadout().contains (phazite::ui::formatParameterValue (*first.getInfo(), first.getBaseValue())));
+
+        if (g.wheel.has_value())
+        {
+            auto turned = parameterOf (*g.wheel);
+            CHECK (drag.getTooltip().contains ("Wheel: " + turned.getName()));
+            const auto before = turned.getBaseValue();
+            mouse.wheel (handleAt(), 0.5f);
+            phazite::ui::WheelBurst::endAll();
+            CHECK (turned.getBaseValue() != doctest::Approx (before));
+            undoAll();
+            s.getUndoManager().clearUndoHistory();
+        }
+        else
+        {
+            CHECK_FALSE (drag.getTooltip().contains ("Wheel"));
+        }
+
+        if (g.empty.has_value())
+        {
+            CHECK_FALSE (drag.getHandleAt (g.empty->toFloat()).has_value());
+            const auto before = songText (song);
+            mouse.wheel (*g.empty, 0.5f);
+            phazite::ui::WheelBurst::endAll();
+            CHECK (songText (song) == before);
+            CHECK_FALSE (s.getUndoManager().canUndo());
+        }
+    }
+}
+
+juce::Point<int> centreOf (const juce::Component& c)
+{
+    return c.getLocalBounds().getCentre();
+}
+
+// The device taken away by Undo while a drag of its graph is held: the drag goes on and ends without a gesture left open.
+void checkSongChangesUnder (TestSong& song, juce::Component& graph, juce::Point<int> at)
+{
+    auto& s = songOf (song);
+    REQUIRE (s.getUndoManager().canUndo()); // the device's adding
+    Mouse mouse (graph);
+    mouse.press (at);
+    mouse.dragTo (at + juce::Point<int> (10, -10));
+    phazite::undo (s);
+    refreshDisplays();
+    mouse.dragTo (at + juce::Point<int> (20, -20));
+    mouse.release();
+    mouse.pause();
+    CHECK_FALSE (phazite::Gesture::isInProgress (s));
+    mouse.doubleClick (at);
+    mouse.wheel (at, 0.5f);
+    phazite::ui::WheelBurst::endAll();
+    CHECK_FALSE (phazite::Gesture::isInProgress (s));
+}
+} // namespace
+
+TEST_CASE ("The one-handle dot graphs keep every graph's grammar: the Filter's, a synth's filter's and Motion's dots (S6.9)")
+{
+    TestSong song;
+
+    SUBCASE ("The Filter")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::FilterEffect::typeID);
+        phazite::ui::FilterEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& graph = editor.getGraph();
+        checkGrammar (song, { graph,
+                              [&graph] { return centreOf (graph) / 2; },
+                              { { device, "cutoff" }, { device, "resonance" } },
+                              { 6, -4 },
+                              ParameterRef { device, "drive" },
+                              std::nullopt });
+
+        // A press away from the dot changes nothing, and a drag from there moves the dot as far as a drag from the dot does.
+        refreshDisplays();
+        const auto dot = editor.getDotPosition().roundToInt();
+        const auto away = dot.x < graph.getWidth() / 2 ? juce::Point<int> (graph.getWidth() - 10, 10) : juce::Point<int> (10, 10);
+        pressAndLetGo (song, graph, away);
+        dragBy (graph, away, { 20, -10 });
+        const auto fromAway = std::pair { valueOf (song, device, "cutoff"), valueOf (song, device, "resonance") };
+        phazite::undo (songOf (song));
+        refreshDisplays();
+        dragBy (graph, editor.getDotPosition().roundToInt(), { 20, -10 });
+        CHECK (valueOf (song, device, "cutoff") == doctest::Approx (fromAway.first));
+        CHECK (valueOf (song, device, "resonance") == doctest::Approx (fromAway.second));
+    }
+
+    SUBCASE ("A synth's filter")
+    {
+        const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        phazite::ui::SynthEditor editor (phazite::getDeviceHandle (song.context, synth));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& filter = editor.getFilter();
+        checkGrammar (song, { filter,
+                              [&filter] { return centreOf (filter); },
+                              { { synth, "cutoff" }, { synth, "resonance" } },
+                              { 4, -3 },
+                              std::nullopt,
+                              std::nullopt });
+
+        // A press beside the dot changes nothing.
+        refreshDisplays();
+        const auto dot = filter.getDotPosition().roundToInt();
+        pressAndLetGo (song, filter, dot + juce::Point<int> (dot.x < filter.getWidth() / 2 ? 30 : -30, 0));
+    }
+
+    SUBCASE ("Motion's chorus")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Motion::typeID);
+        phazite::ui::MotionEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& picture = editor.getPicture();
+        const auto synced = valueOf (song, device, "sync") > 0.5f;
+        checkGrammar (song, { picture,
+                              [&picture] { return centreOf (picture); },
+                              { { device, "delay" }, { device, "depth" } },
+                              { 5, -3 },
+                              ParameterRef { device, synced ? "division" : "rate" },
+                              std::nullopt });
+    }
+}
+
+TEST_CASE ("The EQ's dots keep every graph's grammar, a double-click putting back a band's frequency, gain and Q (S6.9)")
+{
+    TestSong song;
+    const auto eq = song.addEffect (song.firstTrack, phazite::devices::Equalizer::typeID);
+    phazite::ui::EqEditor editor (phazite::getDeviceHandle (song.context, eq));
+    TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& graph = editor.getGraph();
+    checkGrammar (song, { graph,
+                          [&editor] { return editor.getDotPosition (3).roundToInt(); },
+                          { { eq, "band4Frequency" }, { eq, "band4Gain" } },
+                          { 6, -4 },
+                          ParameterRef { eq, "band4Q" },
+                          juce::Point<int> (2, 2) });
+
+    // Its menu: the frequency's, the gain's and the Q's sections, then the band's own items.
+    auto& drag = dragOf (graph);
+    const auto menu = drag.getMenuAt (editor.getDotPosition (3));
+    CHECK (getHeaders (menu) == juce::StringArray { "Band 4 Frequency", "Band 4 Gain", "Band 4 Q", "Band 4" });
+    CHECK (phazite::test::findMenuItem (menu, { "Turn Off" }) != nullptr);
+
+    // A dynamic band's handle: its Dynamic, its menu its Threshold too.
+    song.setParameter (eq, "band4Dynamic", -6.0f);
+    editor.refresh();
+    const auto handle = editor.getDynamicHandlePosition (3);
+    REQUIRE (handle.has_value());
+    CHECK (getHeaders (drag.getMenuAt (*handle)) == juce::StringArray { "Band 4 Dynamic", "Band 4 Threshold" });
+}
+
+TEST_CASE ("The one-big-handle graphs and the histories keep every graph's grammar (S6.9)")
+{
+    TestSong song;
+
+    SUBCASE ("The saturator's curve")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Saturator::typeID);
+        EditorScreen screen (song, device);
+        auto& curve = screen.find ("Saturation");
+        checkGrammar (song,
+                      { curve, [&curve] { return centreOf (curve); }, { { device, "drive" } }, { 0, -4 }, std::nullopt, std::nullopt });
+    }
+
+    SUBCASE ("Stereo")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Stereo::typeID);
+        EditorScreen screen (song, device);
+        auto& image = screen.find ("Stereo image");
+        checkGrammar (song, { image,
+                              [&image] { return juce::Point<int> (image.getWidth() * 3 / 4, image.getHeight() / 3); },
+                              { { device, "width" } },
+                              { 4, 0 },
+                              ParameterRef { device, "width" },
+                              std::nullopt });
+    }
+
+    SUBCASE ("The vocoder")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Vocoder::typeID);
+        EditorScreen screen (song, device);
+        auto& bands = screen.find ("Vocoder bands");
+        checkGrammar (song,
+                      { bands, [&bands] { return centreOf (bands); }, { { device, "formant" } }, { 6, 0 }, std::nullopt, std::nullopt });
+    }
+
+    SUBCASE ("The reverb's pre-delay")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Reverb::typeID);
+        phazite::ui::ReverbEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        checkGrammar (song, { editor.getGraph(),
+                              [&editor] { return editor.getPredelayHandle().roundToInt(); },
+                              { { device, "predelay" } },
+                              { 3, 0 },
+                              std::nullopt,
+                              std::nullopt });
+    }
+
+    SUBCASE ("The delay's first echo")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Delay::typeID);
+        phazite::ui::DelayEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        const auto synced = valueOf (song, device, "sync") > 0.5f;
+        checkGrammar (song, { editor.getEchoes(),
+                              [&editor] { return editor.getEchoPosition (1).roundToInt() - juce::Point<int> (0, 10); },
+                              { { device, synced ? "note" : "time" }, { device, "feedback" } },
+                              { synced ? 0 : 4, -4 },
+                              std::nullopt,
+                              std::nullopt });
+    }
+
+    SUBCASE ("Age's wow, the wheel its rate")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Age::typeID);
+        phazite::ui::AgeEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        checkGrammar (song, { editor.getRecord(),
+                              [&editor] { return editor.getRecordCentre().roundToInt(); },
+                              { { device, "wow" } },
+                              { 0, -4 },
+                              ParameterRef { device, "wowRate" },
+                              std::nullopt });
+    }
+
+    SUBCASE ("The limiter's ceiling")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Limiter::typeID);
+        phazite::ui::LimiterEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& history = editor.getDisplay().getHistory();
+        const auto lineAt = [&song, &history, device]
+        {
+            return juce::Point<float> ((float) history.getWidth() / 2.0f, history.getYForLevel (valueOf (song, device, "ceiling")))
+                .roundToInt();
+        };
+        checkGrammar (song, { history, lineAt, { { device, "ceiling" } }, { 0, 4 }, std::nullopt, std::nullopt });
+    }
+
+    SUBCASE ("The multiband's low crossover")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Multiband::typeID);
+        phazite::ui::MultibandEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& graph = editor.getBandsGraph();
+        const auto crossoverAt = [&song, &editor, &graph, device]
+        {
+            return juce::Point<float> (editor.getBandsX (valueOf (song, device, "lowFrequency")), (float) graph.getHeight() / 2.0f)
+                .roundToInt();
+        };
+        checkGrammar (song, { graph, crossoverAt, { { device, "lowFrequency" } }, { 5, 0 }, std::nullopt, std::nullopt });
+    }
+}
+
+TEST_CASE ("The envelopes and the LFOs keep every graph's grammar (S6.9)")
+{
+    TestSong song;
+
+    SUBCASE ("A synth's envelope's attack")
+    {
+        using phazite::devices::Synth;
+        const auto synth = song.setInstrument (song.firstTrack, Synth::typeID);
+        phazite::ui::SynthEditor editor (phazite::getDeviceHandle (song.context, synth));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& envelope = editor.getEnvelope (0);
+        const auto& info = Synth::info.parameters[(size_t) Synth::getEnvelopeParameter (0, Synth::envAttack)];
+        const auto id = juce::String (info.id.data(), info.id.size());
+        checkGrammar (song, { envelope,
+                              [&envelope] { return envelope.getPointPosition (phazite::ui::EnvelopeView::Point::attack).roundToInt(); },
+                              { { synth, id } },
+                              { 3, 0 },
+                              std::nullopt,
+                              std::nullopt });
+    }
+
+    SUBCASE ("The FM synth's LFO: its depth, the wheel its rate")
+    {
+        using phazite::devices::FmSynth;
+        const auto fm = song.setInstrument (song.firstTrack, FmSynth::typeID);
+        EditorScreen screen (song, fm);
+        auto& lfo = screen.find ("LFO wave");
+        checkGrammar (
+            song,
+            { lfo, [&lfo] { return centreOf (lfo); }, { { fm, "lfoDepth" } }, { 0, -2 }, ParameterRef { fm, "lfoRate" }, std::nullopt });
+    }
+}
+
+TEST_CASE ("A graph's drag outlives its device taken away by Undo while the mouse is down, and leaves no gesture open (S6.9)")
+{
+    TestSong song;
+
+    SUBCASE ("A dot (the Filter's)")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::FilterEffect::typeID);
+        phazite::ui::FilterEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        checkSongChangesUnder (song, editor.getGraph(), centreOf (editor.getGraph()));
+    }
+
+    SUBCASE ("A dot of several (the EQ's)")
+    {
+        const auto eq = song.addEffect (song.firstTrack, phazite::devices::Equalizer::typeID);
+        phazite::ui::EqEditor editor (phazite::getDeviceHandle (song.context, eq));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        checkSongChangesUnder (song, editor.getGraph(), editor.getDotPosition (3).roundToInt());
+    }
+
+    SUBCASE ("One big handle (the saturator's curve)")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Saturator::typeID);
+        EditorScreen screen (song, device);
+        auto& curve = screen.find ("Saturation");
+        checkSongChangesUnder (song, curve, centreOf (curve));
+    }
+
+    SUBCASE ("A history's line (the limiter's ceiling)")
+    {
+        const auto device = song.addEffect (song.firstTrack, phazite::devices::Limiter::typeID);
+        phazite::ui::LimiterEditor editor (phazite::getDeviceHandle (song.context, device));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& history = editor.getDisplay().getHistory();
+        const auto at = juce::Point<float> ((float) history.getWidth() / 2.0f, history.getYForLevel (valueOf (song, device, "ceiling")));
+        checkSongChangesUnder (song, history, at.roundToInt());
+    }
+
+    SUBCASE ("An envelope's point (a synth's)")
+    {
+        const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        phazite::ui::SynthEditor editor (phazite::getDeviceHandle (song.context, synth));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& envelope = editor.getEnvelope (0);
+        checkSongChangesUnder (song, envelope, envelope.getPointPosition (phazite::ui::EnvelopeView::Point::decay).roundToInt());
+    }
+}
+
+TEST_CASE ("The samplers' waveforms keep every graph's grammar: the Sampler's markers and the drum sampler's handles (S6.9)")
+{
+    TestSong song;
+
+    SUBCASE ("The Sampler's start marker: a right-click shows its menu and plays and moves nothing")
+    {
+        using phazite::devices::Sampler;
+        const auto sampler = song.setInstrument (song.firstTrack, Sampler::typeID);
+        phazite::ui::SamplerEditor editor (phazite::getDeviceHandle (song.context, sampler));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& view = editor.getSampleView();
+        checkGrammar (
+            song, { view,
+                    [&] { return juce::Point<float> (editor.getMarkerX (Sampler::start), (float) view.getHeight() / 2.0f).roundToInt(); },
+                    { { sampler, "start" } },
+                    { 6, 0 },
+                    std::nullopt,
+                    std::nullopt });
+    }
+
+    SUBCASE ("The drum sampler's start")
+    {
+        using phazite::devices::DrumSampler;
+        const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
+        phazite::ui::DrumSamplerEditor editor (phazite::getDeviceHandle (song.context, drums));
+        TestWindow window (editor, editor.getWidth(), editor.getHeight());
+        auto& waveform = editor.getWaveform();
+        REQUIRE (editor.getSelectedPad() == 36);
+        checkGrammar (song, { waveform,
+                              [&]
+                              {
+                                  return juce::Point<float> (editor.getHandleX (DrumSampler::Field::start),
+                                                             (float) waveform.getHeight() / 2.0f)
+                                      .roundToInt();
+                              },
+                              { { drums, "pad36Start" } },
+                              { 4, 0 },
+                              std::nullopt,
+                              std::nullopt });
+    }
 }

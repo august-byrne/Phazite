@@ -105,6 +105,7 @@ namespace
 
 //==============================================================================
 class AgeEditor::Picture : public juce::Component,
+                           public juce::TooltipClient,
                            private DisplayTicker::Display
 {
 public:
@@ -141,6 +142,17 @@ public:
         {
             readValues();
             repaint();
+        };
+
+        // The medium and its pitch: the wow, the wheel turning its rate; the band: its nearer end.
+        drag.findHandle = [this] (juce::Point<float> at)
+        {
+            const auto target = findTarget (at);
+
+            if (target == wowTarget)
+                return graph::Handle ({ &wow }, at, &rate);
+
+            return graph::Handle ({ &parameters[(size_t) target] }, at);
         };
 
         // What came before the editor opened isn't shown.
@@ -286,14 +298,13 @@ public:
         if (draggingBand)
         {
             drag.moveAlong (
-                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getBandAxis().xFor (hertz); },
+                0, drag.getMoved (e).x, [this] (float hertz) { return getBandAxis().xFor (hertz); },
                 [this] (float x) { return (float) getBandAxis().frequencyAt (x); });
         }
         else
         {
             const auto range = wow.getRange();
-            const auto moved =
-                -(float) e.getDistanceFromDragStartY() / std::max (1.0f, getUpperArea().getHeight()) * (range.end - range.start);
+            const auto moved = -drag.getMoved (e).y / std::max (1.0f, getUpperArea().getHeight()) * (range.end - range.start);
             drag.set (0, drag.getStart (0) + moved);
         }
 
@@ -313,14 +324,24 @@ public:
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (nothing); }
 
-    // The wheel turns the wow's rate: the record's speed, or the tape's drift's.
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& details) override
+    juce::String getTooltip() override { return drag.getTooltip(); }
+
+    // Over the medium and its pitch, the wheel turns the wow's rate: the record's speed, or the tape's drift's (in finer steps
+    // with Shift); over the band, it goes on to what is around the picture.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details) override
     {
+        if (const auto handle = drag.getHandleAt (e.position); ! handle.has_value() || handle->wheel == nullptr)
+        {
+            drag.passWheelOn (e, details);
+            return;
+        }
+
         if (juce::approximatelyEqual (details.deltaY, 0.0f))
             return;
 
         const auto range = rate.getRange();
-        const auto along = range.convertTo0to1 (rate.getBaseValue()) + (details.deltaY > 0.0f ? wheelStep : -wheelStep);
+        const auto step = (details.deltaY > 0.0f ? wheelStep : -wheelStep) * graph::getFineFactor (e.mods);
+        const auto along = range.convertTo0to1 (rate.getBaseValue()) + step;
         wheelGesture.turn (rate, range.convertFrom0to1 (juce::jlimit (0.0f, 1.0f, along)));
         readValues();
         repaint();

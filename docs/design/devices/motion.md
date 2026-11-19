@@ -193,7 +193,9 @@ rate. Each reads Motion's values through the same mapping to its engine's that p
   each notch reads as a valley carved in the sound, and along the bottom how far the sweep reaches. A dot sits at the
   Frequency, as high as the Feedback, with 0 in the middle; the wheel turns the Depth.
 
-Dragging a dot moves both its values as one undo step, and a press anywhere puts it under the pointer.
+A drag from anywhere on the picture moves the dot's two values as one undo step, as far as the pointer goes (a press
+beside the dot doesn't move it there), a fifth as far with Shift; a double-click puts back both, and a right-click shows
+both menus.
 
 ## Limits
 

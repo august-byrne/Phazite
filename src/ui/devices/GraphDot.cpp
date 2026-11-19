@@ -15,13 +15,14 @@ GraphDot::GraphDot (juce::Component& g, std::function<juce::Point<float>()> cent
     : graph (g),
       getCentre (std::move (centre))
 {
-    graph.setMouseCursor (juce::MouseCursor::CrosshairCursor);
+    graph.setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     graph.addMouseListener (this, false);
     drag.onCancelled = [this]
     {
         if (moved != nullptr)
             moved();
     };
+    drag.findHandle = [this] (juce::Point<float>) { return findHandle(); };
 }
 
 GraphDot::~GraphDot()
@@ -36,12 +37,26 @@ void GraphDot::setDrag (Value newAcross, Value newUp, std::function<void()> onMo
     moved = std::move (onMoved);
 }
 
+void GraphDot::setWheel (std::function<ParameterHandle*()> turned)
+{
+    wheel = std::move (turned);
+}
+
+// The graph's one handle, anywhere on it: both values, and what the wheel turns.
+std::optional<graph::Handle> GraphDot::findHandle() const
+{
+    if (across.handle == nullptr || up.handle == nullptr)
+        return std::nullopt;
+
+    return graph::Handle ({ across.handle, up.handle }, getCentre(), wheel != nullptr ? wheel() : nullptr);
+}
+
 // Each value from its start, at the place the pointer has moved its own axis to; one the pointer hasn't moved along is its start,
 // exactly (a round trip through the pixels may not give it back).
 void GraphDot::moveBy (juce::Point<float> offset)
 {
     const auto moveAxis = [this] (size_t index, const Value& value, float from, float by)
-    { drag.set (index, juce::exactlyEqual (by, 0.0f) ? startValues[index] : value.valueAt (from + by)); };
+    { drag.set (index, juce::exactlyEqual (by, 0.0f) ? drag.getStart (index) : value.valueAt (from + by)); };
 
     moveAxis (0, across, startPlace.x, offset.x);
     moveAxis (1, up, startPlace.y, offset.y);
@@ -73,8 +88,6 @@ bool GraphDot::isOnDot (juce::Point<float> position) const
 
 void GraphDot::show (bool shouldBeLit)
 {
-    graph.setMouseCursor (shouldBeLit ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::CrosshairCursor);
-
     if (shouldBeLit != lit)
     {
         lit = shouldBeLit;
@@ -92,26 +105,17 @@ void GraphDot::mouseMove (const juce::MouseEvent& e)
     show (isOnDot (e.position));
 }
 
-// On the dot, the press takes it from where its values set by hand put it, and changes nothing; elsewhere, it puts the dot
-// under the pointer, as near as it goes. The drag takes it along.
+// Anywhere on the graph, the press takes the dot from where its values set by hand put it, and changes nothing: a press beside
+// the dot doesn't move it there. The drag takes it along. A right-click is the drag's (its menu).
 void GraphDot::mouseDown (const juce::MouseEvent& e)
 {
-    if (across.handle != nullptr && up.handle != nullptr && ! e.mods.isPopupMenu())
-    {
-        const auto onDot = isOnDot (e.position);
-        drag.take ({ across.handle, up.handle });
+    if (e.mods.isPopupMenu())
+        return;
 
-        if (onDot)
-        {
-            startValues = { drag.getStart (0), drag.getStart (1) };
-            startPlace = { across.placeOf (startValues[0]), up.placeOf (startValues[1]) };
-        }
-        else
-        {
-            startPlace = e.position;
-            startValues = { across.valueAt (startPlace.x), up.valueAt (startPlace.y) };
-            moveBy ({});
-        }
+    if (across.handle != nullptr && up.handle != nullptr)
+    {
+        drag.take ({ across.handle, up.handle });
+        startPlace = { across.placeOf (drag.getStart (0)), up.placeOf (drag.getStart (1)) };
     }
 
     show (true);
@@ -120,7 +124,7 @@ void GraphDot::mouseDown (const juce::MouseEvent& e)
 void GraphDot::mouseDrag (const juce::MouseEvent& e)
 {
     if (drag.isTaken())
-        moveBy (e.getOffsetFromDragStart().toFloat());
+        moveBy (drag.getMoved (e));
 }
 
 void GraphDot::mouseUp (const juce::MouseEvent& e)

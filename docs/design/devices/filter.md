@@ -156,8 +156,9 @@ Two columns, built on the frame every device editor shares ([devices.md](../devi
   -6 dB deep). Sample & Hold, which is not a linear filter and has no single response, draws as a flat line, and its
   readout says the Mix while it is under 100 %. Driven draws its response to a quiet sound, the curve straight, half the
   drive (in decibels) louder as it plays one, whose peak goes off the top where it sings. A dot sits at the cutoff, as
-  high as the resonance: dragging it moves both, as one undo step, and a press anywhere puts it under the pointer. The
-  wheel over the graph turns the drive, a decibel a notch. The graph names the type, "Driven" while it is, the cutoff and
+  high as the resonance: a drag from anywhere on the graph moves both, as one undo step, as far as the pointer goes (a
+  press beside the dot doesn't move it there), a fifth as far with Shift; a double-click puts back both, a right-click
+  shows both menus, and the wheel over the graph turns the drive, a decibel a notch (a fifth of one with Shift). The graph names the type, "Driven" while it is, the cutoff and
   the resonance, and the drive while there is any.
 - **Sweep** (Cutoff, large, and Resonance) over **Character** (Clean and Driven as two buttons, over Type, Slope and
   Drive) and **Quality**, a list.

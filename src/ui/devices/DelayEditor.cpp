@@ -67,6 +67,7 @@ namespace
 
 //==============================================================================
 class DelayEditor::Echoes : public juce::Component,
+                            public juce::TooltipClient,
                             private DisplayTicker::Display
 {
 public:
@@ -92,6 +93,21 @@ public:
         }
 
         drag.onCancelled = [this] { repaint(); };
+
+        // Over the echoes, a side's first echo: its time and the feedback; over the band, its nearer end.
+        drag.findHandle = [this] (juce::Point<float> at)
+        {
+            const auto target = findTarget (at);
+
+            if (target == firstEcho || target == firstEchoRight)
+            {
+                const auto side = target == firstEchoRight ? 1 : 0;
+                return graph::Handle ({ &parameters[(size_t) timeParameter (side)], &parameters[Delay::feedback] },
+                                      getEchoPosition (1, side));
+            }
+
+            return graph::Handle ({ &parameters[(size_t) target] }, at);
+        };
     }
 
     ~Echoes() override
@@ -200,10 +216,10 @@ public:
 
         if (draggingBand)
             drag.moveAlong (
-                0, (float) e.getDistanceFromDragStartX(), [this] (float hertz) { return getBandAxis().xFor (hertz); },
+                0, drag.getMoved (e).x, [this] (float hertz) { return getBandAxis().xFor (hertz); },
                 [this] (float x) { return (float) getBandAxis().frequencyAt (x); });
         else
-            moveFirstEchoBy (e.getOffsetFromDragStart());
+            moveFirstEchoBy (drag.getMoved (e));
 
         repaint();
     }
@@ -218,6 +234,7 @@ public:
     // sideways, and its nearer end lit, which a press takes.
     void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
     void mouseExit (const juce::MouseEvent&) override { hover (nothing); }
+    juce::String getTooltip() override { return drag.getTooltip(); }
 
 private:
     DeviceHandle device;
@@ -372,17 +389,17 @@ private:
     // time), the right's to where the pointer puts its first echo on that scale; the feedback by how far up. Each move works
     // from the press's values, not from what the last one wrote, and an axis the pointer hasn't moved along keeps its value
     // exactly (known bug 116).
-    void moveFirstEchoBy (juce::Point<int> offset)
+    void moveFirstEchoBy (juce::Point<float> offset)
     {
         const auto area = getEchoArea();
         // The feedback up to 100 % at most, where the echoes would start to swell: past it is the knob's, or a value typed,
         // not a drag's by accident (one that starts over it can only bring it down).
         const auto highest = std::max (1.0f, drag.getStart (1));
-        drag.set (1, offset.y == 0
+        drag.set (1, juce::exactlyEqual (offset.y, 0.0f)
                          ? drag.getStart (1)
-                         : juce::jlimit (0.0f, highest, drag.getStart (1) - (float) offset.y / std::max (1.0f, area.getHeight())));
+                         : juce::jlimit (0.0f, highest, drag.getStart (1) - offset.y / std::max (1.0f, area.getHeight())));
 
-        if (offset.x == 0)
+        if (juce::exactlyEqual (offset.x, 0.0f))
         {
             drag.set (0, drag.getStart (0));
             return;

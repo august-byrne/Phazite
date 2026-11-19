@@ -70,10 +70,10 @@ The menus that add instruments and effects, and the editors of Phazite's own dev
 | `DeviceEditorBase.*`, `DeviceLayout.*` | The frame every editor is built on: columns of parts that stack, show under tabs or narrow, and pages of them where the dock is narrower, so that every editor fits the default dock without scrolling. `DeviceEditorBase::setModes()` gives an editor modes, a page of parts for each, as tabs along its top (a choice's tabs, `ChoiceTabs`). |
 | `DeviceWindowContent.*` | An editor in a window of its own, out of the Devices view (`src/app/PluginWindow.h`): as wide as the window, its parts wrapping into rows, scrolling when the window is shorter. |
 | `ParameterControls.*` | A parameter's controls; `ParameterControls::showParameters()` shows a set of them. |
-| `DeviceGraph.*` | Graphs' axes, spectra and histories, and how every graph takes a handle (`HandleDrag`: from its value set by hand, as far as the pointer goes, Escape taking the drag back) and turns one with the wheel (`WheelGesture`). |
+| `DeviceGraph.*` | Graphs' axes, spectra and histories, and the grammar every graph's handles keep, as a knob does (`HandleDrag`: a drag from the value set by hand, as far as the pointer goes and a fifth as far with Shift, Escape taking it back; a double-click for the defaults, a right-click for the parameters' menus with Type a Value..., the readout and the tooltip of the handle under the pointer; `Handle` says what each moves), and the wheel turning one (`WheelGesture`). |
 | `LevelHistoryView.*` | A dynamics device's last two bars at the song's tempo, its key on the same time line, over the beats and bars, each reading drawn across the time it covers. |
 | `SidechainMenus.*` | What a device's sidechain listens to, a track or a bus, picked inside the device under the word every DAW prints on its picker, Sidechain. |
-| `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a dot that a drag moves (through `HandleDrag`) and a press away from it puts under the pointer. |
+| `GraphDot.*` | What a graph shows under the pointer of what a drag there moves: the pointer, the handle a press takes, lit, and a graph's one dot, which a drag from anywhere on the graph moves (through `HandleDrag`), as far as the pointer goes. |
 | `SynthParts.*` | The synths' envelope, LFO and filter views. |
 | `SweepPicture.*` | The picture Motion's three modes share, with their LFO. |
 | `DeviceTint.*` | Each device's colour. |
