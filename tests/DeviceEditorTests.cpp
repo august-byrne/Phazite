@@ -654,7 +654,10 @@ TEST_CASE ("A right-click on a switch, a list, a choice's button or tab, or a pa
         const auto before = valueOf();
         phazite::test::Mouse mouse (*kind.control);
         mouse.click (kind.control->getLocalBounds().getCentre(), juce::ModifierKeys::rightButtonModifier);
-        CHECK (juce::Component::getCurrentlyModalComponent() != nullptr);
+        // The menu is up, unless JUCE has already taken it down again: its window's timer does that where the program isn't
+        // the foreground one, which a test on a machine without a screen never is (the EQ's case failed so once on Linux CI,
+        // 2026-11-19: its picture takes longest to paint, and the timer came first).
+        CHECK ((juce::Component::getCurrentlyModalComponent() != nullptr || ! juce::Process::isForegroundProcess()));
         juce::PopupMenu::dismissAllActiveMenus();
         phazite::test::dispatchPendingMessages();
         CHECK (valueOf() == doctest::Approx (before));
